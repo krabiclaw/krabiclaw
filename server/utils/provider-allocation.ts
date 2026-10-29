@@ -1,4 +1,4 @@
-import { BUSY_FRESHNESS_MS } from '~/shared/member-scheduling'
+import { BUSY_FRESHNESS_MS, PUBLISHED_PROFILE_SQL } from '~/shared/member-scheduling'
 
 /** Session commitment wins over the current offering assignment. */
 export function sessionMemberSql(s: string): string {
@@ -7,7 +7,11 @@ export function sessionMemberSql(s: string): string {
 
 /** One occupancy per distinct Session. Group attendees share capacity. */
 export function providerUnavailableSql(s: string, replacingBooking = 'NULL', convertingPayment = 'NULL', member = sessionMemberSql(s)): string {
-  return `(((EXISTS(SELECT 1 FROM product_booking_configs c WHERE c.organization_id=${s}.organization_id AND c.product_id=${s}.product_id AND c.scheduling_mode='provider') OR ${s}.assigned_member_id IS NOT NULL) AND ${member} IS NULL) OR (${member} IS NOT NULL AND (
+  return `((EXISTS (SELECT 1 FROM products consultation WHERE consultation.id=${s}.product_id AND consultation.organization_id=${s}.organization_id AND consultation.kind='service') AND (
+    NOT EXISTS (SELECT 1 FROM product_booking_configs legal WHERE legal.product_id=${s}.product_id AND legal.organization_id=${s}.organization_id AND legal.scheduling_mode='provider')
+    OR ${member} IS NULL
+    OR NOT EXISTS (SELECT 1 FROM member_scheduling ms WHERE ms.member_id=${member} AND ms.organization_id=${s}.organization_id AND ${PUBLISHED_PROFILE_SQL})
+  )) OR ((EXISTS(SELECT 1 FROM product_booking_configs c WHERE c.organization_id=${s}.organization_id AND c.product_id=${s}.product_id AND c.scheduling_mode='provider') OR ${s}.assigned_member_id IS NOT NULL) AND ${member} IS NULL) OR (${member} IS NOT NULL AND (
     NOT EXISTS (SELECT 1 FROM member_scheduling ms JOIN member m ON m.id=ms.member_id AND m.organizationId=ms.organization_id
       WHERE ms.member_id=${member} AND ms.organization_id=${s}.organization_id AND ms.timezone IS NOT NULL
       AND ms.windows_until>=${s}.ends_at

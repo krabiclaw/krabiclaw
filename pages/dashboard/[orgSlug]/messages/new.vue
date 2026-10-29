@@ -2,6 +2,9 @@
   <DashboardLeafPanel id="new-team-conversation" title="New team conversation" save-label="Start" :disabled="!selected.length || !!membersError || !!stayError" :saving="saving" :error="actionError" @save="start">
     <UAlert v-if="membersError || stayError" class="mb-6" color="error" title="Conversation could not be prepared" :description="getErrorMessage(membersError || stayError, 'Team members could not be loaded')" />
     <template v-if="members">
+      <UFormField v-if="selected.length >= 2 && !stayId && !locationId" label="Conversation name" class="mb-6">
+        <UInput v-model="name" aria-label="Conversation name" placeholder="Optional" :maxlength="100" :disabled="saving" class="w-full" />
+      </UFormField>
       <UInput v-model="search" icon="i-lucide-search" placeholder="Search teammates" aria-label="Search teammates" class="mb-6 w-full" />
       <div class="divide-y divide-default">
         <div v-for="member in visibleMembers" :key="member.id" class="flex items-center gap-3 py-4">
@@ -30,6 +33,8 @@ if (session.value.isPending) await session.value.refetch()
 if (session.value.error) throw createError({ statusCode: session.value.error.status || 503, statusMessage: getErrorMessage(session.value.error, 'Your session could not be loaded') })
 const api = useDashboardApi()
 const selected = ref<string[]>([])
+const name = ref('')
+let attempt: { identity: string; key: string } | null = null
 const search = ref('')
 const actionError = ref('')
 const saving = ref(false)
@@ -54,8 +59,11 @@ async function start() {
   saving.value = true
   actionError.value = ''
   try {
+    const body = { memberIds: [...selected.value].sort(), ...(selected.value.length >= 2 && !stayId && !locationId && name.value.trim() ? { name: name.value.trim() } : {}), ...(stayId ? { stayId } : {}), ...(locationId ? { locationId } : {}) }
+    const identity = JSON.stringify(body)
+    if (attempt?.identity !== identity) attempt = { identity, key: crypto.randomUUID() }
     const thread = await api('/api/dashboard/team/threads', {
-      method: 'POST', body: { memberIds: selected.value, ...(stayId ? { stayId } : {}), ...(locationId ? { locationId } : {}) },
+      method: 'POST', body: { ...body, idempotencyKey: attempt.key },
       validate: (value): value is { id: string } => isRecord(value) && typeof value.id === 'string' && Boolean(value.id),
     })
     await refreshNuxtData(`team-threads:${dashboard.organizationId.value}`)

@@ -2,7 +2,7 @@ import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import { assertCalendarDate, isValidTimezone, instantDate, localDateAt, addLocalDays, localDateTimeToInstant } from '~/utils/timezone'
 import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, type DbClient } from '~/server/db'
-import { assignedBookingSql, assignedHomeSql, assignedLocationSql, roleAllows, assertRoleAllows, type ResolvedMembership } from '~/server/utils/member-access'
+import { assignedGuestThreadScope, assignedResponsibilitySql, roleAllows, assertRoleAllows, type ResolvedMembership } from '~/server/utils/member-access'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
@@ -172,6 +172,7 @@ export async function listAgenda(
   const staff = query.principal && !await roleAllows({ ...query.principal.membership, permissions: { operations: ['read'] } })
     ? query.principal.membership : null
   if (staff) await assertRoleAllows({ ...staff, permissions: { operations: ['assigned'] } })
+  const assignedRequests = staff ? assignedGuestThreadScope('rq', staff.userId) : null
 
   // Read configured and historical activity kinds plus the explicit locations
   // in one round trip. Template features do not establish actual activity.
@@ -186,11 +187,11 @@ export async function listAgenda(
         UNION ALL SELECT 1 AS present FROM reservations WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam, scopeParam] },
     // A buyer's calendar is not filtered by branch; the business's is.
     { query: `SELECT l.id, l.organization_id, l.title FROM business_locations l WHERE l.organization_id = ? AND l.organization_id ${scopeSql}
-        ${staff ? `AND (EXISTS (SELECT 1 FROM requests r JOIN bookings b ON b.request_id = r.id AND b.organization_id = r.organization_id
-          WHERE r.organization_id = l.organization_id AND r.location_id = l.id AND ${assignedBookingSql('b')})
-          OR EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = l.organization_id AND c.location_id = l.id AND ${assignedHomeSql('c')})
-          OR (${assignedLocationSql('l')}))` : ''}
-        ORDER BY l.title, l.id`, params: [scope.organizationId ?? '', scopeParam, ...(staff ? [staff.userId, staff.userId, staff.userId, staff.userId, staff.userId] : [])] },
+        ${staff ? `AND (EXISTS (SELECT 1 FROM requests rq
+          WHERE rq.organization_id = l.organization_id AND rq.location_id = l.id AND ${assignedRequests!.sql})
+          OR EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = l.organization_id AND c.location_id = l.id AND ${assignedResponsibilitySql('c')})
+          OR (${assignedResponsibilitySql('l')}))` : ''}
+        ORDER BY l.title, l.id`, params: [scope.organizationId ?? '', scopeParam, ...(staff ? [...assignedRequests!.params, staff.userId, staff.userId, staff.userId, staff.userId] : [])] },
     { query: `SELECT 1 AS present FROM product_stay_configs WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam] },
   ], { operation: 'Read the agenda scope' })
   const locations = scope.organizationId ? (locationResult?.results ?? []) as LocationRow[] : []
@@ -246,17 +247,17 @@ export async function listAgenda(
     json_extract(rq.payload_json, '$.guest.name') AS title, printf('%d%s guests', agenda_reservation.party_size, CASE json_extract(rq.payload_json, '$.party_size_is_minimum') WHEN 1 THEN '+' ELSE '' END) AS subtitle, agenda_reservation.party_size, agenda_reservation.status`, {
     joins: 'JOIN reservations agenda_reservation ON agenda_reservation.request_id = rq.id',
     timezone: 'agenda_reservation.timezone',
-  })} ${staff ? `AND (${assignedLocationSql('l')})` : ''} AND agenda_reservation.status <> 'cancelled' AND agenda_reservation.starts_at BETWEEN ? AND ?`, [...params(), ...(staff ? [staff.userId, staff.userId] : []), broadFrom, broadTo]))
-  if (requestedKinds.has('booking')) sourceQueries.push(queryAll(db, `${commonSelect('b', 'booking', `agenda_session.starts_at, agenda_session.ends_at,
-    json_extract(b.payload_json, '$.guest.name') AS title, printf('%d guests', agenda_booking.party_size) AS subtitle, agenda_booking.party_size AS party_size, agenda_booking.status`, {
-    joins: `JOIN bookings agenda_booking ON agenda_booking.request_id = b.id
+  })} ${assignedRequests ? `AND ${assignedRequests.sql}` : ''} AND agenda_reservation.status <> 'cancelled' AND agenda_reservation.starts_at BETWEEN ? AND ?`, [...params(), ...(assignedRequests?.params ?? []), broadFrom, broadTo]))
+  if (requestedKinds.has('booking')) sourceQueries.push(queryAll(db, `${commonSelect('rq', 'booking', `agenda_session.starts_at, agenda_session.ends_at,
+    json_extract(rq.payload_json, '$.guest.name') AS title, printf('%d guests', agenda_booking.party_size) AS subtitle, agenda_booking.party_size AS party_size, agenda_booking.status`, {
+    joins: `JOIN bookings agenda_booking ON agenda_booking.request_id = rq.id
       JOIN product_sessions agenda_session ON agenda_session.id = agenda_booking.product_session_id
       LEFT JOIN products agenda_product ON agenda_product.id = agenda_booking.product_id AND agenda_product.organization_id = agenda_booking.organization_id`,
     assignedMember:'agenda_booking.assigned_member_id',
     timezone: 'agenda_session.timezone',
     pictureOwner: { type: `'product'`, id: 'agenda_booking.product_id' },
     resourceTitle: 'COALESCE(agenda_product.name, l.title, s.name, s.subdomain, s.id)',
-  })} ${staff ? `AND (${assignedBookingSql('agenda_booking')})` : ''} AND agenda_booking.status <> 'cancelled' AND agenda_session.starts_at BETWEEN ? AND ?`, [...params(), ...(staff ? [staff.userId] : []), broadFrom, broadTo]))
+  })} ${assignedRequests ? `AND ${assignedRequests.sql}` : ''} AND agenda_booking.status <> 'cancelled' AND agenda_session.starts_at BETWEEN ? AND ?`, [...params(), ...(assignedRequests?.params ?? []), broadFrom, broadTo]))
   // A post is on the agenda on the day it was published; nothing is due.
   if (requestedKinds.has('post')) sourceQueries.push(queryAll(db, `${commonSelect('p', 'post', `p.published_at AS starts_at, NULL AS ends_at,
     NULLIF(p.title, '') AS title, NULL AS subtitle, NULL AS party_size, p.status`, {
@@ -284,7 +285,7 @@ export async function listAgenda(
        SELECT 1 FROM requests r WHERE r.id = st.request_id AND r.organization_id = st.organization_id AND r.kind = 'stay' AND r.user_id = st.user_id AND ${REQUEST_CURRENT_BUYER_SQL}))`
        : 'st.organization_id = ?'} AND st.status <> 'cancelled'
        AND ${scope.buyerUserId || query.currentStaysAt && !staff ? 'st.check_in_date <= ? AND st.check_out_date >= ?' : '(st.check_in_date BETWEEN ? AND ? OR st.check_out_date BETWEEN ? AND ?)'}
-       ${query.organizationId ? 'AND st.organization_id = ?' : ''} ${query.locationId ? 'AND c.location_id = ?' : ''} ${staff ? `AND ${assignedHomeSql('c')}` : ''}`,
+       ${query.organizationId ? 'AND st.organization_id = ?' : ''} ${query.locationId ? 'AND c.location_id = ?' : ''} ${staff ? `AND ${assignedResponsibilitySql('c')}` : ''}`,
     [scopeParam, ...(scope.buyerUserId || query.currentStaysAt && !staff ? [query.to, query.from] : [query.from, query.to, query.from, query.to]), ...(query.organizationId ? [query.organizationId] : []), ...(query.locationId ? [query.locationId] : []), ...(staff ? [staff.userId, staff.userId] : [])])
     : Promise.resolve([])
 

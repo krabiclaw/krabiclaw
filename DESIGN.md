@@ -93,6 +93,16 @@ theme:
 | Messages | `O/messages` | guest and internal member conversations; Team settings owns membership and access |
 | Menu | `O/menu` | a launcher |
 
+An internal manual group's conversation owns its name and participant roster.
+Its Conversation details index under `O/messages/team/:id/details` links to
+the Name and Members leaves. The canonical team-conversation operation handles
+their writes; the thread's server-provided capabilities control the actions.
+The creator and participating owners/admins manage a group, and any participant
+may leave it. These controls never change workspace membership. Direct,
+buyer/guest and stay/location conversations stay protected. Reads of the shared
+thread list verify name/roster writes, while removal and leave also end access
+to the open transcript. Conversation history is retained.
+
 **Menu is a launcher, not a parent.** It lists the Earnings and Insights cards,
 then Website, Locations, Team, Connections, Plan and billing (owners and
 admins), Platform accounts (Better Auth admins, inside KrabiClaw's own
@@ -179,12 +189,21 @@ begin with guest identity, without a resource cover. Resource photography
 belongs to its catalog and website surfaces.
 The existing stay domain owns homes, assignments, nights and payments; Today
 projects its arrivals and departures rather than creating a lodging service or
-second lifecycle. Cleaner cards show the guest's first name, party size, home,
+second lifecycle. Assigned members' cards show the guest's first name, party size, home,
 location and check-in or checkout time. Access to each stay and its conversation
 is authorized by the existing member or team assignment. Owners receive stay
 conversation work through the same guest inbox as other booked activity.
 Lodging does not offer the appointment-assignee filter: the home's assignment
 controls its stays.
+
+Locations, offerings and homes use the shared Responsibility picker over
+Better Auth memberships and Teams. A resource names one person or one Team;
+owners and admins are valid choices. Unassigned is explicit. The same canonical
+pair governs scoped work and recipient matching across all four verticals.
+There is no separate cleaner assignment or bulk member-to-homes editor.
+Responsibility survives role promotion. Booking an individual attorney or host
+records a separate historical fact and changing responsibility never rewrites
+that booked provider.
 
 ### Verticals and Domain Focus
 

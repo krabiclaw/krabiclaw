@@ -1143,9 +1143,9 @@ function stayTeamSummary(): string {
   if (!schedulingMembers.value) return 'Loading team…'
   if (form.stay_member_id) {
     const member = schedulingMembers.value.members.find(candidate => candidate.id === form.stay_member_id)
-    return member?.name?.trim() || 'Assigned team member'
+    return member?.name ?? 'Assigned member not found in this business'
   }
-  if (!form.stay_team_id) return 'Owners and admins only'
+  if (!form.stay_team_id) return 'Unassigned'
   return schedulingMembers.value.teams.find(candidate => candidate.id === form.stay_team_id)?.name ?? 'Assigned team not found in this business'
 }
 function roomsSummary(): string {
@@ -1168,7 +1168,7 @@ const { data: schedulingMembers, error: schedulingMembersError } = await useMemb
 /** The assignee by its loaded name; a read failure, a pending read or an unknown id says so. */
 function assignmentSummary(): string {
   const assignment = isNew.value ? form : product.value?.booking
-  if (!assignment?.assigned_team_id && !assignment?.assigned_member_id) return `No ${bookingCopy.value.assigneeNoun} assigned`
+  if (!assignment?.assigned_team_id && !assignment?.assigned_member_id) return 'Unassigned'
   if (schedulingMembersError.value) return 'Team members could not be loaded'
   if (!schedulingMembers.value) return 'Loading team members…'
   if (assignment.assigned_team_id) return schedulingMembers.value.teams.find(team => team.id === assignment.assigned_team_id)?.name ?? 'Assigned team not found in this business'
@@ -1723,7 +1723,7 @@ async function commit(concern?: ProductConcern) {
   const id = locationId.value
   const removesOnlineScope = locationScope.value === 'online' && (concern === 'location' && !form.held_online || concern === 'enabled' && !form.bookable)
   let ordinaryDraft: { version: string | null; values: ProductForm } | null = null
-  const bookingDraft: Partial<ProductForm> | null = concern === 'enabled' ? { bookable: form.bookable }
+  const bookingDraft: Partial<ProductForm> | null = concern === 'enabled' ? { bookable: form.bookable, ...(legalEditor.value && form.bookable ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id, assigned_team_id: form.assigned_team_id } : {}) }
     : concern === 'duration' ? { booking_duration: form.booking_duration }
     : concern === 'capacity' ? { booking_capacity: form.booking_capacity }
     : concern === 'confirmation' ? { confirmation_mode: form.confirmation_mode }
@@ -1939,6 +1939,7 @@ async function saveBooking(concern: BookingConcern) {
     return
   }
   const body = concern === 'duration' ? { duration_minutes: Number(form.booking_duration) }
+    : concern === 'enabled' && legalEditor.value ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id, assigned_team_id: form.assigned_team_id }
     : concern === 'capacity' ? { default_capacity: form.booking_capacity.trim() ? Number(form.booking_capacity) : null }
     : concern === 'confirmation' ? { confirmation_mode: form.confirmation_mode }
     : concern === 'assignment' ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id, assigned_team_id: form.assigned_team_id }

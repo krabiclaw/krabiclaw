@@ -142,7 +142,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.deepEqual(refusal(await edit(owner, { check_in_end_time: '9pm' })), { status: 422, code: 'INVALID_DETAIL', field: 'check_in_end_time' })
     assert.deepEqual(refusal(await edit(owner, { check_in_end_time: '  ' })), { status: 422, code: 'INVALID_DETAIL', field: 'check_in_end_time' })
     assert.deepEqual(refusal(await edit(owner, { check_in_end_time: '15:00' })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.check_in_end_time' })
-    assert.deepEqual(refusal(await edit(owner, { assigned_member_id: 'nobody' })), { status: 422, code: 'INVALID_DETAIL', field: 'assigned_member_id' })
+    assert.deepEqual(refusal(await edit(owner, { assigned_member_id: 'nobody' })), { status: 422, code: 'INVALID_RESPONSIBILITY', field: 'assigned_member_id' })
     assert.deepEqual(refusal(await edit(await cookieFor('helper'), { name: 'Mine' })), { status: 403, code: 'STAY_ROLE_REQUIRED' })
     assert.deepEqual((await call(owner, 'GET')).body.homes, [created.body.home, second.body.home])
 

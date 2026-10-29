@@ -1,3 +1,5 @@
+import { assertResponsibilityTarget } from '~/server/utils/member-access'
+import { publishAccessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { assertPublishedHost } from '~/server/utils/public-provider'
 import { creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
@@ -101,28 +103,40 @@ export interface SessionAvailability extends ProductSession {
   is_full: boolean
 }
 
+function requireConsultationAttorney(kind: string, config: Pick<ProductBookingConfigRecord, 'scheduling_mode' | 'assigned_member_id' | 'assigned_team_id'>): void {
+  if (kind !== 'service') return
+  if (config.scheduling_mode !== 'provider' || (!config.assigned_member_id && !config.assigned_team_id)) {
+    throw new HTTPError({ statusCode: 409, statusMessage: 'Choose an attorney or legal team and use their working hours before taking new legal consultation requests.',
+      data: { code: 'ATTORNEY_REQUIRED', field: config.scheduling_mode !== 'provider' ? 'scheduling_mode' : 'host' } })
+  }
+}
+
 export async function requireBookingConfig(
   db: DbClient,
   organizationId: string,
   productId: string,
 ): Promise<ProductBookingConfigRecord> {
-  const row = await queryFirst<Omit<ProductBookingConfigRecord, 'online_payment_required' | 'held_online'> & { online_payment_required: number; held_online: number }>(db, `
-    SELECT product_id, organization_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, assigned_team_id
-    FROM product_booking_configs WHERE organization_id = ? AND product_id = ?
+  const row = await queryFirst<Omit<ProductBookingConfigRecord, 'online_payment_required' | 'held_online'> & { online_payment_required: number; held_online: number; product_kind: string }>(db, `
+    SELECT c.product_id, c.organization_id, c.duration_minutes, c.default_capacity, c.confirmation_mode, c.online_payment_required, c.held_online, c.scheduling_mode, c.assigned_member_id, c.assigned_team_id, p.kind product_kind
+    FROM product_booking_configs c JOIN products p ON p.id=c.product_id AND p.organization_id=c.organization_id WHERE c.organization_id = ? AND c.product_id = ?
   `, [organizationId, productId])
   // The absence of a config row means the product does not take bookings. It
   // is not a product with unknown booking settings.
   if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'This product does not take bookings' })
-  return { ...row, online_payment_required: row.online_payment_required === 1, held_online: row.held_online === 1 }
+  const { product_kind: kind, ...config } = row
+  requireConsultationAttorney(kind, config)
+  return { ...config, online_payment_required: config.online_payment_required === 1, held_online: config.held_online === 1 }
 }
 
 /** Shared capability writer: omissions retain saved defaults; null clears and capacity zero closes seats. */
 export async function prepareProductBookingConfig(db: DbClient, input: {
   organizationId: string; productId: string; actorId: string; env?: import('~/server/utils/auth').CloudflareEnv
   productInSameBatch?: boolean
+  productKind?: string
   patch: { duration_minutes?: unknown; default_capacity?: unknown; confirmation_mode?: unknown; online_payment_required?: unknown; held_online?: unknown; scheduling_mode?: unknown; assigned_member_id?: unknown; assigned_team_id?: unknown }
 }): Promise<{ query: BatchQuery; config: ProductBookingConfigRecord }> {
   const product = input.productInSameBatch ? null : await requireOrganizationProduct(db, input)
+  if (input.productInSameBatch && !['experience', 'service'].includes(input.productKind ?? '')) badRequest('The scheduled product kind is required before preparing booking setup')
   if (product && !['experience', 'service'].includes(product.kind)) badRequest('Only experiences and services take scheduled bookings')
   const patch = input.patch
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) badRequest('Invalid request body')
@@ -145,13 +159,12 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   const current = await queryFirst<Omit<ProductBookingConfigRecord, 'online_payment_required' | 'held_online'> & { online_payment_required: number; held_online: number; updated_at: string }>(db, 'SELECT product_id,organization_id,duration_minutes,default_capacity,confirmation_mode,online_payment_required,held_online,scheduling_mode,assigned_member_id,assigned_team_id,updated_at FROM product_booking_configs WHERE organization_id = ? AND product_id = ?', [input.organizationId, input.productId])
   const heldOnline = patch.held_online === undefined ? current?.held_online === 1 : patch.held_online === true
   if (patch.scheduling_mode !== undefined && !['legacy', 'provider'].includes(String(patch.scheduling_mode))) badRequest('Invalid scheduling mode')
-  if (patch.assigned_member_id !== undefined && patch.assigned_member_id !== null && typeof patch.assigned_member_id !== 'string') badRequest('Invalid member ID')
-  if (patch.assigned_team_id !== undefined && patch.assigned_team_id !== null && typeof patch.assigned_team_id !== 'string') badRequest('Invalid team ID')
-  const assignedMember = patch.assigned_member_id === undefined ? current?.assigned_member_id ?? null : patch.assigned_member_id as string | null
-  const assignedTeam = patch.assigned_team_id === undefined ? current?.assigned_team_id ?? null : patch.assigned_team_id as string | null
+  const target = await assertResponsibilityTarget(db, input.organizationId, patch, current)
+  const assignedMember = target.assigned_member_id
+  const assignedTeam = target.assigned_team_id
   const mode = (patch.scheduling_mode ?? current?.scheduling_mode ?? 'legacy') as ProductBookingConfigRecord['scheduling_mode']
+  requireConsultationAttorney(product?.kind ?? input.productKind!, { scheduling_mode: mode, assigned_member_id: assignedMember, assigned_team_id: assignedTeam })
   // The host is who runs it, a member or a team; in provider mode their own hours are also the schedule.
-  if (assignedMember && assignedTeam) badRequest('Choose one host: a member or a team')
   if (mode === 'provider' && !assignedMember && !assignedTeam) badRequest('Choose the member or team whose working hours guests book')
   // Online, the provider's own hours are the schedule; there is no business clock to hold it in.
   if (heldOnline && mode !== 'provider') badRequest('An online offering is held by a member or a team: assign who provides it')
@@ -166,9 +179,8 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
     await assertRoleAllows({...membership,permissions:{products:['update']}})
     if (assignedMember) await requireSchedulingAccess({ env, userId: input.actorId, organizationId: input.organizationId }, assignedMember, true)
     if (mode === 'provider' && assignedMember && !(await queryFirst(db, 'SELECT member_id FROM member_scheduling WHERE member_id=? AND organization_id=? AND timezone IS NOT NULL', [assignedMember, input.organizationId]))) badRequest('Set working hours for this member before using their hours for bookings')
-    if (assignedTeam && !(await queryFirst(db, `SELECT t.id FROM team t WHERE t.id=? AND t.organizationId=? AND (?<>'provider' OR EXISTS (
-      SELECT 1 FROM teamMember tm JOIN member m ON m.userId=tm.userId AND m.organizationId=t.organizationId
-        JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId AND ms.timezone IS NOT NULL WHERE tm.teamId=t.id))`, [assignedTeam, input.organizationId, mode]))) badRequest(mode === 'provider' ? 'Choose a team in this business with at least one member who has set working hours' : 'Choose a team in this business')
+    if (mode === 'provider' && assignedTeam && !await queryFirst(db, `SELECT 1 FROM teamMember tm JOIN member m ON m.userId=tm.userId AND m.organizationId=?
+      JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId AND ms.timezone IS NOT NULL WHERE tm.teamId=?`, [input.organizationId, assignedTeam])) badRequest('Choose a team with at least one member who has set working hours')
   }
   const now = new Date().toISOString()
   const config: ProductBookingConfigRecord = {
@@ -226,6 +238,10 @@ export async function setProductBookingConfig(db: DbClient, input: Omit<Paramete
   const queries = [query, ...materialized, ...online, publicResourceCacheInvalidationQuery(input.organizationId, 'product-booking-config')]
   if (queries.length > MAX_D1_BATCH_STATEMENTS) badRequest('This schedule exceeds one atomic update; reduce the requested times or team size')
   await executeBatch(db, queries, { operation: 'Set product booking config' }).catch(error => { throw bookingConfigurationWriteError(error) })
+  if (input.patch.assigned_member_id !== undefined || input.patch.assigned_team_id !== undefined) {
+    if (!input.env) throw new HTTPError({ statusCode: 503, message: 'The saved responsibility requires its organization environment', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', committed: true } })
+    await publishAccessInvalidation(input.env, { organizationId: input.organizationId })
+  }
   return requireBookingConfig(db, input.organizationId, input.productId)
 }
 
@@ -689,7 +705,7 @@ function manualSessionQuery(input: {
 
 /** Product creation uses the same config and occurrence writers in its atomic batch. */
 export async function prepareProductBookingSetup(db: DbClient, input: {
-  organizationId: string; productId: string; actorId: string; env: import('~/server/utils/auth').CloudflareEnv; now: string; booking: ProductBookingSetupInput; productInSameBatch?: boolean
+  organizationId: string; productId: string; actorId: string; env: import('~/server/utils/auth').CloudflareEnv; now: string; booking: ProductBookingSetupInput; productInSameBatch?: boolean; productKind?: string
 }): Promise<BatchQuery[]> {
   const booking = input.booking
   if (!Number.isSafeInteger(booking.duration_minutes) || booking.duration_minutes <= 0) badRequest('Provide the session duration before creating a bookable offering')
@@ -773,6 +789,10 @@ export async function listSessions(db: DbClient, input: {
   toInstant: string
   statuses?: ProductSessionStatus[]
 }): Promise<SessionAvailability[]> {
+  if (input.productId && await queryFirst(db, `SELECT c.product_id FROM product_booking_configs c JOIN products p ON p.id=c.product_id AND p.organization_id=c.organization_id
+    WHERE c.organization_id=? AND c.product_id=? AND p.kind='service'`, [input.organizationId, input.productId])) {
+    await requireBookingConfig(db, input.organizationId, input.productId)
+  }
   const statuses = input.statuses ?? ['scheduled']
   const sessions = await queryAll<SessionAvailability>(db, `
     SELECT s.id, s.organization_id, s.product_id, s.location_id, s.availability_rule_id, ${sessionMemberSql('s')} AS assigned_member_id,
@@ -1003,6 +1023,7 @@ export async function claimSessionCapacity(db: DbClient, input: {
     }
   }
 
+  await requireBookingConfig(db, input.organizationId, input.productId)
   const bookingId = crypto.randomUUID()
   const claim = await sessionClaimQuery(db, { ...input, bookingId, now: new Date().toISOString() })
   const results = await executeBatch(db, [claim, sessionAssignmentQuery(input.sessionId, input.organizationId, bookingId), ...(input.following?.(bookingId) ?? [])], { operation: 'Claim session capacity' })

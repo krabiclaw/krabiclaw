@@ -3,7 +3,7 @@ import { executeBatch, queryAll, queryFirst, type BatchQuery } from '~/server/db
 import { providerUnavailableSql } from '~/server/utils/provider-allocation'
 import { requireSchedulingAccess, refreshMemberBusy, type SchedulingActor } from './member-scheduling'
 import { executeGuestThreadOperation } from './guest-threads/operations'
-import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
+import { publishAccessInvalidation, publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { notifyBookingReassigned } from '~/server/utils/notifications'
 
 /**
@@ -45,6 +45,7 @@ export async function reassignBookingProvider(actor: SchedulingActor, input: {bo
   const result=await executeBatch(db,queries,{operation:'Reassign provider-led Session'})
   if(!result[0]?.meta.changes)throw new HTTPError({statusCode:409,message:'That team member isn’t free at this time, or the booking changed. Reload and try again.'})
  }
+ await publishAccessInvalidation(actor.env,{organizationId:actor.organizationId})
  const threads=await queryAll<{request_id:string}>(db,"SELECT a.request_id FROM activity_entries a JOIN requests r ON r.id=a.request_id AND r.organization_id=? WHERE a.event_name='booking.reassign' AND a.scope_kind='request' AND a.dedupe_key=?||':'||json_extract(a.payload_json,'$.operational_booking_id')",[actor.organizationId,key])
  const name=await queryFirst<{name:string|null}>(db,'SELECT public_name name FROM member_scheduling WHERE member_id=? AND organization_id=? AND public_approved=1',[input.member_id,actor.organizationId])
  for(const thread of threads) {

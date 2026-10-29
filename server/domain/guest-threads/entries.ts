@@ -165,7 +165,7 @@ export function parseEntryPayload(entry: GuestThreadEntryRow): Record<string, un
 
 export const BUYER_OPERATION_EVENTS = [
  'booking.confirm','booking.reject','booking.cancel','reservation.confirm','reservation.reject','reservation.cancel',
- 'booking_change.requested','booking_change.accepted','booking_change.declined',
+ 'booking_change.requested','booking_change.accepted','booking_change.declined','booking_change.moved',
  'payment.payment_captured','payment.payment_failed','payment.refund_pending','payment.refund_succeeded','payment.refund_failed','payment.refund_canceled',
 ] as const
 /** Guest-visible facts; staff diagnostics and financial disputes have no buyer audience. */

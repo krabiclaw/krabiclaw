@@ -7,6 +7,7 @@ import { claimSessionCapacity } from '../../server/utils/availability.ts'
 import { storeCalendarSelection, syncCalendarOrganization } from '../../server/utils/google-calendar.ts'
 import { ensureCalendarWatch, pullCalendarChanges, readCalendarSync, resolveCalendarChannel, setCalendarReschedules, stopCalendarWatch } from '../../server/utils/google-calendar-inbound.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
 
 /**
  * The business calendar moved, deleted and put back: an event dragged in
@@ -33,9 +34,9 @@ test('an event moved in Google moves its booking; a refused move or a deletion i
     await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('service','p','org','Consultation','consultation','actor','actor')").run()
     await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('v','org','p','Consultation','actor','actor')").run()
     await db.prepare("INSERT INTO product_publications(product_id,organization_id,published,created_by,updated_by) VALUES('p','org',1,'actor','actor')").run()
-    await db.prepare("INSERT OR IGNORE INTO user(id,name,email,emailVerified) VALUES('host','Host','host@example.test',1),('owner','Owner','owner@example.test',1)").run()
+    await db.prepare("INSERT OR IGNORE INTO user(id,name,email,emailVerified) VALUES('host','Host','host@example.test',1),('owner','Owner','owner@example.test',1),('buyer','Jane Doe','jane@example.test',1)").run()
     await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES('host-org','org','host','member',1),('owner-org','org','owner','owner',1)").run()
-    await db.prepare(`INSERT INTO member_scheduling(member_id,organization_id,timezone,weekly_json,time_off_json,windows_json,windows_until,calendar_revision,updated_at,updated_by) VALUES('host-org','org','UTC','[]','[]','[{"start":"2020-01-01T00:00:00.000Z","end":"2100-01-01T00:00:00.000Z"}]','2100-01-01T00:00:00.000Z','rev','2026-01-01T00:00:00.000Z','actor')`).run()
+    await db.prepare(`INSERT INTO member_scheduling(member_id,organization_id,public_name,public_approved,timezone,weekly_json,time_off_json,windows_json,windows_until,calendar_revision,updated_at,updated_by) VALUES('host-org','org','Host',1,'UTC','[]','[]','[{"start":"2020-01-01T00:00:00.000Z","end":"2100-01-01T00:00:00.000Z"}]','2100-01-01T00:00:00.000Z','rev','2026-01-01T00:00:00.000Z','actor')`).run()
     await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,held_online,scheduling_mode,assigned_member_id,confirmation_mode,created_by,updated_by) VALUES('p','org',30,1,'provider','host-org','review','actor','actor')").run()
     // Two bookable times a month out, half an hour apart; nothing starts at 16:00.
     const day = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10)
@@ -43,8 +44,8 @@ test('an event moved in Google moves its booking; a refused move or a deletion i
     for (const [id, start, end] of [['s', at('14:00'), at('14:30')], ['s2', at('15:00'), at('15:30')]]) {
       await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES(?,'org','p','host-org','America/New_York',?,?,1,'actor','actor')").bind(id, start, end).run()
     }
-    await db.prepare(`INSERT INTO requests(id,kind,organization_id,conversation_state,payload_json) VALUES('thread','booking','org','resolved','{"guest":{"name":"Jane Doe","email":"jane@example.test","phone":null},"notes":null,"party_size_is_minimum":false,"ip_hash":null,"cancellation":{"token_hash":null,"expires_at":null,"used_at":null}}')`).run()
-    const { bookingId } = await claimSessionCapacity(db, { organizationId: 'org', productId: 'p', sessionId: 's', productVariantId: 'v', partySize: 1, requestId: 'thread' })
+    await db.prepare(`INSERT INTO requests(id,kind,organization_id,user_id,conversation_state,payload_json) VALUES('thread','booking','org','buyer','resolved','{"guest":{"name":"Jane Doe","email":"jane@example.test","phone":null},"notes":null,"party_size_is_minimum":false,"ip_hash":null,"cancellation":{"token_hash":null,"expires_at":null,"used_at":null}}')`).run()
+    const { bookingId } = await claimSessionCapacity(db, { organizationId: 'org', productId: 'p', sessionId: 's', productVariantId: 'v', partySize: 1, requestId: 'thread', userId: 'buyer' })
     await storeCalendarSelection(db, 'org', { account_id: 'linked-account', calendar_id: 'chosen', calendar_name: 'KrabiClaw' })
     const env = { ...await mf.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test', EMAIL_REPLY_SECRET: 'reply-secret', EMAIL_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     const provider = { token: async () => 'token' }
@@ -103,6 +104,15 @@ test('an event moved in Google moves its booking; a refused move or a deletion i
     const moved = await db.prepare("SELECT actor_kind, body, event_name FROM activity_entries WHERE request_id='thread' AND event_name='booking_change.moved'").first()
     assert.equal(moved?.actor_kind, 'system')
     assert.match(String(moved?.body), /from Google Calendar/)
+    const buyerDetail = await getGuestThreadDetail(db, 'thread', 'org', { buyerUserId: 'buyer' })
+    assert.ok(buyerDetail)
+    assert.equal(buyerDetail.source.fields.startsAt, at('15:00'))
+    const buyerMove = buyerDetail.entries.find(entry => entry.eventName === 'booking_change.moved')
+    assert.ok(buyerMove)
+    assert.equal(buyerMove.kind, 'operation')
+    assert.equal(buyerMove.actorKind, 'system')
+    assert.equal(buyerMove.body, moved?.body)
+    assert.match(buyerMove.body ?? '', /from Google Calendar/)
     assert.equal((await db.prepare("SELECT conversation_state FROM requests WHERE id='thread'").first())?.conversation_state, 'resolved')
     assert.deepEqual(await db.prepare("SELECT provider, kind, external_id, status FROM channel_sync_log ORDER BY rowid").all().then(r => r.results), [{ provider: 'google_calendar', kind: 'calendar_event', external_id: eventId, status: 'applied' }])
     // The same Google change read twice moves nothing twice.

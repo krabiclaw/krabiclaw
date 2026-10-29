@@ -57,6 +57,13 @@
       "when": 1793015173995,
       "tag": "0007_google_calendar_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1793245104778,
+      "tag": "0008_team_group_management",
+      "breakpoints": true
     }
   ]
 }

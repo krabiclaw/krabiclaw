@@ -70,7 +70,11 @@ and cleanup.
   of Better Auth authorization scope.
 - MCP uses Better Auth Organization roles and permissions through the shared
   authorization utilities and domain services. Team membership and explicit
-  product, location and booking assignment determine access to scoped work.
+  location, offering and home responsibility use the same member-or-Team pair
+  and determine access to scoped work. `assigned_member_id` names a membership,
+  not a user. `assigned_team_id` names a Better Auth Team. Choose at most one;
+  send null for the other when changing target. A booking's actual recorded
+  provider remains distinct from current resource responsibility.
 - Native organization roles are `owner`, `admin` and `member`, scoped to the
   selected tenant. `member` includes assigned product and booking operations and
   the member's own scheduling; it is not an inherently read-only role.
@@ -88,9 +92,11 @@ and cleanup.
 ## Internal team conversations
 
 `list_team_conversation_recipients` discovers the selected organization's real
-members and identifies the caller. `start_team_conversation` creates or reuses
-the conversation with exactly the selected member user IDs and optional explicit
-stay/location context. This neither invites someone nor creates a Better Auth Team.
+members and identifies the caller. `start_team_conversation` reuses direct and
+stay/location conversations with exactly the selected member user IDs and
+explicit context. A manual group of at least three people is a distinct
+conversation with an optional name and required stable `idempotency_key`.
+This neither invites someone nor creates a Better Auth Team.
 `list_team_conversations` reads only conversations the caller participates in;
 `get_team_conversation` pages their messages newest first with the native
 `before`/`before_id` pair. Reading does not mark a conversation read.
@@ -101,6 +107,14 @@ a saved message does not prove device delivery. `mark_team_conversation_read`
 changes only the caller's read position. These tools use the same team messaging
 operations, Better Auth memberships and participant seats as CMS and iOS. They
 never reply to a guest or turn team conversations into permission groups.
+
+`update_team_group` renames a manual group, adds/removes selected workspace
+members, or leaves it. Read `canManage` and `canLeave` first. Only the creator
+and participating owners/admins may manage it; all participants can leave.
+Direct, buyer/guest and stay/location conversations are protected. New members
+can read the group's history; removal/leave ends access and retains messages.
+Retry an unfinished operation with the same `idempotency_key` and unchanged
+arguments, including after a committed leave.
 
 ## Tool catalog
 

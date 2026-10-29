@@ -8,67 +8,18 @@
     @cancel="editor.revert"
     @save="editor.save"
   >
-    <p v-if="membersError" role="alert" class="mb-3 text-error">
-      Team members could not be loaded.
-    </p>
-    <p v-else-if="membersStatus !== 'success'" class="mb-3 text-muted">
-      Loading team members…
-    </p>
-    <URadioGroup
-      v-else
-      v-model="assignedChoice"
-      :items="assignmentOptions"
-      variant="card"
-      class="w-full"
-    />
+    <ResponsibilityPicker v-model:member-id="editor.detailsForm.assigned_member_id" v-model:team-id="editor.detailsForm.assigned_team_id" :organization-id="organizationId" :disabled="editor.saving.value" />
     <UAlert v-if="editor.validationMessage.value" class="mt-6" color="error" variant="soft" :description="editor.validationMessage.value" />
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
 import { useLocationEditor } from '~/lib/components/workspace/settings/LocationSettingsPage.vue'
-import { useMemberSchedulingList } from '~/composables/useMemberSchedulingList'
+import ResponsibilityPicker from '~/components/dashboard/ResponsibilityPicker.vue'
 
 definePageMeta({ layout: 'dashboard' })
 
 const dashboardLocation = useDashboardLocation()
 const organizationId = await useDashboardOrganizationId()
 const editor = await useLocationEditor(organizationId, dashboardLocation.currentLocationId, 'assignment')
-
-const { data: members, error: membersError, status: membersStatus } = await useMemberSchedulingList(organizationId)
-
-const ADMINISTRATORS = 'administrators'
-
-const assignedChoice = computed({
-  get: () => {
-    if (editor.detailsForm.assigned_team_id) return `team:${editor.detailsForm.assigned_team_id}`
-    if (editor.detailsForm.assigned_member_id) return `member:${editor.detailsForm.assigned_member_id}`
-    return ADMINISTRATORS
-  },
-  set: (val: string) => {
-    editor.detailsForm.assigned_team_id = val.startsWith('team:') ? val.slice(5) : null
-    editor.detailsForm.assigned_member_id = val.startsWith('member:') ? val.slice(7) : null
-  },
-})
-
-const assignmentOptions = computed(() => {
-  if (!members.value) return []
-  return [
-    {
-      value: ADMINISTRATORS,
-      label: 'Administrators',
-      description: 'No staff are assigned. Owners and administrators manage this location.',
-    },
-    ...members.value.teams.map(team => ({
-      value: `team:${team.id}`,
-      label: `Team: ${team.name}`,
-      description: `Members of ${team.name}, owners and administrators manage this location and its reservations.`,
-    })),
-    ...members.value.members.map(member => ({
-      value: `member:${member.id}`,
-      label: member.name,
-      description: `${member.name}, owners and administrators manage this location and its reservations.`,
-    })),
-  ]
-})
 </script>

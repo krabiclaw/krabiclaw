@@ -1,10 +1,7 @@
 import { HTTPError } from 'nitro'
 import { sessionMemberSql } from './provider-allocation'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
-import type { PublicProvider } from '~/shared/member-scheduling'
-
-/** A member's published profile: explicit approved content only; never Better Auth user profile fields. */
-const PUBLISHED_PROFILE_SQL = `ms.public_approved=1 AND length(trim(ms.public_name))>0`
+import { PUBLISHED_PROFILE_SQL, type PublicProvider } from '~/shared/member-scheduling'
 
 /** The members a host names: the member, or every member of the team. */
 const HOST_MEMBERS_SQL = `SELECT m.id FROM member m WHERE m.organizationId=? AND (m.id=? OR EXISTS (

@@ -2429,8 +2429,11 @@ export const team_threads = sqliteTable("team_threads", {
 	stay_id: text(),
 	location_id: text(),
 	created_by_user_id: text().references(() => user.id, { onDelete: "set null" }),
-	// SHA-256 of the stay, location, and the sorted member ids the conversation was started
-	// with: starting the same conversation again, or twice at once, finds this one.
+	name: text(),
+	// Kept after members leave: a group never becomes a direct conversation.
+	is_group: integer({ mode: "boolean" }).default(false).notNull(),
+	// Direct/contextual conversations use their initial roster. Mutable groups
+	// use a caller-scoped creation key, independent of their changing roster.
 	participants_key: text().notNull(),
 	// The newest message's time, or the creation time before the first message.
 	last_message_at: text().notNull(),

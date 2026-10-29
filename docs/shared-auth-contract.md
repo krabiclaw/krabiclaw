@@ -48,6 +48,56 @@ Decisions D3–D9 were recorded by the owner on 2026-10-14 (krabiclaw#1370); D1,
 | Delete organization | `POST /api/auth/organization/delete` | Owner only; §4. |
 | Report and block | Guest: `POST /api/dashboard/organizations/:id/guest-threads/:threadId/operations/{report,block,unblock}` `{idempotencyKey, reason}` (`reason` for report and block). Team: `POST /api/dashboard/team/threads/:threadId/messages/:messageId/report` `{reason, idempotencyKey}` → 201 `{report:{id, status}}` | App Store guideline 1.2; §4.1. |
 
+### Team group lifecycle
+
+Team-thread responses carry required `name` (nullable), `isGroup`,
+`createdByUserId` (nullable), `canManage` and `canLeave`. Clients render controls
+from these server capabilities. A current participant who created a manual
+group, or is a workspace owner/admin, may rename it and add/remove others; all
+participants may leave. Direct, stay/location, buyer and guest conversations are
+protected. Leaving/removing revokes access without deleting history. Newly added
+members can read the complete history. Manual groups retain their identity even
+after their roster shrinks.
+
+Creation of a manual group requires a stable `idempotencyKey`; optional `name`
+is at most 100 trimmed characters. There are at most 50 participants including
+the sender. Reusing the creation key replays that exact request; another key
+creates a distinct group. Direct and stay/location conversations retain their
+existing participant/context reuse.
+
+`POST /api/dashboard/team/threads/:threadId/operations` takes
+`{action:"rename"|"add"|"remove"|"leave", idempotencyKey, name?, memberIds?, userId?}`
+and returns `{status:"updated"|"left", threadId}`. Rename takes a name or null;
+add takes current workspace user IDs; remove takes another participant's user
+ID. Its receipt and mutation commit together, and the same request can repair a
+failed realtime publication after the caller has left.
+
+The socket emits `team_thread.access_ended` with `teamThreadId` and
+`targetUserId` to the affected member after a removal/leave, without message
+content. Both apps clear that thread's cached transcript and close its open
+view. Current participants receive the normal `team_thread.changed` event.
+
+The iOS Message host action continues to include all workspace owners/admins
+in a protected stay conversation. No assignment, invite, or Better Auth Team
+change automatically enrolls someone in another conversation.
+
+Assignment/member/team writes also emit content-free `access.changed` with only
+the normal event/organization/time fields. Every currently authorized workspace
+socket receives it and re-reads its permitted guest conversations. A denied
+403/404 read clears the displayed conversation and draft. Group participation,
+booking provider attribution and current resource responsibility remain
+separate. Guest timelines retain and display canonical operation entries and
+their actual payloads, including booking moves and financial summaries, across
+all four verticals.
+
+Locations, experience/legal offering configurations and homes use the same
+`assigned_member_id` / `assigned_team_id` pair. The first names an actual
+Better Auth membership in the organization; the second names an actual Better
+Auth Team there. At most one is selected. All roles are eligible for explicit
+responsibility, including owners and admins. The resource editor is the write
+boundary; there is no alternate bulk member-to-homes operation. Better Auth
+Team changes affect authorized work, without creating chat participation.
+
 ### 3.1 Homes quote
 
 `GET /api/organizations/:id/billing/homes?adding=N`, owner or admin. `adding` is optional, default 1, an integer from 0 to 500: the homes about to go live (§3.4). Anything else is 422 `INVALID_QUERY` with `field: "adding"`. Every amount is read from Stripe: a paid plan's from the homes price on its own subscription (its graduated tiers: the ones at no charge are the included homes, the next is each further home), billed at the end of the period, never prorated; Basic's from the published homes price in the Stripe catalog. Basic includes 2 live homes and refuses a third. Drafts are free and unlimited on every plan. When a paid plan ends (Stripe deletes the subscription, or pauses it when a trial ends without a card), the organization is on Basic and its newest live homes and active locations past the 2 included go back to drafts: a home is taken off the site and its Airbnb sync stopped (a stop job with no requester, which the airbnb-sync task runs), and a location is turned off.
@@ -246,7 +296,7 @@ Every step fails the operation visibly; nothing is skipped.
 
 - **Organization deletion** (`beforeDeleteOrganization`, after Better Auth Stripe's subscription guard; `cleanupOrganizationBeforeDelete` in `server/utils/tenant-deletion.ts`): Payments servicing links are retained; the Airbnb connection is released in Channex (`AirbnbConnection.deleteForOrganization`: rate-plan mappings removed one at a time and verified, the channel deactivated and deleted, every property in the organization's dedicated group deleted with `force=true`, then the group, each verified gone by a 404); Google Calendar cleanup is staged; custom domains and Cloudflare Images the organization alone holds (home, guest and team message photos) are deleted. Every lodging row — stays, nights, channel mappings and threads, guest threads, scheduled messages, message templates, team threads, seats and messages — cascades with the organization row.
 - **Account deletion** (`user.deleteUser.beforeDelete`; `/api/auth/admin/remove-user` is disabled because it bypassed this): sole-owner guard (400 `SOLE_ORGANIZATION_OWNER`); Apple code exchange and immediate revocation (`APPLE_REAUTHENTICATION_REQUIRED`, `APPLE_ACCOUNT_MISMATCH`, `APPLE_CODE_EXCHANGE_FAILED`, `APPLE_NOT_CONFIGURED`, `APPLE_REVOCATION_FAILED`) (D6). Then, in the user delete hook after Stripe buyer customers are removed, the homes the account's members looked after are released. Sessions, device tokens, member rows and their thread seats cascade with the user; team messages the user sent keep their text with the sender set to null.
-- **Member removed or left**: the member's homes become unassigned and the change is published to open views; thread seats cascade with the member row. **Role changed to owner or admin**: the member's homes are released, since owners and admins see every home. `releaseUnassignableHomes` reconciles the whole organization, so a failed release is repaired by the next membership change there.
+- **Member removed or left, or Team deleted**: dangling location, offering and home responsibility is cleared through the shared reconciliation and published to open views; thread seats cascade with the member row. **Role changed to owner or admin**: explicit responsibility remains. Recorded booked providers remain historical attribution. `reconcileResponsibilities` reconciles departed targets across the organization on membership changes.
 
 ### 4.1 Reports and blocked guests
 

@@ -1779,9 +1779,9 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates or reuses an internal conversation with exactly the selected current members and optional accessible stay or location context. Sends no message and creates no Better Auth Team.",
-        "open_world_justification": "Creates or reuses an internal conversation with exactly the selected current members and optional accessible stay or location context. Sends no message and creates no Better Auth Team. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Creates or reuses an internal conversation with exactly the selected current members and optional accessible stay or location context. Sends no message and creates no Better Auth Team."
+        "read_only_justification": "Creates a distinct manual internal group with explicitly selected workspace members under a stable creation key, or reuses a direct/stay/location conversation. Sends no message and creates no Better Auth Team.",
+        "open_world_justification": "Creates a distinct manual internal group with explicitly selected workspace members under a stable creation key, or reuses a direct/stay/location conversation. Sends no message and creates no Better Auth Team. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Creates a distinct manual internal group with explicitly selected workspace members under a stable creation key, or reuses a direct/stay/location conversation. Sends no message and creates no Better Auth Team."
       }
     },
     "update_article_category": {
@@ -2046,6 +2046,18 @@
         "read_only_justification": "Overwrites the selected Better Auth team name.",
         "open_world_justification": "Overwrites the selected Better Auth team name. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
         "destructive_justification": "Overwrites the selected Better Auth team name."
+      }
+    },
+    "update_team_group": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Renames a manual internal group, adds selected current workspace members, removes another participant, or leaves it under a stable retry key. Management requires the participating creator or workspace owner/admin; all participants can leave. Added people can read history; removal and leaving revoke access while retaining messages. Guest/buyer and direct/stay/location conversations are protected.",
+        "open_world_justification": "Renames a manual internal group, adds selected current workspace members, removes another participant, or leaves it under a stable retry key. Management requires the participating creator or workspace owner/admin; all participants can leave. Added people can read history; removal and leaving revoke access while retaining messages. Guest/buyer and direct/stay/location conversations are protected. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Renames a manual internal group, adds selected current workspace members, removes another participant, or leaves it under a stable retry key. Management requires the participating creator or workspace owner/admin; all participants can leave. Added people can read history; removal and leaving revoke access while retaining messages. Guest/buyer and direct/stay/location conversations are protected."
       }
     }
   },

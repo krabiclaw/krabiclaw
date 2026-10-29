@@ -40,7 +40,7 @@ const target = (id: string) => ({ path: `/dashboard/${encodeURIComponent(String(
 watch(threads, rows => emit('first', rows[0] ? target(rows[0].id) : null), { immediate: true })
 const realtime = useDashboardInvalidations()
 watch(realtime.event, event => {
-  if (event?.type === 'team_thread.changed' && event.organizationId === dashboard.organizationId.value) void refresh()
+  if ((event?.type === 'team_thread.changed' || event?.type === 'team_thread.access_ended' || event?.type === 'access.changed') && event.organizationId === dashboard.organizationId.value) void refresh()
 })
 watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refresh() })
 </script>

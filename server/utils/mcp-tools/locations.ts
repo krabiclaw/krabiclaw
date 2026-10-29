@@ -102,6 +102,8 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
       inputSchema: {
         location_id: { type: 'string', description: 'Internal location ID returned by list_locations or get_workspace_context.' },
         title: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[\\s\\S]*\\S[\\s\\S]*$', description: 'Location name shown to guests. Renaming keeps its saved public address.' },
+        assigned_member_id: locationObject.properties.assigned_member_id,
+        assigned_team_id: locationObject.properties.assigned_team_id,
         description: { type: ['string', 'null'], description: 'Long description shown on the location page. Pass null to clear it.' },
         short_description: { type: ['string', 'null'], description: 'One-line summary shown on location cards. Pass null to clear it.' },
         status: { type: 'string', enum: ['active', 'inactive'], description: 'Set active to enable the location, or inactive to hide it. Increasing the number of live homes requires the dashboard.' },
