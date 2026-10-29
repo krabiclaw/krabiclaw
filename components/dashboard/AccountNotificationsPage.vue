@@ -20,7 +20,8 @@ const level = useRouteLevel()
 const session = authClient.useSession()
 const sessionData = computed(() => session.value.data)
 const { preferences, labels, error, load } = useNotificationPreferences(() => sessionData.value?.user?.id)
-await load()
+// Read on every visit: the labels follow the person's businesses, which change outside this screen.
+await load(true)
 
 const groups = computed<EditorNavigationGroup[]>(() => [{
   id: 'categories',

@@ -57,8 +57,9 @@ export async function sendWebPush(
     { endpoint: input.subscription.endpoint, expirationTime: null, keys: { p256dh: input.subscription.p256dh, auth: input.subscription.auth } },
     vapidKeys(env),
   )
-  // A push service answers; it does not forward the message elsewhere.
-  const response = await fetch(input.subscription.endpoint, { method: 'POST', headers: request.headers, body: request.body, redirect: 'error' })
+  // A push service answers; it does not forward the message elsewhere, so a redirect is a failed
+  // send (Workers implements 'manual', not 'error').
+  const response = await fetch(input.subscription.endpoint, { method: 'POST', headers: request.headers, body: request.body, redirect: 'manual' })
   // RFC 8030 §5: 201 Created, with the push message's resource in Location.
   if (response.ok) return { status: 'sent', messageId: response.headers.get('location') }
   const body = await response.text()

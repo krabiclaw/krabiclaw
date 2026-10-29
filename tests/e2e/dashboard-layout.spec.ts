@@ -613,7 +613,7 @@ test.describe('dashboard pane hierarchy', () => {
       await page.reload()
       await waitForNuxtHydration(page)
       await expect(leaf.getByRole('switch', { name: 'WhatsApp', exact: true })).toHaveAttribute('aria-checked', String(wanted.whatsapp))
-      await leaf.getByRole('switch', { name: /^Push/ }).click()
+      await leaf.getByRole('switch', { name: 'Push', exact: true }).click()
       await expect(save).toBeEnabled()
       const pushSaved = page.waitForResponse(response => new URL(response.url()).pathname === '/api/user/notification-preferences' && response.request().method() === 'PATCH')
       await save.click()
@@ -628,7 +628,7 @@ test.describe('dashboard pane hierarchy', () => {
       await open(page, path)
       await expect(leaf.getByRole('switch', { name: 'Email', exact: true })).toHaveAttribute('aria-checked', String(before[category].email))
       await expect(leaf.getByRole('switch', { name: 'WhatsApp', exact: true })).toHaveAttribute('aria-checked', String(before[category].whatsapp))
-      await expect(leaf.getByRole('switch', { name: /^Push/ })).toHaveAttribute('aria-checked', String(before[category].push))
+      await expect(leaf.getByRole('switch', { name: 'Push', exact: true })).toHaveAttribute('aria-checked', String(before[category].push))
       await expect(save).toBeDisabled()
     }
   })

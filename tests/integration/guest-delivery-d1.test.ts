@@ -145,8 +145,9 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       assert.equal(sent?.url, endpoint)
       assert.equal(sent?.encoding, 'aes128gcm')
       assert.match(sent?.authorization ?? '', new RegExp(`^vapid t=[\\w-]+\\.[\\w-]+\\.[\\w-]+, k=${webEnv.NUXT_PUBLIC_VAPID_PUBLIC_KEY}$`))
-      assert.equal(typeof sent?.payload.title, 'string')
-      assert.match(String(sent?.payload.url), /^https:\/\/.+\/dashboard\//)
+      // The alert's own title and its reply link: the conversation in the organization's inbox.
+      assert.equal(sent?.payload.title, 'New website message from Proof Guest')
+      assert.equal(sent?.payload.url, 'https://proof.example/dashboard/proof/messages/web-delivered')
       assert.equal(sent?.payload.tag, 'web-delivered')
       await notifyPushContact(webEnv, 'web-gone')
       assert.deepEqual(await pushDelivery('web-gone'), [{ provider: 'web_push', status: 'failed', error: 'Web push fcm.googleapis.com 410 gone; device removed', provider_message_id: null }])
