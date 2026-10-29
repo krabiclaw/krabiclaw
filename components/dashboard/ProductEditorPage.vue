@@ -434,6 +434,7 @@ import {
   STAY_PROPERTY_TYPE_GROUPS,
   STAY_CANCELLATION_POLICIES,
   STAY_LONG_TERM_CANCELLATION_POLICIES,
+  NEW_HOME_CANCELLATION_POLICIES,
   STAY_CHECK_IN_METHODS,
   isStayPropertyType,
 } from '~/shared/stay-listing'
@@ -819,7 +820,7 @@ const draft = useState<ProductForm>(draftKey, () => ({
   stay_property_type_group: null, stay_property_type: null,
   stay_listing_type: null, stay_total_floors: '', stay_listing_floor: '', stay_year_built: '', stay_property_size: '', stay_property_size_unit: null,
   stay_bedrooms: '', stay_beds: '', stay_bathrooms: '',
-  stay_amenities: [] as StayAmenity[], stay_amenity_answers: [] as StayAmenityAnswer[], stay_cancellation_policy: null, stay_long_term_cancellation_policy: null,
+  stay_amenities: [] as StayAmenity[], stay_amenity_answers: [] as StayAmenityAnswer[], stay_cancellation_policy: NEW_HOME_CANCELLATION_POLICIES.cancellation_policy, stay_long_term_cancellation_policy: NEW_HOME_CANCELLATION_POLICIES.long_term_cancellation_policy,
 }))
 const form = reactive(draft.value)
 
@@ -965,8 +966,8 @@ function loadForm(row: Product) {
   form.stay_bathrooms = stay && stay.bathrooms !== null ? String(stay.bathrooms) : ''
   form.stay_amenities = stay ? [...stay.amenities] : []
   form.stay_amenity_answers = stay ? stay.amenity_answers.map(answer => ({ ...answer })) : []
-  form.stay_cancellation_policy = stay ? stay.cancellation_policy : null
-  form.stay_long_term_cancellation_policy = stay ? stay.long_term_cancellation_policy : null
+  form.stay_cancellation_policy = stay ? stay.cancellation_policy : NEW_HOME_CANCELLATION_POLICIES.cancellation_policy
+  form.stay_long_term_cancellation_policy = stay ? stay.long_term_cancellation_policy : NEW_HOME_CANCELLATION_POLICIES.long_term_cancellation_policy
   loadedCatalogShape.value = catalogShapeOf()
 }
 

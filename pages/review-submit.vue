@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen bg-default text-default">
     <section class="tenant-container max-w-2xl py-16">
-      <div v-if="pending" class="rounded-lg border border-default p-8">
+      <div v-if="validationStatus === 'idle' || validationStatus === 'pending'" class="rounded-lg border border-default p-8">
         <div class="h-5 w-40 animate-pulse rounded bg-elevated" />
         <div class="mt-4 h-20 animate-pulse rounded bg-elevated" />
       </div>
@@ -157,7 +157,7 @@ const activeVideoUploads = new Set<AbortController>()
 const imageCount = computed(() => media.value.filter(item => item.kind === 'image').length)
 const videoCount = computed(() => media.value.filter(item => item.kind === 'video').length)
 
-const { data: requestData, pending, error: validationError } = await useAsyncData<{
+const { data: requestData, status: validationStatus, error: validationError } = await useAsyncData<{
   request: { id: string; bookingType: string; expiresAt: string }
   organization: { id: string; name: string }
   visit: { subject: string; title: string | null; at: string; locationTitle: string | null }
@@ -166,7 +166,9 @@ const { data: requestData, pending, error: validationError } = await useAsyncDat
   displayNames: string[]
 }>(() => `review-request-validation-${token.value}`, () =>
   $fetch('/api/public/review-requests/validate', { query: { token: token.value } }),
-)
+// The link is the guest's private credential: it is read in their browser, as
+// a booking-change link is, never during the server render.
+{ server: false })
 const loadError = computed(() => validationError.value ? 'The link may have expired or already been used.' : '')
 watch(requestData, (data) => { if (data && !displayName.value) displayName.value = data.displayNames[0] ?? '' }, { immediate: true })
 

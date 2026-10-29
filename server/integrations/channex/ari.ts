@@ -3,7 +3,7 @@ import type { StayHome, StayNight } from '~/server/domain/stays'
 import { currencyFractionDigits, type CurrencyCode } from '~/shared/currencies'
 import { channexRequest, ChannexError, type ChannexEnv } from './client'
 import { ChannexDataError, object, string } from './data'
-import { CALENDAR_NIGHTS } from './airbnb-listing'
+import { CALENDAR_NIGHTS, instantBookingCategory } from './airbnb-listing'
 import { HTTPError } from 'nitro'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 
@@ -507,7 +507,7 @@ export interface AirbnbListingSettings {
 export async function pushAirbnbListingSettings(db: DbClient, env: ChannexEnv, organizationId: string, productId: string, settings: AirbnbListingSettings): Promise<ChannelPush | null> {
   const mapping = await connectedMapping(db, env, organizationId, productId)
   if (!mapping) return null
-  const row = await queryFirst<{ channel_id: string }>(db, "SELECT channel_id FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex'", [organizationId, productId])
+  const row = await queryFirst<{ channel_id: string; listing_id: string }>(db, "SELECT channel_id, listing_id FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex'", [organizationId, productId])
   const path = `/channels/${encodeURIComponent(row!.channel_id)}`
   try {
     const channel = object((await channexRequest(env, path)).data, 'channel')
@@ -515,7 +515,10 @@ export async function pushAirbnbListingSettings(db: DbClient, env: ChannexEnv, o
     const listing = Array.isArray(ratePlans) ? ratePlans.map(entry => object(entry, 'Mapping')).find(entry => entry.rate_plan_id === mapping.rate_plan_id) : undefined
     if (!listing || typeof listing.id !== 'string') return { state: 'needs_review', detail: 'Channex has no mapping for this listing; its settings were not sent to Airbnb' }
     const mappingId = encodeURIComponent(listing.id)
-    if (Object.keys(settings.booking).length) await channexRequest(env, `${path}/execute/update_booking_setting`, 'PUT', { channel_rate_plan_id: listing.id, data: settings.booking })
+    if (Object.keys(settings.booking).length) {
+      const category = await instantBookingCategory(env, row!.channel_id, row!.listing_id)
+      await channexRequest(env, `${path}/execute/update_booking_setting`, 'PUT', { channel_rate_plan_id: listing.id, data: { ...settings.booking, instant_booking_allowed_category: category } })
+    }
     if (Object.keys(settings.availability).length) await channexRequest(env, `${path}/mappings/${mappingId}/availability_settings`, 'PUT', { availability_settings: settings.availability })
     return { state: 'pushed', detail: null }
   } catch (error) {

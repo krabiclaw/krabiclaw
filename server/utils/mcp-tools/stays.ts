@@ -54,8 +54,8 @@ export const STAY_LISTING_SCHEMA = {
   bathrooms: { type: ['number', 'null'], minimum: 0, maximum: 50, multipleOf: 0.5, description: 'Whole and half baths, such as 1.5.' },
   amenities: { type: 'array', uniqueItems: true, items: { type: 'string', enum: Object.keys(STAY_AMENITIES) }, description: 'Amenity codes the home offers. Empty means no positive amenity answers.' },
   amenity_answers: { type: 'array', items: { type: 'object', properties: { code: { type: 'string', enum: Object.keys(STAY_AMENITIES) }, available: { type: 'boolean' } }, required: ['code', 'available'], additionalProperties: false }, description: 'Explicit amenity reports, each code once, in catalog order. Missing codes are unknown. amenities is the true-only projection.' },
-  cancellation_policy: nullableCode(STAY_CANCELLATION_POLICIES, 'Policy shown to guests for stays under 28 nights. It does not refund by itself.'),
-  long_term_cancellation_policy: nullableCode(STAY_LONG_TERM_CANCELLATION_POLICIES, 'Policy shown to guests for stays of 28 nights or more.'),
+  cancellation_policy: { type: 'string', enum: Object.keys(STAY_CANCELLATION_POLICIES), description: 'Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.' },
+  long_term_cancellation_policy: { type: 'string', enum: Object.keys(STAY_LONG_TERM_CANCELLATION_POLICIES), description: 'Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.' },
 }
 export const STAY_LISTING_WRITE_SCHEMA = { ...STAY_LISTING_SCHEMA,
   property_type_group: { ...STAY_LISTING_SCHEMA.property_type_group, description: `${STAY_LISTING_SCHEMA.property_type_group.description} Supply property_type with it; both are set or both null.` },
@@ -206,7 +206,8 @@ export const STAYS_TOOLS: McpToolDefinition[] = [
     inputSchema: { product_id: productId, from: day, to: { ...day, description: 'Exclusive; at most 500 days after from.' }, closed: { type: 'boolean' }, price_minor: { type: ['integer', 'null'], minimum: 0 },
       min_stay_arrival: { type: ['integer', 'null'], minimum: 1 }, min_stay_through: { type: ['integer', 'null'], minimum: 1 }, max_stay: { type: ['integer', 'null'], minimum: 1 },
       closed_to_arrival: { type: 'boolean' }, closed_to_departure: { type: 'boolean' }, reset: { type: 'boolean', description: 'True removes all nightly overrides in the range and cannot be combined with night settings. False or omitted requires at least one night setting.' },
-      oneOf: [{ required: ['reset'], properties: { reset: { const: true } }, not: { anyOf: nightSettingFields.map(field => ({ required: [field] })) } }, { properties: { reset: { const: false } }, anyOf: nightSettingFields.map(field => ({ required: [field] })) }] },
+      // At least one change; reset with night settings is refused by the stay domain.
+      anyOf: ['reset', ...nightSettingFields].map(field => ({ required: [field] })) },
     required: ['product_id', 'from', 'to'], outputSchema: calendar }),
 ]
 
