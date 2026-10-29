@@ -1,8 +1,11 @@
 import { readFileSync } from 'node:fs'
 import type { SeedTenantKey } from '../../../config/development-auth-fixtures.ts'
 
+/** Each seeded business's subdomain; tests address its public site with it. */
+export const SEED_SUBDOMAINS: Record<SeedTenantKey, string> = { restaurant: 'demo', experience: 'clayhouse', legal: 'harbor-legal' }
+
 /** Written by the seed in Playwright's global setup; read by specs in their workers. */
-export const SEED_MANIFEST_PATH = new URL('../.seed/manifest.json', import.meta.url)
+export const SEED_MANIFEST_PATH = new URL(`../.seed/manifest-${process.env.PLAYWRIGHT_PORT ?? 3000}.json`, import.meta.url)
 
 export interface SeedTenant {
   key: SeedTenantKey

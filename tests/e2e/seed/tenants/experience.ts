@@ -1,5 +1,5 @@
 import type { CreateTenant } from '../seed.ts'
-import type { SeedTenant } from '../manifest.ts'
+import { SEED_SUBDOMAINS, type SeedTenant } from '../manifest.ts'
 import { everyDay, publishProfile, recordProduct, seedLocation, seedMedia, toolFor } from './common.ts'
 
 const HOST_ID = 'user-e2e-pottery-location-owner'
@@ -8,7 +8,7 @@ const HOST_ID = 'user-e2e-pottery-location-owner'
 // daily wheel class hosted by one teacher and a glazing session at the river.
 export async function seedExperience(createTenant: CreateTenant): Promise<SeedTenant> {
   const { owner, tenant } = await createTenant({
-    key: 'experience', name: 'Clayhouse Studio', slug: 'clayhouse-studio', subdomain: 'clayhouse',
+    key: 'experience', name: 'Clayhouse Studio', slug: 'clayhouse-studio', subdomain: SEED_SUBDOMAINS.experience,
     vertical: 'experience', currency: 'THB', timezone: 'Asia/Bangkok', subscription: 'growth',
   })
   try {

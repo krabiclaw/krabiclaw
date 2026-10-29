@@ -1,12 +1,12 @@
 import type { CreateTenant } from '../seed.ts'
-import type { SeedTenant } from '../manifest.ts'
+import { SEED_SUBDOMAINS, type SeedTenant } from '../manifest.ts'
 import { everyDay, recordProduct, seedLocation, seedMedia, toolFor } from './common.ts'
 
 // Ember & Slice is KrabiClaw's fictional pizzeria: two New York locations with
 // table reservations, a menu and a kitchen blog.
 export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTenant> {
   const { owner, tenant } = await createTenant({
-    key: 'restaurant', name: 'Ember & Slice', slug: 'ember-slice-demo', subdomain: 'demo',
+    key: 'restaurant', name: 'Ember & Slice', slug: 'ember-slice-demo', subdomain: SEED_SUBDOMAINS.restaurant,
     vertical: 'restaurant', currency: 'USD', timezone: 'America/New_York', subscription: 'business',
   })
   try {

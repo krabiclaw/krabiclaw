@@ -1,5 +1,5 @@
 import type { CreateTenant } from '../seed.ts'
-import type { SeedTenant } from '../manifest.ts'
+import { SEED_SUBDOMAINS, type SeedTenant } from '../manifest.ts'
 import { everyDay, publishProfile, recordProduct, seedLocation, seedMedia, setWorkingHours, toolFor } from './common.ts'
 
 const ATTORNEY_ID = 'user-e2e-ncls-owner'
@@ -9,7 +9,7 @@ const ATTORNEY_ID = 'user-e2e-ncls-owner'
 // consultations for.
 export async function seedLegal(createTenant: CreateTenant): Promise<SeedTenant> {
   const { owner, tenant } = await createTenant({
-    key: 'legal', name: 'Harbor Legal Aid', slug: 'harbor-legal-aid', subdomain: 'harbor-legal',
+    key: 'legal', name: 'Harbor Legal Aid', slug: 'harbor-legal-aid', subdomain: SEED_SUBDOMAINS.legal,
     vertical: 'service', currency: 'USD', timezone: 'America/New_York', subscription: 'growth',
   })
   try {

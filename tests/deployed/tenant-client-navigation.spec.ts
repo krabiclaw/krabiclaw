@@ -1,9 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
-import {
-  blawbyBaseURL, blawbyExtraHeaders,
-  openTenantPage, potteryHouseBaseURL, potteryHouseExtraHeaders,
-} from '../e2e/helpers'
-import { kikuzukiTestBaseUrl, kikuzukiTestExtraHeaders } from '../e2e/test-env'
+import { openTenantPage } from '../e2e/helpers'
+import { blawbyBaseURL, blawbyExtraHeaders, kikuzukiBaseURL, kikuzukiExtraHeaders, potteryHouseBaseURL, potteryHouseExtraHeaders } from './real-tenants'
 
 async function clientJourney(page: Page, options: {
   baseURL: string
@@ -34,8 +31,8 @@ test('Pottery home → experiences → experience detail', async ({ page }) => {
 
 test('Kikuzuki home → menu → menu item and published experience branch', async ({ page, request }) => {
   test.setTimeout(90_000)
-  const baseURL = kikuzukiTestBaseUrl()
-  const headers = kikuzukiTestExtraHeaders()
+  const baseURL = kikuzukiBaseURL
+  const headers = kikuzukiExtraHeaders
   await clientJourney(page, {
     baseURL, headers,
     listPath: '/menu', listHeading: /Kikuzuki Krabi Thailand/i,

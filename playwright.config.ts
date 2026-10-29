@@ -19,6 +19,8 @@ const previewUrl = process.env.PLAYWRIGHT_PREVIEW_URL
 const port = Number(process.env.PLAYWRIGHT_PORT ?? 3000)
 const baseURL = previewUrl || `http://localhost:${port}`
 const localPrepared = process.env.PLAYWRIGHT_LOCAL_PREPARED === 'true'
+// Each local run owns its database, so runs on different ports never share one.
+const e2eStateDirectory = `.wrangler/e2e-state-${port}`
 const captureServerLogs = process.env.PLAYWRIGHT_SERVER_LOGS === 'true' || !!process.env.CI
 const localDevRouteSecret = previewUrl ? '' : 'local-playwright-dev-route-secret'
 
@@ -56,7 +58,7 @@ const localWorkerEnvironment = [
 
 const localWorkerCommand = [
   localWorkerEnvironment,
-  'corepack yarn wrangler dev .output/server/index.mjs --env e2e --persist-to .wrangler/e2e-state',
+  `corepack yarn wrangler dev .output/server/index.mjs --env e2e --persist-to ${e2eStateDirectory}`,
   '--assets .output/public',
   `--port ${port}`,
   '--var E2E_ALLOW_DEV_ROUTES:true',
@@ -94,7 +96,7 @@ export default defineConfig({
   webServer: previewUrl ? undefined : {
     command: localPrepared
       ? localWorkerCommand
-      : `${localWorkerEnvironment} corepack yarn e2e:local:prepare && ${localWorkerCommand}`,
+      : `${localWorkerEnvironment} E2E_STATE_DIRECTORY=${e2eStateDirectory} corepack yarn e2e:local:prepare && ${localWorkerCommand}`,
     // Not `/`. On the platform host that is a tenant page, and a `db:pull:local`
     // snapshot carries no page documents for the platform site, so `/` answers
     // 404 and the suite never starts — which is how a test broken by #1001 sat
