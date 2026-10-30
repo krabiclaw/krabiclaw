@@ -120,7 +120,7 @@ test.describe('Plan and billing', () => {
         expect((await rejected.json() as { message: string }).message).toBe('Managed ads is billed on the Business plan. Choose Business in Plan and billing before turning on managed ads.')
         const after = await page.request.get(`/api/dashboard/services?org=${slug}`)
         expect(after.status(), await after.text()).toBe(200)
-        expect(await after.json()).toEqual({ success: true, services: { managed_ads: null, strategy: null } })
+        expect(await after.json()).toEqual({ success: true, services: { managed_ads: null, strategy: null }, offers: SERVICES })
 
         for (const width of WIDTHS) {
           await page.setViewportSize({ width, height: 1200 })
