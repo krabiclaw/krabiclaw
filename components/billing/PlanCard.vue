@@ -37,7 +37,8 @@
         </h3>
         <span
           v-if="plan.badge"
-          class="shrink-0 px-3.5 py-1 text-[11px] font-black tracking-widest uppercase rounded-full text-white bg-gradient-to-r from-primary to-(--kc-coral) shadow-md"
+          class="shrink-0 px-3 py-1 text-[11px] font-bold tracking-widest uppercase rounded-full"
+          :class="chipClass"
         >
           {{ plan.badge }}
         </span>
@@ -64,7 +65,11 @@
           </span>
         </div>
         <p data-plan-homes class="text-xs font-semibold mt-2" :class="isHighlighted ? 'text-white/70' : 'text-muted'">
-          {{ homesNote }}
+          <template v-if="betaSpotsLeft">{{ INCLUDED_HOMES }} homes included, then <s data-plan-next-price class="opacity-60">{{ nextAdditionalHomePrice() }}</s> {{ additionalHomePrice() }}</template>
+          <template v-else>{{ homesNote }}</template>
+        </p>
+        <p v-if="betaSpotsLeft" data-plan-beta class="mt-3 inline-block px-3 py-1 text-[11px] font-bold tracking-widest uppercase rounded-full" :class="chipClass">
+          Beta price · {{ betaSpotsLeft }} {{ betaSpotsLeft === 1 ? 'spot' : 'spots' }} left
         </p>
       </template>
       <p v-else data-price-unavailable class="text-sm font-semibold" :class="isHighlighted ? 'text-white/70' : 'text-muted'">
@@ -114,7 +119,7 @@
 <script setup lang="ts">
 import { useEventListener } from '@vueuse/core'
 import type { Plan } from '~/composables/usePlans'
-import { additionalHomePrice, INCLUDED_HOMES } from '~/shared/billing-model'
+import { additionalHomePrice, INCLUDED_HOMES, nextAdditionalHomePrice } from '~/shared/billing-model'
 
 const props = defineProps<{
   plan: Plan
@@ -155,6 +160,11 @@ const currentPrice = computed(() => displayPrice(props.plan))
 const billingPeriodLabel = computed(() => props.photo && props.plan.id === 'free' ? 'No subscription' : '/mo')
 
 // Stripe's own phrasing: the included allowance, then the charge per additional home (a place to stay).
+// A paid plan's beta spots left; the struck next price and the chip show only while some are.
+const betaSpotsLeft = computed(() => props.plan.prices.length ? props.plan.betaSpotsLeft ?? 0 : 0)
+// Badges take the feature checks' tint: a pale primary chip on a light card, a deeper one on a dark card.
+const chipClass = computed(() => props.photo || !isHighlighted.value ? 'bg-primary/10 text-primary-600' : 'bg-primary/20 text-primary-300')
+
 const homesNote = computed(() => {
   if (!props.plan.prices.length) return `${INCLUDED_HOMES} homes included`
   return `${INCLUDED_HOMES} homes included, then ${additionalHomePrice()}`
@@ -165,7 +175,7 @@ const homesNote = computed(() => {
 <style scoped>
 .kc-photo-plan { min-width: 0; border-radius: 14px; padding: clamp(1.5rem, 3vw, 2.5rem); transform: none; scale: 1; background: #fff; color: #222840; box-shadow: none; border: 0; perspective: 1600px; transform-style: preserve-3d; overflow: visible; backdrop-filter: none; }
 .kc-photo-plan :deep(h3), .kc-photo-plan :deep(.text-default), .kc-photo-plan :deep(.text-white) { color: #222840; }
-.kc-photo-plan :deep(.text-white\/60), .kc-photo-plan :deep(.text-white\/50), .kc-photo-plan :deep(.text-white\/80), .kc-photo-plan :deep(.text-muted) { color: #5a6072; }
+.kc-photo-plan :deep(.text-white\/60), .kc-photo-plan :deep(.text-white\/50), .kc-photo-plan :deep(.text-white\/70), .kc-photo-plan :deep(.text-white\/80), .kc-photo-plan :deep(.text-muted) { color: #5a6072; }
 .kc-photo-plan__front { display: none; position: absolute; inset: 0; z-index: 20; border-radius: inherit; overflow: hidden; pointer-events: none; backface-visibility: hidden; }
 .kc-photo-plan__front img { width: 100%; height: 100%; object-fit: cover; }
 .kc-photo-plan .kc-plan-details { min-height: 0; }

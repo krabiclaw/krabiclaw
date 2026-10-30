@@ -49,10 +49,10 @@
         {{ description }}
       </p>
       <div v-if="actions.length" class="mt-10 flex flex-wrap gap-4">
-        <TenantButton v-if="actions[0]" :to="actions[0].url" size="lg">
+        <TenantButton v-if="actions[0]" :to="actions[0].url" size="lg" @click="trackAction(actions[0].url)">
           {{ actions[0].label }}
         </TenantButton>
-        <TenantButton v-if="actions[1]" :to="actions[1].url" variant="outline" size="lg" class="border-white/50 text-white hover:bg-white/10">
+        <TenantButton v-if="actions[1]" :to="actions[1].url" variant="outline" size="lg" class="border-white/50 text-white hover:bg-white/10" @click="trackAction(actions[1].url)">
           {{ actions[1].label }}
         </TenantButton>
       </div>
@@ -73,7 +73,7 @@
         </h1>
         <TenantRichText v-if="overviewProse" :content="overviewProse" unstyled class="prose mx-auto mt-6 max-w-2xl text-left text-lg text-default" />
         <div v-if="overviewActions.length" class="mt-10 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-          <TenantButton v-for="action in overviewActions" :key="action.url" :to="action.url" class="gap-2">
+          <TenantButton v-for="action in overviewActions" :key="action.url" :to="action.url" class="gap-2" @click="trackAction(action.url)">
             {{ action.label }}
           </TenantButton>
         </div>
@@ -102,7 +102,7 @@
             class="mx-auto mt-6 max-w-2xl text-lg leading-8 opacity-90"
           />
           <div v-if="pageAction" class="mt-10">
-            <TenantButton :to="pageAction.url" size="lg">
+            <TenantButton :to="pageAction.url" size="lg" @click="trackAction(pageAction.url)">
               {{ pageAction.label }}
             </TenantButton>
           </div>
@@ -146,6 +146,14 @@ function destination(url: string): string {
 const primary = computed(() => ({ label: blockText(props.block?.data?.cta_label), url: destination(blockText(props.block?.data?.cta_url)) }))
 const secondary = computed(() => ({ label: blockText(props.block?.data?.secondary_label), url: destination(blockText(props.block?.data?.secondary_url)) }))
 const actions = computed(() => [primary.value, secondary.value].filter(action => action.label && action.url))
+
+// An action that books a consultation records its click: to the schedule page, or out to the practice's own scheduler.
+const { trackConsultationClick } = useOrganizationConversionTracking(consultation)
+function trackAction(url: string) {
+  const settings = consultation.value
+  if (!settings || (url !== localePath(settings.schedule_path) && url !== settings.external_url)) return
+  trackConsultationClick(isSchedule.value ? 'schedule_hero' : 'hero', props.page.path, url, props.page.page_id)
+}
 
 const mediaList = computed(() => props.block ? blockMedia(props.block, 'media') : (props.page.media || []))
 const background = computed(() => mediaList.value[0] ?? null)

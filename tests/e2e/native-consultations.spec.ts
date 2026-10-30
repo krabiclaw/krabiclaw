@@ -714,6 +714,17 @@ test('native online review uses canonical Products, holds capacity, and releases
         const externalAction = scheduleHero.locator('[data-parity-section="page-hero"]').getByRole('link', { name: expectedLabel, exact: true })
         await expect(externalAction).toHaveCount(1)
         await expect(externalAction).toHaveAttribute('href', modeShell.consultation!.external_url!)
+        // Leaving for the practice's own scheduler is the consultation click KrabiClaw records.
+        await waitForNuxtHydration(page)
+        const handoffResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/public/conversion-events' && response.request().postDataJSON()?.event_name === 'consultation_cta_click')
+        const schedulerTab = page.waitForEvent('popup')
+        await externalAction.click()
+        const handoff = await handoffResponse
+        expect(handoff.status()).toBe(201)
+        const handoffId = (await handoff.json() as { id: string }).id
+        await (await schedulerTab).close()
+        const handoffEvents = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'query_organization_analytics', args: { organization_id: org, mode: 'events', filters: { event_name: 'consultation_cta_click', stage: 'external_booking_handoff', page_type: 'schedule_hero' } } })
+        expect(mcpData<{ rows: Array<Record<string, unknown>> }>(await handoffEvents.json()).rows).toContainEqual(expect.objectContaining({ event_id: handoffId, stage: 'external_booking_handoff', page_type: 'schedule_hero', page_path: '/schedule' }))
       } else if (mode === 'native_disabled') {
         const contactAction = scheduleHero.locator('[data-parity-section="page-hero"]').getByRole('link', { name: 'Contact', exact: true })
         await expect(contactAction).toHaveCount(1)
