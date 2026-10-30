@@ -17,7 +17,7 @@ import { createQa, deleteQa, listQa, reorderQa, updateQa } from '../../server/ut
 import { createContentDocumentWithBlocks } from '../../server/utils/content/documents.ts'
 import { getMediaAsset, updateMediaAssetMetadata } from '../../server/utils/media-asset-manager.ts'
 import { applyOnboardingDraft } from '../../server/utils/onboarding-apply.ts'
-import { buildOnboardingDraftPayload } from '../../server/utils/onboarding-drafts.ts'
+import { buildOnboardingDraftPayload, onboardingDraftWriteGuard, readOnboardingDraft, upsertActiveOnboardingDraft } from '../../server/utils/onboarding-drafts.ts'
 import { createLocation, getLocation, updateLocation } from '../../server/utils/location-management.ts'
 
 const ORG = 'org'
@@ -74,6 +74,34 @@ test('resuming onboarding updates the existing location without changing its his
       id: 'historic-location', slug: 'original-restaurant', title: 'Renamed Restaurant',
       address: { regionCode: 'TH', addressLines: ['88 Beach Road'], locality: 'Ao Nang' },
     })
+    const location = await getLocation(db, ORG, 'historic-location')
+    assert.ok(location)
+    const beforeNoop = await db.prepare("SELECT id, payload_json FROM activity_entries WHERE organization_id = ? AND event_name = 'location.updated' ORDER BY id").bind(ORG).all()
+    const purgesBefore = await db.prepare("SELECT count(*) AS n FROM public_resource_cache_invalidations WHERE organization_id = ? AND reason = 'write-through-purge'").bind(ORG).first<number>('n')
+    assert.ok(purgesBefore !== null)
+    const unchangedInput = { phone: location.phone, expected_updated_at: location.updated_at }
+    const guard = onboardingDraftWriteGuard(draft, ORG)
+    assert.equal((await updateLocation(db, ORG, location.id, unchangedInput, userId, env, guard)).status, 200)
+    assert.deepEqual(await getLocation(db, ORG, location.id), location)
+    assert.equal(await db.prepare("SELECT count(*) AS n FROM public_resource_cache_invalidations WHERE organization_id = ? AND reason = 'write-through-purge'").bind(ORG).first('n'), purgesBefore + 1,
+      'a current guarded no-op completes its public cache purge')
+
+    const revised = await upsertActiveOnboardingDraft(db, {
+      userId, draftId: draft.id, name: payload.preview.brandName, vertical: 'restaurant', sourceType: 'manual', payload, expectedUpdatedAt: draft.updated_at,
+    })
+    const currentDraft = await readOnboardingDraft(db, userId, draft.id)
+    assert.equal(currentDraft.row.updated_at, revised.updatedAt)
+    assert.notEqual(currentDraft.row.updated_at, draft.updated_at)
+    await assert.rejects(updateLocation(db, ORG, location.id, unchangedInput, userId, env, guard), /malformed JSON/)
+    assert.deepEqual(await getLocation(db, ORG, location.id), location)
+    assert.deepEqual((await db.prepare("SELECT id, payload_json FROM activity_entries WHERE organization_id = ? AND event_name = 'location.updated' ORDER BY id").bind(ORG).all()).results, beforeNoop.results)
+    assert.equal(await db.prepare("SELECT count(*) AS n FROM public_resource_cache_invalidations WHERE organization_id = ? AND reason = 'write-through-purge'").bind(ORG).first('n'), purgesBefore + 1,
+      'a stale guarded no-op runs no public cache completion')
+
+    assert.equal((await updateLocation(db, ORG, location.id, unchangedInput, userId, env, onboardingDraftWriteGuard(currentDraft.row, ORG))).status, 200)
+    assert.deepEqual(await getLocation(db, ORG, location.id), location)
+    assert.equal(await db.prepare("SELECT count(*) AS n FROM public_resource_cache_invalidations WHERE organization_id = ? AND reason = 'write-through-purge'").bind(ORG).first('n'), purgesBefore + 2)
+    assert.deepEqual((await db.prepare("SELECT id, payload_json FROM activity_entries WHERE organization_id = ? AND event_name = 'location.updated' ORDER BY id").bind(ORG).all()).results, beforeNoop.results)
   } finally { await runtime.dispose() }
 })
 

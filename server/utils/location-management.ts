@@ -628,6 +628,7 @@ export async function updateLocation(
     if (!equal) changedFields.push(field);
   }
   if (!changedFields.length) {
+    if (writeGuard) await executeBatch(db, [writeGuard]);
     await reportBillingUsage(env, db, organizationId, { committed: true });
     if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId });
     await purgePublicResourceCacheNow(env, organizationId);
