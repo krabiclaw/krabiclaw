@@ -12,9 +12,9 @@ import { CONVERSION_EVENT_CATALOG, ORGANIZATION_CONVERSION_EVENT_NAMES, type Con
 const localDate = (timeZone: string, at: number) => new Intl.DateTimeFormat('en-CA', { timeZone }).format(at)
 const rangeIn = (timeZone: string) => ({ startDate: localDate(timeZone, Date.now() - 29 * 86_400_000), endDate: localDate(timeZone, Date.now()) })
 const businesses = [
-  { user: 'user-e2e-ncls-owner', key: 'legal', words: ['Viewed a practice area', 'Clicked Book a consultation', 'Requested a consultation', 'Scheduled'] },
-  { user: 'user-e2e-kikuzuki-owner', key: 'restaurant', words: ['Viewed a dish', 'Started a reservation', 'Reserved', 'Seated'] },
-  { user: 'user-e2e-pottery-owner', key: 'experience', words: ['Viewed', 'Started checkout', 'Booked', 'Confirmed'] },
+  { user: 'user-e2e-ncls-owner', key: 'legal', words: ['Viewed a practice area', 'Clicked Book a consultation or called', 'Requested a consultation', 'Scheduled'] },
+  { user: 'user-e2e-kikuzuki-owner', key: 'restaurant', words: ['Viewed a dish', 'Started a reservation or called', 'Reserved', 'Seated'] },
+  { user: 'user-e2e-pottery-owner', key: 'experience', words: ['Viewed', 'Started checkout or called', 'Booked', 'Confirmed'] },
 ] as const
 const steps = ['viewed', 'intent', 'submitted'] as const
 const count = (value: number) => new Intl.NumberFormat('en-US').format(value)
