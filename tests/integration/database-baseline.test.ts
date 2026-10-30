@@ -28,6 +28,32 @@ test('the migration chain applies from zero and builds every table the schema de
       assert.throws(() => database.prepare("UPDATE organization SET consultation_settings_json = ? WHERE id = 'tenant-a'").run(JSON.stringify(invalid)), /organization_consultation_settings_check/)
     }
     assert.deepEqual(JSON.parse((database.prepare("SELECT consultation_settings_json FROM organization WHERE id = 'tenant-a'").get() as { consultation_settings_json: string }).consultation_settings_json), consultation)
+    database.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('schema-user','Schema user','schema-user@example.test',1)").run()
+    database.prepare("INSERT INTO session(id,expiresAt,token,userId) VALUES('schema-session',9999999999,'schema-session-token','schema-user')").run()
+    for (const [token, kind, environment, p256dh, auth] of [
+      ['aabb', 'apns', null, null, null],
+      ['https://push.example.test/missing-key', 'web', null, null, 'recorded-auth'],
+      ['https://push.example.test/missing-auth', 'web', null, 'recorded-p256dh', null],
+    ]) {
+      assert.throws(() => database.prepare("INSERT INTO device_tokens(token,kind,user_id,session_id,environment,p256dh,auth) VALUES(?,?,'schema-user','schema-session',?,?,?)").run(token, kind, environment, p256dh, auth), /device_tokens_kind_check/)
+    }
+    database.prepare("INSERT INTO device_tokens(token,kind,user_id,session_id,environment,p256dh,auth) VALUES('aabb','apns','schema-user','schema-session','production',NULL,NULL),('https://push.example.test/complete','web','schema-user','schema-session',NULL,'recorded-p256dh','recorded-auth')").run()
+    assert.deepEqual(database.prepare('SELECT token,kind,environment,p256dh,auth FROM device_tokens ORDER BY kind').all(), [
+      { token: 'aabb', kind: 'apns', environment: 'production', p256dh: null, auth: null },
+      { token: 'https://push.example.test/complete', kind: 'web', environment: null, p256dh: 'recorded-p256dh', auth: 'recorded-auth' },
+    ])
+    database.prepare("INSERT INTO requests(id,kind,organization_id,conversation_state,payload_json) VALUES('schema-request','contact','tenant-a','waiting_on_guest',?)").run(JSON.stringify({ guest: { name: 'Recorded guest', email: 'guest@example.test', phone: null }, message: 'Recorded conversation' }))
+    const at = '2026-10-30T12:30:00.000Z'
+    for (const status of ['failed', 'needs_review']) for (const missing of ['reason', 'error_code', 'error_field']) {
+      const error = { reason: 'Recorded refusal', error_code: 'delivery_refused', error_field: 'channel', [missing]: null }
+      assert.throws(() => database.prepare("INSERT INTO send_later_messages(id,organization_id,request_id,user_id,body,due_at,status,reason,error_code,error_field,version,created_at,updated_at) VALUES(?,'tenant-a','schema-request','schema-user','Recorded reply',?,?,?,?,?,1,?,?)")
+        .run(`${status}-${missing}`, at, status, error.reason, error.error_code, error.error_field, at, at), /send_later_messages_error_check/)
+    }
+    database.prepare("INSERT INTO send_later_messages(id,organization_id,request_id,user_id,body,due_at,status,reason,error_code,error_field,version,created_at,updated_at) VALUES('pending','tenant-a','schema-request','schema-user','Recorded reply',?,'pending',NULL,NULL,NULL,1,?,?),('failed','tenant-a','schema-request','schema-user','Recorded reply',?,'failed','Recorded refusal','delivery_refused','channel',1,?,?)").run(at, at, at, at, at, at)
+    assert.deepEqual(database.prepare('SELECT id,status,reason,error_code,error_field FROM send_later_messages ORDER BY id').all(), [
+      { id: 'failed', status: 'failed', reason: 'Recorded refusal', error_code: 'delivery_refused', error_field: 'channel' },
+      { id: 'pending', status: 'pending', reason: null, error_code: null, error_field: null },
+    ])
     for (const organizationId of ['tenant-a', 'tenant-b']) {
       database.prepare('INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES (?, ?, ?, 0, ?)').run(`${organizationId}-th`, organizationId, 'th', 'published')
       database.prepare("INSERT INTO resource_localizations (id, organization_id, resource_type, resource_id, locale, route_path, values_json, created_by_user_id, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'test', 'test')").run(`${organizationId}-route`, organizationId, 'product', `${organizationId}-product`, 'th', '/th/products/shared', '{}')

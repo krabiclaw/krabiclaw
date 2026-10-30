@@ -1676,7 +1676,7 @@ export const send_later_messages = sqliteTable("send_later_messages", {
 	index("send_later_messages_due_idx").on(table.status, table.due_at),
 	index("send_later_messages_author_idx").on(table.organization_id, table.user_id, table.due_at),
 	check("send_later_messages_status_check", sql`status IN ('pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled')`),
-	check("send_later_messages_error_check", sql`status NOT IN ('failed', 'needs_review') OR (length(trim(reason)) > 0 AND length(trim(error_code)) > 0 AND length(trim(error_field)) > 0)`),
+	check("send_later_messages_error_check", sql`(status NOT IN ('failed', 'needs_review') OR (length(trim(reason)) > 0 AND length(trim(error_code)) > 0 AND length(trim(error_field)) > 0)) IS TRUE`),
 	check("send_later_messages_sent_check", sql`status <> 'sent' OR (entry_id IS NOT NULL AND sent_at IS NOT NULL)`),
 	check("send_later_messages_sending_check", sql`status <> 'sending' OR started_at IS NOT NULL`),
 	check("send_later_messages_text_check", sql`length(trim(body)) BETWEEN 1 AND 5000 AND version >= 1`),
@@ -2482,7 +2482,7 @@ export const device_tokens = sqliteTable("device_tokens", {
 }, (table) => [
 	index("device_tokens_user_idx").on(table.user_id),
 	index("device_tokens_session_idx").on(table.session_id),
-	check("device_tokens_kind_check", sql`(kind = 'apns' AND length(token) > 0 AND length(token) % 2 = 0 AND token NOT GLOB '*[^0123456789abcdef]*' AND environment IN ('sandbox', 'production') AND p256dh IS NULL AND auth IS NULL) OR (kind = 'web' AND token LIKE 'https://%' AND environment IS NULL AND length(p256dh) > 0 AND length(auth) > 0)`),
+	check("device_tokens_kind_check", sql`((kind = 'apns' AND length(token) > 0 AND length(token) % 2 = 0 AND token NOT GLOB '*[^0123456789abcdef]*' AND environment IN ('sandbox', 'production') AND p256dh IS NULL AND auth IS NULL) OR (kind = 'web' AND token LIKE 'https://%' AND environment IS NULL AND length(p256dh) > 0 AND length(auth) > 0)) IS TRUE`),
 	check("device_tokens_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
 	check("device_tokens_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);

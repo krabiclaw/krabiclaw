@@ -832,6 +832,8 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       assert(unsafe.length === 0, `Through-stay values need explicit reconciliation before retirement: ${JSON.stringify(unsafe.slice(0, 8))}; no rows were copied`)
       const retired = stage.prepare("SELECT count(*) AS n FROM product_nights WHERE min_stay_through IS NOT NULL AND source = 'import'").get().n
       if (retired) manifest.transforms.push({ name: 'airbnb_duplicated_through_minimum_removed', changes: retired })
+      // The exact date/value set and unique home/date key bound this authorization.
+      // Already removed rules do not invalidate the remaining approved dates.
       const approved = stage.prepare("SELECT count(*) AS n FROM product_nights WHERE min_stay_through IS NOT NULL AND source = 'host'").get().n
       if (approved) manifest.transforms.push({ name: 'owner_approved_saltleaf_through_minimum_removed', changes: approved })
     }

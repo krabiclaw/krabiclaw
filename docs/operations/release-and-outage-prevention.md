@@ -739,9 +739,14 @@ rules visibly. Their range endpoints and precedence are not established by the
 published API contract; no local seasonal feature or guessed interpretation is
 offered. Explicit dated night overrides remain supported.
 
+The forward migration `0001_required_delivery_fields.sql` makes the existing
+device-token credentials and failed-message diagnostics checks reject NULL.
+It rebuilds only the two unreferenced leaf tables, preserving their rows with
+foreign keys enabled; the applied baseline remains unchanged.
+
 The initial-copy manifests beside these artifacts record table totals,
 retired-policy counts and queued syncs. Read the persisted rows back independently
-after each load; require only `0000_baseline.sql` in the native ledger and no
+after each load; require the current migration files in the native ledger and no
 foreign-key violations. Retain the initial artifacts for the final delta, and
 verify the live Worker bindings before cutover. Unproven legacy minimums and
 historical consultation JSON remain unchanged.
