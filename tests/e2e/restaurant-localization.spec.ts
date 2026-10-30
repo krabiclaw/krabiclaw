@@ -6,6 +6,8 @@ import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededSiteHeaders, seededSiteURL, testBaseUrl } from './test-env'
 import { seededTenant } from './seed/manifest'
 
+test.describe.configure({ mode: 'default' })
+
 // Ember & Slice translated into Thai: its name, its Brooklyn location, the
 // Brooklyn Specials section and its clam pie. Read once the seed has run.
 const locale = 'th'
@@ -66,11 +68,9 @@ test.beforeAll(async ({ playwright }, testInfo) => {
   readSeed()
   const baseURL = testBaseUrl()
   const owner = await playwright.request.newContext({ baseURL })
-  await loginAs(owner, baseURL)
 
   try {
-    await expectStatus(await owner.post(`/api/editor/organizations/${organizationId}/locales/${locale}/add`), 200)
-
+    await loginAs(owner, baseURL)
     await putLocalization(owner, 'organization', organizationId, {
       values: {
         name: thai.name,
