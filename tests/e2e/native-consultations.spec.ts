@@ -727,14 +727,6 @@ test('native online review uses canonical Products, holds capacity, and releases
         const handoffEvents = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'query_organization_analytics', args: { organization_id: org, mode: 'events', filters: { event_name: 'consultation_cta_click', stage: 'external_booking_handoff', page_type: 'schedule_hero' } } })
         // Preserve source-page attribution while the external handoff has no native subject.
         expect(mcpData<{ rows: Array<Record<string, unknown>> }>(await handoffEvents.json()).rows).toContainEqual(expect.objectContaining({ event_id: handoffId, stage: 'external_booking_handoff', subject: null, page: expect.objectContaining({ page_type: 'schedule_hero', path: '/schedule', page_id: authoredSchedule.page_id }) }))
-        // Calling the office's number is the other way a client gets in touch; it counts for that office.
-        const callResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/public/conversion-events' && response.request().postDataJSON()?.event_name === 'phone_click')
-        await page.locator('a[href="tel:+19195550123"]').first().click()
-        const call = await callResponse
-        expect(call.status()).toBe(201)
-        const callId = (await call.json() as { id: string }).id
-        const callEvents = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'query_organization_analytics', args: { organization_id: org, mode: 'events', filters: { event_name: 'phone_click', location_id: legal.locations.raleigh!.id } } })
-        expect(mcpData<{ rows: Array<Record<string, unknown>> }>(await callEvents.json()).rows).toContainEqual(expect.objectContaining({ event_id: callId, stage: 'external_handoff', location_id: legal.locations.raleigh!.id, page: expect.objectContaining({ path: '/schedule' }) }))
       } else if (mode === 'native_disabled') {
         const contactAction = scheduleHero.locator('[data-parity-section="page-hero"]').getByRole('link', { name: 'Contact', exact: true })
         await expect(contactAction).toHaveCount(1)

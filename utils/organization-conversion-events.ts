@@ -75,7 +75,8 @@ export const CONVERSION_EVENT_CATALOG = {
   announcement_view: interaction({ origin: 'public', stages: ['viewed'], entityType: null, ga4: { name: 'announcement_view' }, ga4Sender: 'browser', funnel: 'viewed' }),
   announcement_cta_click: interaction({ origin: 'public', stages: ['external_handoff'], entityType: null, ga4: { name: 'announcement_cta_click' }, ga4Sender: 'browser', funnel: 'intent' }),
   // A tap on one of the business's own phone numbers, whichever page and component drew the link.
-  phone_click: interaction({ origin: 'public', stages: ['external_handoff'], entityType: null, ga4: { name: 'phone_click' }, ga4Sender: 'browser', funnel: 'intent' }),
+  // Not a funnel step: each vertical names its intent step for its own booking action.
+  phone_click: interaction({ origin: 'public', stages: ['external_handoff'], entityType: null, ga4: { name: 'phone_click' }, ga4Sender: 'browser' }),
   contact_submit: { kind: 'conversion', producer: 'server', origin: 'public', stages: ['submitted'], entityType: 'request', valueBasis: null, conversionType: 'contact', ga4: { name: 'generate_lead' }, ga4Sender: 'browser', outcome: true, funnel: 'submitted' },
   reservation_submit: { kind: 'conversion', producer: 'server', origin: 'public', stages: ['submitted'], entityType: 'request', valueBasis: null, conversionType: 'reservation', ga4: { name: 'reservation_submit' }, ga4Sender: 'browser', outcome: true, funnel: 'submitted' },
   booking_submit: { kind: 'conversion', producer: 'server', origin: 'public', stages: ['submitted'], entityType: 'request', valueBasis: 'quoted', conversionType: 'booking', ga4: { name: 'booking_submit' }, ga4Sender: 'browser', outcome: true, funnel: 'submitted' },
