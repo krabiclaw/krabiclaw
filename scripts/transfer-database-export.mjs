@@ -896,7 +896,27 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       const queue = target.prepare(queueSql)
       let queued = 0
       const at = new Date().toISOString()
-      for (const home of target.prepare(candidatesSql).all()) queued += queue.run(hash(`airbnb-v23-sync:${home.organization_id}:${home.listing_id}`), home.organization_id, home.listing_id, home.product_id, home.created_by, at, at).changes
+      const earlier = deltaFrom ? comparisonDatabase(deltaFrom) : null
+      try {
+        const jobs = target.prepare('SELECT * FROM airbnb_sync_jobs WHERE organization_id = ? AND listing_id = ?')
+        const previous = earlier?.prepare('SELECT * FROM airbnb_sync_jobs WHERE organization_id = ? AND listing_id = ?')
+        const retainTimestamp = target.prepare('UPDATE airbnb_sync_jobs SET created_at = ?, updated_at = ? WHERE id = ?')
+        for (const home of target.prepare(candidatesSql).all()) {
+          const original = jobs.get(home.organization_id, home.listing_id)
+          const changes = queue.run(hash(`airbnb-v23-sync:${home.organization_id}:${home.listing_id}`), home.organization_id, home.listing_id, home.product_id, home.created_by, at, at).changes
+          queued += changes
+          if (changes && previous) {
+            const row = jobs.get(home.organization_id, home.listing_id)
+            const initial = previous.get(home.organization_id, home.listing_id)
+            assert(row, `Queued Airbnb sync job missing: ${home.organization_id}/${home.listing_id}`)
+            // Identical derived facts keep their initial queue time. A source
+            // job keeps its own creation time; a new derived job starts now.
+            if (initial && Object.keys(row).every(name => name === 'updated_at' || (!original && name === 'created_at') || row[name] === initial[name])) {
+              retainTimestamp.run(original ? row.created_at : initial.created_at, initial.updated_at, row.id)
+            }
+          }
+        }
+      } finally { earlier?.close() }
       if (queued) manifest.transforms.push({ name: 'airbnb_canonical_sync_queued', changes: queued, sql_sha256: hash(queueSql) })
     }
     const retiredSettings = target.prepare("UPDATE organization SET settings_json = json_remove(settings_json, '$.config.default_timezone') WHERE json_type(settings_json, '$.config.default_timezone') IS NOT NULL").run().changes

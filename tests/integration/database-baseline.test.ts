@@ -1245,11 +1245,14 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
       { name: 'airbnb_canonical_sync_queued', changes: 2 },
     ])
     const deltaPayload = join(directory, 'same-source-delta.sql')
+    const initialBytes = readFileSync(targetPath)
+    t.mock.timers.tick(60_000)
     const delta = await transferDatabaseExport(sourcePath, join(directory, 'same-source-final.sqlite'), { payloadPath: deltaPayload, deltaFrom: targetPath })
     assert.equal(delta.payload!.delta!.airbnb_sync_jobs, 0)
     assert.deepEqual(Object.fromEntries(Object.entries(delta.payload!.delta!).filter(([, count]) => count)), {})
     assert.deepEqual(delta.payload!.left_behind, {})
     assert.deepEqual(readFileSync(sourcePath), sourceBytes)
+    assert.deepEqual(readFileSync(targetPath), initialBytes, 'the initial replacement remains the immutable final-delta baseline')
     const target = new Database(targetPath)
     let retryRows: unknown[]
     try {
@@ -1278,6 +1281,11 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
       assert.deepEqual(target.prepare("SELECT product_id FROM airbnb_sync_jobs WHERE product_id IN ('disconnected','departed')").all(), [])
       assert.equal(target.prepare("SELECT id FROM airbnb_sync_jobs WHERE product_id='derived'").get()!.id, 'job-derived', 'resuming a completed job preserves its existing identity')
       assert.equal(target.prepare("SELECT id FROM airbnb_sync_jobs WHERE product_id='west'").get()!.id, createHash('sha256').update('airbnb-v23-sync:host:listing-west').digest('hex'))
+      assert.deepEqual(target.prepare("SELECT product_id,created_at,updated_at FROM airbnb_sync_jobs WHERE product_id IN ('derived','west') ORDER BY product_id").all(), [
+        { product_id: 'derived', created_at: createdAt, updated_at: '2026-10-30T12:30:00.000Z' },
+        { product_id: 'west', created_at: '2026-10-30T12:30:00.000Z', updated_at: '2026-10-30T12:30:00.000Z' },
+      ])
+      target.prepare("UPDATE airbnb_sync_jobs SET attempts=6,next_attempt_at='2026-10-31T13:00:00.000Z',last_error_code='recorded_retry',last_error='Recorded retry' WHERE product_id='derived'").run()
       const initialJobs = target.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all()
       target.exec(readFileSync(deltaPayload, 'utf8'))
       assert.deepEqual(target.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all(), initialJobs, 'the final delta applies without duplicate listing jobs or resetting their state')
@@ -1287,7 +1295,6 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
       // The next copy is an ordinary current-epoch refresh, after delivery has made retry progress.
       target.exec(`CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
         ${current.map(file => `INSERT INTO d1_migrations(name) VALUES('${file}');`).join('\n')}`)
-      target.prepare("UPDATE airbnb_sync_jobs SET attempts=6,next_attempt_at='2026-10-31T13:00:00.000Z',last_error_code='recorded_retry',last_error='Recorded retry' WHERE product_id='derived'").run()
       target.prepare("UPDATE product_stay_configs SET calendar_rules=? WHERE product_id='derived'").run(recordedCalendarRules)
       retryRows = target.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all()
     } finally { target.close() }
