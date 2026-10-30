@@ -162,6 +162,18 @@ deleted keys before retiring the old database; carry important edits explicitly,
 without overwriting new-database writes. There is no write freeze or
 maintenance response in the application.
 
+Paged initial reads are not a consistent live snapshot. After repointing,
+account for old HTTP and cron invocations through version-specific Worker
+logs, paired MCP request events and the existing operation/delivery leases.
+Asset convergence verifies the build, not completion of old writers. Cron
+invocations can run for 15 minutes; HTTP has no fixed duration while connected,
+so elapsed time or an empty lease query alone cannot establish that work ended.
+Capture the final delta only after old writers finish, and verify that the
+retired source remains unchanged during and after capture. If it changes,
+discard the unapplied capture and repeat the read-only preflight against the
+same initial artifact. Apply the verified capture with `--source-file`, then
+reconcile changed/deleted keys and read back the affected state.
+
 For the v7-to-v8 integrations replacement, create empty v8 databases with
 location hint `wnam` and apply the generated baseline with `wrangler d1
 migrations apply`. Never execute the SQL file directly: its migration ledger
@@ -629,8 +641,9 @@ under `~/.codex/krabiclaw-db-replacements/v22/`. Repository bindings name the
 prepared replacements; deployed Workers keep their existing v21 databases
 until the normal environment deployment. Before each cutover, perform a
 read-only delta preflight (`--out` without an environment load flag) from that
-environment's v21 source against its initial artifact. Immediately after the
-binding moves, apply the final delta once against that initial artifact. Inspect
+environment's v21 source against its initial artifact. After the binding moves
+and old invocations finish, capture and apply the verified final delta once
+against that initial artifact. Inspect
 changed/deleted keys and carry important edits explicitly without overwriting
 replacement writes. Verify deployed schema, foreign keys and the
 affected guest workflows before retiring either v21 database. Production,
@@ -721,8 +734,9 @@ under their original creator only if that member still has owner/admin access.
 Pending, failed, error and stop requests are preserved; repair job identities
 remain stable between the initial copy and final delta.
 
-At cutover, use each environment's explicit v22 source and its initial artifact
-for the normal final delta. Review changed/deleted keys before carrying updates;
+At cutover, finish old invocations after the binding moves, then use each
+environment's explicit v22 source and its initial artifact for the verified
+final delta described above. Review changed/deleted keys before carrying updates;
 do not overwrite progress the replacement has made. After deployment, run the
 existing `airbnb-sync` task and inspect each listing's visible sync outcome.
 Staging schedules only the Channex queues, including this task every two minutes.

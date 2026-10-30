@@ -21,6 +21,9 @@
  * refuses every other query on a database while a native export runs, and
  * tenant sites answered those requests with 500s. Named replacement sources
  * can still be serving customers, so they use the same paged reads.
+ * An initial copy can miss concurrent writes. After repointing, finish old
+ * HTTP/cron invocations before the final --delta-from capture; verify the
+ * retired source stays unchanged through that capture before applying it.
  * Use --source-file for an existing local copy.
  *
  * `--out` alone is the preflight: the transformed target, its data-only payload
