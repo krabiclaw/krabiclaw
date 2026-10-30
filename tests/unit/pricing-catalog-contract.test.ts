@@ -42,7 +42,7 @@ test('display rename preserves provider identities and metadata selects one cano
 
 // Stripe's own phrasing for each metered price, and which plan carries it.
 test('homes and fees are metered prices in Stripe’s phrasing', () => {
-  assert.equal(additionalHomePrice(), '$9 per additional home per month')
+  assert.equal(additionalHomePrice(), '$4 per additional home per month')
   assert.equal(PAYMENTS_FEE, '1.4% of payment volume, plus Stripe fees')
   assert.equal(ratePercent(0.014), '1.4')
   assert.equal(ratePercent(0.1), '10')
@@ -51,8 +51,8 @@ test('homes and fees are metered prices in Stripe’s phrasing', () => {
   assert.deepEqual(planMeters('business'), ['homes', 'captured_volume', 'stripe_cost', 'ad_spend'])
   assert.deepEqual(planMeters('free'), [])
   assert.deepEqual(BILLING_METER_KEYS.map(key => BILLING_METERS[key].formula), ['last', 'sum', 'sum', 'sum'])
-  assert.deepEqual(BILLING_METERS.homes.tiers, [{ up_to: 2, unit_amount: 0 }, { up_to: 'inf', unit_amount: 900 }])
-  assert.equal(BILLING_METERS.homes.description, '2 homes included, then $9 per additional home per month.')
+  assert.deepEqual(BILLING_METERS.homes.tiers, [{ up_to: 2, unit_amount: 0 }, { up_to: 'inf', unit_amount: 400 }])
+  assert.equal(BILLING_METERS.homes.description, '2 homes included, then $4 per additional home per month.')
 })
 
 const meter = (key: string, overrides: Record<string, unknown> = {}) => ({
@@ -175,6 +175,7 @@ test('renderPlansMarkdown generates accurate, machine-readable markdown specific
 
   const md = renderPlansMarkdown(dummyPlans)
   assert.ok(md.includes('# KrabiClaw Pricing & Plans'))
+  assert.ok(md.includes('\nBeta pricing. Prices will rise for new subscribers as KrabiClaw grows; you keep the price you subscribe at for 12 months.\n'))
   assert.ok(md.includes('## Free'))
   assert.ok(md.includes('Free ($0/month)'))
   assert.ok(md.includes('## Growth'))
@@ -182,7 +183,7 @@ test('renderPlansMarkdown generates accurate, machine-readable markdown specific
   assert.ok(md.includes('Custom Domain: Included'))
   assert.ok(md.includes('Custom Domain: Not included'))
   assert.ok(md.includes('- **Homes**: 2 included. A home is a place to stay.\n'))
-  assert.ok(md.includes('- **Homes**: 2 included, then $9 per additional home per month. A home is a place to stay.\n'))
+  assert.ok(md.includes('- **Homes**: 2 included, then $4 per additional home per month. A home is a place to stay.\n'))
   const business = renderPlansMarkdown([{ ...dummyPlans[1]!, id: 'business', name: 'Business', prices: [{ id: 'p_business', amount: 14900, currency: 'usd', interval: 'month' }] }])
   assert.ok(business.includes('$149/month'))
   assert.ok(!business.includes('rental unit'))
@@ -221,11 +222,11 @@ test('a plan subscription has one plan item beside its metered and service items
   assert.throws(() => planSubscriptionItem(subscription(plan, { ...plan, id: 'si-growth' })), /exactly one plan price/)
 })
 
-// The published homes price on Business: 50 homes are the flat $149 plus 48 × $9, which is $581 per month.
-test('a 50-home Business organization is quoted $581 per month', () => {
+// The published homes price on Business: 50 homes are the flat $149 plus 48 × $4, which is $341 per month.
+test('a 50-home Business organization is quoted $341 per month', () => {
   const homes = meteredPrice('homes')
   assert.equal(recurringPriceAmount(homes, 2), 0)
-  assert.equal(recurringPriceAmount(homes, 50), 48 * 900)
-  assert.equal(PAID_PLAN_PRICES.business.monthly + recurringPriceAmount(homes, 50), 58100)
-  assert.equal(PAID_PLAN_PRICES.growth.monthly + recurringPriceAmount(homes, 50), 48100)
+  assert.equal(recurringPriceAmount(homes, 50), 48 * 400)
+  assert.equal(PAID_PLAN_PRICES.business.monthly + recurringPriceAmount(homes, 50), 34100)
+  assert.equal(PAID_PLAN_PRICES.growth.monthly + recurringPriceAmount(homes, 50), 24100)
 })

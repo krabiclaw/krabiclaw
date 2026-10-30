@@ -13,7 +13,7 @@ from the catalog, and `server/utils/stripe-catalog.ts` validates the catalog.
 | Line | Stripe price |
 | --- | --- |
 | Plan (Growth $49 / Business $149) | flat monthly, quantity 1 |
-| Homes (Growth, Business) | metered, meter `krabiclaw_homes`, formula `last`, graduated: 2 included, then $9 per additional home per month |
+| Homes (Growth, Business) | metered, meter `krabiclaw_homes`, formula `last`, graduated: 2 included, then $4 per additional home per month |
 | Payments fee (Business) | metered, meter `krabiclaw_captured_volume`, formula `sum`, 0.014 cents per captured USD cent (1.4% of payment volume) |
 | Stripe fees (Business) | metered, meter `krabiclaw_stripe_cost`, formula `sum`, 1 cent per cost cent (at cost) |
 | Managed ads (Business) | metered, meter `krabiclaw_ad_spend`, formula `sum`, 0.1 cent per ad-spend cent (10% of monthly ad spend) |
