@@ -110,7 +110,6 @@ export default defineHandler(async (event) => {
         WHERE id = ? AND kind = ?
           AND organization_id = ?
           AND user_id IS ?
-          AND json_extract(payload_json, '$.review.submitted_at') IS NULL
           AND review_id IS NULL
       )`, [
         result.request.booking_id, result.request.booking_type, result.context.organization_id, reviewUserId, ], 'review booking state changed during submission', ), ]
@@ -157,13 +156,12 @@ export default defineHandler(async (event) => {
           AND expires_at > ?`, params: [
         now, now, ...requestGuardParams, ], }, batchAssertion('changes() = 1', [], 'review request submission compare-and-set failed'), {
       query: `UPDATE requests
-        SET payload_json = json_set(payload_json, '$.review.submitted_at', ?), review_id = ?, updated_at = ?
+        SET review_id = ?, updated_at = ?
         WHERE id = ? AND kind = ?
           AND organization_id = ?
           AND user_id IS ?
-          AND json_extract(payload_json, '$.review.submitted_at') IS NULL
           AND review_id IS NULL`, params: [
-        now, reviewId, now, result.request.booking_id, result.request.booking_type, result.context.organization_id, reviewUserId, ], }, batchAssertion('changes() = 1', [], 'review booking submission compare-and-set failed'), )
+        reviewId, now, result.request.booking_id, result.request.booking_type, result.context.organization_id, reviewUserId, ], }, batchAssertion('changes() = 1', [], 'review booking submission compare-and-set failed'), )
 
   if (mediaCount) {
     batch.push(

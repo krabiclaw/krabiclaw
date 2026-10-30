@@ -614,7 +614,6 @@ export async function pushAirbnbListingSettings(db: DbClient, env: ChannexEnv, o
   if (Object.keys(settings.availability).length) {
     const availabilityPath = `${path}/mappings/${mappingId}/availability_settings`
     const attributes = object((await listingRecord(env, row!.channel_id, row!.listing_id)).availability_rules, 'Airbnb availability rules')
-    if (attributes.seasonal_min_nights !== undefined && attributes.seasonal_min_nights !== null && (!Array.isArray(attributes.seasonal_min_nights) || attributes.seasonal_min_nights.length)) throw new ChannexDataError('seasonal_min_nights is unsupported; verify its boundary semantics before changing this Airbnb listing')
     // This is a full settings update. Preserve the provider's required controls instead of inventing notice or turnover policies.
     for (const field of ['booking_lead_time', 'max_days_notice', 'default_max_nights', 'turnover_days']) {
       if (typeof attributes[field] !== 'number' || !Number.isFinite(attributes[field])) throw new ChannexDataError(`Airbnb availability settings are missing ${field}`)
