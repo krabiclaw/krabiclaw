@@ -3,7 +3,7 @@ import { HTTPError } from 'nitro'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { getOrganizationBillingStatus, getStripe } from '~/server/utils/billing'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { BILLING_METERS, BUSINESS_PLAN_ID, PAYMENTS_FEE, PAYMENT_TERMS, ratePercent, type BillingMeterKey } from '~/shared/billing-model'
+import { BILLING_METERS, BUSINESS_PLAN_ID, ratePercent, type BillingMeterKey } from '~/shared/billing-model'
 import { planSubscriptionItem } from '~/server/utils/stripe-catalog'
 import { recordPaymentsVolumeBilled } from '~/server/domain/booking-analytics'
 import { tokenHash } from './buyer'
@@ -92,7 +92,7 @@ export async function paymentsUsage(db: DbClient, env: CloudflareEnv, organizati
   const billing = await getOrganizationBillingStatus(env, db, organizationId)
   const refreshed_at = new Date().toISOString()
   // Only Business carries the fee prices; any other plan has nothing to read from Stripe.
-  if (billing.plan !== BUSINESS_PLAN_ID) return { configured: false, pricing: null, pending, source: 'Stripe', refreshed_at, terms: { ...PAYMENT_TERMS, fee: PAYMENTS_FEE, source: 'offer' } }
+  if (billing.plan !== BUSINESS_PLAN_ID) return { configured: false, pricing: null, pending, source: 'Stripe', refreshed_at }
   if (!billing.stripeSubscriptionId) throw new HTTPError({ statusCode: 409, statusMessage: 'Business subscription is missing', data: { code: 'PAYMENT_PRICING_UNAVAILABLE', field: 'stripeSubscriptionId' } })
   const subscription = await getStripe(env).subscriptions.retrieve(billing.stripeSubscriptionId, { expand: ['items.data.price.product'] })
   planSubscriptionItem(subscription)
@@ -109,7 +109,6 @@ export async function paymentsUsage(db: DbClient, env: CloudflareEnv, organizati
   const adSpend = rate('ad_spend')
   if (capturedVolume === null || stripeCost === null) throw new HTTPError({ statusCode: 502, statusMessage: 'The subscription is missing required payment prices', data: { code: 'PAYMENT_PRICING_INVALID', field: capturedVolume === null ? 'captured_volume' : 'stripe_cost' } })
   return {
-    terms: { ...PAYMENT_TERMS, fee: `${ratePercent(capturedVolume)}% of payment volume, plus Stripe fees`, stripe: `${ratePercent(stripeCost)}% of Stripe processing costs. The underlying fees depend on the payment method and transaction.`, source: 'subscription' },
     configured: true,
     pricing: {
       currency: 'USD' as const,

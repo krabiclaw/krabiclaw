@@ -63,24 +63,6 @@ export async function useOrganizationServices() {
   return { servicesResource: data, services: computed(() => data.value?.services), servicesError: error, refreshServices: refresh }
 }
 
-export type Pricing = { captured_volume_rate_percent: string; ad_spend_rate_percent: string | null; livemode: boolean }
-export type PendingUsage = { kind: string; event_count: number; action_required: boolean }
-export type PaymentTerms = { fee: string; source: 'offer' | 'subscription'; stripe: string; billing: string; surcharge: string; minimumBasisPoints: number; maximumBasisPoints: number }
-export type UsageBilling = { configured: boolean; pricing: Pricing | null; pending: PendingUsage[]; terms: PaymentTerms }
-const isUsageBilling = (value: unknown): value is UsageBilling => isRecord(value) && typeof value.configured === 'boolean'
-  && isRecord(value.terms) && typeof value.terms.fee === 'string' && typeof value.terms.stripe === 'string' && typeof value.terms.billing === 'string' && typeof value.terms.surcharge === 'string' && ['offer', 'subscription'].includes(String(value.terms.source)) && Number.isSafeInteger(value.terms.minimumBasisPoints) && Number.isSafeInteger(value.terms.maximumBasisPoints)
-  && Array.isArray(value.pending) && value.pending.every(row => isRecord(row) && typeof row.kind === 'string' && Number.isSafeInteger(row.event_count) && typeof row.action_required === 'boolean')
-  && (value.pricing === null || (isRecord(value.pricing) && (value.pricing.ad_spend_rate_percent === null || typeof value.pricing.ad_spend_rate_percent === 'string') && typeof value.pricing.captured_volume_rate_percent === 'string' && typeof value.pricing.livemode === 'boolean'))
-
-export async function usePaymentsUsage() {
-  const route = useRoute()
-  const dashboardApi = useDashboardApi()
-  // Lazy on purpose: this reads the plan subscription's metered prices from
-  // Stripe, and the plan rows do not wait on that provider round trip.
-  const { data, error, refresh } = await useAsyncData(`payments-billing:${String(route.params.orgSlug)}`, () => dashboardApi<UsageBilling>('/api/dashboard/payments/billing', { validate: isUsageBilling }), { lazy: true })
-  return { usage: data, usageError: error, refreshUsage: refresh }
-}
-
 export type ConnectStatus = 'creating' | 'creation_failed' | 'action_required' | 'pending_review' | 'restricted' | 'ready'
 type CapabilityStatus = 'active' | 'pending' | 'restricted' | 'unsupported'
 export interface ConnectRequirement { awaitingActionFrom: 'stripe' | 'user'; deadlineStatus: 'currently_due' | 'eventually_due' | 'past_due'; description: string; errors: string[] }

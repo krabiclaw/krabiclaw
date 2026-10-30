@@ -227,10 +227,8 @@ export function getNewSalePlan(value: unknown): NewSalePlanId | null {
   return isNewSalePlan(normalized) ? normalized : null
 }
 
-/** Payment explanations and surcharge bounds shared by web and native clients. */
-export const PAYMENT_TERMS = Object.freeze({
-  stripe: 'Stripe processing fees also apply. The amount depends on the payment method and transaction.',
-  billing: 'Payment volume and Stripe costs are metered and billed at the end of each period on your Business subscription.',
+/** Surcharge policy shared by web and native clients; fee explanations live on the pricing page. */
+export const SURCHARGE_POLICY = Object.freeze({
   surcharge: 'Pass credit card fees on to the buyer. The surcharge is shown before they pay and included in the total. Stripe caps it for each card and never adds one to debit or prepaid cards.',
   minimumBasisPoints: 1,
   maximumBasisPoints: 10_000,
