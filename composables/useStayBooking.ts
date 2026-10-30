@@ -168,7 +168,6 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     const keepsCheckOut = previousCheckOut !== null && [...checkOuts(date)].includes(previousCheckOut)
     checkOut.value = keepsCheckOut ? previousCheckOut : null
     dateField.value = keepsCheckOut ? 'checkIn' : 'checkOut'
-    quote.value = null
   }
 
   /** A typed or pressed checkout for the chosen check-in; one that cannot end the stay says why. */
@@ -212,7 +211,6 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
 
   function clearCheckOut() {
     checkOut.value = null
-    quote.value = null
     bookingError.value = ''
     dateField.value = 'checkOut'
   }
@@ -220,7 +218,6 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   function clearDates() {
     checkIn.value = null
     checkOut.value = null
-    quote.value = null
     bookingError.value = ''
     dateField.value = 'checkIn'
   }
