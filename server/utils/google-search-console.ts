@@ -159,10 +159,12 @@ export async function querySearchAnalytics(accessToken: string, siteUrl: string,
   })
   return {
     rows: (response.rows ?? []).map((row) => {
-      if (row.keys?.length !== input.dimensions.length || typeof row.clicks !== 'number' || typeof row.impressions !== 'number' || typeof row.ctr !== 'number' || typeof row.position !== 'number') {
+      // A query with no dimensions has one total row and no keys.
+      const keys = row.keys ?? []
+      if (keys.length !== input.dimensions.length || typeof row.clicks !== 'number' || typeof row.impressions !== 'number' || typeof row.ctr !== 'number' || typeof row.position !== 'number') {
         throw new Error(`Search Console returned an incomplete row for ${siteUrl}`)
       }
-      return { keys: Object.fromEntries(input.dimensions.map((dimension, index) => [dimension, row.keys![index]!])), clicks: row.clicks, impressions: row.impressions, ctr: row.ctr, position: row.position }
+      return { keys: Object.fromEntries(input.dimensions.map((dimension, index) => [dimension, keys[index]!])), clicks: row.clicks, impressions: row.impressions, ctr: row.ctr, position: row.position }
     }),
     aggregationType: response.responseAggregationType ?? null,
   }

@@ -27,9 +27,9 @@ All calls are in `server/utils/google-ads.ts`, against `v25`.
 | Call | Used by |
 | --- | --- |
 | `customers:listAccessibleCustomers`, `googleAds:search` on `customer` | Integrations → Google Ads: list the login's accounts with their names, currency and time zone; pick one |
-| `googleAds:search` on `campaign` | Insights → Google Ads (campaigns by spend for a range); `list_google_ads_campaigns` (all-time, or for chosen days); Today's Google Ads card totals |
+| `googleAds:search` on `campaign` | Insights → Google Ads (campaigns by spend for a range); `list_google_ads_campaigns` (all-time, or for chosen days); Today's Google Ads card totals; `query_google_ads_report` `campaign_daily` |
 | `googleAds:search` on `ad_group`, `ad_group_criterion`, `ad_group_ad` | `get_google_ads_campaign` detail |
-| `googleAds:search` on `search_term_view`, `keyword_view`, `landing_page_view` | `query_google_ads_report` for chosen days |
+| `googleAds:search` on `search_term_view`, `keyword_view`, `landing_page_view`, `geographic_view`, then `geo_target_constant` for country names | `query_google_ads_report` (`search_terms`, `keywords`, `landing_pages`, `geography`) for chosen days |
 | `googleAds:mutate` | `create_google_ads_search_campaign`, `update_google_ads_campaign` (status, budget) — Business plan only (`google_ads_management`); every read above is free with the connection |
 | `googleAds:search` on `customer` metrics for one day | `marketing:ad-spend-daily`: a managed account's finished day, billed at 10% |
 
@@ -45,7 +45,7 @@ daily `ad_spend` usage events for businesses with managed ads on.
   currency; a managed-ads card when the service is off.
 - **Today** — the connected account's last 7 complete days (spend, clicks,
   conversions), linking to that range in Insights.
-- **ChatGPT / MCP** — the four `*_google_ads_*` tools above, for Business.
+- **ChatGPT / MCP** — the five `*_google_ads_*` tools above. Reading campaigns and reports is free with the connection; `create_google_ads_search_campaign` and `update_google_ads_campaign` need Business (`google_ads_management`).
 - **Plan and billing → Managed ads** — managed ads consent; the daily task reads
   spend only for days the agreement was on.
 

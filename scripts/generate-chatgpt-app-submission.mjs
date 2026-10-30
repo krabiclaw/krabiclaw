@@ -13,7 +13,7 @@ const OUTPUT_PATH = 'chatgpt-app-submission.json'
 // A newly exposed tool must receive an explicit review before regeneration succeeds.
 const effects = {
   list_google_ads_campaigns: 'Reads campaigns, budgets and performance metrics from the Google Ads account the selected business connected.',
-  query_google_ads_report: 'Reads search term, keyword or landing page performance for chosen days from the Google Ads account the selected business connected.',
+  query_google_ads_report: 'Reads daily campaign, search term, keyword, landing page or country performance for chosen days from the Google Ads account the selected business connected.',
   query_google_analytics: 'Reads a report from the Google Analytics 4 property the selected business connected.',
   query_search_console: 'Reads organic search performance from the Search Console property the selected business connected.',
   get_google_ads_campaign: 'Reads one campaign, its ad groups, keywords and responsive search ads from the connected Google Ads account.',

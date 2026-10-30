@@ -388,10 +388,13 @@ export async function getAnalyticsReport(db: DbClient, input: {
   const observedEnd = end < nowIso ? end : nowIso
   // Native collection began when the business went live. A range wholly before that has nothing native
   // to report, and zeros would read as a business nobody visited; one that straddles it reports from then.
-  if (context.analyticsDataStartAt && end <= context.analyticsDataStartAt) {
+  if (!context.analyticsDataStartAt) {
+    throw new HTTPError({ statusCode: 422, statusMessage: 'This business\'s own analytics begin when its site goes live.', data: { code: 'NO_NATIVE_COVERAGE' } })
+  }
+  if (end <= context.analyticsDataStartAt) {
     throw new HTTPError({ statusCode: 422, statusMessage: `This business's own analytics begin ${context.analyticsDataStartAt}; ${range.startDate} to ${range.endDate} is before them. Earlier periods are in Google Ads, Google Analytics and Search Console.`, data: { code: 'NO_NATIVE_COVERAGE' } })
   }
-  const nativeCoverage = context.analyticsDataStartAt && start < context.analyticsDataStartAt ? 'partial' as const : 'full' as const
+  const nativeCoverage = start < context.analyticsDataStartAt ? 'partial' as const : 'full' as const
   const cutoffDate = context.analyticsDataStartAt ? localDateAt(new Date(context.analyticsDataStartAt), context.timezone) : null
   const [slices, sessionStats, returningStats, attributionRows] = await Promise.all([
     loadSlices(db, input.organizationId, range.dates, context.timezone, now, cutoffDate),
