@@ -15,7 +15,6 @@
 // migration chain. With --delta-from it instead inserts only the rows whose
 // primary key the earlier transfer's target did not hold: the rows created in
 // the source after the initial export, copied onto the live replacement.
-import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { register } from 'node:module'
@@ -285,7 +284,7 @@ export const TARGET_INVARIANT_QUERIES = {
 
 }
 
-export function auditTargetInvariants(target) {
+export async function auditTargetInvariants(target) {
   const results = Object.entries(TARGET_INVARIANT_QUERIES).map(([name, query]) => ({
     name, violations: target.prepare(query).all().reduce((total, row) => total + Number(row.orphaned_count ?? 1), 0), sql_sha256: hash(query),
   }))
@@ -320,14 +319,15 @@ export function auditTargetInvariants(target) {
   // the rewrite would break, and the transfer names it. A deleted asset's
   // object is gone on purpose.
   const media = target.prepare("SELECT id, public_url FROM media_assets WHERE status = 'active' AND provider = 'cloudflare_r2' AND public_url IS NOT NULL").all()
-  const unserved = media.flatMap(row => {
-    const probe = spawnSync('curl', ['-sS', '-o', '/dev/null', '-I', '-w', '%{http_code}', '--max-time', '20', String(row.public_url)], { encoding: 'utf8' })
-    if (probe.error) throw new Error(`Media probe failed for ${row.id} ${row.public_url}: ${probe.error.message}`, { cause: probe.error })
-    const status = probe.stdout.trim()
-    return probe.status === 0 && status === '200'
-      ? []
-      : [`${row.id} ${row.public_url}: HTTP ${status || 'unavailable'}, curl exit ${probe.status}${probe.signal ? ` (${probe.signal})` : ''}${probe.stderr.trim() ? `: ${probe.stderr.trim()}` : ''}`]
-  })
+  const unserved = []
+  for (const row of media) {
+    try {
+      const response = await fetch(String(row.public_url), { method: 'HEAD', signal: AbortSignal.timeout(20_000) })
+      if (response.status !== 200) unserved.push(`${row.id} ${row.public_url}: HTTP ${response.status}`)
+    } catch (error) {
+      unserved.push(`${row.id} ${row.public_url}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   results.push({ name: 'media_objects_are_served', violations: unserved.length, unserved })
   return results
 }
@@ -1021,7 +1021,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     manifest.schema = target.prepare(SCHEMA_OBJECTS_QUERY).all()
     assert(sameSchema(target, expected), 'Target schema differs from the migration chain')
     expected.close()
-    manifest.invariants = auditTargetInvariants(target)
+    manifest.invariants = await auditTargetInvariants(target)
     const broken = manifest.invariants.filter(result => result.violations > 0)
     assert(broken.length === 0, `Invariant violations: ${JSON.stringify(broken)}`)
     if (payloadPath) manifest.payload = writePayload(target, payloadPath, schemaSql, { withoutJwks, deltaFrom })

@@ -1,6 +1,6 @@
 import { renderNotificationEmail, type RenderedNotificationEmail } from '~/server/emails/render'
 import { sendEmail, hashEmail } from '~/server/utils/email-delivery'
-import { resetPasswordMessage, verifyEmailMessage } from '~/server/notifications/guest-events'
+import { resetPasswordMessage, signInCodeMessage, verifyEmailMessage } from '~/server/notifications/guest-events'
 
 export interface AuthEmailEnv {
   RESEND_API_KEY?: string
@@ -59,6 +59,20 @@ export async function sendVerificationEmail(
   await sendAuthEmail(env, {
     to: opts.email,
     subject: 'Verify your KrabiClaw email',
+    ...email,
+  })
+}
+
+export async function sendSignInCodeEmail(
+  env: AuthEmailEnv,
+  opts: { email: string, code: string },
+) {
+  const email = await renderNotificationEmail(signInCodeMessage({ code: opts.code }), { platformDomain: platformDomain(env) })
+
+  await sendAuthEmail(env, {
+    to: opts.email,
+    // The subject is logged with every send, so the code stays out of it.
+    subject: 'Your KrabiClaw sign-in code',
     ...email,
   })
 }

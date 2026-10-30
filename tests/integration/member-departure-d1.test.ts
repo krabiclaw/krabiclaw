@@ -64,6 +64,24 @@ test('every way a member leaves clears their homes, locations and Teams and publ
       assert.ok(tokens[person])
     }
 
+    const changedRole = await post('/organization/update-member-role', tokens.owner!, { organizationId: ORG, memberId: 'm-removed', role: 'admin' })
+    assert.equal(changedRole.status, 200, await changedRole.clone().text())
+    assert.equal(await db.prepare("SELECT role FROM member WHERE id = 'm-removed'").first('role'), 'admin')
+    const roleChanges = () => db.prepare("SELECT actor_user_id, payload_json FROM activity_entries WHERE organization_id = ? AND event_name = 'member.role_changed' ORDER BY occurred_at, id").bind(ORG).all<{ actor_user_id: string; payload_json: string }>()
+    const firstRoleChange = (await roleChanges()).results
+    assert.equal(firstRoleChange.length, 1)
+    assert.equal(firstRoleChange[0]!.actor_user_id, 'owner')
+    assert.deepEqual(JSON.parse(firstRoleChange[0]!.payload_json), {
+      entityType: 'member', entityId: 'm-removed', actorType: 'member',
+      beforeState: { role: 'member' }, afterState: { role: 'admin' },
+      metadata: { userId: 'removed', previousRole: 'member', role: 'admin' },
+    })
+    const unchangedRole = await post('/organization/update-member-role', tokens.owner!, { organizationId: ORG, memberId: 'm-removed', role: 'admin' })
+    assert.equal(unchangedRole.status, 200, await unchangedRole.clone().text())
+    assert.deepEqual((await roleChanges()).results, firstRoleChange)
+    const restoredRole = await post('/organization/update-member-role', tokens.owner!, { organizationId: ORG, memberId: 'm-removed', role: 'member' })
+    assert.equal(restoredRole.status, 200, await restoredRole.clone().text())
+
     // Each departing member looks after one home at its own location, through
     // the same writes the dashboard makes, and belongs to one Team.
     const manager: StayAccess = { organizationId: ORG, actorId: 'owner', manage: true }
@@ -115,6 +133,14 @@ test('every way a member leaves clears their homes, locations and Teams and publ
       assert.equal(await locationAssignee(person), null, `${person}'s location is unassigned`)
       assert.equal(await teamSeats(person), 0, `${person} has no Team seat`)
       assert.equal(await removals(person), 1, `${person}'s departure is recorded once`)
+      const departure = await db.prepare("SELECT actor_kind, actor_user_id, payload_json FROM activity_entries WHERE organization_id = ? AND event_name = 'member.removed' AND json_extract(payload_json, '$.metadata.userId') = ?")
+        .bind(ORG, person).first<{ actor_kind: string; actor_user_id: string | null; payload_json: string }>()
+      assert.ok(departure)
+      assert.equal(departure.actor_user_id, person === 'removed' ? 'owner' : person === 'leaver' ? 'leaver' : null)
+      assert.equal(departure.actor_kind, person === 'deleter' ? 'system' : 'member')
+      assert.deepEqual(JSON.parse(departure.payload_json).metadata, {
+        userId: person, operation: person === 'removed' ? 'removed' : person === 'leaver' ? 'left' : 'account_deleted',
+      })
       assert.ok(await accessChanges() > before, `${person}'s departure publishes access.changed`)
     }
     assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM user WHERE id = 'deleter'").first('n'), 0)

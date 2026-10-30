@@ -1,6 +1,7 @@
 import { markdownRequiresSourceMode } from '~/shared/markdown-editor-mode'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { resolveMcpDocumentationBlocks } from '~/server/utils/mcp-documentation'
+import { creationRequestHash, organizationEventQuery } from '~/server/utils/organization-events'
 import { HTTPError } from 'nitro';
 
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '../../db/index.ts'
@@ -111,6 +112,8 @@ export type ContentDocumentChanges = Partial<Pick<typeof content_documents.$infe
 >> & { metadata?: Record<string, unknown> }
 
 interface ContentDocumentWriteOptions {
+  actorId?: string | null
+  changedFields?: readonly string[]
   changes?: ContentDocumentChanges
   bodyMarkdown?: string
   expectedDocument?: { id: string; updatedAt: string }
@@ -443,8 +446,16 @@ async function writeDocumentBlocks(
 ) {
   const prepared = buildDocumentWriteBatch(document, blocks, {
     ...opts,
+    changes: { ...opts.changes, ...(opts.actorId === undefined ? {} : { updated_by: opts.actorId }) },
     expectedDocument: { id: document.id, updatedAt: document.updated_at },
   })
+  if (document.kind === 'page' && opts.actorId !== undefined) {
+    const activity = organizationEventQuery({ organizationId: document.organization_id, actorId: opts.actorId,
+      eventType: 'content.updated', entityType: 'page', entityId: document.id,
+      beforeState: { updated_at: document.updated_at }, afterState: { updated_at: prepared.updated_at },
+      metadata: { changed_fields: opts.changedFields ?? ['content_blocks'], evidence_basis: 'persisted_change', locale: document.locale, page_id: document.root_id ?? document.id } })
+    prepared.queries.push({ ...activity, params: activity.params ?? [] })
+  }
   try {
     await executeBatch(db, prepared.queries)
   } catch (error) {
@@ -499,7 +510,7 @@ export function prepareContentDocumentWithBlocks(
     id: block.id, source_block_id: block.source_block_id ?? null, parent_block_id: block.parent_block_id ?? null, type: block.type,
     position: index, level: block.level ?? null, data: block.data,
   })), { bodyMarkdown: opts.bodyMarkdown, additionalQueriesAfter: opts.additionalQueriesAfter })
-  return { document, ...write, queries: [...(opts.additionalQueriesBefore ?? []), documentInsert, ...write.queries] }
+  return { document: { ...document, updated_at: write.updated_at }, ...write, queries: [...(opts.additionalQueriesBefore ?? []), documentInsert, ...write.queries] }
 }
 
 export async function createContentDocumentWithBlocks(
@@ -585,7 +596,7 @@ export async function appendContentBlock(
   db: DbClient,
   documentId: string,
   input: ContentBlockInput & { after_block_id?: string | null },
-  opts: Pick<ContentDocumentWriteOptions, 'additionalQueriesAfter'> = {},
+  opts: Pick<ContentDocumentWriteOptions, 'additionalQueriesAfter' | 'actorId'> = {},
 ) {
   const document = await getContentDocumentById(db, documentId)
   if (!document) notFound('Content document not found')
@@ -638,7 +649,7 @@ export async function replaceContentBlock(
   db: DbClient,
   blockId: string,
   input: { data: Record<string, unknown>; expected_updated_at: string },
-  opts: Pick<ContentDocumentWriteOptions, 'additionalQueriesAfter'> = {},
+  opts: Pick<ContentDocumentWriteOptions, 'additionalQueriesAfter' | 'actorId'> = {},
 ) {
   const current = await getContentBlock(db, blockId)
   const document = await getContentDocumentById(db, current.document_id)
@@ -647,6 +658,9 @@ export async function replaceContentBlock(
   const blocks = await listBlocksForDocument(db, document.id)
   if (blocks.find(block => block.id === blockId)?.updated_at !== input.expected_updated_at) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Content block was updated by another writer' })
+  }
+  if (!(opts.additionalQueriesAfter?.length) && await creationRequestHash(current.data) === await creationRequestHash(mediaFreeBlockData(current.type, input.data, 'content block data'))) {
+    return { body_markdown: renderContentBlocksToMarkdown(blocks), blocks: blocks.map(formatBlockOutline), updated_at: document.updated_at }
   }
   const snapshots = blocks.map((block) => ({
     id: block.id,
@@ -666,7 +680,7 @@ export async function replaceContentBlock(
 export async function deleteContentBlock(
   db: DbClient,
   blockId: string,
-  input: { expected_updated_at: string },
+  input: { expected_updated_at: string; actorId?: string | null },
 ) {
   const current = await getContentBlock(db, blockId)
   const document = await getContentDocumentById(db, current.document_id)
@@ -703,7 +717,7 @@ export async function deleteContentBlock(
       updated_at: block.updated_at,
     }))
 
-  return await writeDocumentBlocks(db, document, snapshots)
+  return await writeDocumentBlocks(db, document, snapshots, { actorId: input.actorId })
 }
 
 export async function getContentEditorSnapshotForDocument(db: DbClient, document: ContentDocumentRow) {
@@ -727,6 +741,8 @@ export async function updateContentDocument(
     expected_updated_at: string
     blocks?: ContentBlockInput[]
     changes?: ContentDocumentChanges
+    actorId?: string | null
+    changedFields?: readonly string[]
     additionalQueriesBefore?: BatchQuery[]
     additionalQueriesAfter?: BatchQuery[]
   },
@@ -742,6 +758,7 @@ export async function updateContentDocument(
     data: asObject(block.data, `content block ${index} data`), updated_at: null,
   }))
   const result = await writeDocumentBlocks(db, document, snapshots, {
+    actorId: input.actorId, changedFields: input.changedFields,
     changes: input.changes, expectedDocument: { id: document.id, updatedAt: input.expected_updated_at },
     additionalQueriesBefore: input.additionalQueriesBefore,
     additionalQueriesAfter: [...(input.additionalQueriesAfter ?? []), publicResourceCacheInvalidationQuery(document.organization_id, `${document.kind}-update`)],

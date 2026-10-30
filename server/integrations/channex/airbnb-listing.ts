@@ -167,7 +167,6 @@ export async function keptBookingSettings(env: ChannexEnv, channelId: string, li
 
 function minimumNights(listing: JsonRecord): number {
   const availability = object(listing.availability_rules, 'Listing availability rules')
-  if (availability.seasonal_min_nights !== undefined && availability.seasonal_min_nights !== null && (!Array.isArray(availability.seasonal_min_nights) || availability.seasonal_min_nights.length)) throw new ChannexDataError('availability_rules.seasonal_min_nights is unsupported: its date-boundary semantics must be verified before importing this listing')
   const value = integer(availability.default_min_nights, 'availability_rules.default_min_nights', 1)
   if (value > MAX_STAY_NIGHTS) throw new ChannexDataError(`availability_rules.default_min_nights must be at most ${MAX_STAY_NIGHTS}`)
   return value
@@ -411,7 +410,7 @@ function addDays(date: string, days: number): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10)
 }
 
-/** The listing's next 500 nights, starting today where the home is. All 500 or none. */
+/** Airbnb resolves date-range rules into each day's arrival minimum. Import all next 500 nights or none. */
 export async function listingCalendar(env: ChannexEnv, channelId: string, listingId: string, timezone: string): Promise<ListingNight[]> {
   const from = localToday(timezone)
   const to = addDays(from, STAY_CALENDAR_DAYS - 1)

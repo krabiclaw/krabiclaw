@@ -46,6 +46,7 @@ zone_name = "krabiclaw.com"
 [vars]
 # Sign in with Apple audience: the native app's bundle id.
 APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
+APPLE_SERVICES_ID = "com.krabiclaw.web"
 # APNs token authentication (APNS_PRIVATE_KEY is a secret: yarn wrangler secret put APNS_PRIVATE_KEY).
 APNS_KEY_ID = "M6MMSR6BM3"
 APNS_TEAM_ID = "WDXU8XZ7J6"
@@ -164,6 +165,7 @@ enabled = true
 [env.dev.vars]
 # Sign in with Apple audience: the native app's bundle id.
 APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
+APPLE_SERVICES_ID = "com.krabiclaw.web"
 # APNs token authentication (APNS_PRIVATE_KEY is a secret: yarn wrangler secret put APNS_PRIVATE_KEY).
 APNS_KEY_ID = "M6MMSR6BM3"
 APNS_TEAM_ID = "WDXU8XZ7J6"
@@ -233,6 +235,7 @@ crons = ["1-59/2 * * * *", "3-59/10 * * * *"]
 CHANNEX_BASE_URL = "https://staging.channex.io/api/v1"
 # Sign in with Apple audience: the native app's bundle id.
 APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
+APPLE_SERVICES_ID = "com.krabiclaw.web"
 # APNs token authentication (APNS_PRIVATE_KEY is a secret: yarn wrangler secret put APNS_PRIVATE_KEY).
 APNS_KEY_ID = "M6MMSR6BM3"
 APNS_TEAM_ID = "WDXU8XZ7J6"
@@ -311,6 +314,7 @@ crons = []
 [env.e2e.vars]
 # Sign in with Apple audience: the native app's bundle id.
 APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
+APPLE_SERVICES_ID = "com.krabiclaw.web"
 # APNs token authentication (APNS_PRIVATE_KEY is a secret: yarn wrangler secret put APNS_PRIVATE_KEY).
 APNS_KEY_ID = "M6MMSR6BM3"
 APNS_TEAM_ID = "WDXU8XZ7J6"

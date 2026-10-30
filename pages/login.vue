@@ -7,6 +7,7 @@
 
     <div class="mt-6 space-y-3">
       <AuthGoogleButton label="Sign in with Google" :loading="googleLoading" :last-used="lastUsedMethod === 'google'" @activate="signInWithGoogle(postLoginUrl)" />
+      <AuthAppleButton label="Sign in with Apple" :loading="googleLoading" :last-used="lastUsedMethod === 'apple'" @activate="signInWithApple(postLoginUrl)" />
       <USeparator label="or" />
       <AuthEmailSignInForm :key="queryEmail" :callback-url="postLoginUrl" :initial-email="queryEmail" :last-used="lastUsedMethod === 'email'" @verification-required="showVerification" />
 
@@ -52,7 +53,7 @@ const verificationEmail = ref('')
 const resending = ref(false)
 const notice = ref<string | null>(null)
 const operationError = ref<string | null>(null)
-const { loading: googleLoading, error: googleError, signInWithGoogle } = useAuthOperation()
+const { loading: googleLoading, error: googleError, signInWithGoogle, signInWithApple } = useAuthOperation()
 watch(googleError, value => { operationError.value = value })
 
 // Better Auth returns a link it refused to the same callback with `error` added.

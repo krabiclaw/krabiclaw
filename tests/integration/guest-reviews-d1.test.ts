@@ -5,7 +5,7 @@ import { H3 } from 'nitro/h3'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
-import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
+import { getGuestRequest, requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { getReviewBookingContext, getReviewRequestByToken } from '../../server/utils/review-requests.ts'
 import { loadReviewFeedback } from '../../server/utils/review-feedback.ts'
@@ -14,6 +14,8 @@ import reviewTask from '../../server/tasks/review-request-automation.ts'
 import validateRoute from '../../server/api/public/review-requests/validate.get.ts'
 import submitRoute from '../../server/api/public/review-requests/submit.post.ts'
 import { localDateAt } from '../../utils/timezone.ts'
+import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
+import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
 
 const HOUR = 3_600_000
 const at = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString()
@@ -61,7 +63,9 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     const thread = async (key: string, kind: 'reservation' | 'booking' | 'stay', userId: string, locationId: string | null, name: string) => {
       const id = T[key] ??= crypto.randomUUID()
       const writes = requestInsertQueries({ id, kind, organization_id: 'org', location_id: locationId, user_id: userId, review_id: null, conversation_state: 'resolved', resolved_at: now,
-        payload: threadPayloadForGuest({ name, email: `${key}@guests.example`, phone: '+66812345678' }), created_at: now, updated_at: now } as Parameters<typeof requestInsertQueries>[0])
+        // A stay's conversation carries only its guest; a booking's or reservation's carries the thread's own facts too.
+        payload: kind === 'stay' ? { guest: { name, email: `${key}@guests.example`, phone: '+66812345678' } } : threadPayloadForGuest({ name, email: `${key}@guests.example`, phone: '+66812345678' }),
+        created_at: now, updated_at: now } as Parameters<typeof requestInsertQueries>[0])
       await db.batch(writes.map(write => db.prepare(write.query).bind(...(write.params ?? []))))
     }
     const reservation = async (id: string, guest: string, locationId: string, endsAt: string, status = 'confirmed') => {
@@ -119,6 +123,8 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
       { booking_type: 'booking', booking_id: 'lesson', sent: 1 },
     ], 'every ended, confirmed visit inside the window is invited; the early, cancelled, old and no-show ones are not')
     assert.equal(run.result.sent, 4)
+    // Inviting leaves every conversation readable: a stay's strict payload carries no review state.
+    for (const key of ['dinner', 'consultation', 'lesson', 'cottage']) assert.ok(await getGuestRequest(db, T[key]!, 'org'), `${key} still reads as a conversation`)
 
     // The invitation is a fact in the visit's own conversation, and its email is that fact's receipt.
     const delivery = await db.prepare(`SELECT e.event_name, e.body, d.purpose, d.channel, d.status, d.email_json FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
@@ -189,6 +195,16 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     assert.equal(consultation.status, 201)
     assert.equal(consultation.body.status, 'private')
     const consultationReviewId = String(consultation.body.reviewId)
+    const progressMembership = await resolveMembership(env, { organizationId: 'org', userId: 'owner' })
+    assert(progressMembership)
+    const reviewProgress = await listBusinessOutcomes(db, memberAccessPrincipal(progressMembership, { env }), { limit: 100 })
+    for (const [reviewId, threadId] of [[dinnerReviewId, T.dinner], [consultationReviewId, T.consultation]]) {
+      const fact = reviewProgress.outcomes.find(item => item.source.table === 'reviews' && item.source.id === reviewId)
+      assert(fact)
+      assert.deepEqual(fact.subject, { kind: 'review', id: reviewId })
+      assert.deepEqual(fact.references, [{ kind: 'guest_thread', id: threadId }], 'the review writer records the actual request id; the progress reference must not use the operational booking id')
+    }
+
     await assert.rejects(setReviewStatus(db, 'org', consultationReviewId, 'approved'), /shared their review privately/)
 
     // Read back through the public projection: before moderation nothing; after, only the consented text.

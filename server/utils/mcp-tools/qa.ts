@@ -1,3 +1,5 @@
+import { HTTPError } from 'nitro'
+import { findAuthUsersByIds } from '~/server/utils/auth'
 import type { McpToolDefinition } from './shared'
 import { pageInfoObject, paginationInputSchema, qaItemObject, organizationTool } from './shared'
 import type { McpExecutorContext } from './execution'
@@ -55,21 +57,24 @@ export async function handleQaTools(ctx: McpExecutorContext): Promise<unknown> {
     locationId: (args.location_id ?? null) as string | null,
     pagePath: (args.page_path ?? null) as string | null,
   }
+  const authoredWrite = toolName === 'create_qa' || toolName === 'update_qa' || toolName === 'reorder_qa'
+  const actor = authoredWrite ? (await findAuthUsersByIds(organization.env, [organization.userId])).get(organization.userId) ?? null : null
+  if (authoredWrite && !actor) throw new HTTPError({ statusCode: 401, statusMessage: 'The authenticated Q&A author was not found' })
   switch (toolName) {
     case 'create_qa': {
-      const result = await createQa(organization.db, scope, { ...args, question: args.question })
+      const result = await createQa(organization.db, scope, { ...args, question: args.question }, actor)
       assertDomainSuccess(result)
       return result.data
     }
     case 'update_qa':
-      return await updateQa(organization.db, scope, requiredString(args, 'qa_id'), args)
+      return await updateQa(organization.db, scope, requiredString(args, 'qa_id'), args, actor)
     case 'delete_qa': {
       const result = await deleteQa(organization.db, scope, requiredString(args, 'qa_id'))
       assertDomainSuccess(result)
       return result.data
     }
     case 'reorder_qa':
-      return await reorderQa(organization.db, scope, args.updates as Array<{ id: string; sort_order: number }>)
+      return await reorderQa(organization.db, scope, args.updates as Array<{ id: string; sort_order: number }>, actor)
     case "list_organization_qa":
       {
         const items = await listQa(organization.db, organization.organizationId, null, false, typeof args.page_path === "string" ? args.page_path : null);

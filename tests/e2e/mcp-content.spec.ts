@@ -601,7 +601,7 @@ test.describe('stateless MCP server', () => {
     }
   })
 
-  test('tenant blog tools preserve the canonical block document', async ({ request, page, baseURL }) => {
+  test('tenant blog tools preserve the canonical block document', async ({ request, page, baseURL }, testInfo) => {
     await loginAs(request, baseURL!)
     const organizationId = mcpOrganizationId()
     const discovery = await mcpRequest(request, baseURL!, { method: 'tools/list' })
@@ -612,6 +612,7 @@ test.describe('stateless MCP server', () => {
     const validateBlog = new Ajv({ strict: false, allErrors: true }).compile(blogTool!.outputSchema)
     let postId = ''
     let addedLocale = ''
+    const release = await acquireTenantMutationLock(testInfo, organizationId)
     try {
       const categoryList = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'list_article_categories',
@@ -864,6 +865,7 @@ test.describe('stateless MCP server', () => {
       await expect.poll(() => picture.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
       await expect(page.locator('.blog-article')).toContainText('Kitchen photo')
     } finally {
+      try {
       if (postId) {
         const cleanup = await mcpRequest(request, baseURL!, {
           method: 'tools/call', toolName: 'delete_blog_post', args: { organization_id: organizationId, post_id: postId },
@@ -879,6 +881,7 @@ test.describe('stateless MCP server', () => {
         const cleanedLanguages = await languagesAfterCleanup.json() as { languages: Array<{ locale: string }> }
         expect(cleanedLanguages.languages.map(language => language.locale)).not.toContain(addedLocale)
       }
+      } finally { await release() }
     }
   })
 

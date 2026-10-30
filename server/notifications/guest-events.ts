@@ -36,6 +36,20 @@ export function verifyEmailMessage(input: { verificationUrl: string }): Notifica
   }
 }
 
+export function signInCodeMessage(input: { code: string }): NotificationMessage {
+  return {
+    title: 'Your KrabiClaw sign-in code',
+    preheader: `${input.code} is your code. It expires in 5 minutes.`,
+    hero: null,
+    intro: 'Enter this code where you asked for it to sign in to KrabiClaw.',
+    facts: [{ key: 'code', label: 'Code', value: input.code }],
+    finePrint: 'The code expires in 5 minutes. If you did not ask for it, you can ignore this email.',
+    emailPurpose: 'transactional',
+    emailReason: 'You received this email because a sign-in code was requested for this address on KrabiClaw.',
+    category: 'account_security',
+  }
+}
+
 export function resetPasswordMessage(input: { resetUrl: string }): NotificationMessage {
   return {
     title: 'Reset your password',

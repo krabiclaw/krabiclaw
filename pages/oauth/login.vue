@@ -61,6 +61,7 @@
         <!-- No session / switch mode — show sign-in options -->
         <div v-else class="space-y-3 py-1">
           <AuthGoogleButton label="Sign in with Google" :loading="loading || authLoading" @activate="handleGoogleSignIn" />
+          <AuthAppleButton label="Sign in with Apple" :loading="loading || authLoading" @activate="signInWithApple()" />
 
           <USeparator label="or" />
 
@@ -195,7 +196,7 @@ async function switchAccount() {
 // ── Sign-in options (no existing session) ────────────────────────────────────
 const error = ref<string | null>(null)
 
-const { loading: authLoading, error: authError, signInWithGoogle } = useAuthOperation()
+const { loading: authLoading, error: authError, signInWithGoogle, signInWithApple } = useAuthOperation()
 watch(authError, value => { error.value = value })
 async function handleGoogleSignIn() {
   await signInWithGoogle()

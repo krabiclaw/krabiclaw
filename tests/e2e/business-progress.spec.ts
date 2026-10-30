@@ -54,6 +54,51 @@ test('authored goals and evidence-bound feedback follow persisted work', async (
     expect(progress.goals).toEqual([revised.goal])
     const currentGoal = revised.goal
 
+    const qaUrl = `/api/editor/organizations/${organization.id}/qa`
+    const question = 'Which documents should I bring?'
+    const answer = 'Bring the documents and correspondence about your legal question.'
+    const qa = await responseBody<{ id: string }>(await request.post(qaUrl, { data: { question, answer } }), 201)
+    const qaRead = await responseBody<{ qa: Array<{ id: string; question: string; answer: string; answer_author: string | null; answer_date: string | null; updated_at: string; status: string }> }>(await request.get(qaUrl, { params: { id: qa.id } }))
+    expect(qaRead.qa).toHaveLength(1)
+    expect(qaRead.qa[0]).toMatchObject({ id: qa.id, question, answer })
+    expect(qaRead.qa[0]!.answer_author?.trim()).toBeTruthy()
+    expect(new Date(qaRead.qa[0]!.answer_date!).toISOString()).toBe(qaRead.qa[0]!.answer_date)
+    const qaOutcomes = (value: Progress) => value.outcomes.filter(outcome => outcome.subject.kind === 'qa' && outcome.subject.id === qa.id)
+    const qaCreatedProgress = await responseBody<Progress>(await request.get(`${api}/progress`))
+    expect(qaOutcomes(qaCreatedProgress)).toEqual([expect.objectContaining({
+      source: { table: 'activity_entries', id: expect.any(String) }, event: 'content.updated',
+      actor: { kind: 'member', userId: actorId }, changedFields: expect.arrayContaining(['question', 'answer']),
+      state: 'published', revision: qaRead.qa[0]!.updated_at,
+      details: expect.objectContaining({ afterState: expect.objectContaining({ updated_at: qaRead.qa[0]!.updated_at, status: 'published' }) }),
+      verification: { status: 'verified', basis: 'persisted_change', receipts: [] },
+    })])
+    const updatedAnswer = 'Bring the relevant documents and any notice with a deadline.'
+    const changedQa = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_qa', args: {
+      organization_id: organization.id, qa_id: qa.id, answer: updatedAnswer,
+    } })
+    expect(changedQa.status(), await changedQa.text()).toBe(200)
+    mcpData(await changedQa.json())
+    const updatedQaRead = await responseBody<typeof qaRead>(await request.get(qaUrl, { params: { id: qa.id } }))
+    expect(updatedQaRead.qa[0]).toMatchObject({ id: qa.id, answer: updatedAnswer, answer_author: qaRead.qa[0]!.answer_author })
+    expect(Date.parse(updatedQaRead.qa[0]!.answer_date!)).toBeGreaterThan(Date.parse(qaRead.qa[0]!.answer_date!))
+    const qaChangedProgress = await responseBody<Progress>(await request.get(`${api}/progress`))
+    expect(qaOutcomes(qaChangedProgress)).toHaveLength(2)
+    expect(qaOutcomes(qaChangedProgress)[0]).toMatchObject({
+      actor: { userId: actorId }, changedFields: ['answer'], state: 'published', revision: updatedQaRead.qa[0]!.updated_at,
+      details: { beforeState: { updated_at: qaRead.qa[0]!.updated_at, status: 'published' }, afterState: { updated_at: updatedQaRead.qa[0]!.updated_at, status: 'published' } },
+    })
+    await responseBody(await request.patch(`${qaUrl}/${qa.id}`, { data: { answer: updatedAnswer } }))
+    expect(qaOutcomes(await responseBody<Progress>(await request.get(`${api}/progress`)))).toEqual(qaOutcomes(qaChangedProgress))
+    await responseBody(await request.patch(`${qaUrl}/${qa.id}`, { data: { status: 'hidden' } }))
+    const hiddenQaRead = await responseBody<typeof qaRead>(await request.get(qaUrl, { params: { id: qa.id } }))
+    expect(hiddenQaRead.qa[0]).toMatchObject({ id: qa.id, status: 'hidden', answer: updatedAnswer })
+    const hiddenQaProgress = await responseBody<Progress>(await request.get(`${api}/progress`))
+    expect(qaOutcomes(hiddenQaProgress)).toHaveLength(3)
+    expect(qaOutcomes(hiddenQaProgress)[0]).toMatchObject({
+      changedFields: ['status'], state: 'hidden', revision: hiddenQaRead.qa[0]!.updated_at,
+      details: { beforeState: { updated_at: updatedQaRead.qa[0]!.updated_at, status: 'published' }, afterState: { updated_at: hiddenQaRead.qa[0]!.updated_at, status: 'hidden' } },
+    })
+
     const { category } = await responseBody<{ category: { id: string } }>(await request.post(`${editor}/categories`, { data: { collection: 'blog', name: 'Consultations' } }), 201)
     const created = await responseBody<{ post: { id: string; title: string; updated_at: string } }>(await request.post(`${editor}/posts`, { data: {
       idempotency_key: crypto.randomUUID(), title: 'Prepare for a legal consultation', category_id: category.id,
@@ -62,7 +107,7 @@ test('authored goals and evidence-bound feedback follow persisted work', async (
     const postId = created.post.id
     const postUrl = `${editor}/${postId}`
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
-    const articleOutcomes = (value: Progress) => value.outcomes.filter(outcome => outcome.subject.id === postId)
+    const articleOutcomes = (value: Progress) => value.outcomes.filter(outcome => outcome.subject.kind === 'article' && outcome.subject.id === postId)
     expect(articleOutcomes(progress)).toEqual([expect.objectContaining({
       event: 'article.created', actor: { kind: 'member', userId: actorId },
       verification: { status: 'verified', basis: 'persisted_change', receipts: [] },
@@ -223,7 +268,7 @@ test('authored goals and evidence-bound feedback follow persisted work', async (
     await responseBody(await request.post(`${threadUrl}/operations/reply`, { data: { body: replyBody, idempotencyKey: replyKey } }))
     await responseBody(await request.post(`${threadUrl}/operations/reply`, { data: { body: replyBody, idempotencyKey: replyKey } }))
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
-    const replies = progress.outcomes.filter(outcome => outcome.subject.id === threadId)
+    const replies = progress.outcomes.filter(outcome => outcome.event === 'thread.member_reply' && outcome.subject.id === threadId)
     expect(replies).toEqual([expect.objectContaining({
       event: 'thread.member_reply', actor: { kind: 'member', userId: actorId },
       verification: { status: 'unconfirmed', basis: 'provider_acceptance', receipts: [expect.objectContaining({ provider: 'log_only', channel: 'email', status: 'sent' })] },
@@ -242,7 +287,7 @@ test('authored goals and evidence-bound feedback follow persisted work', async (
     expect(inboundReference.evidence.latestGuestEntryId).not.toBe(repliedReference.evidence.latestGuestEntryId)
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
     expect(progress.feedback.find(item => item.id === deferred.id)?.applicability).toEqual({ current: false, reasons: ['evidence_changed'] })
-    expect(progress.outcomes.filter(outcome => outcome.subject.id === threadId)).toEqual(replies)
+    expect(progress.outcomes.filter(outcome => outcome.event === 'thread.member_reply' && outcome.subject.id === threadId)).toEqual(replies)
     const preserved = await responseBody<{ thread: { entries: Array<{ body: string | null }> } }>(await request.get(threadUrl))
     expect(preserved.thread.entries.filter(entry => entry.body === replyBody)).toHaveLength(1)
     expect(preserved.thread.entries.filter(entry => entry.body === guestReply)).toHaveLength(1)
@@ -279,12 +324,14 @@ test('business progress read-only contract holds on an established business', as
   const api = `/api/organizations/${encodeURIComponent(organizationId)}`
   const first = await responseBody<Progress>(await request.get(`${api}/progress`))
   const second = await responseBody<Progress>(await request.get(`${api}/progress`))
-  expect(first.coverage).toEqual({
-    supportedEvents: ['article.created', 'article.updated', 'article.published', 'thread.member_reply'],
+  expect(first.coverage).toMatchObject({
+    sources: ['activity_entries', 'post_publications', 'reviews', 'analytics_events'],
     attribution: 'recorded_actor_only', article: 'persisted_change_only', webReply: 'stored_message_only',
-    externalReply: 'provider_acceptance_requires_receipt',
-    unverified: ['public_visibility', 'operation_completion', 'recipient_notification', 'conversation_resolution', 'business_goal_achievement'],
+    externalReply: 'provider_acceptance_requires_receipt', verification: 'only_the_named_evidence_basis',
   })
+  expect(first.coverage.unverified).toContain('attendance_or_fulfilment')
+  expect(first.coverage.unverified).toContain('causal_revenue_attribution')
+  expect(new Set(first.coverage.supportedEvents).size).toBe(first.coverage.supportedEvents.length)
   expect(second.coverage).toEqual(first.coverage)
   // These are fresh reads: edits/deletions can change goals and feedback,
   // while new activity can shift page membership. Compare retained versions.
@@ -304,6 +351,9 @@ test('business progress read-only contract holds on an established business', as
   for (const outcome of first.outcomes) {
     const repeated = second.outcomes.find(item => item.id === outcome.id)
     if (!repeated) continue
+    // Provider receipts and review moderation retain their source ID while the
+    // recorded state/revision advances. Compare the same source revision.
+    if (repeated.revision !== outcome.revision) continue
     expect(repeated, 'A canonical occurrence keeps its identity across progress reads').toMatchObject({
       id: outcome.id, event: outcome.event, subject: outcome.subject, actor: { kind: outcome.actor.kind }, occurredAt: outcome.occurredAt,
     })
@@ -311,7 +361,7 @@ test('business progress read-only contract holds on an established business', as
     if (repeated.actor.userId !== null) expect(repeated.actor.userId).toBe(outcome.actor.userId)
   }
   for (const outcome of [...first.outcomes, ...second.outcomes]) {
-    expect(['guest', 'member', 'system', 'cloudflare']).toContain(outcome.actor.kind)
+    expect(['guest', 'member', 'system', 'cloudflare', 'user', 'agent', 'unknown']).toContain(outcome.actor.kind)
     if (outcome.actor.userId !== null) {
       expect(outcome.actor.userId).toEqual(expect.any(String))
       expect(outcome.actor.userId.length).toBeGreaterThan(0)

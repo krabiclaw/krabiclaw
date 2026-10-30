@@ -21,19 +21,19 @@ export function oauthErrorMessage(code: unknown, description?: unknown): string 
     case 'state_mismatch':
     case 'state_security_mismatch':
     case 'state_not_found':
-      message = 'The connection request expired or could not be verified. Start Connect again from Settings → Integrations in the same browser.'
+      message = 'The connection request expired or could not be verified. Start again in the same browser.'
       break
     case 'access_denied':
-      message = 'Authorization was cancelled or denied. Start Connect again and approve the requested access.'
+      message = 'Authorization was cancelled or denied. Start again and approve the requested access.'
       break
     case 'account_already_linked_to_different_user':
       message = 'This provider account is already linked to another KrabiClaw user. Choose a different account or sign in as the user who linked it.'
       break
     case 'unable_to_get_user_info':
-      message = 'The provider could not return your account information. Start Connect again; if it still fails, check your provider account access.'
+      message = 'The provider could not return your account information. Start again; if it still fails, check your provider account access.'
       break
     default:
-      message = 'The provider connection failed. Start Connect again from Settings → Integrations.'
+      message = 'The provider connection failed. Start again.'
   }
   return `${message} (${code})${typeof description === 'string' && description ? ` ${description}` : ''}`
 }

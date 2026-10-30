@@ -5,6 +5,8 @@ import { MCP_VERSION, mcpOrganizationId, mcpRequest, mcpData } from './helpers/m
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTenant } from './seed/manifest'
 import type { Product as EditorProduct } from '../../server/types/products'
+import { E2E_ADMIN_ID } from '../../config/development-auth-fixtures'
+import type { BusinessOutcomePage } from '../../shared/business-outcomes'
 
 test.describe('stateless MCP server', () => {
   test('ChatGPT session exposes native media upload', async ({ request, baseURL }) => {
@@ -109,7 +111,7 @@ test.describe('stateless MCP server', () => {
     expect((await unchangedMedia.json()).media).toEqual([stored])
   })
 
-  test('a gallery reorder moves the fixture gallery and get_location reads the new order', async ({ request, baseURL }, testInfo) => {
+  test('media changes retain their acting member and repeated operations do not invent changes', async ({ request, baseURL }, testInfo) => {
     const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, mcpOrganizationId())
     const call = async <T>(toolName: string, args: Record<string, unknown>) => mcpData<T>(await (await mcpRequest(request, baseURL!, {
       method: 'tools/call', toolName, args: { organization_id: mcpOrganizationId(), ...args },
@@ -117,12 +119,20 @@ test.describe('stateless MCP server', () => {
     const locationId = seededTenant('restaurant').locations.williamsburg!.id
     const placement = { owner_type: 'business_location', owner_id: locationId, slot: 'gallery' }
     let original: string[] = []
+    let originalHero: string | null | undefined
+    const addedAsset = seededTenant('restaurant').media.margherita!.id
+    const readLocation = async () => (await call<{ location: { media: Array<{ slot: string; asset_id: string }> } }>('get_location', { location_id: locationId })).location
+    const galleryOrder = async () => (await readLocation()).media.filter(item => item.slot === 'gallery').map(item => item.asset_id)
+    const changes = async () => {
+      const response = await request.get(`${baseURL}/api/organizations/${mcpOrganizationId()}/progress`, { params: { limit: 100 } })
+      expect(response.status(), await response.text()).toBe(200)
+      return (await response.json() as BusinessOutcomePage).outcomes.filter(outcome => outcome.event === 'media.placement_changed' && outcome.subject.id === locationId)
+    }
     try {
       await loginAs(request, baseURL!)
-      const galleryOrder = async () => (await call<{ location: { media: Array<{ slot: string; asset_id: string }> } }>('get_location', { location_id: locationId }))
-        .location.media.filter(item => item.slot === 'gallery').map(item => item.asset_id)
       // The fixture's two-image gallery, in its stored order.
       original = await galleryOrder()
+      originalHero = (await readLocation()).media.find(item => item.slot === 'hero')?.asset_id ?? null
       const [first, second] = original
       // Nothing changes until the fixture is known to be exactly the two images restored below.
       expect(original, 'Williamsburg fixture gallery').toHaveLength(2)
@@ -135,15 +145,53 @@ test.describe('stateless MCP server', () => {
       expect(conflictingAnchors.status()).toBe(200)
       expect((await conflictingAnchors.json()).result.isError).toBe(true)
       expect(await galleryOrder()).toEqual(original)
+      const priorIds = new Set((await changes()).map(outcome => outcome.id))
+      const newChanges = async () => (await changes()).filter(outcome => !priorIds.has(outcome.id))
       await call('reorder_media', { placement, moves: [{ asset_id: first }] })
       expect(await galleryOrder()).toEqual([second, first])
+      const reordered = await newChanges()
+      expect(reordered).toHaveLength(1)
+      expect(reordered[0]).toMatchObject({ actor: { kind: 'member', userId: E2E_ADMIN_ID }, verification: { status: 'verified', basis: 'persisted_change' } })
+      expect(reordered[0]!.changedFields).toEqual(['media.gallery'])
       await call('reorder_media', { placement, moves: [{ asset_id: second, before_asset_id: first }] })
       expect(await galleryOrder()).toEqual([second, first])
+      expect(await newChanges()).toEqual(reordered)
+      await call('reorder_media', { placement, moves: [{ asset_id: first, before_asset_id: first }] })
+      expect(await galleryOrder()).toEqual([second, first])
+      expect(await newChanges()).toEqual(reordered)
       await call('reorder_media', { placement, moves: [{ asset_id: first, before_asset_id: second }] })
       expect(await galleryOrder()).toEqual([first, second])
+      expect(await newChanges()).toHaveLength(2)
+
+      expect(original).not.toContain(addedAsset)
+      await call('attach_media', { placement, asset_id: addedAsset })
+      expect(await galleryOrder()).toEqual([...original, addedAsset])
+      const attached = await newChanges()
+      expect(attached).toHaveLength(3)
+      await call('attach_media', { placement, asset_id: addedAsset })
+      expect(await galleryOrder()).toEqual([...original, addedAsset])
+      expect(await newChanges()).toEqual(attached)
+      await call('remove_media', { placement, asset_id: addedAsset })
+      expect(await galleryOrder()).toEqual(original)
+      const removed = await newChanges()
+      expect(removed).toHaveLength(4)
+      await call('remove_media', { placement, asset_id: addedAsset })
+      expect(await newChanges()).toEqual(removed)
+
+      const hero = { owner_type: 'business_location', owner_id: locationId, slot: 'hero' }
+      const replacementHero = original.find(assetId => assetId !== originalHero)!
+      await call('set_media', { placement: hero, asset_id: replacementHero })
+      expect((await readLocation()).media.find(item => item.slot === 'hero')?.asset_id).toBe(replacementHero)
+      const replaced = await newChanges()
+      expect(replaced).toHaveLength(5)
+      await call('set_media', { placement: hero, asset_id: replacementHero })
+      expect(await newChanges()).toEqual(replaced)
+      expect(replaced.every(outcome => outcome.actor.userId === E2E_ADMIN_ID)).toBe(true)
     } finally {
       // Put the fixture back in its stored order whatever failed above.
       try {
+        if (originalHero !== undefined) await call('set_media', { placement: { owner_type: 'business_location', owner_id: locationId, slot: 'hero' }, asset_id: originalHero })
+        if (original.length === 2) await call('remove_media', { placement, asset_id: addedAsset })
         if (original.length === 2) await call('reorder_media', { placement, moves: [{ asset_id: original[0], before_asset_id: original[1] }] })
       } finally {
         await releaseTenantMutationLock()
