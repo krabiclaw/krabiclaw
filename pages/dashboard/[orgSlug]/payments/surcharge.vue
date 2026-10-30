@@ -1,11 +1,11 @@
 <template>
   <!-- Stripe's surcharge: the business names a rate, Stripe bounds it per card and never applies it to debit or prepaid. -->
-  <DashboardLeafPanel id="organization-surcharge" title="Card surcharge" lead="Pass credit card fees on to the buyer. The surcharge is shown before they pay and included in the total. Stripe caps it for each card and never adds one to debit or prepaid cards." :footer="!connectPending && !connectError && account?.status === 'ready'" :saving="saving" :disabled="!dirty" :error="error" :save-label="account?.surchargeBasisPoints === null ? 'Turn on surcharge' : 'Save rate'" @save="save(parsed)">
+  <DashboardLeafPanel id="organization-surcharge" title="Card surcharge" :lead="PAYMENT_TERMS.surcharge" :footer="!connectPending && !connectError && account?.status === 'ready'" :saving="saving" :disabled="!dirty" :error="error" :save-label="account?.surchargeBasisPoints === null ? 'Turn on surcharge' : 'Save rate'" @save="save(parsed)">
     <UAlert v-if="connectError" color="error" :description="getErrorMessage(connectError, 'Payment settings could not be loaded')" />
     <p v-else-if="connectPending" role="status" class="text-muted">Loading payment settings…</p>
     <template v-else-if="account?.status === 'ready'">
       <UFormField label="Surcharge rate" description="Percent of the amount, up to Stripe’s cap for the card.">
-        <UInput v-model="percent" type="number" inputmode="decimal" min="0" max="100" step="0.01" :disabled="saving" class="w-32" :ui="{ trailing: 'pe-2' }" data-testid="card-surcharge">
+        <UInput v-model="percent" type="number" inputmode="decimal" :min="PAYMENT_TERMS.minimumBasisPoints / 100" :max="PAYMENT_TERMS.maximumBasisPoints / 100" step="0.01" :disabled="saving" class="w-32" :ui="{ trailing: 'pe-2' }" data-testid="card-surcharge">
           <template #trailing><span class="text-sm text-muted">%</span></template>
         </UInput>
       </UFormField>
@@ -19,6 +19,7 @@
 </template>
 
 <script setup lang="ts">
+import { PAYMENT_TERMS } from '~/shared/billing-model'
 import { isConnectedAccount, useConnectAccount, type ConnectedAccount } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard' })
@@ -28,10 +29,10 @@ const dashboardApi = useDashboardApi()
 const { account, setAccount, connectPending, connectError } = useConnectAccount()
 /** The rate as a percent in the field; basis points are what the account stores. */
 const percent = ref('')
-watch(account, (value) => { percent.value = value?.surchargeBasisPoints === null || value === null ? '3' : String(value.surchargeBasisPoints / 100) }, { immediate: true })
+watch(account, (value) => { percent.value = value?.surchargeBasisPoints === null || value === null ? '' : String(value.surchargeBasisPoints / 100) }, { immediate: true })
 const parsed = computed(() => {
   const points = Math.round(Number(percent.value) * 100)
-  return Number.isSafeInteger(points) && points >= 1 && points <= 10_000 ? points : null
+  return Number.isSafeInteger(points) && points >= PAYMENT_TERMS.minimumBasisPoints && points <= PAYMENT_TERMS.maximumBasisPoints ? points : null
 })
 const dirty = computed(() => !connectPending.value && !connectError.value && account.value?.status === 'ready' && parsed.value !== null && parsed.value !== account.value?.surchargeBasisPoints)
 const saving = ref(false)

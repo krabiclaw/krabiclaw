@@ -27,10 +27,9 @@ export async function paymentPictures(db: DbClient, organizationId: string, paym
   ])
   const productIds = [...bookings.map(row => row.product_id), ...lines.map(row => row.product_id).filter((id): id is string => !!id)]
   const locationIds = [...reservations.map(row => row.location_id), ...payments.map(payment => payment.location_id).filter((id): id is string => !!id)]
-  const [products, locations, organization] = await Promise.all([
+  const [products, locations] = await Promise.all([
     loadOwnerPictures(db, organizationId, 'product', productIds),
     loadOwnerPictures(db, organizationId, 'business_location', locationIds),
-    loadOwnerPictures(db, organizationId, 'organization', [organizationId]),
   ])
   const result = new Map<string, PaymentPicture>()
   for (const payment of payments) {
@@ -39,15 +38,15 @@ export async function paymentPictures(db: DbClient, organizationId: string, paym
     const booking = bookings.find(row => row.payment_id === payment.id)
     const reservation = reservations.find(row => row.payment_id === payment.id)
     const line = lines.find(row => row.payment_id === payment.id)
-    // The picture is the thing sold; failing that, where it was sold; failing that, the business's own mark.
-    const imageUrl = (booking && products.get(booking.product_id)?.imageUrl)
-      || (reservation && locations.get(reservation.location_id)?.imageUrl)
-      || (line?.product_id && products.get(line.product_id)?.imageUrl)
-      || (payment.location_id && locations.get(payment.location_id)?.imageUrl)
-      || organization.get(organizationId)?.imageUrl
-      || null
+    // Use only the image of the payment's actual subject; an absent image is optional.
+    const imageUrl = booking ? products.get(booking.product_id)?.imageUrl
+      : reservation ? locations.get(reservation.location_id)?.imageUrl
+      : line?.product_id ? products.get(line.product_id)?.imageUrl
+      : payment.subject_type === 'stay' && payment.location_id ? locations.get(payment.location_id)?.imageUrl
+      : null
+
     const visit = booking ?? reservation ?? null
-    result.set(payment.id, { title: snapshot.title, imageUrl, subjectTitle: visit?.title ?? null, startsAt: visit?.starts_at ?? null, endsAt: visit?.ends_at ?? null, timeZone: visit?.timezone ?? null })
+    result.set(payment.id, { title: snapshot.title, imageUrl: imageUrl ?? null, subjectTitle: visit?.title ?? null, startsAt: visit?.starts_at ?? null, endsAt: visit?.ends_at ?? null, timeZone: visit?.timezone ?? null })
   }
   return result
 }
@@ -117,15 +116,20 @@ export async function connectedStripe(db: DbClient, env: CloudflareEnv, organiza
 export async function payoutItems(db: DbClient, stripe: Stripe, options: { stripeAccount: string }, organizationId: string, payoutId: string): Promise<PayoutItem[]> {
   const payout = await stripe.payouts.retrieve(payoutId, {}, options)
   if (!payout.automatic) return []
-  const transactions = await stripe.balanceTransactions.list({ payout: payoutId, type: 'charge', limit: 100 }, options)
-  const chargeIds = transactions.data.map(row => typeof row.source === 'string' ? row.source : row.source?.id).filter((id): id is string => !!id)
+  const transactions = await stripe.balanceTransactions.list({ payout: payoutId, type: 'charge', limit: 100 }, options).autoPagingToArray({ limit: 10000 })
+  const chargeIds = transactions.map(row => {
+    const id = typeof row.source === 'string' ? row.source : row.source?.id
+    if (!id) throw new HTTPError({ statusCode: 502, statusMessage: 'Stripe payout transaction has no charge source', data: { code: 'PAYOUT_TRANSACTION_SOURCE_MISSING', field: `transactions.${row.id}.source` } })
+    return id
+  })
   if (!chargeIds.length) return []
   const payments = await queryAll<Payment>(db, `SELECT * FROM payments WHERE organization_id = ? AND stripe_charge_id IN (SELECT value FROM json_each(?))`, [organizationId, JSON.stringify(chargeIds)])
   const pictures = await paymentPictures(db, organizationId, payments)
   return payments.map((payment) => {
     const picture = pictures.get(payment.id)!
-    const transaction = transactions.data.find(row => (typeof row.source === 'string' ? row.source : row.source?.id) === payment.stripe_charge_id)
-    return { paymentId: payment.id, title: picture.title, imageUrl: picture.imageUrl, amount: transaction?.net ?? payment.captured_amount, currency: (transaction?.currency ?? payment.currency).toUpperCase(), startsAt: picture.startsAt, endsAt: picture.endsAt, timeZone: picture.timeZone, subjectTitle: picture.subjectTitle }
+    const transaction = transactions.find(row => (typeof row.source === 'string' ? row.source : row.source?.id) === payment.stripe_charge_id)
+    if (!transaction) throw new HTTPError({ statusCode: 502, statusMessage: 'Payout payment has no Stripe balance transaction', data: { code: 'PAYOUT_TRANSACTION_MISSING', field: `items.${payment.id}.amount` } })
+    return { paymentId: payment.id, title: picture.title, imageUrl: picture.imageUrl, amount: transaction.net, currency: transaction.currency.toUpperCase(), startsAt: picture.startsAt, endsAt: picture.endsAt, timeZone: picture.timeZone, subjectTitle: picture.subjectTitle }
   })
 }
 
@@ -137,18 +141,15 @@ export async function paymentPayoutDetail(db: DbClient, env: CloudflareEnv, prin
   const destination = typeof payout.destination === 'string' ? payout.destination : payout.destination?.id
   const external = destination ? await stripe.accounts.retrieveExternalAccount(options.stripeAccount, destination) : null
   const bank = external && external.object === 'bank_account' ? { bankName: external.bank_name ?? null, last4: external.last4 } : null
-  const bankByDefault = bank ?? (await (async () => {
-    const banks = await stripe.accounts.listExternalAccounts(options.stripeAccount, { object: 'bank_account', limit: 10 })
-    const row = banks.data.find(entry => entry.object === 'bank_account' && entry.default_for_currency)
-    return row && row.object === 'bank_account' ? { bankName: row.bank_name ?? null, last4: row.last4 } : null
-  })())
+  if (!destination) throw new HTTPError({ statusCode: 502, statusMessage: 'Stripe payout has no destination', data: { code: 'PAYOUT_DESTINATION_MISSING', field: 'payout.destination' } })
+
   return {
     id: payout.id,
     amount: payout.amount,
     currency: payout.currency.toUpperCase(),
     status: payout.status,
     arrivalDate: payout.arrival_date,
-    bank: bankByDefault,
+    bank,
     items: await payoutItems(db, stripe, options, principal.organizationId, payout.id),
   }
 }

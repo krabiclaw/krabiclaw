@@ -1,3 +1,4 @@
+import { BUSINESS_PLAN_ID, PAYMENTS_FEE } from '~/shared/billing-model'
 import { HTTPError, defineHandler  } from 'nitro';
 import { useRuntimeConfig } from 'nitro/runtime-config'
 
@@ -18,7 +19,7 @@ export default defineHandler(async (event) => {
 
   try {
     const plans = await getCachedPlans(env as EnvWithOrganizationCache, useRuntimeConfig().app.buildId)
-    return jsonResponse(plans)
+    return jsonResponse(plans.map(plan => ({ ...plan, paymentFee: plan.id === BUSINESS_PLAN_ID ? PAYMENTS_FEE : null })))
   } catch (error) {
     const planError = error instanceof BillingPlansError
       ? error
