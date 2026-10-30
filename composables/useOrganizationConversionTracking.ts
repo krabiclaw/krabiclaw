@@ -14,6 +14,7 @@ interface ConversionPayload {
   document_id?: string | null
   tier_label?: string | null
   tier_amount?: number | null
+  phone?: string | null
 }
 
 // The native record is the primary one and does not depend on Google Analytics, consent, or a GA
@@ -140,6 +141,11 @@ export function useOrganizationConversionTracking() {
     track({ event_name: 'product_order_external_click', stage: 'external_handoff', location_id: locationId, product_id: productId, page_type: 'product', page_path: pagePath })
   }
 
+  // The number as the link wrote it; the server decides whether it is the business's own.
+  function trackPhoneClick(phone: string, pagePath: string) {
+    track({ event_name: 'phone_click', stage: 'external_handoff', phone, page_path: pagePath })
+  }
+
   function trackAnnouncementView(pagePath: string) {
     track({ event_name: 'announcement_view', stage: 'viewed', page_path: pagePath })
   }
@@ -151,5 +157,5 @@ export function useOrganizationConversionTracking() {
     track({ event_name: 'announcement_cta_click', stage: 'external_handoff', page_path: pagePath })
   }
 
-  return { track, pageEventId, trackProductView, trackCheckoutStart, trackConsultationClick, mirrorSubmission, trackDonationClick, trackLinkClick, trackProductOrder, trackAnnouncementView, trackAnnouncementCtaClick }
+  return { track, pageEventId, trackProductView, trackCheckoutStart, trackConsultationClick, mirrorSubmission, trackDonationClick, trackLinkClick, trackProductOrder, trackPhoneClick, trackAnnouncementView, trackAnnouncementCtaClick }
 }
