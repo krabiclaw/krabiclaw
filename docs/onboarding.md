@@ -179,9 +179,9 @@ Lodging homes have their own addresses and timezones. Add a home as a draft,
 configure its listing and nightly calendar, then publish it. For Airbnb listings,
 request synchronization: the live-home allowance is checked before work is
 queued, and KrabiClaw imports and activates selected listings in the background
-without a separate activation request. See the [Airbnb sync contract](shared-auth-contract.md#35-airbnb-listings-sync-in-the-background). Drafts are free and unlimited. Every plan includes
-2 live homes; Growth and Business then charge $4 per additional home per month
-at period end. Locations are not billed on any plan, and a home's location
+without a separate activation request. See the [Airbnb sync contract](shared-auth-contract.md#35-airbnb-listings-sync-in-the-background). Drafts are free and unlimited. Basic includes
+1 live home; Growth and Business charge $4 per home per month at period
+end. Locations are not billed on any plan, and a home's location
 is not a second charge. See
 [Plans](../PRODUCT.md#plans) and [live homes](shared-auth-contract.md#34-live-homes).
 

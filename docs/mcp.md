@@ -358,9 +358,9 @@ Verify actual delivery through the canonical guest conversation's receipts.
 
 These tools share the dashboard and native app's domain operations. New
 customers need Business and a ready Stripe connection for guests to book and
-pay on the website; recording a stay in MCP is not that payment flow. Plans
-include 2 live homes; Growth and Business then bill $4 per additional home per
-month at period end. Locations are not billed on any plan. A live home is
+pay on the website; recording a stay in MCP is not that payment flow. Basic
+includes 1 live home; Growth and Business bill $4 per home per month at
+period end. Locations are not billed on any plan. A live home is
 active at its active location and published or syncing through an enabled
 Channex mapping; other homes are free drafts. See
 [billing](payments/payments.md) and the [live-home contract](shared-auth-contract.md#34-live-homes).

@@ -37,7 +37,7 @@ function priceProductId(price: Stripe.Price): string {
 /**
  * The metered price each meter bills through: the one active product of its
  * family, its `monthly_price_id`, on the active meter with the event name and
- * formula `BILLING_METERS` names, at exactly the published tiers or rate.
+ * formula `BILLING_METERS` names, at exactly the published rate.
  */
 export function selectMeteredPrices({ products, prices, meters }: StripeCatalog): Record<BillingMeterKey, Stripe.Price> {
   return Object.fromEntries(BILLING_METER_KEYS.map(key => {
@@ -47,12 +47,7 @@ export function selectMeteredPrices({ products, prices, meters }: StripeCatalog)
     const product = matching[0]!
     const price = prices.find(row => row.id === product.metadata.monthly_price_id?.trim() && priceProductId(row) === product.id)
     const meter = meters.find(row => row.id === price?.recurring?.meter)
-    const tiers = 'tiers' in definition ? definition.tiers : null
-    const unitAmountDecimal = 'unitAmountDecimal' in definition ? definition.unitAmountDecimal : null
-    const rateMatches = tiers
-      ? price?.billing_scheme === 'tiered' && price.tiers_mode === 'graduated' && price.tiers?.length === tiers.length
-        && price.tiers.every((tier, index) => (tier.up_to ?? 'inf') === tiers[index]!.up_to && tier.unit_amount === tiers[index]!.unit_amount && tier.flat_amount === null)
-      : price?.billing_scheme === 'per_unit' && price.unit_amount_decimal !== null && Number(String(price.unit_amount_decimal)) === Number(unitAmountDecimal)
+    const rateMatches = price?.billing_scheme === 'per_unit' && price.unit_amount_decimal !== null && Number(String(price.unit_amount_decimal)) === Number(definition.unitAmountDecimal)
     if (!price || !price.active || price.currency !== 'usd' || price.recurring?.usage_type !== 'metered' || price.recurring.interval !== 'month'
       || price.recurring.interval_count !== 1 || !rateMatches || !meter || meter.status !== 'active'
       || meter.event_name !== definition.eventName || meter.default_aggregation.formula !== definition.formula) {
