@@ -12,7 +12,7 @@
         <button
           type="button"
           class="flex size-10 items-center justify-center rounded-full hover:bg-muted transition text-default"
-          :aria-label="t('payment.cancel')"
+          :aria-label="t('payment.back')"
           :disabled="working || completing"
           @click="leave"
         >
@@ -48,7 +48,7 @@
               <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.dates') }}</h3>
               <p class="mt-1 text-sm text-default">{{ stayRange }}</p>
             </div>
-            <UButton v-if="offeringPath && handoff.state !== 'paid'" color="neutral" variant="soft" size="sm" :label="t('payment.change')" :loading="working" :disabled="working || completing" @click="changeStay('dates')" />
+            <UButton v-if="offeringPath && handoff.state !== 'paid' && !paid && !outcome" color="neutral" variant="soft" size="sm" :label="t('payment.change')" :loading="working" :disabled="working || completing" @click="changeStay('dates')" />
           </div>
           <div v-else-if="handoff.starts_at && handoff.ends_at && handoff.timezone" class="flex items-start justify-between gap-4 border-t border-default pt-5" data-payment-time>
             <div>
@@ -63,7 +63,7 @@
               <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.guests') }}</h3>
               <p class="mt-1 text-sm text-default">{{ guests }}</p>
             </div>
-            <UButton v-if="offeringPath && handoff.stay && handoff.state !== 'paid'" color="neutral" variant="soft" size="sm" :label="t('payment.change')" :loading="working" :disabled="working || completing" @click="changeStay('guests')" />
+            <UButton v-if="offeringPath && handoff.stay && handoff.state !== 'paid' && !paid && !outcome" color="neutral" variant="soft" size="sm" :label="t('payment.change')" :loading="working" :disabled="working || completing" @click="changeStay('guests')" />
             <UButton v-else-if="offeringPath && !handoff.stay" :to="offeringPath" color="neutral" variant="soft" size="sm" :label="t('payment.change')" />
           </div>
 
@@ -392,10 +392,6 @@ async function complete() {
 }
 
 async function leave() {
-  if (handoff.value?.stay && handoff.value.state !== 'paid' && offeringPath.value) {
-    await changeStay('dates')
-    return
-  }
   await navigateTo(offeringPath.value || localePath('/'))
 }
 

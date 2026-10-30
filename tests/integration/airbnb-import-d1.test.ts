@@ -6,7 +6,8 @@ import { Miniflare } from 'miniflare'
 import { H3, HTTPError } from 'nitro/h3'
 import { hashPassword } from 'better-auth/crypto'
 import * as schema from '../../server/db/schema.ts'
-import { listingCalendar } from '../../server/integrations/channex/airbnb-listing.ts'
+import { ChannexError } from '../../server/integrations/channex/client.ts'
+import { listingCalendar, listingMinimumNights } from '../../server/integrations/channex/airbnb-listing.ts'
 import { AirbnbConnection, type ImportContentReport } from '../../server/integrations/channex/airbnb-connection.ts'
 import { createStay, createStayHome, deliverPendingChannelNights, readStayCalendar, readStayHome, setStayNights, stayHomeInput, updateStayHome } from '../../server/domain/stays.ts'
 import { deleteMediaAsset, getMediaAsset } from '../../server/utils/media-asset-manager.ts'
@@ -562,7 +563,16 @@ test('actual weekday and weekend rules survive default edits, protected refresh 
     await assert.rejects(connection.refreshContent(productId), { status: 422, data: { code: 'CURRENCY_MISMATCH' } })
     assert.equal((await readStayHome(db, manager, productId)).currency, 'USD')
     channex.currency = 'USD'
-    // The newly exposed dates inherit the canonical rules, including an actual weekend amount.
+    // Native weekday defaults own newly opened weekday-only dates; no explicit ARI replay is needed.
+    await updateStayHome(env, db, manager, productId, { calendar_rules: { day_of_week_min_nights: authoredRules.day_of_week_min_nights } })
+    const weekdayOnlyStart = channex.seen.length
+    context.mock.timers.enable({ apis: ['Date'], now: Date.now() + 7 * 86_400_000 })
+    assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 0 })
+    assert.deepEqual(channex.seen.slice(weekdayOnlyStart).filter(request => request.method === 'POST'), [])
+    assert.deepEqual(channex.ratePlans.get(channex.ratePlan)!.min_stay_arrival, [3, 10, 10, 10, 10, 10, 10])
+    context.mock.timers.reset()
+    await updateStayHome(env, db, manager, productId, { calendar_rules: authoredRules })
+    // Native prices are scalar; only the newly exposed Friday/Saturday prices need dated delivery.
     context.mock.timers.enable({ apis: ['Date'], now: Date.now() + 7 * 86_400_000 })
     assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 1 })
     const opened = addDays(firstDate, 500)
@@ -570,7 +580,8 @@ test('actual weekday and weekend rules survive default edits, protected refresh 
     assert.ok(weekend)
     assert.equal(channex.restrictions[weekend]!.rate, '250.00')
     const openedMonday = Array.from({ length: 7 }, (_, offset) => addDays(opened, offset)).find(date => new Date(`${date}T00:00:00Z`).getUTCDay() === 1)!
-    assert.equal(channex.restrictions[openedMonday]!.min_stay_arrival, 3)
+    assert.equal(channex.restrictions[openedMonday], undefined, 'weekday minima are left to the verified native rate-plan template')
+    assert.deepEqual((await readStayCalendar(db, manager, { productId, from: openedMonday, to: addDays(openedMonday, 1) })).nights.map(night => [night.min_stay_arrival, night.price_minor]), [[3, 21000]])
     const visible = await readStayCalendar(db, manager, { productId, from: weekend, to: addDays(weekend, 1) })
     assert.deepEqual(visible.nights.map(night => [night.price_minor, night.min_stay_arrival]), [[25000, 10]])
   } finally {
@@ -946,7 +957,7 @@ test('the backfill route fills a home imported without content and the listings 
     channex.content = true
     const filled = await call('POST', `/imports/${productId}/content`)
     assert.equal(filled.status, 200)
-    assert.deepEqual(filled.body, { product_id: productId, stage: 'complete', content: {
+    assert.deepEqual(filled.body, { product_id: productId, stage: 'complete', channel_push: { state: 'pushed', detail: null }, content: {
       photos_imported: PHOTOS.map(photo => photo.id), photos_skipped: [], photos_upgraded: [], photos_removed: [], photos_unplaced: [], unmatched_amenities: ['HOVERBOARD_DOCK'], unmapped_check_in_category: null, truncated_fields: [], photo_rooms_skipped: 2, kept_host_edits: [],
     } satisfies ImportContentReport })
     const after = await readStayHome(db, manager, productId)
@@ -1136,10 +1147,34 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     // A requested resync reads Airbnb's actual global default, then corrects the unchanged imported canonical value.
     channex.availabilityRules.default_min_nights = 7
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 202)
+    const unchangedCalendarStart = channex.seen.length
     await runCron()
     assert.deepEqual(await job(), { action: 'sync', state: 'done', product_id: productId, last_error_code: null, attempts: 0 })
     assert.equal((await readStayHome(db, manager, productId)).min_nights, 7)
     assert.equal(channex.ratePlans.get(channex.ratePlan)!.min_stay_arrival, 7)
+    assert.deepEqual(channex.seen.slice(unchangedCalendarStart).filter(request => request.method === 'POST' && ['/restrictions', '/availability'].includes(request.path)), [], 'a refresh does not replay an already confirmed calendar')
+    // A completed-home sync retains the refresh's pending delivery instead of reporting done or forcing another full sync.
+    globalThis.fetch = async (input, init = {}) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
+      if (init.method === 'POST' && url.pathname === '/api/v1/restrictions') return new Response('Pause this property', { status: 429 })
+      return channex.fetch(input, init)
+    }
+    const queuedNight = await setStayNights(db, env, manager, { product_id: productId, from: addDays(today(), 20), to: addDays(today(), 21), price_minor: 25000 })
+    assert.equal(queuedNight.channel_push?.state, 'pending')
+    assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 202)
+    assert.deepEqual(await runCron(), { stepped: 1, done: 0, failed: 0 })
+    assert.deepEqual(await job(), { action: 'sync', state: 'pending', product_id: productId, last_error_code: null, attempts: 0 })
+    const waitingRefresh = await new AirbnbConnection(db, env, ORG, OWNER).refreshContent(productId)
+    assert.deepEqual(waitingRefresh.channel_push, queuedNight.channel_push)
+    assert.equal(await db.prepare('SELECT completed_at FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first('completed_at'), null)
+    globalThis.fetch = channex.fetch as typeof fetch
+    await db.prepare("UPDATE channel_night_pushes SET retry_at = '2000-01-01T00:00:00.000Z' WHERE product_id = ? AND state = 'pending'").bind(productId).run()
+    await db.prepare("UPDATE airbnb_sync_jobs SET next_attempt_at = '2000-01-01T00:00:00.000Z' WHERE listing_id = ?").bind(LISTING).run()
+    const confirmedRefreshStart = channex.seen.length
+    assert.deepEqual(await runCron(), { stepped: 1, done: 1, failed: 0 })
+    assert.deepEqual(await job(), { action: 'sync', state: 'done', product_id: productId, last_error_code: null, attempts: 0 })
+    assert.deepEqual(channex.seen.slice(confirmedRefreshStart).filter(request => request.method === 'POST' && ['/restrictions', '/availability'].includes(request.path)), [{ method: 'POST', path: '/restrictions' }])
+    assert.deepEqual((await readStayCalendar(db, manager, { productId, from: addDays(today(), 20), to: addDays(today(), 21) })).nights.map(night => [night.price_minor, night.channel]), [[25000, { state: 'pushed', detail: null }]])
     // An authored canonical change survives the next source refresh and the full sync restores Airbnb to it.
     await updateStayHome(env, db, manager, productId, { min_nights: 9, description: 'Host words stay.' })
     channex.availabilityRules.default_min_nights = 11
@@ -1385,7 +1420,7 @@ test('a paid home retains a failed meter report and retries terminal billing bef
     assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).done, 1)
     assert.deepEqual(await job(), { state: 'done', last_error_code: null, attempts: 2, lease_token: null, lease_until: null })
     assert.deepEqual(receipts, [{ event: 'krabiclaw_homes', customer: 'cus_paid_host', value: '1' }])
-    assert.deepEqual(channex.seen.slice(providerStart).filter(entry => entry.method !== 'GET'), [{ method: 'POST', path: '/restrictions' }, { method: 'POST', path: '/availability' }], 'a completed sync retries its absolute calendar delivery without repeating content writes')
+    assert.deepEqual(channex.seen.slice(providerStart).filter(entry => entry.method !== 'GET'), [], 'billing recovery does not repeat confirmed calendar or content writes')
     assert.equal((await readStayHome(db, manager, prepared.product_id)).live, true)
 
     // A native Stripe refusal stays permanent after the committed-state formatter.
@@ -1411,6 +1446,184 @@ test('a paid home retains a failed meter report and retries terminal billing bef
     await runtime.dispose()
   }
 })
+
+for (const authored of [false, true]) {
+  test(`receipt resume keeps source inheritance and true exceptions ${authored ? 'after a host edit' : 'without a host edit'}`, { timeout: 120_000 }, async () => {
+    const { runtime, db, env } = await boot()
+    const channex = new FakeChannex()
+    channex.availabilityRules.default_min_nights = 2
+    channex.calendarMinimum = () => 2
+    const realFetch = globalThis.fetch
+    globalThis.fetch = channex.fetch as typeof fetch
+    try {
+      const connection = await connected(db, env, channex)
+      await db.prepare(`CREATE TRIGGER refuse_resume_mapping BEFORE INSERT ON product_channel_mappings BEGIN SELECT RAISE(ABORT, 'Receipt mapping refused'); END`).run()
+      await assert.rejects(connection.prepare(LISTING, form), /Receipt mapping refused/)
+      const productId = await db.prepare('SELECT id FROM products').first<string>('id')
+      assert.ok(productId)
+      if (authored) await updateStayHome(env, db, manager, productId, { min_nights: 9, base_price_minor: 20000 })
+      await db.prepare('DROP TRIGGER refuse_resume_mapping').run()
+      const explicit = addDays(today(), 1)
+      const inherited = addDays(today(), 2)
+      channex.availabilityRules.default_min_nights = 5
+      channex.calendarMinimum = date => date === explicit ? 2 : 5
+      channex.calendarRate = date => date === explicit ? 189.5 : 100
+      globalThis.fetch = async (input, init = {}) => {
+        const response = await channex.fetch(input, init)
+        const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
+        if (url.pathname.endsWith('/action/listing_details')) {
+          const body = await response.json() as { data: { listing: { pricing_settings: { default_daily_price: number } } } }
+          body.data.listing.pricing_settings.default_daily_price = 100
+          return Response.json(body)
+        }
+        return response
+      }
+      assert.equal((await connection.prepare(LISTING, form)).product_id, productId)
+      const home = await readStayHome(db, manager, productId)
+      assert.deepEqual([home.min_nights, home.base_price_minor], authored ? [9, 20000] : [2, 18950])
+      assert.deepEqual((await db.prepare('SELECT date, min_stay_arrival, price_minor FROM product_nights WHERE product_id = ? AND date IN (?, ?) ORDER BY date').bind(productId, explicit, inherited).all()).results,
+        [{ date: explicit, min_stay_arrival: 2, price_minor: 18950 }, { date: inherited, min_stay_arrival: null, price_minor: null }])
+      await updateStayHome(env, db, manager, productId, { min_nights: 11, base_price_minor: 23000 })
+      const calendar = await readStayCalendar(db, manager, { productId, from: explicit, to: addDays(inherited, 1) })
+      assert.deepEqual(calendar.nights.map(night => [night.date, night.min_stay_arrival, night.price_minor]), [[explicit, 2, 18950], [inherited, 11, 23000]])
+    } finally {
+      globalThis.fetch = realFetch
+      await runtime.dispose()
+    }
+  })
+}
+
+test('a source-owned legacy default becomes inheritance after a refused canonical-default push', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  const channex = new FakeChannex()
+  const explicit = addDays(today(), 1)
+  const inherited = addDays(today(), 2)
+  channex.calendarMinimum = date => date === explicit ? 2 : 5
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const connection = await connected(db, env, channex)
+    const productId = (await connection.prepare(LISTING, form)).product_id
+    await importAll(connection, db, channex, productId)
+    // A pre-v23 source import materialized each resolved default instead of recording inheritance.
+    await db.prepare("UPDATE product_nights SET min_stay_arrival = COALESCE(min_stay_arrival, 5), price_minor = COALESCE(price_minor, 18950) WHERE product_id = ? AND source = 'import'").bind(productId).run()
+    globalThis.fetch = async (input, init = {}) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
+      if (init.method === 'PUT' && url.pathname.endsWith('/availability_settings')) return new Response('Default refused', { status: 400 })
+      return channex.fetch(input, init)
+    }
+    await assert.rejects(updateStayHome(env, db, manager, productId, { min_nights: 9, base_price_minor: 20000 }), (error: unknown) => {
+      assert(error instanceof HTTPError)
+      assert.deepEqual([error.status, error.data?.code, error.data?.committed], [503, 'CHANNEL_PUSH_FAILED', true])
+      return true
+    })
+    assert.deepEqual([(await readStayHome(db, manager, productId)).min_nights, channex.availabilityRules.default_min_nights], [9, 5])
+    globalThis.fetch = channex.fetch as typeof fetch
+    const refreshed = await connection.refreshContent(productId)
+    assert(refreshed.content.kept_host_edits.includes('min_nights'))
+    assert.deepEqual((await db.prepare('SELECT date, min_stay_arrival, price_minor FROM product_nights WHERE product_id = ? AND date IN (?, ?) ORDER BY date').bind(productId, explicit, inherited).all()).results,
+      [{ date: explicit, min_stay_arrival: 2, price_minor: null }, { date: inherited, min_stay_arrival: null, price_minor: null }])
+    const calendar = await readStayCalendar(db, manager, { productId, from: explicit, to: addDays(inherited, 1) })
+    assert.deepEqual(calendar.nights.map(night => [night.date, night.min_stay_arrival, night.price_minor]), [[explicit, 2, 20000], [inherited, 9, 20000]])
+    const source = await listingCalendar(env, channex.channelId, LISTING, TZ)
+    assert.deepEqual(source.filter(night => [explicit, inherited].includes(night.date)).map(night => [night.date, night.minStay, night.rate]), [[explicit, 2, '200'], [inherited, 9, '200']])
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+for (const target of ['rolling default', 'listing minimum'] as const) {
+  for (const outcome of ['refused', 'refused with failed completion', 'uncertain'] as const) {
+    test(`a content refresh preserves ${outcome} ${target} write provenance through completion`, { timeout: 120_000 }, async () => {
+      const { runtime, db, env } = await boot()
+      const channex = new FakeChannex()
+      const realFetch = globalThis.fetch
+      globalThis.fetch = channex.fetch as typeof fetch
+      try {
+        const connection = await connected(db, env, channex)
+        const productId = (await connection.prepare(LISTING, form)).product_id
+        await importAll(connection, db, channex, productId)
+        const canonicalMinimum = target === 'listing minimum' ? 7 : 5
+        if (target === 'listing minimum') {
+          await updateStayHome(env, db, manager, productId, { min_nights: canonicalMinimum })
+          channex.availabilityRules.default_min_nights = 1
+        } else channex.ratePlans.get(channex.ratePlan)!.min_stay_arrival = 1
+        if (outcome === 'refused with failed completion') await db.prepare(`CREATE TRIGGER refuse_refresh_report BEFORE UPDATE OF import_content ON product_channel_mappings BEGIN SELECT RAISE(ABORT, 'Refresh report refused'); END`).run()
+        let failWrite = true
+        let attempts = 0
+        globalThis.fetch = async (input, init = {}) => {
+          const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
+          const targeted = target === 'listing minimum' ? url.pathname.endsWith('/availability_settings') : url.pathname === `/api/v1/rate_plans/${channex.ratePlan}`
+          if (init.method === 'PUT' && targeted) {
+            attempts++
+            if (failWrite) {
+              if (outcome === 'uncertain') await channex.fetch(input, init)
+              return new Response(outcome === 'uncertain' ? 'Acknowledgement lost' : 'Default refused', { status: outcome === 'uncertain' ? 503 : 400 })
+            }
+          }
+          return channex.fetch(input, init)
+        }
+        if (target === 'listing minimum' && outcome === 'refused') {
+          // An unreadable required control fails before a write intent exists, and never fabricates a policy.
+          const notice = channex.availabilityRules.booking_lead_time
+          channex.availabilityRules.booking_lead_time = null
+          await assert.rejects(connection.refreshContent(productId), (error: unknown) => {
+            assert(error instanceof HTTPError)
+            assert.deepEqual([error.status, error.data?.code, error.data?.committed], [503, 'CHANNEL_PUSH_FAILED', true])
+            assert.match(String(error.data?.reason), /missing booking_lead_time/)
+            return true
+          })
+          assert.equal(attempts, 0)
+          assert.deepEqual(await db.prepare('SELECT status, pending_step, operation_id FROM channex_connections').first(), { status: 'connected', pending_step: null, operation_id: null })
+          channex.availabilityRules.booking_lead_time = notice
+        }
+        await assert.rejects(connection.refreshContent(productId), (error: unknown) => {
+          assert(error instanceof HTTPError)
+          assert.deepEqual([error.status, error.data?.code, error.data?.committed], [503, 'CHANNEL_PUSH_FAILED', true])
+          assert(error.cause && typeof error.cause === 'object')
+          const wrapped = Reflect.get(error.cause, 'cause')
+          const source = wrapped instanceof AggregateError ? wrapped.errors[0] : wrapped
+          assert(source instanceof ChannexError)
+          assert.equal(source.writeRefused, outcome !== 'uncertain')
+          assert.equal(source.uncertain, outcome === 'uncertain')
+          if (outcome === 'refused with failed completion') {
+            assert(wrapped instanceof AggregateError)
+            assert.equal(wrapped.errors.length, 2)
+            assert.match(error.message, /Failed query: UPDATE product_channel_mappings SET import_content/)
+            assert(errorChainForTelemetry(wrapped.errors[1]).some(cause => cause.message.includes('Refresh report refused')))
+          }
+          return true
+        })
+        assert.equal(attempts, 1)
+        const state = await db.prepare('SELECT status, pending_step, operation_id FROM channex_connections').first<{ status: string; pending_step: string | null; operation_id: string | null }>()
+        const currentMinimum = target === 'listing minimum' ? await listingMinimumNights(env, channex.channelId, LISTING) : channex.ratePlans.get(channex.ratePlan)!.min_stay_arrival
+        if (outcome === 'uncertain') {
+          assert.equal(state!.status, 'needs_review')
+          assert.equal(state!.pending_step, target === 'listing minimum' ? 'update_listing_minimum' : 'update_calendar_defaults')
+          assert.ok(state!.operation_id)
+          assert.equal(currentMinimum, canonicalMinimum, 'the unconfirmed mutation actually applied')
+          await assert.rejects(connection.refreshContent(productId), { status: 409, data: { code: 'CONNECTION_NEEDS_REVIEW' } })
+          assert.equal(attempts, 1, 'the uncertain provider write remains fenced')
+        } else {
+          assert.deepEqual(state, { status: 'connected', pending_step: null, operation_id: null })
+          assert.equal(currentMinimum, 1, 'the refused mutation did not apply')
+          if (outcome === 'refused with failed completion') await db.prepare('DROP TRIGGER refuse_refresh_report').run()
+          failWrite = false
+          assert.equal((await connection.refreshContent(productId)).stage, 'complete')
+          assert.equal(attempts, 2)
+          const readback = await fetch(`${env.CHANNEX_BASE_URL}/rate_plans/${channex.ratePlan}`).then(response => response.json()) as { data: { attributes: { min_stay_arrival: number } } }
+          assert.equal(readback.data.attributes.min_stay_arrival, canonicalMinimum)
+          if (target === 'listing minimum') assert.equal(await listingMinimumNights(env, channex.channelId, LISTING), canonicalMinimum)
+          assert.deepEqual(await db.prepare('SELECT status, pending_step, operation_id FROM channex_connections').first(), { status: 'connected', pending_step: null, operation_id: null })
+        }
+      } finally {
+        globalThis.fetch = realFetch
+        await runtime.dispose()
+      }
+    })
+  }
+}
 
 test('a failed verification read retains the completed provider write for review', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()

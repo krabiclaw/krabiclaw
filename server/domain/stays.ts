@@ -1287,8 +1287,8 @@ export async function syncStayCalendar(db: DbClient, env: ChannexEnv, access: St
 
 /**
  * Deliver due nights and extend dated delivery as the booking window rolls.
- * Native rate-plan defaults cover ordinary dates; actual listing calendar
- * rules also need their newly opened dates delivered through ARI.
+ * Native rate-plan defaults cover weekday minimums and base prices.
+ * Only a differing weekend price needs dated delivery as new dates open.
  */
 export async function deliverPendingChannelNights(db: DbClient, env: StayMutationEnv): Promise<{ homes: number }> {
   const homes = await queryAll<{ organization_id: string; product_id: string; due: number }>(db, `SELECT organization_id, product_id, MAX(due) AS due FROM (
@@ -1297,7 +1297,7 @@ export async function deliverPendingChannelNights(db: DbClient, env: StayMutatio
       UNION ALL
       SELECT m.organization_id, m.product_id, 0 AS due FROM product_channel_mappings m
         JOIN product_stay_configs c ON c.organization_id = m.organization_id AND c.product_id = m.product_id
-       WHERE m.provider = 'channex' AND m.enabled = 1 AND c.calendar_rules IS NOT NULL
+       WHERE m.provider = 'channex' AND m.enabled = 1 AND json_extract(c.calendar_rules, '$.weekend_price_minor') IS NOT NULL
     ) GROUP BY organization_id, product_id`, [new Date().toISOString()])
   const failures: string[] = []
   let delivered = 0
@@ -1306,9 +1306,9 @@ export async function deliverPendingChannelNights(db: DbClient, env: StayMutatio
       const home = await readStayHome(db, { organizationId: row.organization_id, actorId: 'system', manage: true }, row.product_id)
       const from = homeToday(home.timezone)
       const to = addDays(from, STAY_CALENDAR_DAYS)
-      const known = home.calendar_rules === null ? [] : await queryAll<{ date: string }>(db, "SELECT date FROM channel_night_pushes WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND date >= ? AND date < ?", [row.organization_id, row.product_id, from, to])
+      const known = home.calendar_rules?.weekend_price_minor === undefined ? [] : await queryAll<{ date: string }>(db, "SELECT date FROM channel_night_pushes WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND date >= ? AND date < ?", [row.organization_id, row.product_id, from, to])
       const queued = new Set(known.map(night => night.date))
-      const added = home.calendar_rules === null ? [] : Array.from({ length: STAY_CALENDAR_DAYS }, (_, offset) => addDays(from, offset)).filter(date => !queued.has(date))
+      const added = home.calendar_rules?.weekend_price_minor === undefined ? [] : Array.from({ length: STAY_CALENDAR_DAYS }, (_, offset) => addDays(from, offset)).filter(date => !queued.has(date) && resolveStayNightPolicy(home, date).price_minor !== home.base_price_minor)
       if (!added.length && !row.due) continue
       const read = (from: string, to: string) => homeNights(db, row.organization_id, home, from, to)
       if (added.length) await pushStayNights(db, env, row.organization_id, home, added, read)

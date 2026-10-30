@@ -78,7 +78,7 @@
   "payment.continue_to_pay": "お支払いへ進む",
   "payment.paid": "お支払い済み",
   "payment.pay": "{amount} を支払う",
-  "payment.cancel": "キャンセル",
+  "payment.back": "戻る",
   "payment.declined": "お支払いは完了しませんでした。",
   "booking.confirmed": "予約が確定しました",
   "booking.request_received": "リクエストを受け付けました",

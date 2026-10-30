@@ -31,22 +31,18 @@ Actual optional weekday minima and the actual Friday/Saturday weekend amount
 are stored in `calendar_rules`; an absent provider field stays absent. Imported
 effective min/price values equal to the actual source policy inherit it (`NULL`)
 instead of becoming 500 explicit exceptions. Differing dated values remain
-explicit. The normal ARI task sends new dates as the window advances, so a real
-weekday or weekend rule survives beyond the initial import horizon. Nonempty
+explicit. Channex rolls the weekday minimums forward itself; the normal ARI
+task delivers differing weekend prices as their dates enter the window. Nonempty
 `seasonal_min_nights` is rejected visibly: its endpoint/collision semantics have
 not been established, and no seasonal rule feature is offered.
 
-Weekday order evidence (2026-10-30): the official Channex staging rate-plan
-[advanced editor](https://staging.channex.io/rooms/rates/11f68565-4e00-4b62-9d44-ec59fc3fb876/edit)
-was inspected without saving. Its actual DOM named `closed_to_arrival0` through
-`closed_to_arrival6` alongside `Mo, Tu, We, Th, Fr, Sa, Su`; the same indices
-appeared for `closed_to_departure` and `stop_sell`. The minimum input itself was
-scalar. Applying that shared provider weekday-index convention to the documented
-seven-value minimum array is an inference, supported by exact array and dated
-readback protocol regressions; a live nonuniform minimum edit was not performed.
-The [rate-plan API](https://docs.channex.io/api-v.1-documentation/rate-plans-collection#fields)
-allows one value or seven weekday defaults. Airbnb's live listing schema
-explicitly reports its weekday minimum array Monday-first, and Airbnb identifies
+Provider evidence (2026-10-30): the current
+[create](https://docs.channex.io/api-v.1-documentation/rate-plans-collection/create-rate-plan-api.md)
+and [update](https://docs.channex.io/api-v.1-documentation/rate-plans-collection/update-rate-plan-api.md)
+OpenAPI schemas explicitly define seven Monday-first minimum values. Their
+occupancy option accepts only a scalar rate, so weekend prices require dated
+ARI delivery. Airbnb's live listing schema also reports its weekday minimum
+array Monday-first, and Airbnb identifies
 [weekend pricing as Friday and Saturday](https://www.airbnb.com/help/article/512).
 
 

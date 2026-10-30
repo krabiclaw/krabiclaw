@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:84be3f669127b174f2677828f83a55ba68a44d2a4a6462817a0a1f4267384273",
-  "documentationFingerprint": "sha256:d0d51403ddbac4b3970c3a8969332e79fd91aab758dc753883815500053b97c4",
+  "fingerprint": "sha256:f31d9b8f21d2d2728d1c3c892c251b2fb0160b1420563213626a461ef3a0175a",
+  "documentationFingerprint": "sha256:298f05a53b376c3356c44c3db1d730779d96ecbbab04aee008d1989719f671cb",
   "tools": [
     {
       "name": "add_organization_language",
@@ -98607,7 +98607,7 @@
     {
       "name": "set_stay_nights",
       "title": "Set stay nights",
-      "description": "Close or open nights, set a nightly price, or set stay rules for a date range at one place to stay. Fields left out keep each night’s value; price_minor null returns to the base price; reset removes the range’s overrides. Updates the website’s bookable nights and, when connected, pushes prices, availability and stay rules to the home’s Airbnb listing through Channex. Returns channel_push on success. A failed channel update raises CHANNEL_PUSH_FAILED with committed:true; read the calendar before retrying.",
+      "description": "Close or open nights, set a nightly price, or set stay rules for a date range at one place to stay. Fields left out keep each night’s value; price_minor null inherits the weekend price on Friday/Saturday when configured, otherwise the base price; reset removes the range’s overrides. Updates the website’s bookable nights and, when connected, pushes prices, availability and stay rules to the home’s Airbnb listing through Channex. Returns channel_push on success. A failed channel update raises CHANNEL_PUSH_FAILED with committed:true; read the calendar before retrying.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [

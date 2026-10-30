@@ -78,7 +78,7 @@
   "payment.continue_to_pay": "ดำเนินการชำระเงิน",
   "payment.paid": "ชำระแล้ว",
   "payment.pay": "ชำระ {amount}",
-  "payment.cancel": "ยกเลิก",
+  "payment.back": "ย้อนกลับ",
   "payment.declined": "การชำระเงินไม่สำเร็จ",
   "booking.confirmed": "ยืนยันการจองแล้ว",
   "booking.request_received": "ได้รับคำขอแล้ว",

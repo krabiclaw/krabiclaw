@@ -42,7 +42,7 @@ export default {
     "continue_to_pay": "Continue to pay",
     "paid": "Paid",
     "pay": "Pay {amount}",
-    "cancel": "Cancel",
+    "back": "Back",
     "declined": "The payment was not completed.",
     "verifying": "Confirming your payment…",
     "processing": "Your payment is processing",

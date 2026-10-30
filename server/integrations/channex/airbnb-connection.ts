@@ -256,7 +256,14 @@ export class AirbnbConnection {
       }, async (check) => {
         this.operationCheck = check
         try { return await action(row, check) } catch (error) {
-          refusedWrite = error instanceof ChannexError && error.writeRefused
+          // HTTPError retains its details object as cause; completion and heartbeat may also aggregate failures.
+          const causes = new Set<unknown>([error])
+          for (const cause of causes) {
+            if (cause && typeof cause === 'object' && 'cause' in cause) causes.add(cause.cause)
+            if (cause instanceof AggregateError) for (const nested of cause.errors) causes.add(nested)
+          }
+          const providerErrors = [...causes].filter(cause => cause instanceof ChannexError)
+          refusedWrite = providerErrors.length > 0 && providerErrors.every(cause => cause.writeRefused)
           throw error
         }
       }, () => { this.operationCheck = undefined })
@@ -264,7 +271,7 @@ export class AirbnbConnection {
       return result
     } catch (error) {
       // A write that was sent and not provably refused stays locked for review.
-      const uncertain = row.pending_step !== null && !refusedWrite && !(error instanceof ChannexError && error.writeRefused)
+      const uncertain = row.pending_step !== null && !refusedWrite
       try {
         await this.save(row, uncertain ? { status: 'needs_review' } : { operation_id: null, pending_step: null })
       } catch (cleanupError) {
@@ -781,7 +788,7 @@ export class AirbnbConnection {
    * before content was carried over, or whose Airbnb content changed. Same
    * lock, same work, same report.
    */
-  async refreshContent(productId: string): Promise<{ product_id: string; stage: ImportStage; content: ImportContentReport }> {
+  async refreshContent(productId: string): Promise<{ product_id: string; stage: ImportStage; content: ImportContentReport; channel_push: SuccessfulChannelPush | null }> {
     return await this.locked(async (row) => {
       if (row.status !== 'connected' || !row.channel_id) fail(409, 'NOT_CONNECTED', 'Connect Airbnb before importing listing content.')
       await this.requireChannelSync()
@@ -791,15 +798,14 @@ export class AirbnbConnection {
       const { report, written } = await this.importContent(mapping, row.channel_id, Infinity)
       let pushed: ChannelPushCompletion
       try { pushed = await this.deliverCalendar(row, mapping) } catch (cause) { pushed = cause instanceof Error ? cause : new Error(String(cause)) }
-      await completeChannelPush(pushed, { product_id: productId }, async () => {
+      return await completeChannelPush(pushed, { product_id: productId }, async () => {
         const result = await execute(this.db, "UPDATE product_channel_mappings SET import_content = ?, import_written = ?, updated_at = ? WHERE product_id = ? AND provider = 'channex' AND import_stage = 'complete'", [JSON.stringify(report), JSON.stringify(written), now(), productId])
         if (!result.meta.changes) fail(409, 'IMPORT_CHANGED', 'The import changed. Refresh and try again.')
         const home = await readStayHome(this.db, this.manager(), productId)
         await purgePublicResourceCacheNow(this.env, this.organizationId)
         await publishStayInvalidation(this.env, { type: 'nights.changed', organizationId: this.organizationId, productId, locationId: home.location_id, stayId: null }, { updated_at: now() })
-        return {}
+        return { product_id: productId, stage: 'complete' as const, content: report }
       })
-      return { product_id: productId, stage: 'complete', content: report }
     })
   }
 
@@ -1263,6 +1269,7 @@ function contentReport(mapping: MappingRow): ImportContentReport | null {
 }
 
 
+/** Source equality identifies inheritance; the canonical home governs inherited values after import. */
 function importedNight(night: ListingNight, currency: string, source: Pick<ListingDetails, 'minimumNights' | 'nightlyRate' | 'calendarRules'>) {
   const defaults = resolveStayNightPolicy({ min_nights: source.minimumNights, base_price_minor: minorUnits(source.nightlyRate, currency), calendar_rules: source.calendarRules }, night.date)
   const price = minorUnits(night.rate, currency)

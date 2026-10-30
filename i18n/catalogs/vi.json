@@ -78,7 +78,7 @@
   "payment.continue_to_pay": "Tiếp tục thanh toán",
   "payment.paid": "Đã thanh toán",
   "payment.pay": "Thanh toán {amount}",
-  "payment.cancel": "Hủy",
+  "payment.back": "Quay lại",
   "payment.declined": "Thanh toán chưa hoàn tất.",
   "booking.confirmed": "Đặt chỗ đã được xác nhận",
   "booking.request_received": "Đã nhận yêu cầu",

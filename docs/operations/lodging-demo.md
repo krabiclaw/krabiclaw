@@ -58,7 +58,7 @@ and blocked nights for the next 500 days. Every stay on the demo
 homes is cancelled; a stay paid on the site is cancelled without a refund,
 which in Stripe test mode moves no money. Lapsed checkout holds need no reset:
 holds last 60 minutes, the calendar reads a lapsed one as free, and the next
-hold on those nights clears it. Staging runs no cron, so nothing else does.
+hold on those nights clears it. Staging's scheduled Channex queues do not expire checkout holds.
 
 ## Payments setup (once per organization)
 

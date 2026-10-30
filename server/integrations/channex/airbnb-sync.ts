@@ -241,8 +241,7 @@ async function step(env: CloudflareEnv, db: DbClient, job: JobRow, lease: string
     }
     if (mapping.import_stage === 'complete' && mapping.enabled === 1) {
       // A requested resync reads the actual source through the content hash guard, then publishes the canonical calendar.
-      await connection.refreshContent(mapping.product_id)
-      if ((await connection.syncFullCalendar(mapping.product_id)).channel_push.state === 'pending') return 'later'
+      if ((await connection.refreshContent(mapping.product_id)).channel_push?.state === 'pending') return 'later'
       await reportBillingUsage(env, db, job.organization_id)
       return 'done'
     }
