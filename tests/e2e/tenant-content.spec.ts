@@ -179,11 +179,12 @@ test('a featured image alt text saved in the media library reaches the rendered 
 test('a tap on the practice’s phone number is a call to its office; a number it does not list is not', async ({ page, request, baseURL }) => {
   const legal = seededTenant('legal')
   const office = legal.locations.raleigh!
-  const rendered = await openTenantPage(page, `${seededSiteURL('legal')}/`, seededSiteHeaders('legal'))
+  // The office's own page writes its number; the header shows only the first office's.
+  const rendered = await openTenantPage(page, `${seededSiteURL('legal')}/locations/${office.slug}`, seededSiteHeaders('legal'))
   expect(rendered?.status()).toBe(200)
   await waitForNuxtHydration(page)
   const recorded = page.waitForResponse(response => new URL(response.url()).pathname === '/api/public/conversion-events' && response.request().postDataJSON()?.event_name === 'phone_click')
-  // The page writes the office's number however the office stored it.
+  // However the office stored its number, the link dials it.
   const link = page.locator('a[href^="tel:"]').first()
   expect(dialsSameNumber((await link.getAttribute('href'))!.slice('tel:'.length), '+19195550123')).toBe(true)
   await link.click()
@@ -191,13 +192,13 @@ test('a tap on the practice’s phone number is a call to its office; a number i
   expect(call.status(), await call.text()).toBe(201)
   const callId = (await call.json() as { id: string }).id
   // The same visitor reporting someone else's number records nothing.
-  const other = await page.evaluate(async () => (await fetch('/api/public/conversion-events', {
+  const other = await page.evaluate(async location => (await fetch('/api/public/conversion-events', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ event_name: 'phone_click', stage: 'external_handoff', phone: '+19195550199', page_path: '/' }),
-  })).json())
+    body: JSON.stringify({ event_name: 'phone_click', stage: 'external_handoff', phone: '+19195550199', page_path: `/locations/${location}` }),
+  })).json(), office.slug)
   expect(other).toEqual({ ok: true, ignored: true })
   await loginAs(request, baseURL!, 'user-e2e-ncls-owner')
   const events = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'query_organization_analytics', args: { organization_id: legal.organizationId, mode: 'events', filters: { event_name: 'phone_click', location_id: office.id } } })
   expect(events.status()).toBe(200)
-  expect(mcpData<{ rows: Array<Record<string, unknown>> }>(await events.json()).rows).toContainEqual(expect.objectContaining({ event_id: callId, stage: 'external_handoff', location_id: office.id, page: expect.objectContaining({ path: '/' }) }))
+  expect(mcpData<{ rows: Array<Record<string, unknown>> }>(await events.json()).rows).toContainEqual(expect.objectContaining({ event_id: callId, stage: 'external_handoff', location_id: office.id, page: expect.objectContaining({ path: `/locations/${office.slug}` }) }))
 })
