@@ -20,7 +20,7 @@
         <EarningsBars v-if="data" class="mt-6" :months="data.months" :selected="month" :currency="data.currency" @select="month = $event" />
       </section>
 
-      <section v-if="data" class="mt-8 rounded-3xl ring ring-default">
+      <section v-if="data && selected" class="mt-8 rounded-3xl ring ring-default">
         <div class="p-6">
           <h3 class="text-base font-semibold text-highlighted">{{ monthTitle }}</h3>
           <dl class="mt-4 space-y-3">
@@ -87,11 +87,18 @@ watch(month, (next) => { year.value = Number(next.slice(0, 4)); void router.repl
 
 const { data, error } = await useAsyncData(
   () => `earnings-performance:${route.params.orgSlug}:${year.value}:${month.value}`,
-  () => api<EarningsPerformance>('/api/dashboard/payments', { query: { view: 'performance', year: year.value, month: month.value }, validate: isEarningsPerformance }),
+  async () => {
+    const requestedMonth = month.value
+    const performance = await api<EarningsPerformance>('/api/dashboard/payments', { query: { view: 'performance', year: year.value, month: requestedMonth }, validate: isEarningsPerformance })
+    if (!performance.months.some(row => row.month === requestedMonth)) {
+      throw createError({ statusCode: 502, statusMessage: `Krabiclaw did not return earnings for ${requestedMonth}`, data: { code: 'EARNINGS_MONTH_MISSING', field: `months.${requestedMonth}` } })
+    }
+    return performance
+  },
   { watch: [month] },
 )
 const money = (amount: number) => paymentMoney(amount, data.value!.currency)
-const selected = computed(() => data.value?.months.find(row => row.month === month.value) ?? { month: month.value, paid: 0, refunded: 0 })
+const selected = computed(() => data.value?.months.find(row => row.month === month.value))
 const monthTitle = computed(() => formatCalendarDate(`${month.value}-01`, 'en', { month: 'long', year: 'numeric' }))
 const monthTotal = computed(() => data.value?.items.reduce((sum, item) => sum + item.paid, 0) ?? 0)
 const share = (paid: number) => `${monthTotal.value ? Math.round((paid / monthTotal.value) * 1000) / 10 : 0}%`
