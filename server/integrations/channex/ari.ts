@@ -224,7 +224,7 @@ export function calendarMinimumDefaults(home: Pick<StayHome, 'min_nights' | 'cal
 }
 
 /** The canonical listing defaults also govern each new date Channex adds to its rolling state. */
-export async function configureStayCalendar(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping?: ChannexMapping, write: (step: string, action: () => Promise<void>) => Promise<void> = async (_step, action) => action()): Promise<void> {
+export async function configureStayCalendar(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping?: ChannexMapping, write: (action: () => Promise<void>) => Promise<void> = async action => action()): Promise<void> {
   let written = false
   try {
     const target = mapping ?? await connectedMapping(db, env, organizationId, home.product_id)
@@ -239,7 +239,7 @@ export async function configureStayCalendar(db: DbClient, env: ChannexEnv, organ
     if (linked.enabled === 1 && !mapped) throw new ChannexDataError('Channex has no Airbnb mapping for this connected home')
     const channelSettings = object(channel.attributes.settings, 'channel.settings')
     if (channelSettings.min_stay_type !== 'Arrival') {
-      await write('update_channel_min_stay_type', async () => {
+      await write(async () => {
         written = true
         await channexRequest(env, channelPath, 'PUT', { channel: { channel: 'AirBNB', settings: { ...channelSettings, min_stay_type: 'Arrival' } } })
         const verified = await channexGet(env, channelPath, 'channel')
@@ -253,7 +253,7 @@ export async function configureStayCalendar(db: DbClient, env: ChannexEnv, organ
     const minimumType = string(propertySettings.min_stay_type, 'property.settings.min_stay_type')
     if (!['arrival', 'through', 'both'].includes(minimumType)) throw new ChannexDataError(`Channex returned an unknown minimum-stay type: ${minimumType}`)
     if (minimumType !== 'arrival') {
-      await write('update_min_stay_type', async () => {
+      await write(async () => {
         written = true
         await channexRequest(env, propertyPath, 'PUT', { property: { settings: { ...propertySettings, min_stay_type: 'arrival' } } })
         const verified = await channexGet(env, propertyPath, 'property')
@@ -261,7 +261,7 @@ export async function configureStayCalendar(db: DbClient, env: ChannexEnv, organ
       })
     }
     if (mapped && await listingMinimumNights(env, linked.channel_id, linked.listing_id) !== home.min_nights) {
-      const pushed = await pushAirbnbListingSettings(db, env, organizationId, home.product_id, { booking: {}, availability: { default_min_nights: home.min_nights } }, target, action => write('update_listing_minimum', async () => {
+      const pushed = await pushAirbnbListingSettings(db, env, organizationId, home.product_id, { booking: {}, availability: { default_min_nights: home.min_nights } }, target, action => write(async () => {
         written = true
         await action()
       }))
@@ -294,7 +294,7 @@ export async function configureStayCalendar(db: DbClient, env: ChannexEnv, organ
     const minimumChanged = !minimumMatches(defaults.attributes.min_stay_arrival)
     const priceChanged = originalOptions.some(value => value.is_primary && Number(value.rate) !== Number(baseRate))
     if (minimumChanged || priceChanged) {
-      await write('update_calendar_defaults', async () => {
+      await write(async () => {
         written = true
         await channexRequest(env, ratePath, 'PUT', { rate_plan: {
           ...(minimumChanged ? { min_stay_arrival: canonicalMinimum } : {}),
