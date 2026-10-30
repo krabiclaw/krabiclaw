@@ -26,6 +26,21 @@ export type NewSalePlanId = typeof NEW_SALE_PAID_PLAN_IDS[number]
 export type KnownRecurringPlanId = typeof KNOWN_RECURRING_PLAN_IDS[number]
 export type BillingPlanId = StarterPlanId | KnownRecurringPlanId
 
+/** The choices both account clients show; Better Auth still owns and authorizes each change. */
+export function billingPlanActions(status: {
+  plan: string; stripeSubscriptionId?: string; subscriptionStatus?: string; cancelAtPeriodEnd?: boolean
+}, scheduledPlan: { plan: string; at: string } | null) {
+  if (status.cancelAtPeriodEnd || scheduledPlan) return { label: null, changes: [], restore: true } as const
+  if (status.subscriptionStatus === 'past_due') return { label: null, changes: [], restore: false } as const
+  if (status.plan === STARTER_PLAN_ID && !status.stripeSubscriptionId) return {
+    label: 'Choose a plan', changes: NEW_SALE_PAID_PLAN_IDS.map(plan => ({ plan, timing: 'immediate' as const })), restore: false,
+  }
+  if (status.plan === BUSINESS_PLAN_ID) return {
+    label: 'Change plan', changes: [{ plan: GROWTH_PLAN_ID, timing: 'period_end' as const }], restore: false,
+  }
+  return { label: 'Upgrade to Business', changes: [{ plan: BUSINESS_PLAN_ID, timing: 'immediate' as const }], restore: false }
+}
+
 /** Fixed USD monthly offers: each plan is one flat price at quantity 1. */
 export const PAID_PLAN_PRICES: Readonly<Record<NewSalePlanId, { monthly: number }>> = Object.freeze({
   [GROWTH_PLAN_ID]: Object.freeze({ monthly: 4900 }),
@@ -167,12 +182,16 @@ export const SERVICES = Object.freeze({
     description: 'Chris hand-manages the campaigns in your connected Google Ads account — budgets, creative direction and conversion rate — and meets with you weekly.',
     price: `${ratePercent(AD_SPEND_RATE)}% of monthly ad spend`,
     billing: 'Billed at the end of each month on your Business subscription. Connecting Google Ads and reading its results in Insights is free.',
+    consent: 'By turning it on you agree to the stated share of monthly ad spend, read from Google each day and billed on your plan invoice. Google bills the ad spend itself to your Google Ads account.',
+    ending: 'Turning it off stops Chris managing your campaigns. Today’s spend is excluded if you turn it off before the day closes in your Google Ads account’s time zone; earlier managed days are still billed. Keep Google Ads connected until earlier managed spend has been counted; each day is counted after two days.',
   }),
   strategy: Object.freeze({
     name: 'SEO and marketing strategy',
     description: 'Julia leads your SEO strategy, hand-writes blog posts written to rank, meets with you weekly and is on chat with you.',
     price: `$${(SERVICE_PRICES.strategy.monthly / 100).toLocaleString('en-US')} per month`,
     billing: 'Added to your plan subscription and billed monthly by Stripe, prorated from the day you agree.',
+    consent: 'By turning it on you agree to the stated monthly price, added to your plan subscription and charged to its card. Stripe charges today’s prorated share immediately.',
+    ending: 'Turning it off ends Julia’s service now. Stripe credits the unused part of this period to your next invoice.',
   }),
 })
 

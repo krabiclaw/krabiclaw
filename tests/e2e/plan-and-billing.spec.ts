@@ -148,7 +148,7 @@ test.describe('Plan and billing', () => {
           await expect(upgrade.getByRole('radio')).toHaveCount(2)
           // The recommended plan starts chosen, so Continue is live.
           await expect(upgrade.getByRole('radio', { checked: true })).toHaveCount(1)
-          await expect(upgrade.getByRole('button', { name: 'Continue', exact: true })).toBeEnabled()
+          await expect(upgrade.getByRole('button', { name: 'Continue to Stripe', exact: true })).toBeEnabled()
           // The card is what a person presses. Its radio is named by the card's label beside the pane,
           // and by its value inside the drawer, where Nuxt UI's label is not yet associated.
           await upgrade.getByText('Business', { exact: true }).click()
@@ -218,7 +218,7 @@ test.describe('Plan and billing', () => {
         await expect(upgrade.getByTestId('editor-row-airbnb-sync')).toContainText('Airbnb sync')
         await expect(upgrade.getByTestId('editor-row-ios')).toHaveCount(0)
         await expect(upgrade.getByTestId('editor-row-messaging')).toHaveCount(0)
-        await expect(upgrade.getByRole('button', { name: 'Continue', exact: true })).toBeEnabled()
+        await expect(upgrade.getByRole('button', { name: 'Agree and upgrade to Business', exact: true })).toBeEnabled()
         await expect(upgrade.getByRole('radio')).toHaveCount(0)
       }
 
@@ -238,7 +238,7 @@ test.describe('Plan and billing', () => {
       })
       await open(page, `${GROWTH}/billing/upgrade`)
       const upgrade = page.locator('#dashboard-panel-organization-upgrade')
-      await upgrade.getByRole('button', { name: 'Continue', exact: true }).click()
+      await upgrade.getByRole('button', { name: 'Agree and upgrade to Business', exact: true }).click()
       await expect(upgrade.getByText('Stopped at the test boundary', { exact: true })).toBeVisible()
       expect(intents).toHaveLength(1)
       expect(intents[0]).toMatchObject({ organizationId: GROWTH_ID, subscriptionId: billing.stripeSubscriptionId, action: 'upgrade', effectiveTiming: 'immediate' })

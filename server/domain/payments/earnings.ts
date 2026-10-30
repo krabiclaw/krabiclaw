@@ -5,6 +5,7 @@ import { loadOwnerPictures } from '~/server/notifications/hero'
 import { getStripeConnectedAccount, paymentsStripe } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { authorizePayments, type FinancialPrincipal, type Payment } from './index'
+import { channelReservationAmounts } from '~/server/domain/stays'
 
 /**
  * The Earnings screens as Airbnb draws them: a payment leads with the picture
@@ -53,6 +54,8 @@ export async function paymentPictures(db: DbClient, organizationId: string, paym
 
 export interface MonthEarnings { month: string; paid: number; refunded: number }
 export interface EarningsPerformance {
+  /** Confirmed channel reservations arriving in the selected month, never added to captured payments. */
+  channelReservations: Array<{ channel: string; currency: string; amount: number; count: number }>
   /** What was earned in; with nothing earned yet, the currency the business sells in. */
   currency: string
   /** Twelve months of the year, every month present. */
@@ -64,11 +67,11 @@ export interface EarningsPerformance {
 /** Airbnb's Performance: the year by month, and one month by what was sold. */
 export async function paymentPerformance(db: DbClient, principal: FinancialPrincipal, year: number, month: string): Promise<EarningsPerformance> {
   await authorizePayments(principal, 'read')
-  if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid year is required' })
-  if (!/^\d{4}-\d{2}$/.test(month) || !month.startsWith(`${year}-`)) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid month within the requested year is required' })
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid year is required', data: { code: 'INVALID_EARNINGS_PERIOD', field: 'year' } })
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !month.startsWith(`${year}-`)) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid month within the requested year is required', data: { code: 'INVALID_EARNINGS_PERIOD', field: 'month' } })
   const rows = await queryAll<{ month: string; currency: string; paid: number; refunded: number }>(db, `SELECT strftime('%Y-%m', created_at) AS month, currency, SUM(captured_amount) AS paid, SUM(refunded_amount) AS refunded FROM payments WHERE organization_id = ? AND created_at >= ? AND created_at < ? GROUP BY 1, 2 ORDER BY 1`, [principal.organizationId, `${year}-01-01T00:00:00.000Z`, `${year + 1}-01-01T00:00:00.000Z`])
   const currencies = [...new Set(rows.map(row => row.currency))]
-  if (currencies.length > 1) throw new HTTPError({ statusCode: 409, statusMessage: 'Earnings in more than one currency cannot be charted together' })
+  if (currencies.length > 1) throw new HTTPError({ statusCode: 409, statusMessage: 'Earnings in more than one currency cannot be charted together', data: { code: 'MULTIPLE_EARNINGS_CURRENCIES', field: 'currency' } })
   const months = Array.from({ length: 12 }, (_, index) => {
     const key = `${year}-${String(index + 1).padStart(2, '0')}`
     const row = rows.find(entry => entry.month === key)
@@ -88,7 +91,8 @@ export async function paymentPerformance(db: DbClient, principal: FinancialPrinc
   }
   const currency = currencies[0] ?? (await queryFirst<{ default_currency: string }>(db, 'SELECT default_currency FROM organization WHERE id = ?', [principal.organizationId]))?.default_currency
   if (!currency) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
-  return { currency, months, items: [...byTitle.values()].sort((a, b) => b.paid - a.paid) }
+  const channelReservations = await channelReservationAmounts(db, principal.organizationId, `${month}-01`, next.slice(0, 10))
+  return { currency, months, items: [...byTitle.values()].sort((a, b) => b.paid - a.paid), channelReservations }
 }
 
 export interface PayoutItem { paymentId: string; title: string; imageUrl: string | null; amount: number; currency: string; startsAt: string | null; endsAt: string | null; timeZone: string | null; subjectTitle: string | null }

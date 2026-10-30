@@ -22,12 +22,14 @@ export function earningsFigure(summary:EarningsSummary):string {
 /** What `view=performance` answers: the year by month and one month by what was sold. */
 export interface EarningsPerformance {
  currency:string
+ channelReservations:Array<{channel:string;currency:string;amount:number;count:number}>
  months:Array<{month:string;paid:number;refunded:number}>
  items:Array<{title:string;imageUrl:string|null;paid:number;count:number}>
 }
 const record=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value)
 export function isEarningsPerformance(value:unknown):value is EarningsPerformance {
  return record(value)&&isCurrencyCode(value.currency)
+  &&Array.isArray(value.channelReservations)&&value.channelReservations.every(row=>record(row)&&['airbnb','booking_com','vrbo'].includes(String(row.channel))&&isCurrencyCode(row.currency)&&Number.isSafeInteger(row.amount)&&Number(row.amount)>=0&&Number.isSafeInteger(row.count)&&Number(row.count)>0)
   &&Array.isArray(value.months)&&value.months.length===12&&value.months.every(row=>record(row)&&typeof row.month==='string'&&/^\d{4}-\d{2}$/.test(row.month)&&Number.isSafeInteger(row.paid)&&Number.isSafeInteger(row.refunded))
   &&Array.isArray(value.items)&&value.items.every(row=>record(row)&&typeof row.title==='string'&&(row.imageUrl===null||typeof row.imageUrl==='string')&&Number.isSafeInteger(row.paid)&&Number.isSafeInteger(row.count))
 }
@@ -51,7 +53,7 @@ const moneyRow=(value:unknown)=>record(value)&&Number.isSafeInteger(value.amount
 export function isPayoutsView(value:unknown):value is PayoutsView {
  return record(value)&&typeof value.configured==='boolean'&&Array.isArray(value.payouts)&&(value.next_cursor===null||(typeof value.next_cursor==='string'&&!!value.next_cursor))
   &&(value.configured===false||(record(value.balance)&&Array.isArray(value.balance.available)&&value.balance.available.every(moneyRow)&&Array.isArray(value.balance.pending)&&value.balance.pending.every(moneyRow)
-   &&value.payouts.every(row=>moneyRow(row)&&typeof row.id==='string'&&typeof row.status==='string'&&Number.isSafeInteger(row.arrival_date))))
+   &&value.payouts.every(row=>moneyRow(row)&&typeof row.id==='string'&&['pending','in_transit','paid','failed','canceled'].includes(String(row.status))&&Number.isSafeInteger(row.arrival_date))))
   &&(value.items===undefined||(record(value.items)&&Object.values(value.items).every(list=>Array.isArray(list)&&list.every(isPayoutItem))))
 }
 export function payoutStatusLabel(status:string):string {

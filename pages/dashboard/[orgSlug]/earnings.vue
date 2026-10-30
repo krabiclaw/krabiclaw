@@ -1,63 +1,50 @@
 <template>
-  <!--
-    Airbnb's Earnings page: a Performance card with this month's total, the
-    year's bars, Paid and Upcoming and a way into the details; then Upcoming
-    and Paid payouts as cards, and paid payouts. The cog opens Payments
-    (payouts) and Plan and billing. A card on Menu, so Back returns there. Beside a pane
-    it opens on Performance, the details its own card leads to.
-  -->
   <DashboardIndexPanel id="earnings" title="Earnings" :auto-open="`${level.path.value}/performance`">
     <template #right>
-      <UDropdownMenu :items="settingsItems" :content="{ align: 'end' }" :ui="{ content: 'w-60' }">
+      <UDropdownMenu :items="settingsItems" :content="{ align: 'end' }">
         <UButton icon="i-lucide-settings" color="neutral" variant="soft" square aria-label="Settings and documents" />
       </UDropdownMenu>
     </template>
-
     <div class="space-y-10 pb-10">
-      <UAlert v-if="error" color="error" variant="soft" title="Earnings could not be loaded" :description="getErrorMessage(error, 'Earnings request failed')" />
-      <UAlert v-else-if="payoutsError" color="error" variant="soft" title="Payouts could not be loaded" :description="getErrorMessage(payoutsError, 'Payouts request failed')" />
-      <p v-else-if="!performance || !payouts" role="status" class="text-muted">Loading earnings…</p>
-      <template v-else>
-      <UCard as="section" variant="subtle">
-        <p class="text-center text-sm font-medium text-highlighted">Performance</p>
-        <p class="mt-2 text-center text-5xl font-semibold tracking-tight text-highlighted">{{ total }}</p>
-        <p class="mt-2 text-center text-sm text-muted">Total for {{ monthName }} ({{ performance.currency }})</p>
-        <div class="mx-auto mt-8 flex h-48 w-40 items-end justify-center gap-3" role="img" :aria-label="`${monthName}: paid ${total}, upcoming ${upcoming}`">
-          <span class="w-16 rounded-xl bg-primary transition-[height]" :style="{ height: `${barHeight(paidAmount)}%` }" />
-          <span class="w-16 rounded-xl ring-2 ring-inset ring-primary transition-[height]" :style="{ height: `${barHeight(upcomingAmount)}%` }" />
-        </div>
-        <dl class="mt-8 space-y-3">
-          <div class="flex items-center justify-between gap-4"><dt class="flex items-center gap-2 text-sm text-muted"><span class="size-2 rounded-full bg-primary" aria-hidden="true" />Paid</dt><dd class="text-sm font-medium text-highlighted">{{ total }}</dd></div>
-          <div class="flex items-center justify-between gap-4"><dt class="flex items-center gap-2 text-sm text-muted"><span class="size-2 rounded-full ring-2 ring-inset ring-primary" aria-hidden="true" />Upcoming</dt><dd class="text-sm font-medium text-highlighted">{{ upcoming }}</dd></div>
-        </dl>
-        <UButton class="mt-8 w-full justify-center" color="neutral" variant="soft" size="lg" label="View more details" :to="`${level.path.value}/performance`" />
-      </UCard>
-
-      <section>
-        <h2 class="text-xl font-semibold text-highlighted">Upcoming</h2>
-        <div v-if="upcomingPayouts.length" class="mt-4 space-y-4">
-          <PayoutCard v-for="row in upcomingPayouts" :key="row.id" :payout="row" :items="payouts?.items?.[row.id]" :to="`${level.path.value}/payouts/${encodeURIComponent(row.id)}`" />
-        </div>
-        <div v-else-if="clearing.length" class="mt-4 space-y-4">
-          <UCard v-for="row in clearing" :key="row.currency + row.label" variant="subtle">
-            <p class="text-sm font-medium text-highlighted">{{ row.label }}</p>
-            <p class="mt-1 text-2xl font-semibold text-highlighted">{{ paymentMoney(row.amount, row.currency) }}</p>
-            <p class="mt-2 text-sm text-muted">Stripe sends it on your payout schedule.</p>
-          </UCard>
-        </div>
-        <UEmpty v-else class="mt-4" icon="i-lucide-calendar-days" title="No scheduled payouts" description="You don’t have any upcoming payouts to review right now." />
-      </section>
-
-      <section>
-        <h2 class="text-xl font-semibold text-highlighted">Paid</h2>
-        <div v-if="paidPayouts.length" class="mt-4 space-y-4">
-          <PayoutCard v-for="row in paidPayouts" :key="row.id" :payout="row" :items="payouts?.items?.[row.id]" :to="`${level.path.value}/payouts/${encodeURIComponent(row.id)}`" />
-        </div>
-        <UEmpty v-else class="mt-4" icon="i-lucide-landmark" title="Nothing paid out yet" description="Payouts appear here once Stripe sends them." />
-        <UButton class="mt-4" color="neutral" variant="soft" label="View all paid" :to="`${level.path.value}/payouts`" />
-      </section>
-
-
+      <UAlert v-if="error" color="error" variant="soft" title="Direct payments could not be loaded" :description="getErrorMessage(error, 'Earnings request failed')" />
+      <template v-if="performance">
+        <UCard as="section" variant="subtle">
+          <h2 class="text-xl font-semibold text-highlighted">Direct payments</h2>
+          <p class="mt-4 text-5xl font-semibold tracking-tight text-highlighted">{{ total }}</p>
+          <p class="mt-3 text-sm text-muted">{{ monthName }} · Payments collected through Stripe, less refunds. This is not the amount transferred to your bank.</p>
+          <UButton class="mt-6" color="neutral" variant="soft" label="View payment details" :to="`${level.path.value}/performance`" />
+        </UCard>
+        <ChannelReservationSummary v-if="dashboard.organization.value?.vertical === 'lodging'" :rows="performance.channelReservations" :month="monthName" />
+      </template>
+      <UAlert v-if="payoutsError" color="error" variant="soft" title="Stripe payouts could not be loaded" :description="getErrorMessage(payoutsError, 'Payouts request failed')" />
+      <template v-if="payouts">
+        <section>
+          <h2 class="text-xl font-semibold text-highlighted">Stripe payouts</h2>
+          <p class="mt-2 text-sm text-muted">Transfers from your connected Stripe account. Airbnb and other channels manage their own payouts.</p>
+          <p v-if="!payouts.configured" class="mt-4 text-sm text-muted">Connect Stripe in Payments &amp; payouts to receive online payments.</p>
+          <template v-else>
+            <h3 class="mt-6 text-base font-semibold text-highlighted">Upcoming</h3>
+            <div v-if="upcomingPayouts.length" class="mt-4 space-y-4">
+              <PayoutCard v-for="row in upcomingPayouts" :key="row.id" :payout="row" :to="`${level.path.value}/payouts/${encodeURIComponent(row.id)}`" />
+            </div>
+            <p v-else class="mt-4 text-sm text-muted">No scheduled Stripe payouts.</p>
+            <h3 class="mt-6 text-base font-semibold text-highlighted">Sent</h3>
+            <div v-if="paidPayouts.length" class="mt-4 space-y-4">
+              <PayoutCard v-for="row in paidPayouts" :key="row.id" :payout="row" :items="payouts.items?.[row.id]" :to="`${level.path.value}/payouts/${encodeURIComponent(row.id)}`" />
+            </div>
+            <p v-else class="mt-4 text-sm text-muted">Nothing sent by Stripe yet.</p>
+            <UButton class="mt-6" label="View Stripe payout history" color="neutral" variant="link" :to="`${level.path.value}/payouts`" />
+          </template>
+        </section>
+        <section v-if="clearing.length">
+          <h2 class="text-xl font-semibold text-highlighted">Stripe balance</h2>
+          <dl class="mt-4 space-y-3">
+            <div v-for="row in clearing" :key="row.currency + row.label" class="flex items-center justify-between gap-4">
+              <dt class="text-sm text-muted">{{ row.label }}</dt><dd class="font-medium">{{ paymentMoney(row.amount, row.currency) }}</dd>
+            </div>
+          </dl>
+          <p class="mt-3 text-sm text-muted">Funds held by Stripe, shown separately from transfers already scheduled.</p>
+        </section>
       </template>
       <PaymentsHelp />
     </div>
@@ -68,6 +55,7 @@
 import { getLocalTimeZone, today } from '@internationalized/date'
 import PayoutCard from '~/components/dashboard/PayoutCard.vue'
 import PaymentsHelp from '~/components/dashboard/PaymentsHelp.vue'
+import ChannelReservationSummary from '~/components/dashboard/ChannelReservationSummary.vue'
 import { paymentMoney } from '~/shared/payment-display'
 import { isEarningsPerformance, isPayoutsView, type EarningsPerformance, type PayoutsView } from '~/shared/earnings-display'
 import { formatCalendarDate } from '~/utils/timezone'
@@ -76,6 +64,7 @@ definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
 useSeoMeta({ title: 'Earnings | KrabiClaw', robots: 'noindex, nofollow' })
 
 const route = useRoute()
+const dashboard = useDashboardOrganization()
 const api = useDashboardApi()
 const level = useRouteLevel()
 const thisMonth = today(getLocalTimeZone()).set({ day: 1 })
@@ -94,7 +83,7 @@ const [{ data: performance, error }, { data: payouts, error: payoutsError }] = a
 ])
 const money = (amount: number) => paymentMoney(amount, performance.value!.currency)
 const monthRow = (month: string) => performance.value?.months.find(row => row.month === month)
-const paidAmount = computed(() => { const row = monthRow(thisMonthKey); return row ? row.paid - row.refunded : 0 })
+const paidAmount = computed(() => { const row = monthRow(thisMonthKey); if (!row) throw new Error('The selected payment month is missing'); return row.paid - row.refunded })
 const total = computed(() => money(paidAmount.value))
 
 const upcomingPayouts = computed(() => (payouts.value?.payouts ?? []).filter(row => row.status === 'pending' || row.status === 'in_transit'))
@@ -102,12 +91,6 @@ const clearing = computed(() => [
   ...(payouts.value?.balance?.available ?? []).map(row => ({ amount: row.amount, currency: row.currency.toUpperCase(), label: 'Ready to send' })),
   ...(payouts.value?.balance?.pending ?? []).map(row => ({ amount: row.amount, currency: row.currency.toUpperCase(), label: 'Clearing' })),
 ].filter(row => row.amount !== 0))
-// One currency on the card: the loaded performance currency.
-const shownCurrency = computed(() => performance.value!.currency.toUpperCase())
-const upcomingAmount = computed(() => clearing.value.filter(row => row.currency === shownCurrency.value).reduce((sum, row) => sum + row.amount, 0) + upcomingPayouts.value.filter(row => row.currency.toUpperCase() === shownCurrency.value).reduce((sum, row) => sum + row.amount, 0))
-const upcoming = computed(() => money(upcomingAmount.value))
-// Two bars share one scale; an empty month still draws a short stub, as Airbnb's does.
-const barHeight = (amount: number) => Math.max(12, Math.round((amount / Math.max(1, paidAmount.value, upcomingAmount.value)) * 100))
 const paidPayouts = computed(() => (payouts.value?.payouts ?? []).filter(row => row.status === 'paid').slice(0, 3))
 
 // Airbnb's cog: "Settings and documents" — how payouts arrive, and the plan's own destination.

@@ -9,6 +9,10 @@
         :description="loadError"
         :actions="[{ label: 'Try again', onClick: () => refresh() }]"
       />
+      <div v-if="canReadAnalytics" class="flex flex-wrap items-center justify-between gap-3">
+        <p class="text-sm text-muted">Website activity covers your own site. Direct payments and channel reservation amounts are separate in Earnings.</p>
+        <UButton label="Booking income by channel" :to="`/dashboard/${route.params.orgSlug}/earnings/performance`" color="neutral" variant="link" />
+      </div>
       <DashboardFilterPills
         id="insights-channel"
         v-model="tab"

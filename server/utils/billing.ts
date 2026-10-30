@@ -280,7 +280,7 @@ export interface HomesQuote {
   currency: 'USD'
   /** `additional_price_minor` is what each home past the included ones costs: 0 on a paid subscription from before homes were priced. */
   /** `used` counts live homes; `drafts` the homes not live, which are free. */
-  homes: { used: number; drafts: number; included: number; additional_price_minor: number; amount_minor: number }
+  homes: { used: number; drafts: number; included: number; limit: number | null; additional_price_minor: number; amount_minor: number }
   /** `count` is homes about to go live. */
   adding: { count: number; additional_homes: number; amount_minor: number; allowed: boolean }
   /** `trial_end` is when a subscription's free trial ends, `null` when it has none: usage in a trial is not billed. */
@@ -357,7 +357,7 @@ export async function homesQuote(env: CloudflareEnv, db: DbClient, organizationI
   return {
     plan,
     currency: 'USD',
-    homes: { used, drafts: drafts.homes, included: terms.included, additional_price_minor: terms.additional, amount_minor: additionalHomes(terms.included, 0, used) * terms.additional },
+    homes: { used, drafts: drafts.homes, included: terms.included, limit: subscription ? null : terms.included, additional_price_minor: terms.additional, amount_minor: additionalHomes(terms.included, 0, used) * terms.additional },
     adding: { count: adding, additional_homes: added, amount_minor: added * terms.additional, allowed },
     billing: { period_end: subscription?.periodEnd?.toISOString() ?? null, trial_end: trialEnd, prorated: false },
   }

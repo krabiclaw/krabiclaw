@@ -43,7 +43,7 @@
 import EditorNavigationList, { type EditorNavigationGroup, type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
 import { authClient } from '~/lib/auth-client'
 import { classifyStripePlanChange } from '~/shared/stripe-ga4'
-import { BUSINESS_PLAN_ID, SERVICE_PRICES, SERVICES, STARTER_PLAN_ID, isNewSalePlan } from '~/shared/billing-model'
+import { SERVICE_PRICES, SERVICES, STARTER_PLAN_ID, isNewSalePlan } from '~/shared/billing-model'
 import { cardBrandLabel, useHomesQuote, useOrganizationBilling, useOrganizationServices, usePaymentMethods } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
@@ -122,13 +122,12 @@ const TRIAL_WITHOUT_CARD = {
 
 // The plan's one change: up from Basic or Growth, or to Growth from Business, each its own leaf; none while a change is pending.
 const change = computed<{ label: string; to: string; outline?: boolean } | null>(() => {
-  const status = billing.value
-  if (!status || status.cancelAtPeriodEnd || scheduledPlan.value) return null
-  if (onStarter.value) return { label: 'Choose a plan', to: to('upgrade') }
-  if (status.plan === BUSINESS_PLAN_ID) return { label: 'Change plan', to: to('change'), outline: true }
-  return { label: 'Upgrade to Business', to: to('upgrade') }
+  const actions = billing.value?.actions
+  if (!actions?.label) return null
+  const downgrade = actions.changes.some(change => change.timing === 'period_end')
+  return { label: actions.label, to: to(downgrade ? 'change' : 'upgrade'), outline: downgrade }
 })
-const pending = computed(() => !!billing.value && (!!billing.value.cancelAtPeriodEnd || !!scheduledPlan.value))
+const pending = computed(() => billing.value?.actions.restore === true)
 
 // Beside a pane the index opens a way up; Business, with nothing above it, opens its first service.
 const firstLeaf = computed(() => !dashboard.canUpdateBilling.value ? null : change.value && !change.value.outline ? change.value.to : to('managed-ads'))
@@ -142,8 +141,8 @@ const homesRow = computed<EditorNavigationItem | null>(() => {
   const current = homes.value
   if (!current || (!current.homes.used && !current.homes.drafts && dashboard.organization.value?.vertical !== 'lodging')) return null
   const counted = `${current.homes.used} live · ${current.homes.drafts} ${current.homes.drafts === 1 ? 'draft' : 'drafts'}`
-  const summary = onStarter.value
-    ? `${counted} · ${nameOf(STARTER_PLAN_ID)} includes ${current.homes.included}`
+  const summary = current.homes.limit !== null
+    ? `${counted} · This plan includes ${current.homes.limit}`
     : current.homes.additional_price_minor
       ? `${counted} · ${formatPrice(current.homes.amount_minor)} per month${current.billing.trial_end ? ' after your free trial' : ''}`
       : `${counted} · not billed on this subscription`
