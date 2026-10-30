@@ -1616,6 +1616,39 @@ for (const target of ['rolling default', 'listing minimum'] as const) {
           assert.equal(readback.data.attributes.min_stay_arrival, canonicalMinimum)
           if (target === 'listing minimum') assert.equal(await listingMinimumNights(env, channex.channelId, LISTING), canonicalMinimum)
           assert.deepEqual(await db.prepare('SELECT status, pending_step, operation_id FROM channex_connections').first(), { status: 'connected', pending_step: null, operation_id: null })
+          if (target === 'rolling default' && outcome === 'refused') {
+            // The home update can commit before its dependent channel work fails.
+            // Its source ownership must commit with it, so a later source change
+            // still updates that field while preserving an actual host edit.
+            await updateStayHome(env, db, manager, productId, { description: 'The host keeps these words.' })
+            channex.availabilityRules.default_min_nights = 7
+            channex.booking.check_in_time_start = '17'
+            channex.booking.guest_controls = { ...(channex.booking.guest_controls as Record<string, unknown>), allows_events_as_host: true }
+            failWrite = true
+            await assert.rejects(connection.refreshContent(productId), (error: unknown) => error instanceof HTTPError && error.status === 503 && error.data?.code === 'CHANNEL_PUSH_FAILED' && error.data.committed === true)
+            const committed = await readStayHome(db, manager, productId)
+            assert.deepEqual([committed.min_nights, committed.check_in_time, committed.description], [7, '17:00', 'The host keeps these words.'])
+            assert.equal((await getProduct(db, 'org', productId)).details.events_allowed, false, 'the later details write did not run')
+            failWrite = false
+            channex.availabilityRules.default_min_nights = 8
+            channex.booking.check_in_time_start = '18'
+            const retried = await connection.refreshContent(productId)
+            const updated = await readStayHome(db, manager, productId)
+            assert.deepEqual([updated.min_nights, updated.check_in_time, updated.description], [8, '18:00', 'The host keeps these words.'])
+            assert.equal((await getProduct(db, 'org', productId)).details.events_allowed, true, 'uncommitted details were not fingerprinted as already imported')
+            assert(retried.content.kept_host_edits.includes('description'))
+
+            // A failure in the outer delivery still runs its completion callback.
+            channex.ratePlans.get(channex.ratePlan)!.min_stay_arrival = 1
+            channex.booking.check_in_time_start = '19'
+            failWrite = true
+            await assert.rejects(connection.refreshContent(productId), (error: unknown) => error instanceof HTTPError && error.status === 503 && error.data?.code === 'CHANNEL_PUSH_FAILED' && error.data.committed === true)
+            assert.equal((await readStayHome(db, manager, productId)).check_in_time, '19:00')
+            failWrite = false
+            channex.booking.check_in_time_start = '20'
+            await connection.refreshContent(productId)
+            assert.equal((await readStayHome(db, manager, productId)).check_in_time, '20:00')
+          }
         }
       } finally {
         globalThis.fetch = realFetch

@@ -620,6 +620,19 @@ interface Actor { actorId: string }
 /** A write receipt, never a field on a stored or read Product. */
 export type ProductMutation = Product & { channel_push: SuccessfulChannelPush | null }
 
+/** Internal source ownership; public Product patches cannot supply import provenance. */
+export interface StayImportWrite { channelId: string; listingId: string; written: Record<string, string> }
+
+/** The locked import keeps this mapping stable; hashes commit with their fields. */
+export function stayImportWrittenQuery(organizationId: string, productId: string, source: StayImportWrite, fields: readonly string[]): BatchQuery {
+  const written = Object.fromEntries(fields.filter(field => Object.hasOwn(source.written, field)).map(field => [field, source.written[field]]))
+  return {
+    query: `UPDATE product_channel_mappings SET import_written = json_patch(COALESCE(import_written, '{}'), ?), updated_at = ?
+      WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND channel_id = ? AND listing_id = ?`,
+    params: [JSON.stringify(written), new Date().toISOString(), organizationId, productId, source.channelId, source.listingId],
+  }
+}
+
 export function slugCandidate(base: string, attempt: number): string {
   const normalized = base.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, PRODUCT_LIMITS.slug)
   const root = normalized || 'product'
@@ -1342,9 +1355,9 @@ export async function publishStayProducts(env: CloudflareEnv, products: readonly
  * as a home, and the counts are reported to Stripe after. Other products are
  * not billed by count, so their writes run as they are.
  */
-async function executeProductWrites(db: DbClient, env: CloudflareEnv, organizationId: string, writes: BatchQuery[], options: { operation: string; action: string; stay: boolean; allowHomeActivation?: boolean }): Promise<void> {
-  if (options.stay) await executeWithinCapacity(env, db, organizationId, writes, options)
-  else await executeBatch(db, writes, { operation: options.operation })
+async function executeProductWrites(db: DbClient, env: CloudflareEnv, organizationId: string, writes: BatchQuery[], options: { operation: string; action: string; stay: boolean; allowHomeActivation?: boolean }): Promise<D1Result[]> {
+  if (options.stay) return await executeWithinCapacity(env, db, organizationId, writes, options)
+  return await executeBatch(db, writes, { operation: options.operation })
 }
 
 export async function createProduct(db: DbClient, input: {
@@ -1872,6 +1885,8 @@ export async function updateProduct(db: DbClient, input: {
   idempotencyKey?: string
   /** updateStayHome completes once after its optional location timezone write. */
   deferStayNightPush?: true
+  /** Only fields committed by this Product patch advance the import's edit guard. */
+  stayImport?: StayImportWrite
   /** A room's authored details share this Product transaction when assigning listing amenities. */
   stayRoomUpdate?: { roomId: string; expectedDetailsVersion: number; accessibility?: StayRoomAccessibility } & Partial<Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom' | 'amenities'>>
   /** Listing accessibility uses the Product version and the same photo transaction as room evidence. */
@@ -2026,6 +2041,8 @@ export async function updateProduct(db: DbClient, input: {
     writes.push({ query: `INSERT INTO product_publications(organization_id,product_id,published,created_at,updated_at,created_by,updated_by) VALUES(?,?,1,?,?,?,?) ON CONFLICT(product_id,organization_id) DO UPDATE SET published=1,updated_at=excluded.updated_at,updated_by=excluded.updated_by`, params: [input.organizationId, input.productId, now, now, input.actor.actorId, input.actor.actorId] })
   }
   if (dedupeKey) writes.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.updated', entityType: 'product', entityId: input.productId, dedupeKey, metadata: { request_hash: requestHash, channel_completion: { nights: reprice, settings } } }))
+  const importWrittenIndex = writes.length
+  if (input.stayImport) writes.push(stayImportWrittenQuery(input.organizationId, input.productId, input.stayImport, [...Object.keys(input.patch), ...Object.keys(input.patch.stay ?? {}), ...Object.keys(input.patch.details ?? {})]))
   if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This offering exceeds one atomic update')
 
   // A variant anything was ever booked on is not removed by an edit. Stopping
@@ -2038,7 +2055,7 @@ export async function updateProduct(db: DbClient, input: {
   // A booking taken between the check above and this batch makes the variant
   // delete raise, and D1 rolls the whole batch back: the product is exactly as
   // it was, and the merchant is told why rather than reading a constraint name.
-  await executeProductWrites(db, env, input.organizationId, writes, { operation: 'Update product', action: 'turn it on', stay: current.kind === 'stay', allowHomeActivation: input.allowHomeActivation }).catch(async (error: unknown) => {
+  const results = await executeProductWrites(db, env, input.organizationId, writes, { operation: 'Update product', action: 'turn it on', stay: current.kind === 'stay', allowHomeActivation: input.allowHomeActivation }).catch(async (error: unknown) => {
     if (isUniqueDedupeConflict(error) && await replay()) return
     const evidenceError = stayAccessibilityEvidenceWriteError(error)
     if (evidenceError !== error) throw evidenceError
@@ -2060,6 +2077,7 @@ export async function updateProduct(db: DbClient, input: {
     if (raced.length === 0) throw error
     conflict(`${raced.join(', ')} was booked while you were editing, so nothing was changed. Turn it off instead of removing it.`)
   })
+  if (input.stayImport && (!results || !results[importWrittenIndex] || results[importWrittenIndex].meta.changes !== 1)) throw new HTTPError({ statusCode: 409, statusMessage: 'The import changed. Refresh and try again.', data: { code: 'IMPORT_CHANGED', committed: true, product_id: input.productId } })
   return complete(await getProduct(db, input.organizationId, input.productId))
 }
 

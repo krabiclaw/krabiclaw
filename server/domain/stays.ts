@@ -18,7 +18,7 @@ import { AIRBNB_CANCELLATION_CATEGORIES, AIRBNB_LONG_TERM_CANCELLATION_IDS, isSt
 import { validateProductDetails, validateStayAlarmDetails, stayHouseRuleLines } from '~/shared/product-details'
 import { staySafetyLines, stayAlarmLines } from '~/shared/stay-safety'
 import { formatTime, isValidTimezone, localDateTimeToInstant } from '~/utils/timezone'
-import { createProduct, getProduct, setProductPublication, updateProduct } from '~/server/utils/product-management'
+import { createProduct, getProduct, setProductPublication, stayImportWrittenQuery, updateProduct, type StayImportWrite } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
@@ -707,7 +707,7 @@ function locationPatch(body: Record<string, unknown>): UpdateLocationInput {
  * connected home, a new base price or minimum stay is pushed for the nights
  * ahead, because nights without their own value use them.
  */
-export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: StayAccess, productId: string, body: Record<string, unknown>): Promise<{ home: StayHome; channel_push: SuccessfulChannelPush | null; airbnb_unsynced: ReturnType<typeof airbnbUnsynced> }> {
+export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: StayAccess, productId: string, body: Record<string, unknown>, stayImport?: StayImportWrite): Promise<{ home: StayHome; channel_push: SuccessfulChannelPush | null; airbnb_unsynced: ReturnType<typeof airbnbUnsynced> }> {
   requireManager(access)
   const home = await readStayHome(db, access, productId)
   const unknown = Object.keys(body).find(key => !(EDITABLE_HOME_FIELDS as readonly string[]).includes(key))
@@ -764,7 +764,7 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   // Clearing an already absent base price still asks for channel completion,
   // but creates no product pricing patch for updateProduct to preflight.
   if (pushes && patch.variants === undefined && patch.stay?.min_nights === undefined) await requireChannelPush(db, env, access.organizationId, productId)
-  const saved = Object.keys(patch).length ? await updateProduct(db, { organizationId: access.organizationId, productId, patch, actor: { actorId: access.actorId }, env, deferStayNightPush: true }) : null
+  const saved = Object.keys(patch).length ? await updateProduct(db, { organizationId: access.organizationId, productId, patch, actor: { actorId: access.actorId }, env, deferStayNightPush: true, stayImport }) : null
   const settings = saved ? touchesAirbnbSettings({ stay: saved.stay ?? undefined }, { stay: home }) : null
   // The product's checks are the ones a valid request can still fail, so it is written first.
   if ((zone !== null && zone !== home.timezone) || Object.keys(location).length) {
@@ -777,12 +777,16 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   const columns = Object.keys(arrival)
   const instructionsAt = columns.length ? new Date().toISOString() : null
   if (instructionsAt !== null) {
-    const results = await executeBatch(db, [{
+    const writes: BatchQuery[] = [{
       query: `UPDATE product_stay_configs SET ${columns.map(column => `${column} = ?`).join(', ')}, updated_at = ?, updated_by = ? WHERE organization_id = ? AND product_id = ?`,
       params: [...columns.map(column => arrival[column]!), instructionsAt, access.actorId, access.organizationId, productId],
     }, organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.instructions_updated', entityType: 'stay_home', entityId: productId,
-      metadata: { fields: columns.sort().join(',') }, onlyIfPreviousChangedOneRow: true })], { operation: 'Update home arrival guide' })
+      metadata: { fields: columns.sort().join(',') }, onlyIfPreviousChangedOneRow: true })]
+    const importWrittenIndex = writes.length
+    if (stayImport) writes.push(stayImportWrittenQuery(access.organizationId, productId, stayImport, columns))
+    const results = await executeBatch(db, writes, { operation: 'Update home arrival guide' })
     if (results[0]?.meta.changes !== 1) fail(409, 'HOME_CHANGED', 'The home changed before its arrival guide was saved; reload it', 'product_id')
+    if (stayImport && (!results[importWrittenIndex] || results[importWrittenIndex].meta.changes !== 1)) fail(409, 'IMPORT_CHANGED', 'The import changed. Refresh and try again.', undefined, { committed: true, product_id: productId })
   }
   const product = pushes || settings !== null ? await getProduct(db, access.organizationId, productId) : null
   const channelPush = product ? await pushStayHomeChannel(db, env, access, product, { nights: pushes, settings }) : null

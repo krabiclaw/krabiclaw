@@ -979,11 +979,12 @@ export class AirbnbConnection {
     [JSON.stringify(inherited), this.organizationId, mapping.product_id])
     const homeWrite = await unedited(body)
     const detailsWrite = await unedited(details)
+    const stayImport = { channelId, listingId: mapping.listing_id, written }
     this.checkSlice()
-    if (Object.keys(homeWrite).length) await updateStayHome(this.env, this.db, access, mapping.product_id, homeWrite)
+    if (Object.keys(homeWrite).length) await updateStayHome(this.env, this.db, access, mapping.product_id, homeWrite, stayImport)
     if (Object.keys(detailsWrite).length) {
       this.checkSlice()
-      await updateProduct(this.db, { organizationId: this.organizationId, productId: mapping.product_id, patch: { details_mode: 'merge', details: detailsWrite }, actor: { actorId: this.userId }, env: this.env })
+      await updateProduct(this.db, { organizationId: this.organizationId, productId: mapping.product_id, patch: { details_mode: 'merge', details: detailsWrite }, actor: { actorId: this.userId }, env: this.env, stayImport })
     }
     return { report, done: true, written }
   }
