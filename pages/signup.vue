@@ -42,6 +42,7 @@
     </UCheckbox>
     <div class="mt-4 space-y-3" :class="agreed ? '' : 'pointer-events-none opacity-50'" :aria-disabled="!agreed" :inert="!agreed">
       <AuthGoogleButton label="Sign up with Google" :loading="loading" @activate="googleSignup" />
+      <AuthAppleButton label="Sign up with Apple" :loading="loading" @activate="appleSignup" />
       <USeparator label="or use email" />
       <AuthEmailSignUpForm :callback-url="verificationCallback" :initial-email="queryEmail" @success="emailSignupComplete" />
     </div>
@@ -78,7 +79,7 @@ const verificationCallback = computed(() => {
   if (redirect.value) url.searchParams.set('redirect', redirect.value)
   return url.toString()
 })
-const { loading, error, signInWithGoogle } = useAuthOperation()
+const { loading, error, signInWithGoogle, signInWithApple } = useAuthOperation()
 const pendingEmail = ref('')
 const agreed = ref(false)
 // The account is KrabiClaw's, so its policies are the platform's, whichever site serves this page.
@@ -102,6 +103,11 @@ if (isAuthenticated.value) await navigateTo(postLoginUrl.value, { external: true
 async function googleSignup() {
   if (!agreed.value) return
   await signInWithGoogle(postLoginUrl.value)
+}
+
+async function appleSignup() {
+  if (!agreed.value) return
+  await signInWithApple(postLoginUrl.value)
 }
 
 async function emailSignupComplete(email: string) {

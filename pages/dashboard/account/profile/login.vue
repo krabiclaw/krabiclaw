@@ -19,13 +19,23 @@
             </div>
             <NuxtLink to="/forgot-password" class="shrink-0 text-sm font-semibold text-highlighted underline underline-offset-4">Update</NuxtLink>
           </div>
-          <div class="flex items-start justify-between gap-4 py-4">
+          <div v-for="provider in LOGIN_PROVIDERS" :key="provider.id" class="flex items-start justify-between gap-4 py-4">
             <div>
-              <p class="font-semibold text-highlighted">Google</p>
-              <p class="mt-1 text-sm text-muted">{{ account.googleStatus.value === 'connected' ? 'Connected' : account.googleStatus.value === 'not-connected' ? 'Not connected' : account.googleStatus.value === 'error' ? 'Could not be checked' : '' }}</p>
+              <p class="font-semibold text-highlighted">{{ provider.label }}</p>
+              <p class="mt-1 text-sm text-muted">{{ STATUS_LABELS[account.loginProviderStatus(provider.id)] }}</p>
             </div>
+            <UButton
+              v-if="account.loginProviderStatus(provider.id) === 'not-connected'"
+              variant="link"
+              color="neutral"
+              :label="`Connect ${provider.label}`"
+              :loading="account.connectingProvider.value === provider.id"
+              :disabled="account.connectingProvider.value !== null"
+              @click="account.connectProvider(provider.id)"
+            />
           </div>
         </div>
+        <UAlert v-if="account.connectError.value" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="account.connectError.value" class="mt-3" />
       </section>
 
       <section>
@@ -66,7 +76,9 @@
 </template>
 
 <script setup lang="ts">
-import { accountEditorKey } from '~/components/dashboard/AccountProfilePage.vue'
+import { accountEditorKey, LOGIN_PROVIDERS } from '~/components/dashboard/AccountProfilePage.vue'
+
+const STATUS_LABELS = { 'connected': 'Connected', 'not-connected': 'Not connected', 'error': 'Could not be checked' } as const
 
 definePageMeta({ layout: 'dashboard' })
 

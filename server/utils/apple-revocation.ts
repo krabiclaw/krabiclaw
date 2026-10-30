@@ -18,20 +18,33 @@ function base64url(bytes: ArrayBuffer | Uint8Array | string): string {
   return btoa(String.fromCharCode(...raw)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
 }
 
-/** The ES256 client secret Apple's token and revoke endpoints authenticate with. */
-async function appleClientSecret(env: CloudflareEnv): Promise<string> {
+/** Apple's longest client-secret lifetime, a little under six months. */
+export const APPLE_CLIENT_SECRET_MAX_LIFETIME_SECONDS = 15_777_000
+
+/**
+ * The ES256 client secret Apple's token and revoke endpoints authenticate
+ * with, for the native app (`APPLE_APP_BUNDLE_ID`) or the website's Services
+ * ID. Null when the Sign in with Apple key is not configured.
+ */
+export async function appleClientSecret(env: CloudflareEnv, clientId: string, lifetimeSeconds: number): Promise<string | null> {
   const teamId = env.APPLE_TEAM_ID?.trim()
   const keyId = env.APPLE_KEY_ID?.trim()
   const privateKey = env.APPLE_PRIVATE_KEY?.trim()
-  if (!teamId || !keyId || !privateKey) {
-    throw new APIError('INTERNAL_SERVER_ERROR', { code: 'APPLE_NOT_CONFIGURED', message: 'APPLE_TEAM_ID, APPLE_KEY_ID and APPLE_PRIVATE_KEY are required to delete an account signed in with Apple.' })
-  }
+  if (!teamId || !keyId || !privateKey) return null
   const pem = privateKey.replace(/-----(BEGIN|END) PRIVATE KEY-----/g, '').replace(/\s+/g, '')
   const key = await crypto.subtle.importKey('pkcs8', Uint8Array.from(atob(pem), char => char.charCodeAt(0)), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign'])
   const now = Math.floor(Date.now() / 1000)
-  const signingInput = `${base64url(JSON.stringify({ alg: 'ES256', kid: keyId }))}.${base64url(JSON.stringify({ iss: teamId, iat: now, exp: now + 300, aud: APPLE, sub: env.APPLE_APP_BUNDLE_ID }))}`
+  const signingInput = `${base64url(JSON.stringify({ alg: 'ES256', kid: keyId }))}.${base64url(JSON.stringify({ iss: teamId, iat: now, exp: now + lifetimeSeconds, aud: APPLE, sub: clientId }))}`
   const signature = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, new TextEncoder().encode(signingInput))
   return `${signingInput}.${base64url(signature)}`
+}
+
+async function nativeAppClientSecret(env: CloudflareEnv): Promise<string> {
+  const secret = await appleClientSecret(env, env.APPLE_APP_BUNDLE_ID, 300)
+  if (!secret) {
+    throw new APIError('INTERNAL_SERVER_ERROR', { code: 'APPLE_NOT_CONFIGURED', message: 'APPLE_TEAM_ID, APPLE_KEY_ID and APPLE_PRIVATE_KEY are required to delete an account signed in with Apple.' })
+  }
+  return secret
 }
 
 /**
@@ -39,7 +52,7 @@ async function appleClientSecret(env: CloudflareEnv): Promise<string> {
  * the Apple account linked to this user. Returns the refresh token to revoke.
  */
 export async function exchangeAppleAuthorizationCode(env: CloudflareEnv, code: string, appleAccountId: string): Promise<{ refreshToken: string; clientSecret: string }> {
-  const clientSecret = await appleClientSecret(env)
+  const clientSecret = await nativeAppClientSecret(env)
   const response = await fetch(`${APPLE}/auth/token`, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },

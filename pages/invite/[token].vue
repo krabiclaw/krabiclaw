@@ -29,6 +29,7 @@
 
       <template v-else>
         <AuthGoogleButton :loading="googleLoading" @activate="signInWithGoogle(pagePath)" />
+        <AuthAppleButton :loading="googleLoading" @activate="signInWithApple(pagePath)" />
         <UButton :to="loginUrl" color="neutral" variant="outline" size="lg" block :ui="{ base: 'justify-start' }">
           Sign in with email
         </UButton>
@@ -100,8 +101,8 @@ const session = authClient.useSession()
 const sessionLoading = computed(() => session.value.isPending)
 // An anonymous guest identity is not an account that can join a workspace.
 const signedIn = computed(() => Boolean(session.value.data?.user && !session.value.data.user.isAnonymous))
-const { loading: googleLoading, error: googleError, signInWithGoogle } = useAuthOperation()
-watch(googleError, value => { if (value) failure.value = { title: 'Google sign in failed', message: value } })
+const { loading: googleLoading, error: googleError, signInWithGoogle, signInWithApple } = useAuthOperation()
+watch(googleError, value => { if (value) failure.value = { title: 'Sign in failed', message: value } })
 
 const accepting = ref(false)
 const joined = ref<Joined | null>(null)

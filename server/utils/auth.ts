@@ -3,7 +3,7 @@ import { createAuthMiddleware, getOAuthState, isAPIError } from 'better-auth/api
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { DISCORD_BOT_PERMISSIONS } from '~/server/utils/discord-bot'
 import { loginMethodForPath } from '~/shared/auth/login-method'
-import { admin, anonymous, bearer, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, organization, phoneNumber, type UserWithAnonymous } from 'better-auth/plugins'
+import { admin, anonymous, bearer, emailOTP, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, organization, phoneNumber, type UserWithAnonymous } from 'better-auth/plugins'
 import { stripe as betterAuthStripe } from '@better-auth/stripe'
 import { oauthProvider } from '@better-auth/oauth-provider'
 import { cimd } from '@better-auth/cimd'
@@ -19,7 +19,7 @@ import { isValidTimezone } from '~/utils/timezone'
 import { createCanonicalNotification, notifyNewUserSignup } from '~/server/utils/notification-center'
 import { measurementOutcome, readPageEventId, recordAndDeliverConversion } from '~/server/utils/organization-conversions'
 import { getPlatformOrganization } from '~/server/utils/platform-organization'
-import { sendPasswordResetEmail, sendVerificationEmail } from '~/server/utils/auth-email'
+import { sendPasswordResetEmail, sendSignInCodeEmail, sendVerificationEmail } from '~/server/utils/auth-email'
 import { validatePassword } from '~/utils/password-validation'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { organizationAccessControl, organizationRoles } from '~/utils/organization-access'
@@ -33,8 +33,9 @@ import { anonymousLinkQueries, linkGuestIdentitiesByVerifiedEmail } from '~/serv
 import { unwrapInstrumentedD1 } from '~/server/utils/request-metrics'
 import { timingSafeEqualText } from '~/server/utils/dev-route-auth'
 import { notifyOrganizationInvited } from '~/server/utils/notifications'
+import { assertNoPendingInvitation } from '~/server/utils/email-invitations'
 import { cleanupOrganizationBeforeDelete } from '~/server/utils/tenant-deletion'
-import { APPLE_AUTHORIZATION_CODE_HEADER, exchangeAppleAuthorizationCode, revokeAppleGrant } from '~/server/utils/apple-revocation'
+import { APPLE_AUTHORIZATION_CODE_HEADER, APPLE_CLIENT_SECRET_MAX_LIFETIME_SECONDS, appleClientSecret, exchangeAppleAuthorizationCode, revokeAppleGrant } from '~/server/utils/apple-revocation'
 import { reconcileZarazAnalytics } from '~/server/utils/zaraz-analytics'
 import { isNewSalePlan, normalizeBillingPlanId } from '~/shared/billing-model'
 import { integrationsThroughAccount } from '~/server/utils/organization-integrations'
@@ -136,6 +137,7 @@ export interface CloudflareEnv {
   GOOGLE_CLIENT_ID: string
   GOOGLE_CLIENT_SECRET: string
   APPLE_APP_BUNDLE_ID: string
+  APPLE_SERVICES_ID: string
   STRIPE_SECRET_KEY?: string
   STRIPE_WEBHOOK_SECRET?: string
   STRIPE_CONNECT_WEBHOOK_SECRET?: string
@@ -250,6 +252,8 @@ function trustedOriginsForAuth(env: CloudflareEnv): string[] | ((_request?: Requ
   // Better Auth matches a custom scheme by scheme and authority, so only the
   // billing returns are trusted, not any krabiclaw:// address.
   origins.add(NATIVE_BILLING_RETURN_ORIGIN)
+  // Sign in with Apple returns to the website by posting a form from Apple.
+  origins.add('https://appleid.apple.com')
   if (import.meta.dev || env.E2E_ALLOW_DEV_ROUTES === 'true') {
     const port = env.PORT || '3000'
     if (import.meta.dev) {
@@ -366,7 +370,10 @@ function buildAuth(env: CloudflareEnv) {
   const configuredOrganizationOptions = {
     ...organizationOptions,
     organizationHooks: {
-      beforeCreateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
+      beforeCreateOrganization: async ({ organization, user }: { organization: Record<string, unknown>; user: { email: string } }) => {
+        assertOrganizationFacts(organization)
+        await assertNoPendingInvitation(db, user.email)
+      },
       beforeUpdateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
       afterAddMember: async ({ member }: { member: { organizationId: string } }) => recordMemberChange(member.organizationId),
       afterAcceptInvitation: async ({ member }: { member: { organizationId: string } }) => recordMemberChange(member.organizationId),
@@ -427,7 +434,14 @@ function buildAuth(env: CloudflareEnv) {
     // An administrator does not delete accounts: /admin/remove-user would skip
     // the ownership guard and Apple revocation that /delete-user runs in
     // deleteUser.beforeDelete.
-    disabledPaths: ['/sign-in/phone-number', '/phone-number/request-password-reset', '/phone-number/reset-password', '/admin/remove-user'],
+    //
+    // An email code only signs in; verifying, resetting a password and changing
+    // an address keep their existing link flows.
+    disabledPaths: [
+      '/sign-in/phone-number', '/phone-number/request-password-reset', '/phone-number/reset-password', '/admin/remove-user',
+      '/email-otp/verify-email', '/email-otp/request-password-reset', '/forget-password/email-otp', '/email-otp/reset-password',
+      '/email-otp/request-email-change', '/email-otp/change-email',
+    ],
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         if (ctx.path === '/phone-number/verify' && ctx.body?.updatePhoneNumber !== true) {
@@ -764,6 +778,15 @@ function buildAuth(env: CloudflareEnv) {
         roles: platformAdminRoles,
         impersonationSessionDuration: 15 * 60,
       }),
+      // Someone invited by email signs in with a code sent to that address, so
+      // the account that accepts is the one the invitation names. Only sign-in
+      // codes are sent; verification and password reset stay on their links.
+      emailOTP({
+        sendVerificationOTP: async ({ email, otp, type }) => {
+          if (type !== 'sign-in') throw new APIError('BAD_REQUEST', { code: 'UNSUPPORTED_OTP_TYPE', message: 'Email codes are used only to sign in.' })
+          await sendSignInCodeEmail(env, { email, code: otp })
+        },
+      }),
       phoneNumber({
         sendOTP: async ({ phoneNumber: phone, code }) => {
           try {
@@ -859,15 +882,20 @@ function buildAuth(env: CloudflareEnv) {
       }),
     ],
     socialProviders: {
-      // The native app signs in with the identity token Sign in with Apple hands
-      // it. Better Auth verifies that token against Apple's keys with the app's
-      // bundle id as audience, so no client secret is involved and there is no
-      // web redirect flow. Apple is not a trusted linking provider: an existing
-      // account links it explicitly, and only with a verified email claim.
-      apple: {
-        clientId: env.APPLE_APP_BUNDLE_ID,
-        appBundleIdentifier: env.APPLE_APP_BUNDLE_ID,
-      },
+      // The website signs in through Apple's redirect flow as the Services ID,
+      // authenticating with a client secret signed by the Sign in with Apple
+      // key; Better Auth resolves this config once per instance, well inside
+      // the secret's lifetime. Without the key the redirect flow refuses with
+      // Better Auth's CLIENT_ID_AND_SECRET_REQUIRED. The native app signs in
+      // with the identity token Sign in with Apple hands it, verified against
+      // Apple's keys with either id as audience. Apple is not a trusted
+      // linking provider: an existing account links it explicitly, and only
+      // with a verified email claim.
+      apple: async () => ({
+        clientId: env.APPLE_SERVICES_ID,
+        clientSecret: await appleClientSecret(env, env.APPLE_SERVICES_ID, APPLE_CLIENT_SECRET_MAX_LIFETIME_SECONDS) ?? undefined,
+        audience: [env.APPLE_APP_BUNDLE_ID, env.APPLE_SERVICES_ID],
+      }),
       google: {
         clientId: env.GOOGLE_CLIENT_ID,
         clientSecret: env.GOOGLE_CLIENT_SECRET,
