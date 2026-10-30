@@ -848,7 +848,9 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
     }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     assert.equal((await cancel(crypto.randomUUID() + crypto.randomUUID())).status, 404)
     assert.equal((await cancel(claims.get('changing')!, 'another-business')).status, 404)
-    assert.equal((await cancel(claims.get('changing')!)).status, 409)
+    const processing = await cancel(claims.get('changing')!)
+    assert.equal(processing.status, 409)
+    assert.equal((await processing.json() as { data: { code: string } }).data.code, 'payment_in_progress')
     assert.equal(cancellations, 0)
     assert.equal(await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='changing'").first('status'), 'active')
     nativeStatus = 'requires_payment_method'

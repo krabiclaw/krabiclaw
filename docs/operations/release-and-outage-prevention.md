@@ -743,6 +743,8 @@ The forward migration `0001_required_delivery_fields.sql` makes the existing
 device-token credentials and failed-message diagnostics checks reject NULL.
 It rebuilds only the two unreferenced leaf tables, preserving their rows with
 foreign keys enabled; the applied baseline remains unchanged.
+Verify these constraints after the complete migration chain: the historical
+definitions in `0000_baseline.sql` are superseded by `0001`.
 
 The initial-copy manifests beside these artifacts record table totals,
 retired-policy counts and queued syncs. Read the persisted rows back independently

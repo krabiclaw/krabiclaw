@@ -1310,6 +1310,7 @@ export async function deliverPendingChannelNights(db: DbClient, env: StayMutatio
       const home = await readStayHome(db, { organizationId: row.organization_id, actorId: 'system', manage: true }, row.product_id)
       const from = homeToday(home.timezone)
       const to = addDays(from, STAY_CALENDAR_DAYS)
+      // Partial date edits make the outbox sparse, so each weekend needs its own delivery row.
       const known = home.calendar_rules?.weekend_price_minor === undefined ? [] : await queryAll<{ date: string }>(db, "SELECT date FROM channel_night_pushes WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND date >= ? AND date < ?", [row.organization_id, row.product_id, from, to])
       const queued = new Set(known.map(night => night.date))
       const added = home.calendar_rules?.weekend_price_minor === undefined ? [] : Array.from({ length: STAY_CALENDAR_DAYS }, (_, offset) => addDays(from, offset)).filter(date => !queued.has(date) && resolveStayNightPolicy(home, date).price_minor !== home.base_price_minor)
