@@ -19,17 +19,18 @@ import { createReplayableReservationCancelToken, hashReservationCancelToken } fr
  * only then is the intent confirmed. Each step is bound to the purchase claim
  * the checkout handed the browser, so another buyer cannot pay or review it.
  */
-interface OpenAttempt { id: string; payment_id: string; stripe_payment_intent_id: string; expires_at: string; status: string; review_json: string | null }
+interface OpenAttempt { id: string; payment_id: string; stripe_payment_intent_id: string; expires_at: string; claim_expires_at: string; status: string; review_json: string | null }
 type IntentWithSurcharge = Stripe.PaymentIntent & { amount_details?: { surcharge?: { status?: string; maximum_amount?: number; amount?: number } } }
 export type PaymentHandoffState = 'open' | 'paid' | 'failed' | 'expired'
 
 export async function requireOpenAttempt(db: DbClient, organizationId: string, paymentId: string, claim: string): Promise<{ payment: Payment; attempt: OpenAttempt; state: PaymentHandoffState }> {
   if (!/^[a-f0-9-]{72}$/u.test(claim)) throw new HTTPError({ statusCode: 400, statusMessage: 'Purchase claim required' })
-  const attempt = await queryFirst<OpenAttempt>(db, `SELECT a.id,a.payment_id,a.stripe_payment_intent_id,a.expires_at,a.status,a.review_json FROM payment_attempts a JOIN payment_claims c ON c.payment_id=a.payment_id JOIN payments p ON p.id=a.payment_id
+  const attempt = await queryFirst<OpenAttempt>(db, `SELECT a.id,a.payment_id,a.stripe_payment_intent_id,a.expires_at,c.expires_at AS claim_expires_at,a.status,a.review_json FROM payment_attempts a JOIN payment_claims c ON c.payment_id=a.payment_id JOIN payments p ON p.id=a.payment_id
     WHERE a.payment_id=? AND p.organization_id=? AND c.token_hash=? AND a.stripe_payment_intent_id IS NOT NULL ORDER BY a.created_at DESC LIMIT 1`, [paymentId, organizationId, await tokenHash(claim)])
   if (!attempt) throw new HTTPError({ statusCode: 404, statusMessage: 'Payment not found' })
   const payment = await requirePayment(db, organizationId, paymentId)
-  const state: PaymentHandoffState = payment.captured_amount > 0 ? 'paid' : payment.state === 'failed' ? 'failed' : attempt.expires_at <= new Date().toISOString() ? 'expired' : 'open'
+  const now = new Date().toISOString()
+  const state: PaymentHandoffState = payment.captured_amount > 0 ? 'paid' : payment.state === 'failed' ? 'failed' : attempt.expires_at <= now || attempt.claim_expires_at <= now ? 'expired' : 'open'
   return { payment, attempt, state }
 }
 
@@ -102,6 +103,25 @@ export async function paymentHandoff(db: DbClient, stripe: Stripe, publishableKe
     surcharge_basis_points: await surchargeBasisPoints(db, organizationId, payment.stripe_account_id),
     review: parseReview(attempt.review_json),
   }
+}
+
+/** The buyer goes back to change a stay only after Stripe cancels the purchase and its held nights are released. */
+export async function cancelStayPayment(db: DbClient, stripe: Stripe, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string): Promise<{ status: 'canceled' }> {
+  const { payment, attempt, state } = await requireOpenAttempt(db, organizationId, paymentId, claim)
+  if (payment.subject_type !== 'stay') throw new HTTPError({ statusCode: 409, statusMessage: 'This payment does not hold a stay' })
+  if (state === 'paid') throw new HTTPError({ statusCode: 409, statusMessage: 'This stay is already paid; open its booking to request a change', data: { code: 'payment_paid' } })
+  const current = await stripe.paymentIntents.retrieve(attempt.stripe_payment_intent_id, {}, { stripeAccount: payment.stripe_account_id })
+  if (current.id !== attempt.stripe_payment_intent_id || (payment.stripe_payment_intent_id && payment.stripe_payment_intent_id !== current.id) || current.livemode !== Boolean(payment.livemode) || current.currency.toUpperCase() !== payment.currency || current.metadata.krabiclaw_payment_id !== payment.id) throw new Error('Stripe PaymentIntent does not match the purchase')
+  if (state !== 'open' && current.status !== 'canceled') throw new HTTPError({ statusCode: 409, statusMessage: state === 'expired' ? 'This payment has expired; start the booking again' : 'This payment was not accepted; start the booking again', data: { code: `payment_${state}` } })
+  if (current.status !== 'canceled' && !['requires_payment_method', 'requires_confirmation', 'requires_action'].includes(current.status)) {
+    throw new HTTPError({ statusCode: 409, statusMessage: 'This payment has started processing and cannot be changed here', data: { code: 'payment_in_progress' } })
+  }
+  const canceled = current.status === 'canceled' ? current : await stripe.paymentIntents.cancel(current.id, { cancellation_reason: 'requested_by_customer' }, { stripeAccount: payment.stripe_account_id, idempotencyKey: `krabiclaw-cancel:${payment.id}:${attempt.id}` })
+  if (canceled.status !== 'canceled') throw new Error('Stripe did not cancel the purchase')
+  await reconcilePaymentIntent(db, stripe, payment, canceled, env)
+  const released = await queryFirst<{ status: string }>(db, 'SELECT status FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, organizationId])
+  if (released?.status !== 'released') throw new Error('The canceled purchase still holds its stay')
+  return { status: 'canceled' }
 }
 
 /**

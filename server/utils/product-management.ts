@@ -4,6 +4,7 @@ import { assertResponsibilityTarget, ASSIGNED_SERVICE_SQL, memberAccessPrincipal
 import { assertPublishedHost } from '~/server/utils/public-provider'
 import type { ProductBookingSetupInput, SessionAvailability } from '~/server/utils/availability'
 import { HTTPError } from 'nitro'
+import { MAX_STAY_NIGHTS, parseStayCalendarRules } from '~/shared/bookings'
 import { d1JsonArray, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
@@ -270,7 +271,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
       WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
-    { query: `SELECT c.product_id, c.location_id, c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, c.property_type_group, c.property_type,
+    { query: `SELECT c.product_id, c.location_id, c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, c.calendar_rules, c.property_type_group, c.property_type,
         c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
         c.cancellation_policy, c.long_term_cancellation_policy, c.assigned_member_id, c.assigned_team_id, ${liveHomeSql('p')} AS live
       FROM product_stay_configs c JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
@@ -294,7 +295,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       accessibility: accessibility.get(product.id)!,
       location_id: String(row.location_id), check_in_time: String(row.check_in_time),
       check_in_end_time: row.check_in_end_time === null ? null : String(row.check_in_end_time), check_out_time: String(row.check_out_time),
-      max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
+      max_guests: Number(row.max_guests), min_nights: Number(row.min_nights), calendar_rules: parseStayCalendarRules(row.calendar_rules === null ? null : JSON.parse(String(row.calendar_rules))),
       ...storedStayListing(row),
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
@@ -619,6 +620,19 @@ interface Actor { actorId: string }
 /** A write receipt, never a field on a stored or read Product. */
 export type ProductMutation = Product & { channel_push: SuccessfulChannelPush | null }
 
+/** Internal source ownership; public Product patches cannot supply import provenance. */
+export interface StayImportWrite { channelId: string; listingId: string; written: Record<string, string> }
+
+/** The locked import keeps this mapping stable; hashes commit with their fields. */
+export function stayImportWrittenQuery(organizationId: string, productId: string, source: StayImportWrite, fields: readonly string[]): BatchQuery {
+  const written = Object.fromEntries(fields.filter(field => Object.hasOwn(source.written, field)).map(field => [field, source.written[field]]))
+  return {
+    query: `UPDATE product_channel_mappings SET import_written = json_patch(COALESCE(import_written, '{}'), ?), updated_at = ?
+      WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND channel_id = ? AND listing_id = ?`,
+    params: [JSON.stringify(written), new Date().toISOString(), organizationId, productId, source.channelId, source.listingId],
+  }
+}
+
 export function slugCandidate(base: string, attempt: number): string {
   const normalized = base.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, PRODUCT_LIMITS.slug)
   const root = normalized || 'product'
@@ -785,8 +799,14 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
   if (checkInEnd === stay.check_in_time) invalidStayField('check_in_end_time', 'stay.check_in_end_time must differ from stay.check_in_time')
   const maxGuests = stay.max_guests
   if (typeof maxGuests !== 'number' || !Number.isInteger(maxGuests) || maxGuests < 1 || maxGuests > 99) invalid('stay.max_guests must be a whole number from 1 to 99')
-  const minNights = stay.min_nights ?? 1
-  if (typeof minNights !== 'number' || !Number.isInteger(minNights) || minNights < 1 || minNights > 365) invalid('stay.min_nights must be a whole number from 1 to 365')
+  const minNights = stay.min_nights
+  if (typeof minNights !== 'number' || !Number.isInteger(minNights) || minNights < 1 || minNights > MAX_STAY_NIGHTS) invalid(`stay.min_nights must be a whole number from 1 to ${MAX_STAY_NIGHTS}`)
+  let calendarRules: ProductStayConfig['calendar_rules']
+  try { calendarRules = parseStayCalendarRules(stay.calendar_rules ?? null) }
+  catch (error) {
+    if (!(error instanceof TypeError)) throw error
+    invalidStayField('calendar_rules', error.message)
+  }
   const location = await queryFirst<{ id: string }>(db, 'SELECT id FROM business_locations WHERE organization_id = ? AND id = ?', [organizationId, locationId])
   if (!location) notFound('That location is not in this organization')
   // An edit names the responsibility it changes; the stored target it keeps is carried, not re-checked.
@@ -794,7 +814,7 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
     ? Object.fromEntries((['assigned_member_id', 'assigned_team_id'] as const).filter(field => (stay[field] ?? null) !== stored[field]).map(field => [field, stay[field]]))
     : stay
   const target = await assertResponsibilityTarget(db, organizationId, named, stored)
-  return { location_id: locationId, check_in_time: stay.check_in_time as string, check_in_end_time: checkInEnd as string | null, check_out_time: stay.check_out_time as string, max_guests: maxGuests, min_nights: minNights,
+  return { location_id: locationId, check_in_time: stay.check_in_time as string, check_in_end_time: checkInEnd as string | null, check_out_time: stay.check_out_time as string, max_guests: maxGuests, min_nights: minNights, calendar_rules: calendarRules,
     ...planStayListing(stay), ...target }
 }
 
@@ -1154,7 +1174,7 @@ function productWrites(
   // unrelated save never restates settings someone else changed.
   if (planned.stay && (options.stayFields === undefined || options.stayFields.length)) {
     const columns = [
-      'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'property_type_group', 'property_type',
+      'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'property_type_group', 'property_type',
       'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit',
       'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy', 'assigned_member_id', 'assigned_team_id',
     ] as const satisfies readonly (keyof ProductStayConfig)[]
@@ -1169,14 +1189,14 @@ function productWrites(
                VALUES (?, ?, ?, 1, 1, ?, ?, ?, ?) ON CONFLICT (product_id, location_id) DO NOTHING`,
       params: [organizationId, planned.id, planned.stay.location_id, now, now, actor.actorId, actor.actorId],
     }, {
-      query: `INSERT INTO product_stay_configs (product_id, organization_id, location_id, check_in_time, check_in_end_time, check_out_time, max_guests, min_nights,
+      query: `INSERT INTO product_stay_configs (product_id, organization_id, location_id, check_in_time, check_in_end_time, check_out_time, max_guests, min_nights, calendar_rules,
                  property_type_group, property_type, listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit,
                  bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id, created_at, updated_at, created_by, updated_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (product_id) DO UPDATE SET ${[...assignments, 'updated_at = excluded.updated_at', 'updated_by = excluded.updated_by'].join(', ')}
                WHERE product_stay_configs.organization_id = excluded.organization_id AND product_stay_configs.location_id = excluded.location_id`,
       params: [planned.id, organizationId, planned.stay.location_id, planned.stay.check_in_time, planned.stay.check_in_end_time, planned.stay.check_out_time,
-        planned.stay.max_guests, planned.stay.min_nights, planned.stay.property_type_group, planned.stay.property_type,
+        planned.stay.max_guests, planned.stay.min_nights, planned.stay.calendar_rules === null ? null : JSON.stringify(planned.stay.calendar_rules), planned.stay.property_type_group, planned.stay.property_type,
         planned.stay.listing_type, planned.stay.total_floors, planned.stay.listing_floor, planned.stay.year_built, planned.stay.property_size, planned.stay.property_size_unit,
         planned.stay.bedrooms, planned.stay.beds, planned.stay.bathrooms,
         JSON.stringify(planned.stay.amenity_answers), planned.stay.cancellation_policy, planned.stay.long_term_cancellation_policy,
@@ -1341,9 +1361,9 @@ export async function publishStayProducts(env: CloudflareEnv, products: readonly
  * as a home, and the counts are reported to Stripe after. Other products are
  * not billed by count, so their writes run as they are.
  */
-async function executeProductWrites(db: DbClient, env: CloudflareEnv, organizationId: string, writes: BatchQuery[], options: { operation: string; action: string; stay: boolean; allowHomeActivation?: boolean }): Promise<void> {
-  if (options.stay) await executeWithinCapacity(env, db, organizationId, writes, options)
-  else await executeBatch(db, writes, { operation: options.operation })
+async function executeProductWrites(db: DbClient, env: CloudflareEnv, organizationId: string, writes: BatchQuery[], options: { operation: string; action: string; stay: boolean; allowHomeActivation?: boolean }): Promise<D1Result[]> {
+  if (options.stay) return await executeWithinCapacity(env, db, organizationId, writes, options)
+  return await executeBatch(db, writes, { operation: options.operation })
 }
 
 export async function createProduct(db: DbClient, input: {
@@ -1872,6 +1892,8 @@ export async function updateProduct(db: DbClient, input: {
   idempotencyKey?: string
   /** updateStayHome completes once after its optional location timezone write. */
   deferStayNightPush?: true
+  /** Only fields committed by this Product patch advance the import's edit guard. */
+  stayImport?: StayImportWrite
   /** A room's authored details share this Product transaction when assigning listing amenities. */
   stayRoomUpdate?: { roomId: string; expectedDetailsVersion: number; accessibility?: StayRoomAccessibility } & Partial<Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom' | 'amenities'>>
   /** Listing accessibility uses the Product version and the same photo transaction as room evidence. */
@@ -2026,6 +2048,8 @@ export async function updateProduct(db: DbClient, input: {
     writes.push({ query: `INSERT INTO product_publications(organization_id,product_id,published,created_at,updated_at,created_by,updated_by) VALUES(?,?,1,?,?,?,?) ON CONFLICT(product_id,organization_id) DO UPDATE SET published=1,updated_at=excluded.updated_at,updated_by=excluded.updated_by`, params: [input.organizationId, input.productId, now, now, input.actor.actorId, input.actor.actorId] })
   }
   if (dedupeKey) writes.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.updated', entityType: 'product', entityId: input.productId, dedupeKey, metadata: { request_hash: requestHash, channel_completion: { nights: reprice, settings } } }))
+  const importWrittenIndex = writes.length
+  if (input.stayImport) writes.push(stayImportWrittenQuery(input.organizationId, input.productId, input.stayImport, [...Object.keys(input.patch), ...Object.keys(input.patch.stay ?? {}), ...Object.keys(input.patch.details ?? {})]))
   if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This offering exceeds one atomic update')
 
   // A variant anything was ever booked on is not removed by an edit. Stopping
@@ -2038,7 +2062,7 @@ export async function updateProduct(db: DbClient, input: {
   // A booking taken between the check above and this batch makes the variant
   // delete raise, and D1 rolls the whole batch back: the product is exactly as
   // it was, and the merchant is told why rather than reading a constraint name.
-  await executeProductWrites(db, env, input.organizationId, writes, { operation: 'Update product', action: 'turn it on', stay: current.kind === 'stay', allowHomeActivation: input.allowHomeActivation }).catch(async (error: unknown) => {
+  const results = await executeProductWrites(db, env, input.organizationId, writes, { operation: 'Update product', action: 'turn it on', stay: current.kind === 'stay', allowHomeActivation: input.allowHomeActivation }).catch(async (error: unknown) => {
     if (isUniqueDedupeConflict(error) && await replay()) return
     const evidenceError = stayAccessibilityEvidenceWriteError(error)
     if (evidenceError !== error) throw evidenceError
@@ -2060,6 +2084,7 @@ export async function updateProduct(db: DbClient, input: {
     if (raced.length === 0) throw error
     conflict(`${raced.join(', ')} was booked while you were editing, so nothing was changed. Turn it off instead of removing it.`)
   })
+  if (input.stayImport && (!results || !results[importWrittenIndex] || results[importWrittenIndex].meta.changes !== 1)) throw new HTTPError({ statusCode: 409, statusMessage: 'The import changed. Refresh and try again.', data: { code: 'IMPORT_CHANGED', committed: true, product_id: input.productId } })
   return complete(await getProduct(db, input.organizationId, input.productId))
 }
 

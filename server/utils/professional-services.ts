@@ -17,7 +17,6 @@ const consultationSettingsSchema = z.object({
   }, 'external_url must be an absolute HTTP or HTTPS URL without credentials').nullable(),
   schedule_path: z.string().trim().startsWith('/'),
   confirmation_path: z.string().trim().startsWith('/'),
-  tracking_enabled: z.boolean(),
   metadata_json: z.looseObject({}).nullable().optional(),
 }).superRefine((settings, context) => {
   if (settings.mode === 'external_url' && settings.external_url === null) {

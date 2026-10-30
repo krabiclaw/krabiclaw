@@ -12,7 +12,8 @@
         <button
           type="button"
           class="flex size-10 items-center justify-center rounded-full hover:bg-muted transition text-default"
-          :aria-label="t('payment.cancel')"
+          :aria-label="t('payment.back')"
+          :disabled="working || completing"
           @click="leave"
         >
           <PlatformIcon name="arrow-left" class="size-4" />
@@ -41,13 +42,13 @@
             </details>
           </section>
 
-          <!-- Airbnb's Change goes back to what was picked; here that is the offering's own page. -->
+          <!-- Changing a stay first releases this purchase's hold, then restores its dates and party on the home's page. -->
           <div v-if="handoff.stay" class="flex items-start justify-between gap-4 border-t border-default pt-5" data-payment-stay>
             <div>
               <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.dates') }}</h3>
               <p class="mt-1 text-sm text-default">{{ stayRange }}</p>
             </div>
-            <UButton v-if="offeringPath" :to="offeringPath" color="neutral" variant="soft" size="sm" :label="t('payment.change')" />
+            <UButton v-if="offeringPath && handoff.state !== 'paid' && !paid && !outcome" color="neutral" variant="soft" size="sm" :label="t('payment.change')" :loading="working" :disabled="working || completing" @click="changeStay('dates')" />
           </div>
           <div v-else-if="handoff.starts_at && handoff.ends_at && handoff.timezone" class="flex items-start justify-between gap-4 border-t border-default pt-5" data-payment-time>
             <div>
@@ -62,7 +63,8 @@
               <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.guests') }}</h3>
               <p class="mt-1 text-sm text-default">{{ guests }}</p>
             </div>
-            <UButton v-if="offeringPath" :to="offeringPath" color="neutral" variant="soft" size="sm" :label="t('payment.change')" />
+            <UButton v-if="offeringPath && handoff.stay && handoff.state !== 'paid' && !paid && !outcome" color="neutral" variant="soft" size="sm" :label="t('payment.change')" :loading="working" :disabled="working || completing" @click="changeStay('guests')" />
+            <UButton v-else-if="offeringPath && !handoff.stay" :to="offeringPath" color="neutral" variant="soft" size="sm" :label="t('payment.change')" />
           </div>
 
           <div class="border-t border-default pt-5 space-y-2">
@@ -391,5 +393,28 @@ async function complete() {
 
 async function leave() {
   await navigateTo(offeringPath.value || localePath('/'))
+}
+
+async function changeStay(edit: 'dates' | 'guests') {
+  const value = handoff.value
+  if (working.value || completing.value || !value?.stay || !offeringPath.value) return
+  working.value = true
+  actionError.value = ''
+  try {
+    if (value.state === 'open') {
+      await publicApiMutation<{ status: 'canceled' }>(`/api/public/payments/${encodeURIComponent(paymentId)}/cancel`, {
+        method: 'POST', body: { claim: claim.value },
+        validate: (result): result is { status: 'canceled' } => isRecord(result) && result.status === 'canceled',
+      })
+    }
+    await navigateTo({ path: offeringPath.value, query: {
+      check_in_date: value.stay.check_in_date, check_out_date: value.stay.check_out_date,
+      adults: String(value.stay.adults), children: String(value.stay.children), infants: String(value.stay.infants), stay_edit: edit,
+    } })
+  } catch (cause) {
+    actionError.value = getErrorMessage(cause, t('payment.unavailable'))
+  } finally {
+    working.value = false
+  }
 }
 </script>

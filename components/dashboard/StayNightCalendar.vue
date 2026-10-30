@@ -141,7 +141,7 @@
 <script setup lang="ts">
 import { parseDate, today, type DateValue } from '@internationalized/date'
 import type { Stay, StayHome, StayNight, StayTurnover } from '~/server/domain/stays'
-import { STAY_CHANNEL_LABELS } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, STAY_CHANNEL_LABELS, parseStayCalendarRules, resolveStayNightPolicy } from '~/shared/bookings'
 import StayNightInspector, { type NightConcern, type NightDraft, type NightEditField } from './StayNightInspector.vue'
 import EditorNavigationList from './EditorNavigationList.vue'
 import CalendarOfferingFilter from './CalendarOfferingFilter.vue'
@@ -152,7 +152,7 @@ import { STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES } from
 import { addLocalDays, formatCalendarDate, isValidCalendarDate, isValidInstant, isValidTimezone } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 
-type Home = Pick<StayHome, 'product_id' | 'name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'cancellation_policy' | 'long_term_cancellation_policy'>
+type Home = Pick<StayHome, 'product_id' | 'name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'cancellation_policy' | 'long_term_cancellation_policy'>
 // A manager reads each stay's surname and channel; a member's turnover has neither.
 type CalendarStay = Pick<StayTurnover, 'id' | 'product_id' | 'check_in_date' | 'check_out_date' | 'guest_name' | 'status'> & Partial<Pick<Stay, 'guest_surname' | 'channel'>>
 interface CalendarPayload { home: Home; nights: StayNight[]; stays: CalendarStay[]; channel_push?: SuccessfulChannelPush | null }
@@ -220,17 +220,18 @@ function isCalendar(value: unknown): value is CalendarPayload {
   if (!isRecord(value) || !isRecord(value.home) || !Array.isArray(value.nights) || !Array.isArray(value.stays)) return false
   const home = value.home
   if (home.product_id !== props.productId || typeof home.name !== 'string' || typeof home.timezone !== 'string' || !isCurrencyCode(home.currency)
-    || !nullableAmount(home.base_price_minor) || !nullableRule(home.min_nights, 365) || home.min_nights === null
+    || !nullableAmount(home.base_price_minor) || typeof home.min_nights !== 'number' || !nullableRule(home.min_nights, MAX_STAY_NIGHTS)
     || !(home.cancellation_policy === null || typeof home.cancellation_policy === 'string' && Object.hasOwn(STAY_CANCELLATION_POLICIES, home.cancellation_policy))
     || !(home.long_term_cancellation_policy === null || typeof home.long_term_cancellation_policy === 'string' && Object.hasOwn(STAY_LONG_TERM_CANCELLATION_POLICIES, home.long_term_cancellation_policy))) return false
   if (!isValidTimezone(home.timezone)) return false
+  parseStayCalendarRules(home.calendar_rules)
   if (!value.stays.every(stay => isRecord(stay) && typeof stay.id === 'string' && stay.product_id === props.productId
     && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date) && stay.check_out_date > stay.check_in_date
     && nullableText(stay.guest_name) && (props.manage ? nullableText(stay.guest_surname) && Object.hasOwn(channels, String(stay.channel)) : !('guest_surname' in stay) && !('channel' in stay)) && typeof stay.status === 'string')) return false
   return (value.channel_push === undefined || isSuccessfulChannelPush(value.channel_push)) && value.nights.every(item => isRecord(item) && isValidCalendarDate(item.date)
     && typeof item.available === 'boolean' && typeof item.closed === 'boolean' && nullableText(item.stay_id) && nullableAmount(item.price_minor)
     && (item.calendar === null || item.calendar === 'vrbo')
-    && nullableRule(item.min_stay_arrival) && nullableRule(item.min_stay_through) && nullableRule(item.max_stay)
+    && typeof item.min_stay_arrival === 'number' && nullableRule(item.min_stay_arrival) && nullableRule(item.max_stay)
     && typeof item.closed_to_arrival === 'boolean' && typeof item.closed_to_departure === 'boolean'
     && [null, 'host', 'import'].includes(item.source as string | null) && (item.held_until === null || isValidInstant(item.held_until))
     && (item.channel === null || isRecord(item.channel) && ['pending', 'pushed', 'needs_review'].includes(String(item.channel.state)) && nullableText(item.channel.detail)))
@@ -297,12 +298,12 @@ const writeError = ref('')
 const datesOpen = ref(false)
 const dateDraft = reactive({ start: '', end: '' })
 const dateError = ref('')
-const draft = reactive<NightDraft>({ price_minor: '', min_stay_arrival: '', min_stay_through: '', max_stay: '', closed_to_arrival: 'keep', closed_to_departure: 'keep' })
+const draft = reactive<NightDraft>({ price_minor: '', min_stay_arrival: '', max_stay: '', closed_to_arrival: 'keep', closed_to_departure: 'keep' })
 const dirtyFields = ref<NightEditField[]>([])
 const inspectorProps = computed(() => ({ orgSlug: String(route.params.orgSlug), home: data.value!.home, nights: selectedNights.value, dateLabel: dateLabel.value, manage: props.manage, busy: busy.value || status.value === 'pending', error: writeError.value, notice: [...new Set(selectedNights.value.flatMap(night => channelNote(night) ?? []))].join(' '), concern: concern.value, draft, dirty: dirtyFields.value.length > 0 }))
 const overviewGroups = computed(() => [{ id: 'home', items: [
   { id: 'price', label: 'Pricing', summary: data.value?.home.base_price_minor == null ? 'No base nightly price set' : `${money(data.value.home.base_price_minor)} per night`, to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/price` },
-  { id: 'availability', label: 'Availability', summary: `${data.value?.home.min_nights} night minimum`, to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/availability` },
+  { id: 'availability', label: 'Availability', summary: data.value ? `${data.value.home.min_nights} night minimum` : 'Loading availability…', to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/availability` },
   { id: 'cancellation', label: 'Cancellations', summary: [data.value?.home.cancellation_policy ? STAY_CANCELLATION_POLICIES[data.value.home.cancellation_policy].label : 'Short-term policy not set', data.value?.home.long_term_cancellation_policy ? STAY_LONG_TERM_CANCELLATION_POLICIES[data.value.home.long_term_cancellation_policy].label : 'Long-term policy not set'].join(' · '), to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/cancellation` },
 ] }])
 function edit(value: NightConcern) {
@@ -391,9 +392,12 @@ async function write(patch: Record<string, boolean | number | null>) {
     }
     await refresh()
     if (error.value) throw error.value
-    const expected = patch.reset ? { source: null, closed: false, price_minor: data.value!.home.base_price_minor, min_stay_arrival: null, min_stay_through: null, max_stay: null, closed_to_arrival: false, closed_to_departure: false }
-      : { ...patch, ...('price_minor' in patch && patch.price_minor === null ? { price_minor: data.value!.home.base_price_minor } : {}) }
-    if (selectedNights.value.length !== selectedCount.value || selectedNights.value.some(night => Object.entries(expected).some(([field, value]) => night[field as keyof StayNight] !== value))) throw new Error('The saved calendar does not match the selected night settings. Review the calendar before making another change.')
+    if (selectedNights.value.length !== selectedCount.value || selectedNights.value.some((night) => {
+      const listing = resolveStayNightPolicy(data.value!.home, night.date)
+      const expected = patch.reset ? { source: null, closed: false, ...listing, max_stay: null, closed_to_arrival: false, closed_to_departure: false }
+        : { ...patch, ...(patch.price_minor === null ? { price_minor: listing.price_minor } : {}), ...(patch.min_stay_arrival === null ? { min_stay_arrival: listing.min_stay_arrival } : {}) }
+      return Object.entries(expected).some(([field, value]) => night[field as keyof StayNight] !== value)
+    })) throw new Error('The saved calendar does not match the selected night settings. Review the calendar before making another change.')
     edit('summary')
   } catch (cause) {
     if (mutation.signal.aborted) return
@@ -416,7 +420,7 @@ async function save() {
       else if (field === 'price_minor') patch[field] = majorAmountToMinor(value, data.value!.home.currency)
       else {
         const count = Number(value)
-        if (!Number.isInteger(count) || count < 1 || count > 99) throw new Error('Nightly stay overrides must be whole numbers from 1 to 99.')
+        if (!Number.isInteger(count) || count < 1 || count > MAX_STAY_NIGHTS) throw new Error(`Nightly stay overrides must be whole numbers from 1 to ${MAX_STAY_NIGHTS}.`)
         patch[field] = count
       }
     }

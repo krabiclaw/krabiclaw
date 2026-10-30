@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a5286a8c-fa25-4c34-bce0-5ff37cbda692",
-  "prevId": "031593e1-9291-4378-9ef0-8a281251599a",
+  "id": "e73577ba-7925-4f88-9a55-0965ddadaeab",
+  "prevId": "384bf695-df2f-4d31-8ada-19dca56e30b7",
   "tables": {
     "account": {
       "name": "account",
@@ -1372,6 +1372,13 @@
         },
         "cancellation_reason": {
           "name": "cancellation_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "no_show_at": {
+          "name": "no_show_at",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -3880,7 +3887,7 @@
       "checkConstraints": {
         "device_tokens_kind_check": {
           "name": "device_tokens_kind_check",
-          "value": "(kind = 'apns' AND length(token) > 0 AND length(token) % 2 = 0 AND token NOT GLOB '*[^0123456789abcdef]*' AND environment IN ('sandbox', 'production') AND p256dh IS NULL AND auth IS NULL) OR (kind = 'web' AND token LIKE 'https://%' AND environment IS NULL AND length(p256dh) > 0 AND length(auth) > 0)"
+          "value": "((kind = 'apns' AND length(token) > 0 AND length(token) % 2 = 0 AND token NOT GLOB '*[^0123456789abcdef]*' AND environment IN ('sandbox', 'production') AND p256dh IS NULL AND auth IS NULL) OR (kind = 'web' AND token LIKE 'https://%' AND environment IS NULL AND length(p256dh) > 0 AND length(auth) > 0)) IS TRUE"
         },
         "device_tokens_created_at_check": {
           "name": "device_tokens_created_at_check",
@@ -7661,7 +7668,7 @@
         },
         "organization_consultation_settings_check": {
           "name": "organization_consultation_settings_check",
-          "value": "consultation_settings_json IS NULL OR (json_valid(consultation_settings_json) AND json_type(consultation_settings_json) IS 'object' AND json_extract(consultation_settings_json, '$.mode') IN ('external_url', 'native_disabled', 'native') AND json_type(consultation_settings_json, '$.cta_label') IS 'text' AND json_type(consultation_settings_json, '$.schedule_path') IS 'text' AND json_extract(consultation_settings_json, '$.schedule_path') LIKE '/%' AND json_type(consultation_settings_json, '$.confirmation_path') IS 'text' AND json_extract(consultation_settings_json, '$.confirmation_path') LIKE '/%' AND json_type(consultation_settings_json, '$.tracking_enabled') IN ('true', 'false') AND (json_type(consultation_settings_json, '$.metadata_json') IS NULL OR json_type(consultation_settings_json, '$.metadata_json') IN ('null', 'object')) AND (json_type(consultation_settings_json, '$.external_url') IS NULL OR json_type(consultation_settings_json, '$.external_url') IN ('null', 'text'))) IS TRUE"
+          "value": "consultation_settings_json IS NULL OR (json_valid(consultation_settings_json) AND json_type(consultation_settings_json) IS 'object' AND json_extract(consultation_settings_json, '$.mode') IN ('external_url', 'native_disabled', 'native') AND json_type(consultation_settings_json, '$.cta_label') IS 'text' AND json_type(consultation_settings_json, '$.schedule_path') IS 'text' AND json_extract(consultation_settings_json, '$.schedule_path') LIKE '/%' AND json_type(consultation_settings_json, '$.confirmation_path') IS 'text' AND json_extract(consultation_settings_json, '$.confirmation_path') LIKE '/%' AND (json_type(consultation_settings_json, '$.metadata_json') IS NULL OR json_type(consultation_settings_json, '$.metadata_json') IN ('null', 'object')) AND (json_type(consultation_settings_json, '$.external_url') IS NULL OR json_type(consultation_settings_json, '$.external_url') IN ('null', 'text'))) IS TRUE"
         },
         "organization_config_palette_check": {
           "name": "organization_config_palette_check",
@@ -11975,13 +11982,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "min_stay_through": {
-          "name": "min_stay_through",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "max_stay": {
           "name": "max_stay",
           "type": "integer",
@@ -12084,7 +12084,7 @@
         },
         "product_nights_stay_rules_check": {
           "name": "product_nights_stay_rules_check",
-          "value": "(min_stay_arrival IS NULL OR min_stay_arrival >= 1) AND (min_stay_through IS NULL OR min_stay_through >= 1) AND (max_stay IS NULL OR max_stay >= 1)"
+          "value": "(min_stay_arrival IS NULL OR min_stay_arrival >= 1) AND (max_stay IS NULL OR max_stay >= 1)"
         },
         "product_nights_source_check": {
           "name": "product_nights_source_check",
@@ -12988,8 +12988,14 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": 1
+          "autoincrement": false
+        },
+        "calendar_rules": {
+          "name": "calendar_rules",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "check_in_instructions": {
           "name": "check_in_instructions",
@@ -13292,6 +13298,10 @@
         "product_stay_configs_min_nights_check": {
           "name": "product_stay_configs_min_nights_check",
           "value": "min_nights >= 1"
+        },
+        "product_stay_configs_calendar_rules_check": {
+          "name": "product_stay_configs_calendar_rules_check",
+          "value": "calendar_rules IS NULL OR (json_valid(calendar_rules) AND json_type(calendar_rules) = 'object')"
         },
         "product_stay_configs_instructions_check": {
           "name": "product_stay_configs_instructions_check",
@@ -15127,6 +15137,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "no_show_at": {
+          "name": "no_show_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -15431,6 +15448,68 @@
         "resource_localizations_route_path_check": {
           "name": "resource_localizations_route_path_check",
           "value": "route_path IS NULL OR (route_path LIKE '/' || locale || '/%' AND route_path NOT LIKE '%?%' AND route_path NOT LIKE '%#%' AND route_path NOT LIKE '%//%')"
+        }
+      }
+    },
+    "review_category_ratings": {
+      "name": "review_category_ratings",
+      "columns": {
+        "review_id": {
+          "name": "review_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "rating": {
+          "name": "rating",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "review_category_ratings_review_id_reviews_id_fk": {
+          "name": "review_category_ratings_review_id_reviews_id_fk",
+          "tableFrom": "review_category_ratings",
+          "tableTo": "reviews",
+          "columnsFrom": [
+            "review_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "review_category_ratings_pk": {
+          "columns": [
+            "review_id",
+            "category"
+          ],
+          "name": "review_category_ratings_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "review_category_ratings_rating_check": {
+          "name": "review_category_ratings_rating_check",
+          "value": "rating BETWEEN 1 AND 5"
+        },
+        "review_category_ratings_category_check": {
+          "name": "review_category_ratings_category_check",
+          "value": "category IN ('food', 'service', 'atmosphere', 'expertise', 'organization', 'enjoyment', 'listening', 'explanation', 'next_steps', 'cleanliness', 'accuracy', 'check_in', 'communication')"
         }
       }
     },
@@ -15745,6 +15824,13 @@
         },
         "content": {
           "name": "content",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "private_feedback": {
+          "name": "private_feedback",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -16196,6 +16282,14 @@
           ],
           "isUnique": true
         },
+        "scheduled_guest_messages_check_in_stay_unique": {
+          "name": "scheduled_guest_messages_check_in_stay_unique",
+          "columns": [
+            "stay_id"
+          ],
+          "isUnique": true,
+          "where": "template_id IS NULL AND template_title = 'Check-in instructions'"
+        },
         "scheduled_guest_messages_due_idx": {
           "name": "scheduled_guest_messages_due_idx",
           "columns": [
@@ -16319,6 +16413,226 @@
         "scheduled_guest_messages_instants_check": {
           "name": "scheduled_guest_messages_instants_check",
           "value": "strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (due_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', due_at, '+0 days') IS due_at) AND (started_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', started_at, '+0 days') IS started_at) AND (sent_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', sent_at, '+0 days') IS sent_at)"
+        }
+      }
+    },
+    "send_later_messages": {
+      "name": "send_later_messages",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "due_at": {
+          "name": "due_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_field": {
+          "name": "error_field",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "entry_id": {
+          "name": "entry_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sent_at": {
+          "name": "sent_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "send_later_messages_due_idx": {
+          "name": "send_later_messages_due_idx",
+          "columns": [
+            "status",
+            "due_at"
+          ],
+          "isUnique": false
+        },
+        "send_later_messages_author_idx": {
+          "name": "send_later_messages_author_idx",
+          "columns": [
+            "organization_id",
+            "user_id",
+            "due_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "send_later_messages_organization_id_organization_id_fk": {
+          "name": "send_later_messages_organization_id_organization_id_fk",
+          "tableFrom": "send_later_messages",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "send_later_messages_user_id_user_id_fk": {
+          "name": "send_later_messages_user_id_user_id_fk",
+          "tableFrom": "send_later_messages",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "send_later_messages_entry_id_activity_entries_id_fk": {
+          "name": "send_later_messages_entry_id_activity_entries_id_fk",
+          "tableFrom": "send_later_messages",
+          "tableTo": "activity_entries",
+          "columnsFrom": [
+            "entry_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "send_later_messages_request_scope_fk": {
+          "name": "send_later_messages_request_scope_fk",
+          "tableFrom": "send_later_messages",
+          "tableTo": "requests",
+          "columnsFrom": [
+            "organization_id",
+            "request_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "send_later_messages_status_check": {
+          "name": "send_later_messages_status_check",
+          "value": "status IN ('pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled')"
+        },
+        "send_later_messages_error_check": {
+          "name": "send_later_messages_error_check",
+          "value": "(status NOT IN ('failed', 'needs_review') OR (length(trim(reason)) > 0 AND length(trim(error_code)) > 0 AND length(trim(error_field)) > 0)) IS TRUE"
+        },
+        "send_later_messages_sent_check": {
+          "name": "send_later_messages_sent_check",
+          "value": "status <> 'sent' OR (entry_id IS NOT NULL AND sent_at IS NOT NULL)"
+        },
+        "send_later_messages_sending_check": {
+          "name": "send_later_messages_sending_check",
+          "value": "status <> 'sending' OR started_at IS NOT NULL"
+        },
+        "send_later_messages_text_check": {
+          "name": "send_later_messages_text_check",
+          "value": "length(trim(body)) BETWEEN 1 AND 5000 AND version >= 1"
+        },
+        "send_later_messages_instants_check": {
+          "name": "send_later_messages_instants_check",
+          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND strftime('%Y-%m-%dT%H:%M:%fZ', due_at, '+0 days') IS due_at AND (started_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', started_at, '+0 days') IS started_at) AND (sent_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', sent_at, '+0 days') IS sent_at)"
         }
       }
     },
@@ -17143,6 +17457,13 @@
         },
         "cancellation_reason": {
           "name": "cancellation_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "no_show_at": {
+          "name": "no_show_at",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

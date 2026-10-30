@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -17,16 +18,42 @@ test('the migration chain applies from zero and builds every table the schema de
     const built = (database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{ name: string }>)
       .map(row => row.name)
     assert.deepEqual(built, declared)
-    const consultation = { mode: 'native', cta_label: 'Book', schedule_path: '/schedule', confirmation_path: '/confirmed', tracking_enabled: true, metadata_json: {} }
+    const consultation = { mode: 'native', cta_label: 'Book', schedule_path: '/schedule', confirmation_path: '/confirmed', metadata_json: {} }
     database.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone, consultation_settings_json) VALUES (?, ?, ?, 'USD', 'America/New_York', ?)").run('tenant-a', 'A', 'tenant-a', JSON.stringify(consultation))
     database.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('tenant-b', 'B', 'tenant-b', 'THB', 'Asia/Bangkok')").run()
     // A business cannot be stored without the currency it sells in and the clock it reports in.
     assert.throws(() => database.prepare("INSERT INTO organization (id, name, slug, timezone) VALUES ('no-currency', 'C', 'no-currency', 'Asia/Bangkok')").run(), /NOT NULL constraint failed: organization.default_currency/)
     assert.throws(() => database.prepare("INSERT INTO organization (id, name, slug, default_currency) VALUES ('no-clock', 'C', 'no-clock', 'USD')").run(), /NOT NULL constraint failed: organization.timezone/)
-    for (const invalid of [{ ...consultation, mode: 'unknown' }, { ...consultation, tracking_enabled: 'true' }, { ...consultation, metadata_json: [] }, { ...consultation, schedule_path: 'schedule' }, { mode: 'native' }]) {
+    for (const invalid of [{ ...consultation, mode: 'unknown' }, { ...consultation, cta_label: false }, { ...consultation, metadata_json: [] }, { ...consultation, schedule_path: 'schedule' }, { mode: 'native' }]) {
       assert.throws(() => database.prepare("UPDATE organization SET consultation_settings_json = ? WHERE id = 'tenant-a'").run(JSON.stringify(invalid)), /organization_consultation_settings_check/)
     }
     assert.deepEqual(JSON.parse((database.prepare("SELECT consultation_settings_json FROM organization WHERE id = 'tenant-a'").get() as { consultation_settings_json: string }).consultation_settings_json), consultation)
+    database.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('schema-user','Schema user','schema-user@example.test',1)").run()
+    database.prepare("INSERT INTO session(id,expiresAt,token,userId) VALUES('schema-session',9999999999,'schema-session-token','schema-user')").run()
+    for (const [token, kind, environment, p256dh, auth] of [
+      ['aabb', 'apns', null, null, null],
+      ['https://push.example.test/missing-key', 'web', null, null, 'recorded-auth'],
+      ['https://push.example.test/missing-auth', 'web', null, 'recorded-p256dh', null],
+    ]) {
+      assert.throws(() => database.prepare("INSERT INTO device_tokens(token,kind,user_id,session_id,environment,p256dh,auth) VALUES(?,?,'schema-user','schema-session',?,?,?)").run(token, kind, environment, p256dh, auth), /device_tokens_kind_check/)
+    }
+    database.prepare("INSERT INTO device_tokens(token,kind,user_id,session_id,environment,p256dh,auth) VALUES('aabb','apns','schema-user','schema-session','production',NULL,NULL),('https://push.example.test/complete','web','schema-user','schema-session',NULL,'recorded-p256dh','recorded-auth')").run()
+    assert.deepEqual(database.prepare('SELECT token,kind,environment,p256dh,auth FROM device_tokens ORDER BY kind').all(), [
+      { token: 'aabb', kind: 'apns', environment: 'production', p256dh: null, auth: null },
+      { token: 'https://push.example.test/complete', kind: 'web', environment: null, p256dh: 'recorded-p256dh', auth: 'recorded-auth' },
+    ])
+    database.prepare("INSERT INTO requests(id,kind,organization_id,conversation_state,payload_json) VALUES('schema-request','contact','tenant-a','waiting_on_guest',?)").run(JSON.stringify({ guest: { name: 'Recorded guest', email: 'guest@example.test', phone: null }, message: 'Recorded conversation' }))
+    const at = '2026-10-30T12:30:00.000Z'
+    for (const status of ['failed', 'needs_review']) for (const missing of ['reason', 'error_code', 'error_field']) {
+      const error = { reason: 'Recorded refusal', error_code: 'delivery_refused', error_field: 'channel', [missing]: null }
+      assert.throws(() => database.prepare("INSERT INTO send_later_messages(id,organization_id,request_id,user_id,body,due_at,status,reason,error_code,error_field,version,created_at,updated_at) VALUES(?,'tenant-a','schema-request','schema-user','Recorded reply',?,?,?,?,?,1,?,?)")
+        .run(`${status}-${missing}`, at, status, error.reason, error.error_code, error.error_field, at, at), /send_later_messages_error_check/)
+    }
+    database.prepare("INSERT INTO send_later_messages(id,organization_id,request_id,user_id,body,due_at,status,reason,error_code,error_field,version,created_at,updated_at) VALUES('pending','tenant-a','schema-request','schema-user','Recorded reply',?,'pending',NULL,NULL,NULL,1,?,?),('failed','tenant-a','schema-request','schema-user','Recorded reply',?,'failed','Recorded refusal','delivery_refused','channel',1,?,?)").run(at, at, at, at, at, at)
+    assert.deepEqual(database.prepare('SELECT id,status,reason,error_code,error_field FROM send_later_messages ORDER BY id').all(), [
+      { id: 'failed', status: 'failed', reason: 'Recorded refusal', error_code: 'delivery_refused', error_field: 'channel' },
+      { id: 'pending', status: 'pending', reason: null, error_code: null, error_field: null },
+    ])
     for (const organizationId of ['tenant-a', 'tenant-b']) {
       database.prepare('INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES (?, ?, ?, 0, ?)').run(`${organizationId}-th`, organizationId, 'th', 'published')
       database.prepare("INSERT INTO resource_localizations (id, organization_id, resource_type, resource_id, locale, route_path, values_json, created_by_user_id, updated_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'test', 'test')").run(`${organizationId}-route`, organizationId, 'product', `${organizationId}-product`, 'th', '/th/products/shared', '{}')
@@ -1065,5 +1092,225 @@ test('a v21 replacement preserves booked descendants and auth, completes manual 
       for (const table of ['account', 'session', 'jwks']) assert.deepEqual(live.prepare(`SELECT * FROM ${table} ORDER BY 1`).all(), recorded[table])
       assert.deepEqual(live.pragma('foreign_key_check'), [])
     } finally { live.close() }
+  } finally { rmSync(directory, { recursive: true, force: true }) }
+})
+
+test('a v22 replacement preserves stay rules, retires imported duplicates and approved demo rules, and resumes canonical sync without overwriting host edits or job progress', async t => {
+  const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
+  const { MEDIA_PLACEMENT_OWNER_AUDIT_QUERY } = await import('../../scripts/audit-orphaned-media-placements.mjs')
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-30T12:30:00.000Z') })
+  const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-v22-stay-minimum-transfer-'))
+  const archived = JSON.parse(readFileSync('migrations-history/v22/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
+  const current = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
+  const sourcePath = join(directory, 'v22.sqlite')
+  const targetPath = join(directory, 'current.sqlite')
+  const createdAt = '2026-10-23T11:13:46.511Z', importedAt = '2026-10-23T11:13:47.428Z'
+  const preservedTables = ['user', 'member', 'account', 'session', 'jwks', 'stays', 'stay_nights', 'stay_payments', 'activity_entries', 'channex_connections', 'requests', 'team_threads', 'team_messages', 'media_assets', 'media_placements']
+  const recorded: Record<string, unknown[]> = {}
+  const pushProjection = 'product_id,date,state,detail,sent_json,attempts,retry_at'
+  const nightProjection = 'organization_id,product_id,date,closed,price_minor,min_stay_arrival,max_stay,closed_to_arrival,closed_to_departure,source,updated_at,updated_by'
+  const demoOrganization = '5mbJj0T09tvDCSfhOlUTEt4idxKt82tc', demoHome = '2521e20c-6857-448a-a3a9-7cd389be29e0'
+  let originalPushes: Array<Record<string, unknown>>
+  let originalJobs: Array<Record<string, unknown>>
+  let arrivalRules: unknown[]
+  let homeMinimums: unknown[]
+  const minimumFingerprint = createHash('sha256').update('21').digest('hex')
+  const earlierFingerprint = createHash('sha256').update('7').digest('hex')
+  const recordedCalendarRules = JSON.stringify({ day_of_week_min_nights: [-1, -1, -1, -1, 3, 3, -1], weekend_price_minor: 12500 })
+  const recordedConsultationSettings = JSON.stringify({ mode: 'native', cta_label: 'Book', schedule_path: '/schedule', confirmation_path: '/confirmed', tracking_enabled: false, metadata_json: { custom: 'preserved' } }, null, 2)
+  try {
+    const source = new Database(sourcePath)
+    try {
+      source.pragma('foreign_keys = ON')
+      for (const file of archived) source.exec(readFileSync(`migrations-history/v22/${file}`, 'utf8'))
+      source.exec(`CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
+        ${archived.map(file => `INSERT INTO d1_migrations(name) VALUES('${file}');`).join('\n')}`)
+      source.prepare("INSERT INTO organization(id,name,slug,subdomain,vertical,default_currency,timezone,consultation_settings_json) VALUES('host','Recorded host','host','host','lodging','USD','Pacific/Kiritimati',?)").run(recordedConsultationSettings)
+      source.prepare("INSERT INTO organization_locales(id,organization_id,locale,is_source,status) VALUES('host-en','host','en',1,'published')").run()
+      source.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('owner','Recorded owner','owner@proof.example',1),('departed-owner','Former owner','former@proof.example',1)").run()
+      source.prepare("INSERT INTO member(id,organizationId,userId,role) VALUES('owner-member','host','owner','owner')").run()
+      source.prepare("INSERT INTO account(id,accountId,providerId,userId,password) VALUES('credential','owner','credential','owner','recorded-fixture-hash')").run()
+      source.prepare("INSERT INTO session(id,expiresAt,token,activeOrganizationId,userId) VALUES('retained-session',9999999999,'recorded-fixture-session','host','owner')").run()
+      source.prepare("INSERT INTO jwks(id,publicKey,privateKey,createdAt) VALUES('retained-key','recorded-fixture-public-key','recorded-fixture-private-key',1)").run()
+      source.prepare("INSERT INTO channex_connections(organization_id,status,group_id,channel_id,connected_at,authorization_user_id) VALUES('host','connected','group','channel',?,NULL)").run(createdAt)
+      for (const [id, minimum, timezone, enabled] of [
+        ['derived', 21, 'Pacific/Kiritimati', 1], ['authored', 7, 'Pacific/Kiritimati', 1],
+        ['edited-first', 21, 'Pacific/Kiritimati', 1], ['unproven', 21, 'Pacific/Kiritimati', 1],
+        ['west', 21, 'America/Los_Angeles', 1], ['disconnected', 21, 'Pacific/Kiritimati', 0],
+        ['stopped', 21, 'Pacific/Kiritimati', 1], ['departed', 21, 'Pacific/Kiritimati', 1],
+      ] as const) {
+        source.prepare('INSERT INTO business_locations(id,organization_id,slug,title,timezone) VALUES(?,?,?,?,?)').run(`site-${id}`, 'host', id, id, timezone)
+        source.prepare("INSERT INTO products(id,organization_id,kind,name,slug,created_by,updated_by) VALUES(?,'host','stay',?,?,'owner','owner')").run(id, id, id)
+        source.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES(?,'host',?,?,'owner','owner')").run(`variant-${id}`, id, id)
+        source.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,created_by,updated_by) VALUES('host',?,?,'owner','owner')").run(id, `site-${id}`)
+        source.prepare("INSERT INTO product_stay_configs(organization_id,product_id,location_id,check_in_time,check_out_time,max_guests,min_nights,created_at,updated_at,created_by,updated_by) VALUES('host',?,?,'16:00','10:00',4,?,?,?,?, 'owner')").run(id, `site-${id}`, minimum, createdAt, createdAt, id === 'departed' ? 'departed-owner' : 'owner')
+        source.prepare("INSERT INTO product_channel_mappings(organization_id,product_id,provider,listing_id,channel_id,property_id,room_type_id,rate_plan_id,import_stage,enabled,import_written) VALUES('host',?,'channex',?,'channel',?,?,?,'complete',?,?)").run(id, `listing-${id}`, `property-${id}`, `room-${id}`, `rate-${id}`, enabled, id === 'derived' ? null : JSON.stringify({ name: 'recorded-title-guard', ...(id === 'west' ? { min_nights: earlierFingerprint } : {}) }))
+        source.prepare("INSERT INTO product_nights(organization_id,product_id,date,price_minor,min_stay_arrival,min_stay_through,source,updated_at,updated_by) VALUES('host',?,'2026-10-23',10000,21,NULL,'import',?,'owner')").run(id, id === 'edited-first' ? '2026-10-23T11:13:47.429Z' : importedAt)
+        if (id !== 'unproven') source.prepare("INSERT INTO activity_entries(id,kind,scope_kind,organization_id,actor_kind,actor_user_id,event_name,payload_json,dedupe_key,occurred_at) VALUES(?,'audit','organization','host','member','owner','product.created',?,?,?)").run(`created-${id}`, JSON.stringify({ entityId: id, entityType: 'product' }), `create:product:host:airbnb-listing:listing-${id}`, createdAt)
+        source.prepare("INSERT INTO activity_entries(id,kind,scope_kind,organization_id,actor_kind,actor_user_id,event_name,payload_json,dedupe_key,occurred_at) VALUES(?,'audit','organization','host','member','owner','stay.nights_imported',?,?,?)").run(`imported-${id}`, JSON.stringify({ entityId: id, entityType: 'product', metadata: { from: '2026-10-23', to: '2026-10-23', nights: 1 } }), `audit:imported-${id}`, importedAt)
+      }
+      for (const [productId, date, through, sourceKind, sentThrough] of [
+        ['derived', '2026-10-30', 21, 'import', 21],
+        ['derived', '2026-10-31', 21, 'import', 21],
+        ['derived', '2026-11-01', null, 'import', 21], // The old outbound default filled an absent through rule.
+        ['derived', '2026-11-02', null, 'host', 21],
+        ['derived', '2026-11-03', 21, 'import', 21],
+        ['derived', '2026-11-04', null, 'import', 1],
+        ['west', '2026-10-30', 21, 'import', 21],
+        ['disconnected', '2026-10-31', 21, 'import', 21],
+      ] as const) {
+        source.prepare("INSERT INTO product_nights(organization_id,product_id,date,price_minor,min_stay_arrival,min_stay_through,source,updated_at,updated_by) VALUES('host',?,?,10000,21,?,?,?,'owner')").run(productId, date, through, sourceKind, importedAt)
+        source.prepare("INSERT INTO channel_night_pushes(organization_id,product_id,provider,date,state,detail,sent_json,attempts,updated_at) VALUES('host',?,'channex',?,'pushed','Recorded confirmation',?,3,?)").run(productId, date, JSON.stringify({ date, rate: '100.00', min_stay_arrival: 21, min_stay_through: sentThrough }), importedAt)
+      }
+      for (const [productId, action, state] of [['derived', 'sync', 'done'], ['authored', 'sync', 'pending'], ['edited-first', 'sync', 'error'], ['unproven', 'sync', 'failed'], ['stopped', 'stop', 'pending']] as const) {
+        source.prepare("INSERT INTO airbnb_sync_jobs(id,organization_id,listing_id,product_id,action,state,requested_by,attempts,last_error_code,last_error,next_attempt_at,completed_at,created_at,updated_at) VALUES(?,'host',?,?,?,?,'owner',4,'recorded_error','Recorded job state','2026-10-31T13:00:00.000Z',?,?,?)").run(`job-${productId}`, `listing-${productId}`, productId, action, state, state === 'done' ? importedAt : null, createdAt, importedAt)
+      }
+      source.prepare("INSERT INTO organization(id,name,slug,subdomain,vertical,default_currency,timezone) VALUES(?,'Saltleaf demo','saltleaf-demo','saltleaf-demo','lodging','USD','America/Los_Angeles')").run(demoOrganization)
+      source.prepare("INSERT INTO organization_locales(id,organization_id,locale,is_source,status) VALUES('saltleaf-en',?,'en',1,'published')").run(demoOrganization)
+      source.prepare("INSERT INTO business_locations(id,organization_id,slug,title,timezone) VALUES('demo-site',?,'demo-site','Demo home','America/Los_Angeles')").run(demoOrganization)
+      source.prepare("INSERT INTO products(id,organization_id,kind,name,slug,created_by,updated_by) VALUES(?,?,'stay','Demo home','demo-home','owner','owner')").run(demoHome, demoOrganization)
+      source.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('demo-variant',?,?,'Demo home','owner','owner')").run(demoOrganization, demoHome)
+      source.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,created_by,updated_by) VALUES(?,?,'demo-site','owner','owner')").run(demoOrganization, demoHome)
+      source.prepare("INSERT INTO product_stay_configs(organization_id,product_id,location_id,check_in_time,check_out_time,max_guests,min_nights,created_by,updated_by) VALUES(?,?,'demo-site','16:00','10:00',4,1,'owner','owner')").run(demoOrganization, demoHome)
+      for (const [from, to, minimum] of [['2026-11-01', '2026-11-10', 1], ['2026-11-23', '2026-11-23', 3], ['2026-12-01', '2027-05-01', 2]] as const) {
+        source.prepare(`WITH RECURSIVE dates(d) AS (SELECT ? UNION ALL SELECT date(d,'+1 day') FROM dates WHERE d < ?)
+          INSERT INTO product_nights(organization_id,product_id,date,price_minor,min_stay_arrival,min_stay_through,max_stay,closed_to_arrival,source,updated_at,updated_by)
+          SELECT ?,?,d,12000,?,?,30,CAST(substr(d,9,2) AS INTEGER)%2,'host',?,'owner' FROM dates`).run(from, to, demoOrganization, demoHome, minimum, minimum, importedAt)
+      }
+      assert.deepEqual(source.prepare('SELECT min_stay_arrival,COUNT(*) AS nights FROM product_nights WHERE product_id=? GROUP BY min_stay_arrival ORDER BY min_stay_arrival').all(demoHome), [
+        { min_stay_arrival: 1, nights: 10 }, { min_stay_arrival: 2, nights: 152 }, { min_stay_arrival: 3, nights: 1 },
+      ])
+      source.prepare("INSERT INTO stays(id,organization_id,product_id,channel,owner,status,check_in_date,check_out_date,adults,guest_name,total_minor,currency,idempotency_key,created_at,updated_at) VALUES('booked-stay','host','derived','direct','app','confirmed','2026-11-10','2026-11-12',2,'Recorded guest',30000,'USD','recorded-stay',?,?)").run(createdAt, createdAt)
+      source.prepare("INSERT INTO stay_nights(organization_id,product_id,date,stay_id) VALUES('host','derived','2026-11-10','booked-stay'),('host','derived','2026-11-11','booked-stay')").run()
+      source.prepare("INSERT INTO stay_payments(id,organization_id,stay_id,amount_minor,currency,method,paid_on,idempotency_key,created_by) VALUES('recorded-payment','host','booked-stay',30000,'USD','cash','2026-10-23','recorded-payment','owner')").run()
+      source.prepare("INSERT INTO requests(id,kind,organization_id,conversation_state,payload_json) VALUES('guest-conversation','contact','host','waiting_on_guest',?)").run(JSON.stringify({ guest: { name: 'Recorded guest', email: 'guest@proof.example', phone: null }, message: 'Recorded conversation' }))
+      source.prepare("INSERT INTO activity_entries(id,request_id,kind,scope_kind,actor_kind,channel,body,dedupe_key,sequence,occurred_at) VALUES('guest-message','guest-conversation','message','request','guest','web','Recorded message','guest-message',1,?)").run(importedAt)
+      source.prepare("INSERT INTO team_threads(id,organization_id,created_by_user_id,participants_key,last_message_at,created_at) VALUES('team-thread','host','owner','recorded-thread',?,?)").run(importedAt, createdAt)
+      source.prepare("INSERT INTO team_messages(id,organization_id,thread_id,sender_user_id,body,idempotency_key,request_hash,created_at) VALUES('team-message','host','team-thread','owner','Recorded team message','recorded-message','recorded-hash',?)").run(importedAt)
+      for (const [id, organization] of [['message-photo', 'host'], ['demo-photo', demoOrganization]]) source.prepare("INSERT INTO media_assets(id,organization_id,kind,provider,source,public_url,status) VALUES(?,?,'image','cloudflare_images','uploaded','https://imagedelivery.net/h/attachment/public','active')").run(id, organization)
+      for (const [ownerType, ownerId] of [['team_message', 'team-message'], ['activity_entry', 'guest-message']]) source.prepare("INSERT INTO media_placements(id,organization_id,owner_type,owner_id,slot,asset_id) VALUES(?,'host',?,?,'attachments','message-photo')").run(`photo-${ownerType}`, ownerType, ownerId)
+      assert.deepEqual(source.prepare(MEDIA_PLACEMENT_OWNER_AUDIT_QUERY).all(), [], 'both canonical message owner types are in scope')
+      assert.throws(() => source.prepare("UPDATE media_placements SET owner_type='invented_owner' WHERE id='photo-team_message'").run(), /media_placements_owner_type_check/)
+      for (const table of preservedTables) recorded[table] = source.prepare(`SELECT * FROM ${table} ORDER BY 1,2`).all()
+      arrivalRules = source.prepare(`SELECT ${nightProjection} FROM product_nights ORDER BY product_id,date`).all()
+      homeMinimums = source.prepare('SELECT product_id,min_nights FROM product_stay_configs ORDER BY product_id').all()
+      originalPushes = source.prepare(`SELECT ${pushProjection} FROM channel_night_pushes ORDER BY product_id,date`).all() as Array<Record<string, unknown>>
+      originalJobs = source.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all() as Array<Record<string, unknown>>
+      assert.deepEqual(source.pragma('foreign_key_check'), [])
+    } finally { source.close() }
+
+    const sourceBytes = readFileSync(sourcePath)
+    for (const [ownerType, ownerId, wrongTenant] of [
+      ['team_message', 'missing-message', false], ['team_message', 'team-message', true],
+      ['activity_entry', 'missing-entry', false], ['activity_entry', 'guest-message', true],
+      ['activity_entry', 'created-derived', false], // An organization audit is not a guest message owner.
+    ] as const) {
+      const unsafePath = join(directory, `unsafe-owner-${ownerType}-${ownerId}-${wrongTenant}.sqlite`)
+      copyFileSync(sourcePath, unsafePath)
+      const unsafe = new Database(unsafePath)
+      unsafe.prepare('UPDATE media_placements SET owner_id=?,organization_id=?,asset_id=? WHERE id=?').run(ownerId, wrongTenant ? demoOrganization : 'host', wrongTenant ? 'demo-photo' : 'message-photo', `photo-${ownerType}`)
+      assert.deepEqual(unsafe.prepare(MEDIA_PLACEMENT_OWNER_AUDIT_QUERY).all(), [{ owner_type: ownerType, orphaned_count: 1 }])
+      unsafe.close()
+      const before = readFileSync(unsafePath)
+      await assert.rejects(() => transferDatabaseExport(unsafePath, `${unsafePath}.refused`), /Invariant violations:.*media_owner_scope/u)
+      assert.deepEqual(readFileSync(unsafePath), before)
+    }
+    // Authored or semantically distinct through rules must fail before a column can be retired.
+    for (const [kind, arrival, through] of [['host', 21, 21], ['import', 21, 7], ['import', null, 21]] as const) {
+      const unsafePath = join(directory, `unsafe-${kind}-${arrival}-${through}.sqlite`)
+      copyFileSync(sourcePath, unsafePath)
+      const unsafe = new Database(unsafePath)
+      unsafe.prepare("UPDATE product_nights SET source=?,min_stay_arrival=?,min_stay_through=? WHERE product_id='derived' AND date='2026-10-31'").run(kind, arrival, through)
+      unsafe.close()
+      const before = readFileSync(unsafePath)
+      await assert.rejects(() => transferDatabaseExport(unsafePath, `${unsafePath}.refused`), /Through-stay values need explicit reconciliation before retirement:.*no rows were copied/u)
+      assert.deepEqual(readFileSync(unsafePath), before)
+    }
+    for (const [date, minimum] of [['2026-11-11', 1], ['2026-11-01', 2]] as const) {
+      const unsafePath = join(directory, `unapproved-demo-${date}-${minimum}.sqlite`)
+      copyFileSync(sourcePath, unsafePath)
+      const unsafe = new Database(unsafePath)
+      unsafe.prepare("UPDATE product_nights SET date=?,min_stay_arrival=?,min_stay_through=? WHERE organization_id=? AND product_id=? AND date='2026-11-01'").run(date, minimum, minimum, demoOrganization, demoHome)
+      unsafe.close()
+      const before = readFileSync(unsafePath)
+      await assert.rejects(() => transferDatabaseExport(unsafePath, `${unsafePath}.refused`), /Through-stay values need explicit reconciliation before retirement:.*no rows were copied/u)
+      assert.deepEqual(readFileSync(unsafePath), before)
+    }
+    const manifest = await transferDatabaseExport(sourcePath, targetPath)
+    assert.deepEqual(readFileSync(sourcePath), sourceBytes, 'the archived source must remain byte-for-byte unchanged')
+    assert.deepEqual(manifest.transforms.map(({ name, changes }) => ({ name, changes })), [
+      { name: 'airbnb_duplicated_through_minimum_removed', changes: 5 },
+      { name: 'owner_approved_saltleaf_through_minimum_removed', changes: 163 },
+      { name: 'airbnb_original_minimum_edit_guard_recorded', changes: 4 },
+      { name: 'airbnb_canonical_sync_queued', changes: 2 },
+    ])
+    const deltaPayload = join(directory, 'same-source-delta.sql')
+    const initialBytes = readFileSync(targetPath)
+    t.mock.timers.tick(60_000)
+    const delta = await transferDatabaseExport(sourcePath, join(directory, 'same-source-final.sqlite'), { payloadPath: deltaPayload, deltaFrom: targetPath })
+    assert.equal(delta.payload!.delta!.airbnb_sync_jobs, 0)
+    assert.deepEqual(Object.fromEntries(Object.entries(delta.payload!.delta!).filter(([, count]) => count)), {})
+    assert.deepEqual(delta.payload!.left_behind, {})
+    assert.deepEqual(readFileSync(sourcePath), sourceBytes)
+    assert.deepEqual(readFileSync(targetPath), initialBytes, 'the initial replacement remains the immutable final-delta baseline')
+    const target = new Database(targetPath)
+    let retryRows: unknown[]
+    try {
+      target.pragma('foreign_keys = ON')
+      assert.equal(target.prepare("SELECT consultation_settings_json FROM organization WHERE id='host'").get()!.consultation_settings_json, recordedConsultationSettings, 'the retired tracking flag and surrounding JSON are retained byte-for-byte')
+      assert.deepEqual(target.prepare('SELECT product_id,min_nights FROM product_stay_configs ORDER BY product_id').all(), homeMinimums)
+      assert.deepEqual(target.prepare('SELECT product_id,calendar_rules FROM product_stay_configs ORDER BY product_id').all(), (homeMinimums as Array<{ product_id: string }>).map(({ product_id }) => ({ product_id, calendar_rules: null })), 'legacy homes have no fabricated calendar rules')
+      assert.deepEqual(target.prepare(`SELECT ${nightProjection} FROM product_nights ORDER BY product_id,date`).all(), arrivalRules)
+      assert.equal((target.pragma('table_info(product_nights)') as Array<{ name: string }>).some(column => column.name === 'min_stay_through'), false)
+      assert.deepEqual(target.prepare("SELECT product_id, json_extract(import_written,'$.name') AS name, json_extract(import_written,'$.min_nights') AS minimum FROM product_channel_mappings ORDER BY product_id").all(), [
+        { product_id: 'authored', name: 'recorded-title-guard', minimum: null },
+        { product_id: 'departed', name: 'recorded-title-guard', minimum: minimumFingerprint },
+        { product_id: 'derived', name: null, minimum: minimumFingerprint },
+        { product_id: 'disconnected', name: 'recorded-title-guard', minimum: minimumFingerprint },
+        { product_id: 'edited-first', name: 'recorded-title-guard', minimum: null },
+        { product_id: 'stopped', name: 'recorded-title-guard', minimum: minimumFingerprint },
+        { product_id: 'unproven', name: 'recorded-title-guard', minimum: null },
+        { product_id: 'west', name: 'recorded-title-guard', minimum: earlierFingerprint },
+      ])
+      assert.deepEqual(target.prepare(`SELECT ${pushProjection} FROM channel_night_pushes ORDER BY product_id,date`).all(), originalPushes, 'confirmed provider snapshots are untouched before the real source refresh')
+      for (const row of originalJobs.filter(row => row.product_id !== 'derived')) assert.deepEqual(target.prepare('SELECT * FROM airbnb_sync_jobs WHERE listing_id=?').get(row.listing_id), row)
+      assert.deepEqual(target.prepare("SELECT product_id,action,state,requested_by,attempts,last_error,next_attempt_at,completed_at FROM airbnb_sync_jobs WHERE product_id IN ('derived','west') ORDER BY product_id").all(), [
+        { product_id: 'derived', action: 'sync', state: 'pending', requested_by: 'owner', attempts: 0, last_error: null, next_attempt_at: null, completed_at: null },
+        { product_id: 'west', action: 'sync', state: 'pending', requested_by: 'owner', attempts: 0, last_error: null, next_attempt_at: null, completed_at: null },
+      ])
+      assert.deepEqual(target.prepare("SELECT product_id FROM airbnb_sync_jobs WHERE product_id IN ('disconnected','departed')").all(), [])
+      assert.equal(target.prepare("SELECT id FROM airbnb_sync_jobs WHERE product_id='derived'").get()!.id, 'job-derived', 'resuming a completed job preserves its existing identity')
+      assert.equal(target.prepare("SELECT id FROM airbnb_sync_jobs WHERE product_id='west'").get()!.id, createHash('sha256').update('airbnb-v23-sync:host:listing-west').digest('hex'))
+      assert.deepEqual(target.prepare("SELECT product_id,created_at,updated_at FROM airbnb_sync_jobs WHERE product_id IN ('derived','west') ORDER BY product_id").all(), [
+        { product_id: 'derived', created_at: createdAt, updated_at: '2026-10-30T12:30:00.000Z' },
+        { product_id: 'west', created_at: '2026-10-30T12:30:00.000Z', updated_at: '2026-10-30T12:30:00.000Z' },
+      ])
+      target.prepare("UPDATE airbnb_sync_jobs SET attempts=6,next_attempt_at='2026-10-31T13:00:00.000Z',last_error_code='recorded_retry',last_error='Recorded retry' WHERE product_id='derived'").run()
+      const initialJobs = target.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all()
+      target.exec(readFileSync(deltaPayload, 'utf8'))
+      assert.deepEqual(target.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all(), initialJobs, 'the final delta applies without duplicate listing jobs or resetting their state')
+      for (const table of preservedTables) assert.deepEqual(target.prepare(`SELECT * FROM ${table} ORDER BY 1,2`).all(), recorded[table], `${table} keeps every recorded value`)
+      assert.deepEqual(target.pragma('foreign_key_check'), [])
+
+      // The next copy is an ordinary current-epoch refresh, after delivery has made retry progress.
+      target.exec(`CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
+        ${current.map(file => `INSERT INTO d1_migrations(name) VALUES('${file}');`).join('\n')}`)
+      target.prepare("UPDATE product_stay_configs SET calendar_rules=? WHERE product_id='derived'").run(recordedCalendarRules)
+      retryRows = target.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all()
+    } finally { target.close() }
+    const currentBytes = readFileSync(targetPath)
+    const repeatedPath = join(directory, 'current-copy.sqlite')
+    const repeated = await transferDatabaseExport(targetPath, repeatedPath)
+    assert.deepEqual(repeated.transforms, [])
+    assert.deepEqual(readFileSync(targetPath), currentBytes)
+    const refreshed = new Database(repeatedPath, { readonly: true })
+    try {
+      assert.deepEqual(refreshed.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all(), retryRows)
+      assert.equal(refreshed.prepare("SELECT consultation_settings_json FROM organization WHERE id='host'").get()!.consultation_settings_json, recordedConsultationSettings, 'current-epoch refreshes preserve the original consultation JSON too')
+      assert.equal(refreshed.prepare("SELECT calendar_rules FROM product_stay_configs WHERE product_id='derived'").get()!.calendar_rules, recordedCalendarRules, 'current-epoch copies retain recorded calendar rules')
+      assert.deepEqual(refreshed.prepare(`SELECT ${pushProjection} FROM channel_night_pushes ORDER BY product_id,date`).all(), originalPushes)
+      for (const table of preservedTables) assert.deepEqual(refreshed.prepare(`SELECT * FROM ${table} ORDER BY 1,2`).all(), recorded[table])
+      assert.deepEqual(refreshed.pragma('foreign_key_check'), [])
+    } finally { refreshed.close() }
   } finally { rmSync(directory, { recursive: true, force: true }) }
 })

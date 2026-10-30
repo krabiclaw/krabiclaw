@@ -1,4 +1,4 @@
-import { STAY_HOME_ACCESSIBILITY_SCHEMA, STAY_LISTING_SCHEMA, STAY_LISTING_WRITE_SCHEMA, STAY_PHOTO_ROOM_SCHEMA } from './stays'
+import { STAY_CALENDAR_RULES_SCHEMA, STAY_HOME_ACCESSIBILITY_SCHEMA, STAY_LISTING_SCHEMA, STAY_LISTING_WRITE_SCHEMA, STAY_PHOTO_ROOM_SCHEMA } from './stays'
 import type { McpToolDefinition } from './shared'
 import { HTTPError } from 'nitro'
 import { pageInfoObject, paginationInputSchema, resolvedMediaAssetObject, organizationTool } from './shared'
@@ -6,6 +6,7 @@ import { TENANT_PAGE_BLOCKS_SCHEMA, TENANT_PAGE_METADATA_SCHEMA } from './conten
 import { productEditorPath } from '~/server/utils/dashboard-links'
 import { PRODUCT_LIMITS } from '~/server/utils/product-validation'
 import { SUPPORTED_CURRENCIES } from '~/shared/currencies'
+import { MAX_STAY_NIGHTS } from '~/shared/bookings'
 import { PRODUCT_KINDS, productDetailsSchema } from '~/shared/product-details'
 import { selectPrice, PRICE_RECURRING_INTERVALS, PRICE_TAX_BEHAVIORS, PRICE_TYPES, type PriceBilling } from '~/shared/prices'
 import { setProductBookingConfig, deleteProductBookingConfig, replaceWeeklySchedule, type ProductBookingSetupInput } from '~/server/utils/availability'
@@ -229,7 +230,8 @@ const stayRules = {
   check_in_end_time: { type: ['string', 'null'], pattern: stayTime.pattern, description: 'Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.' },
   check_out_time: { ...stayTime, description: 'Local 24-hour time guests leave by.' },
   max_guests: { type: 'integer', minimum: 1, maximum: 99 },
-  min_nights: { type: 'integer', minimum: 1, maximum: 365, description: 'Default minimum nights; individual nights may set their own.' },
+  min_nights: { type: 'integer', minimum: 1, maximum: MAX_STAY_NIGHTS, description: 'The listing’s required default minimum; individual arrival dates may override it.' },
+  calendar_rules: STAY_CALENDAR_RULES_SCHEMA,
   assigned_member_id: { type: ['string', 'null'], description: 'Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. This assignment grants the member access to the home’s stays and shows their approved public profile to guests. Publication requires an approved profile with a nonblank public_name; read get_member_public_profile. Clear assigned_team_id when choosing a member.' },
   assigned_team_id: { type: ['string', 'null'], description: 'Host team ID from list_teams. This assignment grants the team access to the home’s stays and shows its members with approved public profiles to guests. At least one approved profile is required for publication. Clear assigned_member_id when choosing a team.' },
   ...STAY_LISTING_SCHEMA,
@@ -238,9 +240,9 @@ const stayObject = { type: ['object', 'null'], description: 'Non-null exactly fo
   assigned_member_id: { type: ['string', 'null'], description: 'Better Auth organization membership ID of the home’s assigned host; null when no individual host is selected.' },
   assigned_team_id: { type: ['string', 'null'], description: 'Better Auth team ID assigned to host and look after the home; null when no team is selected.' },
   photo_rooms: { type: 'array', items: STAY_PHOTO_ROOM_SCHEMA }, accessibility: STAY_HOME_ACCESSIBILITY_SCHEMA },
-  required: ['location_id', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'assigned_member_id', 'assigned_team_id', 'photo_rooms', 'accessibility', ...Object.keys(STAY_LISTING_SCHEMA)] }
+  required: ['location_id', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'assigned_member_id', 'assigned_team_id', 'photo_rooms', 'accessibility', ...Object.keys(STAY_LISTING_SCHEMA)] }
 const staySetup = { type: 'object', description: 'Required for kind stay and refused for every other kind: the location the home is at (fixed once created) and its stay settings. Guest-facing house rules go in details.house_rules. Base nightly rate is the variant price.',
-  properties: { location_id: { type: 'string' }, ...stayRules, ...STAY_LISTING_WRITE_SCHEMA }, required: ['location_id', 'check_in_time', 'check_out_time', 'max_guests'], additionalProperties: false }
+  properties: { location_id: { type: 'string' }, ...stayRules, ...STAY_LISTING_WRITE_SCHEMA }, required: ['location_id', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights'], additionalProperties: false }
 const stayPatch = { type: 'object', description: 'Stay settings to change on a place to stay. Its location is fixed.', properties: { ...stayRules, ...STAY_LISTING_WRITE_SCHEMA }, additionalProperties: false }
 
 const productObject = {

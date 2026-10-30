@@ -20,9 +20,31 @@ applicable, since a home has one room type and one rate plan. Availability is
 0 or 1 and follows bookings, checkout holds and linked calendars alone. A host
 closing a night is `stop_sell: true` on the rate plan, one restrictions call
 and nothing else; opening it is `stop_sell: false` alone. The property is
-created with `min_stay_type: both`, and the two minimum-stay fields always
-travel together: a change to either sends both, and a night without its own
-minimum sends the home's minimum nights in both.
+created with `min_stay_type: arrival`, and its Airbnb channel uses `Arrival`.
+Airbnb minimum stays apply to the arrival date. A date without its own
+override uses the actual listing default imported from live
+`listing_details.availability_rules.default_min_nights`; missing or invalid
+defaults stop the import. KrabiClaw has no independent through-stay rule.
+The rate plan's rolling default minimum and primary rate follow the canonical
+home's minimum and base price, so new dates agree with the direct calendar.
+Actual optional weekday minima and the actual Friday/Saturday weekend amount
+are stored in `calendar_rules`; an absent provider field stays absent. Imported
+effective min/price values equal to the actual source policy inherit it (`NULL`)
+instead of becoming 500 explicit exceptions. Differing dated values remain
+explicit. Channex rolls the weekday minimums forward itself; the normal ARI
+task delivers differing weekend prices as their dates enter the window. Nonempty
+`seasonal_min_nights` is rejected visibly: its endpoint/collision semantics have
+not been established, and no seasonal rule feature is offered.
+
+Provider evidence (2026-10-30): the current
+[create](https://docs.channex.io/api-v.1-documentation/rate-plans-collection/create-rate-plan-api.md)
+and [update](https://docs.channex.io/api-v.1-documentation/rate-plans-collection/update-rate-plan-api.md)
+OpenAPI schemas explicitly define seven Monday-first minimum values. Their
+occupancy option accepts only a scalar rate, so weekend prices require dated
+ARI delivery. Airbnb's live listing schema also reports its weekday minimum
+array Monday-first, and Airbnb identifies
+[weekend pricing as Friday and Saturday](https://www.airbnb.com/help/article/512).
+
 
 Channex checks every submitted task against the exact dates and values in
 its specification, so the dates below are mandatory, not examples. Delivery
@@ -44,32 +66,45 @@ The write path Channex will ask to see:
 | Task IDs | `channel_sync_log.task_id` on every ARI call |
 | Bookings | webhook `POST /api/integrations/channex/webhook` → `applyBookingRevision` (`booking-revisions.ts`) → `GET /booking_revisions/:id` is the booking, landed as a stay, then `POST /booking_revisions/:id/ack`; `channex-revision-feed` reads unacknowledged revisions every 10 minutes. Nothing reads `GET /bookings/:id`: Channex counts that as `booking_received_via_booking_find` and refuses it |
 | Airbnb change requests | webhook event `alteration_request` (or the same `channex-revision-feed` run) → `runAlterationRequestFeed` (`server/domain/guest-threads/stay-change-requests.ts`) reads `GET /live_feed?filter[event]=alteration_request` and records each waiting request in the stay's conversation, alerting the owners; the host's Accept or Decline there sends `POST /live_feed/:id/resolve` with `{"resolution":{"accept":"accept"|"decline"}}` and reads the event back. The stay changes only when Airbnb's confirmed `modified` revision lands as above. A request resolved on Airbnb (declined, or withdrawn by the guest, which sends no webhook) is reconciled from the feed |
-| Full sync again | In the iOS app's Airbnb listing chooser, **Full sync** beside the selected syncing home → `POST /api/organizations/:organizationId/integrations/airbnb/imports/:productId/calendar` (empty request). The existing outbox resends the home's actual 500 future nights in exactly two Channex HTTP requests: one `POST /restrictions` and one `POST /availability`, preserving its channel mapping and Messages installation |
+| Full sync again | In the iOS app's Airbnb listing chooser, **Full sync** beside the selected syncing home → `POST /api/organizations/:organizationId/integrations/airbnb/imports/:productId/calendar` (empty request). The existing outbox resends the home's actual 500 future nights in two Channex ARI requests: one `POST /restrictions` and one `POST /availability`, preserving its channel mapping and Messages installation |
 
 ## Before the run
 
 1. On Channex staging, connect two Airbnb test listings to one staging
    organization with **Connect Airbnb** in the dashboard. The import creates
    each home's property, room type and rate plan and sends its full sync.
-   During import and reactivation, KrabiClaw reads the property's minimum-stay mode.
-   An existing property using only arrival or through stay is changed to
-   `both`, verified, and its confirmed calendar forgotten before delivery:
-   Channex discards the unused minimum under a single-type mode, even when
-   KrabiClaw sent it. Missing or unknown modes fail setup visibly. The import
-   verifies both minimum-stay fields against Channex's inventory before it
-   completes. Property setup and repair are separate from an explicit full
-   sync of a home that has completed setup and is syncing.
+   Import, reactivation and explicit full sync verify the channel's arrival
+   mode, the property's arrival mode, and the rate plan's default minimum and
+   primary rate. Existing `through` or `both` property modes are changed to
+   `arrival`; metadata writes are read back before delivery. The import also
+   verifies all dated arrival minimums against Channex inventory before it
+   completes. Unknown or missing provider values fail visibly.
 
    Redo test 1 for an existing syncing home in the iOS app: open the Airbnb
-   listing chooser and tap **Full sync** beside that home's name. The action
-   requires an owner or admin with channel sync
-   access. It sends only the two calendar requests above; it does not read or
-   change property settings. Verify the property's minimum-stay mode is still
-   `Both` before the run. Wait for its result; if delivery is pending, read the reason and
-   let the existing outbox retry rather than clicking again. Do this before
-   tests 2 to 10: the full sync records what Channex holds for every night,
-   so each later save sends only the field the test changes. The home's
+   listing chooser and tap **Full sync** beside that home's name. It requires
+   an owner or admin with channel sync access. It verifies canonical defaults,
+   repairs differing metadata if needed, then sends one restrictions and one
+   availability task. It does not reimport Airbnb content. Wait for its result;
+   if delivery is pending, read the reason and let the existing outbox retry.
+   Do this before tests 2 to 10: full sync records what Channex holds for every
+   night, so each later save sends only the field the test changes. The home's
    existing connection and mapping stay in place throughout.
+
+   A requested **Sync** of an already connected listing uses the existing
+   `airbnb_sync_jobs` processor to refresh source content, then sync its
+   canonical calendar. Content changes only fields whose saved import hash
+   still matches the home. Minimum correction additionally requires an
+   explicit `import_written.min_nights` hash: new imports record the actual
+   source minimum; legacy repair may seed one only for a proven unchanged
+   original import. A missing hash or a host edit preserves the canonical
+   minimum. The entire actual rule JSON has the same host-edit hash guard.
+   Legacy correction reads a fresh source calendar and changes only min/price
+   cells on untouched `source='import'` rows. Existing NULL inheritance and all
+   host rows remain canonical; other night values and confirmations are preserved.
+   Source read failures remain visible on the job and prevent the
+   calendar push. Job status reads do not process jobs; an environment without
+   the normal cron must invoke the existing `airbnb-sync` task processor.
+
 2. Register the webhook for the staging account, then check it again without
    `--apply`; it must report `unchanged`:
 
@@ -89,10 +124,9 @@ The write path Channex will ask to see:
    ```
 
    Open those exact tasks in the property's Channex **Logs**. For test 1,
-   inspect every restriction object: each must contain `min_stay_arrival`
-   and `min_stay_through`, and the date ranges must cover all 500 nights.
+   inspect every restriction object: each must contain `min_stay_arrival`, and the date ranges must cover all 500 nights.
    Check the availability task covers the same dates. For test 5, verify
-   both minimum-stay fields carry the requested value on the exact test
+   the arrival minimum carries the requested value on the exact test
    date. A `pushed` row and `sent_json` alone do not prove Channex retained
    the fields.
 
@@ -104,11 +138,11 @@ choose the start and end night, **Edit selected nights**.
 
 | # | Test | Action in KrabiClaw | Calls |
 | --- | --- | --- | --- |
-| 1 | Full sync, 500 days | **Connect Airbnb** imports the home and sends its 500 nights (import stage `inventory`); for an existing syncing home, choose its **Full sync** action as described above. Every night carries rate, both minimum-stay fields, max stay, closed to arrival, closed to departure and stop sell. Set varied prices and rules on Airbnb first: Channex refuses uniform data. | 1 restrictions, 1 availability per home |
+| 1 | Full sync, 500 days | **Connect Airbnb** imports the home and sends its 500 nights (import stage `inventory`); for an existing syncing home, choose its **Full sync** action as described above. Every night carries rate, arrival minimum, max stay, closed to arrival, closed to departure and stop sell. Set varied prices and rules on Airbnb first: Channex refuses uniform data. | 1 restrictions, 1 availability per home |
 | 2 | Single date, single rate | Home A, 22 Nov: **Nightly price** 333 | 1 restrictions |
 | 3 | Single date, several rates | Not applicable: one room type and one rate plan per home. Say so on the form | — |
 | 4 | Several dates, several rates | Home A, 1–10 Nov: 241. Home B, 10–16 Nov: 312.66. B&B: not modelled | 1 per home, one date range each |
-| 5 | Min stay | Home A, 23 Nov: **Custom settings → Minimum nights**: on arrival 3 and through stay 3. Home B, 25 Nov: 2 and 2. B&B: not modelled. The iOS **Minimum nights** field writes both | 1 per home, both `min_stay_arrival` and `min_stay_through` |
+| 5 | Min stay | Home A, 23 Nov: **Custom settings → Minimum nights**: 3 on arrival. Home B, 25 Nov: 2 on arrival. B&B: not modelled | 1 per home, `min_stay_arrival` |
 | 6 | Stop sell | Home A, 14 Nov: **Block selected nights**. Home B, 16 Nov: block. The night sends `stop_sell: true` and nothing else | 1 restrictions per home, no availability call |
 | 7 | Several restrictions | Home A, 1–10 Nov: **Allow check-in** not allowed, **Allow checkout** allowed, **Maximum nights** 4, minimum 1. Home B, 10–16 Nov: check-in not allowed, minimum 2. B&B ranges: not modelled | 1 per home |
 | 8 | Half-year update | Home A, 1 Dec 2026–1 May 2027: price 432, check-in and checkout allowed, minimum 2. Home B, same range: price 342, minimum 3 | 1 per home |
@@ -125,9 +159,9 @@ account.
 
 ## Answers for the form
 
-- **Min stay:** both min stay on arrival and min stay through.
+- **Min stay:** min stay on arrival, matching Airbnb. Independent through-stay minimums are not supported.
 - **Restrictions:** stop sell, closed to arrival, closed to departure, min stay
-  on arrival, min stay through and max stay are all supported.
+  on arrival and max stay are supported.
 - **Room types and rate plans:** one room type and one rate plan per property:
   every home is a single unit. Bed & Breakfast rate plans are skipped.
 - **Credit cards:** not needed. Channel bookings are paid on the channel;
@@ -148,7 +182,7 @@ the booking scenarios; preserve existing stays and rules.
 | --- | --- | --- |
 | Create a booking | In iOS, **Add stay** for one night, then show it on the home's calendar | One availability update for that night, from 1 to 0; no restrictions update or unrelated dates |
 | Move the booking | In iOS, edit that same stay to one week later, keeping it one night; show its new dates | One availability batch reopening the old night to 1 and closing the new night to 0; no restrictions update or unrelated dates |
-| Full sync | In the iOS Airbnb listing chooser, tap **Full sync** beside that same home | Exactly two Channex HTTP requests, producing one restrictions task and one availability task covering the same 500 future nights, with actual varied calendar values and both minimum-stay fields in every restriction object |
+| Full sync | In the iOS Airbnb listing chooser, tap **Full sync** beside that same home | Verified canonical metadata, then two Channex ARI requests producing one restrictions task and one availability task covering the same 500 future nights, with actual varied calendar values and the arrival minimum in every restriction object |
 
 Open the requests and returned task IDs, not just their success labels. Equal
 consecutive nights may be compressed into date ranges; expand the ranges when

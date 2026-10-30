@@ -31,6 +31,9 @@ import servicesPostRoute from '../../server/api/dashboard/services.post.ts'
 import servicesGetRoute from '../../server/api/dashboard/services.get.ts'
 import mcpRoute from '../../server/api/mcp.ts'
 import paymentReturnRoute from '../../server/api/public/payments/[paymentId]/return.post.ts'
+import paymentCancelRoute from '../../server/api/public/payments/[paymentId]/cancel.post.ts'
+import paymentHandoffRoute from '../../server/api/public/payments/[paymentId].get.ts'
+import { readStayCalendar } from '../../server/domain/stays.ts'
 import bookingReceiptRoute from '../../server/api/public/booking-requests/[requestId].get.ts'
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '../../server/utils/reservation-cancel-token.ts'
 import adSpendDailyTask from '../../server/tasks/marketing-ad-spend-daily.ts'
@@ -798,6 +801,121 @@ test('Payments usage reaches its Stripe meters once, a correction as a negative 
   assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:0})
   assert.equal(sent.length,6)
  }finally{await runtime.dispose()}
+})
+
+test('a stay purchase claim cancels Stripe before releasing only its held nights, and a replay completes without a second cancellation', { timeout: 120_000 }, async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse(NOW) })
+  const { db, runtime } = await boot()
+  try {
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_boundary', NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: 'pk_test_local_boundary' }
+    await db.prepare("INSERT INTO business_locations(id,organization_id,slug,title,timezone) VALUES('cabin-site',?,'cabin-site','Cabin','UTC')").bind(ORG).run()
+    await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('stay','cabin',?,'Cabin','cabin','host','host')").bind(ORG).run()
+    await db.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,created_by,updated_by) VALUES(?,'cabin','cabin-site','host','host')").bind(ORG).run()
+    await db.prepare("INSERT INTO product_stay_configs(product_id,organization_id,location_id,check_in_time,check_out_time,max_guests,min_nights,created_by,updated_by) VALUES('cabin',?,'cabin-site','15:00','11:00',4,1,'host','host')").bind(ORG).run()
+    const claims = new Map<string, string>()
+    for (const [id, from, to] of [['changing', '2099-10-01', '2099-10-03'], ['other-stay', '2099-10-03', '2099-10-04']]) {
+      await payable(db, id!)
+      await db.prepare("UPDATE payments SET subject_type='stay',location_id='cabin-site' WHERE id=?").bind(id).run()
+      await db.prepare("UPDATE payment_checkout_holds SET product_id='cabin',variant_id=NULL,price_id=NULL,session_id=NULL,assigned_member_id=NULL,location_id='cabin-site',timezone='UTC',starts_at=?,ends_at=? WHERE payment_id=?").bind(from, to, id).run()
+      const claim = crypto.randomUUID() + crypto.randomUUID()
+      claims.set(id!, claim)
+      await db.prepare("INSERT INTO payment_claims(token_hash,payment_id,expires_at) VALUES(?,?,'2099-01-01T00:00:00.000Z')").bind(await tokenHash(claim), id).run()
+    }
+    for (const [date, hold] of [['2099-10-01', 'h:changing'], ['2099-10-02', 'h:changing'], ['2099-10-03', 'h:other-stay']]) {
+      await db.prepare("INSERT INTO product_nights(organization_id,product_id,date,price_minor,min_stay_arrival,source,updated_by) VALUES(?,'cabin',?,10000,1,'host','host')").bind(ORG, date).run()
+      await db.prepare("INSERT INTO stay_nights(organization_id,product_id,date,hold_id) VALUES(?,'cabin',?,?)").bind(ORG, date, hold).run()
+    }
+    const stayPurchase = {
+      product_id: 'cabin', location_id: 'cabin-site', timezone: 'UTC', check_in_date: '2099-10-01', check_out_date: '2099-10-03',
+      adults: 1, children: 0, infants: 0, total_minor: 20000, currency: 'USD', cancellation_policy: 'flexible',
+      nightly: [{ date: '2099-10-01', price_minor: 10000 }, { date: '2099-10-02', price_minor: 10000 }],
+      guest: { name: 'Guest', email: 'guest@example.com', phone: null, notes: null },
+    }
+    await db.prepare("UPDATE payments SET amount=20000,price_snapshot_json=? WHERE id='changing'").bind(JSON.stringify({
+      title: 'Cabin', quantity: 1, method_configuration_id: 'pmc_cabin', price: { unit_amount: 20000, currency: 'USD', tax_behavior: 'exclusive' }, stay: stayPurchase,
+    })).run()
+    await db.prepare("UPDATE payment_checkout_holds SET amount=20000 WHERE payment_id='changing'").run()
+    let nativeStatus = 'processing'
+    let cancellations = 0
+    const originalFetch = globalThis.fetch
+    t.mock.method(globalThis, 'fetch', async (request, init) => {
+      const url = new URL(request instanceof Request ? request.url : String(request))
+      if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
+      assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
+      if (init?.method === 'POST') {
+        assert.equal(url.pathname, '/v1/payment_intents/pi_changing/cancel')
+        assert.equal(new URLSearchParams(String(init.body)).get('cancellation_reason'), 'requested_by_customer')
+        assert.equal(new Headers(init.headers).get('idempotency-key'), 'krabiclaw-cancel:changing:a:changing')
+        cancellations++
+        nativeStatus = 'canceled'
+      } else assert.equal(url.pathname, '/v1/payment_intents/pi_changing')
+      return Response.json({ id: 'pi_changing', object: 'payment_intent', status: nativeStatus, amount: 20000, currency: 'usd', livemode: false, payment_method_types: ['card'], metadata: { krabiclaw_payment_id: 'changing' } })
+    })
+    const app = new H3()
+    app.use(event => { event.context.organizationId = event.req.headers.get('x-test-organization') ?? ORG })
+    app.get('/api/public/payments/:paymentId', paymentHandoffRoute)
+    app.post('/api/public/payments/:paymentId/cancel', paymentCancelRoute)
+    const cancel = (claim: string, organizationId = ORG) => app.request(Object.assign(new Request('https://payments.proof.example/api/public/payments/changing/cancel', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-test-organization': organizationId }, body: JSON.stringify({ claim }),
+    }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    assert.equal((await cancel(crypto.randomUUID() + crypto.randomUUID())).status, 404)
+    assert.equal((await cancel(claims.get('changing')!, 'another-business')).status, 404)
+    const processing = await cancel(claims.get('changing')!)
+    assert.equal(processing.status, 409)
+    assert.equal((await processing.json() as { data: { code: string } }).data.code, 'payment_in_progress')
+    assert.equal(cancellations, 0)
+    assert.equal(await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='changing'").first('status'), 'active')
+    nativeStatus = 'requires_payment_method'
+    const openHandoff = await app.request(Object.assign(new Request(`https://payments.proof.example/api/public/payments/changing?claim=${claims.get('changing')!}`), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    assert.equal(openHandoff.status, 200, await openHandoff.clone().text())
+    const open = await openHandoff.json()
+    assert.deepEqual(open, {
+      payment_id: 'changing', state: 'open', title: 'Cabin', quantity: 1, unit_amount: 20000,
+      stay: { product_id: 'cabin', check_in_date: '2099-10-01', check_out_date: '2099-10-03', nights: 2, nightly: [10000, 10000], adults: 1, children: 0, infants: 0, cancellation_policy: 'flexible' },
+      kind: 'stay', image_url: null, starts_at: null, ends_at: null, timezone: null, product_slug: 'cabin', location_slug: 'cabin-site', cancellation_policy: null,
+      subtotal: 20000, currency: 'USD', expires_at: '2099-09-30T00:00:00.000Z', stripe_account_id: 'acct_seller', publishable_key: 'pk_test_local_boundary',
+      payment_method_types: ['card'], customer_session_client_secret: null, surcharge_basis_points: null, review: null,
+    })
+    const originalPayment = await requirePayment(db, ORG, 'changing')
+    const originalNights = (await db.prepare('SELECT * FROM stay_nights ORDER BY date').all()).results
+    for (const table of ['payment_attempts', 'payment_claims']) {
+      const expiry = await db.prepare(`SELECT expires_at FROM ${table} WHERE payment_id='changing'`).first<string>('expires_at')
+      assert(expiry)
+      await db.prepare(`UPDATE ${table} SET expires_at=? WHERE payment_id='changing'`).bind(NOW).run()
+      const expired = await cancel(claims.get('changing')!)
+      assert.equal(expired.status, 409)
+      assert.equal((await expired.json() as { data: { code: string } }).data.code, 'payment_expired')
+      const expiredHandoff = await app.request(Object.assign(new Request(`https://payments.proof.example/api/public/payments/changing?claim=${claims.get('changing')!}`), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+      assert.equal(expiredHandoff.status, 200, await expiredHandoff.clone().text())
+      assert.deepEqual(await expiredHandoff.json(), { ...open, state: 'expired', ...(table === 'payment_attempts' ? { expires_at: NOW } : {}) })
+      assert.equal(cancellations, 0)
+      assert.deepEqual(await requirePayment(db, ORG, 'changing'), originalPayment)
+      assert.deepEqual((await db.prepare('SELECT * FROM stay_nights ORDER BY date').all()).results, originalNights)
+      assert.deepEqual((await db.prepare('SELECT payment_id,status FROM payment_checkout_holds ORDER BY payment_id').all()).results, [{ payment_id: 'changing', status: 'active' }, { payment_id: 'other-stay', status: 'active' }])
+      await db.prepare(`UPDATE ${table} SET expires_at=? WHERE payment_id='changing'`).bind(expiry).run()
+    }
+    const canceled = await cancel(claims.get('changing')!)
+    assert.equal(canceled.status, 200, await canceled.clone().text())
+    assert.deepEqual(await canceled.json(), { status: 'canceled' })
+    assert.equal((await requirePayment(db, ORG, 'changing')).state, 'failed')
+    const failedHandoff = await app.request(Object.assign(new Request(`https://payments.proof.example/api/public/payments/changing?claim=${claims.get('changing')!}`), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    assert.equal(failedHandoff.status, 200, await failedHandoff.clone().text())
+    assert.deepEqual(await failedHandoff.json(), { ...open, state: 'failed' })
+    const calendar = await readStayCalendar(db, { organizationId: ORG, actorId: 'host', manage: true }, { productId: 'cabin', from: '2099-10-01', to: '2099-10-04' })
+    assert.deepEqual(calendar.nights.map(night => [night.date, night.available, night.held_until === null]), [
+      ['2099-10-01', true, true], ['2099-10-02', true, true], ['2099-10-03', false, false],
+    ])
+    assert.deepEqual((await db.prepare('SELECT payment_id,status FROM payment_checkout_holds ORDER BY payment_id').all()).results, [{ payment_id: 'changing', status: 'released' }, { payment_id: 'other-stay', status: 'active' }])
+    assert.equal(await db.prepare("SELECT COUNT(*) FROM stay_nights WHERE hold_id='h:changing'").first('COUNT(*)'), 0)
+    await db.prepare("UPDATE payment_claims SET expires_at=? WHERE payment_id='changing'").bind(NOW).run()
+    await db.prepare("UPDATE payment_attempts SET expires_at=? WHERE payment_id='changing'").bind(NOW).run()
+    const replay = await cancel(claims.get('changing')!)
+    assert.equal(replay.status, 200)
+    assert.deepEqual(await replay.json(), { status: 'canceled' })
+    assert.equal(cancellations, 1)
+  } finally {
+    await runtime.dispose()
+  }
 })
 
 test('ACH Direct Debit payment review and confirmation handles bank account details, zero surcharge, and processing hold extension', { timeout: 120_000 }, async (t) => {

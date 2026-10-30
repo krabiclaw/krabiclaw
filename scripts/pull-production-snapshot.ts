@@ -11,7 +11,7 @@
  * names its source and carries that source's jwks across the binding repoint.
  *
  *   node --experimental-strip-types scripts/pull-production-snapshot.ts --staging
- *   node --experimental-strip-types scripts/pull-production-snapshot.ts --out <target.sqlite> [--source <database>] [--export <source.sql>]
+ *   node --experimental-strip-types scripts/pull-production-snapshot.ts --out <target.sqlite> [--source <database>] [--export <source.sqlite>]
  *   node --experimental-strip-types scripts/pull-production-snapshot.ts --production --source <replaced database> [--delta-from <initial.sqlite>]
  *
  * The default source is the deployed production Worker's `DB` binding unless
@@ -19,15 +19,17 @@
  * repository configuration points to a prepared replacement.
  * The live database is read a page of rows at a time into a SQLite copy: D1
  * refuses every other query on a database while a native export runs, and
- * tenant sites answered those requests with 500s. A database `--source` names
- * is a retired epoch source and keeps D1's native export, which owns snapshot
- * consistency. Use --source-file for an existing local copy.
+ * tenant sites answered those requests with 500s. Named replacement sources
+ * can still be serving customers, so they use the same paged reads.
+ * An initial copy can miss concurrent writes. After repointing, finish old
+ * HTTP/cron invocations before the final --delta-from capture; verify the
+ * retired source stays unchanged through that capture before applying it.
+ * Use --source-file for an existing local copy.
  *
  * `--out` alone is the preflight: the transformed target, its data-only payload
  * and its manifest are kept at that path and nothing remote is written. Beside a
  * load, `--out` keeps the loaded target there. `--export` keeps the copy read
- * from the source (`.sqlite` from the live database, `.sql` from a native
- * export), which a later `--source-file` preflight reads without reading the
+ * from the source as `.sqlite`, which a later `--source-file` preflight reads without reading the
  * source again.
  * `--delta-from <initial target.sqlite>` writes only the rows the initial
  * transfer did not hold, for the final copy after the binding is repointed, and
@@ -85,7 +87,7 @@ const wrangler = resolve('node_modules/wrangler/bin/wrangler.js')
 const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CF_ACCOUNT_ID
 const apiToken = process.env.CLOUDFLARE_API_TOKEN
 const live = values.source === 'DB' && !values['source-file']
-if (values.export && !values.export.endsWith(live ? '.sqlite' : '.sql')) throw new Error(`--export keeps ${live ? 'the live database as SQLite: name it .sqlite' : 'a native export: name it .sql'}.`)
+if (values.export && !values.export.endsWith('.sqlite')) throw new Error('--export keeps the source as SQLite: name it .sqlite.')
 if (live) {
   const workerName = readWranglerConfig({ config: 'wrangler.toml' }).name
   if (!accountId || !apiToken || !workerName) throw new Error('Production snapshot requires a configured Cloudflare account, API token and Worker name.')
@@ -211,15 +213,14 @@ execFileSync(process.execPath, ['scripts/check-schema-drift.mjs'], { cwd: proces
 
 const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-snapshot-'))
 try {
-  const dumpPath = values.export ? resolve(values.export) : join(directory, live ? 'source.sqlite' : 'source.sql')
+  const dumpPath = values.export ? resolve(values.export) : join(directory, 'source.sqlite')
   // The transfer below owns validation, destination signing-key preservation,
   // payload generation and load audits for either copy.
-  if (live) {
-    await readLiveDatabase(values.source, dumpPath)
-  } else if (!values['source-file']) {
-    // A retired epoch source takes D1's consistent native export.
-    writeFileSync(dumpPath, '', { flag: 'wx', mode: 0o600 })
-    run(['d1', 'export', values.source, '--remote', '--output', dumpPath, '--skip-confirmation'], true)
+  if (!values['source-file']) {
+    if (!accountId || !apiToken) throw new Error('Database snapshot requires a configured Cloudflare account and API token.')
+    const source = live ? { uuid: values.source } : JSON.parse(run(['d1', 'info', values.source, '--json'], true)) as { uuid?: string }
+    if (!source.uuid) throw new Error(`Could not resolve the source database: ${values.source}`)
+    await readLiveDatabase(source.uuid, dumpPath)
   }
 
   const targetPath = values.out ? resolve(values.out) : join(directory, 'target.sqlite')

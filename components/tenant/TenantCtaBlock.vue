@@ -69,7 +69,7 @@ const backgroundUrl = computed(() => blockMedia(props.block, 'media')[0]?.public
 const featuredMedia = computed(() => blockMedia(props.block, 'featured')[0] ?? null)
 
 const emit = defineEmits<{ click: [] }>()
-const { trackConsultationClick } = useOrganizationConversionTracking(consultation)
+const { trackConsultationClick } = useOrganizationConversionTracking()
 
 function trackClick() {
   if (destination.value) {

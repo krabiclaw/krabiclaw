@@ -2,7 +2,7 @@
   <DashboardLeafPanel
     id="product-stay-availability"
     title="Availability"
-    lead="Choose the minimum number of nights guests can book."
+    lead="Set the listing’s default minimum stay."
     desktop-cancel
     :saving="p.saving.value"
     :disabled="p.saveDisabled.value"
@@ -11,12 +11,12 @@
     @save="p.save"
   >
     <div v-if="p.product.value && !p.loadError.value" class="flex items-center justify-between gap-8 py-6">
-      <label for="stay-minimum-nights" class="text-lg text-highlighted">Minimum nights</label>
+      <label for="stay-minimum-nights" class="text-lg text-highlighted">Default minimum nights</label>
       <UInputNumber
         id="stay-minimum-nights"
-        :model-value="Number(p.form.min_nights)"
+        :model-value="p.form.min_nights.trim() ? Number(p.form.min_nights) : undefined"
         :min="1"
-        :max="365"
+        :max="MAX_STAY_NIGHTS"
         :step="1"
         :disabled="p.saving.value"
         :increment="{ color: 'neutral', variant: 'outline', class: 'rounded-full' }"
@@ -24,9 +24,11 @@
         variant="none"
         class="w-36"
         aria-label="Minimum nights"
+        aria-required="true"
         @update:model-value="p.form.min_nights = $event == null ? '' : String($event)"
       />
     </div>
+    <p v-if="p.product.value && !p.loadError.value" class="text-sm text-muted">Date-specific minimums take precedence over this default.</p>
     <UButton
       v-if="p.product.value && !p.loadError.value"
       :to="{ name: 'dashboard-orgSlug-calendar', params: { orgSlug: String(route.params.orgSlug) }, query: { product_id: p.product.value.id } }"
@@ -41,6 +43,7 @@
 
 <script setup lang="ts">
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
+import { MAX_STAY_NIGHTS } from '~/shared/bookings'
 
 definePageMeta({ layout: 'dashboard' })
 const p = inject(productEditorKey)!

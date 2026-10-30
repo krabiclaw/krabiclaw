@@ -1,4 +1,6 @@
 import { HTTPError } from 'nitro'
+import { MAX_STAY_NIGHTS, STAY_CALENDAR_DAYS, parseStayCalendarRules, type StayCalendarRules } from '~/shared/bookings'
+import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
 import tzLookup from '@photostructure/tz-lookup'
 import { isValidTimezone } from '~/utils/timezone'
 import { DETAIL_FIELDS, type AirbnbPropertyType, type DetailField } from '~/shared/airbnb-import'
@@ -28,7 +30,6 @@ const AIRBNB_PROPERTY_TYPES: Readonly<Record<string, AirbnbPropertyType>> = {
   apartment: 'apartment', condominium: 'apartment', serviced_apartment: 'apartment', loft: 'apartment',
   house: 'holiday_home', townhouse: 'holiday_home', villa: 'villa', chalet: 'chalet',
 }
-export const CALENDAR_NIGHTS = 500
 
 export interface ListingDetails {
   id: string
@@ -38,6 +39,9 @@ export interface ListingDetails {
   defaultOccupancy: number
   /** The base nightly rate as Airbnb states it, a decimal string. */
   nightlyRate: string
+  /** Airbnb's actual listing default, independent of dated calendar exceptions. */
+  minimumNights: number
+  calendarRules: StayCalendarRules | null
   fields: Partial<Record<DetailField, string>>
   missingFields: DetailField[]
   /**
@@ -133,7 +137,7 @@ async function readListingRecord(env: ChannexEnv, channelId: string, listingId: 
   return record
 }
 
-async function listingRecord(env: ChannexEnv, channelId: string, listingId: string): Promise<JsonRecord> {
+export async function listingRecord(env: ChannexEnv, channelId: string, listingId: string): Promise<JsonRecord> {
   try {
     return await readListingRecord(env, channelId, listingId)
   } catch (error) {
@@ -159,6 +163,39 @@ export async function keptBookingSettings(env: ChannexEnv, channelId: string, li
     guestControls: object(booking.guest_controls, 'Guest controls'),
     expectations,
   }
+}
+
+function minimumNights(listing: JsonRecord): number {
+  const availability = object(listing.availability_rules, 'Listing availability rules')
+  if (availability.seasonal_min_nights !== undefined && availability.seasonal_min_nights !== null && (!Array.isArray(availability.seasonal_min_nights) || availability.seasonal_min_nights.length)) throw new ChannexDataError('availability_rules.seasonal_min_nights is unsupported: its date-boundary semantics must be verified before importing this listing')
+  const value = integer(availability.default_min_nights, 'availability_rules.default_min_nights', 1)
+  if (value > MAX_STAY_NIGHTS) throw new ChannexDataError(`availability_rules.default_min_nights must be at most ${MAX_STAY_NIGHTS}`)
+  return value
+}
+
+/** Airbnb states money as a decimal number; the canonical catalog stores minor units. */
+export function minorUnits(decimal: string, currency: string): number {
+  if (!isCurrencyCode(currency)) throw new ChannexDataError(`Unsupported currency ${currency}`)
+  const minor = Math.round(Number(decimal) * 10 ** currencyFractionDigits(currency))
+  if (!Number.isSafeInteger(minor) || minor <= 0) throw new ChannexDataError(`Airbnb rate ${decimal} ${currency} is not a positive amount in that currency`)
+  return minor
+}
+
+function calendarRules(listing: JsonRecord, currency: string): StayCalendarRules | null {
+  const availability = object(listing.availability_rules, 'Listing availability rules')
+  const pricing = object(listing.pricing_settings, 'Listing pricing settings')
+  const rules: Record<string, unknown> = {}
+  if (availability.day_of_week_min_nights !== undefined) rules.day_of_week_min_nights = availability.day_of_week_min_nights
+  if (pricing.weekend_price !== undefined && pricing.weekend_price !== null) rules.weekend_price_minor = minorUnits(amount(pricing.weekend_price, 'Weekend price'), currency)
+  try { return parseStayCalendarRules(Object.keys(rules).length ? rules : null) } catch (error) {
+    throw new ChannexDataError(`Airbnb calendar rules are invalid: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+/** Read Airbnb itself, rather than Channex's cached mapping settings, after a default update. */
+export async function listingMinimumNights(env: ChannexEnv, channelId: string, listingId: string): Promise<number> {
+  const listing = await listingRecord(env, channelId, listingId)
+  return provided(() => minimumNights(listing))
 }
 
 export async function listingDetails(env: ChannexEnv, channelId: string, listingId: string, contact: OrganizationContact): Promise<ListingDetails> {
@@ -190,7 +227,7 @@ export async function listingDetails(env: ChannexEnv, channelId: string, listing
     return {
       id: listingId, title: string(listing.name, 'Listing name'), currency: string(pricing.listing_currency, 'Currency'),
       maxGuests: integer(listing.person_capacity, 'Guest capacity', 1), defaultOccupancy: integer(pricing.guests_included, 'Included guests', 1),
-      nightlyRate: amount(pricing.default_daily_price, 'Base price'), fields,
+      nightlyRate: amount(pricing.default_daily_price, 'Base price'), minimumNights: minimumNights(listing), calendarRules: calendarRules(listing, string(pricing.listing_currency, 'Currency')), fields,
       missingFields: DETAIL_FIELDS.filter(key => fields[key] === undefined),
       checkInTime: hourTime(booking.check_in_time_start, 'booking_settings.check_in_time_start'),
       checkInEndTime: hourTime(booking.check_in_time_end, 'booking_settings.check_in_time_end'),
@@ -229,6 +266,10 @@ export interface ListingRoom {
 
 /** A listing's content as Airbnb reports it: nothing is filled in; a text Airbnb has no value for is null. */
 export interface ListingContent {
+  currency: string
+  nightlyRate: string
+  minimumNights: number
+  calendarRules: StayCalendarRules | null
   images: ListingImage[]
   descriptions: Record<DescriptionField, string | null>
   /** `booking_settings.guest_controls`: whether the host allows pets, events and smoking; null where Airbnb has no answer. */
@@ -344,7 +385,10 @@ export async function listingContent(env: ChannexEnv, channelId: string, listing
       checkInOption = { category: string(option.category, 'check_in_option.category'), instruction: text(option, 'instruction', 'check_in_option.instruction') }
     }
     return {
-      images, descriptions, amenities: [...new Set(amenities)], rooms, checkInOption, quietHours,
+      images, descriptions, amenities: [...new Set(amenities)], rooms, checkInOption, quietHours, minimumNights: minimumNights(listing),
+      currency: string(object(listing.pricing_settings, 'Listing pricing settings').listing_currency, 'Currency'),
+      nightlyRate: amount(object(listing.pricing_settings, 'Listing pricing settings').default_daily_price, 'Base price'),
+      calendarRules: calendarRules(listing, string(object(listing.pricing_settings, 'Listing pricing settings').listing_currency, 'Currency')),
       guestControls: {
         pets: flag(controls, 'allows_pets_as_host', 'guest_controls.allows_pets_as_host'), events: flag(controls, 'allows_events_as_host', 'guest_controls.allows_events_as_host'),
         smoking: flag(controls, 'allows_smoking_as_host', 'guest_controls.allows_smoking_as_host'),
@@ -370,15 +414,15 @@ function addDays(date: string, days: number): string {
 /** The listing's next 500 nights, starting today where the home is. All 500 or none. */
 export async function listingCalendar(env: ChannexEnv, channelId: string, listingId: string, timezone: string): Promise<ListingNight[]> {
   const from = localToday(timezone)
-  const to = addDays(from, CALENDAR_NIGHTS - 1)
+  const to = addDays(from, STAY_CALENDAR_DAYS - 1)
   const raw = await channexRequest(env, `/channels/${encodeURIComponent(channelId)}/action/get_listing_calendar?${new URLSearchParams({ listing_id: listingId, date_from: from, date_to: to })}`)
   return provided(() => {
     const calendar = object(object(raw.data, 'Calendar response').calendar, 'Listing calendar')
-    if (calendar.listing_id !== listingId || calendar.start_date !== from || calendar.end_date !== to || !Array.isArray(calendar.days) || calendar.days.length !== CALENDAR_NIGHTS) {
+    if (calendar.listing_id !== listingId || calendar.start_date !== from || calendar.end_date !== to || !Array.isArray(calendar.days) || calendar.days.length !== STAY_CALENDAR_DAYS) {
       throw new ChannexDataError('Airbnb did not return the complete calendar. Import stopped before changing availability.')
     }
     const days = calendar.days.map(value => object(value, 'Calendar day'))
-    return Array.from({ length: CALENDAR_NIGHTS }, (_, offset) => {
+    return Array.from({ length: STAY_CALENDAR_DAYS }, (_, offset) => {
       const date = addDays(from, offset)
       const matching = days.filter(day => day.date === date)
       if (matching.length !== 1) throw new ChannexDataError('Airbnb returned missing or duplicate calendar dates')
