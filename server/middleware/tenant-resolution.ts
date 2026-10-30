@@ -247,7 +247,7 @@ function setResolvedTenantContext(
   }
 }
 
-const SESSION_SCOPED_API_PREFIXES = ["/api/dashboard", "/api/organizations", "/api/mcp", "/api/invite-links", "/api/integrations/channex"] as const;
+const SESSION_SCOPED_API_PREFIXES = ["/api/dashboard", "/api/organizations", "/api/mcp", "/api/invite-links", "/api/invitations", "/api/integrations/channex"] as const;
 
 export default defineHandler(async (event) => {
   // Nested self-fetches (i18n/icon/internal API calls during SSR) never carry
@@ -269,7 +269,7 @@ export default defineHandler(async (event) => {
   // own access and never read one either. A fresh database has no platform
   // organization until the E2E seed's bootstrap creates it.
   if (tenantPath === "/api/health" || tenantPath.startsWith("/api/dev/")) return;
-  // The dashboard, organization, MCP and invite-link APIs are scoped by the session and the
+  // The dashboard, organization, MCP, invite-link and invitation APIs are scoped by the session and the
   // organization the request names, never by the host. Resolving the platform
   // site for them cost every call its tenant row, its redirect lookups and the
   // preview check before authentication ran: six D1 statements and 100-190 ms

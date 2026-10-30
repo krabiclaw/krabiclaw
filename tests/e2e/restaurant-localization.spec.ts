@@ -2,8 +2,11 @@ import { expect, test, type APIRequestContext, type APIResponse, type Page } fro
 import { openTenantPage, waitForNuxtHydration } from './helpers'
 import { loginAs } from './helpers/auth'
 import { mcpRequest } from './helpers/mcp'
+import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededSiteHeaders, seededSiteURL, testBaseUrl } from './test-env'
 import { seededTenant } from './seed/manifest'
+
+test.describe.configure({ mode: 'default' })
 
 // Ember & Slice translated into Thai: its name, its Brooklyn location, the
 // Brooklyn Specials section and its clam pie. Read once the seed has run.
@@ -65,11 +68,9 @@ test.beforeAll(async ({ playwright }, testInfo) => {
   readSeed()
   const baseURL = testBaseUrl()
   const owner = await playwright.request.newContext({ baseURL })
-  await loginAs(owner, baseURL)
 
   try {
-    await expectStatus(await owner.post(`/api/editor/organizations/${organizationId}/locales/${locale}/add`), 200)
-
+    await loginAs(owner, baseURL)
     await putLocalization(owner, 'organization', organizationId, {
       values: {
         name: thai.name,
@@ -216,10 +217,12 @@ test('The restaurant\'s Brand translations open from their URL in the stored lan
   }
 })
 
-test('The restaurant\'s translations preserve published addresses and save an added language privately', async ({ browser, playwright }) => {
+test('The restaurant\'s translations preserve published addresses and save an added language privately', async ({ browser, playwright }, testInfo) => {
   const baseURL = testBaseUrl()
   const owner = await playwright.request.newContext({ baseURL })
+  let release: (() => Promise<void>) | undefined
   try {
+    release = await acquireTenantMutationLock(testInfo, organizationId)
     await loginAs(owner, baseURL)
     const dashboardContext = await browser.newContext({ baseURL, storageState: await owner.storageState() })
     const cms = await dashboardContext.newPage()
@@ -345,6 +348,6 @@ test('The restaurant\'s translations preserve published addresses and save an ad
       await dashboardContext.close()
     }
   } finally {
-    await owner.dispose()
+    await Promise.all([owner.dispose(), release?.()])
   }
 })
