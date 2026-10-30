@@ -1606,6 +1606,8 @@ for (const target of ['rolling default', 'listing minimum'] as const) {
           assert.equal(state!.pending_step, target === 'listing minimum' ? 'update_listing_minimum' : 'update_calendar_defaults')
           assert.ok(state!.operation_id)
           assert.equal(currentMinimum, canonicalMinimum, 'the unconfirmed mutation actually applied')
+          assert.ok((await connection.listings()).some(listing => listing.id === LISTING))
+          assert.equal((await connection.details(LISTING)).minimumNights, channex.availabilityRules.default_min_nights, 'the paused connection still reads the actual provider policy')
           await assert.rejects(connection.refreshContent(productId), { status: 409, data: { code: 'CONNECTION_NEEDS_REVIEW' } })
           assert.equal(attempts, 1, 'the uncertain provider write remains fenced')
         } else {
