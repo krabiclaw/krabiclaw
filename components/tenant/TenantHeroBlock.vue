@@ -148,7 +148,7 @@ const secondary = computed(() => ({ label: blockText(props.block?.data?.secondar
 const actions = computed(() => [primary.value, secondary.value].filter(action => action.label && action.url))
 
 // An action that books a consultation records its click: to the schedule page, or out to the practice's own scheduler.
-const { trackConsultationClick } = useOrganizationConversionTracking(consultation)
+const { trackConsultationClick } = useOrganizationConversionTracking()
 function trackAction(url: string) {
   const settings = consultation.value
   if (!settings || (url !== localePath(settings.schedule_path) && url !== settings.external_url)) return

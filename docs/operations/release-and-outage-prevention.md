@@ -689,18 +689,21 @@ it, so the initial artifacts stay valid.
 The v22-to-v23 replacement removes the duplicated nightly through-stay minimum,
 requires an explicit home minimum without a database default, and stores only
 actual optional weekday and weekend-price rules in
-`product_stay_configs.calendar_rules`. The immutable v22 chain, including its
+`product_stay_configs.calendar_rules`. It also retires the unused consultation
+tracking gate from the old GTM bridge; canonical native analytics and Zaraz's
+consent controls own measurement. Existing consultation JSON is preserved.
+The immutable v22 chain, including its
 three forward migrations, is archived in `migrations-history/v22/`.
 
 The WNAM replacements are:
 
-- `krabiclaw-staging-v23`: `4e3a114d-94fc-4615-a345-cd6a0161bf58`
-- `krabiclaw-production-v23`: `bf0d66f1-a3a8-4e61-8cf1-5e9edbddb25d`
+- `krabiclaw-staging-v23`: `02248634-935c-4d8e-b3ae-287c1f4067a0`
+- `krabiclaw-production-v23`: `4120f640-e449-45a4-828b-ff2601a0ee0e`
 
 Rehearse and load each unbound replacement with the canonical snapshot command,
 naming its own v22 source. Keep the initial comparison artifacts privately under
 `~/.codex/krabiclaw-db-replacements/v23/` as
-`staging-release-initial.sqlite` and `production-release-initial.sqlite`.
+`staging-release-r2-initial.sqlite` and `production-release-r2-initial.sqlite`.
 The transfer preserves every home minimum and all other nightly fields. It
 retires imported through values only when they duplicate a nonnull arrival
 minimum. The owner also explicitly approved retiring exactly 163 matching
@@ -736,16 +739,12 @@ rules visibly. Their range endpoints and precedence are not established by the
 published API contract; no local seasonal feature or guessed interpretation is
 offered. Explicit dated night overrides remain supported.
 
-The initial WNAM copies were prepared and independently read back on
-2026-10-30: staging has 119 tables and 110,569 rows; production has 119 tables
-and 170,344 rows. Both record only `0000_baseline.sql`, have no foreign-key
-violations, retain all saved home minimums, and initially leave the new optional
-rules NULL until the existing sync job reads the real provider. Production
-records 30 original-minimum fingerprints and queues 29 eligible syncs; one
-unproven legacy minimum remains unchanged. Staging queues one sync and its
-approved 163 arrival minimums read back as 10 one-night, 152 two-night and one
-three-night values. The live Worker bindings remained on v22; no cutover or
-deployment was performed. Retain the initial artifacts for the final delta.
+The initial-copy manifests beside these artifacts record table totals,
+retired-policy counts and queued syncs. Read the persisted rows back independently
+after each load; require only `0000_baseline.sql` in the native ledger and no
+foreign-key violations. Retain the initial artifacts for the final delta, and
+verify the live Worker bindings before cutover. Unproven legacy minimums and
+historical consultation JSON remain unchanged.
 
 Before dropping or retiring a legacy table or writer:
 

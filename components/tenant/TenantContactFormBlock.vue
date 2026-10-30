@@ -41,11 +41,10 @@ defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 
 const { id: organizationId } = useTenantOrganization().organization
 const { locale, localePath } = useI18n()
-const { consultation } = useOrganizationShellState()
 const submitting = ref(false)
 const submitMessage = ref('')
 const form = reactive({ name: '', email: '', subject: 'general', message: '', consent: false })
-const { mirrorSubmission, pageEventId } = useOrganizationConversionTracking(consultation)
+const { mirrorSubmission, pageEventId } = useOrganizationConversionTracking()
 
 async function submitContact() {
   if (submitting.value) return

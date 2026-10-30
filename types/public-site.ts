@@ -15,7 +15,6 @@ export interface PublicConsultationSettings {
   external_url: string | null
   schedule_path: string
   confirmation_path: string
-  tracking_enabled: boolean
 }
 
 export interface PublicComplianceContactPoint {

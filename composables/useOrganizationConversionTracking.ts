@@ -1,9 +1,6 @@
-import type { PublicConsultationSettings } from '~/types/public-site'
 import { projectConversionToGa4 } from '~/utils/ga4-projection'
 import { pageEventIdFor, whenLeaving } from '~/utils/pageview-tracking-runtime.client'
 import type { ConversionValue, OrganizationConversionEventName } from '~/utils/organization-conversion-events'
-import type { MaybeRefOrGetter } from 'vue'
-import { toValue } from 'vue'
 
 interface ConversionPayload {
   event_name: OrganizationConversionEventName
@@ -58,7 +55,7 @@ function mirrorConversion(payload: ConversionPayload, eventId: string, value?: C
   window.zaraz?.track(projection.name, projection.params)
 }
 
-export function useOrganizationConversionTracking(consultationSource?: MaybeRefOrGetter<PublicConsultationSettings | null | undefined>) {
+export function useOrganizationConversionTracking() {
   const nuxtApp = useNuxtApp()
   // A preview records nothing; the pageview collector does not run for it either.
   const { previewAuthorized } = useTenantOrganization()
@@ -111,14 +108,13 @@ export function useOrganizationConversionTracking(consultationSource?: MaybeRefO
   }
 
   function trackConsultationClick(pageType: string, pagePath: string, destination?: string | null, pageId?: string | null) {
-    if (toValue(consultationSource)?.tracking_enabled === false) return
     const external = /^https?:\/\//i.test(destination || '')
     track({
       event_name: 'consultation_cta_click',
       stage: external ? 'external_booking_handoff' : 'schedule_navigation',
       page_type: pageType,
       page_path: pagePath,
-      page_id: pageId,
+      page_id: external ? undefined : pageId,
     })
   }
 

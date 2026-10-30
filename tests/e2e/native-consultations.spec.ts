@@ -724,7 +724,7 @@ test('native online review uses canonical Products, holds capacity, and releases
         const handoffId = (await handoff.json() as { id: string }).id
         await (await schedulerTab).close()
         const handoffEvents = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'query_organization_analytics', args: { organization_id: org, mode: 'events', filters: { event_name: 'consultation_cta_click', stage: 'external_booking_handoff', page_type: 'schedule_hero' } } })
-        expect(mcpData<{ rows: Array<Record<string, unknown>> }>(await handoffEvents.json()).rows).toContainEqual(expect.objectContaining({ event_id: handoffId, stage: 'external_booking_handoff', page_type: 'schedule_hero', page_path: '/schedule' }))
+        expect(mcpData<{ rows: Array<Record<string, unknown>> }>(await handoffEvents.json()).rows).toContainEqual(expect.objectContaining({ event_id: handoffId, stage: 'external_booking_handoff', page: expect.objectContaining({ page_type: 'schedule_hero', path: '/schedule' }) }))
       } else if (mode === 'native_disabled') {
         const contactAction = scheduleHero.locator('[data-parity-section="page-hero"]').getByRole('link', { name: 'Contact', exact: true })
         await expect(contactAction).toHaveCount(1)

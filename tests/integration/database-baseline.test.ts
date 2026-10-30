@@ -18,13 +18,13 @@ test('the migration chain applies from zero and builds every table the schema de
     const built = (database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{ name: string }>)
       .map(row => row.name)
     assert.deepEqual(built, declared)
-    const consultation = { mode: 'native', cta_label: 'Book', schedule_path: '/schedule', confirmation_path: '/confirmed', tracking_enabled: true, metadata_json: {} }
+    const consultation = { mode: 'native', cta_label: 'Book', schedule_path: '/schedule', confirmation_path: '/confirmed', metadata_json: {} }
     database.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone, consultation_settings_json) VALUES (?, ?, ?, 'USD', 'America/New_York', ?)").run('tenant-a', 'A', 'tenant-a', JSON.stringify(consultation))
     database.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('tenant-b', 'B', 'tenant-b', 'THB', 'Asia/Bangkok')").run()
     // A business cannot be stored without the currency it sells in and the clock it reports in.
     assert.throws(() => database.prepare("INSERT INTO organization (id, name, slug, timezone) VALUES ('no-currency', 'C', 'no-currency', 'Asia/Bangkok')").run(), /NOT NULL constraint failed: organization.default_currency/)
     assert.throws(() => database.prepare("INSERT INTO organization (id, name, slug, default_currency) VALUES ('no-clock', 'C', 'no-clock', 'USD')").run(), /NOT NULL constraint failed: organization.timezone/)
-    for (const invalid of [{ ...consultation, mode: 'unknown' }, { ...consultation, tracking_enabled: 'true' }, { ...consultation, metadata_json: [] }, { ...consultation, schedule_path: 'schedule' }, { mode: 'native' }]) {
+    for (const invalid of [{ ...consultation, mode: 'unknown' }, { ...consultation, cta_label: false }, { ...consultation, metadata_json: [] }, { ...consultation, schedule_path: 'schedule' }, { mode: 'native' }]) {
       assert.throws(() => database.prepare("UPDATE organization SET consultation_settings_json = ? WHERE id = 'tenant-a'").run(JSON.stringify(invalid)), /organization_consultation_settings_check/)
     }
     assert.deepEqual(JSON.parse((database.prepare("SELECT consultation_settings_json FROM organization WHERE id = 'tenant-a'").get() as { consultation_settings_json: string }).consultation_settings_json), consultation)
@@ -1091,6 +1091,7 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
   const minimumFingerprint = createHash('sha256').update('21').digest('hex')
   const earlierFingerprint = createHash('sha256').update('7').digest('hex')
   const recordedCalendarRules = JSON.stringify({ day_of_week_min_nights: [-1, -1, -1, -1, 3, 3, -1], weekend_price_minor: 12500 })
+  const recordedConsultationSettings = JSON.stringify({ mode: 'native', cta_label: 'Book', schedule_path: '/schedule', confirmation_path: '/confirmed', tracking_enabled: false, metadata_json: { custom: 'preserved' } }, null, 2)
   try {
     const source = new Database(sourcePath)
     try {
@@ -1098,7 +1099,7 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
       for (const file of archived) source.exec(readFileSync(`migrations-history/v22/${file}`, 'utf8'))
       source.exec(`CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
         ${archived.map(file => `INSERT INTO d1_migrations(name) VALUES('${file}');`).join('\n')}`)
-      source.prepare("INSERT INTO organization(id,name,slug,subdomain,vertical,default_currency,timezone) VALUES('host','Recorded host','host','host','lodging','USD','Pacific/Kiritimati')").run()
+      source.prepare("INSERT INTO organization(id,name,slug,subdomain,vertical,default_currency,timezone,consultation_settings_json) VALUES('host','Recorded host','host','host','lodging','USD','Pacific/Kiritimati',?)").run(recordedConsultationSettings)
       source.prepare("INSERT INTO organization_locales(id,organization_id,locale,is_source,status) VALUES('host-en','host','en',1,'published')").run()
       source.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('owner','Recorded owner','owner@proof.example',1),('departed-owner','Former owner','former@proof.example',1)").run()
       source.prepare("INSERT INTO member(id,organizationId,userId,role) VALUES('owner-member','host','owner','owner')").run()
@@ -1227,6 +1228,7 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
     let retryRows: unknown[]
     try {
       target.pragma('foreign_keys = ON')
+      assert.equal(target.prepare("SELECT consultation_settings_json FROM organization WHERE id='host'").get()!.consultation_settings_json, recordedConsultationSettings, 'the retired tracking flag and surrounding JSON are retained byte-for-byte')
       assert.deepEqual(target.prepare('SELECT product_id,min_nights FROM product_stay_configs ORDER BY product_id').all(), homeMinimums)
       assert.deepEqual(target.prepare('SELECT product_id,calendar_rules FROM product_stay_configs ORDER BY product_id').all(), (homeMinimums as Array<{ product_id: string }>).map(({ product_id }) => ({ product_id, calendar_rules: null })), 'legacy homes have no fabricated calendar rules')
       assert.deepEqual(target.prepare(`SELECT ${nightProjection} FROM product_nights ORDER BY product_id,date`).all(), arrivalRules)
@@ -1271,6 +1273,7 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
     const refreshed = new Database(repeatedPath, { readonly: true })
     try {
       assert.deepEqual(refreshed.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all(), retryRows)
+      assert.equal(refreshed.prepare("SELECT consultation_settings_json FROM organization WHERE id='host'").get()!.consultation_settings_json, recordedConsultationSettings, 'current-epoch refreshes preserve the original consultation JSON too')
       assert.equal(refreshed.prepare("SELECT calendar_rules FROM product_stay_configs WHERE product_id='derived'").get()!.calendar_rules, recordedCalendarRules, 'current-epoch copies retain recorded calendar rules')
       assert.deepEqual(refreshed.prepare(`SELECT ${pushProjection} FROM channel_night_pushes ORDER BY product_id,date`).all(), originalPushes)
       for (const table of preservedTables) assert.deepEqual(refreshed.prepare(`SELECT * FROM ${table} ORDER BY 1,2`).all(), recorded[table])
