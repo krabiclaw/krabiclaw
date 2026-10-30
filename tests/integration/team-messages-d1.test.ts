@@ -3,6 +3,7 @@ import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import sharp from 'sharp'
+import { HTTPError } from 'nitro'
 import * as schema from '../../server/db/schema.ts'
 import { createDb } from '../../server/db/index.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
@@ -131,7 +132,11 @@ test('members talk in team conversations, see unread state and receive recorded 
     ])
     for (const result of locationAssignments) {
       if (result.status === 'fulfilled') assert.equal(result.value.status, 200)
-      else assert.partialDeepStrictEqual(result.reason, { status: 422, data: { code: 'RESPONSIBILITY_TARGET_CONFLICT' } })
+      else {
+        assert.ok(HTTPError.isError(result.reason))
+        assert.equal(result.reason.status, 422)
+        assert.deepEqual(result.reason.data, { code: 'RESPONSIBILITY_TARGET_CONFLICT', field: 'assigned_team_id' })
+      }
     }
     const assignedLocation = (await getLocation(db, ORG, 'cabin-site'))!
     assert.ok((assignedLocation.assigned_member_id === 'm-cook' && assignedLocation.assigned_team_id === null)

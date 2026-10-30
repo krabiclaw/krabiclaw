@@ -568,6 +568,7 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos, [])
     await arrangeProductPhotos(db, { organizationId: ORG, env, principal, productId: cabin.id, from: [], to: ['room-a', 'room-b', 'room-c'] })
     assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c'])
+    await arrangeProductPhotos(db, { organizationId: ORG, env, principal, productId: cabin.id, from: ['room-a', 'room-b', 'room-c'], to: ['room-a', 'room-b', 'room-c'] })
     const photoAudit = await db.prepare(`SELECT actor_kind, actor_user_id, payload_json FROM activity_entries
       WHERE organization_id = ? AND event_name = 'media.placement_changed' AND json_extract(payload_json, '$.entityId') = ?`).bind(ORG, cabin.id).all<{ actor_kind: string; actor_user_id: string; payload_json: string }>()
     assert.equal(photoAudit.results.length, 1)
@@ -950,6 +951,8 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     assert.deepEqual(beforeRoomRemoval.photo_rooms, [roomA, roomB, { ...roomC, photo_ids: ['room-c', 'room-a'] }])
     const publicDetail = await loadPublicProductApiDetail(env, db, ORG, true, 'cabin-site', cabin.slug)
     assert(publicDetail)
+    assert.equal(publicDetail.product.image?.asset_id, 'room-c')
+    assert.deepEqual(publicDetail.product.gallery.map(photo => photo.asset_id), ['room-a'])
     assert.deepEqual(publicDetail.product.stay?.photo_rooms, beforeRoomRemoval.photo_rooms)
     // Replacing the only placement through the generic media owner clears its
     // old room too. Restoring the picture cannot restore that old membership.

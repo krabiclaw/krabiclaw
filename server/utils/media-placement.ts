@@ -624,7 +624,11 @@ export async function prepareArrangeProductPhotos(db: DbClient, input: {
     JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id AND ma.status = 'active'
     WHERE mp.organization_id = ? AND mp.owner_type = 'product' AND mp.owner_id = ? AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'`
   const now = new Date().toISOString()
-  const photosChanged = current.length !== input.to.length || current.some((item, index) => item.asset_id !== input.to[index])
+  // The same visible order can still need a cover restored or duplicate slots
+  // normalized. Only an identical slot, position and asset arrangement is a no-op.
+  const intendedPlacements = new Set(input.to.map((assetId, index) => `${index ? 'gallery' : 'image'}:${index ? index - 1 : 0}:${assetId}`))
+  const photosChanged = placements.length !== intendedPlacements.size
+    || placements.some(item => !intendedPlacements.has(`${item.slot}:${item.sort_order}:${item.asset_id}`))
   const queries: BatchQuery[] = [
       {
         query: `INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id, sort_order, status, created_at, updated_at)
