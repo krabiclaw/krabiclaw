@@ -125,6 +125,18 @@ const ORGANIZATION_SETTINGS_READ_PROPERTIES = {
   canonical_url: { type: ['string', 'null'] },
   created_at: { type: 'string' },
   updated_at: { type: 'string' },
+  integrations: {
+    type: 'object',
+    description: 'Saved connections and the provider account, property or site each acts on. A saved connection does not prove a report will pass; query_google_analytics, query_search_console and query_google_ads_report report their own failures.',
+    properties: Object.fromEntries(['google_analytics', 'google_ads', 'google_search_console'].map(provider => [provider, {
+      type: ['object', 'null'],
+      properties: {
+        account_id: { type: 'string' }, target_id: { type: ['string', 'null'] }, target_name: { type: ['string', 'null'] },
+        measurement_id: { type: ['string', 'null'] }, verified: { type: ['boolean', 'null'] }, status: { type: ['string', 'null'] },
+        last_error: { type: ['string', 'null'] }, connected_at: { type: 'string' }, connected_through: { type: ['object', 'null'], properties: { email: { type: ['string', 'null'] }, name: { type: ['string', 'null'] } } },
+      },
+    }])),
+  },
 } as const
 
 export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [

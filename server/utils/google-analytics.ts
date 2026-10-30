@@ -83,3 +83,71 @@ export async function selectAnalyticsProperty(
   }, expected)
   return measurementId
 }
+
+export interface Ga4ReportInput {
+  dateRanges: Array<{ startDate: string; endDate: string; name?: string }>
+  dimensions: string[]
+  metrics: string[]
+  /** Every filter must match: a dimension's value, compared as `match` says. */
+  filters: Array<{ dimension: string; match: 'EXACT' | 'BEGINS_WITH' | 'ENDS_WITH' | 'CONTAINS' | 'FULL_REGEXP'; value: string }>
+  orderBy: { field: string; kind: 'metric' | 'dimension'; desc: boolean } | null
+  limit: number
+  offset: number
+}
+
+export interface Ga4Report {
+  rows: Array<{ dimensions: Record<string, string>; metrics: Record<string, number> }>
+  rowCount: number
+  timeZone: string
+  currencyCode: string
+  /** GA4's token allowance for the property, as the report left it. */
+  propertyQuota: Record<string, { consumed?: number; remaining?: number }> | null
+}
+
+/**
+ * A GA4 report through the Data API's `properties.runReport`. More than one
+ * date range adds GA4's own `dateRange` dimension, naming each row's range.
+ */
+export async function runGa4Report(accessToken: string, propertyId: string, input: Ga4ReportInput): Promise<Ga4Report> {
+  if (!/^\d+$/u.test(propertyId)) throw new Error(`GA4 property id must be numeric: ${propertyId}`)
+  const response = await fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({
+      dateRanges: input.dateRanges,
+      dimensions: input.dimensions.map(name => ({ name })),
+      metrics: input.metrics.map(name => ({ name })),
+      ...(input.filters.length ? { dimensionFilter: { andGroup: { expressions: input.filters.map(filter => ({ filter: { fieldName: filter.dimension, stringFilter: { matchType: filter.match, value: filter.value } } })) } } } : {}),
+      ...(input.orderBy ? { orderBys: [{ desc: input.orderBy.desc, ...(input.orderBy.kind === 'metric' ? { metric: { metricName: input.orderBy.field } } : { dimension: { dimensionName: input.orderBy.field } }) }] } : {}),
+      limit: input.limit,
+      offset: input.offset,
+      returnPropertyQuota: true,
+    }),
+  })
+  if (!response.ok) throw new Error(`Google Analytics report failed (${response.status}): ${(await response.text()).slice(0, 300)}`)
+  const data = await response.json() as {
+    dimensionHeaders?: Array<{ name: string }>
+    metricHeaders?: Array<{ name: string }>
+    rows?: Array<{ dimensionValues?: Array<{ value?: string }>; metricValues?: Array<{ value?: string }> }>
+    rowCount?: number
+    metadata?: { timeZone?: string; currencyCode?: string }
+    propertyQuota?: Record<string, { consumed?: number; remaining?: number }>
+  }
+  if (!data.metadata?.timeZone || !data.metadata.currencyCode) throw new Error(`Google Analytics did not report property ${propertyId}'s time zone and currency`)
+  const dimensionNames = (data.dimensionHeaders ?? []).map(header => header.name)
+  const metricNames = (data.metricHeaders ?? []).map(header => header.name)
+  return {
+    rows: (data.rows ?? []).map((row) => {
+      const dimensions = dimensionNames.map(name => [name, row.dimensionValues?.[dimensionNames.indexOf(name)]?.value] as const)
+      const metrics = metricNames.map(name => [name, Number(row.metricValues?.[metricNames.indexOf(name)]?.value)] as const)
+      if (dimensions.some(([, value]) => typeof value !== 'string') || metrics.some(([, value]) => !Number.isFinite(value))) {
+        throw new Error(`Google Analytics returned an incomplete row for property ${propertyId}`)
+      }
+      return { dimensions: Object.fromEntries(dimensions) as Record<string, string>, metrics: Object.fromEntries(metrics) }
+    }),
+    rowCount: data.rowCount ?? (data.rows?.length ?? 0),
+    timeZone: data.metadata.timeZone,
+    currencyCode: data.metadata.currencyCode,
+    propertyQuota: data.propertyQuota ?? null,
+  }
+}

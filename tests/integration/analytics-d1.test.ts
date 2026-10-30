@@ -42,6 +42,12 @@ test('analytics preserves duplicate, attribution, summary semantics on D1', { ti
     assert.equal(await db.prepare("SELECT json_extract(payload_json, '$.duration_seconds') duration FROM analytics_summaries WHERE kind = 'session'").first('duration'), 20)
     await recordTenantPageview(db, { ...input, eventId: 'returning', sessionId: 'returning-session', now: '2026-09-06T02:00:00.000Z' })
     const period = { organizationId: 'org-proof', startDate: '2026-09-05', endDate: '2026-09-06', now: new Date('2026-09-06T12:00:00Z') }
+    // The business's own analytics began at local midnight on September 5: a range before then has
+    // nothing native to report, and one that starts earlier reports from that moment.
+    await assert.rejects(getAnalyticsReport(db, { ...period, startDate: '2026-08-01', endDate: '2026-09-04' }), (error: { statusCode?: number; data?: { code?: string } }) =>
+      error.statusCode === 422 && error.data?.code === 'NO_NATIVE_COVERAGE')
+    assert.equal((await getAnalyticsReport(db, { ...period, startDate: '2026-09-01' })).period.nativeCoverage, 'partial')
+    assert.equal((await getAnalyticsReport(db, period)).period.nativeCoverage, 'full')
     const before = await getAnalyticsReport(db, period)
     assert.equal(before.metrics.pageViews, 4)
     assert.equal(before.metrics.uniqueSessions, 2)

@@ -18,7 +18,7 @@ test('a business and its locations carry their own clock and currency; nothing s
     await assert.rejects(db.prepare("INSERT INTO organization (id, name, slug, default_currency) VALUES ('no-clock', 'n', 'no-clock', 'USD')").run(), /NOT NULL constraint failed: organization.timezone/)
     await assert.rejects(db.prepare("INSERT INTO organization (id, name, slug, timezone) VALUES ('no-currency', 'n', 'no-currency', 'Asia/Bangkok')").run(), /NOT NULL constraint failed: organization.default_currency/)
     await assert.rejects(db.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('blank', 'n', 'blank', 'USD', '')").run(), /organization_timezone_check/)
-    await db.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('org', 'Org', 'org', 'THB', 'Asia/Bangkok')").run()
+    await db.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone, analytics_data_start_at) VALUES ('org', 'Org', 'org', 'THB', 'Asia/Bangkok', '2026-09-01T00:00:00.000Z')").run()
     assert.equal(await db.prepare("SELECT settings_json FROM organization WHERE id = 'org'").first('settings_json'), '{}')
     await assert.rejects(db.prepare("INSERT INTO business_locations (id, organization_id, slug, title) VALUES ('placeless', 'org', 'placeless', 'Placeless')").run(), /NOT NULL constraint failed: business_locations.timezone/)
     await db.prepare("INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES ('location', 'org', 'location', 'Location', 'America/New_York')").run()

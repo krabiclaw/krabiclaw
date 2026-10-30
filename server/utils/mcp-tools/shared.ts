@@ -926,6 +926,8 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   get_organization: R,
   get_organization_analytics: R,
   query_organization_analytics: R,
+  query_google_analytics: R,
+  query_search_console: R,
   list_media_assets: R,
   get_organization_settings: R,
   get_site_page: R,
@@ -1008,6 +1010,7 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   update_reservation_policy: { ...D, openWorldHint: true },
   list_google_ads_campaigns: R,
   get_google_ads_campaign: R,
+  query_google_ads_report: R,
   create_google_ads_search_campaign: { ...D, openWorldHint: true },
   update_google_ads_campaign: { ...D, openWorldHint: true },
 } as const satisfies Record<string, McpToolAnnotations>

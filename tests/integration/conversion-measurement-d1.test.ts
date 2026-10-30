@@ -42,7 +42,7 @@ test('conversion measurement: contract, values, idempotency, report and cohort o
   try {
     const settings = '{}'
     for (const id of ['org-platform', 'org-customer']) {
-      await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone) VALUES (?, ?, ?, ?, ?, 'USD', 'Asia/Bangkok')`).bind(id, id, id, id, settings).run()
+      await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone, analytics_data_start_at) VALUES (?, ?, ?, ?, ?, 'USD', 'Asia/Bangkok', '2000-01-01T00:00:00.000Z')`).bind(id, id, id, id, settings).run()
     }
     for (const id of ['user-a', 'user-b']) {
       await db.prepare(`INSERT INTO user (id, name, email) VALUES (?, ?, ?)`).bind(id, id, `${id}@example.com`).run()
@@ -200,7 +200,7 @@ test('conversion measurement: contract, values, idempotency, report and cohort o
 test('the funnel joins a business site from visit to payment, by source and by location', { timeout: 60_000 }, async () => {
   const { runtime, db } = await openDb()
   try {
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone) VALUES ('org-funnel', 'Funnel', 'funnel', 'funnel', '{}', 'THB', 'Asia/Bangkok')`).run()
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone, analytics_data_start_at) VALUES ('org-funnel', 'Funnel', 'funnel', 'funnel', '{}', 'THB', 'Asia/Bangkok', '2000-01-01T00:00:00.000Z')`).run()
     for (const id of ['loc-beach', 'loc-town']) {
       await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES (?, 'org-funnel', ?, ?, 'Asia/Bangkok')`).bind(id, id, id).run()
     }
@@ -259,7 +259,7 @@ test('attribution rates share one population; cohorts follow the acquiring owner
   try {
     const settings = '{}'
     for (const id of ['org-platform', 'org-paying', 'org-new']) {
-      await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone) VALUES (?, ?, ?, ?, ?, 'USD', 'Asia/Bangkok')`).bind(id, id, id, id, settings).run()
+      await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone, analytics_data_start_at) VALUES (?, ?, ?, ?, ?, 'USD', 'Asia/Bangkok', '2000-01-01T00:00:00.000Z')`).bind(id, id, id, id, settings).run()
     }
     for (const id of ['owner', 'newcomer', 'founder']) await db.prepare(`INSERT INTO user (id, name, email) VALUES (?, ?, ?)`).bind(id, id, `${id}@example.com`).run()
     const uuid = (n: number) => `${String(n).padStart(8, '0')}-0000-4000-8000-000000000000`

@@ -19,7 +19,8 @@ const funnelCounts = {
 
 /** The native D1 report contract, shared by its producer, dashboard and MCP. */
 export const analyticsReportSchema = z.object({
-  period: z.object({ startDate: text, endDate: text, timezone: text, analyticsDataStartAt: nullableText }),
+  // partial: the range began before the business's own analytics did, and counts from analyticsDataStartAt.
+  period: z.object({ startDate: text, endDate: text, timezone: text, analyticsDataStartAt: nullableText, nativeCoverage: z.enum(['full', 'partial']) }),
   metrics: z.object({
     pageViews: count, uniqueSessions: count, uniqueVisitors: count, returningVisitors: count,
     avgSessionDuration: z.number().nonnegative(), pagesPerSession: z.number().nonnegative(), changePercent: z.number().nullable(),

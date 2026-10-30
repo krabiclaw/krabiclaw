@@ -54,7 +54,7 @@ export const OFFERS: readonly Offer[] = [
     ],
   },
   {
-    id: 'google_ads', unlock: { entitlement: 'marketing', plan: BUSINESS_PLAN_ID },
+    id: 'google_ads', unlock: { entitlement: 'google_ads_management', plan: BUSINESS_PLAN_ID },
     name: 'Google Ads campaigns', headline: 'Run Google Ads from your dashboard',
     line: 'Create Search campaigns, change budgets and see the bookings they bring in.',
     illustration: `${ILLUSTRATIONS}/megaphone.webp`, path: 'integrations/google-ads',
