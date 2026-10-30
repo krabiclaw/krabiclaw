@@ -186,6 +186,7 @@ interface ReviewRequestNotificationInput extends OrganizationContext {
   locationName?: string | null
   visitAt: string
   partySize: string
+  partyLabel?: string
   reviewUrl: string
   /** Whose review_requests preference governs this email and its unsubscribe link. */
   userId: string
@@ -1002,9 +1003,11 @@ export async function notifyReservationCreated(
     messageHero(db, opts.organizationId, { type: 'business_location', id: opts.locationId }),
     organizationLogo(db, opts.organizationId),
   ])
+  const presentation = resolveBookingPresentation('reservation', 'restaurant')
+  const formattedGuests = presentation.formatCount(opts.guests)
   const ownerMessage = reservationCreatedMessage({
     guestName: opts.guestName, guestEmail: opts.email, guestPhone: opts.phone ?? null,
-    date: prettyDate, time: prettyTime, partySize: opts.guests,
+    date: prettyDate, time: prettyTime, partySize: formattedGuests,
     locationName: opts.locationName ?? null, organizationName: restaurant,
     notes: opts.requests ?? null, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
   })
@@ -1012,7 +1015,7 @@ export async function notifyReservationCreated(
   const guestMessage = guestReservationReceivedMessage({
     ...guest, manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId: opts.organizationId, threadId: opts.reservationId }),
     guestName: opts.guestName, organizationLogoUrl: logoUrl,
-    date: formatCalendarDate(opts.date, guest.locale), time: formatTime(opts.time, guest.locale), partySize: opts.guests, notes: opts.requests,
+    date: formatCalendarDate(opts.date, guest.locale), time: formatTime(opts.time, guest.locale), partySize: formattedGuests, notes: opts.requests,
     contactPhone: opts.contactPhone, contactEmail: opts.contactEmail,
     receiptUrl: opts.receiptUrl, heroImageUrl: hero?.imageUrl ?? null,
     paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, guest.locale) : null,
@@ -1080,9 +1083,11 @@ export async function notifyReservationCancelled(
     deep_link: inboxUrl ?? '',
   }
 
+  const presentation = resolveBookingPresentation('reservation', 'restaurant')
+  const formattedGuests = presentation.formatCount(opts.guests)
   const ownerMessage = reservationCancelledMessage({
     guestName: opts.guestName, guestEmail: opts.email, guestPhone: opts.phone ?? null,
-    date: prettyDate, time: prettyTime, partySize: opts.guests,
+    date: prettyDate, time: prettyTime, partySize: formattedGuests,
     locationName: opts.locationName ?? null, organizationName: restaurant,
     notes: opts.requests ?? null, heroImageUrl: null, replyUrl: inboxUrl,
     wasConfirmed: confirmed,
@@ -1091,7 +1096,7 @@ export async function notifyReservationCancelled(
   const guestMessage = guestReservationCancelledMessage({
     ...guest, manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId: opts.organizationId, threadId: opts.reservationId }),
     guestName: opts.guestName, date: formatCalendarDate(opts.date, guest.locale), time: formatTime(opts.time, guest.locale),
-    partySize: opts.guests, notes: opts.requests, wasConfirmed: confirmed,
+    partySize: formattedGuests, notes: opts.requests, wasConfirmed: confirmed,
     organizationLogoUrl: logoUrl,
   })
   const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain })
@@ -1263,6 +1268,7 @@ export async function notifyReviewRequest(
     locationName: opts.locationName ?? null,
     visitAt: opts.visitAt,
     partySize: opts.partySize,
+    partyLabel: opts.partyLabel,
     reviewUrl: opts.reviewUrl,
     organizationLogoUrl: logoUrl,
   })
@@ -1336,20 +1342,25 @@ export async function notifyBookingCreated(
     messageHero(db, opts.organizationId, { type: 'product', id: opts.productId }),
     organizationLogo(db, opts.organizationId),
   ])
+  const presentation = resolveBookingPresentation('booking', opts.vertical)
+  const formattedPartySize = presentation.formatCount(opts.partySize)
   const ownerMessage = bookingCreatedMessage({
     guestName: opts.guestName, guestEmail: opts.email, guestPhone: opts.guestPhone ?? null,
-    date: prettyDate, time: prettyTime, partySize: String(opts.partySize),
+    date: prettyDate, time: prettyTime, partySize: formattedPartySize,
     locationName: null, organizationName: studio, productTitle: opts.productTitle,
-    presentation: resolveBookingPresentation('booking', opts.vertical),
+    presentation,
     notes: opts.notes ?? null, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
   })
   const guest = await guestPresentation(db, opts)
+  const copy = getVerticalCopy(opts.vertical, guest.locale)
   const guestMessage = guestBookingReceivedMessage({
     ...guest, manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId: opts.organizationId, threadId: opts.bookingId }),
     guestName: opts.guestName, organizationLogoUrl: logoUrl, status: opts.status,
     productTitle: guest.productTitle!,
     date: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { dateStyle: 'medium' }),
-    time: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), partySize: String(opts.partySize),
+    time: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }),
+    partySize: formattedPartySize,
+    partyLabel: copy.guestsLabel,
     notes: opts.notes, contactPhone: opts.contactPhone ?? null, contactEmail: opts.contactEmail ?? null,
     receiptUrl: opts.receiptUrl ?? null, heroImageUrl: hero?.imageUrl ?? null,
     paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, guest.locale) : null,
@@ -1600,20 +1611,26 @@ export async function notifyBookingCancelled(
     deep_link: inboxUrl ?? '',
   }
 
+  const presentation = resolveBookingPresentation('booking', opts.vertical)
+  const formattedPartySize = presentation.formatCount(opts.partySize)
   const ownerMessage = bookingCancelledMessage({
     guestName: opts.guestName, guestEmail: opts.email, guestPhone: opts.guestPhone ?? null,
-    date: prettyDate, time: prettyTime, partySize: String(opts.partySize),
+    date: prettyDate, time: prettyTime, partySize: formattedPartySize,
     locationName: null, organizationName: studio, productTitle: opts.productTitle,
-    presentation: resolveBookingPresentation('booking', opts.vertical),
+    presentation,
     notes: opts.notes ?? null, heroImageUrl: null, replyUrl: inboxUrl,
     wasConfirmed: confirmed,
   })
   const guest = await guestPresentation(db, opts)
+  const copy = getVerticalCopy(opts.vertical, guest.locale)
   const guestMessage = guestBookingCancelledMessage({
     ...guest, manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId: opts.organizationId, threadId: opts.bookingId }),
     guestName: opts.guestName, productTitle: guest.productTitle!,
     date: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { dateStyle: 'medium' }),
-    time: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), partySize: String(opts.partySize), notes: opts.notes, wasConfirmed: confirmed,
+    time: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }),
+    partySize: formattedPartySize,
+    partyLabel: copy.guestsLabel,
+    notes: opts.notes, wasConfirmed: confirmed,
     organizationLogoUrl: logoUrl,
   })
   const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain })
@@ -1701,16 +1718,20 @@ export async function notifyBookingChangeOwner(
       ? 'The guest accepted. The updated details are now confirmed.'
       : 'The guest declined. The original details remain unchanged.'
   const replyUrl = await buildOwnerThreadInboxUrl(env, db, opts)
+  const presentation = resolveBookingPresentation(opts.submissionType === 'reservation' ? 'reservation' : 'booking', opts.noun === 'consultation' ? 'service' : undefined)
+  const formattedPartySize = presentation.formatCount(opts.guests)
   const ownerMessage = bookingChangeMessage({
     recordKind: noun,
     assignment: opts.assignment,
     guestName: opts.guestName,
+    counterpartyLabel: presentation.counterpartyLabel,
     status: opts.status,
     location: opts.locationTitle,
     date: opts.whenDate,
     time: opts.whenTime,
     whenLabel: opts.whenLabel,
-    partySize: String(opts.guests),
+    partySize: formattedPartySize,
+    partyLabel: presentation.partyLabel,
     summary: message,
     replyUrl,
     organizationName: organizationName(opts),

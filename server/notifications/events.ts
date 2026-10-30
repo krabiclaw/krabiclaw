@@ -175,19 +175,23 @@ export function stayTurnoverAlert<T extends Pick<StayEventInput, 'guestName' | '
 export interface BookingEventInput extends ReservationEventInput {
   productTitle: string
   presentation: BookingPresentation
+  partyLabel?: string
+  counterpartyLabel?: string
 }
 
 export function bookingCreatedMessage(input: BookingEventInput): NotificationMessage {
+  const counterparty = input.counterpartyLabel ?? input.presentation.counterpartyLabel
+  const partyLabel = input.partyLabel ?? input.presentation.partyLabel
   return {
     title: `New ${input.presentation.noun} request from ${input.guestName}`,
     preheader: `${input.productTitle} · ${input.date} at ${input.time}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle } : null,
     facts: facts(
       fact('context', input.presentation.label, input.productTitle, true),
-      fact('guestName', 'Guest', input.guestName, true),
+      fact('guestName', counterparty, input.guestName, true),
       fact('date', 'Date', input.date, true),
       fact('time', 'Time', input.time, true),
-      fact('partySize', 'Party size', input.partySize, true),
+      fact('partySize', partyLabel, input.partySize, true),
       fact('guestPhone', 'Phone', input.guestPhone && formatPhone(input.guestPhone)),
       fact('guestEmail', 'Email', input.guestEmail, true),
       fact('notes', 'Special requests', input.notes),
@@ -201,6 +205,8 @@ export function bookingCreatedMessage(input: BookingEventInput): NotificationMes
 }
 
 export function bookingCancelledMessage(input: BookingEventInput & { wasConfirmed: boolean }): NotificationMessage {
+  const counterparty = input.counterpartyLabel ?? input.presentation.counterpartyLabel
+  const partyLabel = input.partyLabel ?? input.presentation.partyLabel
   const standing = input.wasConfirmed ? `Confirmed ${input.presentation.noun}` : `${input.presentation.label} request`
   return {
     title: `${standing} cancelled by ${input.guestName}`,
@@ -208,10 +214,10 @@ export function bookingCancelledMessage(input: BookingEventInput & { wasConfirme
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle } : null,
     facts: facts(
       fact('context', 'What was cancelled', `${standing} · ${input.productTitle}`, true),
-      fact('guestName', 'Guest', input.guestName, true),
+      fact('guestName', counterparty, input.guestName, true),
       fact('date', 'Date', input.date, true),
       fact('time', 'Time', input.time, true),
-      fact('partySize', 'Party size', input.partySize, true),
+      fact('partySize', partyLabel, input.partySize, true),
       fact('guestPhone', 'Phone', input.guestPhone && formatPhone(input.guestPhone)),
       fact('guestEmail', 'Email', input.guestEmail),
       fact('notes', 'Special requests', input.notes),
@@ -340,6 +346,8 @@ export interface BookingChangeEventInput {
   time: string | null
   whenLabel: string
   partySize: string
+  partyLabel?: string
+  counterpartyLabel?: string
   summary: string
   replyUrl: string | null
   organizationName: string
@@ -347,6 +355,8 @@ export interface BookingChangeEventInput {
 
 export function bookingChangeMessage(input: BookingChangeEventInput): NotificationMessage {
   const assignment = input.assignment
+  const counterparty = input.counterpartyLabel ?? (input.recordKind === 'consultation' ? 'Client' : 'Guest')
+  const partyLabel = input.partyLabel ?? (input.recordKind === 'consultation' ? 'Clients' : input.recordKind === 'stay' ? 'Guests' : 'Party size')
   const summary = assignment && assignment.beforeMemberId !== assignment.afterMemberId
     ? `${input.summary} ${input.status === 'accepted' ? assignment.label : `Proposed ${assignment.label.toLowerCase()}`}: ${assignment.beforeName ?? 'Unassigned'} → ${assignment.afterName ?? 'Unassigned'}.`
     : input.summary
@@ -359,7 +369,7 @@ export function bookingChangeMessage(input: BookingChangeEventInput): Notificati
     intro: summary,
     facts: facts(
       fact('recordKind', 'Type', input.recordKind, true),
-      fact('guestName', 'Guest', input.guestName, true),
+      fact('guestName', counterparty, input.guestName, true),
       fact('status', 'Decision', input.status, true),
       fact('location', 'Location', input.location, true),
       // A proposal recorded before the date and time were stored separately
@@ -368,7 +378,7 @@ export function bookingChangeMessage(input: BookingChangeEventInput): Notificati
       fact('when', 'When', input.whenLabel),
       fact('date', 'Date', input.date, true),
       fact('time', 'Time', input.time, true),
-      fact('partySize', 'Party size', input.partySize, true),
+      fact('partySize', partyLabel, input.partySize, true),
       fact('summary', 'Summary', summary, true),
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'View in dashboard' } : undefined,

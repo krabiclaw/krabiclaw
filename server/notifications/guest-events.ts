@@ -83,6 +83,7 @@ export interface GuestBookingInput {
   date: string
   time: string
   partySize: string
+  partyLabel?: string | null
   locationName?: string | null
   notes?: string | null
   contactPhone?: string | null
@@ -114,7 +115,7 @@ function guestVisitFacts(input: GuestBookingInput): NotificationFact[] {
     input.productTitle ? fact('location', labels['site.experience_detail.meeting_point']!, input.locationName ?? null) : null,
     fact('date', labels['site.reservation_cancel.date']!, input.date),
     fact('time', labels['site.reservation_cancel.time']!, input.time),
-    fact('partySize', labels['site.experience_detail.party_size']!, input.partySize),
+    fact('partySize', input.partyLabel ?? labels['site.experience_detail.party_size']!, input.partySize),
     fact('notes', labels['site.experience_detail.special_requests']!, input.notes ?? null),
     fact('total', labels['payment.paid']!, input.paid ?? null),
   )
@@ -376,6 +377,7 @@ export function reviewRequestMessage(input: {
   locationName: string | null
   visitAt: string
   partySize: string
+  partyLabel?: string
   reviewUrl: string
   organizationLogoUrl?: string | null
 }): NotificationMessage {
@@ -387,7 +389,7 @@ export function reviewRequestMessage(input: {
     intro: `Thanks for visiting, ${input.guestName}. A couple of lines helps other guests know what to expect.`,
     facts: facts(
       fact('visitAt', 'Visit', input.visitAt),
-      fact('partySize', 'Party size', input.partySize),
+      fact('partySize', input.partyLabel ?? 'Party size', input.partySize),
       fact('location', 'Location', input.locationName),
     ),
     primaryAction: { url: input.reviewUrl, label: 'Leave a review' },
