@@ -16,11 +16,11 @@ import { paymentsStripe } from '~/server/utils/stripe-connect'
 export async function resolveBillingCustomer(event: H3Event, organizationId: string) {
   const env = cloudflareEnv(event)
   const session = await getAuthSession(event, env)
-  if (!session?.user?.id) throw new HTTPError({ statusCode: 401, statusMessage: 'Authentication required' })
-  if (!env.STRIPE_SECRET_KEY) throw new HTTPError({ statusCode: 503, statusMessage: 'Stripe is not configured' })
+  if (!session?.user?.id) throw new HTTPError({ statusCode: 401, statusMessage: 'Authentication required', data: { code: 'AUTHENTICATION_REQUIRED', field: 'session' } })
+  if (!env.STRIPE_SECRET_KEY) throw new HTTPError({ statusCode: 503, statusMessage: 'Stripe is not configured', data: { code: 'BILLING_NOT_CONFIGURED', field: 'stripe' } })
   const organization = await resolveRequestedOrganization(event, env.DB, session.user.id, { explicitOrganizationId: organizationId })
-  if (!organization) throw new HTTPError({ statusCode: 404, statusMessage: 'No organization found' })
-  if (organization.role !== 'owner' && organization.role !== 'admin') throw new HTTPError({ statusCode: 403, statusMessage: 'Only owners and admins manage billing' })
+  if (!organization) throw new HTTPError({ statusCode: 404, statusMessage: 'No organization found', data: { code: 'ORGANIZATION_REQUIRED', field: 'organizationId' } })
+  if (organization.role !== 'owner' && organization.role !== 'admin') throw new HTTPError({ statusCode: 403, statusMessage: 'Only owners and admins manage billing', data: { code: 'BILLING_FORBIDDEN', field: 'role' } })
   const billing = await getOrganizationBillingStatus(env, env.DB, organization.id)
   return { stripe: createStripeClient(env.STRIPE_SECRET_KEY), customerId: billing.stripeCustomerId ?? null, label: organization.name }
 }
@@ -33,7 +33,7 @@ export async function listCustomerCards(stripe: Stripe, customerId: string, opti
     stripe.customers.listPaymentMethods(customerId, { type: 'card', limit: 20 }, options),
     stripe.customers.retrieve(customerId, {}, options),
   ])
-  if (customer.deleted) throw new HTTPError({ statusCode: 409, statusMessage: 'The billing customer was deleted at Stripe' })
+  if (customer.deleted) throw new HTTPError({ statusCode: 409, statusMessage: 'The billing customer was deleted at Stripe', data: { code: 'BILLING_CUSTOMER_UNAVAILABLE', field: 'billing.customer' } })
   const fallback = customer.invoice_settings?.default_payment_method
   const defaultId = typeof fallback === 'string' ? fallback : fallback?.id ?? null
   return methods.data.flatMap((method): PaymentMethodRow[] => method.card

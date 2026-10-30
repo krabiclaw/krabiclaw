@@ -3,13 +3,13 @@
     Airbnb's Performance: the year's bars with the chosen month lit, that
     month's paid and refunded earnings and what they were earned on. One screen under Earnings.
   -->
-  <DashboardLeafPanel id="earnings-performance" title="Performance" :footer="false">
+  <DashboardLeafPanel id="earnings-performance" title="Direct payment performance" :footer="false">
     <UAlert v-if="error" color="error" variant="soft" title="Performance could not be loaded" :description="getErrorMessage(error, 'Performance request failed')" />
     <template v-else>
       <section>
         <div class="flex items-center justify-between gap-4">
           <div>
-            <h2 class="text-xl font-semibold text-highlighted">Summary</h2>
+            <h2 class="text-xl font-semibold text-highlighted">Direct payments</h2>
             <p class="text-sm text-muted">Monthly view · {{ year }}</p>
           </div>
           <div class="flex items-center rounded-md ring ring-default">
@@ -20,7 +20,7 @@
         <EarningsBars v-if="data" class="mt-6" :months="data.months" :selected="month" :currency="data.currency" @select="month = $event" />
       </section>
 
-      <section v-if="data" class="mt-8 rounded-3xl ring ring-default">
+      <section v-if="data && selected" class="mt-8 rounded-3xl ring ring-default">
         <div class="p-6">
           <h3 class="text-base font-semibold text-highlighted">{{ monthTitle }}</h3>
           <dl class="mt-4 space-y-3">
@@ -36,7 +36,7 @@
       </section>
 
       <section v-if="data" class="mt-10">
-        <h2 class="text-xl font-semibold text-highlighted">Earnings by offering</h2>
+        <h2 class="text-xl font-semibold text-highlighted">Direct payments by offering</h2>
         <p class="text-sm text-muted">{{ monthTitle }}</p>
         <div v-if="data.items.length" class="mt-4 space-y-5">
           <div v-for="item in data.items" :key="item.title" class="flex items-center gap-4">
@@ -54,14 +54,16 @@
           </div>
         </div>
         <p v-else class="mt-4 text-sm text-muted">Nothing was earned in {{ monthTitle }}.</p>
-        <p class="mt-4 text-xs text-muted">Includes paid earnings for the selected period.</p>
+        <p class="mt-4 text-xs text-muted">Stripe payments captured in the selected period, less refunds; channel reservation amounts are separate.</p>
       </section>
 
+      <ChannelReservationSummary v-if="data && dashboard.organization.value?.vertical === 'lodging'" class="mt-10" :rows="data.channelReservations" :month="monthTitle" />
     </template>
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
+import ChannelReservationSummary from '~/components/dashboard/ChannelReservationSummary.vue'
 import EarningsBars from '~/components/dashboard/EarningsBars.vue'
 import { paymentMoney } from '~/shared/payment-display'
 import { isEarningsPerformance, type EarningsPerformance } from '~/shared/earnings-display'
@@ -71,6 +73,7 @@ definePageMeta({ layout: 'dashboard' })
 useSeoMeta({ title: 'Performance | KrabiClaw', robots: 'noindex, nofollow' })
 
 const route = useRoute()
+const dashboard = useDashboardOrganization()
 const router = useRouter()
 const api = useDashboardApi()
 const now = new Date()
@@ -84,11 +87,18 @@ watch(month, (next) => { year.value = Number(next.slice(0, 4)); void router.repl
 
 const { data, error } = await useAsyncData(
   () => `earnings-performance:${route.params.orgSlug}:${year.value}:${month.value}`,
-  () => api<EarningsPerformance>('/api/dashboard/payments', { query: { view: 'performance', year: year.value, month: month.value }, validate: isEarningsPerformance }),
+  async () => {
+    const requestedMonth = month.value
+    const performance = await api<EarningsPerformance>('/api/dashboard/payments', { query: { view: 'performance', year: year.value, month: requestedMonth }, validate: isEarningsPerformance })
+    if (!performance.months.some(row => row.month === requestedMonth)) {
+      throw createError({ statusCode: 502, statusMessage: `Krabiclaw did not return earnings for ${requestedMonth}`, data: { code: 'EARNINGS_MONTH_MISSING', field: `months.${requestedMonth}` } })
+    }
+    return performance
+  },
   { watch: [month] },
 )
 const money = (amount: number) => paymentMoney(amount, data.value!.currency)
-const selected = computed(() => data.value?.months.find(row => row.month === month.value) ?? { month: month.value, paid: 0, refunded: 0 })
+const selected = computed(() => data.value?.months.find(row => row.month === month.value))
 const monthTitle = computed(() => formatCalendarDate(`${month.value}-01`, 'en', { month: 'long', year: 'numeric' }))
 const monthTotal = computed(() => data.value?.items.reduce((sum, item) => sum + item.paid, 0) ?? 0)
 const share = (paid: number) => `${monthTotal.value ? Math.round((paid / monthTotal.value) * 1000) / 10 : 0}%`

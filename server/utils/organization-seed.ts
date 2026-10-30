@@ -136,7 +136,6 @@ export async function seedNewOrganization(
       external_url: null,
       schedule_path: '/schedule',
       confirmation_path: '/contact/confirmed',
-      tracking_enabled: false,
       metadata_json: null,
     }, writeGuard)
   }

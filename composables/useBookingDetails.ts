@@ -24,7 +24,16 @@ export function isBookingDetailsResponse(value: unknown): value is { booking: Da
 }
 
 // A purchase is not a booking of anything; its one word is the same for every vertical.
-const PURCHASE: BookingPresentation = { noun: 'purchase', nounPlural: 'purchases', label: 'Purchase', labelPlural: 'Purchases' }
+const PURCHASE: BookingPresentation = {
+  noun: 'purchase',
+  nounPlural: 'purchases',
+  label: 'Purchase',
+  labelPlural: 'Purchases',
+  counterpartyNoun: 'buyer',
+  counterpartyLabel: 'Buyer',
+  partyLabel: 'Items',
+  formatCount: count => String(count),
+}
 
 export async function useBookingDetails(bookingType: DashboardRecordType, bookingId: string, personalScope = false) {
   const route = useRoute()

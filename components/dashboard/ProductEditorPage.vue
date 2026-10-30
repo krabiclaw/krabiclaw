@@ -36,7 +36,7 @@
             <UFormField label="Check-in until"><StayCheckInEndSelect v-model="form.check_in_end_time" /></UFormField>
             <UFormField label="Checkout by" required><UInput v-model="form.check_out_time" type="time" class="w-full" /></UFormField>
             <UFormField label="Sleeps" required><UInput v-model="form.max_guests" inputmode="numeric" pattern="[0-9]*" class="w-full" /></UFormField>
-            <UFormField label="Minimum nights" required><UInput v-model="form.min_nights" inputmode="numeric" pattern="[0-9]*" class="w-full" /></UFormField>
+            <UFormField label="Default minimum nights" required><UInput v-model="form.min_nights" inputmode="numeric" pattern="[0-9]*" class="w-full" /></UFormField>
           </div>
         </template>
       </template>
@@ -394,6 +394,7 @@ export const productEditorKey = Symbol('product-editor') as InjectionKey<Product
 </script>
 
 <script setup lang="ts">
+import { MAX_STAY_NIGHTS } from '~/shared/bookings'
 import { cloneFnJSON } from '@vueuse/core'
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
@@ -736,7 +737,7 @@ const stayConfigError = computed(() => {
     !MINUTE_TIME_PATTERN.test(stay.check_in_time) && 'check-in time',
     !MINUTE_TIME_PATTERN.test(stay.check_out_time) && 'checkout time',
     !(Number.isInteger(stay.max_guests) && stay.max_guests >= 1 && stay.max_guests <= 99) && 'sleeps',
-    !(Number.isInteger(stay.min_nights) && stay.min_nights >= 1 && stay.min_nights <= 365) && 'minimum nights',
+    !(Number.isInteger(stay.min_nights) && stay.min_nights >= 1 && stay.min_nights <= MAX_STAY_NIGHTS) && 'minimum nights',
     !Array.isArray(stay.photo_rooms) && 'photo tour',
     !isStayAmenityAnswers(stay.amenity_answers) && 'amenity answers',
     !(Array.isArray(stay.accessibility) && stay.accessibility.length === Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).length && stay.accessibility.every((answer, index) => isStayHomeAccessibility(answer) && answer.feature === Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES)[index])) && 'accessibility details',
@@ -816,7 +817,7 @@ const draft = useState<ProductForm>(draftKey, () => ({
   booking_capacity: '', scheduling_mode: 'legacy', assigned_member_id: null, assigned_team_id: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false,
   image_asset_id: null as string | null,
   // A new place to stay starts from these settings; an existing one is loaded from its own.
-  stay_location_id: '', check_in_time: '15:00', check_in_end_time: '', check_out_time: '11:00', max_guests: '', min_nights: '1', stay_team_id: null, stay_member_id: null,
+  stay_location_id: '', check_in_time: '15:00', check_in_end_time: '', check_out_time: '11:00', max_guests: '', min_nights: '', stay_team_id: null, stay_member_id: null,
   stay_property_type_group: null, stay_property_type: null,
   stay_listing_type: null, stay_total_floors: '', stay_listing_floor: '', stay_year_built: '', stay_property_size: '', stay_property_size_unit: null,
   stay_bedrooms: '', stay_beds: '', stay_bathrooms: '',
@@ -1105,7 +1106,7 @@ const sectionValid = computed(() => {
   if (editorKey.value === 'name') return Boolean(form.name.trim())
   if (editorKey.value === 'description') return form.description.length <= PRODUCT_LIMITS.description
   if (editorKey.value === 'guests') return Number.isInteger(Number(form.max_guests)) && Number(form.max_guests) >= 1 && Number(form.max_guests) <= 99
-  if (editorKey.value === 'availability') return Number.isInteger(Number(form.min_nights)) && Number(form.min_nights) >= 1 && Number(form.min_nights) <= 365
+  if (editorKey.value === 'availability') return Number.isInteger(Number(form.min_nights)) && Number(form.min_nights) >= 1 && Number(form.min_nights) <= MAX_STAY_NIGHTS
   if (editorKey.value === 'arrival-time') return checkInWindowValid()
   if (editorKey.value === 'property-type') {
     return !Object.keys(propertyTypeErrors.value).length
@@ -1132,7 +1133,7 @@ function stayIncomplete(): boolean {
   const guests = Number(form.max_guests)
   const nights = Number(form.min_nights)
   return !form.stay_location_id || !checkInWindowValid()
-    || !Number.isInteger(guests) || guests < 1 || guests > 99 || !Number.isInteger(nights) || nights < 1 || nights > 365
+    || !Number.isInteger(guests) || guests < 1 || guests > 99 || !Number.isInteger(nights) || nights < 1 || nights > MAX_STAY_NIGHTS
 }
 /** Start and checkout are times; the end is a time other than the start, or empty for a flexible end. */
 function checkInWindowValid(): boolean {

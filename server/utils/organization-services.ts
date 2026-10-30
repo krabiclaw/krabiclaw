@@ -56,18 +56,18 @@ export async function managedAdsRequirements(db: DbClient, env: CloudflareEnv, o
 
 export async function agreeToService(db: DbClient, env: CloudflareEnv, organizationId: string, service: Service, userId: string): Promise<ServiceAgreement> {
   const current = await queryFirst<{ id: string }>(db, 'SELECT id FROM organization_services WHERE organization_id=? AND service=? AND ended_at IS NULL', [organizationId, service])
-  if (current) throw new HTTPError({ statusCode: 409, statusMessage: 'This service is already on' })
+  if (current) throw new HTTPError({ statusCode: 409, statusMessage: 'This service is already on', data: { code: 'SERVICE_ALREADY_ACTIVE', field: 'service' } })
   const requirements = await managedAdsRequirements(db, env, organizationId)
-  if (!requirements.business_plan) throw new HTTPError({ statusCode: 409, message: 'Managed ads is billed on the Business plan. Choose Business in Plan and billing before turning on managed ads.' })
-  if (!requirements.default_payment_method) throw new HTTPError({ statusCode: 409, message: 'Add a payment method and set it as default in Plan and billing before turning on managed ads.' })
+  if (!requirements.business_plan) throw new HTTPError({ statusCode: 409, message: 'Managed ads is billed on the Business plan. Choose Business in Plan and billing before turning on managed ads.', data: { code: 'BUSINESS_BILLING_REQUIRED', field: 'requirements.business_plan' } })
+  if (!requirements.default_payment_method) throw new HTTPError({ statusCode: 409, message: 'Add a payment method and set it as default in Plan and billing before turning on managed ads.', data: { code: 'PAYMENT_METHOD_REQUIRED', field: 'requirements.default_payment_method' } })
   const ads = await readIntegration(db, organizationId, 'google_ads')
-  if (!ads) throw new HTTPError({ statusCode: 409, message: 'Connect a Google Ads account billed in USD in Integrations → Google Ads before turning on managed ads.' })
-  if (!requirements.google_ads_usd) throw new HTTPError({ statusCode: 409, message: 'Managed ads currently requires a Google Ads account billed in USD. You can keep this account connected for free reporting in Insights.' })
+  if (!ads) throw new HTTPError({ statusCode: 409, message: 'Connect a Google Ads account billed in USD in Integrations → Google Ads before turning on managed ads.', data: { code: 'GOOGLE_ADS_USD_REQUIRED', field: 'requirements.google_ads_usd' } })
+  if (!requirements.google_ads_usd) throw new HTTPError({ statusCode: 409, message: 'Managed ads currently requires a Google Ads account billed in USD. You can keep this account connected for free reporting in Insights.', data: { code: 'GOOGLE_ADS_USD_REQUIRED', field: 'requirements.google_ads_usd' } })
   const now = new Date().toISOString()
   const id = crypto.randomUUID()
   const result = await execute(db, `INSERT INTO organization_services(id,organization_id,service,terms_version,agreed_by_user_id,agreed_at)
     SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM organization_integrations WHERE organization_id=? AND provider='google_ads' AND revision=?)`, [id, organizationId, service, SERVICE_TERMS_VERSION[service], userId, now, organizationId, ads.revision])
-  if (result.meta.changes !== 1) throw new HTTPError({ statusCode: 409, message: 'Google Ads changed. Reload before turning on managed ads.' })
+  if (result.meta.changes !== 1) throw new HTTPError({ statusCode: 409, message: 'Google Ads changed. Reload before turning on managed ads.', data: { code: 'SERVICE_OPERATION_REFUSED', field: 'service' } })
   const written = (await listServices(db, organizationId))[service]
   if (!written || written.id !== id) throw new Error('Service agreement was not recorded')
   return written
@@ -76,5 +76,5 @@ export async function agreeToService(db: DbClient, env: CloudflareEnv, organizat
 export async function endService(db: DbClient, organizationId: string, service: Service, userId: string): Promise<void> {
   const now = new Date().toISOString()
   const result = await execute(db, 'UPDATE organization_services SET ended_at=?,ended_by_user_id=? WHERE organization_id=? AND service=? AND ended_at IS NULL', [now, userId, organizationId, service])
-  if (!result.meta.changes) throw new HTTPError({ statusCode: 409, statusMessage: 'This service is not on' })
+  if (!result.meta.changes) throw new HTTPError({ statusCode: 409, statusMessage: 'This service is not on', data: { code: 'SERVICE_NOT_ACTIVE', field: 'service' } })
 }

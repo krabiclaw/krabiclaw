@@ -367,7 +367,12 @@ export interface ResponsibilityTarget {
   assigned_team_id: string | null
 }
 
-/** Validate the effective member-or-team pair against Better Auth's own rows. */
+/**
+ * Validate the effective member-or-team pair against Better Auth's own rows.
+ * Only a target the patch names is checked against them: one the edit carries
+ * from `current` is not re-checked, so an unrelated edit still saves after its
+ * member or team has left, and reconcileResponsibilities releases that target.
+ */
 export async function assertResponsibilityTarget(db: DbClient, organizationId: string, patch: { assigned_member_id?: unknown; assigned_team_id?: unknown }, current?: ResponsibilityTarget): Promise<ResponsibilityTarget> {
   const memberId = patch.assigned_member_id === undefined ? current?.assigned_member_id ?? null : patch.assigned_member_id
   const teamId = patch.assigned_team_id === undefined ? current?.assigned_team_id ?? null : patch.assigned_team_id
@@ -375,10 +380,10 @@ export async function assertResponsibilityTarget(db: DbClient, organizationId: s
     if (value !== null && (typeof value !== 'string' || !value.trim())) throw new HTTPError({ statusCode: 422, message: 'Choose a current member or team of this workspace, or leave responsibility unassigned', data: { code: 'INVALID_RESPONSIBILITY', field } })
   }
   if (memberId !== null && teamId !== null) throw new HTTPError({ statusCode: 422, message: 'Choose one responsible member or team', data: { code: 'RESPONSIBILITY_TARGET_CONFLICT', field: 'assigned_team_id' } })
-  if (memberId !== null && !await queryFirst(db, 'SELECT id FROM member WHERE organizationId = ? AND id = ?', [organizationId, memberId])) {
+  if (patch.assigned_member_id !== undefined && memberId !== null && !await queryFirst(db, 'SELECT id FROM member WHERE organizationId = ? AND id = ?', [organizationId, memberId])) {
     throw new HTTPError({ statusCode: 422, message: 'The responsible member must belong to this organization', data: { code: 'INVALID_RESPONSIBILITY', field: 'assigned_member_id' } })
   }
-  if (teamId !== null && !await queryFirst(db, 'SELECT id FROM team WHERE organizationId = ? AND id = ?', [organizationId, teamId])) {
+  if (patch.assigned_team_id !== undefined && teamId !== null && !await queryFirst(db, 'SELECT id FROM team WHERE organizationId = ? AND id = ?', [organizationId, teamId])) {
     throw new HTTPError({ statusCode: 422, message: 'The responsible team must belong to this organization', data: { code: 'INVALID_RESPONSIBILITY', field: 'assigned_team_id' } })
   }
   return { assigned_member_id: memberId as string | null, assigned_team_id: teamId as string | null }

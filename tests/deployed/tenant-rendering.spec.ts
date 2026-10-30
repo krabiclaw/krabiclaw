@@ -210,7 +210,7 @@ test('a guest opens a stay\'s booking dialog, picks nights the calendar allows a
   const homePage = await page.request.get(`${baseURL}/`)
   expect(homePage.status()).toBe(200)
   expect(await homePage.text(), 'the lodging demo home page does not offer the studio').toContain(`href="${stayPath}"`)
-  type Night = { date: string; available: boolean; price_minor: number | null; min_stay_arrival: number; min_stay_through: number | null; max_stay: number | null; closed_to_arrival: boolean; closed_to_departure: boolean }
+  type Night = { date: string; available: boolean; price_minor: number | null; min_stay_arrival: number; max_stay: number | null; closed_to_arrival: boolean; closed_to_departure: boolean }
   const from = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
   const to = new Date(Date.now() + 120 * 86_400_000).toISOString().slice(0, 10)
   const read = await page.request.get(`${baseURL}/api/public/products/${slug}/nights?from=${from}&to=${to}`)
@@ -221,10 +221,9 @@ test('a guest opens a stay\'s booking dialog, picks nights the calendar allows a
   for (let start = 0; start < nights.length && !chosen; start++) {
     const arrival = nights[start]!
     if (arrival.date < home.today || !arrival.available || arrival.closed_to_arrival) continue
-    let minimum = arrival.min_stay_arrival
+    const minimum = arrival.min_stay_arrival
     for (let end = start; end < nights.length - 1; end++) {
       if (!nights[end]!.available) break
-      minimum = Math.max(minimum, nights[end]!.min_stay_through ?? 1)
       const count = end - start + 1
       const departure = nights[end + 1]!
       if (count >= minimum && !departure.closed_to_departure && (arrival.max_stay === null || count <= arrival.max_stay)) {
@@ -262,14 +261,13 @@ test('a guest opens a stay\'s booking dialog, picks nights the calendar allows a
   const [todayYear, todayMonth] = home.today.split('-').map(Number) as [number, number]
   const [year, month] = checkIn.date.split('-').map(Number) as [number, number]
   for (let step = 0; step < (year - todayYear) * 12 + month - todayMonth; step++) await dialog.getByRole('button', { name: 'Next month' }).click()
-  await dialog.getByRole('button', { name: dayLabel(checkIn.date), exact: true }).click()
+  await dialog.locator(`[data-reka-calendar-cell-trigger][data-value="${checkIn.date}"]:not([data-outside-view])`).click()
   await expect(dialog).toContainText('Select checkout date')
   // A checkout short of the minimum is not offered.
   if (minimum > 1) {
-    const arrivalHint = checkIn.min_stay_arrival > 1 ? ` · ${checkIn.min_stay_arrival}-night minimum` : ''
-    await expect(dialog.getByRole('button', { name: `${dayLabel(stayed[1]!.date)}${arrivalHint}`, exact: true })).toBeDisabled()
+    await expect(dialog.locator(`[data-reka-calendar-cell-trigger][data-value="${stayed[1]!.date}"]:not([data-outside-view])`)).toBeDisabled()
   }
-  await dialog.getByRole('button', { name: new RegExp(`^${dayLabel(checkOut)}`) }).click()
+  await dialog.locator(`[data-reka-calendar-cell-trigger][data-value="${checkOut}"]:not([data-outside-view])`).click()
   const total = money(stayed.reduce((sum, night) => sum + night.price_minor!, 0))
   const totalRow = dialog.locator('dl > div').last()
   await expect(totalRow.locator('dt')).toHaveText('Total')
@@ -290,7 +288,7 @@ test('a guest opens a stay\'s booking dialog, picks nights the calendar allows a
   await page.setViewportSize({ width: 1440, height: 900 })
   await card.getByRole('button', { name: new RegExp(`Check-in\\s*${dayLabel(checkIn.date)}`) }).click()
   await expect(dialog).toBeVisible()
-  await expect(dialog.getByRole('button', { name: dayLabel(checkIn.date), exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(dialog.locator(`[data-reka-calendar-cell-trigger][data-value="${checkIn.date}"]:not([data-outside-view])`)).toHaveAttribute('aria-pressed', 'true')
 })
 
 test('Pottery House enforces its published languages and localized catalog', async ({ page }) => {

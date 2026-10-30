@@ -18,6 +18,7 @@ import { organizationLogo } from '~/server/notifications/hero'
 import { getPlatformDomain, buildBuyerRequestActivityUrl } from '~/server/utils/dashboard-notification-links'
 import { isBookingComplete } from '~/shared/bookings'
 import { creationRequestHash } from '~/server/utils/organization-events'
+import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { guestPresentation } from '~/server/utils/notifications'
 import { platformLocale } from '~/shared/platform-locales'
 import { notifyBuyerThread } from '~/server/utils/notification-center'
@@ -340,7 +341,10 @@ async function renderStatusUpdate(env: ReplyEmailEnv, db: DbClient, context: Thr
     : action === 'confirm' ? context.thread.kind === 'reservation' ? 'reservations.confirmed' : 'booking.confirmed'
       : context.thread.kind === 'reservation' ? 'site.reservation_cancel.cancelled_title' : 'site.experience_cancel.cancelled_title'
   const subject = `${labels[titleKey]} — ${guest.productTitle ?? guest.organizationName}`
-  const guests = labels['site.experience_detail.guest_count']!.replace('{count}', `${context.record.party_size}${partySizeIsMinimum(context.thread) ? '+' : ''}`)
+  const org = await queryFirst<{ vertical: string | null }>(db, 'SELECT vertical FROM organization WHERE id = ?', [context.thread.organization_id])
+  const presentation = resolveBookingPresentation(context.thread.kind === 'reservation' ? 'reservation' : 'booking', org?.vertical)
+  const countStr = `${context.record.party_size}${partySizeIsMinimum(context.thread) ? '+' : ''}`
+  const guests = presentation.formatCount(countStr)
   const body = [guest.locationName, formatTimestamp(context.record.starts_at, guest.locale, context.record.timezone, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), guests].filter(Boolean).join(' · ')
   const organizationLogoUrl = await organizationLogo(db, context.thread.organization_id)
   const email = await renderNotificationEmail(guestThreadStatusMessage({ locale: guest.locale, organizationName: guest.organizationName, organizationLogoUrl, heading: subject, body, manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId: context.thread.organization_id, threadId: context.thread.id }) }), { platformDomain: getPlatformDomain(env) })

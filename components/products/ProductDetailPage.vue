@@ -13,7 +13,7 @@
     >
       <div v-if="priceLabel" class="min-w-0">
         <p v-if="compareAtLabel && !stayQuoteTotalLabel" class="text-xs text-muted line-through">{{ compareAtLabel }}</p>
-        <p class="font-semibold leading-tight text-default">{{ stayQuoteTotalLabel ?? (isStay ? t('stay.price_per_night', { price: priceLabel }) : priceLabel) }}</p>
+        <p class="font-semibold leading-tight text-default" :role="isStay && stayBooking.quotePending.value ? 'status' : undefined">{{ stayQuoteTotalLabel ?? (isStay ? t('stay.price_per_night', { price: priceLabel }) : priceLabel) }}</p>
         <p v-if="isStay && stayBooking.quote.value" class="text-xs text-muted">{{ stayBooking.rangeLabel.value }}</p>
       </div>
       <TenantButton v-if="canOrderExternally" class="shrink-0" :href="product.order_url!" target="_blank" rel="noopener noreferrer" @click="recordExternalOrderClick">{{ externalActionLabel }}</TenantButton>
@@ -124,11 +124,11 @@
                 <p class="text-xs text-muted">{{ t('stay.check_out_before', { time: formatTime(product.stay!.check_out_time, locale) }) }}</p>
               </div>
             </div>
-            <div v-if="stayCancellationPolicyLabel" class="flex items-start gap-4">
+            <div class="flex items-start gap-4">
               <TenantIcon name="calendar-days" class="size-5 text-default shrink-0 mt-0.5" />
               <div>
-                <p class="font-medium text-default text-sm">{{ stayCancellationPolicyLabel }}</p>
-                <p class="text-xs text-muted">{{ stayCheckoutAvailable ? t('stay.charged_in_full') : t('stay.enquiry_note') }}</p>
+                <p class="font-medium text-default text-sm">{{ t('stay.cancellation_policy') }}</p>
+                <p class="text-xs text-muted">{{ stayCancellationTerms?.summary ?? t('stay.add_dates_for_policy') }}</p>
               </div>
             </div>
           </div>
@@ -292,7 +292,7 @@
           <div class="space-y-5 rounded-2xl border border-default bg-elevated p-6 shadow-xl">
             <div v-if="priceLabel" class="flex items-center justify-between gap-4">
               <div>
-                <span class="tenant-display text-2xl font-bold tabular-nums text-default">
+                <span class="tenant-display text-2xl font-bold tabular-nums text-default" :role="isStay && stayBooking.quotePending.value ? 'status' : undefined">
                   <span v-if="compareAtLabel && !stayQuoteTotalLabel" class="mr-2 text-base text-muted line-through">{{ compareAtLabel }}</span>{{ stayQuoteTotalLabel ?? (isStay || enquiryOnly || (product.kind !== 'experience' && sellableVariants.length === 1) ? priceLabel : t('site.experience_detail.from_price', { price: priceLabel })) }}
                 </span>
                 <span v-if="isStay && !stayQuoteTotalLabel" class="text-sm font-normal text-muted"> / night</span>
@@ -471,6 +471,7 @@
         target-id="product-booking"
         :title="displayTitle"
         :can-go-back="stayBooking.bookingStep.value > 1 && !stayBooking.submitting.value"
+        :wide="stayBooking.bookingStep.value === 1"
         @back="stayBooking.bookingStep.value = 1"
       >
         <StayBookingSteps :controller="stayBooking" />
@@ -502,7 +503,8 @@ import UpcomingSessions from '~/components/booking/UpcomingSessions.vue'
 import type { ProductPresentation, PublicProduct } from '~/server/types/products'
 import type { Accommodation, PropertyValue } from 'nuxt-schema-org/schema'
 import { useSchemaOrg } from '#imports'
-import { STAY_AMENITIES, STAY_AMENITY_GROUPS, STAY_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
+import { STAY_AMENITIES, STAY_AMENITY_GROUPS, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
+import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 import { stayPhotoRoomName, stayPhotoTourReady } from '~/shared/stay-photos'
 import { STAY_ROOM_ACCESSIBILITY_FEATURES, STAY_HOME_ACCESSIBILITY_FEATURES } from '~/shared/stay-accessibility'
 import type { MediaGalleryGroup } from '~/components/MediaLightbox.vue'
@@ -567,9 +569,11 @@ const displayTitle = computed(() => props.product.name)
 /** A place to stay is booked by its nights, paid in full; its booking is not a session's. */
 const isStay = computed(() => props.product.kind === 'stay')
 const stayBooking = useStayBooking(() => ({ product: props.product, location: props.location, checkout: props.stayCheckoutAvailable }))
-const stayQuoteTotalLabel = computed(() => isStay.value && stayBooking.quote.value
-  ? `${stayBooking.money(stayBooking.quote.value.total_minor)} ${t('stay.total')}`
-  : null)
+const stayQuoteTotalLabel = computed(() => {
+  if (!isStay.value) return null
+  if (stayBooking.quotePending.value) return t('stay.updating_price')
+  return stayBooking.quote.value ? `${stayBooking.money(stayBooking.quote.value.total_minor)} ${t('stay.total')}` : null
+})
 const bookingLabel = computed(() => isStay.value
   ? stayBooking.quote.value ? props.stayCheckoutAvailable ? t('stay.reserve') : t('stay.send_enquiry') : t('stay.check_availability')
   : props.vertical === 'service'
@@ -595,10 +599,7 @@ const stayPropertyFacts = computed(() => {
   ]
 })
 
-const stayCancellationPolicyLabel = computed(() => {
-  const p = props.product.stay?.cancellation_policy
-  return p ? `${STAY_CANCELLATION_POLICIES[p].label} cancellation policy` : ''
-})
+const stayCancellationTerms = computed(() => stayBooking.quote.value ? bookedPolicyTerms(stayBooking.quote.value.cancellation_policy) : null)
 
 const AMENITIES_SHOWN = 10
 // The full list in Airbnb's groups, each amenity once, under the first group that names it.

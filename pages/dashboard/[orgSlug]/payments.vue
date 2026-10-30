@@ -10,28 +10,20 @@
       <UAlert v-if="connectError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Stripe Connect is unavailable" :description="getErrorMessage(connectError, 'Stripe Connect status could not be loaded')" />
       <p v-else-if="connectPending" role="status" class="text-muted">Loading payment settings…</p>
       <EditorNavigationList v-else :groups="groups" :active-item="level.child.value" />
-      <UAlert v-if="usageError" class="mt-6" color="error" title="Fees could not be loaded" :description="getErrorMessage(usageError, 'Payment pricing is unavailable')" />
-      <section v-else-if="usage" class="mt-8 space-y-3" aria-label="Payment fees">
-        <h2 class="text-xl font-semibold">Fees</h2>
-        <p>{{ usage.terms.fee }}</p>
-        <p v-if="usage.terms.source === 'offer'" class="text-sm text-muted">Offered with Business. This workspace has no active Business payment pricing.</p>
-        <p class="text-sm text-muted">{{ usage.terms.stripe }}</p>
-        <p class="text-sm text-muted">{{ usage.terms.billing }}</p>
-      </section>
+      <UButton class="mt-8" label="View pricing and fees" to="/pricing" external color="neutral" variant="link" />
     </div>
   </DashboardIndexPanel>
 </template>
 
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup, type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
-import { connectStatusPresentation, useConnectAccount, usePaymentsUsage } from '~/composables/usePaymentsSettings'
+import { connectStatusPresentation, useConnectAccount } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'dashboard-orgSlug-earnings' })
 useSeoMeta({ title: 'Payments | KrabiClaw', robots: 'noindex, nofollow' })
 
 const level = useRouteLevel()
 const { account, payout, connectError, connectPending } = useConnectAccount()
-const { usage, usageError } = await usePaymentsUsage()
 const to = (leaf: string) => `${level.path.value}/${leaf}`
 
 const rows = computed<EditorNavigationItem[]>(() => [

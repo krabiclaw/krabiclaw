@@ -18,7 +18,7 @@
         <label :for="toggleId" class="absolute inset-0 bg-black/40 backdrop-blur-sm" :aria-label="t('site.experience_detail.close_booking')"></label>
         
         <!-- Modal content -->
-        <div class="relative bg-default border border-default rounded-xl shadow-xl w-full max-w-md h-[min(720px,90vh)] overflow-hidden flex flex-col">
+        <div class="relative bg-default border border-default rounded-xl shadow-xl w-full h-[min(720px,90vh)] overflow-hidden flex flex-col" :class="wide ? 'max-w-3xl' : 'max-w-md'">
           <!-- Header -->
           <div class="flex items-center justify-between gap-2 p-4 pb-3 shrink-0">
             <button
@@ -72,6 +72,7 @@ const props = defineProps<{
   targetId: string
   kicker?: string
   canGoBack?: boolean
+  wide?: boolean
 }>()
 const { t } = useI18n()
 

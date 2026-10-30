@@ -96,7 +96,7 @@ const route = useRoute()
 const { locale, localePath, t } = useI18n()
 const navAriaLabel = computed(() => t('site.header.nav_aria'))
 
-const { trackConsultationClick } = useOrganizationConversionTracking(() => props.consultation)
+const { trackConsultationClick } = useOrganizationConversionTracking()
 
 const brandName = computed(() => (props.organization?.name as string)?.trim() || '')
 const phone = computed(() => {

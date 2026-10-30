@@ -162,6 +162,21 @@ deleted keys before retiring the old database; carry important edits explicitly,
 without overwriting new-database writes. There is no write freeze or
 maintenance response in the application.
 
+Paged initial reads are not a consistent live snapshot. After repointing,
+account for old HTTP and cron invocations through version-specific Worker
+logs, paired MCP request events and the existing operation/delivery leases.
+Asset convergence verifies the build, not completion of old writers. Cron
+invocations can run for 15 minutes; HTTP has no fixed duration while connected,
+so elapsed time or an empty lease query alone cannot establish that work ended.
+Capture the final delta only after old writers finish, and verify that the
+retired source remains unchanged during and after capture. If it changes,
+discard the unapplied capture and repeat the read-only preflight against the
+same initial artifact. Once the source is stable, run the named-source final
+delta with its environment load flag and `--delta-from`; `--source-file` is
+read-only preflight input. Retain the final raw `--export` and require its
+content-and-schema hash to match the verified source capture. Reconcile
+changed/deleted keys and read back the affected state before completion.
+
 For the v7-to-v8 integrations replacement, create empty v8 databases with
 location hint `wnam` and apply the generated baseline with `wrangler d1
 migrations apply`. Never execute the SQL file directly: its migration ledger
@@ -622,19 +637,12 @@ before either binding or loading:
 - `krabiclaw-staging-v22`: `f88d2d02-401b-41b2-97f4-f546009d380c`
 - `krabiclaw-production-v22`: `f359de5d-e97d-4a14-9467-44d5b9e5c52f`
 
-Apply the generated baseline through `wrangler d1 migrations apply`, then load
-each unbound replacement through `scripts/pull-production-snapshot.ts` from its
-own explicitly named v21 source. Retain initial comparison artifacts privately
-under `~/.codex/krabiclaw-db-replacements/v22/`. Repository bindings name the
-prepared replacements; deployed Workers keep their existing v21 databases
-until the normal environment deployment. Before each cutover, perform a
-read-only delta preflight (`--out` without an environment load flag) from that
-environment's v21 source against its initial artifact. Immediately after the
-binding moves, apply the final delta once against that initial artifact. Inspect
-changed/deleted keys and carry important edits explicitly without overwriting
-replacement writes. Verify deployed schema, foreign keys and the
-affected guest workflows before retiring either v21 database. Production,
-development and E2E bindings use the same production replacement.
+The completed v21-to-v22 replacement used the generated baseline, native
+`wrangler d1 migrations apply` and the canonical initial-copy/final-delta
+procedure against each environment's own v21 source. Its comparison artifacts
+remain private under `~/.codex/krabiclaw-db-replacements/v22/`. Production,
+development and E2E shared the production v22 binding. These historical source
+identities describe that completed replacement.
 
 The staging initial copy on 2026-10-29 loaded all 117 tables and 107,587 rows
 from staging v21. Independent API reads confirmed the replacement's baseline
@@ -685,6 +693,74 @@ provider on `guest_thread_deliveries`; neither table is referenced by another.
 The normal deployment applies it to each v22 replacement. A final delta from
 v21 runs it on the staged source and advances the initial comparison through
 it, so the initial artifacts stay valid.
+
+The v22-to-v23 replacement removes the duplicated nightly through-stay minimum,
+requires an explicit home minimum without a database default, and stores only
+actual optional weekday and weekend-price rules in
+`product_stay_configs.calendar_rules`. It also retires the unused consultation
+tracking gate from the old GTM bridge; canonical native analytics and Zaraz's
+consent controls own measurement. Existing consultation JSON is preserved.
+The immutable v22 chain, including its
+three forward migrations, is archived in `migrations-history/v22/`.
+
+The WNAM replacements are:
+
+- `krabiclaw-staging-v23`: `02248634-935c-4d8e-b3ae-287c1f4067a0`
+- `krabiclaw-production-v23`: `4120f640-e449-45a4-828b-ff2601a0ee0e`
+
+Rehearse and load each unbound replacement with the canonical snapshot command,
+naming its own v22 source. Keep the initial comparison artifacts privately under
+`~/.codex/krabiclaw-db-replacements/v23/` as
+`staging-release-r2-initial.sqlite` and `production-release-r2-initial.sqlite`.
+The transfer preserves every home minimum and all other nightly fields. It
+retires imported through values only when they duplicate a nonnull arrival
+minimum. The owner also explicitly approved retiring exactly 163 matching
+through values on Saltleaf's fictional staging home
+`2521e20c-6857-448a-a3a9-7cd389be29e0`: November 1–10, 2026 at one night,
+November 23 at three nights, and December 1, 2026–May 1, 2027 at two nights.
+Its arrival minimums remain unchanged. Any other authored or differing through
+value blocks the transfer.
+
+For mapped homes whose minimum still matches the original import receipt and
+first untouched imported night, the transfer records that value's fingerprint
+in the existing `import_written` field. It never substitutes a guessed default.
+Enabled, complete mappings with connected channels queue the existing sync job
+under their original creator only if that member still has owner/admin access.
+Pending, failed, error and stop requests are preserved; repair job identities
+remain stable between the initial copy and final delta.
+
+At cutover, finish old invocations after the binding moves, then use each
+environment's explicit v22 source and its initial artifact for the verified
+final delta described above. Review changed/deleted keys before carrying updates;
+do not overwrite progress the replacement has made. After deployment, run the
+existing `airbnb-sync` task and inspect each listing's visible sync outcome.
+Staging schedules only the Channex queues, including this task every two minutes.
+Verify live Airbnb defaults and actual optional rules were
+read, host edits remained intact, Channex rolling defaults and calendar pushes
+were confirmed, and public dates and quotes agree. A source or push failure must
+remain a failed sync, with its recorded reason. Read schema drift, the native
+baseline ledger and `PRAGMA foreign_key_check`, then walk the representative
+tenant booking journeys. The bindings and initial copies alone do not complete
+the cutover.
+
+Imports and provider setting writes reject non-empty Airbnb seasonal-minimum
+rules visibly. Their range endpoints and precedence are not established by the
+published API contract; no local seasonal feature or guessed interpretation is
+offered. Explicit dated night overrides remain supported.
+
+The forward migration `0001_required_delivery_fields.sql` makes the existing
+device-token credentials and failed-message diagnostics checks reject NULL.
+It rebuilds only the two unreferenced leaf tables, preserving their rows with
+foreign keys enabled; the applied baseline remains unchanged.
+Verify these constraints after the complete migration chain: the historical
+definitions in `0000_baseline.sql` are superseded by `0001`.
+
+The initial-copy manifests beside these artifacts record table totals,
+retired-policy counts and queued syncs. Read the persisted rows back independently
+after each load; require the current migration files in the native ledger and no
+foreign-key violations. Retain the initial artifacts for the final delta, and
+verify the live Worker bindings before cutover. Unproven legacy minimums and
+historical consultation JSON remain unchanged.
 
 Before dropping or retiring a legacy table or writer:
 

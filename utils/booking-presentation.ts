@@ -19,15 +19,36 @@ export interface BookingPresentation {
 	/** Sentence case, for headings and labels. */
 	label: string
 	labelPlural: string
+	/** Lowercase counterparty noun: 'guest' | 'client'. */
+	counterpartyNoun: string
+	/** Sentence case counterparty label: 'Guest' | 'Client'. */
+	counterpartyLabel: string
+	/** Sentence case fact label for the group: 'Party size' | 'Guests' | 'Clients'. */
+	partyLabel: string
+	/** Format a head count / party quantity: e.g. '1 client', '2 guests', '4+ guests'. */
+	formatCount: (count: number | string, isMinimum?: boolean) => string
 }
 
 export type BookingKind = 'reservation' | 'booking'
+
+function formatPresentationCount(nounSingular: string, nounPlural: string, count: number | string, isMinimum?: boolean): string {
+	const raw = String(count).trim()
+	const hasPlus = isMinimum || raw.endsWith('+')
+	const num = parseInt(raw, 10)
+	if (isNaN(num)) return raw
+	const word = num === 1 && !hasPlus ? nounSingular : nounPlural
+	return `${num}${hasPlus ? '+' : ''} ${word}`
+}
 
 const RESERVATION: BookingPresentation = {
 	noun: 'reservation',
 	nounPlural: 'reservations',
 	label: 'Reservation',
 	labelPlural: 'Reservations',
+	counterpartyNoun: 'guest',
+	counterpartyLabel: 'Guest',
+	partyLabel: 'Party size',
+	formatCount: (count, isMinimum) => formatPresentationCount('guest', 'guests', count, isMinimum),
 }
 
 const CONSULTATION: BookingPresentation = {
@@ -35,6 +56,10 @@ const CONSULTATION: BookingPresentation = {
 	nounPlural: 'consultations',
 	label: 'Consultation',
 	labelPlural: 'Consultations',
+	counterpartyNoun: 'client',
+	counterpartyLabel: 'Client',
+	partyLabel: 'Clients',
+	formatCount: (count, isMinimum) => formatPresentationCount('client', 'clients', count, isMinimum),
 }
 
 const BOOKING: BookingPresentation = {
@@ -42,6 +67,10 @@ const BOOKING: BookingPresentation = {
 	nounPlural: 'bookings',
 	label: 'Booking',
 	labelPlural: 'Bookings',
+	counterpartyNoun: 'guest',
+	counterpartyLabel: 'Guest',
+	partyLabel: 'Guests',
+	formatCount: (count, isMinimum) => formatPresentationCount('guest', 'guests', count, isMinimum),
 }
 
 /**

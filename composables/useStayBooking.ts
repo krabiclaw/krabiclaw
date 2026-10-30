@@ -5,7 +5,8 @@ import type { PublicStayCalendar, PublicStayNight, StayQuote } from '~/server/do
 import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode } from '~/shared/currencies'
 import { stayNightlyGroups } from '~/shared/stay-listing'
-import { addLocalDays, formatCalendarDate, isValidInstant } from '~/utils/timezone'
+import { MAX_STAY_NIGHTS, STAY_CALENDAR_DAYS } from '~/shared/bookings'
+import { addLocalDays, formatCalendarDate, isValidCalendarDate, isValidInstant, localDateAt } from '~/utils/timezone'
 import { getPhoneCountry } from '~/utils/phone'
 import { isRecord, normalizeApiError, publicApiMutation, publicApiRequest } from '~/utils/api-clients'
 import type { ContactFormState } from '~/components/booking/BookingContactForm.vue'
@@ -17,9 +18,6 @@ export interface StayBookingContext {
   checkout: boolean
 }
 
-/** Months a guest can page through, and how many nights are read at once. */
-const WINDOW_DAYS = 400
-
 /**
  * Booking a place to stay on the site: the guest picks check-in and checkout
  * on the home's public nights, sets the party, sees the server's quote, gives
@@ -30,6 +28,7 @@ const WINDOW_DAYS = 400
 export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   const context = computed(() => toValue(input))
   const { locale, t, localePath } = useI18n()
+  const route = useRoute()
   const bookingOpen = ref(false)
   const bookingStep = ref(1)
   const contactForm = ref<ContactFormState>({ name: '', email: '', phone: '', notes: '' })
@@ -39,6 +38,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   const calendarError = ref('')
   const checkIn = ref<string | null>(null)
   const checkOut = ref<string | null>(null)
+  const dateField = ref<'checkIn' | 'checkOut'>('checkIn')
   const adults = ref(1)
   const children = ref(0)
   const infants = ref(0)
@@ -48,9 +48,14 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   const submitting = ref(false)
   let requestKey: string | null = null
   let requestFingerprint: string | null = null
+  let restoredSelection = false
 
   const nightsByDate = computed(() => new Map((calendar.value?.nights ?? []).map(night => [night.date, night])))
-  const maxGuests = computed(() => calendar.value?.home.max_guests ?? context.value.product.stay?.max_guests ?? 1)
+  const maxGuests = computed(() => {
+    const capacity = calendar.value?.home.max_guests ?? context.value.product.stay?.max_guests
+    if (capacity === undefined) throw new Error('The home has no guest capacity')
+    return capacity
+  })
   const currency = computed(() => {
     const code = calendar.value?.home.currency
     return code && isCurrencyCode(code) ? code : null
@@ -61,17 +66,40 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     calendarPending.value = true
     calendarError.value = ''
     try {
-      // The window starts today where the guest is; the server reports today where the home is.
-      const from = new Date().toISOString().slice(0, 10)
+      const timeZone = context.value.location?.timezone
+      if (!timeZone) throw new Error('The home has no timezone')
+      const from = localDateAt(new Date(), timeZone)
       calendar.value = await publicApiRequest<PublicStayCalendar>(`/api/public/products/${encodeURIComponent(context.value.product.slug)}/nights`, {
-        query: { from: addLocalDays(from, -1), to: addLocalDays(from, WINDOW_DAYS - 1) },
+        query: { from, to: addLocalDays(from, STAY_CALENDAR_DAYS) },
         validate: (value): value is PublicStayCalendar => isRecord(value) && isRecord(value.home) && Array.isArray(value.nights),
       })
+      restoreSelection()
     } catch (error) {
       calendarError.value = normalizeApiError(error).message
     } finally {
       calendarPending.value = false
     }
+  }
+
+  /** A canceled pay-page purchase returns its actual choices; the fresh quote still decides whether they can be booked. */
+  function restoreSelection() {
+    if (restoredSelection || !['dates', 'guests'].includes(String(route.query.stay_edit))) return
+    restoredSelection = true
+    bookingOpen.value = true
+    bookingStep.value = 1
+    const query = route.query
+    const party = ['adults', 'children', 'infants'].map(key => typeof query[key] === 'string' && /^(0|[1-9]\d*)$/u.test(query[key]) ? Number(query[key]) : NaN)
+    if (!isValidCalendarDate(query.check_in_date) || !isValidCalendarDate(query.check_out_date) || query.check_out_date <= query.check_in_date
+      || party.some(value => !Number.isSafeInteger(value)) || party[0]! < 1) {
+      bookingError.value = t('stay.error_booking_link')
+      return
+    }
+    checkIn.value = query.check_in_date
+    checkOut.value = query.check_out_date
+    adults.value = party[0]!
+    children.value = party[1]!
+    infants.value = party[2]!
+    dateField.value = 'checkIn'
   }
 
   function night(date: string): PublicStayNight | null {
@@ -80,22 +108,22 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
 
   /**
    * The days that can end a stay arriving on `from`: every night between is
-   * free, the stay meets the arrival night's minimum and maximum and every
-   * stayed night's minimum-through, and the day itself is open to departure.
+   * free, the stay meets the arrival night's minimum and maximum, and the
+   * day itself is open to departure.
    * The calendar only greys out what the nights already say; the server's quote
    * still decides, and names its reason when it refuses.
    */
   function* checkOuts(from: string) {
     const arrival = night(from)
     if (!arrival) return
-    let minimum = arrival.min_stay_arrival
+    const minimum = arrival.min_stay_arrival
     let nights = 0
     for (let day = from; night(day)?.available; day = addLocalDays(day, 1)) {
-      minimum = Math.max(minimum, night(day)!.min_stay_through ?? 1)
       nights++
-      if (arrival.max_stay !== null && nights > arrival.max_stay) return
+      if (nights > MAX_STAY_NIGHTS || (arrival.max_stay !== null && nights > arrival.max_stay)) return
       const end = addLocalDays(day, 1)
-      if (nights >= minimum && !night(end)?.closed_to_departure) yield end
+      const departure = night(end)
+      if (nights >= minimum && departure && !departure.closed_to_departure) yield end
     }
   }
 
@@ -122,22 +150,24 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     return nights
   })
 
-  /** A day pressed on the calendar ends the stay when it can, and otherwise starts one. */
+  /** Calendar clicks edit the field the guest chose, including a completed range. */
   function selectDay(date: string) {
-    if (checkIn.value && !checkOut.value && canCheckOut(date)) setCheckOut(date)
-    else if (canCheckIn(date)) setCheckIn(date)
+    if (dateField.value === 'checkOut') setCheckOut(date)
+    else setCheckIn(date)
   }
 
   /** A typed or pressed check-in; one that cannot start a stay says why and changes nothing. */
   function setCheckIn(date: string) {
     bookingError.value = ''
     if (!canCheckIn(date)) {
-      bookingError.value = t('stay.error_no_check_in')
+      bookingError.value = checkInHint(date)
       return
     }
+    const previousCheckOut = checkOut.value
     checkIn.value = date
-    checkOut.value = null
-    quote.value = null
+    const keepsCheckOut = previousCheckOut !== null && [...checkOuts(date)].includes(previousCheckOut)
+    checkOut.value = keepsCheckOut ? previousCheckOut : null
+    dateField.value = keepsCheckOut ? 'checkIn' : 'checkOut'
   }
 
   /** A typed or pressed checkout for the chosen check-in; one that cannot end the stay says why. */
@@ -145,27 +175,50 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     bookingError.value = ''
     if (canCheckOut(date)) {
       checkOut.value = date
+      dateField.value = 'checkOut'
       return
     }
-    if (!checkIn.value) {
-      bookingError.value = t('stay.select_check_in')
-      return
-    }
+    bookingError.value = checkOutHint(date)
+  }
+
+  function checkInHint(date: string): string {
+    const arrival = night(date)
+    if (!calendar.value || date < calendar.value.home.today || !arrival?.available) return t('dates.date_unavailable')
+    if (!canCheckIn(date)) return t('stay.error_no_check_in')
+    return ''
+  }
+
+  /** Name the restriction, rather than presenting every disabled checkout as a minimum stay. */
+  function checkOutHint(date: string): string {
+    if (!checkIn.value) return t('stay.select_check_in')
+    const arrival = night(checkIn.value)
+    const departure = night(date)
+    if (date <= checkIn.value || !departure || !arrival) return t('stay.error_no_check_out')
     let nights = 0
-    let available = true
+    const minimum = arrival.min_stay_arrival
     for (let day = checkIn.value; day < date; day = addLocalDays(day, 1)) {
-      available &&= Boolean(night(day)?.available)
+      const stayed = night(day)
+      if (!stayed?.available) return t('stay.error_unavailable')
       nights++
     }
-    const minimum = night(checkIn.value)?.min_stay_arrival ?? 1
-    bookingError.value = !available ? t('stay.error_unavailable') : nights < minimum ? t('stay.error_min_nights', { count: minimum }) : t('stay.error_no_check_out')
+    if (nights < minimum) return t('stay.error_min_nights', { count: minimum })
+    if (arrival.max_stay !== null && nights > arrival.max_stay) return t('stay.error_max_nights', { count: arrival.max_stay })
+    if (nights > MAX_STAY_NIGHTS) return t('stay.error_max_nights', { count: MAX_STAY_NIGHTS })
+    if (departure.closed_to_departure) return t('stay.error_no_check_out')
+    return ''
+  }
+
+  function clearCheckOut() {
+    checkOut.value = null
+    bookingError.value = ''
+    dateField.value = 'checkOut'
   }
 
   function clearDates() {
     checkIn.value = null
     checkOut.value = null
-    quote.value = null
     bookingError.value = ''
+    dateField.value = 'checkIn'
   }
 
   /** The guest-facing words for a refusal the server named by its code. */
@@ -176,8 +229,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     const count = typeof data.min_nights === 'number' ? data.min_nights : typeof data.max_nights === 'number' ? data.max_nights : typeof data.max_guests === 'number' ? data.max_guests : null
     switch (failure.code) {
       case 'STAY_NIGHTS_UNAVAILABLE': return t('stay.error_unavailable')
-      case 'STAY_MIN_NIGHTS':
-      case 'STAY_MIN_NIGHTS_THROUGH': return count === null ? failure.message : t('stay.error_min_nights', { count })
+      case 'STAY_MIN_NIGHTS': return count === null ? failure.message : t('stay.error_min_nights', { count })
       case 'STAY_MAX_NIGHTS': return count === null ? failure.message : t('stay.error_max_nights', { count })
       case 'STAY_CLOSED_TO_ARRIVAL': return t('stay.error_no_check_in')
       case 'STAY_CLOSED_TO_DEPARTURE': return t('stay.error_no_check_out')
@@ -285,9 +337,9 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
 
   return {
     checkout, enquiryPath,
-    bookingOpen, bookingStep, contactForm, defaultPhoneCountry, calendar, calendarPending, calendarError, checkIn, checkOut, adults, children, infants, maxGuests,
+    bookingOpen, bookingStep, contactForm, defaultPhoneCountry, calendar, calendarPending, calendarError, checkIn, checkOut, dateField, adults, children, infants, maxGuests,
     quote, quotePending, bookingError, submitting, breakdown, rangeLabel, guestsLabel, nightCount,
-    loadCalendar, night, canCheckIn, canCheckOut, firstCheckIn, earliestCheckOut, selectDay, setCheckIn, setCheckOut, clearDates, openBooking, submitBooking, money, nightsLabel, dateLabel,
+    loadCalendar, night, canCheckIn, canCheckOut, checkInHint, checkOutHint, firstCheckIn, earliestCheckOut, selectDay, setCheckIn, setCheckOut, clearDates, clearCheckOut, openBooking, submitBooking, money, nightsLabel, dateLabel,
   }
 }
 export type StayBookingController = ReturnType<typeof useStayBooking>

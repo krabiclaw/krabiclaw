@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { MAX_STAY_NIGHTS, STAY_CHANNEL_LABELS, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, STAY_CALENDAR_DAYS, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNEL_LABELS, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedResponsibilitySql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
@@ -18,13 +18,13 @@ import { AIRBNB_CANCELLATION_CATEGORIES, AIRBNB_LONG_TERM_CANCELLATION_IDS, isSt
 import { validateProductDetails, validateStayAlarmDetails, stayHouseRuleLines } from '~/shared/product-details'
 import { staySafetyLines, stayAlarmLines } from '~/shared/stay-safety'
 import { formatTime, isValidTimezone, localDateTimeToInstant } from '~/utils/timezone'
-import { createProduct, getProduct, setProductPublication, updateProduct } from '~/server/utils/product-management'
+import { createProduct, getProduct, setProductPublication, stayImportWrittenQuery, updateProduct, type StayImportWrite } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
-import { completeChannelPush, deliverStayNights, pushAirbnbListingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type AirbnbListingSettings, type ChannelPushCompletion, type ChannexMapping, type DeliveryLease } from '~/server/integrations/channex/ari'
+import { completeChannelPush, configureStayCalendar, deliverStayNights, pushAirbnbListingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type AirbnbListingSettings, type ChannelPushCompletion, type ChannexMapping, type DeliveryLease } from '~/server/integrations/channex/ari'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 import { stayThreadQueries } from '~/server/domain/requests'
 import { ownedBuyerRequest } from '~/server/domain/payments/buyer'
@@ -176,6 +176,7 @@ export interface StayHome {
   check_out_time: string
   max_guests: number
   min_nights: number
+  calendar_rules: StayCalendarRules | null
   /** The product's description, the listing text guests read; empty when the host has written none. */
   description: string
   /** Whether the home is listed on the site: its product's publication there. */
@@ -279,8 +280,7 @@ export interface StayNight {
   stay_id: string | null
   closed: boolean
   price_minor: number | null
-  min_stay_arrival: number | null
-  min_stay_through: number | null
+  min_stay_arrival: number
   max_stay: number | null
   closed_to_arrival: boolean
   closed_to_departure: boolean
@@ -294,7 +294,6 @@ export interface StayNight {
 }
 
 const MAX_LIST_DAYS = 400
-const MAX_CALENDAR_DAYS = 500
 /** Every home's nights at once: three months, a window a multi-calendar pages through. */
 const MAX_HOMES_CALENDAR_DAYS = 92
 const MAX_CALENDAR_BYTES = 2_000_000
@@ -349,8 +348,8 @@ function optionalText(value: unknown, field: string, max = 500): string | null {
   return text || null
 }
 
-function count(value: unknown, field: string, min: number): number {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > 99) fail(422, 'INVALID_STAY_FIELD', `${field} must be a whole number from ${min} to 99`, field)
+function count(value: unknown, field: string, min: number, max = 99): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) fail(422, 'INVALID_STAY_FIELD', `${field} must be a whole number from ${min} to ${max}`, field)
   return value
 }
 
@@ -392,7 +391,7 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
 async function stayHomesWhere(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHome[]> {
   const rows = await queryAll<Record<string, unknown>>(db, `
     SELECT p.id AS product_id, p.updated_at AS product_updated_at, p.name, p.description, p.details_json, c.location_id, l.timezone, l.address, l.latitude, l.longitude, l.stay_map_sharing, o.default_currency,
-           c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, c.property_type_group, c.property_type,
+           c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, c.calendar_rules, c.property_type_group, c.property_type,
            c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
            c.cancellation_policy, c.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
            c.directions, c.house_manual, c.checkout_instructions, c.assigned_member_id, c.assigned_team_id,
@@ -428,7 +427,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
     return {
       product_id: String(row.product_id), product_updated_at: String(row.product_updated_at), name: String(row.name), location_id: String(row.location_id), timezone: String(row.timezone),
       currency: row.default_currency, base_price_minor: base ? base.unit_amount : null, base_price_tax_behavior: base ? base.tax_behavior : null,
-      check_in_time: String(row.check_in_time), check_in_end_time: nullableText(row.check_in_end_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
+      check_in_time: String(row.check_in_time), check_in_end_time: nullableText(row.check_in_end_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights), calendar_rules: parseStayCalendarRules(row.calendar_rules === null ? null : JSON.parse(String(row.calendar_rules))),
       description: String(row.description), published: Number(row.published) === 1, live: Number(row.live) === 1,
       address: stayAddress(row.address), latitude: nullableNumber(row.latitude), longitude: nullableNumber(row.longitude), stay_map_sharing: parseStayMapSharing(row.stay_map_sharing),
       property_type_group: nullableText(row.property_type_group) as StayPropertyTypeGroup | null,
@@ -534,6 +533,7 @@ export interface NewStayHome {
   check_out_time: string
   max_guests: number
   min_nights: number
+  calendar_rules?: StayCalendarRules | null
   base_price_minor: number | null
   /** Left out, a new home starts on Airbnb's own: NEW_HOME_CANCELLATION_POLICIES. */
   cancellation_policy?: StayCancellationPolicy
@@ -576,7 +576,7 @@ function homeDetails(body: Record<string, unknown>) {
     text, timezone, time,
     name: (required: boolean) => text('name', 200, required),
     maxGuests: (required: boolean) => whole('max_guests', 1, 99, required),
-    minNights: (required: boolean) => whole('min_nights', 1, 365, required),
+    minNights: (required: boolean) => whole('min_nights', 1, MAX_STAY_NIGHTS, required),
     basePrice: () => whole('base_price_minor', 0, Number.MAX_SAFE_INTEGER, false),
   }
 }
@@ -596,6 +596,7 @@ export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
     phone: text('phone', 32, false), email: text('email', 254, false),
     check_in_time: time('check_in_time', true)!, check_in_end_time: time('check_in_end_time', false), check_out_time: time('check_out_time', true)!,
     max_guests: maxGuests(true)!, min_nights: minNights(true)!,
+    ...('calendar_rules' in body ? { calendar_rules: homeCalendarRules(body.calendar_rules) } : {}),
     base_price_minor: basePrice(),
     // Left out, the product writer gives a new home Airbnb's own; an empty one is refused before the location is made.
     ...policy('cancellation_policy', STAY_CANCELLATION_POLICIES),
@@ -603,6 +604,14 @@ export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
   }
   if (home.email !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(home.email)) fail(422, 'INVALID_DETAIL', 'Enter a valid contact email', 'email')
   return home
+}
+
+function homeCalendarRules(value: unknown): StayCalendarRules | null {
+  try { return parseStayCalendarRules(value) }
+  catch (error) {
+    if (!(error instanceof TypeError)) throw error
+    fail(422, 'INVALID_DETAIL', error.message, 'calendar_rules')
+  }
 }
 
 /** A home's address read from a request; each problem names its field under the prefix. */
@@ -630,7 +639,7 @@ const LISTING_FIELDS = ['property_type_group', 'property_type', 'listing_type', 
 /** The arrival guide: private columns only this module reads and writes. */
 const ARRIVAL_FIELDS = [...Object.keys(STAY_ARRIVAL_TEXT_LIMITS) as Array<keyof typeof STAY_ARRIVAL_TEXT_LIMITS>, 'check_in_method', 'checkout_instructions'] as const
 const LOCATION_FIELDS = ['address', 'latitude', 'longitude', 'stay_map_sharing'] as const
-const EDITABLE_HOME_FIELDS = ['name', 'description', 'published', 'timezone', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'base_price_minor',
+const EDITABLE_HOME_FIELDS = ['name', 'description', 'published', 'timezone', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'base_price_minor',
   'assigned_member_id', 'assigned_team_id', ...LISTING_FIELDS, ...Object.values(STAY_ALARM_DETAIL_KEYS), ...ARRIVAL_FIELDS, ...LOCATION_FIELDS] as const
 
 /** The arrival guide fields a request names, checked; each problem names its field. */
@@ -698,7 +707,7 @@ function locationPatch(body: Record<string, unknown>): UpdateLocationInput {
  * connected home, a new base price or minimum stay is pushed for the nights
  * ahead, because nights without their own value use them.
  */
-export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: StayAccess, productId: string, body: Record<string, unknown>): Promise<{ home: StayHome; channel_push: SuccessfulChannelPush | null; airbnb_unsynced: ReturnType<typeof airbnbUnsynced> }> {
+export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: StayAccess, productId: string, body: Record<string, unknown>, stayImport?: StayImportWrite): Promise<{ home: StayHome; channel_push: SuccessfulChannelPush | null; airbnb_unsynced: ReturnType<typeof airbnbUnsynced> }> {
   requireManager(access)
   const home = await readStayHome(db, access, productId)
   const unknown = Object.keys(body).find(key => !(EDITABLE_HOME_FIELDS as readonly string[]).includes(key))
@@ -722,6 +731,7 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   if (guests !== null) stay.max_guests = guests
   const nights = minNights(false)
   if (nights !== null) stay.min_nights = nights
+  if ('calendar_rules' in body) stay.calendar_rules = homeCalendarRules(body.calendar_rules)
   const arrival = arrivalPatch(body)
   const location = locationPatch(body)
   if ('published' in body && typeof body.published !== 'boolean') fail(422, 'INVALID_DETAIL', 'published must be true or false', 'published')
@@ -750,11 +760,11 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
     if (price !== null) patch.variants = [{ id: variant.id, prices: [base ? { id: base.id, unit_amount: price } : { unit_amount: price }] }]
     else if (base) patch.variants = [{ id: variant.id, prices_mode: 'replace', prices: variant.prices.filter(other => other.id !== base.id).map(other => ({ id: other.id })) }]
   }
-  const pushes = pricing || (nights !== null && nights !== home.min_nights)
+  const pushes = pricing || ('min_nights' in body && nights !== home.min_nights) || ('calendar_rules' in body && JSON.stringify(stay.calendar_rules) !== JSON.stringify(home.calendar_rules))
   // Clearing an already absent base price still asks for channel completion,
   // but creates no product pricing patch for updateProduct to preflight.
   if (pushes && patch.variants === undefined && patch.stay?.min_nights === undefined) await requireChannelPush(db, env, access.organizationId, productId)
-  const saved = Object.keys(patch).length ? await updateProduct(db, { organizationId: access.organizationId, productId, patch, actor: { actorId: access.actorId }, env, deferStayNightPush: true }) : null
+  const saved = Object.keys(patch).length ? await updateProduct(db, { organizationId: access.organizationId, productId, patch, actor: { actorId: access.actorId }, env, deferStayNightPush: true, stayImport }) : null
   const settings = saved ? touchesAirbnbSettings({ stay: saved.stay ?? undefined }, { stay: home }) : null
   // The product's checks are the ones a valid request can still fail, so it is written first.
   if ((zone !== null && zone !== home.timezone) || Object.keys(location).length) {
@@ -767,12 +777,16 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   const columns = Object.keys(arrival)
   const instructionsAt = columns.length ? new Date().toISOString() : null
   if (instructionsAt !== null) {
-    const results = await executeBatch(db, [{
+    const writes: BatchQuery[] = [{
       query: `UPDATE product_stay_configs SET ${columns.map(column => `${column} = ?`).join(', ')}, updated_at = ?, updated_by = ? WHERE organization_id = ? AND product_id = ?`,
       params: [...columns.map(column => arrival[column]!), instructionsAt, access.actorId, access.organizationId, productId],
     }, organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.instructions_updated', entityType: 'stay_home', entityId: productId,
-      metadata: { fields: columns.sort().join(',') }, onlyIfPreviousChangedOneRow: true })], { operation: 'Update home arrival guide' })
+      metadata: { fields: columns.sort().join(',') }, onlyIfPreviousChangedOneRow: true })]
+    const importWrittenIndex = writes.length
+    if (stayImport) writes.push(stayImportWrittenQuery(access.organizationId, productId, stayImport, columns))
+    const results = await executeBatch(db, writes, { operation: 'Update home arrival guide' })
     if (results[0]?.meta.changes !== 1) fail(409, 'HOME_CHANGED', 'The home changed before its arrival guide was saved; reload it', 'product_id')
+    if (stayImport && (!results[importWrittenIndex] || results[importWrittenIndex].meta.changes !== 1)) fail(409, 'IMPORT_CHANGED', 'The import changed. Refresh and try again.', undefined, { committed: true, product_id: productId })
   }
   const product = pushes || settings !== null ? await getProduct(db, access.organizationId, productId) : null
   const channelPush = product ? await pushStayHomeChannel(db, env, access, product, { nights: pushes, settings }) : null
@@ -815,7 +829,7 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
     product: {
       kind: 'stay', name: home.name,
       ...(home.base_price_minor === null ? {} : { variants: [{ name: home.name, prices: [{ unit_amount: home.base_price_minor }] }] }),
-      stay: { location_id: locationId, check_in_time: home.check_in_time, check_in_end_time: home.check_in_end_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, assigned_member_id: null, assigned_team_id: null,
+      stay: { location_id: locationId, check_in_time: home.check_in_time, check_in_end_time: home.check_in_end_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, calendar_rules: home.calendar_rules, assigned_member_id: null, assigned_team_id: null,
         ...(home.cancellation_policy === undefined ? {} : { cancellation_policy: home.cancellation_policy }),
         ...(home.long_term_cancellation_policy === undefined ? {} : { long_term_cancellation_policy: home.long_term_cancellation_policy }) },
     },
@@ -1179,7 +1193,7 @@ export async function getStay<A extends StayAccess>(db: DbClient, access: A, sta
 
 /** Every night of [from, to) at one home: whether it is free, its price and rules, and the stay holding it. */
 export async function readStayCalendar<A extends StayAccess>(db: DbClient, access: A, input: { productId: string; from: unknown; to: unknown }): Promise<{ home: StayHome; nights: StayNight[]; stays: Array<StayView<A>> }> {
-  const { from, to } = range(input, MAX_CALENDAR_DAYS)
+  const { from, to } = range(input, STAY_CALENDAR_DAYS)
   const home = await readStayHome(db, access, input.productId)
   const [nights, stays] = await Promise.all([homeNights(db, access.organizationId, home, from, to), staysOverlapping(db, access, { from, to, productId: input.productId })])
   return { home, nights, stays }
@@ -1232,9 +1246,10 @@ async function homesNights(db: DbClient, organizationId: string, homes: readonly
       const closed = Number(row?.closed ?? 0) === 1
       nights.push({
         date: night, available: !closed && !claim, stay_id: stayId, closed,
-        price_minor: row?.price_minor === null || row?.price_minor === undefined ? home.base_price_minor : Number(row.price_minor),
-        min_stay_arrival: row?.min_stay_arrival == null ? null : Number(row.min_stay_arrival),
-        min_stay_through: row?.min_stay_through == null ? null : Number(row.min_stay_through),
+        ...resolveStayNightPolicy(home, night, {
+          price_minor: row?.price_minor == null ? null : Number(row.price_minor),
+          min_stay_arrival: row?.min_stay_arrival == null ? null : Number(row.min_stay_arrival),
+        }),
         max_stay: row?.max_stay == null ? null : Number(row.max_stay),
         closed_to_arrival: Number(row?.closed_to_arrival ?? 0) === 1,
         closed_to_departure: Number(row?.closed_to_departure ?? 0) === 1,
@@ -1275,26 +1290,42 @@ export async function syncStayCalendar(db: DbClient, env: ChannexEnv, access: St
 }
 
 /**
- * Deliver every connected home's pending nights that are due: those waiting
- * out a rate limit or a retry, and those another delivery of the home or a
- * write that ended early left. Every home is tried; the run fails naming the
- * ones that could not be delivered.
+ * Deliver due nights and extend dated delivery as the booking window rolls.
+ * Native rate-plan defaults cover weekday minimums and base prices.
+ * Only a differing weekend price needs dated delivery as new dates open.
  */
 export async function deliverPendingChannelNights(db: DbClient, env: StayMutationEnv): Promise<{ homes: number }> {
-  const homes = await queryAll<{ organization_id: string; product_id: string }>(db, `SELECT DISTINCT organization_id, product_id FROM channel_night_pushes
-    WHERE provider = 'channex' AND state = 'pending' AND (retry_at IS NULL OR retry_at <= ?)`, [new Date().toISOString()])
+  const homes = await queryAll<{ organization_id: string; product_id: string; due: number }>(db, `SELECT organization_id, product_id, MAX(due) AS due FROM (
+      SELECT organization_id, product_id, 1 AS due FROM channel_night_pushes
+       WHERE provider = 'channex' AND state = 'pending' AND (retry_at IS NULL OR retry_at <= ?)
+      UNION ALL
+      SELECT m.organization_id, m.product_id, 0 AS due FROM product_channel_mappings m
+        JOIN product_stay_configs c ON c.organization_id = m.organization_id AND c.product_id = m.product_id
+       WHERE m.provider = 'channex' AND m.enabled = 1 AND json_extract(c.calendar_rules, '$.weekend_price_minor') IS NOT NULL
+    ) GROUP BY organization_id, product_id`, [new Date().toISOString()])
   const failures: string[] = []
+  let delivered = 0
   for (const row of homes) {
     try {
       const home = await readStayHome(db, { organizationId: row.organization_id, actorId: 'system', manage: true }, row.product_id)
-      await deliverStayNights(db, env, row.organization_id, home, (from, to) => homeNights(db, row.organization_id, home, from, to))
+      const from = homeToday(home.timezone)
+      const to = addDays(from, STAY_CALENDAR_DAYS)
+      // Partial date edits make the outbox sparse, so each weekend needs its own delivery row.
+      const known = home.calendar_rules?.weekend_price_minor === undefined ? [] : await queryAll<{ date: string }>(db, "SELECT date FROM channel_night_pushes WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND date >= ? AND date < ?", [row.organization_id, row.product_id, from, to])
+      const queued = new Set(known.map(night => night.date))
+      const added = home.calendar_rules?.weekend_price_minor === undefined ? [] : Array.from({ length: STAY_CALENDAR_DAYS }, (_, offset) => addDays(from, offset)).filter(date => !queued.has(date) && resolveStayNightPolicy(home, date).price_minor !== home.base_price_minor)
+      if (!added.length && !row.due) continue
+      const read = (from: string, to: string) => homeNights(db, row.organization_id, home, from, to)
+      if (added.length) await pushStayNights(db, env, row.organization_id, home, added, read)
+      else await deliverStayNights(db, env, row.organization_id, home, read)
+      delivered++
       await publishStayInvalidation(env, { type: 'nights.changed', organizationId: row.organization_id, locationId: home.location_id, productId: home.product_id, stayId: null }, { updated_at: new Date().toISOString() })
     } catch (error) {
       failures.push(`${row.product_id}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
   if (failures.length) throw new Error(`${failures.length} home(s) could not deliver their channel nights: ${failures.join('; ')}`)
-  return { homes: homes.length }
+  return { homes: delivered }
 }
 
 /** A base price or minimum stay changes the same 500 future nights on every write surface. */
@@ -1326,7 +1357,8 @@ export function touchesAirbnbSettings(patch: UpdateProductInput, previous: Updat
     booking: (['check_in_time', 'check_in_end_time', 'check_out_time'] as const).some(changed)
       || (Object.keys(AIRBNB_GUEST_CONTROLS) as Array<keyof typeof AIRBNB_GUEST_CONTROLS>).some(key => patch.details?.[key] !== previous.details?.[key]),
     cancellation: (['cancellation_policy', 'long_term_cancellation_policy'] as const).some(changed),
-    availability: patch.stay?.min_nights !== undefined && patch.stay.min_nights !== previous.stay?.min_nights,
+    availability: (patch.stay?.min_nights !== undefined && patch.stay.min_nights !== previous.stay?.min_nights)
+      || (patch.stay?.calendar_rules !== undefined && JSON.stringify(patch.stay.calendar_rules) !== JSON.stringify(previous.stay?.calendar_rules)),
   }
   return sections.booking || sections.cancellation || sections.availability ? sections : null
 }
@@ -1405,8 +1437,9 @@ export async function pushStayHomeChannel(db: DbClient, env: ChannexEnv, access:
       if (pushed?.state === 'needs_review' || !changes.nights) return pushed
     }
     if (!changes.nights) return null
+    await configureStayCalendar(db, env, access.organizationId, home)
     const today = homeToday(home.timezone)
-    return await pushNights(db, env, access, product.id, [[today, addDays(today, MAX_CALENDAR_DAYS)]])
+    return await pushNights(db, env, access, product.id, [[today, addDays(today, STAY_CALENDAR_DAYS)]])
   } catch (cause) {
     return cause instanceof Error ? cause : new Error(String(cause))
   }
@@ -1881,13 +1914,15 @@ export async function deleteStayPayment(db: DbClient, env: GuestInboxPublication
  */
 export async function setStayNights(db: DbClient, env: StayMutationEnv, access: StayAccess, input: Record<string, unknown> & { product_id: string; from: unknown; to: unknown }): Promise<{ home: StayHome; nights: StayNight[]; stays: Stay[]; channel_push: SuccessfulChannelPush | null }> {
   requireManager(access)
-  const { from, to } = range(input, MAX_CALENDAR_DAYS)
+  const unknown = Object.keys(input).find(key => !['organization_id', 'product_id', 'from', 'to', 'reset', 'closed', 'price_minor', 'min_stay_arrival', 'max_stay', 'closed_to_arrival', 'closed_to_departure'].includes(key))
+  if (unknown) fail(422, 'INVALID_STAY_FIELD', `${unknown} is not a night setting`, unknown)
+  const { from, to } = range(input, STAY_CALENDAR_DAYS)
   const home = await readStayHome(db, access, input.product_id)
   const patch: Record<string, number | null> = {}
   if (input.closed !== undefined) { if (typeof input.closed !== 'boolean') fail(422, 'INVALID_STAY_FIELD', 'closed must be true or false', 'closed'); patch.closed = input.closed ? 1 : 0 }
   if (input.price_minor !== undefined) patch.price_minor = input.price_minor === null ? null : amount(input.price_minor, 'price_minor')
-  for (const field of ['min_stay_arrival', 'min_stay_through', 'max_stay'] as const) {
-    if (input[field] !== undefined) patch[field] = input[field] === null ? null : count(input[field], field, 1)
+  for (const field of ['min_stay_arrival', 'max_stay'] as const) {
+    if (input[field] !== undefined) patch[field] = input[field] === null ? null : count(input[field], field, 1, MAX_STAY_NIGHTS)
   }
   for (const field of ['closed_to_arrival', 'closed_to_departure'] as const) {
     if (input[field] !== undefined) { if (typeof input[field] !== 'boolean') fail(422, 'INVALID_STAY_FIELD', `${field} must be true or false`, field); patch[field] = input[field] ? 1 : 0 }
@@ -1917,13 +1952,12 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, access: 
   })
 }
 
-/** One night of a channel's calendar as an import reads it. Airbnb has one minimum stay a night; it is both of KrabiClaw's. */
+/** One night of a channel's calendar. Airbnb's minimum applies to arrivals on that date. */
 export interface ImportedNight {
   date: string
   available: boolean
-  price_minor: number
-  min_stay_arrival: number
-  min_stay_through: number
+  price_minor: number | null
+  min_stay_arrival: number | null
   max_stay: number | null
   closed_to_arrival: boolean
   closed_to_departure: boolean
@@ -1942,16 +1976,16 @@ export async function importStayNights(db: DbClient, env: GuestInboxPublicationE
   const now = new Date().toISOString()
   await executeBatch(db, [
     {
-      query: `INSERT INTO product_nights (organization_id, product_id, date, closed, price_minor, min_stay_arrival, min_stay_through, max_stay, closed_to_arrival, closed_to_departure, source, updated_at, updated_by)
-              SELECT ?, ?, json_extract(value, '$.date'), json_extract(value, '$.closed'), json_extract(value, '$.price_minor'), json_extract(value, '$.min_stay_arrival'), json_extract(value, '$.min_stay_through'),
+      query: `INSERT INTO product_nights (organization_id, product_id, date, closed, price_minor, min_stay_arrival, max_stay, closed_to_arrival, closed_to_departure, source, updated_at, updated_by)
+              SELECT ?, ?, json_extract(value, '$.date'), json_extract(value, '$.closed'), json_extract(value, '$.price_minor'), json_extract(value, '$.min_stay_arrival'),
                      json_extract(value, '$.max_stay'), json_extract(value, '$.closed_to_arrival'), json_extract(value, '$.closed_to_departure'), 'import', ?, ?
                 FROM json_each(?) WHERE true
-              ON CONFLICT (product_id, date) DO UPDATE SET closed = excluded.closed, price_minor = excluded.price_minor, min_stay_arrival = excluded.min_stay_arrival, min_stay_through = excluded.min_stay_through,
+              ON CONFLICT (product_id, date) DO UPDATE SET closed = excluded.closed, price_minor = excluded.price_minor, min_stay_arrival = excluded.min_stay_arrival,
                 max_stay = excluded.max_stay, closed_to_arrival = excluded.closed_to_arrival, closed_to_departure = excluded.closed_to_departure,
                 updated_at = excluded.updated_at, updated_by = excluded.updated_by
               WHERE product_nights.source = 'import'`,
       params: [access.organizationId, home.product_id, now, access.actorId, JSON.stringify(nights.map(night => ({
-        date: night.date, closed: night.available ? 0 : 1, price_minor: night.price_minor, min_stay_arrival: night.min_stay_arrival, min_stay_through: night.min_stay_through,
+        date: night.date, closed: night.available ? 0 : 1, price_minor: night.price_minor, min_stay_arrival: night.min_stay_arrival,
         max_stay: night.max_stay, closed_to_arrival: night.closed_to_arrival ? 1 : 0, closed_to_departure: night.closed_to_departure ? 1 : 0,
 
       })))],
@@ -2187,39 +2221,37 @@ export interface PublicStayNight {
   available: boolean
   price_minor: number | null
   min_stay_arrival: number
-  min_stay_through: number | null
   max_stay: number | null
   closed_to_arrival: boolean
   closed_to_departure: boolean
 }
 
 export interface PublicStayCalendar {
-  home: { currency: CurrencyCode; timezone: string; today: string; check_in_time: string; check_out_time: string; max_guests: number; min_nights: number; base_price_minor: number | null }
+  home: { currency: CurrencyCode; timezone: string; today: string; check_in_time: string; check_out_time: string; max_guests: number; min_nights: number; calendar_rules: StayCalendarRules | null; base_price_minor: number | null }
   nights: PublicStayNight[]
 }
 
-function publicNight(night: StayNight, home: StayHome, today: string): PublicStayNight {
+function publicNight(night: StayNight, today: string): PublicStayNight {
   return {
     date: night.date,
     available: night.available && night.price_minor !== null && night.date >= today,
     price_minor: night.price_minor,
-    min_stay_arrival: night.min_stay_arrival ?? home.min_nights,
-    min_stay_through: night.min_stay_through,
+    min_stay_arrival: night.min_stay_arrival,
     max_stay: night.max_stay,
     closed_to_arrival: night.closed_to_arrival,
     closed_to_departure: night.closed_to_departure,
   }
 }
 
-/** The nights of [from, to) a guest can choose from. Nothing about who holds a night is shown. */
+/** The bookable nights of [from, to), plus `to` so the guest can select that departure. No claims are shown. */
 export async function readPublicStayCalendar(db: DbClient, organizationId: string, slug: string, input: { from: unknown; to: unknown }): Promise<PublicStayCalendar> {
-  const { from, to } = range(input, MAX_LIST_DAYS)
+  const { from, to } = range(input, STAY_CALENDAR_DAYS)
   const home = await readPublicStayHome(db, organizationId, slug)
   const today = homeToday(home.timezone)
-  const nights = await homeNights(db, organizationId, home, from, to)
+  const nights = await homeNights(db, organizationId, home, from, addDays(to, 1))
   return {
-    home: { currency: home.currency, timezone: home.timezone, today, check_in_time: home.check_in_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, base_price_minor: home.base_price_minor },
-    nights: nights.map(night => publicNight(night, home, today)),
+    home: { currency: home.currency, timezone: home.timezone, today, check_in_time: home.check_in_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, calendar_rules: home.calendar_rules, base_price_minor: home.base_price_minor },
+    nights: nights.map(night => publicNight(night, today)),
   }
 }
 
@@ -2261,7 +2293,7 @@ export async function quoteStay(db: DbClient, organizationId: string, home: Stay
   const count_ = days(checkIn, checkOut)
   if (count_ < 1) fail(422, 'INVALID_DATE', 'check_out_date must be after check_in_date', 'check_out_date')
   if (count_ > MAX_STAY_NIGHTS) fail(422, 'STAY_TOO_LONG', `A stay is at most ${MAX_STAY_NIGHTS} nights`, 'check_out_date', { max_nights: MAX_STAY_NIGHTS })
-  if (checkOut > addDays(today, MAX_CALENDAR_DAYS)) fail(422, 'STAY_TOO_FAR_AHEAD', `Stays can be booked up to ${MAX_CALENDAR_DAYS} days ahead`, 'check_out_date')
+  if (checkOut > addDays(today, STAY_CALENDAR_DAYS)) fail(422, 'STAY_TOO_FAR_AHEAD', `Stays can be booked up to ${STAY_CALENDAR_DAYS} days ahead`, 'check_out_date')
   const adults = count(input.adults, 'adults', 1)
   const children = count(input.children ?? 0, 'children', 0)
   const infants = count(input.infants ?? 0, 'infants', 0)
@@ -2277,10 +2309,8 @@ export async function quoteStay(db: DbClient, organizationId: string, home: Stay
   const arrival = stayed[0]!
   if (arrival.closed_to_arrival) fail(422, 'STAY_CLOSED_TO_ARRIVAL', `Guests cannot check in on ${checkIn}`, 'check_in_date')
   if (departure.closed_to_departure) fail(422, 'STAY_CLOSED_TO_DEPARTURE', `Guests cannot check out on ${checkOut}`, 'check_out_date')
-  const minimum = arrival.min_stay_arrival ?? home.min_nights
+  const minimum = arrival.min_stay_arrival
   if (count_ < minimum) fail(422, 'STAY_MIN_NIGHTS', `Stays arriving on ${checkIn} are at least ${minimum} nights`, 'check_out_date', { min_nights: minimum })
-  const through = stayed.reduce((most, night) => Math.max(most, night.min_stay_through ?? 1), 1)
-  if (count_ < through) fail(422, 'STAY_MIN_NIGHTS_THROUGH', `Stays over these nights are at least ${through} nights`, 'check_out_date', { min_nights: through })
   if (arrival.max_stay !== null && count_ > arrival.max_stay) fail(422, 'STAY_MAX_NIGHTS', `Stays arriving on ${checkIn} are at most ${arrival.max_stay} nights`, 'check_out_date', { max_nights: arrival.max_stay })
   if (home.base_price_tax_behavior === null) fail(409, 'STAY_BASE_PRICE_REQUIRED', 'This home has no base nightly price', 'base_price_minor')
   const nightly = stayed.map(night => ({ date: night.date, price_minor: night.price_minor! }))
@@ -2339,11 +2369,12 @@ export async function pushStayHoldNights(db: DbClient, env: StayMutationEnv, org
  * home's channel, then their claims are deleted. A night another write already
  * reclaimed was cleared by that write and is not here.
  */
-export async function releaseLapsedStayHolds(db: DbClient, env: StayMutationEnv): Promise<{ released: number; channel_push: SuccessfulChannelPush[] }> {
+export async function releaseLapsedStayHolds(db: DbClient, env: StayMutationEnv, paymentId?: string): Promise<{ released: number; channel_push: SuccessfulChannelPush[] }> {
   const lapsed = await queryAll<{ hold_id: string; organization_id: string; product_id: string; check_in: string; check_out: string }>(db, `
     SELECT stay_nights.hold_id, stay_nights.organization_id, stay_nights.product_id, MIN(stay_nights.date) AS check_in, date(MAX(stay_nights.date), '+1 day') AS check_out
       FROM stay_nights WHERE ${LAPSED_HOLD_CLAIM_SQL}
-     GROUP BY stay_nights.hold_id, stay_nights.organization_id, stay_nights.product_id LIMIT 100`)
+       AND (? IS NULL OR hold_id IN (SELECT id FROM payment_checkout_holds WHERE payment_id = ?))
+     GROUP BY stay_nights.hold_id, stay_nights.organization_id, stay_nights.product_id LIMIT 100`, [paymentId ?? null, paymentId ?? null])
   const pushes: SuccessfulChannelPush[] = []
   const failures: unknown[] = []
   let released = 0
@@ -2480,7 +2511,7 @@ function nightRuns(nights: readonly string[]): Array<[string, string]> {
 
 async function calendarLinkView(db: DbClient, env: CalendarLinkEnv, row: StayCalendarLinkRow, timezone: string): Promise<StayCalendarLink> {
   const today = homeToday(timezone)
-  const wanted = rangeNights(blockedRanges(row), today, addDays(today, MAX_CALENDAR_DAYS))
+  const wanted = rangeNights(blockedRanges(row), today, addDays(today, STAY_CALENDAR_DAYS))
   const conflicts = wanted.length ? await queryAll<{ date: string }>(db, `SELECT date FROM stay_nights
       WHERE organization_id = ? AND product_id = ? AND date IN (SELECT value FROM json_each(?)) AND calendar_link_id IS NOT ?
         AND NOT (${LAPSED_HOLD_CLAIM_SQL}) ORDER BY date`, [row.organization_id, row.product_id, JSON.stringify(wanted), row.id]) : []
@@ -2579,7 +2610,7 @@ async function syncCalendarLink(db: DbClient, env: CalendarLinkEnv, row: StayCal
     return await recordFailure(error instanceof Error ? error.message : String(error), 'STAY_CALENDAR_INVALID', error)
   }
   const today = homeToday(home.timezone)
-  const nights = rangeNights(ranges, today, addDays(today, MAX_CALENDAR_DAYS))
+  const nights = rangeNights(ranges, today, addDays(today, STAY_CALENDAR_DAYS))
   const claimed = async () => (await queryAll<{ date: string }>(db, 'SELECT date FROM stay_nights WHERE calendar_link_id = ? ORDER BY date', [row.id])).map(night => night.date)
   const before = await claimed()
   const now = new Date().toISOString()
@@ -2681,7 +2712,7 @@ export async function stayCalendarExport(db: DbClient, token: string): Promise<s
   const [home] = await stayHomesWhere(db, row.organization_id, row.product_id, { sql: '1 = 1', params: [] })
   if (!home) fail(404, 'STAY_CALENDAR_NOT_FOUND', 'This calendar address does not exist', 'token')
   const today = homeToday(home.timezone)
-  const nights = await homeNights(db, row.organization_id, home, today, addDays(today, MAX_CALENDAR_DAYS))
+  const nights = await homeNights(db, row.organization_id, home, today, addDays(today, STAY_CALENDAR_DAYS))
   const taken = nights.filter(night => !night.available && night.calendar !== row.channel).map(night => night.date)
   const compact = (day: string) => day.replaceAll('-', '')
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
@@ -2693,4 +2724,21 @@ export async function stayCalendarExport(db: DbClient, token: string): Promise<s
     ]),
     'END:VCALENDAR', '',
   ].join('\r\n')
+}
+
+/** Channel reservation values by arrival date. A reservation amount is never a bank-transfer record. */
+export async function channelReservationAmounts(db: DbClient, organizationId: string, from: string, until: string) {
+  const rows = await queryAll<{ channel: string; currency: string; amount: number; count: number }>(db,
+    `SELECT channel, currency, SUM(total_minor) AS amount, COUNT(*) AS count FROM stays
+      WHERE organization_id = ? AND owner = 'channel' AND status = 'confirmed'
+      AND check_in_date >= ? AND check_in_date < ? GROUP BY channel, currency ORDER BY channel, currency`,
+    [organizationId, from, until])
+  for (const row of rows) {
+    if (!['airbnb', 'booking_com', 'vrbo'].includes(row.channel) || !isCurrencyCode(row.currency)
+      || !Number.isSafeInteger(row.amount) || row.amount < 0 || !Number.isSafeInteger(row.count) || row.count < 1) {
+      throw new HTTPError({ statusCode: 500, statusMessage: 'A channel reservation summary is invalid',
+        data: { code: 'CHANNEL_RESERVATION_AMOUNT_INVALID', field: `channelReservations.${row.channel}.${row.currency}` } })
+    }
+  }
+  return rows
 }

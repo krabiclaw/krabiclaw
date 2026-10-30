@@ -1,10 +1,11 @@
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { StayHome, StayNight } from '~/server/domain/stays'
 import { currencyFractionDigits, type CurrencyCode } from '~/shared/currencies'
-import { channexRequest, ChannexError, type ChannexEnv } from './client'
-import { ChannexDataError, object, string } from './data'
-import { CALENDAR_NIGHTS, keptBookingSettings } from './airbnb-listing'
+import { channexGet, channexRequest, ChannexError, type ChannexEnv } from './client'
+import { ChannexDataError, integer, object, string } from './data'
+import { keptBookingSettings, listingMinimumNights, listingRecord } from './airbnb-listing'
 import { HTTPError } from 'nitro'
+import { STAY_CALENDAR_DAYS } from '~/shared/bookings'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 
 /** A raw push failure is not a persisted review outcome. Its writer must complete it. */
@@ -47,9 +48,9 @@ export async function completeChannelPush<T extends object>(outcome: ChannelPush
  * booking, a checkout hold or a linked calendar takes the night, else 1. A
  * host closing a night is stop_sell on the rate plan alone, and opening it
  * stop_sell false alone; neither touches availability (docs.channex.io ARI
- * and its certification: a stop sell is one restrictions update). The two
- * minimum-stay fields travel together: a change to either sends both, and a
- * night without its own minimum carries the home's minimum nights in both.
+ * and its certification: a stop sell is one restrictions update). Airbnb's
+ * minimum is a rule of the arrival date. Its actual imported listing default
+ * applies when that date has no override.
  *
  * A home's full sync is the same delivery over every night of the calendar
  * ahead, with nothing confirmed yet: an import's inventory, and a home that
@@ -86,15 +87,13 @@ interface AriValues {
   availability: 0 | 1
   rate: string | null
   min_stay_arrival: number
-  min_stay_through: number
   max_stay: number
   closed_to_arrival: boolean
   closed_to_departure: boolean
   stop_sell: boolean
 }
 type SentValues = Partial<AriValues>
-const RESTRICTION_FIELDS = ['rate', 'min_stay_arrival', 'min_stay_through', 'max_stay', 'closed_to_arrival', 'closed_to_departure', 'stop_sell'] as const
-const MIN_STAY_FIELDS: ReadonlyArray<typeof RESTRICTION_FIELDS[number]> = ['min_stay_arrival', 'min_stay_through']
+const RESTRICTION_FIELDS = ['rate', 'min_stay_arrival', 'max_stay', 'closed_to_arrival', 'closed_to_departure', 'stop_sell'] as const
 
 interface OutboxRow { date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null; sent_json: string | null; attempts: number; retry_at: string | null; updated_at: string }
 type Outcome = { state: 'pending'; detail: string; attempts: number; retry_at: string } | { state: 'needs_review'; detail: string }
@@ -124,8 +123,7 @@ function ariValues(night: StayNight, home: StayHome): AriValues {
   return {
     availability: night.stay_id !== null || night.held_until !== null || night.calendar !== null ? 0 : 1,
     rate: night.price_minor === null ? null : rate(night.price_minor, home.currency),
-    min_stay_arrival: night.min_stay_arrival ?? home.min_nights,
-    min_stay_through: night.min_stay_through ?? home.min_nights,
+    min_stay_arrival: night.min_stay_arrival,
     max_stay: night.max_stay ?? 0,
     closed_to_arrival: night.closed_to_arrival,
     closed_to_departure: night.closed_to_departure,
@@ -220,6 +218,98 @@ export async function requireChannelPush(db: DbClient, env: ChannexEnv, organiza
   await connectedMapping(db, env, organizationId, productId)
 }
 
+/** Native weekday defaults preserve only actual imported or authored weekday rules. */
+export function calendarMinimumDefaults(home: Pick<StayHome, 'min_nights' | 'calendar_rules'>): number | number[] {
+  return home.calendar_rules?.day_of_week_min_nights?.map(value => value === -1 ? home.min_nights : value) ?? home.min_nights
+}
+
+/** The canonical listing defaults also govern each new date Channex adds to its rolling state. */
+export async function configureStayCalendar(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping?: ChannexMapping, write: (step: string, action: () => Promise<void>) => Promise<void> = async (_step, action) => action()): Promise<void> {
+  let written = false
+  try {
+    const target = mapping ?? await connectedMapping(db, env, organizationId, home.product_id)
+    if (!target) return
+    const linked = await queryFirst<{ channel_id: string; listing_id: string; enabled: number }>(db, "SELECT channel_id, listing_id, enabled FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex'", [organizationId, home.product_id])
+    if (!linked) throw new ChannexDataError('The home has no Airbnb channel mapping')
+    const channelPath = `/channels/${encodeURIComponent(linked.channel_id)}`
+    const channel = await channexGet(env, channelPath, 'channel')
+    if (channel.id !== linked.channel_id || channel.attributes.channel !== 'AirBNB') throw new ChannexDataError('Channex returned a different Airbnb channel for this home')
+    if (!Array.isArray(channel.attributes.rate_plans)) throw new ChannexDataError('The Airbnb channel has no listing mappings')
+    const mapped = channel.attributes.rate_plans.map(value => object(value, 'Mapping')).some(value => value.rate_plan_id === target.rate_plan_id && object(value.settings, 'Mapping settings').listing_id === linked.listing_id)
+    if (linked.enabled === 1 && !mapped) throw new ChannexDataError('Channex has no Airbnb mapping for this connected home')
+    const channelSettings = object(channel.attributes.settings, 'channel.settings')
+    if (channelSettings.min_stay_type !== 'Arrival') {
+      await write('update_channel_min_stay_type', async () => {
+        written = true
+        await channexRequest(env, channelPath, 'PUT', { channel: { channel: 'AirBNB', settings: { ...channelSettings, min_stay_type: 'Arrival' } } })
+        const verified = await channexGet(env, channelPath, 'channel')
+        if (verified.id !== linked.channel_id || object(verified.attributes.settings, 'channel.settings').min_stay_type !== 'Arrival') throw new ChannexDataError('Channex did not confirm Airbnb arrival minimums')
+      })
+    }
+    const propertyPath = `/properties/${encodeURIComponent(target.property_id)}`
+    const property = await channexGet(env, propertyPath, 'property')
+    if (property.id !== target.property_id) throw new ChannexDataError('Channex returned a different property for this home')
+    const propertySettings = object(property.attributes.settings, 'property.settings')
+    const minimumType = string(propertySettings.min_stay_type, 'property.settings.min_stay_type')
+    if (!['arrival', 'through', 'both'].includes(minimumType)) throw new ChannexDataError(`Channex returned an unknown minimum-stay type: ${minimumType}`)
+    if (minimumType !== 'arrival') {
+      await write('update_min_stay_type', async () => {
+        written = true
+        await channexRequest(env, propertyPath, 'PUT', { property: { settings: { ...propertySettings, min_stay_type: 'arrival' } } })
+        const verified = await channexGet(env, propertyPath, 'property')
+        if (verified.id !== target.property_id || object(verified.attributes.settings, 'property.settings').min_stay_type !== 'arrival') throw new ChannexDataError('Channex did not confirm arrival-based minimum stay')
+      })
+    }
+    if (mapped && await listingMinimumNights(env, linked.channel_id, linked.listing_id) !== home.min_nights) {
+      const pushed = await pushAirbnbListingSettings(db, env, organizationId, home.product_id, { booking: {}, availability: { default_min_nights: home.min_nights } }, target, action => write('update_listing_minimum', async () => {
+        written = true
+        await action()
+      }))
+      if (pushed?.state !== 'pushed') throw new ChannexDataError(pushed?.detail ?? 'Airbnb has no active listing mapping for its canonical default minimum')
+    }
+    const ratePath = `/rate_plans/${encodeURIComponent(target.rate_plan_id)}`
+    const canonicalMinimum = calendarMinimumDefaults(home)
+    const expectedMinimums = Array.isArray(canonicalMinimum) ? canonicalMinimum : [canonicalMinimum]
+    const minimumMatches = (value: unknown): boolean => {
+      const values = Array.isArray(value) ? value : [value]
+      if (values.length !== 1 && values.length !== 7) throw new ChannexDataError('The rate plan has an invalid default arrival minimum')
+      const actual = values.map(value => integer(value, 'rate_plan.min_stay_arrival', 1))
+      return Array.from({ length: 7 }, (_, day) => day).every(day => actual[day % actual.length] === expectedMinimums[day % expectedMinimums.length])
+    }
+    if (home.base_price_minor === null) throw new HTTPError({ statusCode: 422, message: 'Set the home’s actual base price before syncing its rolling calendar.', data: { code: 'PRICE_REQUIRED', field: 'base_price_minor' } })
+    const baseRate = rate(home.base_price_minor, home.currency)
+    const options = (attributes: Record<string, unknown>) => {
+      if (!Array.isArray(attributes.options) || !attributes.options.length) throw new ChannexDataError('The rate plan has no pricing options')
+      const values = attributes.options.map(value => object(value, 'rate_plan.options'))
+      if (values.filter(value => value.is_primary === true).length !== 1) throw new ChannexDataError('The rate plan must have exactly one primary pricing option')
+      for (const value of values) {
+        integer(value.occupancy, 'rate_plan.options.occupancy', 1)
+        if (typeof value.is_primary !== 'boolean' || (typeof value.rate !== 'string' && typeof value.rate !== 'number') || String(value.rate).trim() === '' || !Number.isFinite(Number(value.rate)) || Number(value.rate) < 0) throw new ChannexDataError('The rate plan has an invalid pricing option')
+      }
+      return values
+    }
+    const defaults = await channexGet(env, ratePath, 'rate_plan')
+    if (defaults.id !== target.rate_plan_id) throw new ChannexDataError('Channex returned a different rate plan for this home')
+    const originalOptions = options(defaults.attributes)
+    const minimumChanged = !minimumMatches(defaults.attributes.min_stay_arrival)
+    const priceChanged = originalOptions.some(value => value.is_primary && Number(value.rate) !== Number(baseRate))
+    if (minimumChanged || priceChanged) {
+      await write('update_calendar_defaults', async () => {
+        written = true
+        await channexRequest(env, ratePath, 'PUT', { rate_plan: {
+          ...(minimumChanged ? { min_stay_arrival: canonicalMinimum } : {}),
+          ...(priceChanged ? { options: originalOptions.map(value => value.is_primary ? { ...value, rate: baseRate } : value) } : {}),
+        } })
+        const verified = await channexGet(env, ratePath, 'rate_plan')
+        if (verified.id !== target.rate_plan_id || !minimumMatches(verified.attributes.min_stay_arrival) || options(verified.attributes).some(value => value.is_primary && Number(value.rate) !== Number(baseRate))) throw new ChannexDataError('Channex did not confirm the listing default minimum stay and base price')
+      })
+    }
+  } catch (error) {
+    if (error instanceof ChannexDataError) throw new ChannexError(`Channex returned invalid calendar defaults: ${error.message}`, 502, written, { code: 'INVALID_PROVIDER_RESPONSE', field: 'calendar_defaults' })
+    throw error
+  }
+}
+
 /**
  * Queue these nights of one home and deliver the home's due pending nights.
  * A home with no enabled Channex mapping has nothing to push and returns
@@ -242,7 +332,7 @@ export async function pushStayNights(db: DbClient, env: ChannexEnv, organization
  */
 export async function pushStayCalendar(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: ChannexMapping, read: StayNightReader, lease?: DeliveryLease): Promise<ChannelPush> {
   const from = today(home.timezone)
-  const outcome = await queueAndDeliver(db, env, organizationId, home, mapping, Array.from({ length: CALENDAR_NIGHTS }, (_, offset) => addDays(from, offset)), read, lease)
+  const outcome = await queueAndDeliver(db, env, organizationId, home, mapping, Array.from({ length: STAY_CALENDAR_DAYS }, (_, offset) => addDays(from, offset)), read, lease)
   if (!outcome) throw new Error(`The calendar of ${home.product_id} has no night from ${from} to send`)
   return outcome
 }
@@ -276,16 +366,17 @@ async function queueAndDeliver(db: DbClient, env: ChannexEnv, organizationId: st
       attempts = CASE WHEN channel_night_pushes.state = 'pending' THEN channel_night_pushes.attempts ELSE 0 END,
       retry_at = CASE WHEN channel_night_pushes.state = 'pending' THEN channel_night_pushes.retry_at ELSE NULL END`,
   [organizationId, home.product_id, new Date().toISOString(), JSON.stringify(queued), lease?.token ?? null, home.product_id, lease?.token ?? null])
-  if (lease) {
-    if (inserted.meta.changes !== queued.length) throw new HTTPError({ statusCode: 409, message: 'The calendar delivery changed. Try the full sync again.', data: { code: 'CHANNEL_DELIVERY_CHANGED', product_id: home.product_id } })
-    // A full sync waits out the property's existing pause as one batch; it never bypasses a retry or splits its 500 nights around it.
-    const pause = await queryFirst<{ retry_at: string; detail: string | null }>(db, `SELECT retry_at, detail FROM channel_night_pushes
-      WHERE product_id = ? AND provider = 'channex' AND state = 'pending' AND retry_at > ? ORDER BY retry_at DESC LIMIT 1`, [home.product_id, new Date().toISOString()])
-    if (pause) await execute(db, `UPDATE channel_night_pushes SET retry_at = ?, detail = ?
-      WHERE product_id = ? AND provider = 'channex' AND date IN (SELECT value FROM json_each(?))
-        AND EXISTS (SELECT 1 FROM product_channel_mappings WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?)`,
-    [pause.retry_at, pause.detail, home.product_id, JSON.stringify(queued), home.product_id, lease.token])
-  }
+  if (lease && inserted.meta.changes !== queued.length) throw new HTTPError({ statusCode: 409, message: 'The calendar delivery changed. Try the full sync again.', data: { code: 'CHANNEL_DELIVERY_CHANGED', product_id: home.product_id } })
+  // Every new date waits out the property's existing pause, including a newly opened rolling date.
+  const pause = await queryFirst<{ retry_at: string; detail: string | null }>(db, `SELECT n.retry_at, n.detail FROM channel_night_pushes n
+    WHERE n.product_id = ? AND n.provider = 'channex' AND n.state = 'pending' AND n.retry_at > ?
+      AND (? IS NOT NULL OR EXISTS (SELECT 1 FROM channel_sync_log l WHERE l.product_id = n.product_id AND l.provider = n.provider
+        AND l.direction = 'outbound' AND l.status = 'failed' AND substr(n.detail, 1, length(l.detail)) = l.detail))
+    ORDER BY n.retry_at DESC LIMIT 1`, [home.product_id, new Date().toISOString(), lease?.token ?? null])
+  if (pause) await execute(db, `UPDATE channel_night_pushes SET retry_at = ?, detail = ?
+    WHERE product_id = ? AND provider = 'channex' AND date IN (SELECT value FROM json_each(?))
+      AND (? IS NULL OR EXISTS (SELECT 1 FROM product_channel_mappings WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?))`,
+  [pause.retry_at, pause.detail, home.product_id, JSON.stringify(queued), lease?.token ?? null, home.product_id, lease?.token ?? null])
   await deliver(db, env, organizationId, home, mapping, read, lease)
   const rows = await queryAll<{ state: OutboxRow['state']; detail: string | null }>(db, `SELECT state, detail FROM channel_night_pushes
     WHERE product_id = ? AND provider = 'channex' AND date IN (SELECT value FROM json_each(?)) ORDER BY state = 'needs_review' DESC, state = 'pending' DESC, date`,
@@ -398,9 +489,7 @@ async function sendDue(db: DbClient, env: ChannexEnv, organizationId: string, ho
     // A night without a price sends its other values; the price is what needs review.
     if (values.rate === null) outcomes.set(row.date, { state: 'needs_review', detail: `${row.date} has no nightly price; Channex needs one for every night` })
     const changed = (field: typeof RESTRICTION_FIELDS[number]) => before[field] !== values[field] && values[field] !== null
-    // Channex reads the two minimum-stay fields as one rule: a change to either sends both.
-    const minStay = MIN_STAY_FIELDS.some(changed)
-    return { row, values, restrictions: RESTRICTION_FIELDS.filter(field => changed(field) || (minStay && MIN_STAY_FIELDS.includes(field))), availability: before.availability !== values.availability }
+    return { row, values, restrictions: RESTRICTION_FIELDS.filter(changed), availability: before.availability !== values.availability }
 
   })
 
@@ -461,8 +550,8 @@ async function sendDue(db: DbClient, env: ChannexEnv, organizationId: string, ho
       // Channex says to pause the property after any failed call: a minute, then doubling.
       const reason = limited ? `Channex asked KrabiClaw to slow down for this home (${span})` : `Channex did not confirm the ${kind} update for ${span}. ${error.message}`
       await log(kind, 'failed', reason)
+      const retryAt = new Date(Date.now() + Math.min(MAX_RETRY_MS, RATE_WINDOW_MS * 2 ** Math.max(...batch.map(change => change.row.attempts)))).toISOString()
       paused = (attempts) => {
-        const retryAt = new Date(Date.now() + Math.min(MAX_RETRY_MS, RATE_WINDOW_MS * 2 ** attempts)).toISOString()
         return { state: 'pending', detail: `${reason} Attempt ${attempts + 1}; sending again at ${clock(retryAt)}.`, attempts: attempts + 1, retry_at: retryAt }
       }
       wait(batch, paused)
@@ -500,34 +589,42 @@ export interface AirbnbListingSettings {
 
 /**
  * Push a connected home's Airbnb listing settings. A home with no enabled
- * mapping has nothing to push and returns null. A refusal, or a write Channex
- * did not confirm, is returned as needs_review with its reason; listing
- * settings have no outbox, so it is not retried.
+ * mapping has nothing to push and returns null. Provider failures retain their
+ * original error/proof for the caller's completion and connection cleanup.
+ * The availability write is journaled only after required source reads.
  */
-export async function pushAirbnbListingSettings(db: DbClient, env: ChannexEnv, organizationId: string, productId: string, settings: AirbnbListingSettings): Promise<ChannelPush | null> {
-  const mapping = await connectedMapping(db, env, organizationId, productId)
+export async function pushAirbnbListingSettings(db: DbClient, env: ChannexEnv, organizationId: string, productId: string, settings: AirbnbListingSettings, target?: ChannexMapping, writeAvailability: (action: () => Promise<void>) => Promise<void> = async action => action()): Promise<ChannelPush | null> {
+  const mapping = target ?? await connectedMapping(db, env, organizationId, productId)
   if (!mapping) return null
   const row = await queryFirst<{ channel_id: string; listing_id: string }>(db, "SELECT channel_id, listing_id FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex'", [organizationId, productId])
   const path = `/channels/${encodeURIComponent(row!.channel_id)}`
-  try {
-    const channel = object((await channexRequest(env, path)).data, 'channel')
-    const ratePlans = object(channel.attributes, 'channel.attributes').rate_plans
-    const listing = Array.isArray(ratePlans) ? ratePlans.map(entry => object(entry, 'Mapping')).find(entry => entry.rate_plan_id === mapping.rate_plan_id) : undefined
-    if (!listing || typeof listing.id !== 'string') return { state: 'needs_review', detail: 'Channex has no mapping for this listing; its settings were not sent to Airbnb' }
-    const mappingId = encodeURIComponent(listing.id)
-    if (Object.keys(settings.booking).length) {
-      const kept = await keptBookingSettings(env, row!.channel_id, row!.listing_id)
-      const controls = settings.booking.guest_controls
-      await channexRequest(env, `${path}/execute/update_booking_setting`, 'PUT', { channel_rate_plan_id: listing.id, data: {
-        ...settings.booking, instant_booking_allowed_category: kept.instantBooking, listing_expectations_for_guests: kept.expectations,
-        ...(controls === undefined ? {} : { guest_controls: { ...kept.guestControls, ...object(controls, 'guest_controls') } }),
-      } })
-    }
-    if (Object.keys(settings.availability).length) await channexRequest(env, `${path}/mappings/${mappingId}/availability_settings`, 'PUT', { availability_settings: settings.availability })
-    return { state: 'pushed', detail: null }
-  } catch (error) {
-    if (error instanceof ChannexDataError) return { state: 'needs_review', detail: `Channex's answer to the listing settings update was not readable; its outcome is unknown. ${error.message}` }
-    if (error instanceof ChannexError) return { state: 'needs_review', detail: error.uncertain ? `Channex did not confirm the listing settings update; its outcome is unknown. ${error.message}` : `Airbnb refused the listing settings: ${error.message}` }
-    throw error
+  const channel = object((await channexRequest(env, path)).data, 'channel')
+  const ratePlans = object(channel.attributes, 'channel.attributes').rate_plans
+  const listing = Array.isArray(ratePlans) ? ratePlans.map(entry => object(entry, 'Mapping')).find(entry => entry.rate_plan_id === mapping.rate_plan_id && object(entry.settings, 'Mapping settings').listing_id === row!.listing_id) : undefined
+  if (!listing || typeof listing.id !== 'string') return { state: 'needs_review', detail: 'Channex has no mapping for this listing; its settings were not sent to Airbnb' }
+  const mappingId = encodeURIComponent(listing.id)
+  if (Object.keys(settings.booking).length) {
+    const kept = await keptBookingSettings(env, row!.channel_id, row!.listing_id)
+    const controls = settings.booking.guest_controls
+    await channexRequest(env, `${path}/execute/update_booking_setting`, 'PUT', { channel_rate_plan_id: listing.id, data: {
+      ...settings.booking, instant_booking_allowed_category: kept.instantBooking, listing_expectations_for_guests: kept.expectations,
+      ...(controls === undefined ? {} : { guest_controls: { ...kept.guestControls, ...object(controls, 'guest_controls') } }),
+    } })
   }
+  if (Object.keys(settings.availability).length) {
+    const availabilityPath = `${path}/mappings/${mappingId}/availability_settings`
+    const attributes = object((await listingRecord(env, row!.channel_id, row!.listing_id)).availability_rules, 'Airbnb availability rules')
+    if (attributes.seasonal_min_nights !== undefined && attributes.seasonal_min_nights !== null && (!Array.isArray(attributes.seasonal_min_nights) || attributes.seasonal_min_nights.length)) throw new ChannexDataError('seasonal_min_nights is unsupported; verify its boundary semantics before changing this Airbnb listing')
+    // This is a full settings update. Preserve the provider's required controls instead of inventing notice or turnover policies.
+    for (const field of ['booking_lead_time', 'max_days_notice', 'default_max_nights', 'turnover_days']) {
+      if (typeof attributes[field] !== 'number' || !Number.isFinite(attributes[field])) throw new ChannexDataError(`Airbnb availability settings are missing ${field}`)
+    }
+    const fields = ['booking_lead_time', 'max_days_notice', 'allow_rtb_beyond_max_days_notice', 'default_min_nights', 'default_max_nights', 'allow_rtb_above_max_nights', 'day_of_week_check_in', 'day_of_week_check_out', 'seasonal_min_nights', 'turnover_days']
+    const kept = Object.fromEntries(fields.filter(field => attributes[field] !== undefined && attributes[field] !== null).map(field => [field, attributes[field]]))
+    await writeAvailability(async () => {
+      await channexRequest(env, availabilityPath, 'PUT', { availability_settings: { ...kept, ...settings.availability } })
+      if (settings.availability.default_min_nights !== undefined && await listingMinimumNights(env, row!.channel_id, row!.listing_id) !== settings.availability.default_min_nights) throw new ChannexDataError('Airbnb has not confirmed the listing default minimum stay; read the listing before retrying')
+    })
+  }
+  return { state: 'pushed', detail: null }
 }

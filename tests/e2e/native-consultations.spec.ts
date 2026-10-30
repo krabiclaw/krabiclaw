@@ -721,10 +721,12 @@ test('native online review uses canonical Products, holds capacity, and releases
         await externalAction.click()
         const handoff = await handoffResponse
         expect(handoff.status()).toBe(201)
+        expect(handoff.request().postDataJSON()).not.toHaveProperty('page_id')
         const handoffId = (await handoff.json() as { id: string }).id
         await (await schedulerTab).close()
         const handoffEvents = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'query_organization_analytics', args: { organization_id: org, mode: 'events', filters: { event_name: 'consultation_cta_click', stage: 'external_booking_handoff', page_type: 'schedule_hero' } } })
-        expect(mcpData<{ rows: Array<Record<string, unknown>> }>(await handoffEvents.json()).rows).toContainEqual(expect.objectContaining({ event_id: handoffId, stage: 'external_booking_handoff', page_type: 'schedule_hero', page_path: '/schedule' }))
+        // Preserve source-page attribution while the external handoff has no native subject.
+        expect(mcpData<{ rows: Array<Record<string, unknown>> }>(await handoffEvents.json()).rows).toContainEqual(expect.objectContaining({ event_id: handoffId, stage: 'external_booking_handoff', subject: null, page: expect.objectContaining({ page_type: 'schedule_hero', path: '/schedule', page_id: authoredSchedule.page_id }) }))
       } else if (mode === 'native_disabled') {
         const contactAction = scheduleHero.locator('[data-parity-section="page-hero"]').getByRole('link', { name: 'Contact', exact: true })
         await expect(contactAction).toHaveCount(1)
