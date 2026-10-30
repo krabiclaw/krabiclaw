@@ -9,7 +9,7 @@ export type BookingStatus = typeof BOOKING_STATUSES[number]
 export const RESERVATION_STATUSES = ['confirmed', 'cancelled'] as const
 export type ReservationStatus = typeof RESERVATION_STATUSES[number]
 
-/** Airbnb's documented maximum length of stay; inventory may cover a shorter date window. */
+/** Airbnb's documented restriction bound; a published home may have no stay inside its current inventory window. */
 export const MAX_STAY_NIGHTS = 1125
 /** The dated inventory shared by the guest calendar and the Channex import/push. */
 export const STAY_CALENDAR_DAYS = 500

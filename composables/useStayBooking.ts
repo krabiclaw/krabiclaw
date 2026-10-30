@@ -184,8 +184,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   function checkInHint(date: string): string {
     const arrival = night(date)
     if (!calendar.value || date < calendar.value.home.today || !arrival?.available) return t('dates.date_unavailable')
-    if (arrival.closed_to_arrival) return t('stay.error_no_check_in')
-    if (!canCheckIn(date)) return t('stay.no_dates', { count: arrival.min_stay_arrival }, arrival.min_stay_arrival)
+    if (!canCheckIn(date)) return t('stay.error_no_check_in')
     return ''
   }
 
