@@ -1405,7 +1405,7 @@ test('a host previews the saved guest page around an unsaved draft without recor
       await expect(preview.getByText(section.value, { exact: true })).toHaveCount(1)
     }
     await expect(preview.locator('article')).toContainText('6 guests')
-    await expect(preview.locator('article')).toContainText('Flexible cancellation policy')
+    await expect(preview.locator('article')).toContainText('Add your dates to see the cancellation policy for your stay.')
     await expect(preview.locator('#things-to-know')).toHaveCount(0)
     const publicRead = await request.get(new URL(previewURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), previewURL).href)
     await expectStatus(publicRead, 200)
@@ -2049,7 +2049,7 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
     .toEqual(uploadedPhotos.map((photo, position) => ({ id: photo.id, position })))
   const projectedCalendar = await call<{ home: Record<string, unknown> }>('get_stay_calendar', { product_id: productId, from: checkIn, to: checkOut })
   expect(projectedCalendar.error).toBeNull()
-  expect(projectedCalendar.data!.home).toEqual({ product_id: productId, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null, check_in_time: '15:00', check_in_end_time: null, check_out_time: '11:00', max_guests: 4, min_nights: 2, channel: null })
+  expect(projectedCalendar.data!.home).toEqual({ product_id: productId, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null, check_in_time: '15:00', check_in_end_time: null, check_out_time: '11:00', max_guests: 4, min_nights: 2, calendar_rules: null, channel: null })
   await previewLink.click()
   await expect(previewModal).toBeVisible()
   await expect(preview.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
@@ -3067,7 +3067,7 @@ test('native MCP room tools author the same room identities and selected-photo c
 })
 
 test('a host lists, pauses and unlists a priced place to stay', async ({ page, browser, baseURL }) => {
-  test.setTimeout(60_000)
+  test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, headers, slug, organizationId, location, call, productId } = await createStayHome(page, baseURL!)
   const { previewLink, previewModal, previewIframe } = previewLocators(page)
@@ -3240,7 +3240,8 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
     await expectStatus(nightsRead, 200)
     const calendar = await nightsRead.json() as PublicStayCalendar
     expect(calendar.home).toMatchObject({ currency: 'THB', min_nights: 2, base_price_minor: 150_00 })
-    expect(calendar.nights).toEqual([1, 2, 3].map(offset => expect.objectContaining({ date: localDay(offset), available: true, price_minor: 150_00, min_stay_arrival: 2, closed_to_arrival: false, closed_to_departure: false })))
+    // The public calendar includes the final departure date beside the nights that can be occupied.
+    expect(calendar.nights).toEqual([1, 2, 3, 4].map(offset => expect.objectContaining({ date: localDay(offset), available: true, price_minor: 150_00, min_stay_arrival: 2, closed_to_arrival: false, closed_to_departure: false })))
     const checkIn = calendar.nights[0]!.date
     const checkOut = calendar.nights[2]!.date
     const guestDialog = guest.locator('#product-booking')
@@ -3260,13 +3261,73 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
     await expect(guestDialog.locator('dl > div').last().locator('dd')).toHaveText(quotedTotal)
     await guest.keyboard.press('Escape')
     await expect(guestDialog).toBeHidden()
-    await expect(guest.locator('article').getByText(`${quotedTotal} Total`, { exact: true })).toBeVisible()
+    await expect(guest.locator('#consultations').getByText(`${quotedTotal} Total`, { exact: true })).toBeVisible()
     await guest.setViewportSize({ width: 390, height: 844 })
     const mobileQuoteTotal = guest.getByText(`${quotedTotal} Total`, { exact: true }).filter({ visible: true })
     await expect(mobileQuoteTotal).toBeVisible()
     const dayLabel = (date: string) => new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${date}T00:00:00Z`))
     await expect(mobileQuoteTotal.locator('..').getByText(`${dayLabel(checkIn)} – ${dayLabel(checkOut)}`, { exact: true })).toBeVisible()
     await guest.setViewportSize({ width: 1440, height: 900 })
+    await test.step('the calendar keeps its month and edits the chosen endpoint across short and long stays', async () => {
+      const minimumSaved = await call<{ product: Product }>('update_product', { product_id: productId, stay: { min_nights: 21, long_term_cancellation_policy: 'firm' } })
+      expect(minimumSaved.error).toBeNull()
+      await guest.reload()
+      await guest.getByRole('button', { name: 'Check availability', exact: true }).last().click()
+      await expect(guestDialog).toBeVisible()
+      const calendar = guestDialog.locator('[data-stay-calendar]')
+      await expect(calendar.getByRole('application')).toHaveCount(2)
+      const monthLabel = (date: string) => new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${date}T00:00:00Z`))
+      const [year, month] = localDay(0).split('-').map(Number) as [number, number]
+      const penultimate = new Date(Date.UTC(year, month, -1)).toISOString().slice(0, 10)
+      const arrival = penultimate >= localDay(0) ? penultimate : new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10)
+      const after = (nights: number) => new Date(Date.parse(`${arrival}T00:00:00Z`) + nights * 86_400_000).toISOString().slice(0, 10)
+      const firstMonth = calendar.getByRole('application', { name: monthLabel(arrival), exact: true })
+      const arrivalDay = firstMonth.locator(`button[data-value="${arrival}"]`)
+      await expect(arrivalDay).toHaveAttribute('title', '21-night minimum')
+      await arrivalDay.click()
+      await expect(firstMonth).toBeVisible()
+      await expect(guestDialog.locator('input[type="date"]').nth(0)).toHaveValue(arrival)
+      const nextMonth = calendar.getByRole('application', { name: monthLabel(after(21)), exact: true })
+      const followingDay = calendar.locator(`button[data-value="${after(1)}"]`).filter({ visible: true })
+      await expect(followingDay).toBeDisabled()
+      await expect(followingDay).toHaveAttribute('title', 'Stays on these dates are at least 21 nights.')
+      const checkoutDay = nextMonth.locator(`button[data-value="${after(21)}"]`)
+      await checkoutDay.hover()
+      await expect(calendar.locator('[data-stay-range="preview"]:visible')).toHaveCount(22)
+      await checkoutDay.click()
+      await expect(guestDialog.locator('input[type="date"]').nth(1)).toHaveValue(after(21))
+      await expect(calendar.locator('[data-stay-range="selected"]:visible')).toHaveCount(22)
+      await guestDialog.locator('input[type="date"]').nth(1).focus()
+      await nextMonth.locator(`button[data-value="${after(22)}"]`).click()
+      await expect(guestDialog.locator('input[type="date"]').nth(0)).toHaveValue(arrival)
+      await expect(guestDialog.locator('input[type="date"]').nth(1)).toHaveValue(after(22))
+      await guestDialog.locator('input[type="date"]').nth(1).fill('')
+      await guestDialog.locator('input[type="date"]').nth(1).press('Tab')
+      await expect(guestDialog.locator('input[type="date"]').nth(0)).toHaveValue(arrival)
+      await expect(guestDialog.locator('input[type="date"]').nth(1)).toHaveValue('')
+      const monthlyQuote = guest.waitForResponse(response => new URL(response.url()).pathname.endsWith('/quote') && new URL(response.url()).searchParams.get('check_out_date') === after(28))
+      await guestDialog.locator('input[type="date"]').nth(1).fill(after(28))
+      await guestDialog.locator('input[type="date"]').nth(1).press('Tab')
+      const monthly = await monthlyQuote
+      await expectStatus(monthly, 200)
+      expect((await monthly.json() as { quote: StayQuote }).quote).toMatchObject({ nights: 28, cancellation_policy: 'long_term_firm' })
+      await guest.keyboard.press('Escape')
+      await expect(guest.locator('article')).toContainText('Full refund up to 30 days before check-in. After that, the first 30 days of the stay are non-refundable.')
+      // Clearing dates preserves the displayed checkout month; page back explicitly to choose the arrival.
+      await guest.setViewportSize({ width: 390, height: 844 })
+      await guest.getByRole('button', { name: /^(Check availability|Send enquiry)$/ }).last().click()
+      await expect(guestDialog).toBeVisible()
+      await expect(calendar.getByRole('application', { name: monthLabel(after(28)), exact: true })).toBeVisible()
+      await guestDialog.getByRole('button', { name: 'Clear dates', exact: true }).click()
+      await expect(calendar.getByRole('application')).toHaveCount(1)
+      await expect(calendar.getByRole('application', { name: monthLabel(after(28)), exact: true })).toBeVisible()
+      await calendar.getByRole('button', { name: 'Previous month', exact: true }).click()
+      await expect(calendar.getByRole('application', { name: monthLabel(arrival), exact: true })).toBeVisible()
+      await calendar.locator(`button[data-value="${arrival}"]`).click()
+      await expect(calendar.getByRole('application', { name: monthLabel(arrival), exact: true })).toBeVisible()
+      await guest.keyboard.press('Escape')
+      await guest.setViewportSize({ width: 1440, height: 900 })
+    })
     await page.goto(`${publicationPath}/availability`)
     const availability = page.locator('#dashboard-panel-product-availability')
     const acceptBookings = availability.getByRole('switch', { name: 'Accept bookings', exact: true })
@@ -3767,7 +3828,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const guideRead = await call<{ home: Record<string, unknown> }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
       expect(guideRead.error).toBeNull()
       expect(validateCalendar(guideRead.data), JSON.stringify(validateCalendar.errors)).toBe(true)
-      expect(guideRead.data!.home).toEqual({ product_id: assignedHome.product_id, name: 'Assigned Cabin', location_id: assignedHome.location_id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: 320_000, base_price_tax_behavior: 'unspecified', check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 5, min_nights: 1, channel: null })
+      expect(guideRead.data!.home).toEqual({ product_id: assignedHome.product_id, name: 'Assigned Cabin', location_id: assignedHome.location_id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: 320_000, base_price_tax_behavior: 'unspecified', check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 5, min_nights: 1, calendar_rules: null, channel: null })
       const guideSaved = await call<{ product_id: string; guide: { directions: string }; channel_push: unknown; airbnb_unsynced: unknown[] }>('update_stay_arrival_guide', { product_id: assignedHome.product_id, directions: guide.directions })
       expect(guideSaved.error).toBeNull()
       expect(validateArrival(guideSaved.data), JSON.stringify(validateArrival.errors)).toBe(true)
@@ -3897,6 +3958,11 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       // Calendar edits target one explicit home and inclusive selected nights.
       // Native and MCP readers independently verify every saved override.
       await page.setViewportSize({ width: 1440, height: 900 })
+      const configuredHome = await call<{ product: Product }>('get_product', { product_id: assignedHome.product_id })
+      expect(configuredHome.error).toBeNull()
+      const defaultMinimum = configuredHome.data!.product.stay!.min_nights
+      expect(defaultMinimum).toBe(1)
+      expect(configuredHome.data!.product.stay!.calendar_rules).toBeNull()
       const calendarPath = `/dashboard/${slug}/calendar?product_id=${assignedHome.product_id}`
       await page.goto(`/dashboard/${slug}/calendar?product_id=missing-home`)
       await expect(page.getByText('That offering is not available in this organization.', { exact: true })).toBeVisible()
@@ -3935,7 +4001,6 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await inspector.getByRole('button', { name: 'Custom settings', exact: true }).click()
       await inspector.getByRole('button', { name: 'Minimum nights', exact: true }).click()
       await inspector.getByRole('spinbutton', { name: 'Minimum nights on arrival', exact: true }).fill('2')
-      await inspector.getByRole('spinbutton', { name: 'Minimum nights through stay', exact: true }).fill('3')
       await inspector.getByRole('button', { name: 'Save', exact: true }).click()
       await inspector.getByRole('button', { name: 'Custom settings', exact: true }).click()
       await inspector.getByRole('button', { name: 'Maximum nights', exact: true }).click()
@@ -3952,7 +4017,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const restrictedResponse = await page.request.get(`${api(`stay-homes/${assignedHome.product_id}/calendar`)}&from=${localDay(5)}&to=${localDay(8)}`)
       await expectStatus(restrictedResponse, 200)
       expect((await restrictedResponse.json() as { nights: import('../../server/domain/stays').StayNight[] }).nights)
-        .toEqual([5, 6, 7].map(offset => expect.objectContaining({ date: localDay(offset), closed: false, price_minor: 420_000, min_stay_arrival: 2, min_stay_through: 3, max_stay: 7, closed_to_arrival: true, closed_to_departure: true })))
+        .toEqual([5, 6, 7].map(offset => expect.objectContaining({ date: localDay(offset), closed: false, price_minor: 420_000, min_stay_arrival: 2, max_stay: 7, closed_to_arrival: true, closed_to_departure: true })))
 
       // Changing only the price across a mixed range preserves each night's own
       // stay restrictions, then restoring the base price preserves them again.
@@ -3969,15 +4034,15 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const mixed = await call<{ nights: import('../../server/domain/stays').StayNight[] }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(5), to: localDay(9) })
       expect(mixed.error).toBeNull()
       expect(mixed.data!.nights).toEqual([5, 6, 7, 8].map(offset => expect.objectContaining({ date: localDay(offset), price_minor: offset === 5 ? 420_000 : 430_000,
-        min_stay_arrival: offset < 8 ? 2 : null, min_stay_through: offset < 8 ? 3 : null, max_stay: offset < 8 ? 7 : null,
+        min_stay_arrival: offset < 8 ? 2 : defaultMinimum, max_stay: offset < 8 ? 7 : null,
         closed_to_arrival: offset < 8, closed_to_departure: offset < 8, closed: false })))
       await inspector.getByRole('button', { name: /^Nightly price/ }).click()
-      await inspector.getByRole('button', { name: 'Restore base nightly price', exact: true }).click()
+      await inspector.getByRole('button', { name: 'Restore listing price', exact: true }).click()
       await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toContainText('3,200')
       const restored = await call<{ nights: import('../../server/domain/stays').StayNight[] }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(6), to: localDay(9) })
       expect(restored.error).toBeNull()
       expect(restored.data!.nights).toEqual([6, 7, 8].map(offset => expect.objectContaining({ date: localDay(offset), price_minor: 320_000,
-        min_stay_arrival: offset < 8 ? 2 : null, min_stay_through: offset < 8 ? 3 : null, max_stay: offset < 8 ? 7 : null,
+        min_stay_arrival: offset < 8 ? 2 : defaultMinimum, max_stay: offset < 8 ? 7 : null,
         closed_to_arrival: offset < 8, closed_to_departure: offset < 8 })))
 
       // Returning the visible month to Today retains the distant selection and
@@ -4043,7 +4108,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const reset = await call<{ nights: import('../../server/domain/stays').StayNight[] }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(6), to: localDay(9) })
       expect(reset.error).toBeNull()
       expect(reset.data!.nights).toEqual([6, 7, 8].map(offset => expect.objectContaining({ date: localDay(offset), price_minor: 320_000, closed: false,
-        min_stay_arrival: null, min_stay_through: null, max_stay: null, closed_to_arrival: false, closed_to_departure: false })))
+        min_stay_arrival: defaultMinimum, max_stay: null, closed_to_arrival: false, closed_to_departure: false })))
 
       // Opening occupied nights changes only the host closure. The reservation
       // remains the canonical reason those nights cannot be booked again.

@@ -17,7 +17,7 @@ import { notifyStayBooked, raiseSettledFailures } from '~/server/utils/notificat
 import { paymentsBillingBasis } from './fx'
 import { deliverPaymentsUsage } from './usage'
 import { isStayPurchase } from './checkout'
-import { completeStayFromCheckout, isStayNightConflict, stayFromCheckoutQueries } from '~/server/domain/stays'
+import { completeStayFromCheckout, isStayNightConflict, releaseLapsedStayHolds, stayFromCheckoutQueries } from '~/server/domain/stays'
 
 interface Hold {
   id:string; organization_id:string; product_id:string|null; variant_id:string|null; session_id:string|null; location_id:string|null; timezone:string|null
@@ -47,6 +47,7 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,int
     // A declined confirmation can accept another method; only cancellation is terminal.
     if (intent.status === 'canceled') {
       await executeBatch(db,[{query:"UPDATE payments SET state='failed',updated_at=? WHERE id=? AND captured_amount=0",params:[now,payment.id]},{query:"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",params:[payment.id]}])
+      if (payment.subject_type === 'stay') await releaseLapsedStayHolds(db, env, payment.id)
     }
     if (intent.status === 'requires_payment_method' && intent.last_payment_error) await notifyPaymentFinancialEvent(db,stripe,env,payment,{kind:'payment_failed',nativeId:intent.id,status:intent.status,amount:intent.amount})
     return

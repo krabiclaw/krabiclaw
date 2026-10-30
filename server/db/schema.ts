@@ -1185,7 +1185,10 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	check_in_end_time: text(),
 	check_out_time: text().notNull(),
 	max_guests: integer().notNull(),
-	min_nights: integer().default(1).notNull(),
+	// Imported from the listing’s actual default or explicitly supplied by its host.
+	min_nights: integer().notNull(),
+	// Only actual optional weekday minimums and weekend price; the default stays in min_nights/the primary Price.
+	calendar_rules: text({ mode: "json" }).$type<import("../../shared/bookings").StayCalendarRules>(),
 	check_in_instructions: text(),
 	// What the home is, as guests and search engines read it: Airbnb's property
 	// group and a type it offers, both or neither. Codes come from
@@ -1231,6 +1234,7 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	check("product_stay_configs_check_in_end_check", sql`check_in_end_time IS NULL OR (check_in_end_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_end_time < '24:00')`),
 	check("product_stay_configs_guests_check", sql`max_guests >= 1`),
 	check("product_stay_configs_min_nights_check", sql`min_nights >= 1`),
+	check("product_stay_configs_calendar_rules_check", sql`calendar_rules IS NULL OR (json_valid(calendar_rules) AND json_type(calendar_rules) = 'object')`),
 	check("product_stay_configs_instructions_check", sql`check_in_instructions IS NULL OR (length(trim(check_in_instructions)) BETWEEN 1 AND 5000)`),
 	check("product_stay_configs_property_type_group_check", sql`property_type_group IS NULL OR property_type_group IN ('apartments', 'houses', 'secondary_units', 'unique_homes', 'bnb', 'boutique_hotels_and_more')`),
 	check("product_stay_configs_property_type_check", sql`(property_type IS NULL AND property_type_group IS NULL) OR (property_type IS NOT NULL AND property_type_group IS NOT NULL AND property_type_group || ':' || property_type IN ('apartments:apartment', 'apartments:condominium', 'apartments:serviced_apartment', 'apartments:loft', 'houses:house', 'houses:townhouse', 'houses:bungalow', 'houses:cabin', 'houses:chalet', 'houses:earthhouse', 'houses:hut', 'houses:lighthouse', 'houses:villa', 'houses:dome', 'houses:cottage', 'houses:farmstay', 'houses:houseboat', 'houses:tiny_house', 'secondary_units:guesthouse', 'secondary_units:private_suite', 'secondary_units:farmstay', 'unique_homes:boat', 'unique_homes:castle', 'unique_homes:cave', 'unique_homes:earthhouse', 'unique_homes:hut', 'unique_homes:igloo', 'unique_homes:island', 'unique_homes:lighthouse', 'unique_homes:plane', 'unique_homes:rv', 'unique_homes:tent', 'unique_homes:tipi', 'unique_homes:train', 'unique_homes:treehouse', 'unique_homes:yurt', 'unique_homes:other', 'unique_homes:dome', 'unique_homes:barn', 'unique_homes:campsite', 'unique_homes:farmstay', 'unique_homes:houseboat', 'unique_homes:tiny_house', 'unique_homes:windmill', 'unique_homes:bus', 'unique_homes:holiday_park', 'unique_homes:ranch', 'unique_homes:religious_building', 'unique_homes:riad', 'unique_homes:shipping_container', 'unique_homes:tower', 'bnb:bnb', 'bnb:nature_eco_lodge', 'bnb:farmstay', 'boutique_hotels_and_more:boutique_hotel', 'boutique_hotels_and_more:nature_eco_lodge', 'boutique_hotels_and_more:hostel', 'boutique_hotels_and_more:serviced_apartment', 'boutique_hotels_and_more:aparthotel', 'boutique_hotels_and_more:hotel', 'boutique_hotels_and_more:resort'))`),
@@ -1396,7 +1400,6 @@ export const product_nights = sqliteTable("product_nights", {
 	closed: integer({ mode: "boolean" }).default(false).notNull(),
 	price_minor: integer(),
 	min_stay_arrival: integer(),
-	min_stay_through: integer(),
 	max_stay: integer(),
 	closed_to_arrival: integer({ mode: "boolean" }).default(false).notNull(),
 	closed_to_departure: integer({ mode: "boolean" }).default(false).notNull(),
@@ -1409,7 +1412,7 @@ export const product_nights = sqliteTable("product_nights", {
 	check("product_nights_date_check", sql`date(date, '+0 days') IS date`),
 	check("product_nights_flags_check", sql`closed IN (0, 1) AND closed_to_arrival IN (0, 1) AND closed_to_departure IN (0, 1)`),
 	check("product_nights_price_check", sql`price_minor IS NULL OR price_minor >= 0`),
-	check("product_nights_stay_rules_check", sql`(min_stay_arrival IS NULL OR min_stay_arrival >= 1) AND (min_stay_through IS NULL OR min_stay_through >= 1) AND (max_stay IS NULL OR max_stay >= 1)`),
+	check("product_nights_stay_rules_check", sql`(min_stay_arrival IS NULL OR min_stay_arrival >= 1) AND (max_stay IS NULL OR max_stay >= 1)`),
 	check("product_nights_source_check", sql`source IN ('host', 'import')`),
 	check("product_nights_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);

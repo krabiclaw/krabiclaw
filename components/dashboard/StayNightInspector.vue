@@ -38,16 +38,16 @@
       <h2 class="text-xl font-semibold text-highlighted">{{ concernTitle }}</h2>
       <template v-if="concern === 'price'">
         <UFormField :label="`Nightly price (${home.currency})`">
-          <UInput :model-value="draft.price_minor" :placeholder="price === 'mixed' ? 'Mixed prices' : 'Use base price'" inputmode="decimal" class="w-full" :ui="{ base: 'py-6 text-center text-3xl font-semibold' }" :disabled="busy" @update:model-value="$emit('field', 'price_minor', String($event))" />
+          <UInput :model-value="draft.price_minor" :placeholder="price === 'mixed' ? 'Mixed prices' : 'Use listing price'" inputmode="decimal" class="w-full" :ui="{ base: 'py-6 text-center text-3xl font-semibold' }" :disabled="busy" @update:model-value="$emit('field', 'price_minor', String($event))" />
         </UFormField>
         <p class="text-sm text-muted">Base nightly price: {{ home.base_price_minor === null ? 'Not set' : money(home.base_price_minor) }}.</p>
-        <UButton label="Restore base nightly price" color="neutral" variant="link" class="px-0" :disabled="busy" @click="$emit('patch', { price_minor: null })" />
+        <UButton label="Restore listing price" color="neutral" variant="link" class="px-0" :disabled="busy" @click="$emit('patch', { price_minor: null })" />
       </template>
       <template v-else-if="concern === 'minimum' || concern === 'maximum'">
-        <p v-if="concern === 'minimum'" class="text-sm text-muted">The home’s default is {{ home.min_nights }} nights. Clear an override to use the default.</p>
+        <p v-if="concern === 'minimum'" class="text-sm text-muted">Clear this override to use the listing’s settings for each arrival date.</p>
         <p v-else class="text-sm text-muted">Clear this override to remove the night’s maximum.</p>
         <UFormField v-for="field in numericFields" :key="field.key" :label="field.label">
-          <UInput :model-value="draft[field.key]" type="number" min="1" max="99" step="1" :placeholder="common(field.key) === 'mixed' ? 'Mixed settings' : 'Use default'" class="w-full" :disabled="busy" @update:model-value="$emit('field', field.key, $event == null ? '' : String($event))" />
+          <UInput :model-value="draft[field.key]" type="number" min="1" :max="MAX_STAY_NIGHTS" step="1" :placeholder="common(field.key) === 'mixed' ? 'Mixed settings' : 'Use default'" class="w-full" :disabled="busy" @update:model-value="$emit('field', field.key, $event == null ? '' : String($event))" />
         </UFormField>
       </template>
       <template v-else-if="concern === 'arrival'">
@@ -55,7 +55,7 @@
           <USelect :model-value="draft[field.key]" :items="permissionItems" class="w-full" :disabled="busy" @update:model-value="$emit('field', field.key, String($event))" />
         </UFormField>
       </template>
-      <p v-else-if="concern === 'reset'" class="text-sm text-muted">Remove all selected nights’ custom prices, closures and stay rules. Base price and default minimum nights apply again. Existing reservations and checkout holds remain.</p>
+      <p v-else-if="concern === 'reset'" class="text-sm text-muted">Remove all selected nights’ custom prices, closures and stay rules. The listing’s settings apply again. Existing reservations and checkout holds remain.</p>
       <div class="flex items-center justify-between gap-4 border-t border-default pt-5">
         <UButton label="Cancel" color="neutral" variant="link" :disabled="busy" @click="$emit('cancel')" />
         <UButton :label="concern === 'reset' ? 'Reset all night settings' : 'Save'" color="neutral" :loading="busy" :disabled="concern !== 'reset' && !dirty" @click="$emit('save')" />
@@ -66,14 +66,14 @@
 
 <script lang="ts">
 export type NightConcern = 'summary' | 'price' | 'custom' | 'minimum' | 'maximum' | 'arrival' | 'reset'
-export type NightEditField = 'price_minor' | 'min_stay_arrival' | 'min_stay_through' | 'max_stay' | 'closed_to_arrival' | 'closed_to_departure'
+export type NightEditField = 'price_minor' | 'min_stay_arrival' | 'max_stay' | 'closed_to_arrival' | 'closed_to_departure'
 export type NightDraft = Record<NightEditField, string>
 </script>
 
 <script setup lang="ts">
 import type { StayHome, StayNight } from '~/server/domain/stays'
 import { formatMinorAmount } from '~/shared/prices'
-import { STAY_CHANNEL_LABELS } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, STAY_CHANNEL_LABELS } from '~/shared/bookings'
 import { formatTimestamp } from '~/utils/timezone'
 
 const props = defineProps<{
@@ -117,7 +117,7 @@ const priceLabel = computed(() => price.value === 'mixed' ? 'Mixed prices' : pri
 const concernTitle = computed(() => ({ summary: '', custom: 'Custom settings', price: 'Nightly price', minimum: 'Minimum nights', maximum: 'Maximum nights', arrival: 'Check-in and checkout', reset: 'Reset all night settings' })[props.concern])
 const settingItems = [{ concern: 'minimum', label: 'Minimum nights' }, { concern: 'maximum', label: 'Maximum nights' }, { concern: 'arrival', label: 'Check-in and checkout' }] as const
 const numericFields = computed(() => props.concern === 'minimum'
-  ? [{ key: 'min_stay_arrival', label: 'Minimum nights on arrival' }, { key: 'min_stay_through', label: 'Minimum nights through stay' }] as const
+  ? [{ key: 'min_stay_arrival', label: 'Minimum nights on arrival' }] as const
   : [{ key: 'max_stay', label: 'Maximum nights' }] as const)
 const arrivalFields = [{ key: 'closed_to_arrival', label: 'Allow check-in' }, { key: 'closed_to_departure', label: 'Allow checkout' }] as const
 const permissionItems = [{ label: 'Keep each night’s setting', value: 'keep' }, { label: 'Allowed', value: 'allow' }, { label: 'Not allowed', value: 'block' }]

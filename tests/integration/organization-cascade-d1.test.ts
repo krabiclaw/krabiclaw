@@ -51,7 +51,7 @@ function lodgingGraph(org: string): string[] {
   return [
     `INSERT INTO products (kind, id,organization_id,name,slug,created_by,updated_by) VALUES ('stay', '${home}','${org}','Cabin','cabin','t','t')`,
     `INSERT INTO product_locations (organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES ('${org}','${home}','${location}',1,1,'t','t')`,
-    `INSERT INTO product_stay_configs (product_id,organization_id,location_id,check_in_time,check_out_time,max_guests,assigned_member_id,created_by,updated_by) VALUES ('${home}','${org}','${location}','15:00','11:00',4,'${member}','t','t')`,
+    `INSERT INTO product_stay_configs (product_id,organization_id,location_id,check_in_time,check_out_time,max_guests,min_nights,assigned_member_id,created_by,updated_by) VALUES ('${home}','${org}','${location}','15:00','11:00',4,1,'${member}','t','t')`,
     `INSERT INTO stays (id,organization_id,product_id,channel,owner,status,check_in_date,check_out_date,adults,guest_name,total_minor,currency) VALUES ('${stay}','${org}','${home}','direct','app','confirmed','2099-01-05','2099-01-07',2,'Ana',30000,'USD')`,
     `INSERT INTO channex_connections (organization_id,status,group_id) VALUES ('${org}','not_connected','${org}-group')`,
     `INSERT INTO product_channel_mappings (organization_id,product_id,provider,listing_id,channel_id,import_stage) VALUES ('${org}','${home}','channex','${org}-listing','${org}-channel','property')`,

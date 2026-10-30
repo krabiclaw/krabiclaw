@@ -123,6 +123,7 @@ const RETIRED_COLUMNS = {
   products: ['tags'],
   product_booking_configs: ['online_timezone', 'calendar_group'],
   payment_checkout_holds: ['calendar_group'],
+  product_nights: ['min_stay_through'],
 }
 
 /**
@@ -516,7 +517,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     assert(applied.size === ledger.length, 'Source migration ledger contains duplicate filenames')
     assert(ledger[0] === '0000_baseline.sql', 'Source migration ledger must start with 0000_baseline.sql')
     let recognized = false
-    for (const directory of [MIGRATIONS_DIRECTORY, 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
+    for (const directory of [MIGRATIONS_DIRECTORY, 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
       const candidates = readdirSync(resolve(directory)).filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort()
       if (!ledger.every(name => candidates.includes(name))) continue
       const expected = new Database(':memory:')
@@ -622,13 +623,13 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       stage.exec(normalizedTable)
     }
     // An older archived chain reaches v11 through v11's forward migrations, which the v12 baseline absorbed.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v11').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v11', name), 'utf8'))
       }
     }
     // An older archived chain reaches v12 through v12's forward migrations, which the v13 baseline absorbed.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v12').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v12', name), 'utf8'))
       }
@@ -647,7 +648,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // start empty; existing booking commitments and source languages keep every
     // recorded fact. The new nullable fields stay unknown until an owner sets
     // them or a native financial event supplies its actual billing basis.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v13').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v13', name), 'utf8'))
       }
@@ -676,7 +677,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     }
     // v15 relaxes the calendar group CHECK only. Older chains still pass
     // through v14's canonical content data migration before the exact copy.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v14').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v14', name), 'utf8'))
       }
@@ -720,7 +721,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // retired public OAuth flag, team member times, the Google Ads provider,
     // invite links, full-remaining refunds and payment intents). Older chains pass through it before the exact copy; a v16
     // source already ran its pending ones above.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v16').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v16', name), 'utf8'))
       }
@@ -747,13 +748,13 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // v18 absorbs v17's deployed forward chain (Channex connections, channel
     // mappings, the sync log, night pushes and stay threads). Older chains pass
     // through it before the exact copy; a v17 source already ran its pending ones above.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v17/0000_baseline.sql', 'utf8'))
       for (const name of readdirSync('migrations-history/v17').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v17', name), 'utf8'))
       }
     }
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) withBaselineTables(readFileSync('migrations-history/v19/0000_baseline.sql', 'utf8'))
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) withBaselineTables(readFileSync('migrations-history/v19/0000_baseline.sql', 'utf8'))
     // v19 adds facts no older row has: no copied stay was received as a new
     // reservation and no home has private instructions yet. A saved category
     // preference predates push, so its push switch is that category's
@@ -775,7 +776,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     }
     // Older epochs reach v19 through its full archived forward chain before
     // receiving tables and forward migrations from the current baseline.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v19').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v19', name), 'utf8'))
       }
@@ -783,7 +784,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // Older epochs reach v20 the same way: its baseline's tables, then its
     // forward chain. Rehoming an archived forward migration does not make it a
     // second operation: the complete v19 chain already ran on this stage.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v21', 'migrations-history/v20'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v20/0000_baseline.sql', 'utf8'))
       const absorbed = new Set(readdirSync('migrations-history/v19').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)
         .map(name => hash(readFileSync(resolve('migrations-history/v19', name), 'utf8'))))
@@ -795,15 +796,44 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // v21 widens stays_channel_check to admit Booking.com; every v20 row fits it
     // unchanged. Complete its archived forward chain, including the manual-group
     // backfill, before copying into the replacement's relaxed responsibility CHECK.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v21'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v22', 'migrations-history/v21'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v21/0000_baseline.sql', 'utf8'))
       for (const name of readdirSync('migrations-history/v21').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v21', name), 'utf8'))
       }
     }
+    // v22's pending leaf migrations must run before its tables are copied into
+    // the baseline that retires the duplicated nightly rule. No referenced table is dropped remotely.
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v22'].includes(sourceDirectory)) {
+      withBaselineTables(readFileSync('migrations-history/v22/0000_baseline.sql', 'utf8'))
+      for (const name of readdirSync('migrations-history/v22').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
+        stage.exec(readFileSync(resolve('migrations-history/v22', name), 'utf8'))
+      }
+    }
     if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
+      // Legacy homes have no recorded weekday/weekend rules. Keep that absence
+      // as NULL while advancing the private stage to the replacement schema.
+      stage.exec('ALTER TABLE product_stay_configs ADD COLUMN calendar_rules TEXT NULL')
       withBaselineTables(baseSql)
       for (const name of files.slice(1)) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))
+    }
+    // Airbnb's single minimum was duplicated by the old importer. The owner also
+    // approved retiring these exact Saltleaf demo rules; every other host rule
+    // still requires explicit reconciliation before its column can be retired.
+    if (columns(stage, 'product_nights').includes('min_stay_through')) {
+      const unsafe = stage.prepare(`SELECT product_id, date FROM product_nights WHERE min_stay_through IS NOT NULL
+        AND NOT (min_stay_arrival IS NOT NULL AND min_stay_through = min_stay_arrival AND (
+          source = 'import' OR (source = 'host'
+            AND organization_id = '5mbJj0T09tvDCSfhOlUTEt4idxKt82tc'
+            AND product_id = '2521e20c-6857-448a-a3a9-7cd389be29e0'
+            AND ((date BETWEEN '2026-11-01' AND '2026-11-10' AND min_stay_arrival = 1)
+              OR (date = '2026-11-23' AND min_stay_arrival = 3)
+              OR (date BETWEEN '2026-12-01' AND '2027-05-01' AND min_stay_arrival = 2)))))`).all()
+      assert(unsafe.length === 0, `Through-stay values need explicit reconciliation before retirement: ${JSON.stringify(unsafe.slice(0, 8))}; no rows were copied`)
+      const retired = stage.prepare("SELECT count(*) AS n FROM product_nights WHERE min_stay_through IS NOT NULL AND source = 'import'").get().n
+      if (retired) manifest.transforms.push({ name: 'airbnb_duplicated_through_minimum_removed', changes: retired })
+      const approved = stage.prepare("SELECT count(*) AS n FROM product_nights WHERE min_stay_through IS NOT NULL AND source = 'host'").get().n
+      if (approved) manifest.transforms.push({ name: 'owner_approved_saltleaf_through_minimum_removed', changes: approved })
     }
     const names = tableNames(stage)
     const count = (db, table) => db.prepare(`SELECT count(*) AS n FROM ${qi(table)}`).get().n
@@ -822,6 +852,51 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       }
     })
     copy()
+    if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
+      // Seed the existing content-import edit guard only for a default still
+      // equal to the original first imported night. The protected source read
+      // can then correct that derivation; this transfer never guesses its value.
+      const provenDefaultsSql = `SELECT m.product_id, c.min_nights FROM product_stay_configs c
+        JOIN product_channel_mappings m ON m.organization_id = c.organization_id AND m.product_id = c.product_id AND m.provider = 'channex'
+        JOIN activity_entries created ON created.organization_id = c.organization_id
+          AND created.event_name = 'product.created' AND created.occurred_at = c.created_at
+          AND created.dedupe_key = 'create:product:' || c.organization_id || ':airbnb-listing:' || m.listing_id
+          AND json_extract(created.payload_json, '$.entityId') = c.product_id
+        JOIN activity_entries imported ON imported.organization_id = c.organization_id AND imported.event_name = 'stay.nights_imported'
+          AND json_extract(imported.payload_json, '$.entityId') = c.product_id
+          AND imported.occurred_at = (SELECT min(first_import.occurred_at) FROM activity_entries first_import
+            WHERE first_import.organization_id = c.organization_id AND first_import.event_name = 'stay.nights_imported'
+              AND json_extract(first_import.payload_json, '$.entityId') = c.product_id)
+        JOIN product_nights n ON n.organization_id = c.organization_id AND n.product_id = c.product_id
+          AND n.date = json_extract(imported.payload_json, '$.metadata.from') AND n.source = 'import'
+          AND n.updated_at = imported.occurred_at AND n.min_stay_arrival = c.min_nights
+        WHERE json_type(m.import_written, '$.min_nights') IS NULL`
+      const seed = target.prepare(`UPDATE product_channel_mappings SET import_written = json_set(COALESCE(import_written, '{}'), '$.min_nights', ?)
+        WHERE product_id = ? AND provider = 'channex' AND json_type(import_written, '$.min_nights') IS NULL`)
+      let seeded = 0
+      for (const home of target.prepare(provenDefaultsSql).all()) seeded += seed.run(hash(JSON.stringify(home.min_nights)), home.product_id).changes
+      if (seeded) manifest.transforms.push({ name: 'airbnb_original_minimum_edit_guard_recorded', changes: seeded, sql_sha256: hash(provenDefaultsSql) })
+      // Resume the existing sync operation under the original importing member.
+      // A newer pending/error/failed request or a stop is never replaced.
+      const candidatesSql = `SELECT m.organization_id, m.product_id, m.listing_id, c.created_by FROM product_channel_mappings m
+        JOIN product_stay_configs c ON c.product_id = m.product_id AND c.organization_id = m.organization_id
+        JOIN channex_connections connection ON connection.organization_id = m.organization_id
+          AND connection.channel_id = m.channel_id AND connection.status = 'connected'
+        JOIN member actor ON actor.organizationId = m.organization_id AND actor.userId = c.created_by AND actor.role IN ('owner', 'admin')
+        WHERE m.provider = 'channex' AND m.enabled = 1 AND m.import_stage = 'complete'`
+      const queueSql = `INSERT INTO airbnb_sync_jobs (id, organization_id, listing_id, product_id, action, details, state, requested_by, attempts, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'sync', NULL, 'pending', ?, 0, ?, ?)
+        ON CONFLICT (organization_id, listing_id) DO UPDATE SET product_id = excluded.product_id,
+          details = NULL, state = 'pending', requested_by = excluded.requested_by, attempts = 0,
+          last_error_code = NULL, last_error = NULL, next_attempt_at = NULL, completed_at = NULL,
+          lease_token = NULL, lease_until = NULL, updated_at = excluded.updated_at
+        WHERE airbnb_sync_jobs.action = 'sync' AND airbnb_sync_jobs.state = 'done'`
+      const queue = target.prepare(queueSql)
+      let queued = 0
+      const at = new Date().toISOString()
+      for (const home of target.prepare(candidatesSql).all()) queued += queue.run(hash(`airbnb-v23-sync:${home.organization_id}:${home.listing_id}`), home.organization_id, home.listing_id, home.product_id, home.created_by, at, at).changes
+      if (queued) manifest.transforms.push({ name: 'airbnb_canonical_sync_queued', changes: queued, sql_sha256: hash(queueSql) })
+    }
     const retiredSettings = target.prepare("UPDATE organization SET settings_json = json_remove(settings_json, '$.config.default_timezone') WHERE json_type(settings_json, '$.config.default_timezone') IS NOT NULL").run().changes
     if (retiredSettings) manifest.transforms.push({ name: 'organization_timezone_out_of_settings', changes: retiredSettings })
     if (fromV7) {
@@ -831,7 +906,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       assert(count(target, 'organization_integrations') === integrations.length, 'organization_integrations differs from the connections it maps')
       manifest.transforms.push({ name: 'integrations_json_to_organization_integrations', changes: integrations.length })
     }
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) {
       const configs = target.prepare('SELECT * FROM product_booking_configs WHERE held_online = 1 ORDER BY product_id').all()
       const previousSourceRows = new Map()
       if (deltaFrom) {

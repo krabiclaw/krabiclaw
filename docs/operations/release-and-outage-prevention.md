@@ -686,6 +686,55 @@ The normal deployment applies it to each v22 replacement. A final delta from
 v21 runs it on the staged source and advances the initial comparison through
 it, so the initial artifacts stay valid.
 
+The v22-to-v23 replacement removes the duplicated nightly through-stay minimum,
+requires an explicit home minimum without a database default, and stores only
+actual optional weekday and weekend-price rules in
+`product_stay_configs.calendar_rules`. The immutable v22 chain, including its
+three forward migrations, is archived in `migrations-history/v22/`.
+
+The WNAM replacements are:
+
+- `krabiclaw-staging-v23`: `4e3a114d-94fc-4615-a345-cd6a0161bf58`
+- `krabiclaw-production-v23`: `bf0d66f1-a3a8-4e61-8cf1-5e9edbddb25d`
+
+Rehearse and load each unbound replacement with the canonical snapshot command,
+naming its own v22 source. Keep the initial comparison artifacts privately under
+`~/.codex/krabiclaw-db-replacements/v23/` as
+`staging-release-initial.sqlite` and `production-release-initial.sqlite`.
+The transfer preserves every home minimum and all other nightly fields. It
+retires imported through values only when they duplicate a nonnull arrival
+minimum. The owner also explicitly approved retiring exactly 163 matching
+through values on Saltleaf's fictional staging home
+`2521e20c-6857-448a-a3a9-7cd389be29e0`: November 1–10, 2026 at one night,
+November 23 at three nights, and December 1, 2026–May 1, 2027 at two nights.
+Its arrival minimums remain unchanged. Any other authored or differing through
+value blocks the transfer.
+
+For mapped homes whose minimum still matches the original import receipt and
+first untouched imported night, the transfer records that value's fingerprint
+in the existing `import_written` field. It never substitutes a guessed default.
+Enabled, complete mappings with connected channels queue the existing sync job
+under their original creator only if that member still has owner/admin access.
+Pending, failed, error and stop requests are preserved; repair job identities
+remain stable between the initial copy and final delta.
+
+At cutover, use each environment's explicit v22 source and its initial artifact
+for the normal final delta. Review changed/deleted keys before carrying updates;
+do not overwrite progress the replacement has made. After deployment, run the
+existing `airbnb-sync` task and inspect each listing's visible sync outcome;
+staging has no cron. Verify live Airbnb defaults and actual optional rules were
+read, host edits remained intact, Channex rolling defaults and calendar pushes
+were confirmed, and public dates and quotes agree. A source or push failure must
+remain a failed sync, with its recorded reason. Read schema drift, the native
+baseline ledger and `PRAGMA foreign_key_check`, then walk the representative
+tenant booking journeys. The bindings and initial copies alone do not complete
+the cutover.
+
+Imports and provider setting writes reject non-empty Airbnb seasonal-minimum
+rules visibly. Their range endpoints and precedence are not established by the
+published API contract; no local seasonal feature or guessed interpretation is
+offered. Explicit dated night overrides remain supported.
+
 Before dropping or retiring a legacy table or writer:
 
 - remove every runtime reader and writer;

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:abc5f172e8e828ecbbef7936a1c14424d3be1660c26f957fc2bfdfaea75d5034",
-  "documentationFingerprint": "sha256:49652d2cf9a0abc6a902363f8b8bd585629e00a0eee9fb757deabb02736c3de5",
+  "fingerprint": "sha256:84be3f669127b174f2677828f83a55ba68a44d2a4a6462817a0a1f4267384273",
+  "documentationFingerprint": "sha256:d0d51403ddbac4b3970c3a8969332e79fd91aab758dc753883815500053b97c4",
   "tools": [
     {
       "name": "add_organization_language",
@@ -9103,6 +9103,40 @@
                         "null"
                       ]
                     },
+                    "calendar_rules": {
+                      "additionalProperties": false,
+                      "description": "Actual optional listing rules. Null removes them. Dated overrides take precedence over weekday minimums, then the required default. Friday/Saturday use the weekend price when supplied.",
+                      "properties": {
+                        "day_of_week_min_nights": {
+                          "description": "Monday-first minimum nights. -1 means this weekday inherits the listing default.",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "const": -1,
+                                "type": "integer"
+                              },
+                              {
+                                "maximum": 1125,
+                                "minimum": 1,
+                                "type": "integer"
+                              }
+                            ]
+                          },
+                          "maxItems": 7,
+                          "minItems": 7,
+                          "type": "array"
+                        },
+                        "weekend_price_minor": {
+                          "description": "Whole minor units of the organization currency, e.g. cents.",
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      },
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
                     "cancellation_policy": {
                       "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                       "enum": [
@@ -9171,8 +9205,8 @@
                       "type": "integer"
                     },
                     "min_nights": {
-                      "description": "Default minimum nights; individual nights may set their own.",
-                      "maximum": 365,
+                      "description": "The listing’s required default minimum; individual arrival dates may override it.",
+                      "maximum": 1125,
                       "minimum": 1,
                       "type": "integer"
                     },
@@ -9295,7 +9329,8 @@
                     "location_id",
                     "check_in_time",
                     "check_out_time",
-                    "max_guests"
+                    "max_guests",
+                    "min_nights"
                   ],
                   "type": "object"
                 },
@@ -10853,6 +10888,40 @@
                         "null"
                       ]
                     },
+                    "calendar_rules": {
+                      "additionalProperties": false,
+                      "description": "Actual optional listing rules. Null removes them. Dated overrides take precedence over weekday minimums, then the required default. Friday/Saturday use the weekend price when supplied.",
+                      "properties": {
+                        "day_of_week_min_nights": {
+                          "description": "Monday-first minimum nights. -1 means this weekday inherits the listing default.",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "const": -1,
+                                "type": "integer"
+                              },
+                              {
+                                "maximum": 1125,
+                                "minimum": 1,
+                                "type": "integer"
+                              }
+                            ]
+                          },
+                          "maxItems": 7,
+                          "minItems": 7,
+                          "type": "array"
+                        },
+                        "weekend_price_minor": {
+                          "description": "Whole minor units of the organization currency, e.g. cents.",
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      },
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
                     "cancellation_policy": {
                       "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                       "enum": [
@@ -10921,8 +10990,8 @@
                       "type": "integer"
                     },
                     "min_nights": {
-                      "description": "Default minimum nights; individual nights may set their own.",
-                      "maximum": 365,
+                      "description": "The listing’s required default minimum; individual arrival dates may override it.",
+                      "maximum": 1125,
                       "minimum": 1,
                       "type": "integer"
                     },
@@ -11413,6 +11482,7 @@
                     "check_out_time",
                     "max_guests",
                     "min_nights",
+                    "calendar_rules",
                     "assigned_member_id",
                     "assigned_team_id",
                     "photo_rooms",
@@ -25179,6 +25249,40 @@
                   "null"
                 ]
               },
+              "calendar_rules": {
+                "additionalProperties": false,
+                "description": "Actual optional listing rules. Null removes them. Dated overrides take precedence over weekday minimums, then the required default. Friday/Saturday use the weekend price when supplied.",
+                "properties": {
+                  "day_of_week_min_nights": {
+                    "description": "Monday-first minimum nights. -1 means this weekday inherits the listing default.",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "const": -1,
+                          "type": "integer"
+                        },
+                        {
+                          "maximum": 1125,
+                          "minimum": 1,
+                          "type": "integer"
+                        }
+                      ]
+                    },
+                    "maxItems": 7,
+                    "minItems": 7,
+                    "type": "array"
+                  },
+                  "weekend_price_minor": {
+                    "description": "Whole minor units of the organization currency, e.g. cents.",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "cancellation_policy": {
                 "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                 "enum": [
@@ -25247,8 +25351,8 @@
                 "type": "integer"
               },
               "min_nights": {
-                "description": "Default minimum nights; individual nights may set their own.",
-                "maximum": 365,
+                "description": "The listing’s required default minimum; individual arrival dates may override it.",
+                "maximum": 1125,
                 "minimum": 1,
                 "type": "integer"
               },
@@ -25371,7 +25475,8 @@
               "location_id",
               "check_in_time",
               "check_out_time",
-              "max_guests"
+              "max_guests",
+              "min_nights"
             ],
             "type": "object"
           },
@@ -26918,6 +27023,40 @@
                       "null"
                     ]
                   },
+                  "calendar_rules": {
+                    "additionalProperties": false,
+                    "description": "Actual optional listing rules. Null removes them. Dated overrides take precedence over weekday minimums, then the required default. Friday/Saturday use the weekend price when supplied.",
+                    "properties": {
+                      "day_of_week_min_nights": {
+                        "description": "Monday-first minimum nights. -1 means this weekday inherits the listing default.",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "const": -1,
+                              "type": "integer"
+                            },
+                            {
+                              "maximum": 1125,
+                              "minimum": 1,
+                              "type": "integer"
+                            }
+                          ]
+                        },
+                        "maxItems": 7,
+                        "minItems": 7,
+                        "type": "array"
+                      },
+                      "weekend_price_minor": {
+                        "description": "Whole minor units of the organization currency, e.g. cents.",
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
                   "cancellation_policy": {
                     "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                     "enum": [
@@ -26986,8 +27125,8 @@
                     "type": "integer"
                   },
                   "min_nights": {
-                    "description": "Default minimum nights; individual nights may set their own.",
-                    "maximum": 365,
+                    "description": "The listing’s required default minimum; individual arrival dates may override it.",
+                    "maximum": 1125,
                     "minimum": 1,
                     "type": "integer"
                   },
@@ -27478,6 +27617,7 @@
                   "check_out_time",
                   "max_guests",
                   "min_nights",
+                  "calendar_rules",
                   "assigned_member_id",
                   "assigned_team_id",
                   "photo_rooms",
@@ -51744,6 +51884,40 @@
                       "null"
                     ]
                   },
+                  "calendar_rules": {
+                    "additionalProperties": false,
+                    "description": "Actual optional listing rules. Null removes them. Dated overrides take precedence over weekday minimums, then the required default. Friday/Saturday use the weekend price when supplied.",
+                    "properties": {
+                      "day_of_week_min_nights": {
+                        "description": "Monday-first minimum nights. -1 means this weekday inherits the listing default.",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "const": -1,
+                              "type": "integer"
+                            },
+                            {
+                              "maximum": 1125,
+                              "minimum": 1,
+                              "type": "integer"
+                            }
+                          ]
+                        },
+                        "maxItems": 7,
+                        "minItems": 7,
+                        "type": "array"
+                      },
+                      "weekend_price_minor": {
+                        "description": "Whole minor units of the organization currency, e.g. cents.",
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
                   "cancellation_policy": {
                     "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                     "enum": [
@@ -51812,8 +51986,8 @@
                     "type": "integer"
                   },
                   "min_nights": {
-                    "description": "Default minimum nights; individual nights may set their own.",
-                    "maximum": 365,
+                    "description": "The listing’s required default minimum; individual arrival dates may override it.",
+                    "maximum": 1125,
                     "minimum": 1,
                     "type": "integer"
                   },
@@ -52304,6 +52478,7 @@
                   "check_out_time",
                   "max_guests",
                   "min_nights",
+                  "calendar_rules",
                   "assigned_member_id",
                   "assigned_team_id",
                   "photo_rooms",
@@ -63068,6 +63243,40 @@
                   "null"
                 ]
               },
+              "calendar_rules": {
+                "additionalProperties": false,
+                "description": "Actual optional listing rules. Null removes them. Dated overrides take precedence over weekday minimums, then the required default. Friday/Saturday use the weekend price when supplied.",
+                "properties": {
+                  "day_of_week_min_nights": {
+                    "description": "Monday-first minimum nights. -1 means this weekday inherits the listing default.",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "const": -1,
+                          "type": "integer"
+                        },
+                        {
+                          "maximum": 1125,
+                          "minimum": 1,
+                          "type": "integer"
+                        }
+                      ]
+                    },
+                    "maxItems": 7,
+                    "minItems": 7,
+                    "type": "array"
+                  },
+                  "weekend_price_minor": {
+                    "description": "Whole minor units of the organization currency, e.g. cents.",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "channel": {
                 "description": "The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.",
                 "properties": {
@@ -63150,6 +63359,7 @@
               "check_out_time",
               "max_guests",
               "min_nights",
+              "calendar_rules",
               "channel"
             ],
             "type": "object"
@@ -63224,16 +63434,7 @@
                   ]
                 },
                 "min_stay_arrival": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ]
-                },
-                "min_stay_through": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ]
+                  "type": "integer"
                 },
                 "price_minor": {
                   "type": [
@@ -63266,7 +63467,6 @@
                 "closed",
                 "price_minor",
                 "min_stay_arrival",
-                "min_stay_through",
                 "max_stay",
                 "closed_to_arrival",
                 "closed_to_departure",
@@ -82324,6 +82524,40 @@
                         "null"
                       ]
                     },
+                    "calendar_rules": {
+                      "additionalProperties": false,
+                      "description": "Actual optional listing rules. Null removes them. Dated overrides take precedence over weekday minimums, then the required default. Friday/Saturday use the weekend price when supplied.",
+                      "properties": {
+                        "day_of_week_min_nights": {
+                          "description": "Monday-first minimum nights. -1 means this weekday inherits the listing default.",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "const": -1,
+                                "type": "integer"
+                              },
+                              {
+                                "maximum": 1125,
+                                "minimum": 1,
+                                "type": "integer"
+                              }
+                            ]
+                          },
+                          "maxItems": 7,
+                          "minItems": 7,
+                          "type": "array"
+                        },
+                        "weekend_price_minor": {
+                          "description": "Whole minor units of the organization currency, e.g. cents.",
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      },
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
                     "cancellation_policy": {
                       "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                       "enum": [
@@ -82392,8 +82626,8 @@
                       "type": "integer"
                     },
                     "min_nights": {
-                      "description": "Default minimum nights; individual nights may set their own.",
-                      "maximum": 365,
+                      "description": "The listing’s required default minimum; individual arrival dates may override it.",
+                      "maximum": 1125,
                       "minimum": 1,
                       "type": "integer"
                     },
@@ -82516,7 +82750,8 @@
                     "location_id",
                     "check_in_time",
                     "check_out_time",
-                    "max_guests"
+                    "max_guests",
+                    "min_nights"
                   ],
                   "type": "object"
                 },
@@ -84115,6 +84350,40 @@
                         "null"
                       ]
                     },
+                    "calendar_rules": {
+                      "additionalProperties": false,
+                      "description": "Actual optional listing rules. Null removes them. Dated overrides take precedence over weekday minimums, then the required default. Friday/Saturday use the weekend price when supplied.",
+                      "properties": {
+                        "day_of_week_min_nights": {
+                          "description": "Monday-first minimum nights. -1 means this weekday inherits the listing default.",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "const": -1,
+                                "type": "integer"
+                              },
+                              {
+                                "maximum": 1125,
+                                "minimum": 1,
+                                "type": "integer"
+                              }
+                            ]
+                          },
+                          "maxItems": 7,
+                          "minItems": 7,
+                          "type": "array"
+                        },
+                        "weekend_price_minor": {
+                          "description": "Whole minor units of the organization currency, e.g. cents.",
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      },
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
                     "cancellation_policy": {
                       "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                       "enum": [
@@ -84183,8 +84452,8 @@
                       "type": "integer"
                     },
                     "min_nights": {
-                      "description": "Default minimum nights; individual nights may set their own.",
-                      "maximum": 365,
+                      "description": "The listing’s required default minimum; individual arrival dates may override it.",
+                      "maximum": 1125,
                       "minimum": 1,
                       "type": "integer"
                     },
@@ -84675,6 +84944,7 @@
                     "check_out_time",
                     "max_guests",
                     "min_nights",
+                    "calendar_rules",
                     "assigned_member_id",
                     "assigned_team_id",
                     "photo_rooms",
@@ -98363,11 +98633,6 @@
           },
           {
             "required": [
-              "min_stay_through"
-            ]
-          },
-          {
-            "required": [
               "max_stay"
             ]
           },
@@ -98404,13 +98669,6 @@
             ]
           },
           "min_stay_arrival": {
-            "minimum": 1,
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
-          "min_stay_through": {
             "minimum": 1,
             "type": [
               "integer",
@@ -98520,6 +98778,40 @@
                   "null"
                 ]
               },
+              "calendar_rules": {
+                "additionalProperties": false,
+                "description": "Actual optional listing rules. Null removes them. Dated overrides take precedence over weekday minimums, then the required default. Friday/Saturday use the weekend price when supplied.",
+                "properties": {
+                  "day_of_week_min_nights": {
+                    "description": "Monday-first minimum nights. -1 means this weekday inherits the listing default.",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "const": -1,
+                          "type": "integer"
+                        },
+                        {
+                          "maximum": 1125,
+                          "minimum": 1,
+                          "type": "integer"
+                        }
+                      ]
+                    },
+                    "maxItems": 7,
+                    "minItems": 7,
+                    "type": "array"
+                  },
+                  "weekend_price_minor": {
+                    "description": "Whole minor units of the organization currency, e.g. cents.",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "channel": {
                 "description": "The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.",
                 "properties": {
@@ -98602,6 +98894,7 @@
               "check_out_time",
               "max_guests",
               "min_nights",
+              "calendar_rules",
               "channel"
             ],
             "type": "object"
@@ -98676,16 +98969,7 @@
                   ]
                 },
                 "min_stay_arrival": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ]
-                },
-                "min_stay_through": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ]
+                  "type": "integer"
                 },
                 "price_minor": {
                   "type": [
@@ -98718,7 +99002,6 @@
                 "closed",
                 "price_minor",
                 "min_stay_arrival",
-                "min_stay_through",
                 "max_stay",
                 "closed_to_arrival",
                 "closed_to_departure",
@@ -111353,6 +111636,40 @@
                   "null"
                 ]
               },
+              "calendar_rules": {
+                "additionalProperties": false,
+                "description": "Actual optional listing rules. Null removes them. Dated overrides take precedence over weekday minimums, then the required default. Friday/Saturday use the weekend price when supplied.",
+                "properties": {
+                  "day_of_week_min_nights": {
+                    "description": "Monday-first minimum nights. -1 means this weekday inherits the listing default.",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "const": -1,
+                          "type": "integer"
+                        },
+                        {
+                          "maximum": 1125,
+                          "minimum": 1,
+                          "type": "integer"
+                        }
+                      ]
+                    },
+                    "maxItems": 7,
+                    "minItems": 7,
+                    "type": "array"
+                  },
+                  "weekend_price_minor": {
+                    "description": "Whole minor units of the organization currency, e.g. cents.",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "cancellation_policy": {
                 "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                 "enum": [
@@ -111418,8 +111735,8 @@
                 "type": "integer"
               },
               "min_nights": {
-                "description": "Default minimum nights; individual nights may set their own.",
-                "maximum": 365,
+                "description": "The listing’s required default minimum; individual arrival dates may override it.",
+                "maximum": 1125,
                 "minimum": 1,
                 "type": "integer"
               },
@@ -113138,6 +113455,40 @@
                       "null"
                     ]
                   },
+                  "calendar_rules": {
+                    "additionalProperties": false,
+                    "description": "Actual optional listing rules. Null removes them. Dated overrides take precedence over weekday minimums, then the required default. Friday/Saturday use the weekend price when supplied.",
+                    "properties": {
+                      "day_of_week_min_nights": {
+                        "description": "Monday-first minimum nights. -1 means this weekday inherits the listing default.",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "const": -1,
+                              "type": "integer"
+                            },
+                            {
+                              "maximum": 1125,
+                              "minimum": 1,
+                              "type": "integer"
+                            }
+                          ]
+                        },
+                        "maxItems": 7,
+                        "minItems": 7,
+                        "type": "array"
+                      },
+                      "weekend_price_minor": {
+                        "description": "Whole minor units of the organization currency, e.g. cents.",
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
                   "cancellation_policy": {
                     "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                     "enum": [
@@ -113206,8 +113557,8 @@
                     "type": "integer"
                   },
                   "min_nights": {
-                    "description": "Default minimum nights; individual nights may set their own.",
-                    "maximum": 365,
+                    "description": "The listing’s required default minimum; individual arrival dates may override it.",
+                    "maximum": 1125,
                     "minimum": 1,
                     "type": "integer"
                   },
@@ -113698,6 +114049,7 @@
                   "check_out_time",
                   "max_guests",
                   "min_nights",
+                  "calendar_rules",
                   "assigned_member_id",
                   "assigned_team_id",
                   "photo_rooms",
@@ -123128,18 +123480,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:e5d4a8421e5e3d318a36436a7b8e6aca993e491a791741e99eb375d396827716",
-        "get_product": "sha256:452a8f34d0fab75ca9943fb90d1ad135ef2ede78bed0c00c01e9cf7ff72731a6",
+        "create_product": "sha256:6dfc58f171ede47ded519f92fbf99913a5ca7e378329a3a433a74bd89a305aaf",
+        "get_product": "sha256:5350d6b278b02374fe756e6224d9044713a5ef326a9078c33cc3be234d28c798",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
         "list_location_products": "sha256:3d072da910400920fd6ff0679ad8d99e1fdf2494d6f0d7feb3bee5082ce13d9e",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
-        "reconcile_products": "sha256:9550f78a728818ef914e82684e3bc6f3c83ad837438a8c35452f50336130ad7a",
+        "reconcile_products": "sha256:178f3118a171167fc5f298daf9cac41f2445bf97cf1b0696dffb4d28a9d4e01b",
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
         "set_collection_products": "sha256:16e3e08ee87d86dcb6735b1d2fc9a43600aca70ea8715af3aadfdce5690b8463",
         "update_menu": "sha256:ed70b2c30b8fa7ff3e2ff83d103e650b762b7214797f62934c45e51dbfd39735",
-        "update_product": "sha256:d182659d33a23583d2d92aaa6994a2728745afe2278e6bf9d518cca50cb1098b"
+        "update_product": "sha256:01d309635202a966dabc59bd1872bc326deb0f489828b2684ea11964be5a78a0"
       }
     },
     {
@@ -123184,8 +123536,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:e5d4a8421e5e3d318a36436a7b8e6aca993e491a791741e99eb375d396827716",
-        "get_product": "sha256:452a8f34d0fab75ca9943fb90d1ad135ef2ede78bed0c00c01e9cf7ff72731a6",
+        "create_product": "sha256:6dfc58f171ede47ded519f92fbf99913a5ca7e378329a3a433a74bd89a305aaf",
+        "get_product": "sha256:5350d6b278b02374fe756e6224d9044713a5ef326a9078c33cc3be234d28c798",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
@@ -123256,7 +123608,7 @@
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
         "get_post": "sha256:1bfb415fc3917a3aad29e1b1ae44db4a092b10dd169974b39c89832c4a69017d",
-        "get_product": "sha256:452a8f34d0fab75ca9943fb90d1ad135ef2ede78bed0c00c01e9cf7ff72731a6",
+        "get_product": "sha256:5350d6b278b02374fe756e6224d9044713a5ef326a9078c33cc3be234d28c798",
         "get_site_page": "sha256:f338d72e6cf0e9a9112655bc5f41602ea60b52ff7f9f3921e9868c0173abf7e0",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
@@ -123272,7 +123624,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:e5d4a8421e5e3d318a36436a7b8e6aca993e491a791741e99eb375d396827716",
+        "create_product": "sha256:6dfc58f171ede47ded519f92fbf99913a5ca7e378329a3a433a74bd89a305aaf",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:f338d72e6cf0e9a9112655bc5f41602ea60b52ff7f9f3921e9868c0173abf7e0",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
@@ -123298,7 +123650,7 @@
       },
       "toolContracts": {
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
-        "get_product": "sha256:452a8f34d0fab75ca9943fb90d1ad135ef2ede78bed0c00c01e9cf7ff72731a6",
+        "get_product": "sha256:5350d6b278b02374fe756e6224d9044713a5ef326a9078c33cc3be234d28c798",
         "get_reservation_policy": "sha256:939cd1d0c196d026936d36387ae1f90f236738b40e92ab6341523a0f9320c85a",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
@@ -123306,7 +123658,7 @@
         "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
         "replace_product_weekly_schedule": "sha256:cc5f48fb054661e70ce26d988fc12a29f4325c7fc59b5b20852fb98d0e0e2451",
         "set_product_booking_config": "sha256:a7d0d7635d01b5d1c5785a06aac73b1454ff3f5b5ecee0641aa2956bbf30ff40",
-        "update_product": "sha256:d182659d33a23583d2d92aaa6994a2728745afe2278e6bf9d518cca50cb1098b",
+        "update_product": "sha256:01d309635202a966dabc59bd1872bc326deb0f489828b2684ea11964be5a78a0",
         "update_reservation_policy": "sha256:7dd8f0cb74352e584d3ed4f97fcef2a2265bd75e490c57fdcf076c7398d8b774"
       }
     },
@@ -123326,7 +123678,7 @@
         "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_product": "sha256:d182659d33a23583d2d92aaa6994a2728745afe2278e6bf9d518cca50cb1098b",
+        "update_product": "sha256:01d309635202a966dabc59bd1872bc326deb0f489828b2684ea11964be5a78a0",
         "update_site_page": "sha256:77c97d779b70b40a74b6fd07968e03255dad018d149d6094cfdd3bcd246081c4"
       }
     },
@@ -123342,14 +123694,14 @@
         "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
         "get_guest_conversation": "sha256:0e458314aacd4ef9b6f948eea9e5b395c0f6cc4fd6e5a9dd9884f99e008fdfa5",
         "get_organization_analytics": "sha256:3f37e5014639f5dd6702f1715ed115454c66affa9e0854c5b0611dea6964bc56",
-        "get_product": "sha256:452a8f34d0fab75ca9943fb90d1ad135ef2ede78bed0c00c01e9cf7ff72731a6",
+        "get_product": "sha256:5350d6b278b02374fe756e6224d9044713a5ef326a9078c33cc3be234d28c798",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
         "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
         "reply_to_guest": "sha256:28402ef75ec3f1464c60ffbaa91a3781f96f9764994e56b2c7362dbd26eefb80",
-        "update_product": "sha256:d182659d33a23583d2d92aaa6994a2728745afe2278e6bf9d518cca50cb1098b"
+        "update_product": "sha256:01d309635202a966dabc59bd1872bc326deb0f489828b2684ea11964be5a78a0"
       }
     }
   ]

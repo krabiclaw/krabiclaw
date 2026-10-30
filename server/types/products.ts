@@ -81,7 +81,10 @@ export interface ProductStayConfig {
   check_in_end_time: string | null
   check_out_time: string
   max_guests: number
+  /** The listing’s required default minimum; dated arrival rules may override it. */
   min_nights: number
+  /** Actual optional weekday minimums and weekend price; null means no such rules. */
+  calendar_rules: import('~/shared/bookings').StayCalendarRules | null
   /** What the home is: Airbnb's property group and a type in it, both or neither; null when the host has not said. */
   property_type_group: StayPropertyTypeGroup | null
   property_type: StayPropertyType | null
@@ -115,7 +118,7 @@ export interface ProductStayConfig {
 
 /** What a home is and offers; unsaid when a home is created without them. */
 export type StayListingField = 'property_type_group' | 'property_type' | 'listing_type' | 'total_floors' | 'listing_floor' | 'year_built' | 'property_size' | 'property_size_unit' | 'bedrooms' | 'beds' | 'bathrooms' | 'amenities' | 'amenity_answers' | 'cancellation_policy' | 'long_term_cancellation_policy'
-export type ProductStayConfigInput = Omit<ProductStayConfig, StayListingField | 'photo_rooms' | 'accessibility' | 'check_in_end_time' | 'live'> & Partial<Pick<ProductStayConfig, Exclude<StayListingField, 'amenity_answers'> | 'check_in_end_time'>> & { amenity_answers?: import('~/shared/stay-listing').StayAmenityAnswerPatch[] }
+export type ProductStayConfigInput = Omit<ProductStayConfig, StayListingField | 'photo_rooms' | 'accessibility' | 'check_in_end_time' | 'calendar_rules' | 'live'> & Partial<Pick<ProductStayConfig, Exclude<StayListingField, 'amenity_answers'> | 'check_in_end_time' | 'calendar_rules'>> & { amenity_answers?: import('~/shared/stay-listing').StayAmenityAnswerPatch[] }
 
 /** Who looks after a product: workspace state the public site never carries. */
 export type StaffAssignment = 'assigned_member_id' | 'assigned_team_id'

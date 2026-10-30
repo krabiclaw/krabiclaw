@@ -104,6 +104,24 @@ export async function paymentHandoff(db: DbClient, stripe: Stripe, publishableKe
   }
 }
 
+/** The buyer goes back to change a stay only after Stripe cancels the purchase and its held nights are released. */
+export async function cancelStayPayment(db: DbClient, stripe: Stripe, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string): Promise<{ status: 'canceled' }> {
+  const { payment, attempt, state } = await requireOpenAttempt(db, organizationId, paymentId, claim)
+  if (payment.subject_type !== 'stay') throw new HTTPError({ statusCode: 409, statusMessage: 'This payment does not hold a stay' })
+  if (state === 'paid') throw new HTTPError({ statusCode: 409, statusMessage: 'This stay is already paid; open its booking to request a change', data: { code: 'payment_paid' } })
+  const current = await stripe.paymentIntents.retrieve(attempt.stripe_payment_intent_id, {}, { stripeAccount: payment.stripe_account_id })
+  if (current.id !== attempt.stripe_payment_intent_id || (payment.stripe_payment_intent_id && payment.stripe_payment_intent_id !== current.id) || current.livemode !== Boolean(payment.livemode) || current.currency.toUpperCase() !== payment.currency || current.metadata.krabiclaw_payment_id !== payment.id) throw new Error('Stripe PaymentIntent does not match the purchase')
+  if (current.status !== 'canceled' && !['requires_payment_method', 'requires_confirmation', 'requires_action'].includes(current.status)) {
+    throw new HTTPError({ statusCode: 409, statusMessage: 'This payment has started processing and cannot be changed here', data: { code: 'payment_in_progress' } })
+  }
+  const canceled = current.status === 'canceled' ? current : await stripe.paymentIntents.cancel(current.id, { cancellation_reason: 'requested_by_customer' }, { stripeAccount: payment.stripe_account_id, idempotencyKey: `krabiclaw-cancel:${payment.id}:${attempt.id}` })
+  if (canceled.status !== 'canceled') throw new Error('Stripe did not cancel the purchase')
+  await reconcilePaymentIntent(db, stripe, payment, canceled, env)
+  const released = await queryFirst<{ status: string }>(db, 'SELECT status FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, organizationId])
+  if (released?.status !== 'released') throw new Error('The canceled purchase still holds its stay')
+  return { status: 'canceled' }
+}
+
 /**
  * The buyer's chosen method, attached to the intent so Stripe can say whether
  * this card may carry a surcharge and how much at most. The business's rate is

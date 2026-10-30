@@ -50,7 +50,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
       "INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, created_by, updated_by) VALUES ('class', 'org', 120, 8, 'owner', 'owner')",
       "INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, created_by, updated_by) VALUES ('consult', 'org', 30, 1, 'owner', 'owner')",
       "INSERT INTO product_locations (organization_id, product_id, location_id, created_by, updated_by) VALUES ('org', 'home', 'room', 'owner', 'owner')",
-      "INSERT INTO product_stay_configs (organization_id, product_id, location_id, check_in_time, check_out_time, max_guests, created_by, updated_by) VALUES ('org', 'home', 'room', '15:00', '11:00', 4, 'owner', 'owner')",
+      "INSERT INTO product_stay_configs (organization_id, product_id, location_id, check_in_time, check_out_time, max_guests, min_nights, created_by, updated_by) VALUES ('org', 'home', 'room', '15:00', '11:00', 4, 1, 'owner', 'owner')",
       ...['g-dinner', 'g-early', 'g-cancelled', 'g-old', 'g-absent', 'g-consult', 'g-class', 'g-stay'].map(id => `INSERT INTO user (id, name, email, isAnonymous) VALUES ('${id}', 'Anonymous', 'anon-${id}@customers.krabiclaw.local', 1)`),
     ]) await db.prepare(statement).run().catch((error: unknown) => { throw new Error(`${statement}: ${String(error)}`) })
 

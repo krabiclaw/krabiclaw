@@ -156,8 +156,8 @@ API into a SQLite copy, never through D1's native export: creating an export
 blocks every other request to its source database, and production served those
 requests as 500s. Pages are not one consistent revision; a row written during
 the copy can fall either side of it, and the transfer refuses a copy whose
-foreign keys disagree. An explicit `--source` (a retired epoch database) keeps
-the native export. The transfer validates the schema, rows and integrity of the
+foreign keys disagree. An explicit `--source` uses the same paged read because
+an epoch source can still be serving customers. The transfer validates the schema, rows and integrity of the
 copy before writing the target, and ordinary refreshes retain the destination's
 signing keys.
 

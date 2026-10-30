@@ -11,6 +11,7 @@ export const CONTENT_DOCUMENT_SCOPE_QUERY = `
 const OWNER_TABLES = {
   organization: 'organization', business_location: 'business_locations', collection: 'collections',
   content_document: 'content_documents', review: 'reviews', review_request: 'review_requests',
+  team_message: 'team_messages',
 }
 
 export const MEDIA_PLACEMENT_OWNER_AUDIT_QUERY = `WITH document_scope AS (${CONTENT_DOCUMENT_SCOPE_QUERY})
@@ -18,6 +19,7 @@ export const MEDIA_PLACEMENT_OWNER_AUDIT_QUERY = `WITH document_scope AS (${CONT
    WHERE NOT (
      ${Object.entries(OWNER_TABLES).map(([ownerType, table]) => `(mp.owner_type = '${ownerType}' AND EXISTS (SELECT 1 FROM ${table} o WHERE o.id = mp.owner_id AND ${ownerType === 'organization' ? 'o.id' : 'o.organization_id'} = mp.organization_id))`).join(' OR ')}
      OR (mp.owner_type = 'content_block' AND EXISTS (SELECT 1 FROM content_blocks b JOIN document_scope d ON d.id = b.document_id WHERE b.id = mp.owner_id AND d.organization_id = mp.organization_id))
+     OR (mp.owner_type = 'activity_entry' AND EXISTS (SELECT 1 FROM activity_entries e JOIN requests r ON r.id = e.request_id WHERE e.id = mp.owner_id AND r.organization_id = mp.organization_id))
      OR (mp.owner_type = 'product' AND EXISTS (SELECT 1 FROM products p JOIN product_publications pp ON pp.product_id = p.id AND pp.organization_id = p.organization_id WHERE p.id = mp.owner_id AND p.organization_id = mp.organization_id))
    ) GROUP BY mp.owner_type ORDER BY mp.owner_type
 `

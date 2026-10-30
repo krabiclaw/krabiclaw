@@ -5,6 +5,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { countActiveHomes, homeAllowance, homesQuote, homeLimit, liveHomeSql, reportBillingUsage } from '~/server/utils/billing'
 import { AirbnbConnection, type ImportStage } from './airbnb-connection'
 import { ChannexError } from './client'
+import { assertRoleAllows, resolveOrganizationMembership } from '~/server/utils/member-access'
 
 /**
  * Which of an organization's Airbnb listings sync, done in the background. The
@@ -215,7 +216,12 @@ type Step = 'done' | 'continue' | 'later'
 /** One step of a job: what the listing needs next to reach what was asked, as one AirbnbConnection call. */
 async function step(env: CloudflareEnv, db: DbClient, job: JobRow, lease: string, signal: AbortSignal): Promise<Step> {
   // A sync acts for the person who asked; a stop writes nothing of theirs, so one KrabiClaw asked for, or whose requester left, still runs.
-  if (!job.requested_by && job.action === 'sync') fail(409, 'REQUESTER_REMOVED', 'The person who asked for this sync is no longer a member; ask again')
+  if (job.action === 'sync') {
+    if (!job.requested_by) fail(409, 'REQUESTER_REMOVED', 'The person who asked for this sync is no longer a member; ask again')
+    const membership = await resolveOrganizationMembership(env, { organizationId: job.organization_id, userId: job.requested_by })
+    if (!membership) fail(409, 'REQUESTER_REMOVED', 'The person who asked for this sync is no longer a member; ask again')
+    await assertRoleAllows({ organizationId: membership.organizationId, role: membership.role, permissions: { integrations: ['update'] }, message: 'The person who asked for this sync no longer has permission to manage Airbnb; ask again' })
+  }
   const connection = new AirbnbConnection(db, env, job.organization_id, job.requested_by ?? 'system', signal)
   const mapping = await queryFirst<{ product_id: string; import_stage: ImportStage; enabled: number; channel_id: string; connected_channel_id: string | null }>(db,
     `SELECT m.product_id, m.import_stage, m.enabled, m.channel_id, c.channel_id AS connected_channel_id FROM product_channel_mappings m
@@ -234,7 +240,9 @@ async function step(env: CloudflareEnv, db: DbClient, job: JobRow, lease: string
       return 'continue'
     }
     if (mapping.import_stage === 'complete' && mapping.enabled === 1) {
-      // A previous attempt may have enabled the home before reporting its usage failed.
+      // A requested resync reads the actual source through the content hash guard, then publishes the canonical calendar.
+      await connection.refreshContent(mapping.product_id)
+      if ((await connection.syncFullCalendar(mapping.product_id)).channel_push.state === 'pending') return 'later'
       await reportBillingUsage(env, db, job.organization_id)
       return 'done'
     }

@@ -8,7 +8,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
-import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, setStayNights, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
+import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, setStayNights, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 import { getQuery, H3 } from 'nitro/h3'
 import { createAuth } from '../../server/utils/auth.ts'
@@ -281,7 +281,7 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
     assert.equal(cabin.kind, 'stay')
     assert.equal(cabin.unit_label, 'night')
-    assert.deepEqual(cabin.stay, { location_id: 'cabin-site', check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 4, min_nights: 2,
+    assert.deepEqual(cabin.stay, { location_id: 'cabin-site', check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 4, min_nights: 2, calendar_rules: null,
       property_type_group: null, property_type: null, listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null,
       bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', assigned_member_id: null, assigned_team_id: 'cleaning', live: false, photo_rooms: [],
       accessibility: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(feature => ({ feature, available: null, photo_ids: [] })) })
@@ -1104,7 +1104,7 @@ test('the host sets nights apart from the defaults and resets them', { timeout: 
   try {
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
     const beforeRefusedSettings = await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-04' })
-    for (const patch of [{}, { reset: false }, { reset: true, closed: true }, { reset: true, price_minor: null }]) {
+    for (const patch of [{}, { reset: false }, { reset: true, closed: true }, { reset: true, price_minor: null }, { min_stay_through: 3, price_minor: 200_00 }]) {
       await assert.rejects(setStayNights(db, env, manager, { product_id: cabin.id, from: '2026-11-01', to: '2026-11-04', ...patch }), code('INVALID_STAY_FIELD'))
       assert.deepEqual(await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-04' }), beforeRefusedSettings)
     }
@@ -1119,6 +1119,59 @@ test('the host sets nights apart from the defaults and resets them', { timeout: 
     // A closed night is the host's choice for guests; it does not hold a stay the host takes themselves.
     await setStayNights(db, env, manager, { product_id: cabin.id, from: '2026-11-10', to: '2026-11-11', closed: true })
     await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'closed', check_in_date: '2026-11-10', check_out_date: '2026-11-11', ...guest })
+    // The explicit home default remains canonical. A dated arrival exception
+    // affects only stays starting on that date, not a stay crossing it.
+    await assert.rejects(updateStayHome(env, db, manager, cabin.id, { min_nights: null }), code('INVALID_DETAIL'))
+    assert.equal((await getProduct(db, ORG, cabin.id)).stay!.min_nights, 2)
+    await importStayNights(db, env, manager, cabin.id, [
+      { date: '2026-11-20', available: true, price_minor: 15_000, min_stay_arrival: 21, max_stay: null, closed_to_arrival: false, closed_to_departure: false },
+      { date: '2026-11-21', available: true, price_minor: 15_000, min_stay_arrival: 2, max_stay: null, closed_to_arrival: false, closed_to_departure: false },
+    ])
+    const datedHome = await readStayHome(db, manager, cabin.id)
+    const dated = await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-20', to: '2026-11-22' })
+    assert.equal(dated.home.min_nights, 2)
+    assert.deepEqual(dated.nights.map(night => night.min_stay_arrival), [21, 2])
+    assert.equal((await quoteStay(db, ORG, datedHome, { check_in_date: '2026-11-19', check_out_date: '2026-11-21', adults: 1 })).total_minor, 30_000)
+    await assert.rejects(quoteStay(db, ORG, datedHome, { check_in_date: '2026-11-20', check_out_date: '2026-11-22', adults: 1 }), code('STAY_MIN_NIGHTS'))
+    assert.equal((await quoteStay(db, ORG, datedHome, { check_in_date: '2026-11-22', check_out_date: '2026-11-24', adults: 1 })).total_minor, 30_000)
+    // Resolved imports inherit the real policy rather than freezing a copy
+    // of the default onto every date. A weekday intentionally set to the
+    // same five-night minimum remains five when the default becomes nine.
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: datedHome.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+    const future = (offset: number) => new Date(Date.parse(`${today}T00:00:00Z`) + offset * 86_400_000).toISOString().slice(0, 10)
+    const rules = {
+      day_of_week_min_nights: [-1, -1, 5, -1, -1, -1, -1],
+      weekend_price_minor: 22_000,
+    }
+    await updateStayHome(env, db, manager, cabin.id, { min_nights: 5, base_price_minor: 17_000, calendar_rules: rules })
+    await importStayNights(db, env, manager, cabin.id, Array.from({ length: 6 }, (_, offset) => ({
+      date: `2026-12-0${offset + 1}`, available: true, price_minor: offset === 2 ? 19_000 : null,
+      min_stay_arrival: offset === 2 ? 2 : null, max_stay: null, closed_to_arrival: false, closed_to_departure: false,
+    })))
+    const policyWindow = { productId: cabin.id, from: '2026-12-01', to: '2026-12-07' }
+    assert.deepEqual((await readStayCalendar(db, manager, policyWindow)).nights.map(night => [night.min_stay_arrival, night.price_minor]), [
+      [5, 17_000], [5, 17_000], [2, 19_000], [5, 22_000], [5, 22_000], [5, 17_000],
+    ])
+    await updateStayHome(env, db, manager, cabin.id, { min_nights: 9, base_price_minor: 18_000 })
+    const canonical = await getProduct(db, ORG, cabin.id)
+    assert.equal(canonical.stay!.min_nights, 9)
+    assert.deepEqual(canonical.stay!.calendar_rules, rules)
+    assert.deepEqual((await readStayCalendar(db, manager, policyWindow)).nights.map(night => [night.min_stay_arrival, night.price_minor]), [
+      [9, 18_000], [5, 18_000], [2, 19_000], [9, 22_000], [9, 22_000], [9, 18_000],
+    ])
+    assert.deepEqual((await db.prepare("SELECT date, min_stay_arrival, price_minor FROM product_nights WHERE product_id = ? AND date >= '2026-12-01' ORDER BY date").bind(cabin.id).all()).results,
+      Array.from({ length: 6 }, (_, offset) => ({ date: `2026-12-0${offset + 1}`, min_stay_arrival: offset === 2 ? 2 : null, price_minor: offset === 2 ? 19_000 : null })))
+    const policyHome = await readStayHome(db, manager, cabin.id)
+    await assert.rejects(quoteStay(db, ORG, policyHome, { check_in_date: '2026-12-01', check_out_date: '2026-12-06', adults: 1 }), code('STAY_MIN_NIGHTS'))
+    assert.equal((await quoteStay(db, ORG, policyHome, { check_in_date: '2026-12-02', check_out_date: '2026-12-07', adults: 1 })).total_minor, 99_000)
+    assert.equal((await quoteStay(db, ORG, policyHome, { check_in_date: '2026-12-03', check_out_date: '2026-12-05', adults: 1 })).total_minor, 41_000)
+    const futureWeek = await readStayCalendar(db, manager, { productId: cabin.id, from: future(501), to: future(508) })
+    assert.equal(futureWeek.nights[0]!.date, future(501))
+    assert.deepEqual(futureWeek.nights.map(night => [night.date, night.min_stay_arrival, night.price_minor]), Array.from({ length: 7 }, (_, offset) => {
+      const date = future(501 + offset)
+      const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: 'UTC' }).format(new Date(`${date}T00:00:00Z`))
+      return [date, weekday === 'Wednesday' ? 5 : 9, weekday === 'Friday' || weekday === 'Saturday' ? 22_000 : 18_000]
+    }))
   } finally {
     await runtime.dispose()
   }
@@ -1146,7 +1199,7 @@ test('the multi-calendar reads every home the caller looks after, each night as 
       ['2026-11-05', null, true, false], ['2026-11-06', null, false, true], ['2026-11-07', null, false, true],
     ])
     assert.deepEqual(all.homes[1]!.nights.slice(1, 4).map(night => [night.date, night.price_minor, night.min_stay_arrival, night.stay_id]), [
-      ['2026-11-02', 22_000, 3, null], ['2026-11-03', 22_000, 3, null], ['2026-11-04', 15_000, null, lakeStay.id],
+      ['2026-11-02', 22_000, 3, null], ['2026-11-03', 22_000, 3, null], ['2026-11-04', 15_000, 2, lakeStay.id],
     ])
     assert.deepEqual(all.stays.map(stay => [stay.id, stay.guest_name, stay.channel, stay.check_in_date, stay.check_out_date]), [
       [cabinStay.id, 'Ana', 'direct', '2026-10-30', '2026-11-03'], [lakeStay.id, 'Bo', 'direct', '2026-11-04', '2026-11-07'],

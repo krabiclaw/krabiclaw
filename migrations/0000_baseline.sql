@@ -208,6 +208,7 @@ CREATE TABLE `bookings` (
 	`status` text DEFAULT 'confirmed' NOT NULL,
 	`cancelled_at` text,
 	`cancellation_reason` text,
+	`no_show_at` text,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
@@ -540,15 +541,17 @@ CREATE INDEX `content_reports_request_idx` ON `content_reports` (`request_id`);-
 CREATE INDEX `content_reports_team_message_idx` ON `content_reports` (`team_message_id`);--> statement-breakpoint
 CREATE TABLE `device_tokens` (
 	`token` text PRIMARY KEY NOT NULL,
+	`kind` text NOT NULL,
 	`user_id` text NOT NULL,
 	`session_id` text NOT NULL,
-	`environment` text NOT NULL,
+	`environment` text,
+	`p256dh` text,
+	`auth` text,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`session_id`) REFERENCES `session`(`id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "device_tokens_token_check" CHECK(length(token) > 0 AND length(token) % 2 = 0 AND token NOT GLOB '*[^0123456789abcdef]*'),
-	CONSTRAINT "device_tokens_environment_check" CHECK(environment IN ('sandbox', 'production')),
+	CONSTRAINT "device_tokens_kind_check" CHECK((kind = 'apns' AND length(token) > 0 AND length(token) % 2 = 0 AND token NOT GLOB '*[^0123456789abcdef]*' AND environment IN ('sandbox', 'production') AND p256dh IS NULL AND auth IS NULL) OR (kind = 'web' AND token LIKE 'https://%' AND environment IS NULL AND length(p256dh) > 0 AND length(auth) > 0)),
 	CONSTRAINT "device_tokens_created_at_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at),
 	CONSTRAINT "device_tokens_updated_at_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)
 );
@@ -644,7 +647,7 @@ CREATE TABLE `guest_thread_deliveries` (
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	FOREIGN KEY (`entry_id`) REFERENCES `activity_entries`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "guest_thread_deliveries_instants_check" CHECK((created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)),
-	CONSTRAINT "guest_thread_deliveries_provider_check" CHECK((channel = 'email' AND provider IN ('resend', 'log_only')) OR (channel = 'whatsapp' AND provider IN ('meta', 'log_only')) OR (channel = 'airbnb' AND provider = 'channex') OR (channel = 'push' AND provider = 'apns'))
+	CONSTRAINT "guest_thread_deliveries_provider_check" CHECK((channel = 'email' AND provider IN ('resend', 'log_only')) OR (channel = 'whatsapp' AND provider IN ('meta', 'log_only')) OR (channel = 'airbnb' AND provider = 'channex') OR (channel = 'push' AND provider IN ('apns', 'web_push')))
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `guest_thread_deliveries_provider_message_unique` ON `guest_thread_deliveries` (`provider`,`provider_message_id`) WHERE provider_message_id IS NOT NULL;--> statement-breakpoint
@@ -1725,7 +1728,6 @@ CREATE TABLE `product_nights` (
 	`closed` integer DEFAULT 0 NOT NULL,
 	`price_minor` integer,
 	`min_stay_arrival` integer,
-	`min_stay_through` integer,
 	`max_stay` integer,
 	`closed_to_arrival` integer DEFAULT 0 NOT NULL,
 	`closed_to_departure` integer DEFAULT 0 NOT NULL,
@@ -1738,7 +1740,7 @@ CREATE TABLE `product_nights` (
 	CONSTRAINT "product_nights_date_check" CHECK(date(date, '+0 days') IS date),
 	CONSTRAINT "product_nights_flags_check" CHECK(closed IN (0, 1) AND closed_to_arrival IN (0, 1) AND closed_to_departure IN (0, 1)),
 	CONSTRAINT "product_nights_price_check" CHECK(price_minor IS NULL OR price_minor >= 0),
-	CONSTRAINT "product_nights_stay_rules_check" CHECK((min_stay_arrival IS NULL OR min_stay_arrival >= 1) AND (min_stay_through IS NULL OR min_stay_through >= 1) AND (max_stay IS NULL OR max_stay >= 1)),
+	CONSTRAINT "product_nights_stay_rules_check" CHECK((min_stay_arrival IS NULL OR min_stay_arrival >= 1) AND (max_stay IS NULL OR max_stay >= 1)),
 	CONSTRAINT "product_nights_source_check" CHECK(source IN ('host', 'import')),
 	CONSTRAINT "product_nights_updated_at_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)
 );
@@ -1863,7 +1865,8 @@ CREATE TABLE `product_stay_configs` (
 	`check_in_end_time` text,
 	`check_out_time` text NOT NULL,
 	`max_guests` integer NOT NULL,
-	`min_nights` integer DEFAULT 1 NOT NULL,
+	`min_nights` integer NOT NULL,
+	`calendar_rules` text,
 	`check_in_instructions` text,
 	`property_type_group` text,
 	`property_type` text,
@@ -1901,6 +1904,7 @@ CREATE TABLE `product_stay_configs` (
 	CONSTRAINT "product_stay_configs_check_in_end_check" CHECK(check_in_end_time IS NULL OR (check_in_end_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_end_time < '24:00')),
 	CONSTRAINT "product_stay_configs_guests_check" CHECK(max_guests >= 1),
 	CONSTRAINT "product_stay_configs_min_nights_check" CHECK(min_nights >= 1),
+	CONSTRAINT "product_stay_configs_calendar_rules_check" CHECK(calendar_rules IS NULL OR (json_valid(calendar_rules) AND json_type(calendar_rules) = 'object')),
 	CONSTRAINT "product_stay_configs_instructions_check" CHECK(check_in_instructions IS NULL OR (length(trim(check_in_instructions)) BETWEEN 1 AND 5000)),
 	CONSTRAINT "product_stay_configs_property_type_group_check" CHECK(property_type_group IS NULL OR property_type_group IN ('apartments', 'houses', 'secondary_units', 'unique_homes', 'bnb', 'boutique_hotels_and_more')),
 	CONSTRAINT "product_stay_configs_property_type_check" CHECK((property_type IS NULL AND property_type_group IS NULL) OR (property_type IS NOT NULL AND property_type_group IS NOT NULL AND property_type_group || ':' || property_type IN ('apartments:apartment', 'apartments:condominium', 'apartments:serviced_apartment', 'apartments:loft', 'houses:house', 'houses:townhouse', 'houses:bungalow', 'houses:cabin', 'houses:chalet', 'houses:earthhouse', 'houses:hut', 'houses:lighthouse', 'houses:villa', 'houses:dome', 'houses:cottage', 'houses:farmstay', 'houses:houseboat', 'houses:tiny_house', 'secondary_units:guesthouse', 'secondary_units:private_suite', 'secondary_units:farmstay', 'unique_homes:boat', 'unique_homes:castle', 'unique_homes:cave', 'unique_homes:earthhouse', 'unique_homes:hut', 'unique_homes:igloo', 'unique_homes:island', 'unique_homes:lighthouse', 'unique_homes:plane', 'unique_homes:rv', 'unique_homes:tent', 'unique_homes:tipi', 'unique_homes:train', 'unique_homes:treehouse', 'unique_homes:yurt', 'unique_homes:other', 'unique_homes:dome', 'unique_homes:barn', 'unique_homes:campsite', 'unique_homes:farmstay', 'unique_homes:houseboat', 'unique_homes:tiny_house', 'unique_homes:windmill', 'unique_homes:bus', 'unique_homes:holiday_park', 'unique_homes:ranch', 'unique_homes:religious_building', 'unique_homes:riad', 'unique_homes:shipping_container', 'unique_homes:tower', 'bnb:bnb', 'bnb:nature_eco_lodge', 'bnb:farmstay', 'boutique_hotels_and_more:boutique_hotel', 'boutique_hotels_and_more:nature_eco_lodge', 'boutique_hotels_and_more:hostel', 'boutique_hotels_and_more:serviced_apartment', 'boutique_hotels_and_more:aparthotel', 'boutique_hotels_and_more:hotel', 'boutique_hotels_and_more:resort'))),
@@ -2179,6 +2183,7 @@ CREATE TABLE `reservations` (
 	`status` text DEFAULT 'confirmed' NOT NULL,
 	`cancelled_at` text,
 	`cancellation_reason` text,
+	`no_show_at` text,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
@@ -2220,6 +2225,16 @@ CREATE UNIQUE INDEX `resource_localizations_org_locale_route_unique` ON `resourc
 CREATE INDEX `resource_localizations_org_locale_type_idx` ON `resource_localizations` (`organization_id`,`locale`,`resource_type`);--> statement-breakpoint
 CREATE INDEX `resource_localizations_resource_idx` ON `resource_localizations` (`resource_type`,`resource_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `resource_localizations_org_resource_locale_unique` ON `resource_localizations` (`organization_id`,`resource_type`,`resource_id`,`locale`);--> statement-breakpoint
+CREATE TABLE `review_category_ratings` (
+	`review_id` text NOT NULL,
+	`category` text NOT NULL,
+	`rating` integer NOT NULL,
+	PRIMARY KEY(`review_id`, `category`),
+	FOREIGN KEY (`review_id`) REFERENCES `reviews`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "review_category_ratings_rating_check" CHECK(rating BETWEEN 1 AND 5),
+	CONSTRAINT "review_category_ratings_category_check" CHECK(category IN ('food', 'service', 'atmosphere', 'expertise', 'organization', 'enjoyment', 'listening', 'explanation', 'next_steps', 'cleanliness', 'accuracy', 'check_in', 'communication'))
+);
+--> statement-breakpoint
 CREATE TABLE `review_requests` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,
@@ -2262,6 +2277,7 @@ CREATE TABLE `reviews` (
 	`rating` integer NOT NULL,
 	`title` text,
 	`content` text,
+	`private_feedback` text,
 	`google_review_id` text,
 	`google_review_metadata` text,
 	`owner_reply` text,
@@ -2335,8 +2351,40 @@ CREATE TABLE `scheduled_guest_messages` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `scheduled_guest_messages_template_stay_unique` ON `scheduled_guest_messages` (`template_id`,`stay_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `scheduled_guest_messages_check_in_stay_unique` ON `scheduled_guest_messages` (`stay_id`) WHERE template_id IS NULL AND template_title = 'Check-in instructions';--> statement-breakpoint
 CREATE INDEX `scheduled_guest_messages_due_idx` ON `scheduled_guest_messages` (`status`,`due_at`);--> statement-breakpoint
 CREATE INDEX `scheduled_guest_messages_org_created_idx` ON `scheduled_guest_messages` (`organization_id`,`created_at`,`id`);--> statement-breakpoint
+CREATE TABLE `send_later_messages` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`request_id` text NOT NULL,
+	`user_id` text NOT NULL,
+	`body` text NOT NULL,
+	`due_at` text NOT NULL,
+	`status` text NOT NULL,
+	`reason` text,
+	`error_code` text,
+	`error_field` text,
+	`entry_id` text,
+	`version` integer NOT NULL,
+	`started_at` text,
+	`sent_at` text,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`entry_id`) REFERENCES `activity_entries`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`organization_id`,`request_id`) REFERENCES `requests`(`organization_id`,`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "send_later_messages_status_check" CHECK(status IN ('pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled')),
+	CONSTRAINT "send_later_messages_error_check" CHECK(status NOT IN ('failed', 'needs_review') OR (length(trim(reason)) > 0 AND length(trim(error_code)) > 0 AND length(trim(error_field)) > 0)),
+	CONSTRAINT "send_later_messages_sent_check" CHECK(status <> 'sent' OR (entry_id IS NOT NULL AND sent_at IS NOT NULL)),
+	CONSTRAINT "send_later_messages_sending_check" CHECK(status <> 'sending' OR started_at IS NOT NULL),
+	CONSTRAINT "send_later_messages_text_check" CHECK(length(trim(body)) BETWEEN 1 AND 5000 AND version >= 1),
+	CONSTRAINT "send_later_messages_instants_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND strftime('%Y-%m-%dT%H:%M:%fZ', due_at, '+0 days') IS due_at AND (started_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', started_at, '+0 days') IS started_at) AND (sent_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', sent_at, '+0 days') IS sent_at))
+);
+--> statement-breakpoint
+CREATE INDEX `send_later_messages_due_idx` ON `send_later_messages` (`status`,`due_at`);--> statement-breakpoint
+CREATE INDEX `send_later_messages_author_idx` ON `send_later_messages` (`organization_id`,`user_id`,`due_at`);--> statement-breakpoint
 CREATE TABLE `session` (
 	`id` text PRIMARY KEY NOT NULL,
 	`expiresAt` integer NOT NULL,
@@ -2453,6 +2501,7 @@ CREATE TABLE `stays` (
 	`booking_received_at` text,
 	`cancelled_at` text,
 	`cancellation_reason` text,
+	`no_show_at` text,
 	`version` integer DEFAULT 1 NOT NULL,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,

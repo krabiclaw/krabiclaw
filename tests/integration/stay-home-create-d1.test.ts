@@ -11,7 +11,7 @@ import listHomesRoute from '../../server/api/dashboard/stay-homes/index.get.ts'
 import editHomeRoute from '../../server/api/dashboard/stay-homes/[productId].patch.ts'
 import { getLocation, updateLocation } from '../../server/utils/location-management.ts'
 import { getProduct } from '../../server/utils/product-management.ts'
-import { createStayHome, readStayHome, stayHomeInput } from '../../server/domain/stays.ts'
+import { createStayHome, quoteStay, readPublicStayCalendar, readStayHome, stayHomeInput } from '../../server/domain/stays.ts'
 import { STAY_HOME_ACCESSIBILITY_FEATURES } from '../../shared/stay-accessibility.ts'
 
 // A home added by hand through the native app's route: its details are
@@ -79,6 +79,9 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, country: 'us' })), { status: 422, code: 'INVALID_DETAIL', field: 'country' })
     assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, check_in_time: '3pm' })), { status: 422, code: 'INVALID_DETAIL', field: 'check_in_time' })
     assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, max_guests: 0 })), { status: 422, code: 'INVALID_DETAIL', field: 'max_guests' })
+    for (const min_nights of [undefined, null]) {
+      assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, min_nights })), { status: 422, code: 'MISSING_DETAIL', field: 'min_nights' })
+    }
     for (const idempotency_key of ['a'.repeat(201), '   ']) {
       assert.deepEqual(await call(owner, 'POST', { ...cabin, idempotency_key }), {
         status: 400, body: { error: 'idempotency_key must be 1 to 200 characters', code: 'VALIDATION_ERROR', field: 'idempotency_key' },
@@ -95,7 +98,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
 
     const unspecifiedPropertyDetails = { listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null }
     const home = {
-      name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, base_price_tax_behavior: 'unspecified', check_in_time: '15:00', check_in_end_time: null, check_out_time: '11:00', max_guests: 4, min_nights: 2, check_in_instructions: null, assigned_member_id: null, assigned_team_id: null, channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
+      name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, base_price_tax_behavior: 'unspecified', check_in_time: '15:00', check_in_end_time: null, check_out_time: '11:00', max_guests: 4, min_nights: 2, calendar_rules: null, check_in_instructions: null, assigned_member_id: null, assigned_team_id: null, channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
       accessibility: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(feature => ({ feature, available: null, photo_ids: [] })),
       address: { address: '1 Cliff Rd', city: 'Moab', state: 'UT', country: 'US', zip_code: '84532' }, latitude: null, longitude: null,
       description: '', published: false, live: false, airbnb_listing_id: null, airbnb_editor_url: null, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], smoke_detector_details: null, carbon_monoxide_detector_details: null, cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
@@ -159,7 +162,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.equal(edited.status, 200)
     const changed = {
       product_id: made.product_id, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, location_id: made.location_id, name: 'Cliff Cabin North', timezone: 'America/Los_Angeles', currency: 'USD', base_price_minor: 210_00, base_price_tax_behavior: 'unspecified',
-      check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 6, min_nights: 3, check_in_instructions: null, assigned_member_id: 'm-helper', assigned_team_id: null, channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
+      check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 6, min_nights: 3, calendar_rules: null, check_in_instructions: null, assigned_member_id: 'm-helper', assigned_team_id: null, channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
       accessibility: home.accessibility,
       address: home.address, latitude: null, longitude: null, description: '', published: false, live: false, airbnb_listing_id: null, airbnb_editor_url: null, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], smoke_detector_details: null, carbon_monoxide_detector_details: null, cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
     }
@@ -305,6 +308,21 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.equal((await edit(owner, { published: true })).status, 200)
     assert.equal(((await call(owner, 'GET')).body.homes as Array<{ product_id: string; published: boolean }>).find(home => home.product_id === made.product_id)!.published, true)
     assert.deepEqual(await db.prepare('SELECT published FROM product_publications WHERE product_id = ?').bind(made.product_id).all().then(result => result.results), [{ published: 1 }])
+
+    // The last allowed checkout is a date the guest can choose, not an
+    // unread endpoint beyond a calendar that otherwise promises 500 nights.
+    const publishedHome = await readStayHome(db, { organizationId: ORG, actorId: 'owner', manage: true }, made.product_id)
+    const firstDate = new Intl.DateTimeFormat('en-CA', { timeZone: publishedHome.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+    const lastDate = new Date(Date.parse(`${firstDate}T00:00:00Z`) + 500 * 86_400_000).toISOString().slice(0, 10)
+    const publicCalendar = await readPublicStayCalendar(db, ORG, (await getProduct(db, ORG, made.product_id)).slug, { from: firstDate, to: lastDate })
+    assert.equal(publicCalendar.nights.length, 501)
+    assert.equal(publicCalendar.nights[0]!.date, firstDate)
+    assert.deepEqual(publicCalendar.nights.at(-1), { date: lastDate, available: true, price_minor: 210_00, min_stay_arrival: 3, max_stay: null, closed_to_arrival: false, closed_to_departure: false })
+    const lastArrival = new Date(Date.parse(`${lastDate}T00:00:00Z`) - 3 * 86_400_000).toISOString().slice(0, 10)
+    const lastQuote = await quoteStay(db, ORG, publishedHome, { check_in_date: lastArrival, check_out_date: lastDate, adults: 1 })
+    assert.deepEqual({ check_in_date: lastQuote.check_in_date, check_out_date: lastQuote.check_out_date, nights: lastQuote.nights, total_minor: lastQuote.total_minor }, { check_in_date: lastArrival, check_out_date: lastDate, nights: 3, total_minor: 630_00 })
+    const beyondHorizon = new Date(Date.parse(`${lastDate}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
+    await assert.rejects(quoteStay(db, ORG, publishedHome, { check_in_date: lastArrival, check_out_date: beyondHorizon, adults: 1 }), { status: 422, data: { code: 'STAY_TOO_FAR_AHEAD', field: 'check_out_date' } })
 
     // Adding homes is never refused on Basic: new homes are drafts. The plan covers live homes,
     // and publishing a third is refused as a home while two are live.
