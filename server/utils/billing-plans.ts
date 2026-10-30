@@ -4,6 +4,8 @@ import { createStripeClient } from '~/server/utils/stripe-client'
 import { getPlanEntitlements } from './billing-entitlements'
 import { assertStripeCatalogPrice, readStripeCatalog, selectMeteredPrices, selectStripeCatalogPrice } from './stripe-catalog'
 import {
+  BETA_SPOTS,
+  BETA_STARTED_AT,
   isNewSalePlan,
   isKnownRecurringPlan,
   GROWTH_PLAN_ID,
@@ -39,6 +41,8 @@ export interface Plan {
   features: string[]
   limits: PlanLimits
   cta: { label: string; href: string }
+  /** Paid plans: how many of the beta spots are left (shared/billing-model.ts). */
+  betaSpotsLeft?: number
 }
 
 export type EnvWithOrganizationCache = Record<string, string | undefined> & {
@@ -164,6 +168,7 @@ function isPlan(value: unknown): value is Plan {
     && Array.isArray(value.features)
     && value.features.every((feature) => typeof feature === 'string')
     && isPlanLimits(value.limits, id as string)
+    && (!('betaSpotsLeft' in value) || (Number.isInteger(value.betaSpotsLeft) && (value.betaSpotsLeft as number) >= 0 && (value.betaSpotsLeft as number) <= BETA_SPOTS))
     && isRecord(value.cta)
     && typeof value.cta.label === 'string'
     && typeof value.cta.href === 'string'
@@ -206,7 +211,7 @@ function parseCachedPlans(value: unknown): Plan[] {
     const amounts = PAID_PLAN_PRICES[planId]
     const monthly = plan?.prices[0]
     if (!plan || plan.prices.length !== 1 || monthly?.interval !== 'month'
-      || monthly.amount !== amounts.monthly || monthly.currency.toLowerCase() !== 'usd') {
+      || monthly.amount !== amounts.monthly || monthly.currency.toLowerCase() !== 'usd' || plan.betaSpotsLeft === undefined) {
       throw new BillingPlansError('BILLING_PLANS_CACHE_INVALID', `Billing plans cache contains an invalid ${planId} price set`)
     }
     return plan
@@ -219,10 +224,41 @@ function parseCachedPlans(value: unknown): Plan[] {
 
 // ── Stripe fetch ─────────────────────────────────────────────────────────────
 
+// A checkout that never completed started no subscription; every other status did, and keeps its spot.
+const UNSTARTED_STATUSES = new Set<Stripe.Subscription.Status>(['incomplete', 'incomplete_expired'])
+
+/**
+ * The beta spots taken: the businesses (Stripe customers) that started a
+ * subscription since beta pricing began. A business that cancels keeps its
+ * spot, since the first ten to start take them. One a coupon makes free
+ * (KrabiClaw's own demo and internal sites) takes no spot. Discounts are
+ * expanded to their coupons.
+ */
+export function betaSpotsTaken(subscriptions: readonly Stripe.Subscription[]): number {
+  return new Set(subscriptions.filter(subscription => !UNSTARTED_STATUSES.has(subscription.status)
+    && !subscription.discounts.some((discount) => {
+      if (typeof discount === 'string') throw new Error(`Stripe subscription ${subscription.id} discounts must be expanded`)
+      const coupon = discount.source.coupon
+      if (typeof coupon === 'string') throw new Error(`Stripe subscription ${subscription.id} coupons must be expanded`)
+      return coupon?.percent_off === 100
+    })).map(subscription => typeof subscription.customer === 'string' ? subscription.customer : subscription.customer.id)).size
+}
+
+async function readBetaSpotsLeft(stripe: Stripe): Promise<number> {
+  const started: Stripe.Subscription[] = []
+  // Counting stops once every spot is taken.
+  for await (const subscription of stripe.subscriptions.list({ status: 'all', created: { gte: Math.floor(Date.parse(BETA_STARTED_AT) / 1000) }, limit: 100, expand: ['data.discounts.source.coupon'] })) {
+    started.push(subscription)
+    if (betaSpotsTaken(started) >= BETA_SPOTS) return 0
+  }
+  return BETA_SPOTS - betaSpotsTaken(started)
+}
+
 export async function fetchStripeProducts(
   env: Record<string, string | undefined>,
 ): Promise<Plan[]> {
-  const catalog = await readStripeCatalog(createStripeClient(env.STRIPE_SECRET_KEY!))
+  const stripe = createStripeClient(env.STRIPE_SECRET_KEY!)
+  const [catalog, betaSpotsLeft] = await Promise.all([readStripeCatalog(stripe), readBetaSpotsLeft(stripe)])
   const products = catalog.products.filter(product => product.active)
 
   // Each plan is sold with its metered prices; a catalog without them cannot sell the plans as published.
@@ -288,6 +324,7 @@ export async function fetchStripeProducts(
       features,
       limits: publicPlanLimits(planId),
       cta: PLAN_CTA[planId] ?? { label: 'Get started', href: '/signup' },
+      betaSpotsLeft,
     })
   }
 
@@ -321,7 +358,7 @@ const PLANS_CACHE_TTL_SECONDS = 3600
 // stub under `nuxt dev`, and Nuxt's useRuntimeConfig() is the real one.
 function plansCacheKey(buildId: string | undefined): string {
   if (!buildId) throw new BillingPlansError('BILLING_PLANS_UNAVAILABLE', 'Billing plans cache has no build id to key on')
-  return `stripe-plans:v9:${buildId}`
+  return `stripe-plans:v10:${buildId}`
 }
 
 export async function getCachedPlans(env: EnvWithOrganizationCache, buildId: string | undefined): Promise<Plan[]> {

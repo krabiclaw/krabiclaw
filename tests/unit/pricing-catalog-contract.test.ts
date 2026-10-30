@@ -5,9 +5,9 @@ import { assertStripeCatalogPrice, planSubscriptionItem, recurringPriceAmount, s
 import { PRICING_COMPARISON, comparisonValue } from '../../shared/pricing-comparison.ts'
 import { getPlanEntitlements } from '../../server/utils/billing-entitlements.ts'
 import { classifyStripePlanChange } from '../../shared/stripe-ga4.ts'
-import { additionalHomePrice, assertNewSalePlan, BILLING_METER_KEYS, BILLING_METERS, PAID_PLAN_PRICES, PAYMENTS_FEE, planMeters, ratePercent } from '../../shared/billing-model.ts'
+import { additionalHomePrice, assertNewSalePlan, BILLING_METER_KEYS, BILLING_METERS, nextAdditionalHomePrice, PAID_PLAN_PRICES, PAYMENTS_FEE, planMeters, pricingNotice, ratePercent } from '../../shared/billing-model.ts'
 import { renderPlansMarkdown } from '../../server/routes/pricing.md.get.ts'
-import type { Plan } from '../../server/utils/billing-plans.ts'
+import { betaSpotsTaken, type Plan } from '../../server/utils/billing-plans.ts'
 
 const product = { id: 'prod-existing', metadata: { plan_id: 'growth', monthly_price_id: 'price-month' } } as unknown as Stripe.Product
 // The canonical plan price as Stripe returns it: one flat monthly charge.
@@ -193,6 +193,37 @@ test('renderPlansMarkdown generates accurate, machine-readable markdown specific
   assert.ok(md.includes('## Add-ons\n'))
   assert.ok(md.includes('- **Managed ads**: 10% of monthly ad spend. Chris hand-manages'))
   assert.ok(md.includes('- **SEO and marketing strategy**: $2,000 per month. Julia leads'))
+})
+
+// While beta spots are left, the Markdown states them and the price that follows them.
+test('the beta spots and the price after them are stated while spots are left', () => {
+  assert.equal(nextAdditionalHomePrice(), '$12')
+  assert.equal(pricingNotice(0), 'Beta pricing. Prices will rise for new subscribers as KrabiClaw grows; you keep the price you subscribe at for 12 months.')
+  assert.equal(pricingNotice(7), 'Beta pricing: 7 of 10 spots left. After that, new subscribers pay $12 per additional home per month. You keep the price you subscribe at for 12 months.')
+  const growth: Plan = {
+    id: 'growth', name: 'Growth', tagline: '', highlighted: false, features: [], betaSpotsLeft: 7,
+    prices: [{ id: 'p_growth', amount: 4900, currency: 'usd', interval: 'month' }],
+    limits: { customDomain: true, googlePlaces: true, support: 'Priority' }, cta: { label: 'Get Growth', href: '/signup' },
+  }
+  const md = renderPlansMarkdown([growth])
+  assert.ok(md.includes('\nBeta pricing: 7 of 10 spots left. After that, new subscribers pay $12 per additional home per month. You keep the price you subscribe at for 12 months.\n'))
+  assert.ok(md.includes('- **Homes**: 2 included, then $4 per additional home per month (beta price; $12 per additional home per month once the beta spots are taken). A home is a place to stay.\n'))
+})
+
+// Each business that started a subscription in the beta takes one spot, and keeps it if it cancels;
+// a checkout that never completed, and a free internal subscription, take none.
+test('beta spots are taken by the businesses that started a paid subscription', () => {
+  const coupon = (percent_off: number | null) => ({ source: { type: 'coupon', coupon: { id: 'coupon', percent_off } } })
+  const subscription = (customer: string, status: string, discounts: unknown[] = []) => ({ id: `sub_${customer}_${status}`, customer, status, discounts }) as unknown as Stripe.Subscription
+  assert.equal(betaSpotsTaken([
+    subscription('cus_a', 'active'), subscription('cus_b', 'trialing'), subscription('cus_c', 'past_due'), subscription('cus_d', 'unpaid'),
+    subscription('cus_e', 'canceled'), subscription('cus_f', 'paused'), subscription('cus_g', 'incomplete'), subscription('cus_h', 'incomplete_expired'),
+    subscription('cus_i', 'active', [coupon(100)]), subscription('cus_j', 'active', [coupon(55)]),
+    // A business that subscribed again takes no second spot.
+    subscription('cus_a', 'canceled'),
+  ]), 7)
+  assert.throws(() => betaSpotsTaken([subscription('cus_a', 'active', ['di_unexpanded'])]), /discounts must be expanded/)
+  assert.throws(() => betaSpotsTaken([subscription('cus_a', 'active', [{ source: { type: 'coupon', coupon: 'coupon' } }])]), /coupons must be expanded/)
 })
 
 

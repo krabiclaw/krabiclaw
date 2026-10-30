@@ -16,7 +16,7 @@
     <div class="kc-pricing-plans__rail">
       <BillingPlanCard v-for="(plan, index) in plans" :key="plan.id" :plan="plan" photo :front-image="frontImage(plan.id)" :sequence="index" />
     </div>
-    <p class="kc-pricing-plans__hint">Prices in USD. Paid subscription billed monthly. <span data-pricing-notice>{{ PRICING_NOTICE }}</span></p>
+    <p class="kc-pricing-plans__hint">Prices in USD. Paid subscription billed monthly. <span data-pricing-notice>{{ notice }}</span></p>
     <!-- The services, offered under the plans they are added to; each starts only in Plan and billing. -->
     <div class="kc-pricing-addons" data-parity-section="add-ons">
       <h3 class="kc-pricing-addons__title">Add-ons</h3>
@@ -39,7 +39,7 @@ import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { blockTextOrNull, blockMedia } from '~/utils/tenant-page-block-data'
 import { useSchemaOrg } from '#imports'
 import type { Plan } from '~/composables/usePlans'
-import { STARTER_PLAN_ID, NEW_SALE_PAID_PLAN_IDS, PRICING_NOTICE, SERVICES, SERVICE_PRICES } from '~/shared/billing-model'
+import { STARTER_PLAN_ID, NEW_SALE_PAID_PLAN_IDS, pricingNotice, SERVICES, SERVICE_PRICES } from '~/shared/billing-model'
 
 /**
  * KrabiClaw's plans, published on KrabiClaw's own pages.
@@ -71,6 +71,7 @@ const description = computed(() => blockTextOrNull(props.block.data.description)
 const variant = computed<'home' | 'pricing'>(() => (props.page.path === '/pricing' ? 'pricing' : 'home'))
 
 const { plans, monthlyPrice } = await usePlans()
+const notice = computed(() => pricingNotice(plans.value.find(plan => plan.betaSpotsLeft !== undefined)?.betaSpotsLeft ?? 0))
 const config = useRuntimeConfig()
 const pageUrl = resolveSeoUrl('/pricing', config.public.siteUrl)
 
