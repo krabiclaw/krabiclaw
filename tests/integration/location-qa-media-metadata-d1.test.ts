@@ -9,6 +9,10 @@ import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import organizationQaRoute from '../../server/api/editor/organizations/[organizationId]/qa.get.ts'
 import createOrganizationQaRoute from '../../server/api/editor/organizations/[organizationId]/qa.post.ts'
 import updateOrganizationQaRoute from '../../server/api/editor/organizations/[organizationId]/qa/[qaId].patch.ts'
+import reorderOrganizationQaRoute from '../../server/api/editor/organizations/[organizationId]/qa/reorder.post.ts'
+import reorderLocationQaRoute from '../../server/api/editor/organizations/[organizationId]/locations/[locationId]/qa/reorder.post.ts'
+import { handleQaTools } from '../../server/utils/mcp-tools/qa.ts'
+import type { McpExecutorContext } from '../../server/utils/mcp-tools/execution.ts'
 import { createQa, deleteQa, listQa, reorderQa, updateQa } from '../../server/utils/location-qa.ts'
 import { createContentDocumentWithBlocks } from '../../server/utils/content/documents.ts'
 import { getMediaAsset, updateMediaAssetMetadata } from '../../server/utils/media-asset-manager.ts'
@@ -99,6 +103,8 @@ test('organization Q&A route finds a page record by id without widening tenant a
     app.get('/api/editor/organizations/:organizationId/qa', organizationQaRoute)
     app.post('/api/editor/organizations/:organizationId/qa', createOrganizationQaRoute)
     app.patch('/api/editor/organizations/:organizationId/qa/:qaId', updateOrganizationQaRoute)
+    app.post('/api/editor/organizations/:organizationId/qa/reorder', reorderOrganizationQaRoute)
+    app.post('/api/editor/organizations/:organizationId/locations/:locationId/qa/reorder', reorderLocationQaRoute)
     const request = (org: string, query = '', authenticated = true) => app.request(Object.assign(new Request(`https://proof.example/api/editor/organizations/${org}/qa${query}`, {
       headers: authenticated ? { cookie } : {},
     }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
@@ -155,8 +161,48 @@ test('organization Q&A route finds a page record by id without widening tenant a
     const statusPayload = JSON.parse(statusReceipt!)
     assert.deepEqual(statusPayload.metadata.changed_fields, ['status'])
     assert.deepEqual(statusPayload.afterState, { updated_at: hiddenRow.updated_at, status: 'hidden' })
-
-
+    const order = [{ id: pricingId, sort_order: 10 }, { id: createdId, sort_order: 11 }]
+    const beforeOrder = await listQa(db, ORG, null, false, '/pricing')
+    const reordered = await mutate('/reorder', 'POST', { page_path: '/pricing', updates: order, updated_by: 'spoofed-user' })
+    assert.equal(reordered.status, 200)
+    assert.deepEqual(await reordered.json(), { updated: 2 })
+    const ordered = (await (await request(ORG, '?page_path=%2Fpricing')).json()).qa as Array<{ id: string; sort_order: number; updated_at: string; status: string }>
+    assert.deepEqual(ordered.map(row => ({ id: row.id, sort_order: row.sort_order })), order)
+    for (const row of ordered) {
+      assert.equal(await db.prepare('SELECT updated_by FROM content_documents WHERE id = ?').bind(row.id).first('updated_by'), 'qa-owner')
+      const previous = beforeOrder.find(item => item.id === row.id)!
+      assert.notEqual(row.updated_at, previous.updated_at)
+      const receipt = JSON.parse((await db.prepare("SELECT payload_json FROM activity_entries WHERE event_name='content.updated' AND json_extract(payload_json,'$.entityId')=? ORDER BY occurred_at DESC,id DESC LIMIT 1").bind(row.id).first<string>('payload_json'))!)
+      assert.deepEqual(receipt.metadata.changed_fields, ['sort_order'])
+      assert.deepEqual(receipt.beforeState, { updated_at: previous.updated_at, status: previous.status, sort_order: previous.sort_order })
+      assert.deepEqual(receipt.afterState, { updated_at: row.updated_at, status: row.status, sort_order: row.sort_order })
+    }
+    const auditCount = () => db.prepare("SELECT count(*) FROM activity_entries WHERE organization_id=? AND event_name='content.updated'").bind(ORG).first<number>('count(*)')
+    const afterOrderAuditCount = await auditCount()
+    const repeatOrder = await mutate('/reorder', 'POST', { page_path: '/pricing', updates: order })
+    assert.equal(repeatOrder.status, 200)
+    assert.deepEqual(await repeatOrder.json(), { updated: 0 })
+    assert.deepEqual(await listQa(db, ORG, null, false, '/pricing'), ordered)
+    assert.equal(await auditCount(), afterOrderAuditCount)
+    const mcpOrder = await handleQaTools({ toolName: 'reorder_qa', args: { page_path: '/pricing', updates: [{ id: pricingId, sort_order: 12 }] },
+      organization: { db, env, organizationId: ORG, userId: 'qa-owner', role: 'owner', isPlatformAdmin: false, scopes: ['tenant'],
+        membership: { id: 'qa-member', organizationId: ORG, userId: 'qa-owner', role: 'owner' } },
+    } as McpExecutorContext)
+    assert.deepEqual(mcpOrder, { updated: 1 })
+    assert.equal((await (await request(ORG, `?id=${pricingId}`)).json()).qa[0].sort_order, 12)
+    const mcpActor = await db.prepare("SELECT actor_user_id FROM activity_entries WHERE event_name='content.updated' AND json_extract(payload_json,'$.entityId')=? ORDER BY occurred_at DESC,id DESC LIMIT 1").bind(pricingId).first('actor_user_id')
+    assert.equal(mcpActor, 'qa-owner')
+    await db.prepare("INSERT INTO business_locations (id,organization_id,slug,title,timezone) VALUES ('qa-office',?,'office','Office','Asia/Bangkok')").bind(ORG).run()
+    const locationQa = await createQa(db, { organizationId: ORG, locationId: 'qa-office' }, { question: 'Where is the office?', sort_order: 3 }, null)
+    const locationOrder = await app.request(Object.assign(new Request(`https://proof.example/api/editor/organizations/${ORG}/locations/qa-office/qa/reorder`, {
+      method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ updates: [{ id: locationQa.data.id, sort_order: 0 }], updated_by: 'spoofed-user' }),
+    }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    assert.equal(locationOrder.status, 200)
+    assert.deepEqual(await locationOrder.json(), { updated: 1 })
+    assert.equal((await listQa(db, ORG, 'qa-office'))[0]?.sort_order, 0)
+    assert.equal(await db.prepare('SELECT updated_by FROM content_documents WHERE id=?').bind(locationQa.data.id).first('updated_by'), 'qa-owner')
+    const locationActor = await db.prepare("SELECT actor_user_id FROM activity_entries WHERE location_id='qa-office' AND event_name='content.updated' ORDER BY occurred_at DESC,id DESC LIMIT 1").first('actor_user_id')
+    assert.equal(locationActor, 'qa-owner')
   } finally {
     await runtime.dispose()
   }
@@ -188,7 +234,7 @@ test('a Q&A can be edited and deleted through the scoped writers', async () => {
 
     const second = await createQa(db, scope, { question: 'Can I use my own domain?', answer: 'Yes.' }, null)
     const secondId = (second.data as { id: string }).id
-    await reorderQa(db, scope, [{ id: secondId, sort_order: 0 }, { id: qaId, sort_order: 1 }])
+    await reorderQa(db, scope, [{ id: secondId, sort_order: 0 }, { id: qaId, sort_order: 1 }], null)
     assert.deepEqual((await listQa(db, ORG, null, false, '/pricing')).map(item => item.id), [secondId, qaId])
     assert.equal(await purges(), 2, 'a reorder queues a purge too')
     await deleteQa(db, scope, secondId)
@@ -224,6 +270,7 @@ test('authored Q&A validation is shared and mixed imported reorders are atomic',
   const scope = { organizationId: ORG, locationId: null, pagePath: '/pricing' }
   try {
     const authored = await createQa(db, scope, { question: '  Authored question  ', answer: '  Original answer  ', sort_order: 4 }, null)
+    const secondAuthored = await createQa(db, scope, { question: 'Second authored question', sort_order: 9 }, null)
     const imported = await createQa(db, scope, { question: 'Imported fixture', sort_order: 7 }, null)
     await db.prepare("UPDATE content_documents SET source = 'import' WHERE id = ?").bind(imported.data.id).run()
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('qa-locale-ja', ?, 'ja', 0, 'published')").bind(ORG).run()
@@ -244,14 +291,16 @@ test('authored Q&A validation is shared and mixed imported reorders are atomic',
       await assert.rejects(createQa(db, scope, { question: 'Valid', ...input }, null), expected)
       await assert.rejects(updateQa(db, scope, authored.data.id, input, null), expected)
     }
-    await assert.rejects(reorderQa(db, scope, [{ id: authored.data.id, sort_order: 0 }, { id: imported.data.id, sort_order: 1 }]), /outside the requested scope/)
+    await assert.rejects(reorderQa(db, scope, [{ id: authored.data.id, sort_order: 0 }, { id: imported.data.id, sort_order: 1 }], null), /outside the requested scope/)
     assert.deepEqual(await listQa(db, ORG, null, false, '/pricing'), before)
-    // Exercise the zero-write conflict result on actual D1 without changing any Q&A.
-    await db.prepare("CREATE TRIGGER skip_qa_reorder BEFORE UPDATE OF sort_order ON content_documents WHEN OLD.kind = 'qa' BEGIN SELECT RAISE(IGNORE); END").run()
+    // Refuse one row of a real multi-row reorder: the other row and its audit must roll back too.
+    const beforeReorderAudits = await db.prepare("SELECT count(*) FROM activity_entries WHERE organization_id=? AND event_name='content.updated'").bind(ORG).first('count(*)')
+    await db.prepare("CREATE TRIGGER skip_qa_reorder BEFORE UPDATE OF sort_order ON content_documents WHEN OLD.kind = 'qa' AND OLD.sort_order=4 BEGIN SELECT RAISE(IGNORE); END").run()
     try {
-      await assert.rejects(reorderQa(db, scope, [{ id: authored.data.id, sort_order: 0 }]),
+      await assert.rejects(reorderQa(db, scope, [{ id: authored.data.id, sort_order: 0 }, { id: secondAuthored.data.id, sort_order: 1 }], null),
         { status: 409, statusText: 'Q&A reorder changed concurrently. Reload and try again.' })
       assert.deepEqual(await listQa(db, ORG, null, false, '/pricing'), before)
+      assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE organization_id=? AND event_name='content.updated'").bind(ORG).first('count(*)'), beforeReorderAudits)
     } finally {
       await db.prepare('DROP TRIGGER skip_qa_reorder').run()
     }

@@ -2,7 +2,7 @@ import { HTTPError } from 'nitro'
 import { FAQ_BLOCK_SOURCES, type FaqBlockSource } from '~/shared/faq-block'
 import { getPersistedSourceLocale } from '~/server/utils/localization'
 import { prepareContentDocumentWithBlocks, documentOfRootSql, prepareContentDocumentDeletion } from '~/server/utils/content/documents'
-import { executeBatch, queryAll, queryFirst, type DbClient } from '../db/index.ts'
+import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '../db/index.ts'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { d1JsonStringSet, d1JsonValue } from '../db/d1-limits.ts'
 import { organizationEventQuery } from '~/server/utils/organization-events'
@@ -311,8 +311,11 @@ export async function reorderQa(
   db: DbClient,
   scope: QaScope,
   updates: Array<{ id: string; sort_order: number }>,
+  actor: AuthUserIdentity | null,
 ) {
   await assertQaScope(db, scope)
+  if (actor !== null && (!actor || typeof actor.id !== 'string' || !actor.id.trim() || typeof actor.name !== 'string')) badQaInput('actor must be the authenticated identity or explicitly null')
+  const actorId = actor?.id ?? null
   if (!Array.isArray(updates)) badQaInput('Q&A reorder requires an updates array')
   if (!updates.length || updates.some(update => !update || typeof update.id !== 'string' || !update.id || !Number.isSafeInteger(update.sort_order))) {
     badQaInput('Q&A reorder requires ids with integer sort_order values')
@@ -322,34 +325,52 @@ export async function reorderQa(
   }
 
   const scoped = scopeSql(scope.locationId, scope.pagePath)
-  const validation = await queryFirst<{ valid_count: number }>(db, `
-    SELECT COUNT(*) AS valid_count
+  const current = await queryAll<{ id: string; sort_order: number; status: string; updated_at: string }>(db, `
+    SELECT id, sort_order, status, updated_at
     FROM content_documents
     WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual' AND id IN (SELECT value FROM json_each(?)) AND organization_id = ? AND ${scoped.clause}
   `, [d1JsonStringSet(updates.map(update => update.id)), scope.organizationId, ...scoped.params])
-  if (Number(validation?.valid_count ?? 0) !== updates.length) {
+  if (current.length !== updates.length) {
     throw new HTTPError({ statusCode: 404, statusMessage: 'Q&A reorder contains records outside the requested scope' })
   }
 
-  const now = new Date().toISOString()
+  const orders = new Map(updates.map(update => [update.id, update.sort_order]))
+  const changed = current.filter(row => row.sort_order !== orders.get(row.id))
+  if (!changed.length) return { updated: 0 }
+  const now = new Date(Math.max(Date.now(), ...current.map(row => Date.parse(row.updated_at) + 1))).toISOString()
   const ids = d1JsonStringSet(updates.map(update => update.id))
-  // One guarded UPDATE: every requested row must still be manual and in scope
-  // at write time. A failed precondition changes no row, even after the read.
-  const [result] = await executeBatch(db, [{
-    query: `UPDATE content_documents SET sort_order = (
-      SELECT json_extract(value, '$.sort_order') FROM json_each(?) WHERE json_extract(value, '$.id') = content_documents.id
-    ), updated_at = ?
-    WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual' AND organization_id = ? AND ${scoped.clause}
-      AND id IN (SELECT value FROM json_each(?))
-      AND (SELECT count(*) FROM content_documents WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual'
-        AND organization_id = ? AND ${scoped.clause} AND id IN (SELECT value FROM json_each(?))) = ?`,
-    params: [d1JsonValue(updates), now, scope.organizationId, ...scoped.params, ids, scope.organizationId, ...scoped.params, ids, updates.length],
-  }, publicResourceCacheInvalidationQuery(scope.organizationId, 'qa-reorder')])
-  const changed = Number(result?.meta.changes ?? 0)
-  if (changed !== updates.length) {
+  // A failed group guard deliberately violates updated_at's NOT NULL
+  // constraint, rolling back every row and its audit in the same D1 batch.
+  const guard = (expected: typeof current): BatchQuery => ({
+    query: `UPDATE content_documents SET updated_at = NULL
+      WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?)) AND (
+        SELECT count(*) FROM content_documents JOIN json_each(?) expected ON json_extract(expected.value, '$.id') = content_documents.id
+        WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual' AND organization_id = ? AND ${scoped.clause}
+          AND sort_order = json_extract(expected.value, '$.sort_order') AND updated_at = json_extract(expected.value, '$.updated_at')
+      ) <> ?`,
+    params: [scope.organizationId, ids, d1JsonValue(expected), scope.organizationId, ...scoped.params, current.length],
+  })
+  const writes = changed.flatMap(row => [{
+    query: `UPDATE content_documents SET sort_order = ?, updated_at = ?, updated_by = ?
+      WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual' AND organization_id = ? AND ${scoped.clause} AND id = ? AND updated_at = ?`,
+    params: [orders.get(row.id)!, now, actorId, scope.organizationId, ...scoped.params, row.id, row.updated_at],
+  }, organizationEventQuery({ organizationId: scope.organizationId, locationId: scope.locationId, actorId,
+    eventType: 'content.updated', entityType: 'qa', entityId: row.id,
+    beforeState: { updated_at: row.updated_at, status: row.status, sort_order: row.sort_order },
+    afterState: { updated_at: now, status: row.status, sort_order: orders.get(row.id)! },
+    metadata: { changed_fields: ['sort_order'], evidence_basis: 'persisted_change', page_path: normalizePagePath(scope.pagePath) }, onlyIfPreviousChangedOneRow: true })])
+  const results = await executeBatch(db, [guard(current), ...writes,
+    guard(current.map(row => row.sort_order === orders.get(row.id) ? row : { ...row, sort_order: orders.get(row.id)!, updated_at: now })),
+    publicResourceCacheInvalidationQuery(scope.organizationId, 'qa-reorder')]).catch(error => {
+    if (/NOT NULL constraint failed: content_documents\.updated_at/.test(error instanceof Error ? error.message : String(error))) {
+      throw new HTTPError({ statusCode: 409, statusMessage: 'Q&A reorder changed concurrently. Reload and try again.', cause: error })
+    }
+    throw error
+  })
+  if (changed.some((_, index) => Number(results[1 + index * 2]?.meta.changes ?? 0) !== 1)) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Q&A reorder changed concurrently. Reload and try again.' })
   }
-  return { updated: updates.length }
+  return { updated: changed.length }
 }
 
 export const listLocationQa = (db: DbClient, organizationId: string, locationId: string) => listQa(db, organizationId, locationId)

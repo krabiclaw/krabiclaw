@@ -151,7 +151,8 @@ export async function listBusinessOutcomes(
     const providerStatus = metadata.verification_status
     const noConfirmedChanges = providerStatus === 'unconfirmed' || providerStatus === 'failed'
     const status: BusinessOutcome['verification']['status'] = providerStatus === 'verified' || providerStatus === 'unconfirmed' || providerStatus === 'failed' ? providerStatus : externalSend && !storedReply
-      ? accepted ? 'verified' : deliveries.length > 0 && deliveries.every(receipt => receipt.status === 'failed') ? 'failed' : 'unconfirmed'
+      ? accepted ? 'verified' : deliveries.length > 0 && deliveries.every(receipt => receipt.status === 'failed'
+        && (receipt.provider !== 'channex' || receipt.non_delivery_confirmed === 1)) ? 'failed' : 'unconfirmed'
       : row.source_table === 'post_publications'
         ? payload.state === 'published' || payload.state === 'removed' ? 'verified' : payload.state === 'failed' ? 'failed' : 'unconfirmed'
         : 'verified'
@@ -166,7 +167,8 @@ export async function listBusinessOutcomes(
       verification: {
         status, basis: metadata.verification_basis === 'provider_acceptance' ? 'provider_acceptance' : row.source_table === 'post_publications' ? 'provider_publication'
           : row.source_table === 'analytics_events' ? 'recorded_conversion' : storedReply ? 'stored_web_reply' : externalSend ? 'provider_acceptance' : 'persisted_change',
-        receipts: deliveries.map(receipt => ({ id: receipt.id, channel: receipt.channel, provider: receipt.provider, status: receipt.status, providerMessageId: receipt.provider_message_id })),
+        receipts: deliveries.map(receipt => ({ id: receipt.id, channel: receipt.channel, provider: receipt.provider, status: receipt.status,
+          providerMessageId: receipt.provider_message_id, nonDeliveryConfirmed: receipt.non_delivery_confirmed === null ? null : receipt.non_delivery_confirmed === 1 })),
       },
     }
     const details = row.source_table === 'activity_entries' ? {

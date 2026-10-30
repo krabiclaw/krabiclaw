@@ -37,6 +37,7 @@ export interface BusinessOutcomeReceipt {
   provider: string
   status: string
   providerMessageId: string | null
+  nonDeliveryConfirmed?: boolean | null
 }
 
 export interface BusinessOutcome {
