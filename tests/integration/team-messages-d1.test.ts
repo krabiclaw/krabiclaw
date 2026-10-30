@@ -124,6 +124,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId).sort(), ['owner'], 'a stay conversation alerts owner oversight, not the member looking after the home')
     await db.prepare("INSERT INTO team(id,organizationId,name,createdAt) VALUES('operators',?,'Cabin operators',0),('outsider-team',?,'Other operators',0)").bind(ORG, OTHER).run()
     await db.prepare("INSERT INTO teamMember(id,teamId,userId,createdAt) VALUES('operators-cleaner','operators','cleaner',0),('operators-cook','operators','cook',0)").run()
+    const unassignedLocation = (await getLocation(db, ORG, 'cabin-site'))!
     const locationAssignments = await Promise.allSettled([
       updateLocation(db, ORG, 'cabin-site', { assigned_member_id: 'm-cook' }, 'owner', env),
       updateLocation(db, ORG, 'cabin-site', { assigned_team_id: 'operators' }, 'owner', env),
@@ -135,6 +136,18 @@ test('members talk in team conversations, see unread state and receive recorded 
     const assignedLocation = (await getLocation(db, ORG, 'cabin-site'))!
     assert.ok((assignedLocation.assigned_member_id === 'm-cook' && assignedLocation.assigned_team_id === null)
       || (assignedLocation.assigned_member_id === null && assignedLocation.assigned_team_id === 'operators'), 'concurrent location assignments retain exactly one validated target')
+    assert.deepEqual(await updateLocation(db, ORG, 'cabin-site', {
+      assigned_member_id: null, assigned_team_id: 'operators', expected_updated_at: unassignedLocation.updated_at!,
+    }, 'owner', env), { status: 409, data: { error: 'The location changed since it was read. Reload it and try again.', code: 'LOCATION_VERSION_CONFLICT', field: 'expected_updated_at' } },
+    'an explicit stale revision keeps its version conflict instead of rebasing a responsibility change')
+    const assignmentActivity = await db.prepare("SELECT actor_user_id, payload_json FROM activity_entries WHERE scope_kind = 'organization' AND organization_id = ? AND event_name = 'location.updated' AND json_extract(payload_json, '$.entityId') = 'cabin-site'").bind(ORG).all<{ actor_user_id: string | null; payload_json: string }>()
+    assert.deepEqual(assignmentActivity.results.map(entry => ({ actorId: entry.actor_user_id, payload: JSON.parse(entry.payload_json) })), [{
+      actorId: 'owner', payload: {
+        entityType: 'business_location', entityId: 'cabin-site', actorType: 'member',
+        beforeState: { updated_at: unassignedLocation.updated_at }, afterState: { updated_at: assignedLocation.updated_at },
+        metadata: { title: 'Pine Cabin', changed_fields: [assignedLocation.assigned_member_id === 'm-cook' ? 'assigned_member_id' : 'assigned_team_id'], evidence_basis: 'persisted_change' },
+      },
+    }], 'only the winning assignment records its actual actor, field change and persisted revision')
     assert.equal((await updateLocation(db, ORG, 'cabin-site', { assigned_member_id: null, assigned_team_id: null }, 'owner', env)).status, 200)
     await assert.rejects(updateStayHome(env, db, manager, cabin.id, { assigned_team_id: 'operators' }), refused(422, 'RESPONSIBILITY_TARGET_CONFLICT', 'assigned_team_id'))
     await assert.rejects(updateStayHome(env, db, manager, cabin.id, { assigned_member_id: null, assigned_team_id: 'outsider-team' }), refused(422, 'INVALID_RESPONSIBILITY', 'assigned_team_id'))

@@ -683,7 +683,13 @@ export async function updateLocation(
 
   params.push(locationId, organizationId);
   try {
-    if (!(await runUpdate(params))) return stale;
+    if (!(await runUpdate(params))) {
+      if (input.expected_updated_at === undefined && (input.assigned_member_id !== undefined || input.assigned_team_id !== undefined)) {
+        const current = await loadLocation(db, organizationId, locationId);
+        if (current) await assertResponsibilityTarget(db, organizationId, input, { assigned_member_id: current.assigned_member_id ?? null, assigned_team_id: current.assigned_team_id ?? null });
+      }
+      return stale;
+    }
   } catch (error) {
     const refusal = capacityRefusalOf(error);
     if (refusal) return refusal;
