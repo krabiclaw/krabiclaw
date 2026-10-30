@@ -11,7 +11,7 @@
     :footer="dashboard.canUpdateBilling.value && (on || met)"
     :saving="busy"
     :disabled="!services"
-    :error="error || (requirementsError ? getErrorMessage(requirementsError, 'What managed ads needs could not be checked') : '')"
+    :error="error || (servicesError ? getErrorMessage(servicesError, 'The service could not be loaded') : '') || (requirementsError ? getErrorMessage(requirementsError, 'What managed ads needs could not be checked') : '')"
     :save-label="on ? 'Turn off' : 'Agree and turn on'"
     @save="toggle"
   >
@@ -21,13 +21,12 @@
     <p class="mt-4 text-base font-semibold text-highlighted">{{ priceLine }}</p>
     <div v-if="on" class="mt-6 space-y-3 text-sm text-muted">
       <p>On since {{ formatExactDateTime(services!.managed_ads!.agreed_at) }}.</p>
-      <p>Turning it off stops Chris managing your campaigns. Today's spend is excluded if you turn it off before the day closes in your Google Ads account's time zone; earlier managed days are still billed.</p>
-      <p>Keep Google Ads connected until your earlier managed spend has been counted. We count each day after two days.</p>
+      <p>{{ SERVICES.managed_ads.ending }}</p>
     </div>
     <template v-else-if="requirements">
       <EditorNavigationList class="mt-6" :groups="[{ id: 'requirements', items: requirementRows }]" @act="act" />
       <p v-if="!met" class="mt-6 text-sm text-muted">{{ outstanding }}</p>
-      <p v-else class="mt-6 text-sm text-muted">By turning it on you agree to {{ SERVICES.managed_ads.price }}, read from Google each day and billed on your plan's invoice. Google bills the ad spend itself to your Google Ads account.</p>
+      <p v-else class="mt-6 text-sm text-muted">{{ SERVICES.managed_ads.consent }}</p>
     </template>
   </DashboardLeafPanel>
 </template>

@@ -4,6 +4,7 @@ import { authRequestHeaders, loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTenant } from './seed/manifest'
 import type { HomesQuote } from '../../server/utils/billing'
+import { SERVICES } from '../../shared/billing-model'
 
 // Plan and billing (#1504): its own Menu destination at O/billing. A legal
 // practice made for the Starter case has no subscription, so it is what an
@@ -97,6 +98,7 @@ test.describe('Plan and billing', () => {
         expect(await requirements.json()).toEqual({
           success: true,
           services: { managed_ads: null, strategy: null },
+          offers: SERVICES,
           requirements: { managed_ads: { google_ads_usd: false, business_plan: false, default_payment_method: false } },
         })
 
@@ -118,7 +120,7 @@ test.describe('Plan and billing', () => {
         expect((await rejected.json() as { message: string }).message).toBe('Managed ads is billed on the Business plan. Choose Business in Plan and billing before turning on managed ads.')
         const after = await page.request.get(`/api/dashboard/services?org=${slug}`)
         expect(after.status(), await after.text()).toBe(200)
-        expect(await after.json()).toEqual({ success: true, services: { managed_ads: null, strategy: null } })
+        expect(await after.json()).toEqual({ success: true, services: { managed_ads: null, strategy: null }, offers: SERVICES })
 
         for (const width of WIDTHS) {
           await page.setViewportSize({ width, height: 1200 })
@@ -148,7 +150,7 @@ test.describe('Plan and billing', () => {
           await expect(upgrade.getByRole('radio')).toHaveCount(2)
           // The recommended plan starts chosen, so Continue is live.
           await expect(upgrade.getByRole('radio', { checked: true })).toHaveCount(1)
-          await expect(upgrade.getByRole('button', { name: 'Continue', exact: true })).toBeEnabled()
+          await expect(upgrade.getByRole('button', { name: 'Continue to Stripe', exact: true })).toBeEnabled()
           // The card is what a person presses. Its radio is named by the card's label beside the pane,
           // and by its value inside the drawer, where Nuxt UI's label is not yet associated.
           await upgrade.getByText('Business', { exact: true }).click()
@@ -210,7 +212,7 @@ test.describe('Plan and billing', () => {
         await expect(upgrade.getByRole('heading', { name: 'Upgrade to Business', exact: true })).toBeVisible()
         await expect(upgrade.getByText('$149/mo', { exact: true })).toBeVisible()
         await expect(upgrade.locator('[data-testid^="editor-row-"]')).toHaveCount(4)
-        await expect(upgrade.getByText(/^\$100\/mo more than Growth\. Stripe charges the difference for the rest of this period, then \$149\/mo from \w{3} \d{1,2}, \d{4}\.$/)).toBeVisible()
+        await expect(upgrade.getByText('This upgrade applies immediately. Stripe calculates any prorated charge for the rest of your billing period.', { exact: true })).toBeVisible()
         await expect(upgrade.getByTestId('editor-row-payments')).toContainText('1.4% of payment volume, plus Stripe fees')
         await expect(upgrade.getByTestId('editor-row-payments')).toContainText('Online payments and direct stay booking')
         await expect(upgrade.getByTestId('editor-row-google-ads')).toContainText('Google Ads campaigns')
@@ -218,7 +220,7 @@ test.describe('Plan and billing', () => {
         await expect(upgrade.getByTestId('editor-row-airbnb-sync')).toContainText('Airbnb sync')
         await expect(upgrade.getByTestId('editor-row-ios')).toHaveCount(0)
         await expect(upgrade.getByTestId('editor-row-messaging')).toHaveCount(0)
-        await expect(upgrade.getByRole('button', { name: 'Continue', exact: true })).toBeEnabled()
+        await expect(upgrade.getByRole('button', { name: 'Agree and upgrade to Business', exact: true })).toBeEnabled()
         await expect(upgrade.getByRole('radio')).toHaveCount(0)
       }
 
@@ -238,7 +240,7 @@ test.describe('Plan and billing', () => {
       })
       await open(page, `${GROWTH}/billing/upgrade`)
       const upgrade = page.locator('#dashboard-panel-organization-upgrade')
-      await upgrade.getByRole('button', { name: 'Continue', exact: true }).click()
+      await upgrade.getByRole('button', { name: 'Agree and upgrade to Business', exact: true }).click()
       await expect(upgrade.getByText('Stopped at the test boundary', { exact: true })).toBeVisible()
       expect(intents).toHaveLength(1)
       expect(intents[0]).toMatchObject({ organizationId: GROWTH_ID, subscriptionId: billing.stripeSubscriptionId, action: 'upgrade', effectiveTiming: 'immediate' })

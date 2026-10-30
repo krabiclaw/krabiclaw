@@ -41,7 +41,7 @@ const planName = (id: string) => plans.value.find(plan => plan.id === id)?.name 
 // Only Business moves to Growth, and a plan already changing has no second change to start.
 watchEffect(() => {
   const status = billing.value
-  if (status && (status.plan !== BUSINESS_PLAN_ID || status.cancelAtPeriodEnd || status.scheduledPlan)) showError({ statusCode: 404, statusMessage: 'There is no plan change for this plan' })
+  if (status && (!status.actions.changes.some(change => change.plan === GROWTH_PLAN_ID && change.timing === 'period_end'))) showError({ statusCode: 404, statusMessage: 'There is no plan change for this plan' })
 })
 
 const lead = computed(() => billing.value?.currentPeriodEnd

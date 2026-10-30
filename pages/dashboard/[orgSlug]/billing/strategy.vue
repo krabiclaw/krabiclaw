@@ -10,8 +10,8 @@
     :title="SERVICES.strategy.name"
     :footer="dashboard.canUpdateBilling.value && (on || onPaidPlan)"
     :saving="busy"
+    :error="error || (servicesError ? getErrorMessage(servicesError, 'The service could not be loaded') : '')"
     :disabled="!services"
-    :error="error"
     :save-label="on ? 'Turn off' : 'Agree and turn on'"
     @save="toggle"
   >
@@ -21,12 +21,12 @@
     <p class="mt-4 text-base font-semibold text-highlighted">{{ formatPrice(SERVICE_PRICES.strategy.monthly) }} per month, added to your plan and billed with it.</p>
     <div v-if="on" class="mt-6 space-y-3 text-sm text-muted">
       <p>On since {{ formatExactDateTime(services!.strategy!.since) }} · {{ formatRecurring(services!.strategy!.amount, services!.strategy!.currency) }}.</p>
-      <p>Turning it off ends Julia's service now. Stripe credits the unused part of this period to your next invoice.</p>
+      <p>{{ SERVICES.strategy.ending }}</p>
     </div>
-    <template v-else>
+    <template v-else-if="services">
       <EditorNavigationList class="mt-6" :groups="[{ id: 'requirements', items: requirementRows }]" />
-      <p v-if="!onPaidPlan" class="mt-6 text-sm text-muted">Choose a plan to turn this on.</p>
-      <p v-else class="mt-6 text-sm text-muted">By turning it on you agree to {{ formatPrice(SERVICE_PRICES.strategy.monthly) }} per month, added to your plan's subscription and charged to its card.</p>
+      <p v-if="onPaidPlan === false" class="mt-6 text-sm text-muted">Choose a plan to turn this on.</p>
+      <p v-else-if="onPaidPlan === true" class="mt-6 text-sm text-muted">{{ SERVICES.strategy.consent }}</p>
     </template>
   </DashboardLeafPanel>
 </template>
@@ -44,12 +44,12 @@ const dashboard = useDashboardOrganization()
 const dashboardApi = useDashboardApi()
 const { plans, formatPrice, formatRecurring } = await usePlans()
 const { formatExactDateTime } = useHumanTime()
-const [{ servicesResource, services }, { billing, refreshBilling }] = await Promise.all([useOrganizationServices(), useOrganizationBilling()])
+const [{ servicesResource, services, servicesError, refreshServices }, { billing, refreshBilling }] = await Promise.all([useOrganizationServices('strategy'), useOrganizationBilling()])
 const on = computed(() => !!services.value?.strategy)
 // The service is an item on the plan's subscription, so it needs one that is running.
-const onPaidPlan = computed(() => !!billing.value?.stripeSubscriptionId && ['active', 'trialing'].includes(billing.value.subscriptionStatus ?? ''))
+const onPaidPlan = computed(() => servicesResource.value?.requirements?.strategy?.paid_plan)
 const planName = computed(() => billing.value?.subscriptionPrice?.name ?? plans.value.find(plan => plan.id === billing.value?.plan)?.name ?? 'your plan')
-const requirementRows = computed<EditorNavigationItem[]>(() => [{
+const requirementRows = computed<EditorNavigationItem[]>(() => typeof onPaidPlan.value !== 'boolean' ? [] : [{
   id: 'paid-plan', label: 'Paid plan', mark: onPaidPlan.value ? 'met' : 'open',
   summary: `On ${planName.value}`,
   ...(onPaidPlan.value || !dashboard.canUpdateBilling.value || !level.to.value ? {} : { to: `${level.to.value}/upgrade` }),
@@ -69,7 +69,8 @@ async function toggle() {
     const updated = await dashboardApi('/api/dashboard/services', { method: 'POST', body: { service: 'strategy', action: services.value.strategy ? 'end' : 'agree', attempt }, validate: isServices })
     servicesResource.value = updated
     attempt = crypto.randomUUID()
-    await refreshBilling()
+    await Promise.all([refreshBilling(), refreshServices()])
+    if (servicesError.value) throw new Error(`The service changed, but its current requirements could not be read. ${getErrorMessage(servicesError.value, 'Reopen the service before another change.')}`)
     success.value = updated.services.strategy ? 'The strategy service is on. Julia will be in touch to set up your weekly meeting and chat.' : 'The strategy service is off.'
   } catch (cause) {
     error.value = getErrorMessage(cause, 'The strategy service could not be changed')
