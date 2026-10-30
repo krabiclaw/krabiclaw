@@ -67,6 +67,26 @@ export function additionalHomePrice(): string {
 /** The pricing page's and its Markdown's beta notice: new subscribers get each later price; a subscription keeps its prices for 12 months. */
 export const PRICING_NOTICE = 'Beta pricing. Prices will rise for new subscribers as KrabiClaw grows; you keep the price you subscribe at for 12 months.'
 
+/**
+ * Beta spots: each business that starts a paid plan from BETA_STARTED_AT takes
+ * one of BETA_SPOTS. Once they are taken, new subscribers pay
+ * NEXT_ADDITIONAL_HOME_PRICE (USD cents) per additional home.
+ */
+export const BETA_SPOTS = 10
+export const BETA_STARTED_AT = '2026-10-30T00:00:00.000Z'
+export const NEXT_ADDITIONAL_HOME_PRICE = 1200
+
+/** The per-home price after the beta spots, as the struck price shows it: "$12". */
+export function nextAdditionalHomePrice(): string {
+  return `$${NEXT_ADDITIONAL_HOME_PRICE / 100}`
+}
+
+/** The notice under the plans and in their Markdown: the beta spots left, or the beta notice once none are. */
+export function pricingNotice(betaSpotsLeft: number): string {
+  if (betaSpotsLeft < 1) return PRICING_NOTICE
+  return `Beta pricing: ${betaSpotsLeft} of ${BETA_SPOTS} spots left. After that, new subscribers pay ${nextAdditionalHomePrice()} per additional home per month. You keep the price you subscribe at for 12 months.`
+}
+
 /** The fee as the pricing page and the plan screen state it. */
 export const PAYMENTS_FEE = `${ratePercent(PAYMENTS_FEE_RATE)}% of payment volume, plus Stripe fees`
 
