@@ -6,7 +6,7 @@ import { seededTenant } from './seed/manifest'
 import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { articleFacebookPostPath, blogCreatePath, insightsPath } from '../../server/utils/dashboard-links'
-import { addLocalDays } from '../../utils/timezone'
+import { addLocalDays, localDateAt } from '../../utils/timezone'
 
 const orgSlug = 'ember-slice-demo'
 let organizationId: string
@@ -557,7 +557,9 @@ test('a new article publishes its composed body directly and retries publication
 })
 
 test('Insights reads a linked report period and preserves preset changes in its URL', async ({ page }) => {
-  const range = { startDate: '2026-09-01', endDate: '2026-09-07' }
+  // A period the business's own analytics cover (they begin when the seed takes it live), unlike any preset.
+  const today = localDateAt(new Date(), seededTenant('restaurant').timezone)
+  const range = { startDate: addLocalDays(today, -2), endDate: today }
   const linkedPath = insightsPath(orgSlug, range)
   const isReport = (response: import('@playwright/test').Response) => new URL(response.url()).pathname === '/api/dashboard/analytics'
   expect((await page.goto(linkedPath))?.status()).toBe(200)
