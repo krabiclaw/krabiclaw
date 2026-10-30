@@ -54,6 +54,9 @@ export default defineHandler(async (event) => {
     financialWritesAllowed: await roleAllows({ ...organization.membership, permissions: { payments: ['refund'] } }),
     body: field('body'),
     reason: field('reason'),
+    requestId: field('requestId'),
+    // Who may change a stay (stayAccessFor): the role that updates operations.
+    stayManager: await roleAllows({ ...organization.membership, permissions: { operations: ['update'] } }),
     photos,
     idempotencyKey,
     env,

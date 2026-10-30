@@ -31,7 +31,11 @@ import { listOrganizationReviews } from '../../server/utils/organization-reviews
 import { loadPublicSocialMedia } from '../../server/utils/public-social-image.ts'
 import { arrangeProductPhotos, attachMediaPlacement, removeMediaPlacement, setSingleMediaPlacement } from '../../server/utils/media-placement.ts'
 import { deleteMediaAsset, getMediaAsset } from '../../server/utils/media-asset-manager.ts'
-import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
+import { assertAssignedBookingAccess, listOrganizationNotificationMembers, memberAccessPrincipal, resolveMembership, resolveOrganizationMembership } from '../../server/utils/member-access.ts'
+import { listScheduledGuestMessages } from '../../server/domain/guest-messaging.ts'
+import { handleStaysTools, STAYS_TOOLS } from '../../server/utils/mcp-tools/stays.ts'
+import type { McpOrganizationContext } from '../../server/utils/mcp-auth.ts'
+import Ajv from 'ajv'
 import { stayPhotoRoomName, type StayPhotoRoom } from '../../shared/stay-photos.ts'
 import { agendaToTodayCard } from '../../shared/dashboard-today.ts'
 import { STAY_HOME_ACCESSIBILITY_FEATURES } from '../../shared/stay-accessibility.ts'
@@ -279,7 +283,7 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     assert.equal(cabin.unit_label, 'night')
     assert.deepEqual(cabin.stay, { location_id: 'cabin-site', check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 4, min_nights: 2,
       property_type_group: null, property_type: null, listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null,
-      bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], cancellation_policy: null, long_term_cancellation_policy: null, assigned_member_id: null, assigned_team_id: 'cleaning', live: false, photo_rooms: [],
+      bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', assigned_member_id: null, assigned_team_id: 'cleaning', live: false, photo_rooms: [],
       accessibility: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(feature => ({ feature, available: null, photo_ids: [] })) })
     // Property classification is either one authored pair or fully unknown.
     // A partial SQL write must refuse the whole edit before canonical readers
@@ -1040,12 +1044,17 @@ test('a channel stay is read-only here and is paid through its channel; an app s
   const { runtime, db, env } = await boot()
   try {
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
-    await db.prepare(`INSERT INTO stays (id, organization_id, product_id, channel, owner, status, check_in_date, check_out_date, adults, guest_name, total_minor, currency, provider, external_booking_id, created_at, updated_at)
-      VALUES ('airbnb-1', ?, ?, 'airbnb', 'channel', 'confirmed', '2026-11-20', '2026-11-22', 2, 'Bo', 30000, 'USD', 'channex', 'chx-1', ?, ?)`).bind(ORG, cabin.id, NOW, NOW).run()
-    await assert.rejects(updateStay(db, env, manager, 'airbnb-1', { expected_version: 1, adults: 1 }), code('STAY_NOT_EDITABLE'))
-    await assert.rejects(cancelStay(db, env, manager, 'airbnb-1', { expected_version: 1 }), code('STAY_NOT_EDITABLE'))
-    await assert.rejects(recordStayPayment(db, env, manager, 'airbnb-1', { amount_minor: 100, method: 'cash', paid_on: '2026-11-20', idempotency_key: 'pay-1' }), code('STAY_NOT_EDITABLE'))
+    await db.prepare(`INSERT INTO stays (id, organization_id, product_id, channel, owner, status, check_in_date, check_out_date, adults, guest_name, total_minor, currency, provider, external_booking_id, channel_booking_id, created_at, updated_at)
+      VALUES ('airbnb-1', ?, ?, 'airbnb', 'channel', 'confirmed', '2026-11-20', '2026-11-22', 2, 'Bo', 30000, 'USD', 'channex', 'chx-1', 'HMBO1234', ?, ?)`).bind(ORG, cabin.id, NOW, NOW).run()
+    // The refusal links to the reservation on Airbnb, read from the confirmation code Channex sent.
+    const airbnb = 'https://www.airbnb.com/hosting/reservations/details/HMBO1234'
+    const onAirbnb = (message: string) => (error: unknown) => code('STAY_NOT_EDITABLE')(error)
+      && (error as { data: { channel_booking_url: unknown } }).data.channel_booking_url === airbnb && (error as Error).message === message
+    await assert.rejects(updateStay(db, env, manager, 'airbnb-1', { expected_version: 1, adults: 1 }), onAirbnb(`This stay belongs to Airbnb; change it there: ${airbnb}`))
+    await assert.rejects(cancelStay(db, env, manager, 'airbnb-1', { expected_version: 1 }), onAirbnb(`This stay belongs to Airbnb; change it there: ${airbnb}`))
+    await assert.rejects(recordStayPayment(db, env, manager, 'airbnb-1', { amount_minor: 100, method: 'cash', paid_on: '2026-11-20', idempotency_key: 'pay-1' }), onAirbnb(`This stay is paid through Airbnb; change it there: ${airbnb}`))
     assert.equal((await getStay(db, manager, 'airbnb-1')).payment_status, null)
+    assert.equal((await getStay(db, manager, 'airbnb-1')).channel_booking_url, airbnb)
 
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'p', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest })
     await assert.rejects(recordStayPayment(db, env, manager, stay.id, { amount_minor: 0, method: 'cash', paid_on: '2026-11-01', idempotency_key: 'pay-2' }), code('INVALID_AMOUNT'))
@@ -1194,6 +1203,76 @@ test('members see only the homes they look after and change nothing; a home with
     await assert.rejects(cancelStay(db, env, cleaner, cabinStay.id, { expected_version: 1 }), code('STAY_ROLE_REQUIRED'))
     await assert.rejects(deleteProduct(db, { env, organizationId: ORG, productId: cabin.id }), /has bookings or stays/)
     assert.equal((await getProduct(db, ORG, cabin.id)).id, cabin.id)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('a member reads a stay at a home they look after as its turnover on every read path, and nothing of its guest, money or conversation', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  try {
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
+    const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'turnover', check_in_date: '2026-11-01', check_out_date: '2026-11-03', arrival_time: '15:30',
+      adults: 2, children: 1, infants: 1, guest_name: 'Ana', guest_surname: 'Silva', guest_email: 'ana@example.test', notes: 'Door code 4411', total_minor: 45_000 })
+    await recordStayPayment(db, env, manager, stay.id, { amount_minor: 20_000, method: 'cash', paid_on: '2026-11-01', idempotency_key: 'turnover-pay' })
+    assert(stay.request_id)
+    const turnover = { id: stay.id, product_id: cabin.id, location_id: 'cabin-site', timezone: 'America/Denver', status: 'confirmed', check_in_date: '2026-11-01', check_out_date: '2026-11-03',
+      arrival_time: '15:30', adults: 2, children: 1, infants: 1, guest_name: 'Ana', no_show_at: null }
+    const window = { from: '2026-11-01', to: '2026-11-04' }
+
+    assert.deepEqual(await getStay(db, cleaner, stay.id), turnover)
+    assert.deepEqual(await listStays(db, cleaner, window), [turnover])
+    assert.deepEqual((await readStayCalendar(db, cleaner, { productId: cabin.id, ...window })).stays, [turnover])
+    assert.deepEqual((await readStayCalendars(db, cleaner, window)).stays, [turnover])
+    // Owners and admins read the whole stay, unchanged.
+    const whole = await getStay(db, manager, stay.id)
+    assert.deepEqual([whole.guest_surname, whole.guest_email, whole.notes, whole.total_minor, whole.paid_minor, whole.payments.length, whole.request_id], ['Silva', 'ana@example.test', 'Door code 4411', 45_000, 20_000, 1, stay.request_id])
+    assert.equal((await listStays(db, manager, window))[0]!.guest_surname, 'Silva')
+    // A site checkout saves the guest's whole name in guest_name; the member still reads the first name.
+    const wholeName = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'whole-name', check_in_date: '2026-11-05', check_out_date: '2026-11-07', adults: 1, guest_name: '  Bo   Lee ', total_minor: 30_000 })
+    assert.equal((await getStay(db, cleaner, wholeName.id)).guest_name, 'Bo')
+    assert.equal((await getStay(db, manager, wholeName.id)).guest_name, 'Bo   Lee')
+    // A member with no responsibility for the home reads nothing of it.
+    assert.deepEqual(await listStays(db, outsider, window), [])
+    await assert.rejects(getStay(db, outsider, stay.id), code('STAY_NOT_FOUND'))
+
+    for (const change of [
+      () => updateStay(db, env, cleaner, stay.id, { expected_version: stay.version, adults: 1 }),
+      () => cancelStay(db, env, cleaner, stay.id, { expected_version: stay.version }),
+      () => recordStayPayment(db, env, cleaner, stay.id, { amount_minor: 100, method: 'cash', paid_on: '2026-11-01', idempotency_key: 'member-pay' }),
+      () => deleteStayPayment(db, env, cleaner, stay.id, whole.payments[0]!.id),
+      () => setStayNights(db, env, cleaner, { product_id: cabin.id, from: '2026-11-10', to: '2026-11-11', closed: true }),
+    ]) await assert.rejects(change(), { status: 403, data: { code: 'STAY_ROLE_REQUIRED' } })
+    assert.deepEqual(await getStay(db, manager, stay.id), whole)
+    await assert.rejects(listScheduledGuestMessages(db, cleaner, { limit: 20, offset: 0 }, null), { status: 403, data: { code: 'MESSAGING_ROLE_REQUIRED', field: 'permissions.operations.update' } })
+
+    // The stay's guest conversation is not the member's, and its alerts do not reach them.
+    const [ownerMembership, cleanerMembership] = await Promise.all([OWNER, CLEANER].map(userId => resolveOrganizationMembership(env, { organizationId: ORG, userId })))
+    assert(ownerMembership && cleanerMembership)
+    await assert.rejects(assertAssignedBookingAccess(db, { ...memberAccessPrincipal(cleanerMembership, { env }), requestId: stay.request_id }), { status: 404, data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
+    await assertAssignedBookingAccess(db, { ...memberAccessPrincipal(ownerMembership, { env }), requestId: stay.request_id })
+    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId), [OWNER])
+
+    // Today names the guest by first name for the member and in full for the owner.
+    const today = (membership: typeof ownerMembership) => listTodayAgenda(db, { organizationId: ORG }, { principal: { env, membership }, organizationSlug: 'org' }, new Date('2026-11-01T18:00:00.000Z'))
+    assert.deepEqual((await today(cleanerMembership)).items.map(item => [item.stayId, item.title]), [[stay.id, 'Ana']])
+    assert.deepEqual((await today(ownerMembership)).items.map(item => [item.stayId, item.title]), [[stay.id, 'Ana Silva']])
+
+    // MCP returns the same projection, and each tool's output schema admits both views.
+    const ajv = new Ajv({ strict: false })
+    const mcp = async (membership: typeof ownerMembership, role: McpOrganizationContext['role'], toolName: string, args: Record<string, unknown>) => {
+      const organization: McpOrganizationContext = { env, db, userId: membership.userId, isPlatformAdmin: false, scopes: ['organization:read'], organizationId: ORG, organizationSlug: 'org', role, membership }
+      const result = await handleStaysTools({ organization, toolName, args })
+      const schema = STAYS_TOOLS.find(tool => tool.name === toolName)!.outputSchema
+      assert(ajv.validate(schema, result), `${toolName} output: ${ajv.errorsText()}`)
+      return result as Record<string, unknown>
+    }
+    assert.deepEqual(await mcp(cleanerMembership, 'member', 'get_stay', { stay_id: stay.id }), { stay: turnover })
+    assert.deepEqual(await mcp(cleanerMembership, 'member', 'list_stays', window), { stays: [turnover] })
+    assert.deepEqual((await mcp(cleanerMembership, 'member', 'get_stay_calendar', { product_id: cabin.id, ...window })).stays, [turnover])
+    assert.equal(((await mcp(ownerMembership, 'owner', 'get_stay', { stay_id: stay.id })).stay as Record<string, unknown>).guest_email, 'ana@example.test')
+    assert.equal(((await mcp(ownerMembership, 'owner', 'list_stays', window)).stays as Array<Record<string, unknown>>)[0]!.guest_surname, 'Silva')
+    assert.equal(((await mcp(ownerMembership, 'owner', 'get_stay_calendar', { product_id: cabin.id, ...window })).stays as Array<Record<string, unknown>>)[0]!.guest_surname, 'Silva')
   } finally {
     await runtime.dispose()
   }

@@ -18,13 +18,13 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   await expect(comparison).toBeVisible()
   await expect(comparison.locator('tr[data-feature-id]')).toHaveCount(37)
   await expect(comparison.locator('tr[data-feature-id="locations.included"]')).toHaveCount(0)
-  // Homes are billed by count: 2 included, then $9 each on a paid plan.
+  // Homes are billed by count: 2 included, then $4 each on a paid plan.
   const homes = comparison.locator('tr[data-feature-id="homes.included"]')
   await expect(homes).toContainText('Homes')
   await expect(homes.locator('td')).toHaveText([
     '2 included',
-    '2 included, then $9 per additional home per month',
-    '2 included, then $9 per additional home per month',
+    '2 included, then $4 per additional home per month',
+    '2 included, then $4 per additional home per month',
   ])
   // Locations and homes are the counts billed: no plan has a rental-unit row.
   await expect(comparison.locator('tr[data-feature-id="rental-units.included"]')).toHaveCount(0)
@@ -83,8 +83,9 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   await expect(cards.nth(2).locator('.kc-plan-price')).toHaveText('$149')
   await expect(page.locator('[data-plan-locations]')).toHaveCount(0)
   await expect(cards.nth(0).locator('[data-plan-homes]')).toHaveText('2 homes included')
-  for (const index of [1, 2]) await expect(cards.nth(index).locator('[data-plan-homes]')).toHaveText('2 homes included, then $9 per additional home per month')
+  for (const index of [1, 2]) await expect(cards.nth(index).locator('[data-plan-homes]')).toHaveText('2 homes included, then $4 per additional home per month')
   await expect(page.getByText(/rental unit/i)).toHaveCount(0)
+  await expect(page.locator('[data-pricing-notice]')).toHaveText('Beta pricing. Prices will rise for new subscribers as KrabiClaw grows; you keep the price you subscribe at for 12 months.')
   // The services under the plans and the Markdown projection state the same add-ons from the same catalog.
   const addons = page.locator('[data-parity-section="add-ons"] .kc-pricing-addon')
   await expect(addons).toHaveCount(2)
@@ -98,7 +99,8 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   expect(markdownText).toContain('- **SEO and marketing strategy**: $2,000 per month.')
   expect(markdownText).toContain('- **Price**: $149/month')
   expect(markdownText).not.toContain('additional location')
-  expect(markdownText).toContain('- **Homes**: 2 included, then $9 per additional home per month')
+  expect(markdownText).toContain('Beta pricing. Prices will rise for new subscribers as KrabiClaw grows; you keep the price you subscribe at for 12 months.')
+  expect(markdownText).toContain('- **Homes**: 2 included, then $4 per additional home per month')
   expect(markdownText).toContain('Home listings, nightly rates & stay calendars')
   expect(markdownText).toContain('Business websites for restaurants, experiences, law firms and lodging')
   expect(markdownText).toContain('Direct stay booking with online payment')
@@ -190,7 +192,7 @@ test('pricing remains readable with JavaScript disabled', async ({ browser }) =>
     await expect(cards.nth(2).locator('.kc-plan-price')).toHaveText('$149')
     await expect(page.locator('[data-plan-locations]')).toHaveCount(0)
     await expect(cards.nth(0).locator('[data-plan-homes]')).toHaveText('2 homes included')
-    for (const index of [1, 2]) await expect(cards.nth(index).locator('[data-plan-homes]')).toHaveText('2 homes included, then $9 per additional home per month')
+    for (const index of [1, 2]) await expect(cards.nth(index).locator('[data-plan-homes]')).toHaveText('2 homes included, then $4 per additional home per month')
     await expect(cards.nth(2).getByRole('link', { name: 'Get Business', exact: true })).toHaveAttribute('href', '/signup?plan=business&redirect=%2Fapi%2Fpost-login%3Fplan%3Dbusiness')
     await expect(page.locator('[data-price-unavailable]')).toHaveCount(0)
   } finally {

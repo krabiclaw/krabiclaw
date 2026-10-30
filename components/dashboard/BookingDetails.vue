@@ -101,6 +101,12 @@
             </component>
           </UCard>
 
+          <!-- The guest did not come, or where the visit's review invitation stands: the team's own record of it. -->
+          <UCard v-if="!personalScope && (booking.noShowAt || booking.reviewInvitation)" variant="record" data-testid="booking-review-state">
+            <h3 class="text-base font-semibold text-highlighted">{{ booking.noShowAt ? 'No-show' : 'Review invitation' }}</h3>
+            <p class="mt-1 text-sm text-muted">{{ reviewStateLabel }}</p>
+          </UCard>
+
           <UCard v-if="booking.requests" variant="record">
             <h3 class="text-base font-semibold text-highlighted">{{ personalScope ? 'Your requests' : `${recordCopy?.guestLabel.charAt(0).toUpperCase()}${recordCopy?.guestLabel.slice(1)} requests` }}</h3>
             <p class="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-muted">{{ booking.requests }}</p>
@@ -165,6 +171,15 @@
         <!-- Canonical booking-policy writes sanitize this CMS-authored HTML before persistence. -->
         <!-- eslint-disable-next-line vue/no-v-html -->
         <div v-html="booking.policy!.additional_notes_html" />
+      </div>
+    </div>
+  </DashboardListItemDialog>
+  <DashboardListItemDialog v-model:open="noShowOpen" title="Mark as a no-show" :show-actions="false" :error="actionError">
+    <div v-if="booking" class="space-y-5">
+      <p class="text-sm leading-relaxed text-muted">{{ firstName(booking.guestName ?? '') }} won’t be asked to review this {{ noun }}, and a review link already sent stops working. The {{ noun }} itself stays as it is. This cannot be undone.</p>
+      <div class="flex items-center justify-between gap-4 pt-1">
+        <UButton label="Keep as is" color="neutral" variant="ghost" @click="noShowOpen = false" />
+        <UButton label="Mark as a no-show" color="error" :loading="pendingAction === 'no_show'" @click="runAction('no_show')" />
       </div>
     </div>
   </DashboardListItemDialog>
@@ -358,6 +373,7 @@ async function answerChange(decision: 'accept' | 'decline') {
   }
 }
 const cancelOpen = ref(false)
+const noShowOpen = ref(false)
 const cancelNote = ref('')
 // What a cancellation gives back: everything still captured, as Airbnb's host cancellation does.
 const refundable = computed(() => (booking.value?.payments ?? []).reduce((sum, entry) => sum + entry.payment.captured_amount - entry.payment.refunded_amount, 0))
@@ -471,13 +487,23 @@ const availableActions = computed<Array<{ value: string; label: string; icon: st
   if (props.personalScope) return booking.value.guestCanCancel
     ? [{ value: 'cancel', label: `Cancel ${presentation.value.noun}`, icon: 'i-lucide-calendar-x', color: 'error' as const }]
     : []
-  if (booking.value.complete) return []
+  const noShow = booking.value.canMarkNoShow ? [{ value: 'no_show', label: 'Mark as a no-show', icon: 'i-lucide-user-x', color: 'neutral' as const }] : []
+  if (booking.value.complete) return noShow
   if (booking.value.type === 'booking' && booking.value.status === 'pending') return [
     { value: 'confirm', label: `Confirm ${presentation.value.noun}`, icon: 'i-lucide-calendar-check', color: 'success' as const },
     { value: 'reject', label: `Decline ${presentation.value.noun}`, icon: 'i-lucide-calendar-x', color: 'error' as const },
   ]
   if (booking.value.status !== 'confirmed') return []
-  return [{ value: 'cancel', label: `Cancel ${presentation.value.noun}`, icon: 'i-lucide-calendar-x', color: 'error' as const }]
+  return [{ value: 'cancel', label: `Cancel ${presentation.value.noun}`, icon: 'i-lucide-calendar-x', color: 'error' as const }, ...noShow]
+})
+
+const REVIEW_INVITATION_LABELS = { sent: 'Sent', submitted: 'Answered', revoked: 'Withdrawn', expired: 'Expired' } as const
+const reviewStateLabel = computed(() => {
+  const record = booking.value
+  if (!record) return ''
+  if (record.noShowAt) return `Recorded ${formatCreatedAt(record.noShowAt)}. No review invitation is sent.`
+  const invitation = record.reviewInvitation
+  return invitation ? `${REVIEW_INVITATION_LABELS[invitation.state]} ${formatCreatedAt(invitation.at)}` : ''
 })
 
 function firstName(name: string) {
@@ -525,6 +551,10 @@ function selectAction(action: string) {
   if (action === 'cancel' && !booking.value?.guestCanRetryCancellation) {
     manageOpen.value = false
     openCancel()
+  } else if (action === 'no_show') {
+    manageOpen.value = false
+    actionError.value = null
+    noShowOpen.value = true
   } else void runAction(action)
 }
 
@@ -621,6 +651,7 @@ async function runAction(action: string) {
     await refreshDetails()
     actionAttempt.value = null
     cancelOpen.value = false
+    noShowOpen.value = false
     manageOpen.value = false
   } catch (cause) {
     const approvalUrl=isRecord(cause)&&isRecord(cause.data)&&isRecord(cause.data.data)&&typeof cause.data.data.financial_approval_url==='string'?cause.data.data.financial_approval_url:null

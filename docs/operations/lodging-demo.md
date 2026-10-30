@@ -69,7 +69,7 @@ staging dashboard:
 1. **Plan** (`/dashboard/saltleaf-stays-demo/billing`): choose Business and pay with
    Stripe's test card. Business grants the `payments` entitlement and its subscription carries the
    metered fee prices that accepting payments requires; each home past the two included is billed
-   as a home ($9 per month) at the end of the period, not as a location. On Basic the script stops
+   as a home ($4 per month) at the end of the period, not as a location. On Basic the script stops
    at the third home with `HOME_LIMIT`.
 2. **Payouts** (`/dashboard/saltleaf-stays-demo/payments`): connect Stripe and finish the Stripe-hosted onboarding with
    [Stripe's test values](https://docs.stripe.com/connect/testing). Staging uses

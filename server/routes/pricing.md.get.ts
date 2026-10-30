@@ -4,13 +4,15 @@ import { useRuntimeConfig } from 'nitro/runtime-config'
 import { cloudflareEnv, textResponse } from '~/server/utils/api-response'
 import { getCachedPlans, type EnvWithOrganizationCache, type Plan } from '~/server/utils/billing-plans'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
-import { additionalHomePrice, BUSINESS_PLAN_ID, INCLUDED_HOMES, PAYMENTS_FEE, SERVICES } from '~/shared/billing-model'
+import { additionalHomePrice, BUSINESS_PLAN_ID, INCLUDED_HOMES, PAYMENTS_FEE, PRICING_NOTICE, SERVICES } from '~/shared/billing-model'
 
 export function renderPlansMarkdown(plans: Plan[]): string {
   const lines: string[] = [
     '# KrabiClaw Pricing & Plans',
     '',
     '> Transparent pricing for the KrabiClaw conversational AI website builder.',
+    '',
+    PRICING_NOTICE,
     '',
   ]
 

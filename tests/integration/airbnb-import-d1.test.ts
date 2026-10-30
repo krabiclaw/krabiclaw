@@ -91,6 +91,10 @@ class FakeChannex {
   booking: Record<string, unknown> = {
     check_in_time_start: '16', check_in_time_end: '21', check_out_time: 10,
     guest_controls: { allows_children_as_host: true, allows_infants_as_host: true, allows_pets_as_host: true, allows_events_as_host: false, allows_smoking_as_host: false, children_not_allowed_details: null, pet_capacity: 1 },
+    // Firm and Strict Long Term, as a live listing reported them on 2026-10-29.
+    cancellation_policy_settings: { cancellation_policy_category: 'better_strict_with_grace_period', lts_cancellation_policy_id: 'CANCEL_LONG_TERM_WITH_GRACE_PERIOD', non_refundable_price_factor: null },
+    instant_booking_allowed_category: 'everyone',
+    listing_expectations_for_guests: [{ type: 'requires_stairs', added_details: null }],
   }
   /** Airbnb's `property_type_category` for the listing. */
   category = 'townhouse'
@@ -432,7 +436,8 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
     assert.deepEqual([edited.channel_push, edited.airbnb_unsynced], [{ state: 'pushed', detail: null }, []])
     assert.deepEqual(channex.settings, [
       { booking: { channel_rate_plan_id: 'map-1', data: { check_in_time_start: '17', check_in_time_end: '25', check_out_time: 10,
-        guest_controls: { allows_pets_as_host: true, allows_smoking_as_host: false, allows_events_as_host: false }, cancellation_policy_settings: { cancellation_policy_category: 'firm_14' } } } },
+        // The listing's children, infant and pet-capacity controls are restated under ours.
+        guest_controls: { allows_children_as_host: true, allows_infants_as_host: true, allows_pets_as_host: true, allows_events_as_host: false, allows_smoking_as_host: false, children_not_allowed_details: null, pet_capacity: 1 }, cancellation_policy_settings: { cancellation_policy_category: 'firm_14', lts_cancellation_policy_id: 'CANCEL_LONG_TERM_WITH_GRACE_PERIOD' }, instant_booking_allowed_category: 'everyone', listing_expectations_for_guests: [{ type: 'requires_stairs', added_details: null }] } } },
       { availability_settings: { availability_settings: { default_min_nights: 3 } } },
     ])
     // A value Airbnb cannot take is refused before the home changes.
@@ -1431,11 +1436,21 @@ test('the import asks only for what Airbnb leaves out, and stops when Airbnb has
     // Only the fields Airbnb left out may be supplied.
     await assert.rejects(connection.prepare(LISTING, { missingDetails: { ...form.missingDetails, city: 'Elsewhere' } }), { status: 422, data: { code: 'ONLY_MISSING_DETAILS' } })
     // "FLEXIBLE" or "NOT_SELECTED" is no start: the import stops naming Airbnb's field, and nothing is made.
-    for (const [setting, field] of [[{ check_in_time_start: 'NOT_SELECTED' }, 'booking_settings.check_in_time_start'], [{ check_out_time: null }, 'booking_settings.check_out_time']] as const) {
-      channex.booking = { ...channex.booking, check_in_time_start: '16', check_out_time: 10, ...setting }
+    const policies = channex.booking.cancellation_policy_settings
+    for (const [setting, field] of [
+      [{ check_in_time_start: 'NOT_SELECTED' }, 'booking_settings.check_in_time_start'], [{ check_out_time: null }, 'booking_settings.check_out_time'],
+      [{ cancellation_policy_settings: null }, 'booking_settings.cancellation_policy_settings.cancellation_policy_category'],
+      [{ cancellation_policy_settings: { cancellation_policy_category: 'flexible' } }, 'booking_settings.cancellation_policy_settings.lts_cancellation_policy_id'],
+    ] as const) {
+      channex.booking = { ...channex.booking, check_in_time_start: '16', check_out_time: 10, cancellation_policy_settings: policies, ...setting }
       await assert.rejects(connection.prepare(LISTING, form), (error: { status?: number; data?: Record<string, unknown> }) => error.status === 422 && error.data?.code === 'MISSING_AIRBNB_FIELD' && error.data.field === field)
       assert.deepEqual([await count(db, 'business_locations'), await count(db, 'products'), await count(db, 'product_channel_mappings')], [0, 0, 0])
     }
+    // A policy Airbnb names that has none of ours stops the import for review, and nothing is made.
+    channex.booking = { ...channex.booking, cancellation_policy_settings: { cancellation_policy_category: 'super_strict_30', lts_cancellation_policy_id: 'CANCEL_LONG_TERM_FAIR' } }
+    await assert.rejects(connection.prepare(LISTING, form), { status: 422, data: { code: 'UNSUPPORTED_CANCELLATION_POLICY' } })
+    assert.deepEqual([await count(db, 'business_locations'), await count(db, 'products'), await count(db, 'product_channel_mappings')], [0, 0, 0])
+    channex.booking = { ...channex.booking, cancellation_policy_settings: policies }
     // A flexible end is a home whose check-in window has no end; an hour after midnight is that hour.
     channex.booking = { ...channex.booking, check_in_time_start: '16', check_in_time_end: 'FLEXIBLE', check_out_time: 10 }
     assert.equal((await connection.details(LISTING)).checkInEndTime, null)
@@ -1443,7 +1458,9 @@ test('the import asks only for what Airbnb leaves out, and stops when Airbnb has
     assert.equal((await connection.details(LISTING)).checkInEndTime, '01:00')
     // The home has Airbnb's window; Channex's child-only beds and infant cots are 0, as Airbnb counts neither.
     const started = await connection.prepare(LISTING, form)
-    assert.deepEqual(await db.prepare('SELECT check_in_time, check_in_end_time, check_out_time FROM product_stay_configs WHERE product_id = ?').bind(started.product_id).first(), { check_in_time: '16:00', check_in_end_time: '01:00', check_out_time: '10:00' })
+    // It books under the listing's own policies: Firm, and Strict Long Term.
+    assert.deepEqual(await db.prepare('SELECT check_in_time, check_in_end_time, check_out_time, cancellation_policy, long_term_cancellation_policy FROM product_stay_configs WHERE product_id = ?').bind(started.product_id).first(),
+      { check_in_time: '16:00', check_in_end_time: '01:00', check_out_time: '10:00', cancellation_policy: 'firm', long_term_cancellation_policy: 'strict' })
     assert.deepEqual(channex.roomTypes, [])
     const property = JSON.parse(String(await db.prepare('SELECT import_property FROM product_channel_mappings WHERE product_id = ?').bind(started.product_id).first('import_property'))) as Record<string, unknown>
     assert.deepEqual(['child_beds', 'infant_cots'].filter(key => key in property), [])

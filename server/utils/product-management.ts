@@ -1,4 +1,4 @@
-import { isStayAmenityCodes, parseStayAmenityAnswers, planStayAmenityAnswers, STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, stayCodes, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
+import { isStayAmenityCodes, NEW_HOME_CANCELLATION_POLICIES, parseStayAmenityAnswers, planStayAmenityAnswers, STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, stayCodes, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { assertResponsibilityTarget, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership } from '~/server/utils/member-access'
 import { assertPublishedHost } from '~/server/utils/public-provider'
@@ -845,9 +845,20 @@ function planStayListing(stay: Record<string, unknown>): Pick<ProductStayConfig,
     bathrooms: stayCount(stay, 'bathrooms', 0, 50, 0.5),
     amenities: answers.filter(answer => answer.available).map(answer => answer.code),
     amenity_answers: answers,
-    cancellation_policy: stayCode(stay, 'cancellation_policy', stayCodes(STAY_CANCELLATION_POLICIES)),
-    long_term_cancellation_policy: stayCode(stay, 'long_term_cancellation_policy', stayCodes(STAY_LONG_TERM_CANCELLATION_POLICIES)),
+    cancellation_policy: stayPolicy(stay, 'cancellation_policy', stayCodes(STAY_CANCELLATION_POLICIES)),
+    long_term_cancellation_policy: stayPolicy(stay, 'long_term_cancellation_policy', stayCodes(STAY_LONG_TERM_CANCELLATION_POLICIES)),
   }
+}
+
+/**
+ * A home always has both policies, as an Airbnb listing does: one left out of
+ * a new home is Airbnb's own for a new listing, and none can be cleared. An
+ * edit restates the stored policy, so only a new home leaves one out.
+ */
+function stayPolicy<T extends string>(stay: Record<string, unknown>, field: keyof typeof NEW_HOME_CANCELLATION_POLICIES, codes: readonly T[]): T {
+  const value = stay[field] === undefined ? NEW_HOME_CANCELLATION_POLICIES[field] : stay[field]
+  if (!codes.includes(value as T)) invalidStayField(field, `stay.${field} must be one of ${codes.join(', ')}`)
+  return value as T
 }
 
 /** A stored home's listing facts; the table's checks guarantee their codes. */
@@ -1566,8 +1577,8 @@ function readProductChannelCompletion(value: unknown, product: Pick<Product, 'id
   if (plan.settings === null) return { nights: plan.nights, settings: null }
   if (typeof plan.settings !== 'object' || Array.isArray(plan.settings)) throw invalidPlan
   const settings = plan.settings as Record<string, unknown>
-  if (typeof settings.booking !== 'boolean' || typeof settings.availability !== 'boolean' || (!settings.booking && !settings.availability)) throw invalidPlan
-  return { nights: plan.nights, settings: { booking: settings.booking, availability: settings.availability } }
+  if (typeof settings.booking !== 'boolean' || typeof settings.cancellation !== 'boolean' || typeof settings.availability !== 'boolean' || (!settings.booking && !settings.cancellation && !settings.availability)) throw invalidPlan
+  return { nights: plan.nights, settings: { booking: settings.booking, cancellation: settings.cancellation, availability: settings.availability } }
 }
 
 async function replayCatalogWrite(db: DbClient, organizationId: string, dedupeKey: string | null, requestHash: string | null): Promise<{ products: Product[]; metadata: Record<string, unknown> } | null> {

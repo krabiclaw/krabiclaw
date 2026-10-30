@@ -1,15 +1,6 @@
-import {
-  environmentTenantAliasHostname,
-  usesTenantHeader,
-} from '../../server/utils/tenant-hosts'
-
-export const POTTERY_HOUSE_CANONICAL_URL = 'https://www.potteryhousekrabi.com'
-export const KIKUZUKI_CANONICAL_URL = 'https://www.kikuzuki-thailand.com'
-export const NCLS_CANONICAL_URL = 'https://www.northcarolinalegalservices.org'
-
-export const E2E_DEMO_ORGANIZATION_ID = 'org-demo'
-export const E2E_POTTERY_ORGANIZATION_ID = 'org-user-pottery-house'
-export const E2E_KIKUZUKI_ORGANIZATION_ID = 'org-bVY8SxxUuG6Ctk2CQnfCk8T2cPsj4jJX'
+import { usesTenantHeader } from '../../server/utils/tenant-hosts'
+import { SEED_SUBDOMAINS } from './seed/manifest'
+import type { SeedTenantKey } from '../../config/development-auth-fixtures'
 
 export function testBaseUrl() {
   const previewUrl = process.env.PLAYWRIGHT_PREVIEW_URL
@@ -23,59 +14,18 @@ export function testBaseUrl() {
   return `http://localhost:${port}`
 }
 
-function previewWorkerHeaders(slug: string): Record<string, string> {
-  return { 'x-preview-tenant': slug }
-}
-
 function usesSharedTenantHost(base: URL): boolean {
   return ['localhost', '127.0.0.1', '[::1]'].includes(base.hostname)
     || usesTenantHeader(base.hostname)
 }
 
-function deployedEnvironmentTenantBaseUrl(base: URL, slug: string): string | null {
-  const aliasHostname = environmentTenantAliasHostname(base.hostname, slug)
-  if (!aliasHostname) return null
-  base.hostname = aliasHostname
-  return base.toString().replace(/\/$/, '')
+/** A seeded business's public site: the local Worker, named by its subdomain header. */
+export function seededSiteURL(_key: SeedTenantKey): string {
+  return testBaseUrl().replace(/\/$/, '')
 }
 
-export function tenantTestBaseUrl() {
-  const base = new URL(testBaseUrl())
-  const environmentBaseUrl = deployedEnvironmentTenantBaseUrl(base, 'demo')
-  if (environmentBaseUrl) return environmentBaseUrl
-  if (usesSharedTenantHost(base)) {
-    return base.toString().replace(/\/$/, '')
-  }
-  base.hostname = base.hostname.startsWith('demo.') ? base.hostname : `demo.${base.hostname}`
-  return base.toString().replace(/\/$/, '')
-}
-
-export function potteryHouseTestBaseUrl() {
-  const base = new URL(testBaseUrl())
-  const environmentBaseUrl = deployedEnvironmentTenantBaseUrl(base, 'pottery-house')
-  if (environmentBaseUrl) return environmentBaseUrl
-  if (usesSharedTenantHost(base)) {
-    return base.toString().replace(/\/$/, '')
-  }
-  return POTTERY_HOUSE_CANONICAL_URL
-}
-
-export function blawbyTestBaseUrl() {
-  const base = new URL(testBaseUrl())
-  const environmentBaseUrl = deployedEnvironmentTenantBaseUrl(base, 'ncls')
-  if (environmentBaseUrl) return environmentBaseUrl
-  if (usesSharedTenantHost(base)) return base.toString().replace(/\/$/, '')
-  return NCLS_CANONICAL_URL
-}
-
-export function kikuzukiTestBaseUrl() {
-  const base = new URL(testBaseUrl())
-  const environmentBaseUrl = deployedEnvironmentTenantBaseUrl(base, 'kikuzuki-krabi-thailand')
-  if (environmentBaseUrl) return environmentBaseUrl
-  if (usesSharedTenantHost(base)) {
-    return base.toString().replace(/\/$/, '')
-  }
-  return KIKUZUKI_CANONICAL_URL
+export function seededSiteHeaders(key: SeedTenantKey): Record<string, string> {
+  return { 'x-preview-tenant': SEED_SUBDOMAINS[key] }
 }
 
 /**
@@ -88,28 +38,6 @@ export function kikuzukiTestBaseUrl() {
 export function tenantHostIsAddressable(): boolean {
   const base = new URL(testBaseUrl())
   return base.hostname === 'localhost' || !usesSharedTenantHost(base)
-}
-
-export function tenantTestExtraHeaders(): Record<string, string> {
-  const base = new URL(testBaseUrl())
-  return usesSharedTenantHost(base) ? previewWorkerHeaders('demo') : {}
-}
-
-export function potteryHouseTestExtraHeaders(): Record<string, string> {
-  const base = new URL(testBaseUrl())
-  return usesSharedTenantHost(base) ? previewWorkerHeaders('pottery-house') : {}
-}
-
-export function blawbyTestExtraHeaders(): Record<string, string> {
-  const base = new URL(testBaseUrl())
-  return usesSharedTenantHost(base) ? previewWorkerHeaders('ncls') : {}
-}
-
-export function kikuzukiTestExtraHeaders(): Record<string, string> {
-  const base = new URL(testBaseUrl())
-  return usesSharedTenantHost(base)
-    ? previewWorkerHeaders('kikuzuki-krabi-thailand')
-    : {}
 }
 
 export function devLoginHeaders(): Record<string, string> | undefined {

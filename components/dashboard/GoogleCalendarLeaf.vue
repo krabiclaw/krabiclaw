@@ -11,7 +11,7 @@
           <EditorNavigationList :groups="[{ id: 'conflicts', label: 'Check for conflicts', items: conflictRows }, { id: 'bookings', label: 'Add bookings to', items: bookingRows }]" />
           <section class="space-y-0">
             <h2 class="text-sm font-semibold text-muted">Sync changes from Google</h2>
-            <SettingRow v-model="reschedules" label="Reschedules" description="Drag a booking to a new time in Google Calendar and it moves here too, if that time is free. Your client gets the same email as any reschedule." :disabled="saving || !entitled" />
+            <SettingRow v-model="reschedules" label="Reschedules" description="Drag a booking to a new time in Google Calendar and your client is asked to accept it, if that time is free. The booking stays where it is until they do. Anyone you give edit access to this calendar in Google can request booking changes as you." :disabled="saving || !entitled" />
             <SettingRow :model-value="true" label="Deleted events" description="Deleting a booking's event never cancels it or refunds anyone. The event comes back, the booking shows on Today as needing your decision, and you're emailed, so you can cancel it properly here." disabled />
           </section>
         </template>
@@ -72,7 +72,7 @@ const bookingRows = computed<EditorNavigationItem[]>(() => [{
 const howItWorks: EditorNavigationItem[] = [
   { id: 'conflicts', label: 'Check for conflicts', icon: 'i-lucide-users', summary: 'Times a team member is busy in Google Calendar can’t be booked with them.' },
   { id: 'bookings', label: 'Add bookings to your calendar', icon: 'i-lucide-calendar-check', summary: 'Every booking appears on a KrabiClaw calendar in your Google account, and follows the booking.' },
-  { id: 'changes', label: 'Sync changes from Google', icon: 'i-lucide-refresh-cw', summary: 'Move a booking there and it moves here, and your client is told. Deleting one never cancels it.' },
+  { id: 'changes', label: 'Sync changes from Google', icon: 'i-lucide-refresh-cw', summary: 'Move a booking there and your client is asked to accept the new time. Deleting one never cancels it.' },
 ]
 const reschedules = computed({
   get: () => data.value?.sync?.reschedules ?? true,

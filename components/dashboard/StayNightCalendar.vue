@@ -93,7 +93,7 @@
                 <p class="font-medium text-highlighted">{{ [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest name not provided' }}</p>
                 <p class="mt-1 text-sm text-muted">{{ formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' }) }} – {{ formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric', year: 'numeric' }) }}</p>
               </div>
-              <span class="text-sm text-muted">{{ channels[stay.channel] }}</span>
+              <span v-if="stay.channel" class="text-sm text-muted">{{ channels[stay.channel] }}</span>
             </NuxtLink>
           </div>
         </template>
@@ -140,7 +140,7 @@
 
 <script setup lang="ts">
 import { parseDate, today, type DateValue } from '@internationalized/date'
-import type { Stay, StayHome, StayNight } from '~/server/domain/stays'
+import type { Stay, StayHome, StayNight, StayTurnover } from '~/server/domain/stays'
 import { STAY_CHANNEL_LABELS } from '~/shared/bookings'
 import StayNightInspector, { type NightConcern, type NightDraft, type NightEditField } from './StayNightInspector.vue'
 import EditorNavigationList from './EditorNavigationList.vue'
@@ -153,7 +153,8 @@ import { addLocalDays, formatCalendarDate, isValidCalendarDate, isValidInstant, 
 import { getErrorMessage } from '~/utils/errors'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'cancellation_policy' | 'long_term_cancellation_policy'>
-type CalendarStay = Pick<Stay, 'id' | 'product_id' | 'check_in_date' | 'check_out_date' | 'guest_name' | 'guest_surname' | 'channel' | 'status'>
+// A manager reads each stay's surname and channel; a member's turnover has neither.
+type CalendarStay = Pick<StayTurnover, 'id' | 'product_id' | 'check_in_date' | 'check_out_date' | 'guest_name' | 'status'> & Partial<Pick<Stay, 'guest_surname' | 'channel'>>
 interface CalendarPayload { home: Home; nights: StayNight[]; stays: CalendarStay[]; channel_push?: SuccessfulChannelPush | null }
 const props = defineProps<{ productId: string; homes: Pick<StayHome, 'product_id' | 'name' | 'timezone'>[]; manage: boolean; homeError: string; offeringItems: { label: string; value: string }[]; offeringsError?: string }>()
 const route = useRoute()
@@ -225,7 +226,7 @@ function isCalendar(value: unknown): value is CalendarPayload {
   if (!isValidTimezone(home.timezone)) return false
   if (!value.stays.every(stay => isRecord(stay) && typeof stay.id === 'string' && stay.product_id === props.productId
     && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date) && stay.check_out_date > stay.check_in_date
-    && nullableText(stay.guest_name) && nullableText(stay.guest_surname) && Object.hasOwn(channels, String(stay.channel)) && typeof stay.status === 'string')) return false
+    && nullableText(stay.guest_name) && (props.manage ? nullableText(stay.guest_surname) && Object.hasOwn(channels, String(stay.channel)) : !('guest_surname' in stay) && !('channel' in stay)) && typeof stay.status === 'string')) return false
   return (value.channel_push === undefined || isSuccessfulChannelPush(value.channel_push)) && value.nights.every(item => isRecord(item) && isValidCalendarDate(item.date)
     && typeof item.available === 'boolean' && typeof item.closed === 'boolean' && nullableText(item.stay_id) && nullableAmount(item.price_minor)
     && (item.calendar === null || item.calendar === 'vrbo')
@@ -260,7 +261,7 @@ function stayLabel(day: DateValue) {
   const value = night(day)
   if (value?.stay_id) {
     const stay = staysById.value.get(value.stay_id)
-    return stay ? `${[stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest name not provided'} · ${channels[stay.channel]}` : 'Reserved'
+    return stay ? [[stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest name not provided', ...(stay.channel ? [channels[stay.channel]] : [])].join(' · ') : 'Reserved'
   }
   return value?.calendar ? `Unavailable from ${channels[value.calendar]}` : 'Checkout hold'
 }

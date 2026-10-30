@@ -12,7 +12,7 @@ import { CHANNEX_WEBHOOK_CALLER } from '~/server/utils/internal-secret'
  */
 
 /** The events the webhook handler takes; every other event is answered `ignored`. */
-export const CHANNEX_WEBHOOK_EVENTS = ['booking', 'message', 'message_thread_booking_assigned', 'inquiry'] as const
+export const CHANNEX_WEBHOOK_EVENTS = ['booking', 'message', 'message_thread_booking_assigned', 'inquiry', 'alteration_request'] as const
 
 export interface WebhookTarget {
   /** The environment's origin; the callback is its Channex webhook route. */

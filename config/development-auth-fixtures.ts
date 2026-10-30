@@ -1,3 +1,12 @@
+/** The seeded businesses a fixture can belong to; see tests/e2e/seed. */
+export type SeedTenantKey = 'restaurant' | 'experience' | 'legal'
+
+/** Seeded local actors share one password; nothing here exists outside a local E2E database. */
+export const E2E_PASSWORD = 'E2e-Local-Password-7!'
+
+/** The platform administrator the seed bootstraps first and every default sign-in uses. */
+export const E2E_ADMIN_ID = 'user-e2e-platform-admin'
+
 export interface E2eAuthFixture {
   id: string
   name: string
@@ -5,7 +14,7 @@ export interface E2eAuthFixture {
   phoneNumber?: string
   platformRole?: 'user' | 'admin'
   memberships?: Array<{
-    organizationId: string
+    tenant: SeedTenantKey
     role: 'owner' | 'admin'
   }>
 }
@@ -29,6 +38,7 @@ export const E2E_AUTH_FIXTURES: readonly E2eAuthFixture[] = [
     name: 'E2E Platform Admin',
     email: 'platform-admin@playwright.example',
     platformRole: 'admin',
+    memberships: [{ tenant: 'restaurant', role: 'owner' }, { tenant: 'experience', role: 'owner' }, { tenant: 'legal', role: 'owner' }],
   },
   {
     // A buyer with no organization: bookings, purchases, saved cards and account deletion.
@@ -40,51 +50,50 @@ export const E2E_AUTH_FIXTURES: readonly E2eAuthFixture[] = [
     id: 'user-e2e-demo-owner',
     name: 'E2E Demo Owner',
     email: 'demo-owner@playwright.example',
-    memberships: [{ organizationId: 'org-demo', role: 'owner' }],
+    memberships: [{ tenant: 'restaurant', role: 'owner' }],
   },
   {
     id: 'user-e2e-demo-role-owner',
     name: 'E2E Demo Role Owner',
     email: 'demo-role-owner@playwright.example',
-    memberships: [{ organizationId: 'org-demo', role: 'owner' }],
+    memberships: [{ tenant: 'restaurant', role: 'owner' }],
   },
   {
     id: 'user-e2e-pottery-owner',
     name: 'E2E Pottery Owner',
     email: 'pottery-owner@playwright.example',
     phoneNumber: '+61491570006',
-    memberships: [{ organizationId: 'org-user-pottery-house', role: 'owner' }],
+    memberships: [{ tenant: 'experience', role: 'owner' }],
   },
   {
     id: 'user-e2e-pottery-location-owner',
     name: 'E2E Pottery Location Owner',
     email: 'pottery-location-owner@playwright.example',
-    memberships: [{ organizationId: 'org-user-pottery-house', role: 'owner' }],
+    memberships: [{ tenant: 'experience', role: 'owner' }],
   },
   {
     id: 'user-e2e-kikuzuki-owner',
     name: 'E2E Kikuzuki Owner',
     email: 'kikuzuki-owner@playwright.example',
     phoneNumber: '+61491570156',
-    memberships: [{ organizationId: 'org-bVY8SxxUuG6Ctk2CQnfCk8T2cPsj4jJX', role: 'owner' }],
+    memberships: [{ tenant: 'restaurant', role: 'owner' }],
   },
   {
     id: 'user-e2e-ncls-owner',
     name: 'E2E NCLS Owner',
     email: 'ncls-owner@playwright.example',
-    memberships: [{ organizationId: 'org-ncls-blawby', role: 'owner' }],
+    memberships: [{ tenant: 'legal', role: 'owner' }],
   },
   {
     id: 'user-e2e-ncls-consultation-owner',
     name: 'E2E NCLS Consultation Owner',
     email: 'ncls-consultation-owner@playwright.example',
-    memberships: [{ organizationId: 'org-ncls-blawby', role: 'owner' }],
+    memberships: [{ tenant: 'legal', role: 'owner' }],
   },
   ...[
     'oauth-cimd',
     'oauth-private-cimd',
-    // Drives the new-site wizard end to end; every run leaves it owning one more
-    // organization, which reset-e2e-artifacts sweeps as a non-fixture org.
+    // Drives the new-site wizard end to end, owning the organization it creates.
     'onboarding-wizard',
     // Signs in like the native app, with a bearer session and no cookies, and
     // owns the organization it creates for the lodging-identity spec.
@@ -107,7 +116,7 @@ export const E2E_AUTH_FIXTURES: readonly E2eAuthFixture[] = [
   })),
 ]
 
-export const DEFAULT_E2E_USER_ID = 'user-e2e-demo-owner'
+export const DEFAULT_E2E_USER_ID = E2E_ADMIN_ID
 
 export function findE2eAuthFixture(userId = DEFAULT_E2E_USER_ID): E2eAuthFixture {
   const fixture = E2E_AUTH_FIXTURES.find(candidate => candidate.id === userId)

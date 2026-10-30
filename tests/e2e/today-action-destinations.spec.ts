@@ -1,16 +1,20 @@
 import { expect, test } from '@playwright/test'
 import sharp from 'sharp'
-import { dismissPreviewToolbar, openTenantPage, tenantBaseURL, tenantExtraHeaders, waitForNuxtHydration } from './helpers'
+import { dismissPreviewToolbar, openTenantPage, waitForNuxtHydration } from './helpers'
+import { seededSiteHeaders, seededSiteURL } from './test-env'
+import { seededTenant } from './seed/manifest'
 import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { articleFacebookPostPath, blogCreatePath, insightsPath } from '../../server/utils/dashboard-links'
 import { addLocalDays } from '../../utils/timezone'
 
 const orgSlug = 'ember-slice-demo'
-const organizationId = 'org-demo'
-const editor = `/api/editor/organizations/${organizationId}`
+let organizationId: string
+let editor: string
 
 test.beforeEach(async ({ page, baseURL }) => {
+  organizationId = seededTenant('restaurant').organizationId
+  editor = `/api/editor/organizations/${organizationId}`
   await dismissPreviewToolbar(page)
   await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
 })
@@ -433,7 +437,7 @@ test('a prepared article photo post preserves concurrent media and publishes onl
       .toMatchObject({ status: 'published', body: publishedCaption, media: [{ asset_id: assetId, slot: 'gallery' }, { asset_id: concurrentAssetId, slot: 'gallery' }] })
     const visitor = await page.context().newPage()
     try {
-      const response = await openTenantPage(visitor, new URL(`/posts/${encodeURIComponent(post.slug)}`, tenantBaseURL).toString(), tenantExtraHeaders)
+      const response = await openTenantPage(visitor, new URL(`/posts/${encodeURIComponent(post.slug)}`, seededSiteURL('restaurant')).toString(), seededSiteHeaders('restaurant'))
       expect(response?.status()).toBe(200)
       await expect(visitor.getByRole('heading', { name: title, level: 1, exact: true })).toBeVisible()
       await expect(visitor.getByText(publishedCaption, { exact: true })).toBeVisible()
@@ -537,7 +541,7 @@ test('a new article publishes its composed body directly and retries publication
     expect((await listRead.json() as { posts: Array<{ id: string; title: string }> }).posts.filter(post => post.title === title).map(post => post.id)).toEqual([articleId])
     const visitor = await page.context().newPage()
     try {
-      const response = await openTenantPage(visitor, new URL(article.public_path, tenantBaseURL).toString(), tenantExtraHeaders)
+      const response = await openTenantPage(visitor, new URL(article.public_path, seededSiteURL('restaurant')).toString(), seededSiteHeaders('restaurant'))
       expect(response?.status()).toBe(200)
       await expect(visitor.getByRole('heading', { name: title, level: 1, exact: true })).toBeVisible()
       await expect(visitor.getByText(body, { exact: true })).toBeVisible()

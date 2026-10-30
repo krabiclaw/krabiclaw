@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
-import { blawbyBaseURL, blawbyExtraHeaders, openTenantPage } from './helpers'
-import { testBaseUrl, tenantTestBaseUrl, tenantTestExtraHeaders } from './test-env'
+import { openTenantPage } from './helpers'
+import { seededTenant } from './seed/manifest'
+import { seededSiteHeaders, seededSiteURL, testBaseUrl } from './test-env'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
@@ -15,24 +16,28 @@ test('unknown sites render an unbranded 404 while resolved tenant errors retain 
   expect(unknown?.status()).toBe(404)
   await expect(page.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
   await expect(page.getByText('Error 404', { exact: true })).toBeVisible()
-  expect(await page.locator('body').innerText()).not.toMatch(/Krabi[Cc]law|Ember & Slice|North Carolina Legal Services/)
+  const practice = seededTenant('legal')
+  expect(await page.locator('body').innerText()).not.toMatch(new RegExp(`Krabi[Cc]law|${seededTenant('restaurant').name}|${practice.name}`))
   await page.unrouteAll()
-  const missing = await openTenantPage(page, `${blawbyBaseURL}/no-such-page`, blawbyExtraHeaders)
+  const missing = await openTenantPage(page, `${seededSiteURL('legal')}/no-such-page`, seededSiteHeaders('legal'))
   expect(missing?.status()).toBe(404)
   await expect(page.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
-  await expect(page.getByRole('img', { name: 'North Carolina Legal Services', exact: true })).toBeVisible()
-  const unsupported = await page.goto(`${blawbyBaseURL}/templates`)
+  await expect(page.getByRole('img', { name: practice.name, exact: true })).toBeVisible()
+  const unsupported = await page.goto(`${seededSiteURL('legal')}/templates`)
   expect(unsupported?.status()).toBe(404)
   await expect(page.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
   expect(errors).toEqual([])
 })
 
-for (const tenant of [
-  { name: 'Saya', organizationId: 'org-demo', baseURL: tenantTestBaseUrl(), headers: tenantTestExtraHeaders(), path: '/about', schemaType: 'Organization' },
-  { name: 'Blawby', organizationId: 'org-ncls-blawby', baseURL: blawbyBaseURL, headers: blawbyExtraHeaders, path: '/about', schemaType: 'LegalService' },
-  { name: 'Cedar Legal Demo', organizationId: '5WebMejsoVLyZLHC29wHH5GbQx1jlvCd', baseURL: testBaseUrl(), headers: { 'x-preview-tenant': 'cedar-legal' }, path: '/contact', ownerId: 'ivUlJc9BoyZeFszowpbUEjh1pugcDHiT', schemaType: 'ProfessionalService' },
-]) {
-  test(`${tenant.name} ${tenant.path} CMS-authored HowTo persists and accompanies the public page schema`, async ({ page, request, baseURL }) => {
+// Saya and Blawby pages, and a Blawby contact page edited by the platform
+// administrator while impersonating the practice's owner.
+for (const site of [
+  { name: 'Saya', key: 'restaurant', path: '/about', schemaType: 'Organization' },
+  { name: 'Blawby', key: 'legal', path: '/about', schemaType: 'ProfessionalService' },
+  { name: 'Blawby contact', key: 'legal', path: '/contact', ownerId: 'user-e2e-ncls-owner', schemaType: 'ProfessionalService' },
+] as const) {
+  test(`${site.name} ${site.path} CMS-authored HowTo persists and accompanies the public page schema`, async ({ page, request, baseURL }) => {
+    const tenant = { ...site, organizationId: seededTenant(site.key).organizationId, baseURL: seededSiteURL(site.key), headers: seededSiteHeaders(site.key) }
     await loginAs(request, baseURL!)
     let impersonated = false
     try {
@@ -49,8 +54,8 @@ for (const tenant of [
       const before = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_site_page', args: { organization_id: tenant.organizationId, variant_id: about!.id } })
       expect(before.status()).toBe(200)
       const original = mcpData<{ page: { document: { id: string }; blocks: Array<{ id: string; type: string }> } }>(await before.json()).page
-      // Cedar's contact page as authored in its CMS: the office list and the form the HowTo is added beside.
-      if ('ownerId' in tenant) expect(original.blocks.map(block => block.type)).toEqual(['hero', 'divider', 'location_grid', 'contact_form'])
+      // The contact page's form, which the HowTo is added beside.
+      if ('ownerId' in tenant) expect(original.blocks.map(block => block.type)).toContain('contact_form')
       const title = `Plan your visit ${crypto.randomUUID()}`
       const steps = [{ name: 'Choose a time', text: 'Contact our team to choose a time for your visit.' }, { name: 'Prepare for your visit', text: 'Read the information our team sends before you arrive.' }]
       const added: Array<{ id: string; updated_at: string }> = []
@@ -112,8 +117,8 @@ for (const tenant of [
 }
 
 test('a featured image alt text saved in the media library reaches the rendered page', async ({ page, request, baseURL }, testInfo) => {
-  const tenant = { baseURL: blawbyBaseURL, headers: blawbyExtraHeaders }
-  const organizationId = 'org-ncls-blawby'
+  const tenant = { baseURL: seededSiteURL('legal'), headers: seededSiteHeaders('legal') }
+  const organizationId = seededTenant('legal').organizationId
   const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, organizationId)
   type FeaturedImage = { asset_id: string; slot: string; public_url: string; alt_text: string | null }
   type AuthoredPage = { page: { blocks: Array<{ id: string; type: string; media: FeaturedImage[] }> } }

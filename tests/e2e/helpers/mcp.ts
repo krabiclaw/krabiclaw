@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { expect, type APIRequestContext, type APIResponse } from '@playwright/test'
 import { loginAs } from './auth'
-import { E2E_DEMO_ORGANIZATION_ID } from '../test-env'
+import { seededTenant } from '../seed/manifest'
 
 // The Streamable HTTP transport requires clients to accept both
 // application/json and text/event-stream (see the Accept header below), and
@@ -36,10 +36,10 @@ function withMcpJson(response: APIResponse): APIResponse {
 }
 
 export const MCP_VERSION = '2025-06-18'
-// Ember & Slice, the demo organization the production snapshot carries with the
-// Commerce plan active. Every MCP spec drives this tenant and its loc-demo
-// location; a spec never provisions an organization or location of its own.
-export const MCP_ORGANIZATION_ID = E2E_DEMO_ORGANIZATION_ID
+/** Ember & Slice, the seeded restaurant on the Business plan that MCP specs drive. */
+export function mcpOrganizationId(): string {
+  return seededTenant('restaurant').organizationId
+}
 
 export async function mcpRequest(
   request: APIRequestContext,

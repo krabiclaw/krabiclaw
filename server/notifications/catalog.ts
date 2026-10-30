@@ -12,6 +12,7 @@ import {
   contactReceivedMessage,
   stayBookedMessage,
   stayCancelledMessage,
+  stayTurnoverAlert,
   domainUpdateMessage,
   onboardingCompletedMessage,
   contentReportedMessage,
@@ -83,6 +84,16 @@ const sampleLogo = 'https://imagedelivery.net/Frxyb2_d_vGyiaXhS5xqCg/881bb3e2-b2
 // Owner alerts leave the event builders without a mark; notifyOwner adds the
 // organization's logo before rendering, and the preview shows what it sends.
 const ownerAlert = (message: NotificationMessage): NotificationMessage => ({ ...message, organizationLogoUrl: sampleLogo })
+
+const stay = {
+  guestName: 'Mina', guestEmail: 'mina@example.com', guestPhone: '+1 415 555 0134', homeName: 'Cedar Loft',
+  checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', arrival: '6:00 PM', nights: '3', guests: '2 adults',
+  organizationName: 'Pinecone Stays', heroImageUrl: null, replyUrl: 'https://demo.krabiclaw.com/dashboard/pinecone-stays/messages/preview-1',
+}
+const stayBooked = { ...stay, total: '$645.00', notes: 'We will bring our dog if that is fine.' }
+const stayCancelled = { ...stay, refund: '$322.50' }
+// A member looking after the home opens the stay itself.
+const stayPreviewUrl = 'https://demo.krabiclaw.com/dashboard/pinecone-stays/bookings/stay/preview-1'
 
 const booking = {
   ...reservation,
@@ -160,23 +171,25 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     id: 'stay-booked',
     audience: 'owner',
     title: 'Owner — new stay booked on the site',
-    message: ownerAlert(stayBookedMessage({
-      guestName: 'Mina Park', guestEmail: 'mina@example.com', guestPhone: '+1 415 555 0134', homeName: 'Cedar Loft',
-      checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', nights: '3', guests: '2 adults',
-      total: '$645.00', notes: 'We will arrive around 6 pm.', organizationName: 'Pinecone Stays', heroImageUrl: null,
-      replyUrl: 'https://demo.krabiclaw.com/dashboard/pinecone-stays/messages/preview-1',
-    })),
+    message: ownerAlert(stayBookedMessage(stayBooked)),
+  },
+  {
+    id: 'stay-booked-member',
+    audience: 'owner',
+    title: 'Member looking after the home — new stay booked on the site',
+    message: ownerAlert(stayBookedMessage(stayTurnoverAlert(stayBooked, stayPreviewUrl))),
   },
   {
     id: 'stay-cancelled',
     audience: 'owner',
     title: 'Owner — stay cancelled by its guest',
-    message: ownerAlert(stayCancelledMessage({
-      guestName: 'Mina Park', guestEmail: 'mina@example.com', guestPhone: '+1 415 555 0134', homeName: 'Cedar Loft',
-      checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', nights: '3', guests: '2 adults',
-      refund: '$322.50', organizationName: 'Pinecone Stays', heroImageUrl: null,
-      replyUrl: 'https://demo.krabiclaw.com/dashboard/pinecone-stays/messages/preview-1',
-    })),
+    message: ownerAlert(stayCancelledMessage(stayCancelled)),
+  },
+  {
+    id: 'stay-cancelled-member',
+    audience: 'owner',
+    title: 'Member looking after the home — stay cancelled by its guest',
+    message: ownerAlert(stayCancelledMessage(stayTurnoverAlert(stayCancelled, stayPreviewUrl))),
   },
   {
     id: 'contact-received',
@@ -282,7 +295,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
   { id: 'guest-thread-reply', audience: 'guest', title: 'Guest — a reply from the business', message: guestThreadReplyMessage({ organizationName: restaurant, organizationLogoUrl: sampleLogo, body: 'Hi Jordan,\n\nYes — we have a full vegan menu, and there is street parking on Soi 3 right outside. See you Tuesday!' }) },
   { id: 'guest-thread-status', audience: 'guest', title: 'Guest — reservation status changed', message: guestThreadStatusMessage({ organizationName: restaurant, organizationLogoUrl: sampleLogo, heading: `Your reservation at ${restaurant} is confirmed`, body: 'Your reservation is confirmed: Tue, Jul 14, 2026 at 7:00 PM for 2 guests.', actionUrl: guestVisit.receiptUrl, actionLabel: 'Manage your reservation' }) },
   { id: 'guest-booking-change-proposal', audience: 'guest', title: 'Guest — booking change proposed', message: bookingChangeProposalMessage({ guestName: 'Mina Park', organizationName: studio, organizationLogoUrl: sampleLogo, heading: 'Please review changes to your booking', intro: 'Your host has requested changes. Your booking stays exactly as it is until you accept, and the link below expires in 7 days.', rows: [['Location', 'Main Studio'], ['When', 'Tue, Jul 21, 2026 at 2:00 PM'], ['Guests', '2']], actionUrl: 'https://demo.krabiclaw.com/booking-changes/preview', actionLabel: 'Review the changes' }) },
-  { id: 'guest-review-request', audience: 'guest', title: 'Guest — review request', message: reviewRequestMessage({ guestName: 'Alex Carter', organizationName: restaurant, locationName: 'Main Dining Room', visitAt: 'Tue, Jul 14, 2026 at 7:00 PM', partySize: '2 guests', reviewUrl: 'https://demo.krabiclaw.com/locations/main/review-submit?request=preview', organizationLogoUrl: sampleLogo }) },
+  { id: 'guest-review-request', audience: 'guest', title: 'Guest — review request', message: reviewRequestMessage({ guestName: 'Alex Carter', organizationName: restaurant, locationName: 'Main Dining Room', visitAt: 'Tue, Jul 14, 2026 at 7:00 PM', partySize: '2 guests', reviewUrl: 'https://demo.krabiclaw.com/review-submit?token=preview', organizationLogoUrl: sampleLogo }) },
   { id: 'article-announcement', audience: 'owner', title: 'KrabiClaw news — new article', message: articleAnnouncementMessage({ title: 'Turning walk-ins into repeat guests', summary: 'Three things the best-performing KrabiClaw sites do after a guest leaves.', bodyMarkdown: '## Say thank you the same day\n\nA short note while the meal is still fresh brings guests back more often than any discount.\n\n## Ask for the review\n\n- Send the link once\n- Make it one tap\n\n## Invite them back\n\nTell them what is new next month, and [show them the menu](https://krabiclaw.com).', coverImageUrl: null, articleUrl: 'https://krabiclaw.com/blog/operations/preview' }) },
   ...ownerPayments.map(event => ({ id: `owner-${event.kind}`, audience: 'owner' as const, title: `Owner — ${ownerPaymentMessage(event).title}`, message: ownerPaymentMessage(event) })),
   ...guestPayments.map(event => ({ id: `guest-${event.kind}`, audience: 'guest' as const, title: `Guest — ${guestPaymentMessage(event).title}`, message: guestPaymentMessage(event) })),

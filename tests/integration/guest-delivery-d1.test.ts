@@ -28,7 +28,6 @@ import { registerDevice } from '../../server/domain/devices.ts'
 import { guestPaymentMessage, ownerPaymentMessage } from '../../server/notifications/payment-events.ts'
 import { getResendClient, resendData } from '../../server/utils/resend.ts'
 import { getReviewBookingContext } from '../../server/utils/review-requests.ts'
-import { sendReviewRequestForBooking } from '../../server/utils/review-request-delivery.ts'
 import { renderNotificationEmail } from '../../server/emails/render.ts'
 import { reviewRequestMessage } from '../../server/notifications/guest-events.ts'
 import { formatTimestamp } from '../../utils/timezone.ts'
@@ -412,7 +411,7 @@ test('a replayed status email sends its recorded content and refuses a supersede
       record: {
         kind: 'reservation', id: 'reservation-status', status: 'cancelled', party_size: 2,
         starts_at: '2098-10-01T11:00:00.000Z', ends_at: '2098-10-01T13:00:00.000Z', timezone: 'Asia/Bangkok',
-        location_id: 'location-status', product_id: null, product_name: null, assigned_member_id: null, check_in_date: null, check_out_date: null,
+        location_id: 'location-status', product_id: null, product_name: null, assigned_member_id: null, check_in_date: null, check_out_date: null, no_show_at: null, review_id: null,
         organization_id: 'org-status', user_id: null,
       },
     })
@@ -578,6 +577,84 @@ test('a failed stay cancellation email retries its recorded content after displa
   }
 })
 
+test('a guest-cancelled stay alerts owners with the whole stay and the team looking after the home with its turnover', async (t) => {
+  const runtime = new Miniflare({ workers: [{ config: {
+    name: 'stay-member-alert-proof', compatibilityDate: '2024-11-01',
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
+    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stay-member-alert-proof', exportName: 'Hub' } },
+  } }] })
+  const emails: Array<{ to: string[]; subject: string; text: string; html: string }> = []
+  const pushes: Array<{ url: string; body: Record<string, unknown> }> = []
+  t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+    if (url.startsWith('https://api.sandbox.push.apple.com/')) {
+      pushes.push({ url, body: JSON.parse(String(init.body)) })
+      return new Response(null, { status: 200 })
+    }
+    const readback = url.match(/^https:\/\/api\.resend\.com\/emails\/sent-(\d+)$/u)
+    if (readback && init.method === 'GET') {
+      const sent = emails[Number(readback[1]) - 1]!
+      return Response.json({ id: `sent-${readback[1]}`, message_id: `<sent-${readback[1]}@provider-proof.com>`, to: sent.to, subject: sent.subject, html: sent.html, text: sent.text })
+    }
+    assert.equal(url, 'https://api.resend.com/emails')
+    emails.push(JSON.parse(String(init.body)))
+    return Response.json({ id: `sent-${emails.length}` })
+  })
+  try {
+    const db = await runtime.getD1Database('DB')
+    const signingKey = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+    const pem = `-----BEGIN PRIVATE KEY-----\n${Buffer.from(await crypto.subtle.exportKey('pkcs8', signingKey.privateKey)).toString('base64')}\n-----END PRIVATE KEY-----\n`
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'provider', WHATSAPP_DELIVERY_MODE: 'log_only',
+      STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>',
+      APNS_KEY_ID: 'PROOFKEY01', APNS_TEAM_ID: 'PROOFTEAM1', APNS_BUNDLE_ID: 'com.krabiclaw.app', APNS_PRIVATE_KEY: pem }
+    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    for (const statement of [
+      "INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone, vertical, theme_id) VALUES ('org-turnover', 'Turnover Retreat', 'turnover', 'turnover', 'USD', 'Asia/Bangkok', 'lodging', 'tenant-theme-v1')",
+      "INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('turnover-en', 'org-turnover', 'en', 1, 'published')",
+      "INSERT INTO user (id, name, email) VALUES ('owner-turnover', 'Owner', 'owner@provider-proof.com'), ('cleaner-turnover', 'Cleaner', 'cleaner@provider-proof.com')",
+      "INSERT INTO member (id, organizationId, userId, role) VALUES ('member-owner-turnover', 'org-turnover', 'owner-turnover', 'owner'), ('member-cleaner-turnover', 'org-turnover', 'cleaner-turnover', 'member')",
+      "INSERT INTO team (id, name, organizationId, createdAt) VALUES ('cleaning', 'Cleaning', 'org-turnover', 0)",
+      "INSERT INTO teamMember (id, teamId, userId, createdAt) VALUES ('tm-cleaner', 'cleaning', 'cleaner-turnover', 0)",
+      "INSERT INTO business_locations (id, organization_id, slug, title, timezone, status) VALUES ('location-turnover', 'org-turnover', 'retreat', 'Retreat', 'Asia/Bangkok', 'active')",
+      "INSERT INTO session (id, expiresAt, token, userId) VALUES ('session-cleaner', unixepoch() + 3600, 'session-token-cleaner', 'cleaner-turnover')",
+    ]) await db.prepare(statement).run()
+    const deviceToken = 'cd'.repeat(32)
+    await registerDevice(db, { kind: 'apns', deviceToken, environment: 'sandbox', userId: 'cleaner-turnover', sessionId: 'session-cleaner' })
+    const access = { organizationId: 'org-turnover', actorId: 'owner-turnover', manage: true as const }
+    const home = await createProduct(db, { env, organizationId: access.organizationId, actor: { actorId: access.actorId }, product: {
+      kind: 'stay', name: 'Turnover Cabin', variants: [{ name: 'Turnover Cabin', prices: [{ unit_amount: 15000, currency: 'USD' }] }],
+      stay: { location_id: 'location-turnover', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: 'cleaning' },
+    } })
+    // A site checkout saves the guest's whole name in guest_name.
+    const stay = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'turnover-alert', check_in_date: '2098-10-01', check_out_date: '2098-10-03', arrival_time: '15:30',
+      adults: 2, children: 1, guest_name: 'Ana Silva', guest_email: 'guest@provider-proof.com', notes: 'Door code 4411', total_minor: 30000 })
+    await notifyStayCancelled(env, db, access.organizationId, stay.id, 'guest', 12345)
+
+    const to = (address: string) => emails.filter(email => email.to.includes(address))
+    assert.equal(to('owner@provider-proof.com').length, 1)
+    assert.equal(to('cleaner@provider-proof.com').length, 1)
+    const [ownerEmail] = to('owner@provider-proof.com')
+    const [memberEmail] = to('cleaner@provider-proof.com')
+    assert.equal(ownerEmail!.subject, 'Stay cancelled by Ana Silva')
+    for (const fact of ['guest@provider-proof.com', '$123.45', '3:30 PM']) assert(ownerEmail!.text.includes(fact), `the owner's alert states ${fact}`)
+    assert.equal(memberEmail!.subject, 'Stay cancelled by Ana')
+    for (const fact of ['Place to stay\nTurnover Cabin', 'Guest\nAna\n', 'Check-in\nWed, Oct 1, 2098 · 4:00 PM', 'Check-out\nFri, Oct 3, 2098 · 10:00 AM', 'Arriving\n3:30 PM', 'Guests\n3\n', `https://proof.example/dashboard/turnover/bookings/stay/${stay.id}`]) assert(memberEmail!.text.includes(fact), `the member's alert states ${fact}`)
+    for (const secret of ['Silva', 'guest@provider-proof.com', '$123.45', 'Door code', stay.request_id!]) {
+      assert(!memberEmail!.text.includes(secret) && !memberEmail!.html.includes(secret), `the member's alert leaves out ${secret}`)
+    }
+    // The member's phone opens the stay, not the guest's conversation.
+    assert.equal(pushes.length, 1)
+    assert.equal(pushes[0]!.url, `https://api.sandbox.push.apple.com/3/device/${deviceToken}`)
+    assert.deepEqual(pushes[0]!.body, {
+      aps: { alert: { title: 'Stay cancelled by Ana', body: 'Turnover Cabin · Wed, Oct 1, 2098 · 4:00 PM – Fri, Oct 3, 2098 · 10:00 AM' }, sound: 'default' },
+      organizationId: access.organizationId, userId: 'cleaner-turnover', kind: 'stay', stayId: stay.id,
+    })
+  } finally {
+    await runtime.dispose()
+  }
+})
+
 test('a booking move into a full session leaves the original booking exactly as it was', async () => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'booking-move-proof', compatibilityDate: '2024-11-01',
@@ -677,9 +754,6 @@ test('a review request reads the visit from the record that holds it', async () 
 
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
-      STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests',
-      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     const now = new Date().toISOString()
     for (const statement of [
@@ -709,8 +783,7 @@ test('a review request reads the visit from the record that holds it', async () 
       'status and the visit come from the reservation, not from the thread payload',
     )
 
-    const result = await sendReviewRequestForBooking(env, db, 'reservation', 'reservation-review')
-    assert.deepEqual({ sent: result.sent, error: result.error }, { sent: true, error: undefined })
+    // Sending, its timing and its delivery through the conversation are proven in guest-reviews-d1.
     // The email states the visit. A row that reads "your reservation" is the
     // headline fragment leaking into a value, which is what this guards — the
     // message carries no such phrase at all now, so the check is that the real

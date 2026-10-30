@@ -1,8 +1,9 @@
 import { expect, test } from '@playwright/test'
 import Ajv from 'ajv'
 import { loginAs } from './helpers/auth'
-import { MCP_VERSION, MCP_ORGANIZATION_ID, mcpRequest, mcpData } from './helpers/mcp'
+import { MCP_VERSION, mcpOrganizationId, mcpRequest, mcpData } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
+import { seededTenant } from './seed/manifest'
 import type { Product as EditorProduct } from '../../server/types/products'
 
 test.describe('stateless MCP server', () => {
@@ -45,7 +46,7 @@ test.describe('stateless MCP server', () => {
     const locations = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
       toolName: 'list_locations',
-      args: { organization_id: MCP_ORGANIZATION_ID },
+      args: { organization_id: mcpOrganizationId() },
     })
     expect(locations.status()).toBe(200)
     const locationId = mcpData<{ locations: Array<{ id: string }> }>(await locations.json()).locations[0]?.id
@@ -54,9 +55,9 @@ test.describe('stateless MCP server', () => {
     const mismatchedTarget = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
       toolName: 'set_media',
-      organizationId: MCP_ORGANIZATION_ID,
+      organizationId: mcpOrganizationId(),
       args: {
-        organization_id: MCP_ORGANIZATION_ID,
+        organization_id: mcpOrganizationId(),
         placement: { owner_type: 'business_location', owner_id: locationId, slot: 'hero' },
         location_id: locationId,
         asset_id: 'media-does-not-matter-for-this-check',
@@ -72,15 +73,15 @@ test.describe('stateless MCP server', () => {
     const libraryTool = toolsBody.result.tools.find(tool => tool.name === 'list_media_assets')
     expect(libraryTool).toBeDefined()
     const libraryResponse = await mcpRequest(request, baseURL!, {
-      method: 'tools/call', toolName: 'list_media_assets', args: { organization_id: MCP_ORGANIZATION_ID, kind: 'image', limit: 100 },
+      method: 'tools/call', toolName: 'list_media_assets', args: { organization_id: mcpOrganizationId(), kind: 'image', limit: 100 },
     })
     expect(libraryResponse.status()).toBe(200)
     const library = mcpData<{ assets: Array<Record<string, unknown>> }>(await libraryResponse.json())
     const validateLibrary = new Ajv({ strict: false, allErrors: true }).compile(libraryTool!.outputSchema!)
     expect(validateLibrary(library), JSON.stringify(validateLibrary.errors)).toBe(true)
-    const selected = library.assets.find(asset => asset.asset_id === 'media-demo-margherita')
+    const selected = library.assets.find(asset => asset.asset_id === seededTenant('restaurant').media.margherita!.id)
     expect(selected, 'The existing Margherita photo is available for selection').toBeDefined()
-    const editorMedia = await request.get(`${baseURL}/api/editor/organizations/${MCP_ORGANIZATION_ID}/media`, { params: { id: String(selected!.asset_id) } })
+    const editorMedia = await request.get(`${baseURL}/api/editor/organizations/${mcpOrganizationId()}/media`, { params: { id: String(selected!.asset_id) } })
     expect(editorMedia.status()).toBe(200)
     const storedMedia = (await editorMedia.json()).media
     expect(storedMedia).toHaveLength(1)
@@ -99,21 +100,21 @@ test.describe('stateless MCP server', () => {
       expect(asset).not.toHaveProperty('organization_id')
     }
     const emptyMetadataEdit = await mcpRequest(request, baseURL!, {
-      method: 'tools/call', toolName: 'update_media_asset', args: { organization_id: MCP_ORGANIZATION_ID, asset_id: selected!.asset_id },
+      method: 'tools/call', toolName: 'update_media_asset', args: { organization_id: mcpOrganizationId(), asset_id: selected!.asset_id },
     })
     expect(emptyMetadataEdit.status()).toBe(200)
     expect((await emptyMetadataEdit.json()).result.isError).toBe(true)
-    const unchangedMedia = await request.get(`${baseURL}/api/editor/organizations/${MCP_ORGANIZATION_ID}/media`, { params: { id: String(selected!.asset_id) } })
+    const unchangedMedia = await request.get(`${baseURL}/api/editor/organizations/${mcpOrganizationId()}/media`, { params: { id: String(selected!.asset_id) } })
     expect(unchangedMedia.status()).toBe(200)
     expect((await unchangedMedia.json()).media).toEqual([stored])
   })
 
   test('a gallery reorder moves the fixture gallery and get_location reads the new order', async ({ request, baseURL }, testInfo) => {
-    const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, MCP_ORGANIZATION_ID)
+    const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, mcpOrganizationId())
     const call = async <T>(toolName: string, args: Record<string, unknown>) => mcpData<T>(await (await mcpRequest(request, baseURL!, {
-      method: 'tools/call', toolName, args: { organization_id: MCP_ORGANIZATION_ID, ...args },
+      method: 'tools/call', toolName, args: { organization_id: mcpOrganizationId(), ...args },
     })).json())
-    const locationId = 'loc-demo-2'
+    const locationId = seededTenant('restaurant').locations.williamsburg!.id
     const placement = { owner_type: 'business_location', owner_id: locationId, slot: 'gallery' }
     let original: string[] = []
     try {
@@ -124,10 +125,10 @@ test.describe('stateless MCP server', () => {
       original = await galleryOrder()
       const [first, second] = original
       // Nothing changes until the fixture is known to be exactly the two images restored below.
-      expect(original, 'loc-demo-2 fixture gallery').toHaveLength(2)
+      expect(original, 'Williamsburg fixture gallery').toHaveLength(2)
       const conflictingAnchors = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'reorder_media', args: {
-          organization_id: MCP_ORGANIZATION_ID, placement,
+          organization_id: mcpOrganizationId(), placement,
           moves: [{ asset_id: second, before_asset_id: first, after_asset_id: first }],
         },
       })
@@ -150,17 +151,17 @@ test.describe('stateless MCP server', () => {
     }
   })
   test('product mutation responses preserve the canonical image and gallery', async ({ request, baseURL }, testInfo) => {
-    const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, MCP_ORGANIZATION_ID)
+    const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, mcpOrganizationId())
     type MediaItem = { asset_id: string }
     type Product = { id: string; name: string; image: MediaItem | null; gallery: MediaItem[] }
     const call = async <T>(toolName: string, args: Record<string, unknown>) => mcpData<T>(await (await mcpRequest(request, baseURL!, {
-      method: 'tools/call', toolName, args: { organization_id: MCP_ORGANIZATION_ID, ...args },
+      method: 'tools/call', toolName, args: { organization_id: mcpOrganizationId(), ...args },
     })).json())
     // The seeded Margherita carries one image, also its only gallery item.
-    const productId = 'mi-1'
-    const seededAsset = 'media-demo-margherita'
+    const productId = seededTenant('restaurant').products.margherita!.id
+    const seededAsset = seededTenant('restaurant').media.margherita!.id
     const readEditorProduct = async () => {
-      const response = await request.get(`${baseURL}/api/editor/organizations/${MCP_ORGANIZATION_ID}/products/${productId}`)
+      const response = await request.get(`${baseURL}/api/editor/organizations/${mcpOrganizationId()}/products/${productId}`)
       expect(response.status(), await response.text()).toBe(200)
       return (await response.json() as { product: EditorProduct }).product
     }

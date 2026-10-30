@@ -114,8 +114,8 @@ test('Business catalog consolidates new sales without repricing existing contrac
   })
   const metered = (planId: string) => plan.operations.find(operation => operation.type === 'create_price' && operation.planId === planId)?.params
   const recurring = (planId: string) => ({ interval: 'month', interval_count: 1, usage_type: 'metered', meter: { ref: { kind: 'meter', planId } } })
-  // Homes are a graduated price at $9 past the included ones, on their own meter.
-  assert.deepEqual(metered('homes'), { currency: 'usd', recurring: recurring('homes'), billing_scheme: 'tiered', tiers_mode: 'graduated', tiers: [{ up_to: 2, unit_amount: 0 }, { up_to: 'inf', unit_amount: 900 }] })
+  // Homes are a graduated price at $4 past the included ones, on their own meter.
+  assert.deepEqual(metered('homes'), { currency: 'usd', recurring: recurring('homes'), billing_scheme: 'tiered', tiers_mode: 'graduated', tiers: [{ up_to: 2, unit_amount: 0 }, { up_to: 'inf', unit_amount: 400 }] })
   assert.deepEqual(metered('captured_volume'), { currency: 'usd', recurring: recurring('captured_volume'), billing_scheme: 'per_unit', unit_amount_decimal: '0.014' })
   assert.deepEqual(metered('stripe_cost'), { currency: 'usd', recurring: recurring('stripe_cost'), billing_scheme: 'per_unit', unit_amount_decimal: '1' })
   assert.deepEqual(metered('ad_spend'), { currency: 'usd', recurring: recurring('ad_spend'), billing_scheme: 'per_unit', unit_amount_decimal: '0.1' })

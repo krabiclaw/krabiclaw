@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:c0b2d2885db7b366482252919979803a2548d9d6a76c19255dcfdce4d14e3323",
-  "documentationFingerprint": "sha256:b7adc74a9472f4569f77c08e11ceb4f2e2a15afcae766ac94d76d87962e17a6c",
+  "fingerprint": "sha256:abc5f172e8e828ecbbef7936a1c14424d3be1660c26f957fc2bfdfaea75d5034",
+  "documentationFingerprint": "sha256:49652d2cf9a0abc6a902363f8b8bd585629e00a0eee9fb757deabb02736c3de5",
   "tools": [
     {
       "name": "add_organization_language",
@@ -9104,19 +9104,15 @@
                       ]
                     },
                     "cancellation_policy": {
-                      "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                      "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                       "enum": [
                         "flexible",
                         "moderate",
                         "limited",
                         "firm",
-                        "strict",
-                        null
+                        "strict"
                       ],
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": "string"
                     },
                     "check_in_end_time": {
                       "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -9162,16 +9158,12 @@
                       "type": "string"
                     },
                     "long_term_cancellation_policy": {
-                      "description": "Policy shown to guests for stays of 28 nights or more.",
+                      "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
                       "enum": [
                         "firm",
-                        "strict",
-                        null
+                        "strict"
                       ],
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": "string"
                     },
                     "max_guests": {
                       "maximum": 99,
@@ -10862,19 +10854,15 @@
                       ]
                     },
                     "cancellation_policy": {
-                      "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                      "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                       "enum": [
                         "flexible",
                         "moderate",
                         "limited",
                         "firm",
-                        "strict",
-                        null
+                        "strict"
                       ],
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": "string"
                     },
                     "check_in_end_time": {
                       "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -10920,16 +10908,12 @@
                       "type": "string"
                     },
                     "long_term_cancellation_policy": {
-                      "description": "Policy shown to guests for stays of 28 nights or more.",
+                      "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
                       "enum": [
                         "firm",
-                        "strict",
-                        null
+                        "strict"
                       ],
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": "string"
                     },
                     "max_guests": {
                       "maximum": 99,
@@ -25196,19 +25180,15 @@
                 ]
               },
               "cancellation_policy": {
-                "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                 "enum": [
                   "flexible",
                   "moderate",
                   "limited",
                   "firm",
-                  "strict",
-                  null
+                  "strict"
                 ],
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "type": "string"
               },
               "check_in_end_time": {
                 "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -25254,16 +25234,12 @@
                 "type": "string"
               },
               "long_term_cancellation_policy": {
-                "description": "Policy shown to guests for stays of 28 nights or more.",
+                "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
                 "enum": [
                   "firm",
-                  "strict",
-                  null
+                  "strict"
                 ],
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "type": "string"
               },
               "max_guests": {
                 "maximum": 99,
@@ -26943,19 +26919,15 @@
                     ]
                   },
                   "cancellation_policy": {
-                    "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                    "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                     "enum": [
                       "flexible",
                       "moderate",
                       "limited",
                       "firm",
-                      "strict",
-                      null
+                      "strict"
                     ],
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "check_in_end_time": {
                     "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -27001,16 +26973,12 @@
                     "type": "string"
                   },
                   "long_term_cancellation_policy": {
-                    "description": "Policy shown to guests for stays of 28 nights or more.",
+                    "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
                     "enum": [
                       "firm",
-                      "strict",
-                      null
+                      "strict"
                     ],
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "max_guests": {
                     "maximum": 99,
@@ -46116,6 +46084,7 @@
                             "pending",
                             "accepted",
                             "declined",
+                            "withdrawn",
                             "stale",
                             "expired"
                           ],
@@ -51776,19 +51745,15 @@
                     ]
                   },
                   "cancellation_policy": {
-                    "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                    "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                     "enum": [
                       "flexible",
                       "moderate",
                       "limited",
                       "firm",
-                      "strict",
-                      null
+                      "strict"
                     ],
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "check_in_end_time": {
                     "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -51834,16 +51799,12 @@
                     "type": "string"
                   },
                   "long_term_cancellation_policy": {
-                    "description": "Policy shown to guests for stays of 28 nights or more.",
+                    "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
                     "enum": [
                       "firm",
-                      "strict",
-                      null
+                      "strict"
                     ],
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "max_guests": {
                     "maximum": 99,
@@ -62440,7 +62401,7 @@
     {
       "name": "get_stay",
       "title": "Get stay",
-      "description": "Read one stay with its guest details and, for a stay the host took, the payments recorded against it.",
+      "description": "Read one stay with its guest details and, for a stay the host took, the payments recorded against it. A member reads a stay at a home they look after as its dates, arrival time, guest first name and party only.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -62466,184 +62427,122 @@
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
           "stay": {
-            "properties": {
-              "adults": {
-                "type": "integer"
-              },
-              "arrival_time": {
-                "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "cancellation_policy": {
-                "description": "The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.",
-                "enum": [
-                  "flexible",
-                  "moderate",
-                  "limited",
-                  "firm",
-                  "strict",
-                  "long_term_firm",
-                  "long_term_strict",
-                  null
-                ],
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "cancellation_reason": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "cancelled_at": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "channel": {
-                "enum": [
-                  "airbnb",
-                  "vrbo",
-                  "booking_com",
-                  "direct"
-                ],
-                "type": "string"
-              },
-              "channel_booking_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "channel_push": {
-                "anyOf": [
-                  {
-                    "type": "null"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "type": "null"
-                      },
-                      "state": {
-                        "const": "pushed"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "state": {
-                        "const": "pending"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
-                  }
-                ],
-                "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error.",
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "check_in_date": {
-                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                "type": "string"
-              },
-              "check_out_date": {
-                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                "type": "string"
-              },
-              "children": {
-                "type": "integer"
-              },
-              "created_at": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "currency": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "external_booking_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "guest_email": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "guest_image_url": {
-                "description": "The linked Better Auth account’s current portrait. Null for guests without an account portrait.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "guest_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "guest_phone": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "guest_surname": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "infants": {
-                "type": "integer"
-              },
-              "location_id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "notes": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "online_payment": {
-                "description": "The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.",
+            "anyOf": [
+              {
                 "properties": {
-                  "amount_minor": {
+                  "adults": {
                     "type": "integer"
                   },
-                  "captured_minor": {
+                  "arrival_time": {
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "cancellation_policy": {
+                    "description": "The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.",
+                    "enum": [
+                      "flexible",
+                      "moderate",
+                      "limited",
+                      "firm",
+                      "strict",
+                      "long_term_firm",
+                      "long_term_strict",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "cancellation_reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "cancelled_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "channel": {
+                    "enum": [
+                      "airbnb",
+                      "vrbo",
+                      "booking_com",
+                      "direct"
+                    ],
+                    "type": "string"
+                  },
+                  "channel_booking_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "channel_booking_url": {
+                    "description": "The reservation on its channel (Airbnb's host reservation page), where a channel stay is changed or cancelled. Null for other stays.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "channel_push": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "properties": {
+                          "detail": {
+                            "type": "null"
+                          },
+                          "state": {
+                            "const": "pushed"
+                          }
+                        },
+                        "required": [
+                          "state",
+                          "detail"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "detail": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "state": {
+                            "const": "pending"
+                          }
+                        },
+                        "required": [
+                          "state",
+                          "detail"
+                        ],
+                        "type": "object"
+                      }
+                    ],
+                    "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error.",
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "check_in_date": {
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    "type": "string"
+                  },
+                  "check_out_date": {
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    "type": "string"
+                  },
+                  "children": {
                     "type": "integer"
                   },
                   "created_at": {
@@ -62654,225 +62553,390 @@
                     "minLength": 1,
                     "type": "string"
                   },
-                  "payment_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "receipt_url": {
+                  "external_booking_id": {
                     "type": [
                       "string",
                       "null"
                     ]
                   },
-                  "refunded_minor": {
+                  "guest_email": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "guest_image_url": {
+                    "description": "The linked Better Auth account’s current portrait. Null for guests without an account portrait.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "guest_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "guest_phone": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "guest_surname": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "infants": {
                     "type": "integer"
                   },
-                  "state": {
+                  "location_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "no_show_at": {
+                    "description": "When the host recorded that the guest never arrived; null otherwise.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "notes": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "online_payment": {
+                    "description": "The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.",
+                    "properties": {
+                      "amount_minor": {
+                        "type": "integer"
+                      },
+                      "captured_minor": {
+                        "type": "integer"
+                      },
+                      "created_at": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "currency": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "payment_id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "receipt_url": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "refunded_minor": {
+                        "type": "integer"
+                      },
+                      "state": {
+                        "enum": [
+                          "pending",
+                          "captured",
+                          "failed",
+                          "recovery",
+                          "refunded"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "payment_id",
+                      "state",
+                      "currency",
+                      "amount_minor",
+                      "captured_minor",
+                      "refunded_minor",
+                      "receipt_url",
+                      "created_at"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "overbooked": {
+                    "type": "boolean"
+                  },
+                  "owner": {
+                    "enum": [
+                      "app",
+                      "channel"
+                    ],
+                    "type": "string"
+                  },
+                  "paid_minor": {
+                    "type": "integer"
+                  },
+                  "payment_status": {
+                    "enum": [
+                      "unpaid",
+                      "partial",
+                      "paid",
+                      "overpaid",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "payments": {
+                    "items": {
+                      "properties": {
+                        "amount_minor": {
+                          "type": "integer"
+                        },
+                        "created_at": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "created_by": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "currency": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "id": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "method": {
+                          "enum": [
+                            "cash",
+                            "bank_transfer",
+                            "card_external",
+                            "other"
+                          ],
+                          "type": "string"
+                        },
+                        "note": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "paid_on": {
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                          "type": "string"
+                        },
+                        "reference": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "stay_id": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "stay_id",
+                        "amount_minor",
+                        "currency",
+                        "method",
+                        "paid_on",
+                        "reference",
+                        "note",
+                        "created_at",
+                        "created_by"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "product_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "request_id": {
+                    "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Null until a named guest with email or phone opens one; an existing conversation is retained.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "status": {
                     "enum": [
                       "pending",
-                      "captured",
-                      "failed",
-                      "recovery",
-                      "refunded"
+                      "confirmed",
+                      "cancelled"
                     ],
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "total_minor": {
+                    "type": "integer"
+                  },
+                  "updated_at": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "user_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "version": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "id",
+                  "product_id",
+                  "location_id",
+                  "timezone",
+                  "channel",
+                  "owner",
+                  "status",
+                  "overbooked",
+                  "check_in_date",
+                  "check_out_date",
+                  "arrival_time",
+                  "adults",
+                  "children",
+                  "infants",
+                  "guest_name",
+                  "guest_surname",
+                  "guest_email",
+                  "guest_phone",
+                  "user_id",
+                  "total_minor",
+                  "currency",
+                  "notes",
+                  "provider",
+                  "external_booking_id",
+                  "channel_booking_id",
+                  "channel_booking_url",
+                  "request_id",
+                  "cancelled_at",
+                  "cancellation_reason",
+                  "cancellation_policy",
+                  "no_show_at",
+                  "version",
+                  "created_at",
+                  "updated_at",
+                  "guest_image_url",
+                  "payments",
+                  "online_payment",
+                  "paid_minor",
+                  "payment_status"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "description": "A member’s view of a stay at a home they look after: dates, arrival time, the guest’s first name and party. Owners and admins read the whole stay.",
+                "properties": {
+                  "adults": {
+                    "type": "integer"
+                  },
+                  "arrival_time": {
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "check_in_date": {
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    "type": "string"
+                  },
+                  "check_out_date": {
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    "type": "string"
+                  },
+                  "children": {
+                    "type": "integer"
+                  },
+                  "guest_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "infants": {
+                    "type": "integer"
+                  },
+                  "location_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "no_show_at": {
+                    "description": "When the host recorded that the guest never arrived; null otherwise.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "product_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "pending",
+                      "confirmed",
+                      "cancelled"
+                    ],
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "minLength": 1,
                     "type": "string"
                   }
                 },
                 "required": [
-                  "payment_id",
-                  "state",
-                  "currency",
-                  "amount_minor",
-                  "captured_minor",
-                  "refunded_minor",
-                  "receipt_url",
-                  "created_at"
+                  "id",
+                  "product_id",
+                  "location_id",
+                  "timezone",
+                  "status",
+                  "check_in_date",
+                  "check_out_date",
+                  "arrival_time",
+                  "adults",
+                  "children",
+                  "infants",
+                  "guest_name",
+                  "no_show_at"
                 ],
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "overbooked": {
-                "type": "boolean"
-              },
-              "owner": {
-                "enum": [
-                  "app",
-                  "channel"
-                ],
-                "type": "string"
-              },
-              "paid_minor": {
-                "type": "integer"
-              },
-              "payment_status": {
-                "enum": [
-                  "unpaid",
-                  "partial",
-                  "paid",
-                  "overpaid",
-                  null
-                ],
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "payments": {
-                "items": {
-                  "properties": {
-                    "amount_minor": {
-                      "type": "integer"
-                    },
-                    "created_at": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "created_by": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "currency": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "method": {
-                      "enum": [
-                        "cash",
-                        "bank_transfer",
-                        "card_external",
-                        "other"
-                      ],
-                      "type": "string"
-                    },
-                    "note": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "paid_on": {
-                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                      "type": "string"
-                    },
-                    "reference": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "stay_id": {
-                      "minLength": 1,
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "stay_id",
-                    "amount_minor",
-                    "currency",
-                    "method",
-                    "paid_on",
-                    "reference",
-                    "note",
-                    "created_at",
-                    "created_by"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "product_id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "provider": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "request_id": {
-                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Null until a named guest with email or phone opens one; an existing conversation is retained.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "status": {
-                "enum": [
-                  "pending",
-                  "confirmed",
-                  "cancelled"
-                ],
-                "type": "string"
-              },
-              "timezone": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "total_minor": {
-                "type": "integer"
-              },
-              "updated_at": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "user_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "version": {
-                "type": "integer"
+                "type": "object"
               }
-            },
-            "required": [
-              "id",
-              "product_id",
-              "location_id",
-              "timezone",
-              "channel",
-              "owner",
-              "status",
-              "overbooked",
-              "check_in_date",
-              "check_out_date",
-              "arrival_time",
-              "adults",
-              "children",
-              "infants",
-              "guest_name",
-              "guest_surname",
-              "guest_email",
-              "guest_phone",
-              "user_id",
-              "total_minor",
-              "currency",
-              "notes",
-              "provider",
-              "external_booking_id",
-              "channel_booking_id",
-              "request_id",
-              "cancelled_at",
-              "cancellation_reason",
-              "cancellation_policy",
-              "version",
-              "created_at",
-              "updated_at",
-              "guest_image_url",
-              "payments",
-              "online_payment",
-              "paid_minor",
-              "payment_status"
-            ],
-            "type": "object"
+            ]
           }
         },
         "required": [
@@ -62904,7 +62968,7 @@
     {
       "name": "get_stay_calendar",
       "title": "Get stay calendar",
-      "description": "Read every night of a date range at one home: availability, nightly price, booking restrictions and the stays holding those nights. Returns scheduling details; use get_stay for one booking’s contact and payment details, or get_product for the home’s photos and room groups.",
+      "description": "Read every night of a date range at one home: availability, nightly price, booking restrictions and the stays holding those nights. Returns scheduling details; members read each stay as its dates, arrival time, guest first name and party. Owners and admins use get_stay for one booking’s contact and payment details, or get_product for the home’s photos and room groups.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -63217,97 +63281,184 @@
           },
           "stays": {
             "items": {
-              "additionalProperties": false,
-              "properties": {
-                "adults": {
-                  "type": "integer"
-                },
-                "arrival_time": {
-                  "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "channel": {
-                  "enum": [
-                    "airbnb",
-                    "vrbo",
-                    "booking_com",
-                    "direct"
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "adults": {
+                      "type": "integer"
+                    },
+                    "arrival_time": {
+                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "channel": {
+                      "enum": [
+                        "airbnb",
+                        "vrbo",
+                        "booking_com",
+                        "direct"
+                      ],
+                      "type": "string"
+                    },
+                    "check_in_date": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "check_out_date": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "children": {
+                      "type": "integer"
+                    },
+                    "guest_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "guest_surname": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "infants": {
+                      "type": "integer"
+                    },
+                    "overbooked": {
+                      "type": "boolean"
+                    },
+                    "owner": {
+                      "enum": [
+                        "app",
+                        "channel"
+                      ],
+                      "type": "string"
+                    },
+                    "product_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "pending",
+                        "confirmed",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "product_id",
+                    "channel",
+                    "owner",
+                    "status",
+                    "overbooked",
+                    "check_in_date",
+                    "check_out_date",
+                    "arrival_time",
+                    "adults",
+                    "children",
+                    "infants",
+                    "guest_name",
+                    "guest_surname"
                   ],
-                  "type": "string"
+                  "type": "object"
                 },
-                "check_in_date": {
-                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                  "type": "string"
-                },
-                "check_out_date": {
-                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                  "type": "string"
-                },
-                "children": {
-                  "type": "integer"
-                },
-                "guest_name": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "guest_surname": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "id": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "infants": {
-                  "type": "integer"
-                },
-                "overbooked": {
-                  "type": "boolean"
-                },
-                "owner": {
-                  "enum": [
-                    "app",
-                    "channel"
+                {
+                  "additionalProperties": false,
+                  "description": "A member’s view of a stay at a home they look after: dates, arrival time, the guest’s first name and party. Owners and admins read the whole stay.",
+                  "properties": {
+                    "adults": {
+                      "type": "integer"
+                    },
+                    "arrival_time": {
+                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "check_in_date": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "check_out_date": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "children": {
+                      "type": "integer"
+                    },
+                    "guest_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "infants": {
+                      "type": "integer"
+                    },
+                    "location_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "no_show_at": {
+                      "description": "When the host recorded that the guest never arrived; null otherwise.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "product_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "pending",
+                        "confirmed",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    },
+                    "timezone": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "product_id",
+                    "location_id",
+                    "timezone",
+                    "status",
+                    "check_in_date",
+                    "check_out_date",
+                    "arrival_time",
+                    "adults",
+                    "children",
+                    "infants",
+                    "guest_name",
+                    "no_show_at"
                   ],
-                  "type": "string"
-                },
-                "product_id": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "status": {
-                  "enum": [
-                    "pending",
-                    "confirmed",
-                    "cancelled"
-                  ],
-                  "type": "string"
+                  "type": "object"
                 }
-              },
-              "required": [
-                "id",
-                "product_id",
-                "channel",
-                "owner",
-                "status",
-                "overbooked",
-                "check_in_date",
-                "check_out_date",
-                "arrival_time",
-                "adults",
-                "children",
-                "infants",
-                "guest_name",
-                "guest_surname"
-              ],
-              "type": "object"
+              ]
             },
             "type": "array"
           }
@@ -63346,30 +63497,6 @@
       "description": "Read messages and photo/push receipts from one of your internal conversations, newest first. Defaults to 20, maximum 100. When hasMore is true, page back with both before and before_id from the oldest loaded message’s createdAt and id. Reading does not mark the conversation read.",
       "inputSchema": {
         "additionalProperties": false,
-        "oneOf": [
-          {
-            "required": [
-              "before",
-              "before_id"
-            ]
-          },
-          {
-            "not": {
-              "anyOf": [
-                {
-                  "required": [
-                    "before"
-                  ]
-                },
-                {
-                  "required": [
-                    "before_id"
-                  ]
-                }
-              ]
-            }
-          }
-        ],
         "properties": {
           "before": {
             "minLength": 1,
@@ -65605,6 +65732,25 @@
                     "null"
                   ]
                 },
+                "category_ratings": {
+                  "description": "The guest's optional 1-5 scores for the visit's fixed questions; a skipped question has no entry.",
+                  "items": {
+                    "properties": {
+                      "category": {
+                        "type": "string"
+                      },
+                      "rating": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "category",
+                      "rating"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
                 "collection_method": {
                   "type": [
                     "string",
@@ -65645,6 +65791,13 @@
                   ]
                 },
                 "owner_reply": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "private_feedback": {
+                  "description": "What the guest told the business privately. Never published.",
                   "type": [
                     "string",
                     "null"
@@ -66706,6 +66859,25 @@
                     "null"
                   ]
                 },
+                "category_ratings": {
+                  "description": "The guest's optional 1-5 scores for the visit's fixed questions; a skipped question has no entry.",
+                  "items": {
+                    "properties": {
+                      "category": {
+                        "type": "string"
+                      },
+                      "rating": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "category",
+                      "rating"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
                 "collection_method": {
                   "type": [
                     "string",
@@ -66746,6 +66918,13 @@
                   ]
                 },
                 "owner_reply": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "private_feedback": {
+                  "description": "What the guest told the business privately. Never published.",
                   "type": [
                     "string",
                     "null"
@@ -68282,7 +68461,7 @@
     {
       "name": "list_scheduled_guest_messages",
       "title": "List scheduled guest messages",
-      "description": "Read automatic guest-message snapshots and visible failure reasons, optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Members see only assigned homes. Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.",
+      "description": "Read automatic guest-message snapshots and visible failure reasons, optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -68491,7 +68670,7 @@
         }
       ],
       "domain": "guest_messaging",
-      "minimumRole": "member",
+      "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -68838,7 +69017,7 @@
     {
       "name": "list_stays",
       "title": "List stays",
-      "description": "Read guests staying at the organization’s homes overlapping a date range, with dates, party, channel and status. Members see only assigned homes. Use get_stay for one stay’s contact, notes and payment details.",
+      "description": "Read guests staying at the organization’s homes overlapping a date range, with dates, party, channel and status. Members see only the homes they look after, and only each stay’s dates, arrival time, guest first name and party. Owners and admins use get_stay for one stay’s contact, notes and payment details.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -68878,119 +69057,206 @@
         "properties": {
           "stays": {
             "items": {
-              "additionalProperties": false,
-              "properties": {
-                "adults": {
-                  "type": "integer"
-                },
-                "arrival_time": {
-                  "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "channel": {
-                  "enum": [
-                    "airbnb",
-                    "vrbo",
-                    "booking_com",
-                    "direct"
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "adults": {
+                      "type": "integer"
+                    },
+                    "arrival_time": {
+                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "channel": {
+                      "enum": [
+                        "airbnb",
+                        "vrbo",
+                        "booking_com",
+                        "direct"
+                      ],
+                      "type": "string"
+                    },
+                    "check_in_date": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "check_out_date": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "children": {
+                      "type": "integer"
+                    },
+                    "guest_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "guest_surname": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "infants": {
+                      "type": "integer"
+                    },
+                    "location_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "overbooked": {
+                      "type": "boolean"
+                    },
+                    "owner": {
+                      "enum": [
+                        "app",
+                        "channel"
+                      ],
+                      "type": "string"
+                    },
+                    "product_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Null until a named guest with email or phone opens one; an existing conversation is retained.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "pending",
+                        "confirmed",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    },
+                    "timezone": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "product_id",
+                    "channel",
+                    "owner",
+                    "status",
+                    "overbooked",
+                    "check_in_date",
+                    "check_out_date",
+                    "arrival_time",
+                    "adults",
+                    "children",
+                    "infants",
+                    "guest_name",
+                    "guest_surname",
+                    "location_id",
+                    "timezone",
+                    "request_id",
+                    "version"
                   ],
-                  "type": "string"
+                  "type": "object"
                 },
-                "check_in_date": {
-                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                  "type": "string"
-                },
-                "check_out_date": {
-                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                  "type": "string"
-                },
-                "children": {
-                  "type": "integer"
-                },
-                "guest_name": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "guest_surname": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "id": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "infants": {
-                  "type": "integer"
-                },
-                "location_id": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "overbooked": {
-                  "type": "boolean"
-                },
-                "owner": {
-                  "enum": [
-                    "app",
-                    "channel"
+                {
+                  "additionalProperties": false,
+                  "description": "A member’s view of a stay at a home they look after: dates, arrival time, the guest’s first name and party. Owners and admins read the whole stay.",
+                  "properties": {
+                    "adults": {
+                      "type": "integer"
+                    },
+                    "arrival_time": {
+                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "check_in_date": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "check_out_date": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "children": {
+                      "type": "integer"
+                    },
+                    "guest_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "infants": {
+                      "type": "integer"
+                    },
+                    "location_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "no_show_at": {
+                      "description": "When the host recorded that the guest never arrived; null otherwise.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "product_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "pending",
+                        "confirmed",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    },
+                    "timezone": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "product_id",
+                    "location_id",
+                    "timezone",
+                    "status",
+                    "check_in_date",
+                    "check_out_date",
+                    "arrival_time",
+                    "adults",
+                    "children",
+                    "infants",
+                    "guest_name",
+                    "no_show_at"
                   ],
-                  "type": "string"
-                },
-                "product_id": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "request_id": {
-                  "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Null until a named guest with email or phone opens one; an existing conversation is retained.",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "status": {
-                  "enum": [
-                    "pending",
-                    "confirmed",
-                    "cancelled"
-                  ],
-                  "type": "string"
-                },
-                "timezone": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "version": {
-                  "type": "integer"
+                  "type": "object"
                 }
-              },
-              "required": [
-                "id",
-                "product_id",
-                "channel",
-                "owner",
-                "status",
-                "overbooked",
-                "check_in_date",
-                "check_out_date",
-                "arrival_time",
-                "adults",
-                "children",
-                "infants",
-                "guest_name",
-                "guest_surname",
-                "location_id",
-                "timezone",
-                "request_id",
-                "version"
-              ],
-              "type": "object"
+              ]
             },
             "type": "array"
           }
@@ -82059,19 +82325,15 @@
                       ]
                     },
                     "cancellation_policy": {
-                      "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                      "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                       "enum": [
                         "flexible",
                         "moderate",
                         "limited",
                         "firm",
-                        "strict",
-                        null
+                        "strict"
                       ],
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": "string"
                     },
                     "check_in_end_time": {
                       "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -82117,16 +82379,12 @@
                       "type": "string"
                     },
                     "long_term_cancellation_policy": {
-                      "description": "Policy shown to guests for stays of 28 nights or more.",
+                      "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
                       "enum": [
                         "firm",
-                        "strict",
-                        null
+                        "strict"
                       ],
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": "string"
                     },
                     "max_guests": {
                       "maximum": 99,
@@ -83858,19 +84116,15 @@
                       ]
                     },
                     "cancellation_policy": {
-                      "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                      "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                       "enum": [
                         "flexible",
                         "moderate",
                         "limited",
                         "firm",
-                        "strict",
-                        null
+                        "strict"
                       ],
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": "string"
                     },
                     "check_in_end_time": {
                       "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -83916,16 +84170,12 @@
                       "type": "string"
                     },
                     "long_term_cancellation_policy": {
-                      "description": "Policy shown to guests for stays of 28 nights or more.",
+                      "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
                       "enum": [
                         "firm",
-                        "strict",
-                        null
+                        "strict"
                       ],
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "type": "string"
                     },
                     "max_guests": {
                       "maximum": 99,
@@ -98090,99 +98340,46 @@
       "description": "Close or open nights, set a nightly price, or set stay rules for a date range at one place to stay. Fields left out keep each night’s value; price_minor null returns to the base price; reset removes the range’s overrides. Updates the website’s bookable nights and, when connected, pushes prices, availability and stay rules to the home’s Airbnb listing through Channex. Returns channel_push on success. A failed channel update raises CHANNEL_PUSH_FAILED with committed:true; read the calendar before retrying.",
       "inputSchema": {
         "additionalProperties": false,
-        "oneOf": [
+        "anyOf": [
           {
-            "not": {
-              "anyOf": [
-                {
-                  "required": [
-                    "closed"
-                  ]
-                },
-                {
-                  "required": [
-                    "price_minor"
-                  ]
-                },
-                {
-                  "required": [
-                    "min_stay_arrival"
-                  ]
-                },
-                {
-                  "required": [
-                    "min_stay_through"
-                  ]
-                },
-                {
-                  "required": [
-                    "max_stay"
-                  ]
-                },
-                {
-                  "required": [
-                    "closed_to_arrival"
-                  ]
-                },
-                {
-                  "required": [
-                    "closed_to_departure"
-                  ]
-                }
-              ]
-            },
-            "properties": {
-              "reset": {
-                "const": true
-              }
-            },
             "required": [
               "reset"
             ]
           },
           {
-            "anyOf": [
-              {
-                "required": [
-                  "closed"
-                ]
-              },
-              {
-                "required": [
-                  "price_minor"
-                ]
-              },
-              {
-                "required": [
-                  "min_stay_arrival"
-                ]
-              },
-              {
-                "required": [
-                  "min_stay_through"
-                ]
-              },
-              {
-                "required": [
-                  "max_stay"
-                ]
-              },
-              {
-                "required": [
-                  "closed_to_arrival"
-                ]
-              },
-              {
-                "required": [
-                  "closed_to_departure"
-                ]
-              }
-            ],
-            "properties": {
-              "reset": {
-                "const": false
-              }
-            }
+            "required": [
+              "closed"
+            ]
+          },
+          {
+            "required": [
+              "price_minor"
+            ]
+          },
+          {
+            "required": [
+              "min_stay_arrival"
+            ]
+          },
+          {
+            "required": [
+              "min_stay_through"
+            ]
+          },
+          {
+            "required": [
+              "max_stay"
+            ]
+          },
+          {
+            "required": [
+              "closed_to_arrival"
+            ]
+          },
+          {
+            "required": [
+              "closed_to_departure"
+            ]
           }
         ],
         "properties": {
@@ -98536,97 +98733,184 @@
           },
           "stays": {
             "items": {
-              "additionalProperties": false,
-              "properties": {
-                "adults": {
-                  "type": "integer"
-                },
-                "arrival_time": {
-                  "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "channel": {
-                  "enum": [
-                    "airbnb",
-                    "vrbo",
-                    "booking_com",
-                    "direct"
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "adults": {
+                      "type": "integer"
+                    },
+                    "arrival_time": {
+                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "channel": {
+                      "enum": [
+                        "airbnb",
+                        "vrbo",
+                        "booking_com",
+                        "direct"
+                      ],
+                      "type": "string"
+                    },
+                    "check_in_date": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "check_out_date": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "children": {
+                      "type": "integer"
+                    },
+                    "guest_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "guest_surname": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "infants": {
+                      "type": "integer"
+                    },
+                    "overbooked": {
+                      "type": "boolean"
+                    },
+                    "owner": {
+                      "enum": [
+                        "app",
+                        "channel"
+                      ],
+                      "type": "string"
+                    },
+                    "product_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "pending",
+                        "confirmed",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "product_id",
+                    "channel",
+                    "owner",
+                    "status",
+                    "overbooked",
+                    "check_in_date",
+                    "check_out_date",
+                    "arrival_time",
+                    "adults",
+                    "children",
+                    "infants",
+                    "guest_name",
+                    "guest_surname"
                   ],
-                  "type": "string"
+                  "type": "object"
                 },
-                "check_in_date": {
-                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                  "type": "string"
-                },
-                "check_out_date": {
-                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                  "type": "string"
-                },
-                "children": {
-                  "type": "integer"
-                },
-                "guest_name": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "guest_surname": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "id": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "infants": {
-                  "type": "integer"
-                },
-                "overbooked": {
-                  "type": "boolean"
-                },
-                "owner": {
-                  "enum": [
-                    "app",
-                    "channel"
+                {
+                  "additionalProperties": false,
+                  "description": "A member’s view of a stay at a home they look after: dates, arrival time, the guest’s first name and party. Owners and admins read the whole stay.",
+                  "properties": {
+                    "adults": {
+                      "type": "integer"
+                    },
+                    "arrival_time": {
+                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "check_in_date": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "check_out_date": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "children": {
+                      "type": "integer"
+                    },
+                    "guest_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "infants": {
+                      "type": "integer"
+                    },
+                    "location_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "no_show_at": {
+                      "description": "When the host recorded that the guest never arrived; null otherwise.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "product_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "pending",
+                        "confirmed",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    },
+                    "timezone": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "product_id",
+                    "location_id",
+                    "timezone",
+                    "status",
+                    "check_in_date",
+                    "check_out_date",
+                    "arrival_time",
+                    "adults",
+                    "children",
+                    "infants",
+                    "guest_name",
+                    "no_show_at"
                   ],
-                  "type": "string"
-                },
-                "product_id": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "status": {
-                  "enum": [
-                    "pending",
-                    "confirmed",
-                    "cancelled"
-                  ],
-                  "type": "string"
+                  "type": "object"
                 }
-              },
-              "required": [
-                "id",
-                "product_id",
-                "channel",
-                "owner",
-                "status",
-                "overbooked",
-                "check_in_date",
-                "check_out_date",
-                "arrival_time",
-                "adults",
-                "children",
-                "infants",
-                "guest_name",
-                "guest_surname"
-              ],
-              "type": "object"
+              ]
             },
             "type": "array"
           }
@@ -106850,7 +107134,6 @@
           "public_photo_url": {
             "format": "uri",
             "maxLength": 2048,
-            "pattern": "^https://[\\s\\S]*$",
             "type": [
               "string",
               "null"
@@ -111071,19 +111354,15 @@
                 ]
               },
               "cancellation_policy": {
-                "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                 "enum": [
                   "flexible",
                   "moderate",
                   "limited",
                   "firm",
-                  "strict",
-                  null
+                  "strict"
                 ],
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "type": "string"
               },
               "check_in_end_time": {
                 "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -111126,16 +111405,12 @@
                 ]
               },
               "long_term_cancellation_policy": {
-                "description": "Policy shown to guests for stays of 28 nights or more.",
+                "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
                 "enum": [
                   "firm",
-                  "strict",
-                  null
+                  "strict"
                 ],
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "type": "string"
               },
               "max_guests": {
                 "maximum": 99,
@@ -112864,19 +113139,15 @@
                     ]
                   },
                   "cancellation_policy": {
-                    "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                    "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
                     "enum": [
                       "flexible",
                       "moderate",
                       "limited",
                       "firm",
-                      "strict",
-                      null
+                      "strict"
                     ],
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "check_in_end_time": {
                     "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -112922,16 +113193,12 @@
                     "type": "string"
                   },
                   "long_term_cancellation_policy": {
-                    "description": "Policy shown to guests for stays of 28 nights or more.",
+                    "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
                     "enum": [
                       "firm",
-                      "strict",
-                      null
+                      "strict"
                     ],
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "max_guests": {
                     "maximum": 99,
@@ -122861,18 +123128,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:a25cbc848a85fb4f8f9697bf205f9ba559f18b560a0b38ea543983d53cccb2e6",
-        "get_product": "sha256:b5016e9a8bc2c7ef6aa3483ef7cae33cbea1fc35511704194e25080083843b37",
+        "create_product": "sha256:e5d4a8421e5e3d318a36436a7b8e6aca993e491a791741e99eb375d396827716",
+        "get_product": "sha256:452a8f34d0fab75ca9943fb90d1ad135ef2ede78bed0c00c01e9cf7ff72731a6",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
         "list_location_products": "sha256:3d072da910400920fd6ff0679ad8d99e1fdf2494d6f0d7feb3bee5082ce13d9e",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
-        "reconcile_products": "sha256:127701d719961b059e533edf22564140866e5f015f4492cf9b2aee9af5944b8a",
+        "reconcile_products": "sha256:9550f78a728818ef914e82684e3bc6f3c83ad837438a8c35452f50336130ad7a",
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
         "set_collection_products": "sha256:16e3e08ee87d86dcb6735b1d2fc9a43600aca70ea8715af3aadfdce5690b8463",
         "update_menu": "sha256:ed70b2c30b8fa7ff3e2ff83d103e650b762b7214797f62934c45e51dbfd39735",
-        "update_product": "sha256:9a9dc2f49dd7f7db1432320b9154dafdf227a02c3ac9d6e1b5ad40fbe6d39675"
+        "update_product": "sha256:d182659d33a23583d2d92aaa6994a2728745afe2278e6bf9d518cca50cb1098b"
       }
     },
     {
@@ -122917,8 +123184,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:a25cbc848a85fb4f8f9697bf205f9ba559f18b560a0b38ea543983d53cccb2e6",
-        "get_product": "sha256:b5016e9a8bc2c7ef6aa3483ef7cae33cbea1fc35511704194e25080083843b37",
+        "create_product": "sha256:e5d4a8421e5e3d318a36436a7b8e6aca993e491a791741e99eb375d396827716",
+        "get_product": "sha256:452a8f34d0fab75ca9943fb90d1ad135ef2ede78bed0c00c01e9cf7ff72731a6",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
@@ -122938,12 +123205,12 @@
         "cancel_product_booking": "sha256:a90b3075935852ee847849f1774addc7077bac2636dd83439a792db5a98c9ca3",
         "cancel_table_reservation": "sha256:7c17a97a9f730249ce112981850351006406adab44d5230f8306953e4450b165",
         "confirm_product_booking": "sha256:d1269994270301b34621918853c929c1e77f702b21fa336ac4dd23dcbf81e18e",
-        "get_guest_conversation": "sha256:b7f2fab6e0363d3cac7a8c748104afe78818e24c9034c389fa6ab152cd888c4b",
+        "get_guest_conversation": "sha256:0e458314aacd4ef9b6f948eea9e5b395c0f6cc4fd6e5a9dd9884f99e008fdfa5",
         "get_product_booking": "sha256:f556f5a1b85a50415d2ec9d1464f44b876afced7651eb51aabd5445eca9ebcaa",
-        "get_team_conversation": "sha256:fb0eae689fdfa8508658a4477f7fec885ba4b044d464772e4d6182d918c11532",
+        "get_team_conversation": "sha256:7b308f8af66846f200d2d30c489b3ddf53c1126bdfc2e91616bf58e7d8f7cec7",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
-        "list_location_reviews": "sha256:346fe43967ce2b4471bc28305e8c70fd33357d1b53a4b1dcb10bfecf9551474d",
+        "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
         "list_team_conversations": "sha256:7d0d80ed5a7b2c7b2d46ce8cac3aadddf63040756dafc586723b6bf623914283",
@@ -122989,7 +123256,7 @@
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
         "get_post": "sha256:1bfb415fc3917a3aad29e1b1ae44db4a092b10dd169974b39c89832c4a69017d",
-        "get_product": "sha256:b5016e9a8bc2c7ef6aa3483ef7cae33cbea1fc35511704194e25080083843b37",
+        "get_product": "sha256:452a8f34d0fab75ca9943fb90d1ad135ef2ede78bed0c00c01e9cf7ff72731a6",
         "get_site_page": "sha256:f338d72e6cf0e9a9112655bc5f41602ea60b52ff7f9f3921e9868c0173abf7e0",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
@@ -123005,7 +123272,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:a25cbc848a85fb4f8f9697bf205f9ba559f18b560a0b38ea543983d53cccb2e6",
+        "create_product": "sha256:e5d4a8421e5e3d318a36436a7b8e6aca993e491a791741e99eb375d396827716",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:f338d72e6cf0e9a9112655bc5f41602ea60b52ff7f9f3921e9868c0173abf7e0",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
@@ -123031,7 +123298,7 @@
       },
       "toolContracts": {
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
-        "get_product": "sha256:b5016e9a8bc2c7ef6aa3483ef7cae33cbea1fc35511704194e25080083843b37",
+        "get_product": "sha256:452a8f34d0fab75ca9943fb90d1ad135ef2ede78bed0c00c01e9cf7ff72731a6",
         "get_reservation_policy": "sha256:939cd1d0c196d026936d36387ae1f90f236738b40e92ab6341523a0f9320c85a",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
@@ -123039,7 +123306,7 @@
         "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
         "replace_product_weekly_schedule": "sha256:cc5f48fb054661e70ce26d988fc12a29f4325c7fc59b5b20852fb98d0e0e2451",
         "set_product_booking_config": "sha256:a7d0d7635d01b5d1c5785a06aac73b1454ff3f5b5ecee0641aa2956bbf30ff40",
-        "update_product": "sha256:9a9dc2f49dd7f7db1432320b9154dafdf227a02c3ac9d6e1b5ad40fbe6d39675",
+        "update_product": "sha256:d182659d33a23583d2d92aaa6994a2728745afe2278e6bf9d518cca50cb1098b",
         "update_reservation_policy": "sha256:7dd8f0cb74352e584d3ed4f97fcef2a2265bd75e490c57fdcf076c7398d8b774"
       }
     },
@@ -123059,7 +123326,7 @@
         "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_product": "sha256:9a9dc2f49dd7f7db1432320b9154dafdf227a02c3ac9d6e1b5ad40fbe6d39675",
+        "update_product": "sha256:d182659d33a23583d2d92aaa6994a2728745afe2278e6bf9d518cca50cb1098b",
         "update_site_page": "sha256:77c97d779b70b40a74b6fd07968e03255dad018d149d6094cfdd3bcd246081c4"
       }
     },
@@ -123073,16 +123340,16 @@
       },
       "toolContracts": {
         "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
-        "get_guest_conversation": "sha256:b7f2fab6e0363d3cac7a8c748104afe78818e24c9034c389fa6ab152cd888c4b",
+        "get_guest_conversation": "sha256:0e458314aacd4ef9b6f948eea9e5b395c0f6cc4fd6e5a9dd9884f99e008fdfa5",
         "get_organization_analytics": "sha256:3f37e5014639f5dd6702f1715ed115454c66affa9e0854c5b0611dea6964bc56",
-        "get_product": "sha256:b5016e9a8bc2c7ef6aa3483ef7cae33cbea1fc35511704194e25080083843b37",
+        "get_product": "sha256:452a8f34d0fab75ca9943fb90d1ad135ef2ede78bed0c00c01e9cf7ff72731a6",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
         "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
         "reply_to_guest": "sha256:28402ef75ec3f1464c60ffbaa91a3781f96f9764994e56b2c7362dbd26eefb80",
-        "update_product": "sha256:9a9dc2f49dd7f7db1432320b9154dafdf227a02c3ac9d6e1b5ad40fbe6d39675"
+        "update_product": "sha256:d182659d33a23583d2d92aaa6994a2728745afe2278e6bf9d518cca50cb1098b"
       }
     }
   ]

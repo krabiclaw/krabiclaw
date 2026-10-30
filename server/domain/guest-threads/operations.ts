@@ -4,7 +4,8 @@ import { recordBookingCancelled, recordBookingDecision } from '~/server/domain/b
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { shouldSendRealEmail } from '~/server/utils/email-delivery'
 import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
-import { getGuestRequest, getThreadOperationalRecord, partySizeIsMinimum, requestActions, requestSummary, type ThreadOperationalRecord } from '~/server/domain/requests'
+import { canMarkNoShow, getGuestRequest, getThreadOperationalRecord, partySizeIsMinimum, requestActions, requestSummary, type ThreadOperationalRecord } from '~/server/domain/requests'
+import { revokeReviewRequestQuery } from '~/server/utils/review-requests'
 import { deliverGuestThreadEmail, getDeliveryById, isDeliverySent } from './deliveries'
 import { findEntryByDedupeKey, parseEntryPayload } from './entries'
 import { discardMessagePhotos, listMessagePhotos, MessagePhotoRejection, messagePhotoPlacements, uploadMessagePhotos, type MessagePhotoInput } from './attachments'
@@ -23,6 +24,7 @@ import { notifyBuyerThread } from '~/server/utils/notification-center'
 import { formatTimestamp } from '~/utils/timezone'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
 import { getChannelThreadMapping, replyThroughChannex } from './channel-messages'
+import { respondToStayChangeRequest } from './stay-change-requests'
 import type { ChannexEnv, ChannexError } from '~/server/integrations/channex/client'
 import { announceContentReport, assertSameReport, contentReportId, contentReportInsert, guestThreadExcerpt, reportReason, type ContentReportEnv } from '~/server/domain/content-reports'
 import type {
@@ -38,7 +40,7 @@ import type {
 // member to reach for. Archive and unarchive say where the conversation is
 // filed, not what state it is in, and touch neither the booking nor
 // conversation_state.
-export const GUEST_THREAD_ACTIONS = new Set(['confirm', 'reject', 'cancel', 'reply', 'archive', 'unarchive', 'report', 'block', 'unblock'])
+export const GUEST_THREAD_ACTIONS = new Set(['confirm', 'reject', 'cancel', 'no_show', 'reply', 'archive', 'unarchive', 'report', 'block', 'unblock', 'accept_change', 'decline_change'])
 
 type SuccessfulOperationOutcome = { ok: true; status: 200; thread: GuestThreadRow; availableActions: string[] }
 
@@ -64,6 +66,10 @@ export type ExecuteOperationInput = {
   body?: string
   /** Why a member reports or blocks the guest. */
   reason?: string
+  /** The change request a member accepts or declines. */
+  requestId?: string
+  /** The member may change stays (owners and admins). */
+  stayManager?: boolean
   /** The photos a reply carries, in the order they were chosen. */
   photos?: MessagePhotoInput
   env: ReplyEmailEnv & UploadResolvedMediaInput['env'] & ChannexEnv & ContentReportEnv
@@ -262,19 +268,6 @@ function resolveThreadQuery(threadId: string, entryId: string, now: string): Bat
   }
 }
 
-function revokeReviewRequestQuery(context: ThreadContext, plan: SourceMutationPlan, entryId: string, now: string): BatchQuery | null {
-  if (plan.afterStatus !== 'cancelled') return null
-  return {
-    query: `
-      UPDATE review_requests
-      SET revoked_at = COALESCE(revoked_at, ?), updated_at = ?
-      WHERE booking_type = ? AND booking_id = ? AND submitted_at IS NULL AND revoked_at IS NULL
-        AND EXISTS (SELECT 1 FROM activity_entries WHERE id = ?)
-    `,
-    params: [now, now, plan.kind, context.thread.id, entryId],
-  }
-}
-
 function deliveryReceiptQuery(
   context: ThreadContext,
   input: ExecuteOperationInput,
@@ -469,8 +462,7 @@ async function executeSourceMutation(
     ...(plan.afterStatus === 'cancelled' ? [resolveThreadQuery(context.thread.id, entryId, now)] : []),
     ...refundPlan.queries,
   ]
-  const revokeReview = revokeReviewRequestQuery(context, plan, entryId, now)
-  if (revokeReview) queries.push(revokeReview)
+  if (plan.afterStatus === 'cancelled') queries.push(revokeReviewRequestQuery(plan.kind, context.thread.id, entryId, now))
   if (plan.requiresNotification && summary.guestEmail) {
     queries.push(deliveryReceiptQuery(context, input, entryId, deliveryId, now))
   }
@@ -774,7 +766,62 @@ export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOp
   }
   if (input.action === 'report' || input.action === 'block') return await executeReport(db, context, input, input.action === 'block')
   if (input.action === 'unblock') return await executeUnblock(db, context)
+  if (input.action === 'no_show') return await executeNoShow(db, context, input)
+  if (input.action === 'accept_change' || input.action === 'decline_change') {
+    // A guest's request on their channel; a business's proposal is answered by its guest.
+    if (context.thread.kind !== 'stay') return conflict('Only a stay’s guest change requests are answered here')
+    if (!input.stayManager) throw new HTTPError({ statusCode: 403, message: 'Only organization owners and admins can change stays', data: { code: 'STAY_ROLE_REQUIRED', field: 'role' } })
+    if (!input.requestId) throw new HTTPError({ statusCode: 400, message: 'Name the change request to answer', data: { code: 'VALIDATION_ERROR', field: 'requestId' } })
+    await respondToStayChangeRequest(db, input.env, { thread: context.thread, requestId: input.requestId, decision: input.action === 'accept_change' ? 'accept' : 'decline', actorUserId: input.actorUserId })
+    return await successfulOutcome(db, context)
+  }
   return await executeSourceMutation(db, context, input)
+}
+
+const NO_SHOW_TABLES = { reservation: 'reservations', booking: 'bookings', stay: 'stays' } as const
+
+/**
+ * Record that the guest did not come. The visit keeps its status; its review
+ * invitation is never sent, and a link already sent stops working, in the
+ * same batch as the ledger entry that says who recorded it.
+ */
+async function executeNoShow(db: DbClient, context: ThreadContext, input: ExecuteOperationInput): Promise<OperationOutcome> {
+  const record = context.record
+  if (!record) return { ok: false, status: 404, reason: 'source_not_found' }
+  const dedupeKey = operationDedupeKey(input)
+  const eventName = `${record.kind}.no_show`
+  const existing = await findEntryByDedupeKey(db, dedupeKey)
+  if (existing) return entryMatchesRequest(existing, eventName) ? await successfulOutcome(db, context) : conflict()
+  const now = new Date().toISOString()
+  if (!canMarkNoShow(record, now)) return conflict('Only a confirmed visit that has started and has no review can be marked as a no-show')
+  const table = NO_SHOW_TABLES[record.kind]
+  const entryId = crypto.randomUUID()
+  await executeBatch(db, [
+    {
+      query: `
+        INSERT INTO activity_entries
+          (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, body, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
+        SELECT ?, gt.id, 'operation', 'request', 'member', ?, NULL, 'Marked as a no-show', ?, ?, ?,
+               COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id = gt.id), 0) + 1, ?, ?
+        FROM requests gt
+        WHERE gt.id = ? AND gt.organization_id = ? AND gt.review_id IS NULL
+          AND EXISTS (SELECT 1 FROM ${table} src WHERE src.id = ? AND src.request_id = gt.id AND src.organization_id = gt.organization_id AND src.status = 'confirmed' AND src.no_show_at IS NULL)
+        ON CONFLICT(dedupe_key) DO NOTHING
+      `,
+      params: [entryId, input.actorUserId, eventName, JSON.stringify({ action: 'no_show', operational_booking_id: record.id }), dedupeKey, now, now,
+        context.thread.id, context.thread.organization_id, record.id],
+    },
+    {
+      query: `UPDATE ${table} SET no_show_at = ?, updated_at = ?${table === 'stays' ? ', version = version + 1' : ''}
+        WHERE id = ? AND no_show_at IS NULL AND EXISTS (SELECT 1 FROM activity_entries WHERE id = ?)`,
+      params: [now, now, record.id, entryId],
+    },
+    revokeReviewRequestQuery(record.kind, context.thread.id, entryId, now),
+  ], { operation: `guest thread ${eventName}` })
+  const applied = await findEntryByDedupeKey(db, dedupeKey)
+  if (!applied) return conflict('The visit changed before it could be marked as a no-show')
+  if (!entryMatchesRequest(applied, eventName)) return conflict()
+  return await successfulOutcome(db, context)
 }
 
 /**

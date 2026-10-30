@@ -75,7 +75,7 @@ export const organizationAnalyticsSchema = z.object({
   reviews: z.object({
     total: count, average: z.number().nullable(),
     distribution: z.array(z.object({ rating: z.number(), count })),
-    recent: z.array(z.object({ id: text, author: text, rating: z.number(), title: nullableText, content: nullableText, createdAt: text })),
+    recent: z.array(z.object({ id: text, author: text, rating: z.number(), title: nullableText, content: nullableText, source: text, createdAt: text })),
   }),
 })
 

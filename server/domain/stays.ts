@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { MAX_STAY_NIGHTS, STAY_PAYMENT_METHODS, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, STAY_CHANNEL_LABELS, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedResponsibilitySql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
@@ -14,7 +14,7 @@ import { executeRefund, requirePayment, type Payment } from '~/server/domain/pay
 import { paymentsStripe } from '~/server/utils/stripe-connect'
 import { isRecord } from '~/server/utils/type-guards'
 import { isStayCheckInMethod, STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LIMIT, type StayArrivalGuide } from '~/shared/stay-arrival'
-import { isStayAmenity, parseStayAmenityAnswers, parseStayMapSharing, STAY_ALARM_DETAIL_KEYS, STAY_CANCELLATION_POLICIES, type StayAmenityAnswer, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
+import { AIRBNB_CANCELLATION_CATEGORIES, AIRBNB_LONG_TERM_CANCELLATION_IDS, isStayAmenity, parseStayAmenityAnswers, parseStayMapSharing, STAY_ALARM_DETAIL_KEYS, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, type StayAmenityAnswer, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
 import { validateProductDetails, validateStayAlarmDetails, stayHouseRuleLines } from '~/shared/product-details'
 import { staySafetyLines, stayAlarmLines } from '~/shared/stay-safety'
 import { formatTime, isValidTimezone, localDateTimeToInstant } from '~/utils/timezone'
@@ -91,15 +91,33 @@ export interface Stay {
   provider: 'channex' | null
   external_booking_id: string | null
   channel_booking_id: string | null
+  /** The reservation on its channel's host pages, from its confirmation code; null where the channel has none KrabiClaw links to. */
+  channel_booking_url: string | null
   /** The guest conversation in the inbox; null until a named contact opens one. An existing conversation is retained. */
   request_id: string | null
   cancelled_at: string | null
   cancellation_reason: string | null
   /** The policy a guest booked under on the site; null for a stay not paid there. */
   cancellation_policy: StayBookedPolicy | null
+  /** Staff recorded the guest did not arrive; their review invitation is never sent. */
+  no_show_at: string | null
   version: number
   created_at: string
   updated_at: string
+}
+
+/**
+ * A stay as a member responsible for its home sees it: the Turnovers view.
+ * Dates, arrival, the guest's first name and party, and whether they never
+ * arrived (no_show_at); nothing that reaches
+ * the guest or their money. Owners and admins read the whole stay.
+ */
+export const STAY_TURNOVER_FIELDS = ['id', 'product_id', 'location_id', 'timezone', 'status', 'check_in_date', 'check_out_date', 'arrival_time', 'adults', 'children', 'infants', 'guest_name', 'no_show_at'] as const
+export type StayTurnover = Pick<Stay, typeof STAY_TURNOVER_FIELDS[number]>
+
+export function stayTurnover(stay: Stay): StayTurnover {
+  const turnover = Object.fromEntries(STAY_TURNOVER_FIELDS.map(field => [field, stay[field]])) as StayTurnover
+  return { ...turnover, guest_name: stayGuestFirstName(stay.guest_name) }
 }
 
 export interface StayPayment {
@@ -343,10 +361,18 @@ function amount(value: unknown, field: string, allowNegative = false): number {
 
 const STAY_COLUMNS = `s.id, s.product_id, c.location_id, l.timezone, s.channel, s.owner, s.status, s.overbooked, s.check_in_date, s.check_out_date, s.arrival_time,
   s.adults, s.children, s.infants, s.guest_name, s.guest_surname, s.guest_email, s.guest_phone, s.user_id, s.total_minor, s.currency, s.notes,
-  s.provider, s.external_booking_id, s.channel_booking_id, s.request_id, s.cancelled_at, s.cancellation_reason, s.cancellation_policy, s.version, s.created_at, s.updated_at`
+  s.provider, s.external_booking_id, s.channel_booking_id, s.request_id, s.cancelled_at, s.cancellation_reason, s.cancellation_policy, s.no_show_at, s.version, s.created_at, s.updated_at`
 
 function mapStay(row: Record<string, unknown>): Stay {
-  return { ...row, overbooked: Number(row.overbooked) === 1 } as unknown as Stay
+  const code = row.channel_booking_id
+  return { ...row, overbooked: Number(row.overbooked) === 1,
+    channel_booking_url: row.channel === 'airbnb' && typeof code === 'string' ? `https://www.airbnb.com/hosting/reservations/details/${encodeURIComponent(code)}` : null } as unknown as Stay
+}
+
+/** A channel's stay is changed on its channel: refused, linking to the reservation there when KrabiClaw can. */
+function channelOwned(stay: Stay, state: 'belongs to' | 'is paid through'): never {
+  const url = stay.channel_booking_url
+  fail(409, 'STAY_NOT_EDITABLE', url ? `This stay ${state} ${STAY_CHANNEL_LABELS[stay.channel]}; change it there: ${url}` : `This stay ${state} its channel; change it there`, undefined, { channel_booking_url: url })
 }
 
 /** The SQL that limits rows to homes this caller may see, and its parameters. */
@@ -509,6 +535,9 @@ export interface NewStayHome {
   max_guests: number
   min_nights: number
   base_price_minor: number | null
+  /** Left out, a new home starts on Airbnb's own: NEW_HOME_CANCELLATION_POLICIES. */
+  cancellation_policy?: StayCancellationPolicy
+  long_term_cancellation_policy?: StayLongTermCancellationPolicy
 }
 
 /** A home's details read from a request body; each problem names its field. */
@@ -555,6 +584,12 @@ function homeDetails(body: Record<string, unknown>) {
 /** Read a new home's details from a request body; each problem names its field. */
 export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
   const { text, timezone, time, name, maxGuests, minNights, basePrice } = homeDetails(body)
+  const policy = <K extends 'cancellation_policy' | 'long_term_cancellation_policy'>(key: K, codes: Record<NonNullable<NewStayHome[K]>, unknown>): Partial<Pick<NewStayHome, K>> => {
+    const value = body[key]
+    if (value === undefined) return {}
+    if (typeof value !== 'string' || !Object.hasOwn(codes, value)) fail(422, 'INVALID_DETAIL', `${key} must be one of ${Object.keys(codes).join(', ')}`, key)
+    return { [key]: value } as Partial<Pick<NewStayHome, K>>
+  }
   const home: NewStayHome = {
     name: name(true)!, timezone: timezone(true)!,
     ...homeAddress(body, ''),
@@ -562,6 +597,9 @@ export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
     check_in_time: time('check_in_time', true)!, check_in_end_time: time('check_in_end_time', false), check_out_time: time('check_out_time', true)!,
     max_guests: maxGuests(true)!, min_nights: minNights(true)!,
     base_price_minor: basePrice(),
+    // Left out, the product writer gives a new home Airbnb's own; an empty one is refused before the location is made.
+    ...policy('cancellation_policy', STAY_CANCELLATION_POLICIES),
+    ...policy('long_term_cancellation_policy', STAY_LONG_TERM_CANCELLATION_POLICIES),
   }
   if (home.email !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(home.email)) fail(422, 'INVALID_DETAIL', 'Enter a valid contact email', 'email')
   return home
@@ -777,7 +815,9 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
     product: {
       kind: 'stay', name: home.name,
       ...(home.base_price_minor === null ? {} : { variants: [{ name: home.name, prices: [{ unit_amount: home.base_price_minor }] }] }),
-      stay: { location_id: locationId, check_in_time: home.check_in_time, check_in_end_time: home.check_in_end_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, assigned_member_id: null, assigned_team_id: null },
+      stay: { location_id: locationId, check_in_time: home.check_in_time, check_in_end_time: home.check_in_end_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, assigned_member_id: null, assigned_team_id: null,
+        ...(home.cancellation_policy === undefined ? {} : { cancellation_policy: home.cancellation_policy }),
+        ...(home.long_term_cancellation_policy === undefined ? {} : { long_term_cancellation_policy: home.long_term_cancellation_policy }) },
     },
   })
   return await readStayHome(db, access, product.id)
@@ -1085,14 +1125,18 @@ export async function moveStayPhotos(db: DbClient, env: CloudflareEnv & GuestInb
   return { home: await changedStayPhotoRooms(db, env, access, home), destination_room_id: roomId, created_room_id: creating ? roomId : null, moved_photo_ids: photos.map(photo => photo.photo_id) }
 }
 
+/** What this caller reads of a stay: the whole stay for managers, its turnover for members. */
+export type StayView<A extends StayAccess> = A extends { manage: true } ? Stay : StayTurnover
+type StayDetailView<A extends StayAccess> = A extends { manage: true } ? StayDetail : StayTurnover
+
 /** Stays overlapping [from, to), newest check-in last. Cancelled stays are included only when asked for. */
-export async function listStays(db: DbClient, access: StayAccess, input: { from: unknown; to: unknown; productId?: string; includeCancelled?: boolean }): Promise<Stay[]> {
+export async function listStays<A extends StayAccess>(db: DbClient, access: A, input: { from: unknown; to: unknown; productId?: string; includeCancelled?: boolean }): Promise<Array<StayView<A>>> {
   const { from, to } = range(input, MAX_LIST_DAYS)
   return staysOverlapping(db, access, { from, to, productId: input.productId, includeCancelled: input.includeCancelled })
 }
 
 /** Stays overlapping a range its caller has already checked. */
-async function staysOverlapping(db: DbClient, access: StayAccess, input: { from: string; to: string; productId?: string; includeCancelled?: boolean }): Promise<Stay[]> {
+async function staysOverlapping<A extends StayAccess>(db: DbClient, access: A, input: { from: string; to: string; productId?: string; includeCancelled?: boolean }): Promise<Array<StayView<A>>> {
   const { from, to } = input
   const scope = visibleHomes(access)
   const rows = await queryAll<Record<string, unknown>>(db, `
@@ -1101,10 +1145,10 @@ async function staysOverlapping(db: DbClient, access: StayAccess, input: { from:
      WHERE s.organization_id = ? AND s.check_in_date < ? AND s.check_out_date > ?
        ${input.productId ? 'AND s.product_id = ?' : ''} ${input.includeCancelled ? '' : "AND s.status <> 'cancelled'"} AND ${scope.sql}
      ORDER BY s.check_in_date, s.id`, [access.organizationId, to, from, ...(input.productId ? [input.productId] : []), ...scope.params])
-  return rows.map(mapStay)
+  return rows.map(row => access.manage ? mapStay(row) : stayTurnover(mapStay(row))) as Array<StayView<A>>
 }
 
-export async function getStay(db: DbClient, access: StayAccess, stayId: string): Promise<StayDetail> {
+export async function getStay<A extends StayAccess>(db: DbClient, access: A, stayId: string): Promise<StayDetailView<A>> {
   const scope = visibleHomes(access)
   const row = await queryFirst<Record<string, unknown> & Pick<StayDetail, 'guest_image_url'>>(db, `
     SELECT ${STAY_COLUMNS}, (SELECT u.image FROM user u WHERE u.id = s.user_id) AS guest_image_url
@@ -1113,6 +1157,7 @@ export async function getStay(db: DbClient, access: StayAccess, stayId: string):
      WHERE s.organization_id = ? AND s.id = ? AND ${scope.sql}`, [access.organizationId, stayId, ...scope.params])
   if (!row) fail(404, 'STAY_NOT_FOUND', 'That stay is not in this organization')
   const stay = mapStay(row)
+  if (!access.manage) return stayTurnover(stay) as StayDetailView<A>
   const [payments, online] = await Promise.all([
     queryAll<StayPayment>(db, `
       SELECT id, stay_id, amount_minor, currency, method, paid_on, reference, note, created_at, created_by
@@ -1129,11 +1174,11 @@ export async function getStay(db: DbClient, access: StayAccess, stayId: string):
   const paid = payments.reduce((sum, payment) => sum + payment.amount_minor, 0) + (onlinePayment ? onlinePayment.captured_minor - onlinePayment.refunded_minor : 0)
   const status = stay.owner === 'channel' ? null
     : paid === 0 ? 'unpaid' : paid < stay.total_minor ? 'partial' : paid === stay.total_minor ? 'paid' : 'overpaid'
-  return { ...stay, guest_image_url: row.guest_image_url, payments, online_payment: onlinePayment, paid_minor: paid, payment_status: status }
+  return { ...stay, guest_image_url: row.guest_image_url, payments, online_payment: onlinePayment, paid_minor: paid, payment_status: status } as StayDetailView<A>
 }
 
 /** Every night of [from, to) at one home: whether it is free, its price and rules, and the stay holding it. */
-export async function readStayCalendar(db: DbClient, access: StayAccess, input: { productId: string; from: unknown; to: unknown }): Promise<{ home: StayHome; nights: StayNight[]; stays: Stay[] }> {
+export async function readStayCalendar<A extends StayAccess>(db: DbClient, access: A, input: { productId: string; from: unknown; to: unknown }): Promise<{ home: StayHome; nights: StayNight[]; stays: Array<StayView<A>> }> {
   const { from, to } = range(input, MAX_CALENDAR_DAYS)
   const home = await readStayHome(db, access, input.productId)
   const [nights, stays] = await Promise.all([homeNights(db, access.organizationId, home, from, to), staysOverlapping(db, access, { from, to, productId: input.productId })])
@@ -1145,7 +1190,7 @@ export async function readStayCalendar(db: DbClient, access: StayAccess, input: 
  * multi-calendar's read: each home with its nights, and the stays holding any
  * of them. A night's stay_id names its stay in `stays`.
  */
-export async function readStayCalendars(db: DbClient, access: StayAccess, input: { from: unknown; to: unknown }): Promise<{ from: string; to: string; homes: Array<{ home: StayHome; nights: StayNight[] }>; stays: Stay[] }> {
+export async function readStayCalendars<A extends StayAccess>(db: DbClient, access: A, input: { from: unknown; to: unknown }): Promise<{ from: string; to: string; homes: Array<{ home: StayHome; nights: StayNight[] }>; stays: Array<StayView<A>> }> {
   const { from, to } = range(input, MAX_HOMES_CALENDAR_DAYS)
   const [homes, stays] = await Promise.all([stayHomes(db, access, null), staysOverlapping(db, access, { from, to })])
   const nights = homes.length ? await homesNights(db, access.organizationId, homes, from, to) : []
@@ -1254,15 +1299,6 @@ export async function deliverPendingChannelNights(db: DbClient, env: StayMutatio
 
 /** A base price or minimum stay changes the same 500 future nights on every write surface. */
 /**
- * Our cancellation policies as Airbnb's own: the option of the same title and
- * wording in Airbnb's listing editor (read 2026-10-23), as Channex names it.
- * Airbnb's editor offers no Strict, so a home syncing with Airbnb is refused one.
- */
-const AIRBNB_CANCELLATION: Partial<Record<StayCancellationPolicy, string>> = {
-  flexible: 'flexible', moderate: 'moderate', limited: 'firm_14', firm: 'better_strict_with_grace_period',
-}
-
-/**
  * Refuse, before anything is written, settings a home syncing with Airbnb
  * cannot send. The same mapper validates and sends the normalized values.
  */
@@ -1273,20 +1309,26 @@ export async function requireAirbnbAcceptable(db: DbClient, organizationId: stri
   const syncing = await queryFirst(db, "SELECT 1 FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND enabled = 1", [organizationId, productId])
   if (syncing) fail(422, 'AIRBNB_UNSUPPORTED_VALUE', settings.refusal, settings.field)
 }
-const AIRBNB_LONG_TERM_CANCELLATION: Record<StayLongTermCancellationPolicy, string> = { firm: 'CANCEL_LONG_TERM_FAIR', strict: 'CANCEL_LONG_TERM_WITH_GRACE_PERIOD' }
 /** House rules Airbnb takes as guest controls, by product detail. */
 const AIRBNB_GUEST_CONTROLS = { pets_allowed: 'allows_pets_as_host', smoking_allowed: 'allows_smoking_as_host', events_allowed: 'allows_events_as_host' } as const
-/** Which of a connected home's Airbnb listing settings a product write changes, by section. */
-export type AirbnbSettingSections = { [Section in keyof AirbnbListingSettings]: boolean }
+/**
+ * Which of a connected home's Airbnb listing settings a product write changes:
+ * the check-in and checkout hours and house rules, the cancellation policies,
+ * and the minimum stay. The policies are their own section so an edit that
+ * leaves them alone never restates Airbnb's cancellation settings.
+ */
+export type AirbnbSettingSections = { booking: boolean; cancellation: boolean; availability: boolean }
 
 /** Compare complete normalized snapshots to select the sections this write changes. */
 export function touchesAirbnbSettings(patch: UpdateProductInput, previous: UpdateProductInput): AirbnbSettingSections | null {
+  const changed = (field: 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'cancellation_policy' | 'long_term_cancellation_policy') => patch.stay?.[field] !== undefined && patch.stay[field] !== previous.stay?.[field]
   const sections = {
-    booking: (['check_in_time', 'check_in_end_time', 'check_out_time', 'cancellation_policy', 'long_term_cancellation_policy'] as const).some(field => patch.stay?.[field] !== undefined && patch.stay[field] !== previous.stay?.[field])
+    booking: (['check_in_time', 'check_in_end_time', 'check_out_time'] as const).some(changed)
       || (Object.keys(AIRBNB_GUEST_CONTROLS) as Array<keyof typeof AIRBNB_GUEST_CONTROLS>).some(key => patch.details?.[key] !== previous.details?.[key]),
+    cancellation: (['cancellation_policy', 'long_term_cancellation_policy'] as const).some(changed),
     availability: patch.stay?.min_nights !== undefined && patch.stay.min_nights !== previous.stay?.min_nights,
   }
-  return sections.booking || sections.availability ? sections : null
+  return sections.booking || sections.cancellation || sections.availability ? sections : null
 }
 
 type AirbnbHomeSettings = Pick<StayHome, 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'cancellation_policy' | 'long_term_cancellation_policy' | 'min_nights'>
@@ -1295,14 +1337,17 @@ type AirbnbHomeSettings = Pick<StayHome, 'check_in_time' | 'check_in_end_time' |
  * A home's Airbnb listing settings, or why one of its values cannot be one.
  * Airbnb takes whole hours: a check-in start from 08:00 to 02:00 the next day
  * ("8"–"26"), an end up to 03:00 ("27") or flexible, and a checkout hour.
- * Only what the home has is sent: an unset house rule or policy is left as
- * Airbnb has it. Prices are not listing settings here: every night's price,
- * the base price's included, already reaches Airbnb with the nightly calendar.
+ * Only the sections a write changed are sent, and only what the home has: an
+ * unset house rule is left as Airbnb has it. Prices are not listing settings
+ * here: every night's price, the base price's included, already reaches
+ * Airbnb with the nightly calendar.
  */
 function airbnbListingSettings(home: AirbnbHomeSettings, details: Product['details'], sections: AirbnbSettingSections): AirbnbListingSettings | { refusal: string; field: string } {
-  const booking = sections.booking ? airbnbBookingSettings(home, details) : {}
-  if ('refusal' in booking) return booking as { refusal: string; field: string }
-  return { booking, availability: sections.availability ? { default_min_nights: home.min_nights } : {} }
+  const hours = sections.booking ? airbnbBookingSettings(home, details) : {}
+  if ('refusal' in hours) return hours as { refusal: string; field: string }
+  const cancellation = sections.cancellation ? airbnbCancellationSettings(home) : {}
+  if ('refusal' in cancellation) return cancellation as { refusal: string; field: string }
+  return { booking: { ...hours, ...cancellation }, availability: sections.availability ? { default_min_nights: home.min_nights } : {} }
 }
 
 function airbnbBookingSettings(home: AirbnbHomeSettings, details: Product['details']): Record<string, unknown> | { refusal: string; field: string } {
@@ -1329,14 +1374,19 @@ function airbnbBookingSettings(home: AirbnbHomeSettings, details: Product['detai
   booking.check_out_time = checkout
   const controls = Object.fromEntries((Object.entries(AIRBNB_GUEST_CONTROLS) as Array<[keyof typeof AIRBNB_GUEST_CONTROLS, string]>).flatMap(([key, control]) => typeof details[key] === 'boolean' ? [[control, details[key]]] : []))
   if (Object.keys(controls).length) booking.guest_controls = controls
-  const category = home.cancellation_policy ? AIRBNB_CANCELLATION[home.cancellation_policy] : undefined
-  if (home.cancellation_policy && !category) return { refusal: `Airbnb has no ${STAY_CANCELLATION_POLICIES[home.cancellation_policy].label} cancellation policy. Choose Flexible, Moderate, Limited or Firm for a home that syncs with Airbnb.`, field: 'cancellation_policy' }
-  const cancellation = {
-    ...(category ? { cancellation_policy_category: category } : {}),
-    ...(home.long_term_cancellation_policy ? { lts_cancellation_policy_id: AIRBNB_LONG_TERM_CANCELLATION[home.long_term_cancellation_policy] } : {}),
-  }
-  if (Object.keys(cancellation).length) booking.cancellation_policy_settings = cancellation
   return booking
+}
+
+/** A home's two policies as Airbnb's own options of the same title and wording. Airbnb has no Strict to set. */
+function airbnbCancellationSettings(home: AirbnbHomeSettings): Record<string, unknown> | { refusal: string; field: string } {
+  const categories: Partial<Record<StayCancellationPolicy, string>> = AIRBNB_CANCELLATION_CATEGORIES
+  const category = home.cancellation_policy ? categories[home.cancellation_policy] : undefined
+  if (home.cancellation_policy && !category) return { refusal: `Airbnb has no ${STAY_CANCELLATION_POLICIES[home.cancellation_policy].label} cancellation policy. Choose Flexible, Moderate, Limited or Firm for a home that syncs with Airbnb.`, field: 'cancellation_policy' }
+  const settings = {
+    ...(category ? { cancellation_policy_category: category } : {}),
+    ...(home.long_term_cancellation_policy ? { lts_cancellation_policy_id: AIRBNB_LONG_TERM_CANCELLATION_IDS[home.long_term_cancellation_policy] } : {}),
+  }
+  return Object.keys(settings).length ? { cancellation_policy_settings: settings } : {}
 }
 
 /**
@@ -1508,7 +1558,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
 async function requireAppStay(db: DbClient, access: StayAccess, stayId: string, expectedVersion: unknown): Promise<StayDetail> {
   requireManager(access)
   const stay = await getStay(db, access, stayId)
-  if (stay.owner !== 'app') fail(409, 'STAY_NOT_EDITABLE', 'This stay belongs to its channel; change it there')
+  if (stay.owner !== 'app') channelOwned(stay, 'belongs to')
   if (stay.status === 'cancelled') fail(409, 'STAY_NOT_EDITABLE', 'This stay is cancelled')
   if (expectedVersion !== stay.version) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
   return stay
@@ -1520,6 +1570,7 @@ function versionChanged(results: unknown): boolean {
 }
 
 export async function updateStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: Record<string, unknown> & { expected_version: unknown }): Promise<StayDetail & { channel_push: SuccessfulChannelPush | null }> {
+  requireManager(access)
   const current = await requireAppStay(db, access, stayId, input.expected_version)
   const home = await readStayHome(db, access, current.product_id)
   const fields = stayFields({ ...current, ...input }, home)
@@ -1571,7 +1622,7 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
 export async function cancelStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: { expected_version: unknown; reason?: unknown; authorization_id?: string; financial_writes_allowed?: boolean }): Promise<StayDetail & { channel_push: SuccessfulChannelPush | null }> {
   requireManager(access)
   const current = await getStay(db, access, stayId)
-  if (current.owner !== 'app') fail(409, 'STAY_NOT_EDITABLE', 'This stay belongs to its channel; change it there')
+  if (current.owner !== 'app') channelOwned(current, 'belongs to')
   if (input.expected_version !== current.version) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
   const reason = optionalText(input.reason, 'reason', 500)
   const complete = async (version: number) => {
@@ -1778,7 +1829,7 @@ function stayPaymentInsert(access: StayAccess, stay: { id: string; currency: str
 export async function recordStayPayment(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, stayId: string, input: Record<string, unknown>): Promise<{ stay: StayDetail; payment: StayPayment }> {
   requireManager(access)
   const stay = await getStay(db, access, stayId)
-  if (stay.owner !== 'app') fail(409, 'STAY_NOT_EDITABLE', 'This stay is paid through its channel')
+  if (stay.owner !== 'app') channelOwned(stay, 'is paid through')
   const payment = stayPaymentFields(input, '', true)
   const key = typeof input.idempotency_key === 'string' ? input.idempotency_key.trim() : ''
   if (!key || key.length > 200) fail(422, 'INVALID_STAY_FIELD', 'idempotency_key must be 1 to 200 characters', 'idempotency_key')

@@ -1,13 +1,26 @@
 import { expect, test } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
-import { dismissPreviewToolbar, openTenantPage, tenantBaseURL, tenantExtraHeaders, waitForNuxtHydration } from './helpers'
+import { dismissPreviewToolbar, openTenantPage, waitForNuxtHydration } from './helpers'
+import { seededTenant } from './seed/manifest'
+import { seededSiteHeaders, seededSiteURL } from './test-env'
 import { loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import type { Collection, Product } from '../../server/types/products'
 
-const organizationId = 'org-demo'
-const editor = `/api/editor/organizations/${organizationId}`
-const catalog = '/dashboard/ember-slice-demo/products'
+// The seeded Ember & Slice and its Brooklyn location; read once the seed has run.
+let organizationId = ''
+let editor = ''
+let catalog = ''
+let slug = ''
+let brooklyn = ''
+test.beforeEach(() => {
+  const restaurant = seededTenant('restaurant')
+  organizationId = restaurant.organizationId
+  slug = restaurant.slug
+  editor = `/api/editor/organizations/${organizationId}`
+  catalog = `/dashboard/${slug}/products`
+  brooklyn = restaurant.locations.brooklyn!.id
+})
 
 // A collection replacement must retain every member, including products that
 // a location-filtered catalog does not return. This exercises the real editor
@@ -31,13 +44,13 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
       products.push((await response.json() as { product: Product }).product)
     }
     const [located, unassigned] = products as [Product, Product]
-    const binding = await page.request.put(`${editor}/products/${located.id}/locations/loc-demo`, { data: { active: true, published: false } })
+    const binding = await page.request.put(`${editor}/products/${located.id}/locations/${brooklyn}`, { data: { active: true, published: false } })
     expect(binding.status(), await binding.text()).toBe(200)
-    const locationsRead = await page.request.get('/api/dashboard/locations', { params: { org: 'ember-slice-demo', organization: 'true' } })
+    const locationsRead = await page.request.get('/api/dashboard/locations', { params: { org: slug, organization: 'true' } })
     expect(locationsRead.status(), await locationsRead.text()).toBe(200)
-    const location = (await locationsRead.json() as { locations: Array<{ id: string; title: string; slug: string }> }).locations.find(location => location.id === 'loc-demo')
+    const location = (await locationsRead.json() as { locations: Array<{ id: string; title: string; slug: string }> }).locations.find(location => location.id === brooklyn)
     expect(location).toBeDefined()
-    for (const [label, locationId] of [['Spring specials', null], ['House favourites', null], ['Evening menu', 'loc-demo']] as const) {
+    for (const [label, locationId] of [['Spring specials', null], ['House favourites', null], ['Evening menu', brooklyn]] as const) {
       const response = await page.request.post(`${editor}/collections`, { data: { name: `${label} ${run}`, location_id: locationId } })
       expect(response.status(), await response.text()).toBe(201)
       sections.push((await response.json() as { collection: Collection }).collection)
@@ -48,7 +61,7 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
       expect(response.status(), await response.text()).toBe(200)
     }
 
-    const scoped = await page.request.get(`${editor}/locations/loc-demo/products`)
+    const scoped = await page.request.get(`${editor}/locations/${brooklyn}/products`)
     expect(scoped.status(), await scoped.text()).toBe(200)
     const scopedProducts = (await scoped.json() as { products: Product[] }).products
     expect(scopedProducts.filter(product => products.some(created => created.id === product.id)).map(product => product.id)).toEqual([located.id])
@@ -57,7 +70,7 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
       const response = await page.request.get(`${editor}/products`)
       expect(response.status(), await response.text()).toBe(200)
       const persisted = (await response.json() as { products: Product[] }).products
-      expect(persisted.find(product => product.id === located.id)?.locations).toEqual([{ location_id: 'loc-demo', active: true, published: false }])
+      expect(persisted.find(product => product.id === located.id)?.locations).toEqual([{ location_id: brooklyn, active: true, published: false }])
       expect(persisted.find(product => product.id === unassigned.id)?.locations).toEqual([])
       return [source, target].map(section => persisted.flatMap(product => product.collections
         .filter(membership => membership.collection_id === section.id)
@@ -72,7 +85,7 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     await expect(page.getByTestId('menu-scope-shared')).toHaveCount(0)
     expect(pageErrors).toEqual([])
 
-    expect((await page.goto(`${catalog}/menu?location_id=loc-demo`))?.status()).toBe(200)
+    expect((await page.goto(`${catalog}/menu?location_id=${brooklyn}`))?.status()).toBe(200)
     await waitForNuxtHydration(page)
     await expect(page.locator('#dashboard-panel-catalog-menu').getByRole('link', { name: source.name })).toHaveAttribute('href', `${catalog}/menu/${source.id}?kind=dish`)
 
@@ -144,11 +157,11 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     expect(savedOrder.status(), await savedOrder.text()).toBe(200)
     const savedSections = (await savedOrder.json() as { collections: Collection[] }).collections
     expect(savedSections.filter(section => section.location_id === null).map(section => section.id)).toEqual(sharedBefore)
-    expect(savedSections.filter(section => section.location_id === 'loc-demo')).toEqual(beforeSections.filter(section => section.location_id === 'loc-demo'))
+    expect(savedSections.filter(section => section.location_id === brooklyn)).toEqual(beforeSections.filter(section => section.location_id === brooklyn))
 
     // Menu supplies its dish context explicitly. A location may scope prices,
     // but it must never filter the membership this editor replaces.
-    expect((await page.goto(`${catalog}/menu/${source.id}?location_id=loc-demo&kind=dish`))?.status()).toBe(200)
+    expect((await page.goto(`${catalog}/menu/${source.id}?location_id=${brooklyn}&kind=dish`))?.status()).toBe(200)
     await waitForNuxtHydration(page)
     const panel = page.locator('#dashboard-panel-menu-section')
     const rows = panel.locator('span[data-testid^="product-"]')
@@ -241,7 +254,7 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     await expect(panel.getByTestId(`product-${located.id}`)).toHaveCount(0)
     await expect(panel.getByTestId(`product-${unassigned.id}`)).toBeVisible()
     await page.setViewportSize({ width: 390, height: 844 })
-    expect((await page.goto(`${catalog}/menu/${target.id}?location_id=loc-demo&kind=dish`))?.status()).toBe(200)
+    expect((await page.goto(`${catalog}/menu/${target.id}?location_id=${brooklyn}&kind=dish`))?.status()).toBe(200)
     await waitForNuxtHydration(page)
     await expect(panel.getByTestId(`product-${located.id}`)).toBeVisible()
     await expect(panel.getByTestId('editor-card-name')).toContainText(target.name)
@@ -251,18 +264,18 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     await page.setViewportSize({ width: 1440, height: 900 })
     await panel.getByTestId(`product-${located.id}`).click()
     const membershipCard = page.locator('#dashboard-panel-product').getByTestId('editor-card-collections')
-    await expect(membershipCard).toHaveAttribute('href', `${catalog}/${located.id}/collections?location_id=loc-demo&kind=dish`)
+    await expect(membershipCard).toHaveAttribute('href', `${catalog}/${located.id}/collections?location_id=${brooklyn}&kind=dish`)
     await membershipCard.click()
     const memberships = page.locator('#dashboard-panel-product-collections')
-    await expect(memberships.getByRole('link', { name: target.name })).toHaveAttribute('href', `${catalog}/menu/${target.id}?location_id=loc-demo&kind=dish`)
+    await expect(memberships.getByRole('link', { name: target.name })).toHaveAttribute('href', `${catalog}/menu/${target.id}?location_id=${brooklyn}&kind=dish`)
 
     // Entering the same dish without Menu context must not narrow the target
     // collection's chooser to dishes solely because this member is a dish.
     expect((await page.goto(`${catalog}/${located.id}/collections`))?.status()).toBe(200)
     await waitForNuxtHydration(page)
-    await expect(memberships.getByRole('link', { name: target.name })).toHaveAttribute('href', `${catalog}/menu/${target.id}?location_id=loc-demo`)
+    await expect(memberships.getByRole('link', { name: target.name })).toHaveAttribute('href', `${catalog}/menu/${target.id}?location_id=${brooklyn}`)
     await memberships.getByRole('link', { name: target.name }).click()
-    await expect(page).toHaveURL(`${catalog}/menu/${target.id}?location_id=loc-demo`)
+    await expect(page).toHaveURL(`${catalog}/menu/${target.id}?location_id=${brooklyn}`)
     await panel.getByRole('button', { name: 'Add item', exact: true }).click()
     const generalChooser = page.getByRole('dialog', { name: 'Add items', exact: true })
     await expect(generalChooser.getByRole('textbox', { name: 'Search items', exact: true })).toBeVisible()
@@ -282,7 +295,7 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     expect(multipleRead.status(), await multipleRead.text()).toBe(200)
     const multiple = (await multipleRead.json() as { product: Product }).product
     expect(multiple.collections.map(membership => membership.collection_id).sort()).toEqual([sharedTarget.id, target.id].sort())
-    expect(multiple.locations).toEqual([{ location_id: 'loc-demo', active: true, published: false }])
+    expect(multiple.locations).toEqual([{ location_id: brooklyn, active: true, published: false }])
     await expect(addMembership).toBeHidden()
     const membershipRemoved = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/collections/${sharedTarget.id}/products` && response.request().method() === 'PUT')
     await memberships.getByRole('button', { name: `Remove from ${sharedTarget.name}`, exact: true }).click()
@@ -365,7 +378,7 @@ test('a section photo introduces its section on the public menu', async ({ page,
   }
   try {
     await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
-    await openTenantPage(page, `${tenantBaseURL}/menu`, tenantExtraHeaders)
+    await openTenantPage(page, `${seededSiteURL('restaurant')}/menu`, seededSiteHeaders('restaurant'))
     const listed = await page.request.get(`${editor}/collections`)
     expect(listed.status(), await listed.text()).toBe(200)
     const collections = (await listed.json() as { collections: Collection[] }).collections
@@ -373,10 +386,11 @@ test('a section photo introduces its section on the public menu', async ({ page,
     for (const candidate of collections) {
       if (await page.getByRole('heading', { level: 2, name: candidate.name, exact: true }).count()) { section = candidate; break }
     }
-    expect(section, 'The public menu shows one of the demo sections').toBeDefined()
+    expect(section, 'The public menu shows one of the restaurant\'s sections').toBeDefined()
     restore = { id: section!.id, assetId: section!.image?.asset_id ?? null }
-    // One of the demo's own images, so the run stores nothing new.
-    const assetId = section!.image?.asset_id === 'media-demo-burrata' ? 'media-demo-margherita' : 'media-demo-burrata'
+    // One of the restaurant's own images, so the run stores nothing new.
+    const { media } = seededTenant('restaurant')
+    const assetId = section!.image?.asset_id === media.burrata!.id ? media.margherita!.id : media.burrata!.id
     await setPhoto(section!.id, assetId)
 
     const reread = await page.request.get(`${editor}/collections`)
@@ -385,7 +399,7 @@ test('a section photo introduces its section on the public menu', async ({ page,
     expect(image?.asset_id).toBe(assetId)
     expect(image?.public_url).toBeTruthy()
 
-    await openTenantPage(page, `${tenantBaseURL}/menu`, tenantExtraHeaders)
+    await openTenantPage(page, `${seededSiteURL('restaurant')}/menu`, seededSiteHeaders('restaurant'))
     // The picture that introduces the section is the one set above its own heading, not a dish's.
     const intro = page.getByRole('heading', { level: 2, name: section!.name, exact: true }).locator('xpath=preceding-sibling::img')
     await expect(intro).toHaveCount(1)

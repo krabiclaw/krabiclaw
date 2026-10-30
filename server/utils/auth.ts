@@ -351,6 +351,18 @@ function buildAuth(env: CloudflareEnv) {
     await executeBatch(db, [publicResourceCacheInvalidationQuery(organizationId, 'member-change'), ...audit])
     await publishAccessInvalidation(env, { organizationId })
   }
+  // Removed by an owner, leaving, or deleting the account: one departure, one
+  // record, after Better Auth has deleted the member.
+  const recordMemberDeparture = (member: { id: string; organizationId: string; userId: string }) => recordMemberChange(member.organizationId, [organizationEventQuery({
+    organizationId: member.organizationId,
+    eventType: 'member.removed',
+    entityType: 'member',
+    entityId: member.id,
+    metadata: { userId: member.userId },
+  })])
+  // Better Auth's user delete.after receives only the user; the memberships
+  // its delete cascades away are read in delete.before of the same request.
+  const departingMemberships = new Map<string, Array<{ id: string; organizationId: string; userId: string }>>()
   const configuredOrganizationOptions = {
     ...organizationOptions,
     organizationHooks: {
@@ -358,13 +370,7 @@ function buildAuth(env: CloudflareEnv) {
       beforeUpdateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
       afterAddMember: async ({ member }: { member: { organizationId: string } }) => recordMemberChange(member.organizationId),
       afterAcceptInvitation: async ({ member }: { member: { organizationId: string } }) => recordMemberChange(member.organizationId),
-      afterRemoveMember: async ({ member }: { member: { id: string; organizationId: string; userId: string } }) => recordMemberChange(member.organizationId, [organizationEventQuery({
-        organizationId: member.organizationId,
-        eventType: 'member.removed',
-        entityType: 'member',
-        entityId: member.id,
-        metadata: { userId: member.userId },
-      })]),
+      afterRemoveMember: async ({ member }: { member: { id: string; organizationId: string; userId: string } }) => recordMemberDeparture(member),
       afterUpdateMemberRole: async ({ member }: { member: { id: string; organizationId: string; userId: string; role: string } }) => recordMemberChange(member.organizationId, [organizationEventQuery({
         organizationId: member.organizationId,
         eventType: 'member.role_changed',
@@ -455,11 +461,12 @@ function buildAuth(env: CloudflareEnv) {
         }
       }),
       after: createAuthMiddleware(async (ctx) => {
+        // Better Auth's leave runs no organization hook; it returns the member
+        // it deleted. The session its middleware resolved is not on this context.
         if (ctx.path === '/organization/leave') {
           const left = ctx.context.returned
-          if (left instanceof Error || !ctx.context.session) return
-          const organizationId = (ctx.body as { organizationId: string }).organizationId
-          await recordMemberChange(organizationId)
+          if (left instanceof Error) return
+          await recordMemberDeparture(left as { id: string; organizationId: string; userId: string })
           return
         }
         if (ctx.path !== '/callback/:id') return
@@ -543,11 +550,16 @@ function buildAuth(env: CloudflareEnv) {
             // A deleted account's Customer at every business it paid goes with it, and the cards saved there.
             await deleteBuyerCustomers(db, env, user.id)
             await execute(db, "DELETE FROM activity_entries WHERE kind='notification' AND scope_kind='global' AND target_user_id=?", [user.id])
-            // Current business responsibility ends with membership. The actual
-            // individual recorded on historical bookings remains unchanged.
-            for (const { organizationId } of await queryAll<{ organizationId: string }>(db, 'SELECT DISTINCT "organizationId" FROM member WHERE "userId" = ?', [user.id])) {
-              await reconcileResponsibilities(env, db, { organizationId, departingUserId: user.id })
-            }
+            departingMemberships.set(user.id, await queryAll<{ id: string; organizationId: string; userId: string }>(db, 'SELECT id, "organizationId", "userId" FROM member WHERE "userId" = ?', [user.id]))
+          },
+          // Current business responsibility ends with membership, once the
+          // deletion has removed it. The actual individual recorded on
+          // historical bookings remains unchanged.
+          after: async (user) => {
+            const memberships = departingMemberships.get(user.id)
+            if (!memberships) throw new Error('A deleted account\'s memberships were not read before its deletion')
+            departingMemberships.delete(user.id)
+            for (const member of memberships) await recordMemberDeparture(member)
           },
         },
         update: {

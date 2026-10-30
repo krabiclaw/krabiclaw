@@ -167,7 +167,7 @@ Airbnb stay are distinct fixtures; never create one to stand in for another.
 
 Verify home publication against the live-home allowance separately: Basic includes
 2 live homes and refuses a third; drafts remain free and unlimited. Growth and
-Business include 2 live homes, then $9 per additional home per month, separately
+Business include 2 live homes, then $4 per additional home per month, separately
 from business locations. For a connected home, read both the saved calendar and
 the channel result. For a public paid stay, inspect the guest receipt, confirmed
 stay, held nights and recorded Stripe payment; a manual stay is no substitute.

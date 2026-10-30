@@ -5,7 +5,8 @@
 
     <p v-if="connectPending" role="status" class="text-muted">Loading payout settings…</p>
 
-    <UFormField v-if="needsCountry && !connectError && !connectPending" label="Business country" description="Where your business is legally established.">
+    <p v-if="needsCountry && !connectError && !connectPending && countriesPending" role="status" class="text-muted">Loading countries…</p>
+    <UFormField v-else-if="needsCountry && !connectError && !connectPending" label="Business country" description="Where your business is legally established.">
       <USelectMenu v-model="country" :items="countries" value-key="value" class="w-full" placeholder="Choose a country" />
     </UFormField>
 
@@ -46,9 +47,15 @@ const router = useRouter()
 const { connect, connectError, connectPending, refreshConnect, account, payout, setAccount } = useConnectAccount()
 const country = ref<string>()
 const needsCountry = computed(() => !account.value?.stripeAccountId)
+// Read only while a country is still to be chosen; Stripe answers this slowly.
+const { data: countryList, error: countriesError, status: countriesStatus, execute: loadCountries } = useAsyncData(`dashboard-connect-countries:${String(route.params.orgSlug)}`,
+  () => dashboardApi<{ success: true; countries: string[] }>('/api/dashboard/connect/countries', { validate: (value): value is { success: true; countries: string[] } => isRecord(value) && value.success === true && Array.isArray(value.countries) && value.countries.every(code => typeof code === 'string') }),
+  { server: false, lazy: true, immediate: false })
+watch(() => !connectPending.value && !connectError.value && needsCountry.value, (needed) => { if (needed && countriesStatus.value === 'idle') void loadCountries() }, { immediate: true })
+const countriesPending = computed(() => countriesStatus.value === 'idle' || countriesStatus.value === 'pending')
 const countries = computed(() => {
   const names = new Intl.DisplayNames(['en'], { type: 'region' })
-  return (connect.value?.countries ?? []).map(value => ({ value, label: names.of(value) ?? value })).sort((a, b) => a.label.localeCompare(b.label))
+  return (countryList.value?.countries ?? []).map(value => ({ value, label: names.of(value) ?? value })).sort((a, b) => a.label.localeCompare(b.label))
 })
 const scheduleLabel = computed(() => {
   const schedule = payout.value?.schedule
@@ -58,7 +65,7 @@ const scheduleLabel = computed(() => {
 const starting = ref(false)
 const openingDashboard = ref(false)
 const errorMessage = ref<string | null>(null)
-const failure = computed(() => (connectError.value ? getErrorMessage(connectError.value, 'Stripe Connect status could not be loaded') : errorMessage.value))
+const failure = computed(() => (connectError.value ? getErrorMessage(connectError.value, 'Stripe Connect status could not be loaded') : countriesError.value ? getErrorMessage(countriesError.value, 'Stripe’s countries could not be loaded') : errorMessage.value))
 const canContinueOnboarding = computed(() => account.value !== null && account.value.status !== 'ready')
 const status = computed(() => connectStatusPresentation(account.value?.status))
 const isAccountReply = (value: unknown): value is { success: true; account: ConnectedAccount } => isRecord(value) && value.success === true && isConnectedAccount(value.account)

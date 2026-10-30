@@ -2,6 +2,12 @@ name = "krabiclaw"
 main = ".output/server/index.mjs"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat_v2", "nodejs_compat_populate_process_env", "global_fetch_strictly_public", "web_socket_auto_reply_to_close"]
+# V8 keeps the Worker's source in the isolate's 128 MB heap, two bytes a
+# character once any character is outside ASCII. Unminified, the 41M-character
+# bundle held 78.5 MB of a 122 MB idle heap, so a few page renders pushed the
+# isolate over its limit and killed whatever was still streaming (MCP listen
+# streams). Minified it is 23.8M characters and the idle heap 78 MB.
+minify = true
 
 # D1 lives in WNAM and every statement is a round trip to it. Smart placement
 # never moved execution (every request reported cf-placement local-*), so a

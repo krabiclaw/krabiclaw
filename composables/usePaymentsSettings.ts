@@ -117,9 +117,9 @@ export const isConnectedAccount = (value: unknown): value is ConnectedAccount =>
   && (value.lastError === null || typeof value.lastError === 'string')
   && typeof value.createdAt === 'string' && typeof value.updatedAt === 'string'
 const isPayoutMethod = (value: unknown): value is PayoutMethod | null => value === null || (isRecord(value) && (value.bankName === null || typeof value.bankName === 'string') && typeof value.last4 === 'string' && typeof value.currency === 'string' && isRecord(value.schedule) && typeof value.schedule.interval === 'string' && Number.isSafeInteger(value.schedule.delayDays))
-export interface AccountResponse { success: true; account: ConnectedAccount | null; payout: PayoutMethod | null; countries: string[] }
+export interface AccountResponse { success: true; account: ConnectedAccount | null; payout: PayoutMethod | null }
 const isAccountResponse = (value: unknown): value is AccountResponse =>
-  isRecord(value) && value.success === true && (value.account === null || isConnectedAccount(value.account)) && isPayoutMethod(value.payout) && Array.isArray(value.countries) && value.countries.every(country => typeof country === 'string')
+  isRecord(value) && value.success === true && (value.account === null || isConnectedAccount(value.account)) && isPayoutMethod(value.payout)
 
 export function useConnectAccount() {
   const route = useRoute()

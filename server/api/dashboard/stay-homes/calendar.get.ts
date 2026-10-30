@@ -10,5 +10,5 @@ export default defineHandler(async (event) => {
   const { env, db, organization } = await getDashboardMemberContext(event, {})
   const access = await stayAccessFor(memberAccessPrincipal(organization, { env, event }))
   const query = getQuery(event)
-  return jsonResponse(await readStayCalendars(db, access, { from: query.from, to: query.to }))
+  return jsonResponse({ ...await readStayCalendars(db, access, { from: query.from, to: query.to }), manage: access.manage })
 })
