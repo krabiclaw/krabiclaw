@@ -365,6 +365,7 @@ async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow
     organizationId: thread.organization_id, organizationName: guest.fromName,
     threadId: thread.id, submissionType: thread.kind === 'reservation' ? 'reservation' : 'booking', submissionId: thread.id, sourceEntryId: entryId,
     guestName: summary.guestName, status, noun,
+    vertical: guest.vertical,
     whenLabel: proposal.afterLabel, whenDate: proposal.afterDate ?? null, whenTime: proposal.afterTime ?? null,
     guests: proposal.after.partySize, locationTitle: proposal.locationTitle,
     locationId: status === 'declined' ? proposal.before.locationId : proposal.afterLocationId !== undefined ? proposal.afterLocationId : proposal.before.locationId,

@@ -1706,6 +1706,7 @@ export async function notifyBookingChangeOwner(
     whenTime: string | null
     guests: number
     locationTitle: string
+    vertical?: string | null
   },
 ) {
   const { submissionType, requestedBy, memberIds, ...context } = opts
@@ -1718,7 +1719,12 @@ export async function notifyBookingChangeOwner(
       ? 'The guest accepted. The updated details are now confirmed.'
       : 'The guest declined. The original details remain unchanged.'
   const replyUrl = await buildOwnerThreadInboxUrl(env, db, opts)
-  const presentation = resolveBookingPresentation(opts.submissionType === 'reservation' ? 'reservation' : 'booking', opts.noun === 'consultation' ? 'service' : undefined)
+  const presentation = opts.noun === 'consultation' || opts.vertical === 'service'
+    ? resolveBookingPresentation('booking', 'service')
+    : opts.submissionType === 'reservation'
+      ? resolveBookingPresentation('reservation', opts.vertical ?? 'restaurant')
+      : resolveBookingPresentation('booking', opts.vertical ?? 'experience')
+  const partyLabel = (opts.submissionType === 'stay' || opts.noun === 'stay') ? 'Guests' : presentation.partyLabel
   const formattedPartySize = presentation.formatCount(opts.guests)
   const ownerMessage = bookingChangeMessage({
     recordKind: noun,
@@ -1731,7 +1737,7 @@ export async function notifyBookingChangeOwner(
     time: opts.whenTime,
     whenLabel: opts.whenLabel,
     partySize: formattedPartySize,
-    partyLabel: presentation.partyLabel,
+    partyLabel,
     summary: message,
     replyUrl,
     organizationName: organizationName(opts),
