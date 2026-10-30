@@ -10,16 +10,32 @@ test('resolveBookingPresentation maps service vertical to Consultation', () => {
   assert.equal(serviceBooking.label, 'Consultation')
   assert.equal(serviceBooking.labelPlural, 'Consultations')
   assert.equal(serviceBooking.noun, 'consultation')
+  assert.equal(serviceBooking.counterpartyLabel, 'Client')
+  assert.equal(serviceBooking.counterpartyNoun, 'client')
+  assert.equal(serviceBooking.partyLabel, 'Clients')
+  assert.equal(serviceBooking.formatCount(1), '1 client')
+  assert.equal(serviceBooking.formatCount(2), '2 clients')
 
   const serviceReservation = resolveBookingPresentation('reservation', 'service')
   assert.equal(serviceReservation.label, 'Consultation')
+  assert.equal(serviceReservation.counterpartyLabel, 'Client')
 
   const restaurantReservation = resolveBookingPresentation('reservation', 'restaurant')
   assert.equal(restaurantReservation.label, 'Reservation')
   assert.equal(restaurantReservation.labelPlural, 'Reservations')
+  assert.equal(restaurantReservation.counterpartyLabel, 'Guest')
+  assert.equal(restaurantReservation.partyLabel, 'Party size')
+  assert.equal(restaurantReservation.formatCount(1), '1 guest')
+  assert.equal(restaurantReservation.formatCount(2), '2 guests')
+  assert.equal(restaurantReservation.formatCount(4, true), '4+ guests')
+  assert.equal(restaurantReservation.formatCount('4+'), '4+ guests')
 
   const experienceBooking = resolveBookingPresentation('booking', 'experience')
   assert.equal(experienceBooking.label, 'Booking')
+  assert.equal(experienceBooking.counterpartyLabel, 'Guest')
+  assert.equal(experienceBooking.partyLabel, 'Guests')
+  assert.equal(experienceBooking.formatCount(1), '1 guest')
+  assert.equal(experienceBooking.formatCount(2), '2 guests')
 })
 
 test('threadRecordTitle and threadFilterLabel present legal service bookings as Consultation', () => {

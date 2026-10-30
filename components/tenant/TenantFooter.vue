@@ -2,7 +2,7 @@
   <footer class="border-t border-default bg-elevated text-default" aria-labelledby="tenant-footer-heading">
     <h2 id="tenant-footer-heading" class="sr-only">{{ t('site.footer.label') }}</h2>
     <div class="tenant-container pb-8 pt-12 sm:pt-16 lg:pt-20">
-      <div class="grid gap-10 border-b border-default pb-10 sm:pb-14 lg:grid-cols-[1fr_1.4fr] lg:gap-16">
+      <div class="grid gap-10 border-b border-default pb-10 sm:pb-14 lg:gap-16" :class="{ 'lg:grid-cols-[1fr_1.4fr]': error || (showAddresses && venueLocations.length) }">
         <div class="space-y-6">
           <NuxtLink :to="localePath('/')" class="inline-flex no-underline" :aria-label="`${brandName} home`">
             <SiteLogo :alt="brandName" size="md" loading="lazy">
@@ -27,7 +27,7 @@
         >
           {{ t('site.footer.locations_error') }}
         </div>
-        <div v-else-if="showAddresses && locations.length" class="grid gap-8 sm:grid-cols-2" :class="{ 'xl:grid-cols-3': locations.length > 2 }">
+        <div v-else-if="showAddresses && venueLocations.length" class="grid gap-8 sm:grid-cols-2" :class="{ 'xl:grid-cols-3': venueLocations.length > 2 }">
           <div v-for="loc in formattedLocations" :key="loc.id">
             <div class="tenant-display text-xl font-normal leading-none text-highlighted">{{ loc.title }}</div>
             <div class="mt-2 text-sm leading-relaxed text-muted">{{ formatLocAddress(loc) }}</div>
@@ -133,14 +133,16 @@ const footerGroups = computed(() => [
     label: t('site.footer.heading_connect'),
     items: [
       ...linksFor(['/about', '/schedule', '/contact']),
-      ...(!legalPractice.value && (props.locations || []).filter(location => !location.home_slug).length > 1 ? [{ path: '/locations', title: t('site.footer.all_locations') }] : []),
+      ...(!legalPractice.value && venueLocations.value.length > 1 ? [{ path: '/locations', title: t('site.footer.all_locations') }] : []),
     ],
   },
   { label: t('site.footer.legal'), items: linksFor(['/third-party-notices', '/policies/privacy', '/policies/terms', '/policies/acceptable-use']) },
 ].filter(group => group.items.length))
 
+const venueLocations = computed(() => (props.locations || []).filter(location => !location.home_slug))
+
 const formattedLocations = computed(() =>
-  (props.locations || []).map((loc: ApiRecord) => {
+  venueLocations.value.map((loc: ApiRecord) => {
     const closure = getActiveSpecialClosure((loc.special_hours as SpecialHours) ?? null, loc.timezone as string | undefined)
     return {
       ...loc,

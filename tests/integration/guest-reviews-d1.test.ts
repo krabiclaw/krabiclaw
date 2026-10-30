@@ -5,7 +5,7 @@ import { H3 } from 'nitro/h3'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
-import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
+import { getGuestRequest, requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { getReviewBookingContext, getReviewRequestByToken } from '../../server/utils/review-requests.ts'
 import { loadReviewFeedback } from '../../server/utils/review-feedback.ts'
@@ -63,7 +63,9 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     const thread = async (key: string, kind: 'reservation' | 'booking' | 'stay', userId: string, locationId: string | null, name: string) => {
       const id = T[key] ??= crypto.randomUUID()
       const writes = requestInsertQueries({ id, kind, organization_id: 'org', location_id: locationId, user_id: userId, review_id: null, conversation_state: 'resolved', resolved_at: now,
-        payload: threadPayloadForGuest({ name, email: `${key}@guests.example`, phone: '+66812345678' }), created_at: now, updated_at: now } as Parameters<typeof requestInsertQueries>[0])
+        // A stay's conversation carries only its guest; a booking's or reservation's carries the thread's own facts too.
+        payload: kind === 'stay' ? { guest: { name, email: `${key}@guests.example`, phone: '+66812345678' } } : threadPayloadForGuest({ name, email: `${key}@guests.example`, phone: '+66812345678' }),
+        created_at: now, updated_at: now } as Parameters<typeof requestInsertQueries>[0])
       await db.batch(writes.map(write => db.prepare(write.query).bind(...(write.params ?? []))))
     }
     const reservation = async (id: string, guest: string, locationId: string, endsAt: string, status = 'confirmed') => {
@@ -121,6 +123,8 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
       { booking_type: 'booking', booking_id: 'lesson', sent: 1 },
     ], 'every ended, confirmed visit inside the window is invited; the early, cancelled, old and no-show ones are not')
     assert.equal(run.result.sent, 4)
+    // Inviting leaves every conversation readable: a stay's strict payload carries no review state.
+    for (const key of ['dinner', 'consultation', 'lesson', 'cottage']) assert.ok(await getGuestRequest(db, T[key]!, 'org'), `${key} still reads as a conversation`)
 
     // The invitation is a fact in the visit's own conversation, and its email is that fact's receipt.
     const delivery = await db.prepare(`SELECT e.event_name, e.body, d.purpose, d.channel, d.status, d.email_json FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id

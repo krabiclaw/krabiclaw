@@ -46,6 +46,7 @@ export interface ReviewBookingContext {
   review_submitted_at: string | null
   review_id: string | null
   organization_name: string | null
+  organization_vertical?: string | null
   organization_public_url: string | null
   location_title: string | null
   google_place_id: string | null
@@ -119,9 +120,10 @@ export async function getReviewBookingContext(
   const row = await queryFirst<ReviewBookingContextRow>(db, `SELECT r.kind AS booking_type, r.id AS booking_id, r.organization_id, r.location_id, r.user_id,
     json_extract(r.payload_json, '$.guest.name') AS guest_name, COALESCE(record.guest_email, json_extract(r.payload_json, '$.guest.email')) AS guest_email,
     record.status, record.no_show_at, record.ends_at, record.check_out_date, record.check_out_time,
-    json_extract(r.payload_json, '$.review.request_sent_at') AS review_request_sent_at,
-    json_extract(r.payload_json, '$.review.submitted_at') AS review_submitted_at, r.review_id,
-    s.name AS organization_name, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = s.id AND role = 'canonical' AND status = 'active') AS organization_public_url,
+    -- Whether the visit was invited and answered is the review_requests record's, not the thread's.
+    (SELECT MIN(rr.first_sent_at) FROM review_requests rr WHERE rr.booking_type = r.kind AND rr.booking_id = r.id) AS review_request_sent_at,
+    (SELECT MIN(rr.submitted_at) FROM review_requests rr WHERE rr.booking_type = r.kind AND rr.booking_id = r.id) AS review_submitted_at, r.review_id,
+    s.name AS organization_name, s.vertical AS organization_vertical, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = s.id AND role = 'canonical' AND status = 'active') AS organization_public_url,
     bl.title AS location_title, bl.google_place_id, bl.google_review_url,
     record.starts_at AS visit_starts_at, record.timezone AS visit_timezone, record.party_size, record.product_id, p.kind AS product_kind, p.name AS product_title
     FROM requests r JOIN organization s ON s.id = r.organization_id LEFT JOIN business_locations bl ON bl.id = r.location_id
@@ -262,22 +264,6 @@ export async function markReviewRequestSendSuccess(
         updated_at = ?
     WHERE id = ?
   `, [sentAt, sentAt, requestId])
-  const request = await queryFirst<ReviewRequestRow>(db, `SELECT * FROM review_requests WHERE id = ? LIMIT 1`, [requestId])
-  if (request) await markBookingReviewRequestSent(db, request.booking_type, request.booking_id, sentAt)
-}
-
-export async function markBookingReviewRequestSent(
-  db: DbClient,
-  bookingType: ReviewBookingType,
-  bookingId: string,
-  sentAt = new Date().toISOString(),
-): Promise<void> {
-  const path = '$.review.request_sent_at'
-  await execute(db, `
-    UPDATE requests
-    SET payload_json = json_set(payload_json, ?, COALESCE(json_extract(payload_json, ?), ?)), updated_at = ?
-    WHERE id = ? AND kind = ?
-  `, [path, path, sentAt, sentAt, bookingId, bookingType])
 }
 
 export async function markReviewRequestSendFailure(

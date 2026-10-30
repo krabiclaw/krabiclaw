@@ -517,10 +517,12 @@ const announcement = computed(() => {
   if (!current?.operationalRecord) return null
   const fields = current.source.fields
   // `guests` is the party size alone ("6", or "6+" when it is a minimum).
-  const size = fields.guests?.trim() ? `${fields.guests} ${fields.guests === '1' ? 'guest' : 'guests'}` : null
+  const isConsultation = recordNoun.value === 'consultation'
+  const noun = isConsultation ? (fields.guests === '1' ? 'client' : 'clients') : (fields.guests === '1' ? 'guest' : 'guests')
+  const size = fields.guests?.trim() ? `${fields.guests} ${noun}` : null
   const rows = [
     { label: 'When', value: fields.whenLabel },
-    { label: 'Guests', value: size },
+    { label: isConsultation ? 'Clients' : 'Guests', value: size },
     { label: recordNoun.value.charAt(0).toUpperCase() + recordNoun.value.slice(1), value: fields.productTitle },
     { label: 'Location', value: fields.locationTitle ?? current.locationLabel },
     { label: 'Email', value: current.guestEmail },

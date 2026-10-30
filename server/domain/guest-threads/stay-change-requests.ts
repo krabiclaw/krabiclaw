@@ -83,6 +83,7 @@ async function alertOwners(db: DbClient, env: CloudflareEnv, thread: { id: strin
   await notifyBookingChangeOwner(env, db, {
     organizationId: thread.organization_id, organizationName: home.organization_name, threadId: thread.id, submissionType: 'stay', submissionId: thread.id, sourceEntryId: entry.id,
     guestName: thread.guest_name, status: 'requested', requestedBy: 'guest', noun: 'stay', locationId: home.location_id, locationTitle: home.name,
+    vertical: 'lodging',
     memberIds: home.assigned_member_id ? [home.assigned_member_id] : [],
     whenLabel: nightsLabel(proposal.after, 'en'), whenDate: null, whenTime: null, guests: proposal.after.adults + proposal.after.children,
   })
