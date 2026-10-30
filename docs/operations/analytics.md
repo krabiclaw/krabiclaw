@@ -1,7 +1,11 @@
 # Native analytics
 
 Insights and `get_organization_analytics` read the organization’s first-party D1
-record through `getAnalyticsReport`. Traffic from social networks, search,
+record through `getAnalyticsReport`. That record begins at the organization's
+`analytics_data_start_at` (when it went live). A range that ends before then is
+refused with `NO_NATIVE_COVERAGE` (422) rather than reported as zero traffic; a
+range that starts before then reports `period.nativeCoverage: 'partial'` and
+counts from that moment. Traffic from social networks, search,
 campaigns and direct visits shares the same reporting period and attribution
 model. Provider access is not required to read that history.
 
@@ -24,7 +28,12 @@ channel (`attributionChannel`, from each event's attribution snapshot) and by
 location. Insights names the steps in the vertical's words.
 
 Google Analytics is a delivery destination. Recorded GA4 delivery outcomes are
-reported separately from native business outcomes. Meta publishing connections
+reported separately from native business outcomes. The connected GA4 property and
+Search Console site are also read directly, for history from before KrabiClaw
+and for organic search: `query_google_analytics` runs the Data API's
+`properties.runReport` and `query_search_console` runs `searchanalytics.query`,
+each through the Better Auth linked Google account that connected it. Neither
+is mixed into the native report. Meta publishing connections
 remain in Integrations; views and reach on those platforms are different
 populations from visits to the website and are not added to website traffic.
 

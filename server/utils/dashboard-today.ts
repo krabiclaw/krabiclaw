@@ -11,6 +11,7 @@ import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { articleFacebookPostPath, blogEditorPath, bookingEditorPath, guestConversationPath, insightsPath, postEditorPath, productEditorPath } from '~/server/utils/dashboard-links'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { getAnalyticsReport, resolveOrganizationAnalyticsContext } from '~/server/utils/analytics-report'
+import { localDateBounds } from '~/server/utils/analytics-calendar'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { linkedAccountAccessToken, type CloudflareEnv } from '~/server/utils/auth'
 import { getGoogleAdsCustomer, getGoogleAdsPerformanceSummary } from '~/server/utils/google-ads'
@@ -99,6 +100,8 @@ async function performanceCard(db: DbClient, organization: DashboardOrganization
   const context = await resolveOrganizationAnalyticsContext(db, organization.id)
   const endDate = addLocalDays(localDateAt(now, context.timezone), -1)
   const startDate = addLocalDays(endDate, -6)
+  // A week that ended before the business's own analytics began has nothing to compare.
+  if (!context.analyticsDataStartAt || localDateBounds(endDate, context.timezone).end <= context.analyticsDataStartAt) return null
   const report = await getAnalyticsReport(db, { organizationId: organization.id, startDate, endDate, now })
   if (report.metrics.changePercent === null || report.metrics.changePercent === 0) return null
   const change = report.metrics.changePercent

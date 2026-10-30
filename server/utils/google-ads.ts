@@ -689,3 +689,115 @@ export async function getGoogleAdsPerformanceSummary(
   const averageCpcMicros = clicks > 0 ? Math.round(costMicros / clicks) : 0
   return { clicks, impressions, costMicros, conversions, averageCpcMicros, currencyCode: currencyCode ?? '' }
 }
+
+export const GOOGLE_ADS_REPORTS = ['campaign_daily', 'search_terms', 'keywords', 'landing_pages', 'geography'] as const
+export type GoogleAdsReport = typeof GOOGLE_ADS_REPORTS[number]
+
+export interface GoogleAdsReportRow {
+  /** campaign_daily: the campaign; search_terms: the searched words; keywords: the keyword; landing_pages: the final URL as written; geography: the country. */
+  text: string
+  /** keywords: EXACT, PHRASE or BROAD; search_terms: ADDED, EXCLUDED, NONE…; geography: LOCATION_OF_PRESENCE or AREA_OF_INTEREST. */
+  detail: string | null
+  /** campaign_daily: the day, in the account's time zone. */
+  date: string | null
+  campaignId: string | null
+  campaignName: string | null
+  adGroupId: string | null
+  impressions: number
+  clicks: number
+  costMicros: number
+  conversions: number
+  conversionsValue: number
+}
+
+const REPORT_QUERIES: Record<GoogleAdsReport, { fields: string; from: string; order?: string }> = {
+  campaign_daily: { from: 'campaign', fields: 'campaign.id, campaign.name, segments.date', order: 'segments.date, metrics.clicks DESC' },
+  geography: { from: 'geographic_view', fields: 'geographic_view.country_criterion_id, geographic_view.location_type, campaign.id, campaign.name' },
+  search_terms: { from: 'search_term_view', fields: 'search_term_view.search_term, search_term_view.status, campaign.id, campaign.name, ad_group.id' },
+  keywords: { from: 'keyword_view', fields: 'ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, campaign.id, campaign.name, ad_group.id' },
+  landing_pages: { from: 'landing_page_view', fields: 'landing_page_view.unexpanded_final_url' },
+}
+
+/**
+ * One Google Ads report over calendar days in the account's time zone, through
+ * GoogleAdsService.Search, most clicks first.
+ */
+export async function getGoogleAdsReport(
+  accessToken: string,
+  developerToken: string | undefined,
+  customerId: string,
+  input: { report: GoogleAdsReport; startDate: string; endDate: string; campaignId?: string | null; limit: number },
+): Promise<GoogleAdsReportRow[]> {
+  for (const date of [input.startDate, input.endDate]) {
+    if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) throw new Error(`Google Ads date range must be calendar days: ${date}`)
+  }
+  if (input.campaignId && !/^\d+$/u.test(input.campaignId)) throw new Error('campaignId must be a numeric Google Ads campaign ID')
+  if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 10000) throw new Error('limit must be 1 to 10000 rows')
+  const query = REPORT_QUERIES[input.report]
+  const where = [`segments.date BETWEEN '${input.startDate}' AND '${input.endDate}'`, ...(input.campaignId ? [`campaign.id = ${input.campaignId}`] : [])].join(' AND ')
+  const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cleanCustomerId(customerId)}/googleAds:search`, {
+    method: 'POST',
+    headers: googleAdsHeaders(accessToken, developerToken),
+    body: JSON.stringify({
+      query: `SELECT ${query.fields}, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.conversions_value FROM ${query.from} WHERE ${where} ORDER BY ${query.order ?? 'metrics.clicks DESC'} LIMIT ${input.limit}`,
+    }),
+  })
+  if (!response.ok) throw await googleAdsFailure('Google Ads report failed', response)
+  const data = await response.json() as {
+    results?: Array<{
+      searchTermView?: { searchTerm?: string; status?: string }
+      adGroupCriterion?: { keyword?: { text?: string; matchType?: string } }
+      landingPageView?: { unexpandedFinalUrl?: string }
+      geographicView?: { countryCriterionId?: string | number; locationType?: string }
+      segments?: { date?: string }
+      campaign?: { id?: string; name?: string }
+      adGroup?: { id?: string }
+      metrics?: { impressions?: string | number; clicks?: string | number; costMicros?: string | number; conversions?: string | number; conversionsValue?: string | number }
+    }>
+  }
+  // A country is a geo target constant; Google names it in a second read.
+  const countries = input.report === 'geography'
+    ? await geoTargetNames(accessToken, developerToken, customerId, [...new Set((data.results ?? []).map(row => String(row.geographicView?.countryCriterionId ?? '')).filter(Boolean))])
+    : new Map<string, string>()
+  return (data.results ?? []).map((row) => {
+    const text = input.report === 'campaign_daily' ? row.campaign?.name
+      : input.report === 'search_terms' ? row.searchTermView?.searchTerm
+        : input.report === 'keywords' ? row.adGroupCriterion?.keyword?.text
+          : input.report === 'landing_pages' ? row.landingPageView?.unexpandedFinalUrl
+            : countries.get(String(row.geographicView?.countryCriterionId ?? ''))
+    if (!text) throw new Error(`Google Ads returned a ${input.report} row without its name`)
+    if (input.report === 'campaign_daily' && !row.segments?.date) throw new Error('Google Ads returned a campaign_daily row without its date')
+    return {
+      text,
+      detail: (input.report === 'search_terms' ? row.searchTermView?.status
+        : input.report === 'keywords' ? row.adGroupCriterion?.keyword?.matchType
+          : input.report === 'geography' ? row.geographicView?.locationType : null) ?? null,
+      date: row.segments?.date ?? null,
+      campaignId: row.campaign?.id ?? null,
+      campaignName: row.campaign?.name ?? null,
+      adGroupId: row.adGroup?.id ?? null,
+      impressions: Number(row.metrics?.impressions ?? 0),
+      clicks: Number(row.metrics?.clicks ?? 0),
+      costMicros: Number(row.metrics?.costMicros ?? 0),
+      conversions: Number(row.metrics?.conversions ?? 0),
+      conversionsValue: Number(row.metrics?.conversionsValue ?? 0),
+    }
+  })
+}
+
+/** Google's names for geo target constants, such as 2840 → United States. */
+async function geoTargetNames(accessToken: string, developerToken: string | undefined, customerId: string, ids: string[]): Promise<Map<string, string>> {
+  if (!ids.length) return new Map()
+  if (!ids.every(id => /^\d+$/u.test(id))) throw new Error('Google Ads returned a country that is not a geo target constant')
+  const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cleanCustomerId(customerId)}/googleAds:search`, {
+    method: 'POST',
+    headers: googleAdsHeaders(accessToken, developerToken),
+    body: JSON.stringify({ query: `SELECT geo_target_constant.id, geo_target_constant.name FROM geo_target_constant WHERE geo_target_constant.id IN (${ids.join(', ')})` }),
+  })
+  if (!response.ok) throw await googleAdsFailure('Google Ads country names failed', response)
+  const data = await response.json() as { results?: Array<{ geoTargetConstant?: { id?: string | number; name?: string } }> }
+  const names = new Map((data.results ?? []).flatMap(row => row.geoTargetConstant?.id !== undefined && row.geoTargetConstant.name ? [[String(row.geoTargetConstant.id), row.geoTargetConstant.name] as const] : []))
+  const unnamed = ids.filter(id => !names.has(id))
+  if (unnamed.length) throw new Error(`Google Ads did not name geo targets ${unnamed.join(', ')}`)
+  return names
+}

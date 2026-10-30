@@ -13,6 +13,9 @@ import {
   createGoogleAdsSearchCampaign,
   updateGoogleAdsCampaign,
   getGoogleAdsCustomer,
+  getGoogleAdsReport,
+  GOOGLE_ADS_REPORTS,
+  type GoogleAdsReport,
   validateGoogleAdsSearchCampaign,
   validateGoogleAdsCampaignUpdate,
   GoogleAdsMutationError,
@@ -36,25 +39,41 @@ async function resolveGoogleAdsCredentials(ctx: McpExecutorContext) {
   return { accessToken, developerToken, customerId, integration }
 }
 
+/** Calendar days in the account's time zone: both or neither, unless the report needs them. */
+function reportRange(args: Record<string, unknown>, required: boolean): { startDate: string; endDate: string } | null {
+  const startDate = optionalString(args, 'start_date')
+  const endDate = optionalString(args, 'end_date')
+  if (!startDate && !endDate && !required) return null
+  if (!startDate || !endDate) throw new HTTPError({ statusCode: 400, statusMessage: 'Supply start_date and end_date together (YYYY-MM-DD).' })
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/u.test(endDate) || startDate > endDate) {
+    throw new HTTPError({ statusCode: 400, statusMessage: 'start_date and end_date must be YYYY-MM-DD with start_date on or before end_date.' })
+  }
+  return { startDate, endDate }
+}
+
 export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
   organizationTool({
     name: 'list_google_ads_campaigns',
-    description: 'List up to 100 non-removed campaigns in the connected Google Ads account, ordered by all-time spend, when reviewing campaign status, daily budget, spend, impressions, clicks and conversions.',
+    description: 'List up to 100 campaigns in the connected Google Ads account, most spend first, with status, daily budget, spend, impressions, clicks and conversions. With start_date and end_date the metrics cover those days in the account time zone and include campaigns removed since; without them they are all-time for campaigns not removed. Reading is free with the connection.',
     domain: 'google_ads',
     minimumRole: 'admin',
-    requiredEntitlement: 'marketing',
     inputSchema: {
       status: {
         type: 'string',
         enum: ['ENABLED', 'PAUSED', 'ALL'],
         description: 'Filter campaigns by status: ENABLED, PAUSED, or ALL non-removed campaigns (default: ALL).',
       },
+      start_date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'First day of the metrics, YYYY-MM-DD in the account time zone. Requires end_date.' },
+      end_date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'Last day of the metrics, inclusive. Requires start_date.' },
     },
     outputSchema: {
       type: 'object',
       properties: {
         customer_id: { type: 'string' },
         currency: { type: 'string', description: 'Connected account currency; budget and spend micros are millionths of this currency.' },
+        time_zone: { type: 'string', description: 'The account time zone the dates are in.' },
+        start_date: { type: ['string', 'null'] },
+        end_date: { type: ['string', 'null'] },
         campaigns: {
           type: 'array',
           items: {
@@ -75,7 +94,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
           },
         },
       },
-      required: ['customer_id', 'currency', 'campaigns'],
+      required: ['customer_id', 'currency', 'time_zone', 'start_date', 'end_date', 'campaigns'],
     },
   }),
   organizationTool({
@@ -83,7 +102,6 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
     description: 'Read a campaign in the connected Google Ads account when inspecting its status, budget, ad groups, keywords, responsive search ad copy or destination URLs.',
     domain: 'google_ads',
     minimumRole: 'admin',
-    requiredEntitlement: 'marketing',
     required: ['campaign_id'],
     inputSchema: {
       campaign_id: {
@@ -139,11 +157,57 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
     },
   }),
   organizationTool({
+    name: 'query_google_ads_report',
+    description: 'Read a Google Ads report for chosen days from the connected account: campaign_daily (each campaign per day), search_terms, keywords, landing_pages or geography (countries), with impressions, clicks, spend, conversions and conversion value. Dates are in the account time zone; spend is micros of the account currency. Google omits low-volume search terms for privacy, so a missing term is not zero demand. Reading is free with the connection.',
+    domain: 'google_ads',
+    minimumRole: 'admin',
+    required: ['report', 'start_date', 'end_date'],
+    inputSchema: {
+      report: { type: 'string', enum: [...GOOGLE_ADS_REPORTS], description: 'campaign_daily: each campaign per day; search_terms: what people searched; keywords: the keywords that matched; landing_pages: the final URLs ads sent people to; geography: the countries clicks came from.' },
+      start_date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'First day, YYYY-MM-DD in the account time zone.' },
+      end_date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'Last day, inclusive.' },
+      campaign_id: { type: 'string', pattern: '^[0-9]+$', description: 'Only this campaign.' },
+      limit: { type: 'integer', minimum: 1, maximum: 10000, description: 'Rows to return, most clicks first; campaign_daily is by day (default 100).' },
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        customer_id: { type: 'string' },
+        currency: { type: 'string', description: 'Connected account currency; costMicros are millionths of it.' },
+        time_zone: { type: 'string' },
+        report: { type: 'string' },
+        start_date: { type: 'string' },
+        end_date: { type: 'string' },
+        rows: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              text: { type: 'string', description: 'The campaign, search term, keyword, landing page URL or country.' },
+              detail: { type: ['string', 'null'], description: 'keywords: match type; search_terms: whether the term was added or excluded; geography: physical presence or area of interest.' },
+              date: { type: ['string', 'null'], description: 'campaign_daily: the day.' },
+              campaignId: { type: ['string', 'null'] },
+              campaignName: { type: ['string', 'null'] },
+              adGroupId: { type: ['string', 'null'] },
+              impressions: { type: 'number' },
+              clicks: { type: 'number' },
+              costMicros: { type: 'number' },
+              conversions: { type: 'number' },
+              conversionsValue: { type: 'number' },
+            },
+            required: ['text', 'detail', 'date', 'campaignId', 'campaignName', 'adGroupId', 'impressions', 'clicks', 'costMicros', 'conversions', 'conversionsValue'],
+          },
+        },
+      },
+      required: ['customer_id', 'currency', 'time_zone', 'report', 'start_date', 'end_date', 'rows'],
+    },
+  }),
+  organizationTool({
     name: 'create_google_ads_search_campaign',
     description: 'Create a paused Google Ads Search campaign with one ad group and responsive search ad from the supplied keywords, copy, destination and daily budget. The campaign cannot serve ads until separately enabled. Each call creates a new campaign; inspect the account before retrying an uncertain result.',
     domain: 'google_ads',
     minimumRole: 'admin',
-    requiredEntitlement: 'marketing',
+    requiredEntitlement: 'google_ads_management',
     required: ['name', 'daily_budget_micros', 'target_url', 'keywords', 'headlines', 'descriptions', 'contains_eu_political_advertising'],
     inputSchema: {
       name: {
@@ -208,7 +272,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
     description: 'Pause, enable or change the daily budget of a selected campaign in the connected Google Ads account. Supply status, the budget_id/daily_budget_micros pair, or both. Read get_google_ads_campaign or list_google_ads_campaigns for the current budget ID and account currency first. Enabling or raising a budget can increase advertising spend; changing a shared budget affects every campaign using it.',
     domain: 'google_ads',
     minimumRole: 'admin',
-    requiredEntitlement: 'marketing',
+    requiredEntitlement: 'google_ads_management',
     required: ['campaign_id'],
     inputSchema: {
       oneOf: [
@@ -255,12 +319,28 @@ export async function handleGoogleAdsTools(ctx: McpExecutorContext): Promise<unk
   if (toolName === 'list_google_ads_campaigns') {
     const { accessToken, developerToken, customerId } = await resolveGoogleAdsCredentials(ctx)
     const status = (optionalString(args, 'status') ?? undefined) as 'ENABLED' | 'PAUSED' | 'ALL' | undefined
-    const [campaigns, account] = await Promise.all([listGoogleAdsCampaigns(accessToken, developerToken, customerId, status), getGoogleAdsCustomer(accessToken, developerToken, customerId)])
+    const range = reportRange(args, false)
+    const [campaigns, account] = await Promise.all([listGoogleAdsCampaigns(accessToken, developerToken, customerId, status, range ?? undefined), getGoogleAdsCustomer(accessToken, developerToken, customerId)])
     return {
       customer_id: customerId,
       currency: account.currencyCode,
+      time_zone: account.timeZone,
+      start_date: range?.startDate ?? null,
+      end_date: range?.endDate ?? null,
       campaigns,
     }
+  }
+
+  if (toolName === 'query_google_ads_report') {
+    const { accessToken, developerToken, customerId } = await resolveGoogleAdsCredentials(ctx)
+    const report = requiredString(args, 'report') as GoogleAdsReport
+    if (!GOOGLE_ADS_REPORTS.includes(report)) throw new HTTPError({ statusCode: 400, statusMessage: `report must be one of ${GOOGLE_ADS_REPORTS.join(', ')}` })
+    const range = reportRange(args, true)!
+    const [rows, account] = await Promise.all([
+      getGoogleAdsReport(accessToken, developerToken, customerId, { report, ...range, campaignId: optionalString(args, 'campaign_id'), limit: args.limit === undefined ? 100 : Number(args.limit) }),
+      getGoogleAdsCustomer(accessToken, developerToken, customerId),
+    ])
+    return { customer_id: customerId, currency: account.currencyCode, time_zone: account.timeZone, report, start_date: range.startDate, end_date: range.endDate, rows }
   }
 
   if (toolName === 'get_google_ads_campaign') {

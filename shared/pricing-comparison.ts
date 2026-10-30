@@ -40,7 +40,7 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
     { id: 'locations.management', label: 'Locations and calendar', detail: 'Manage location details and available dates.', included: 'Included' },
     { id: 'posts.website', label: 'Website posts', detail: 'Create and publish posts on your website.', included: 'Included' },
     { id: 'social.external-channels', label: 'Facebook, Instagram and Discord publishing', detail: 'Explicit publishing to connected channels requires provider permissions and valid media.', entitlement: 'managed_service' },
-    { id: 'ads.google', label: 'Google Ads campaign management', detail: 'Create and pause Search campaigns and change their daily budgets in a connected Google Ads account. Ad spend is billed by Google; campaigns we manage are 10% of monthly ad spend.', entitlement: 'marketing' },
+    { id: 'ads.google', label: 'Google Ads campaign management', detail: 'Create and pause Search campaigns and change their daily budgets in a connected Google Ads account. Ad spend is billed by Google; campaigns we manage are 10% of monthly ad spend.', entitlement: 'google_ads_management' },
     { id: 'app.ios', label: 'iPhone companion app', detail: 'Use your existing KrabiClaw account with no extra subscription. Team permissions and plan capabilities still apply.', included: 'Included' },
   ] },
   { title: 'Places to stay', rows: [

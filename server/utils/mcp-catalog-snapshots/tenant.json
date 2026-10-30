@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:3793b37321579de837d0f44a65d0443c24a793457c757290f954ab0fd24c6929",
-  "documentationFingerprint": "sha256:ef6578526942d20b0de6100b48d03d2075ebd863d6437303350d9b68d9396984",
+  "fingerprint": "sha256:75b4c285ce8242a3b6eafeb40ec797cbb458a1b5958ee127c92c0e80a7077d38",
+  "documentationFingerprint": "sha256:6885e2097ae6055d19ffdb892ab0b950e33822a7af9837581f8a1bbfdb7f9147",
   "tools": [
     {
       "name": "add_organization_language",
@@ -19272,7 +19272,7 @@
       ],
       "domain": "google_ads",
       "minimumRole": "admin",
-      "requiredEntitlement": "marketing",
+      "requiredEntitlement": "google_ads_management",
       "fileParams": [],
       "uiResourceUri": null
     },
@@ -46060,7 +46060,7 @@
       ],
       "domain": "google_ads",
       "minimumRole": "admin",
-      "requiredEntitlement": "marketing",
+      "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
     },
@@ -48835,6 +48835,13 @@
               "endDate": {
                 "type": "string"
               },
+              "nativeCoverage": {
+                "enum": [
+                  "full",
+                  "partial"
+                ],
+                "type": "string"
+              },
               "startDate": {
                 "type": "string"
               },
@@ -48846,7 +48853,8 @@
               "startDate",
               "endDate",
               "timezone",
-              "analyticsDataStartAt"
+              "analyticsDataStartAt",
+              "nativeCoverage"
             ],
             "type": "object"
           },
@@ -49324,6 +49332,222 @@
               },
               "id": {
                 "type": "string"
+              },
+              "integrations": {
+                "description": "Saved connections and the provider account, property or site each acts on. A saved connection does not prove a report will pass; query_google_analytics, query_search_console and query_google_ads_report report their own failures.",
+                "properties": {
+                  "google_ads": {
+                    "properties": {
+                      "account_id": {
+                        "type": "string"
+                      },
+                      "connected_at": {
+                        "type": "string"
+                      },
+                      "connected_through": {
+                        "properties": {
+                          "email": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "last_error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "measurement_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "status": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "target_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "target_name": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "verified": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      }
+                    },
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "google_analytics": {
+                    "properties": {
+                      "account_id": {
+                        "type": "string"
+                      },
+                      "connected_at": {
+                        "type": "string"
+                      },
+                      "connected_through": {
+                        "properties": {
+                          "email": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "last_error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "measurement_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "status": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "target_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "target_name": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "verified": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      }
+                    },
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "google_search_console": {
+                    "properties": {
+                      "account_id": {
+                        "type": "string"
+                      },
+                      "connected_at": {
+                        "type": "string"
+                      },
+                      "connected_through": {
+                        "properties": {
+                          "email": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "last_error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "measurement_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "status": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "target_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "target_name": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "verified": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      }
+                    },
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
               },
               "media": {
                 "items": {
@@ -65098,14 +65322,24 @@
     {
       "name": "list_google_ads_campaigns",
       "title": "List Google Ads campaigns",
-      "description": "List up to 100 non-removed campaigns in the connected Google Ads account, ordered by all-time spend, when reviewing campaign status, daily budget, spend, impressions, clicks and conversions.",
+      "description": "List up to 100 campaigns in the connected Google Ads account, most spend first, with status, daily budget, spend, impressions, clicks and conversions. With start_date and end_date the metrics cover those days in the account time zone and include campaigns removed since; without them they are all-time for campaigns not removed. Reading is free with the connection.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "end_date": {
+            "description": "Last day of the metrics, inclusive. Requires start_date.",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "start_date": {
+            "description": "First day of the metrics, YYYY-MM-DD in the account time zone. Requires end_date.",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
             "type": "string"
           },
           "status": {
@@ -65183,11 +65417,30 @@
           },
           "customer_id": {
             "type": "string"
+          },
+          "end_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "start_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "time_zone": {
+            "description": "The account time zone the dates are in.",
+            "type": "string"
           }
         },
         "required": [
           "customer_id",
           "currency",
+          "time_zone",
+          "start_date",
+          "end_date",
           "campaigns"
         ],
         "type": "object"
@@ -65209,7 +65462,7 @@
       ],
       "domain": "google_ads",
       "minimumRole": "admin",
-      "requiredEntitlement": "marketing",
+      "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
     },
@@ -80911,6 +81164,405 @@
       "uiResourceUri": null
     },
     {
+      "name": "query_google_ads_report",
+      "title": "Query Google Ads report",
+      "description": "Read a Google Ads report for chosen days from the connected account: campaign_daily (each campaign per day), search_terms, keywords, landing_pages or geography (countries), with impressions, clicks, spend, conversions and conversion value. Dates are in the account time zone; spend is micros of the account currency. Google omits low-volume search terms for privacy, so a missing term is not zero demand. Reading is free with the connection.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "campaign_id": {
+            "description": "Only this campaign.",
+            "pattern": "^[0-9]+$",
+            "type": "string"
+          },
+          "end_date": {
+            "description": "Last day, inclusive.",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Rows to return, most clicks first; campaign_daily is by day (default 100).",
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "report": {
+            "description": "campaign_daily: each campaign per day; search_terms: what people searched; keywords: the keywords that matched; landing_pages: the final URLs ads sent people to; geography: the countries clicks came from.",
+            "enum": [
+              "campaign_daily",
+              "search_terms",
+              "keywords",
+              "landing_pages",
+              "geography"
+            ],
+            "type": "string"
+          },
+          "start_date": {
+            "description": "First day, YYYY-MM-DD in the account time zone.",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "report",
+          "start_date",
+          "end_date"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "currency": {
+            "description": "Connected account currency; costMicros are millionths of it.",
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string"
+          },
+          "end_date": {
+            "type": "string"
+          },
+          "report": {
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "properties": {
+                "adGroupId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "campaignId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "campaignName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "clicks": {
+                  "type": "number"
+                },
+                "conversions": {
+                  "type": "number"
+                },
+                "conversionsValue": {
+                  "type": "number"
+                },
+                "costMicros": {
+                  "type": "number"
+                },
+                "date": {
+                  "description": "campaign_daily: the day.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "detail": {
+                  "description": "keywords: match type; search_terms: whether the term was added or excluded; geography: physical presence or area of interest.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "impressions": {
+                  "type": "number"
+                },
+                "text": {
+                  "description": "The campaign, search term, keyword, landing page URL or country.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "text",
+                "detail",
+                "date",
+                "campaignId",
+                "campaignName",
+                "adGroupId",
+                "impressions",
+                "clicks",
+                "costMicros",
+                "conversions",
+                "conversionsValue"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "start_date": {
+            "type": "string"
+          },
+          "time_zone": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "customer_id",
+          "currency",
+          "time_zone",
+          "report",
+          "start_date",
+          "end_date",
+          "rows"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Query Google Ads report"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "google_ads",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "query_google_analytics",
+      "title": "Query Google analytics",
+      "description": "Run a report on the connected Google Analytics 4 property: GA4 dimensions and metrics (such as date, landingPage, sessionSource, sessionMedium; activeUsers, sessions, screenPageViews, keyEvents) over one to four date ranges, with filters, ordering and paging. GA4 keeps history from before KrabiClaw; use it for periods the business's own analytics do not cover.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "date_ranges": {
+            "description": "Days in the property time zone. Two ranges compare periods, such as this October and last October.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "end_date": {
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                  "type": "string"
+                },
+                "name": {
+                  "description": "Names the range in the dateRange dimension GA4 adds when there is more than one.",
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                "start_date": {
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "start_date",
+                "end_date"
+              ],
+              "type": "object"
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "type": "array"
+          },
+          "dimensions": {
+            "description": "GA4 API dimension names.",
+            "items": {
+              "pattern": "^[A-Za-z0-9_:]+$",
+              "type": "string"
+            },
+            "maxItems": 9,
+            "type": "array"
+          },
+          "filters": {
+            "description": "Every filter must match.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "dimension": {
+                  "pattern": "^[A-Za-z0-9_:]+$",
+                  "type": "string"
+                },
+                "match": {
+                  "enum": [
+                    "EXACT",
+                    "BEGINS_WITH",
+                    "ENDS_WITH",
+                    "CONTAINS",
+                    "FULL_REGEXP"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "maxLength": 500,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "dimension",
+                "match",
+                "value"
+              ],
+              "type": "object"
+            },
+            "maxItems": 10,
+            "type": "array"
+          },
+          "limit": {
+            "description": "Rows per page (default 100).",
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "metrics": {
+            "description": "GA4 API metric names.",
+            "items": {
+              "pattern": "^[A-Za-z0-9_:]+$",
+              "type": "string"
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "type": "array"
+          },
+          "offset": {
+            "description": "Rows to skip, for the next page.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "order_by": {
+            "additionalProperties": false,
+            "properties": {
+              "desc": {
+                "description": "Default true.",
+                "type": "boolean"
+              },
+              "field": {
+                "pattern": "^[A-Za-z0-9_:]+$",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "metric",
+                  "dimension"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "field",
+              "kind"
+            ],
+            "type": "object"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date_ranges",
+          "metrics"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "property_id": {
+            "type": "string"
+          },
+          "property_quota": {
+            "description": "GA4 tokens consumed and remaining for the property after this report.",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "row_count": {
+            "description": "All rows the report has; page with offset.",
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "properties": {
+                "dimensions": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "metrics": {
+                  "additionalProperties": {
+                    "type": "number"
+                  },
+                  "type": "object"
+                }
+              },
+              "required": [
+                "dimensions",
+                "metrics"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "time_zone": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "property_id",
+          "time_zone",
+          "currency",
+          "row_count",
+          "property_quota",
+          "rows"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Query Google analytics"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "analytics",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "query_organization_analytics",
       "title": "Query organization analytics",
       "description": "Read unsampled filtered events, sessions, breakdowns or daily summaries. Coverage reports missing facts; use next_cursor with the same query to continue. Event results omit unrestricted actor, custom-properties and metadata payloads.",
@@ -81320,6 +81972,234 @@
         "openWorldHint": false,
         "readOnlyHint": true,
         "title": "Query organization analytics"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "analytics",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "query_search_console",
+      "title": "Query search console",
+      "description": "Read organic Google Search performance for the connected Search Console property: clicks, impressions, CTR and average position by query, page, country, device, date or search appearance, with filters and paging. final reads finished days only; all includes days Google is still finalizing.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "aggregation_type": {
+            "description": "How results are counted: byPage counts each page; byProperty counts the site once per result. Default auto.",
+            "enum": [
+              "auto",
+              "byPage",
+              "byProperty"
+            ],
+            "type": "string"
+          },
+          "data_state": {
+            "description": "Default final.",
+            "enum": [
+              "final",
+              "all"
+            ],
+            "type": "string"
+          },
+          "dimensions": {
+            "items": {
+              "enum": [
+                "query",
+                "page",
+                "country",
+                "device",
+                "date",
+                "searchAppearance"
+              ],
+              "type": "string"
+            },
+            "maxItems": 4,
+            "type": "array"
+          },
+          "end_date": {
+            "description": "Last day, inclusive.",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          },
+          "filters": {
+            "description": "Every filter must match.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "dimension": {
+                  "enum": [
+                    "query",
+                    "page",
+                    "country",
+                    "device",
+                    "searchAppearance"
+                  ],
+                  "type": "string"
+                },
+                "expression": {
+                  "maxLength": 4096,
+                  "type": "string"
+                },
+                "operator": {
+                  "enum": [
+                    "equals",
+                    "notEquals",
+                    "contains",
+                    "notContains",
+                    "includingRegex",
+                    "excludingRegex"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "dimension",
+                "operator",
+                "expression"
+              ],
+              "type": "object"
+            },
+            "maxItems": 10,
+            "type": "array"
+          },
+          "limit": {
+            "description": "Rows per page (default 1000).",
+            "maximum": 25000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "search_type": {
+            "description": "Default web.",
+            "enum": [
+              "web",
+              "image",
+              "video",
+              "news",
+              "discover",
+              "googleNews"
+            ],
+            "type": "string"
+          },
+          "start_date": {
+            "description": "First day (Pacific Time, as Search Console counts).",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          },
+          "start_row": {
+            "description": "Rows to skip, for the next page.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start_date",
+          "end_date"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "aggregation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "data_state": {
+            "type": "string"
+          },
+          "end_date": {
+            "type": "string"
+          },
+          "next_start_row": {
+            "description": "Set when this page is full: pass it as start_row for more. Google also omits rare queries, so a last page is not every query.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "rows": {
+            "items": {
+              "properties": {
+                "clicks": {
+                  "type": "number"
+                },
+                "ctr": {
+                  "description": "Clicks per impression, 0 to 1.",
+                  "type": "number"
+                },
+                "impressions": {
+                  "type": "number"
+                },
+                "keys": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "position": {
+                  "description": "Average position, 1 is the top.",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "keys",
+                "clicks",
+                "impressions",
+                "ctr",
+                "position"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "site_url": {
+            "type": "string"
+          },
+          "start_date": {
+            "type": "string"
+          },
+          "time_zone": {
+            "description": "Search Console counts days in Pacific Time.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "site_url",
+          "start_date",
+          "end_date",
+          "data_state",
+          "aggregation",
+          "time_zone",
+          "next_start_row",
+          "rows"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Query search console"
       },
       "securitySchemes": [
         {
@@ -105296,7 +106176,7 @@
       ],
       "domain": "google_ads",
       "minimumRole": "admin",
-      "requiredEntitlement": "marketing",
+      "requiredEntitlement": "google_ads_management",
       "fileParams": [],
       "uiResourceUri": null
     },
@@ -109384,6 +110264,222 @@
               },
               "id": {
                 "type": "string"
+              },
+              "integrations": {
+                "description": "Saved connections and the provider account, property or site each acts on. A saved connection does not prove a report will pass; query_google_analytics, query_search_console and query_google_ads_report report their own failures.",
+                "properties": {
+                  "google_ads": {
+                    "properties": {
+                      "account_id": {
+                        "type": "string"
+                      },
+                      "connected_at": {
+                        "type": "string"
+                      },
+                      "connected_through": {
+                        "properties": {
+                          "email": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "last_error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "measurement_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "status": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "target_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "target_name": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "verified": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      }
+                    },
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "google_analytics": {
+                    "properties": {
+                      "account_id": {
+                        "type": "string"
+                      },
+                      "connected_at": {
+                        "type": "string"
+                      },
+                      "connected_through": {
+                        "properties": {
+                          "email": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "last_error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "measurement_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "status": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "target_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "target_name": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "verified": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      }
+                    },
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "google_search_console": {
+                    "properties": {
+                      "account_id": {
+                        "type": "string"
+                      },
+                      "connected_at": {
+                        "type": "string"
+                      },
+                      "connected_through": {
+                        "properties": {
+                          "email": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "last_error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "measurement_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "status": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "target_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "target_name": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "verified": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      }
+                    },
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
               },
               "media": {
                 "items": {
@@ -123599,7 +124695,7 @@
         "publish_website": "sha256:939b1ce7c3fd387584cc132ae36ef88ea13eb064617de0ba0764e5a81f572f3f",
         "save_website_draft": "sha256:e65a7a223712c5d820ccd7d2ec84abb8da6602e898a89516f1a1caf4d17d171b",
         "update_menu": "sha256:ed70b2c30b8fa7ff3e2ff83d103e650b762b7214797f62934c45e51dbfd39735",
-        "update_organization_settings": "sha256:1a600f7c7a066cfe36d906e8b9a90070be26be9e7b678da716c64bb783e22faa",
+        "update_organization_settings": "sha256:b475de5f61ea5b4e5785704e5c0da3ebc1e2eb2f237b0a70cc9fb227d1a4a254",
         "update_site_page": "sha256:77c97d779b70b40a74b6fd07968e03255dad018d149d6094cfdd3bcd246081c4"
       }
     },
@@ -123656,7 +124752,7 @@
       "toolContracts": {
         "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
         "get_guest_conversation": "sha256:0e458314aacd4ef9b6f948eea9e5b395c0f6cc4fd6e5a9dd9884f99e008fdfa5",
-        "get_organization_analytics": "sha256:3f37e5014639f5dd6702f1715ed115454c66affa9e0854c5b0611dea6964bc56",
+        "get_organization_analytics": "sha256:ddf37dc2b954d9949313e911828f7b7816c51697308b8f458ca44395df81ec7f",
         "get_product": "sha256:5350d6b278b02374fe756e6224d9044713a5ef326a9078c33cc3be234d28c798",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",

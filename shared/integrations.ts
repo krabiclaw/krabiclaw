@@ -58,7 +58,7 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     purpose: 'Show Google this site is yours so every page can be found.',
   },
   {
-    key: 'google-ads', name: 'Google Ads', logo: 'i-logos-google-ads', group: 'connection', entitlement: 'marketing', items: { noun: 'account', selection: 'one' },
+    key: 'google-ads', name: 'Google Ads', logo: 'i-logos-google-ads', group: 'connection', items: { noun: 'account', selection: 'one' },
     purpose: 'Run Search campaigns from your dashboard and ChatGPT, and see what they bring in.',
   },
   {

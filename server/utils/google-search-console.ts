@@ -114,3 +114,58 @@ export async function verifyAndAddProperty(
   // drops ownership if it stops being served.
   await storeIntegration(env.DB, organizationId, 'google_search_console', { ...selection, verified: true }, { revision })
 }
+
+export interface SearchAnalyticsInput {
+  startDate: string
+  endDate: string
+  dimensions: Array<'query' | 'page' | 'country' | 'device' | 'date' | 'searchAppearance'>
+  /** Every filter must match. */
+  filters: Array<{ dimension: 'query' | 'page' | 'country' | 'device' | 'searchAppearance'; operator: 'equals' | 'notEquals' | 'contains' | 'notContains' | 'includingRegex' | 'excludingRegex'; expression: string }>
+  searchType: 'web' | 'image' | 'video' | 'news' | 'discover' | 'googleNews'
+  /** final: finished days only; all: also the days Google is still finalizing. */
+  dataState: 'final' | 'all'
+  /** auto lets Google choose; byPage counts a page once per result; byProperty counts the property once. */
+  aggregationType: 'auto' | 'byPage' | 'byProperty'
+  rowLimit: number
+  startRow: number
+}
+
+export interface SearchAnalyticsRow {
+  keys: Record<string, string>
+  clicks: number
+  impressions: number
+  ctr: number
+  position: number
+}
+
+/** Organic clicks, impressions, CTR and average position through `searchanalytics.query`. */
+export async function querySearchAnalytics(accessToken: string, siteUrl: string, input: SearchAnalyticsInput): Promise<{ rows: SearchAnalyticsRow[]; aggregationType: string | null }> {
+  const response = await googleJson<{
+    rows?: Array<{ keys?: string[]; clicks?: number; impressions?: number; ctr?: number; position?: number }>
+    responseAggregationType?: string
+  }>(`https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`, accessToken, {
+    method: 'POST',
+    body: JSON.stringify({
+      startDate: input.startDate,
+      endDate: input.endDate,
+      dimensions: input.dimensions,
+      type: input.searchType,
+      dataState: input.dataState,
+      aggregationType: input.aggregationType,
+      rowLimit: input.rowLimit,
+      startRow: input.startRow,
+      ...(input.filters.length ? { dimensionFilterGroups: [{ groupType: 'and', filters: input.filters }] } : {}),
+    }),
+  })
+  return {
+    rows: (response.rows ?? []).map((row) => {
+      // A query with no dimensions has one total row and no keys.
+      const keys = row.keys ?? []
+      if (keys.length !== input.dimensions.length || typeof row.clicks !== 'number' || typeof row.impressions !== 'number' || typeof row.ctr !== 'number' || typeof row.position !== 'number') {
+        throw new Error(`Search Console returned an incomplete row for ${siteUrl}`)
+      }
+      return { keys: Object.fromEntries(input.dimensions.map((dimension, index) => [dimension, keys[index]!])), clicks: row.clicks, impressions: row.impressions, ctr: row.ctr, position: row.position }
+    }),
+    aggregationType: response.responseAggregationType ?? null,
+  }
+}
