@@ -4,6 +4,7 @@ import { authRequestHeaders, loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTenant } from './seed/manifest'
 import type { HomesQuote } from '../../server/utils/billing'
+import { SERVICES } from '../../shared/billing-model'
 
 // Plan and billing (#1504): its own Menu destination at O/billing. A legal
 // practice made for the Starter case has no subscription, so it is what an
@@ -97,6 +98,7 @@ test.describe('Plan and billing', () => {
         expect(await requirements.json()).toEqual({
           success: true,
           services: { managed_ads: null, strategy: null },
+          offers: SERVICES,
           requirements: { managed_ads: { google_ads_usd: false, business_plan: false, default_payment_method: false } },
         })
 
@@ -210,7 +212,7 @@ test.describe('Plan and billing', () => {
         await expect(upgrade.getByRole('heading', { name: 'Upgrade to Business', exact: true })).toBeVisible()
         await expect(upgrade.getByText('$149/mo', { exact: true })).toBeVisible()
         await expect(upgrade.locator('[data-testid^="editor-row-"]')).toHaveCount(4)
-        await expect(upgrade.getByText(/^\$100\/mo more than Growth\. Stripe charges the difference for the rest of this period, then \$149\/mo from \w{3} \d{1,2}, \d{4}\.$/)).toBeVisible()
+        await expect(upgrade.getByText('This upgrade applies immediately. Stripe calculates any prorated charge for the rest of your billing period.', { exact: true })).toBeVisible()
         await expect(upgrade.getByTestId('editor-row-payments')).toContainText('1.4% of payment volume, plus Stripe fees')
         await expect(upgrade.getByTestId('editor-row-payments')).toContainText('Online payments and direct stay booking')
         await expect(upgrade.getByTestId('editor-row-google-ads')).toContainText('Google Ads campaigns')
