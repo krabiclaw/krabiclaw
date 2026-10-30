@@ -4,8 +4,8 @@
 // session is the single source of truth for who the user is.
 export function loginMethodForPath(path: string | undefined, body?: { provider?: unknown }): 'google' | 'apple' | 'email' | null {
   if (path === '/callback/google') return 'google'
-  // The native app's Sign in with Apple posts an identity token here.
-  if (path === '/sign-in/social' && body?.provider === 'apple') return 'apple'
-  if (path === '/sign-in/email' || path === '/sign-up/email') return 'email'
+  // The website returns from Apple here; the native app posts its identity token to /sign-in/social.
+  if (path === '/callback/apple' || (path === '/sign-in/social' && body?.provider === 'apple')) return 'apple'
+  if (path === '/sign-in/email' || path === '/sign-up/email' || path === '/sign-in/email-otp') return 'email'
   return null
 }

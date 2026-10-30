@@ -82,7 +82,10 @@ export interface AccountEditor {
   phoneTouched: Ref<boolean>
   requestPhoneVerify: () => Promise<void>
   // login & security
-  googleStatus: ComputedRef<'connected' | 'not-connected' | 'error'>
+  loginProviderStatus: (provider: LoginProvider) => 'connected' | 'not-connected' | 'error'
+  connectingProvider: Ref<LoginProvider | null>
+  connectError: Ref<string | null>
+  connectProvider: (provider: LoginProvider) => Promise<void>
   sessions: Ref<Array<{ token: string; current: boolean; userAgent?: string | null; ipAddress?: string | null; updatedAt: string | Date }>>
   sessionsError: Ref<string | null>
   revoking: Ref<string | null>
@@ -100,6 +103,10 @@ export interface AccountEditor {
   revert: () => void
   save: () => Promise<void>
 }
+
+/** The providers a person can add as another way to sign in to the same account. */
+export const LOGIN_PROVIDERS = [{ id: 'google', label: 'Google' }, { id: 'apple', label: 'Apple' }] as const
+export type LoginProvider = typeof LOGIN_PROVIDERS[number]['id']
 
 export const accountEditorKey = Symbol('account-editor') as InjectionKey<AccountEditor>
 </script>
@@ -132,19 +139,34 @@ async function refreshSession() {
 const { logOut, organization } = useDashboardMenu()
 const { formatExactDateTime } = useHumanTime()
 
-// Whether this account can sign in with Google. It is shown in the Sign in
-// leaf beside the address, because that is the concern it belongs to — it was
-// never a setting of its own, since nothing here links or unlinks a provider.
-// An error stays distinct from "not connected": defaulting a failed lookup to
-// false would misreport a real Google-linked account as unlinked.
+// Whether this account can sign in with Google or Apple, shown in the Login
+// leaf beside the address, where either can be added as another way into the
+// same account. An error stays distinct from "not connected": defaulting a
+// failed lookup to false would misreport a real linked account as unlinked.
 const { data: linkedAccounts, error: linkedAccountsError } = await useAsyncData('account-linked-accounts', async () => {
   const { data, error } = await authClient.listAccounts()
   if (error) throw createError({ statusCode: error.status, statusMessage: error.message || 'Linked accounts could not be loaded' })
   return data
 })
-const googleStatus = computed(() => linkedAccountsError.value
-  ? 'error'
-  : linkedAccounts.value?.some((account: { providerId: string }) => account.providerId === 'google') ? 'connected' : 'not-connected')
+function loginProviderStatus(provider: LoginProvider) {
+  if (linkedAccountsError.value) return 'error' as const
+  return linkedAccounts.value?.some((account: { providerId: string }) => account.providerId === provider) ? 'connected' as const : 'not-connected' as const
+}
+// Better Auth links the provider account and returns here; a refusal (for
+// example an Apple ID already signed in as another account) comes back as `error`.
+const route = useRoute()
+const connectingProvider = ref<LoginProvider | null>(null)
+const connectError = ref<string | null>(typeof route.query.error === 'string' ? oauthErrorMessage(route.query.error, route.query.error_description) : null)
+async function connectProvider(provider: LoginProvider) {
+  connectingProvider.value = provider
+  connectError.value = null
+  const callbackURL = route.path
+  const { error } = await authClient.linkSocial({ provider, callbackURL, errorCallbackURL: callbackURL })
+  if (error) {
+    connectError.value = error.message || 'That sign-in could not be added.'
+    connectingProvider.value = null
+  }
+}
 
 // Device history: the sessions Better Auth holds for this user. The current
 // one is the token in hand; every other row can be logged out from here.
@@ -288,7 +310,6 @@ const groups = computed<EditorNavigationGroup[]>(() => [
 
 // The row whose screen is open. Profile & availability opens an organization's
 // screen below its own URL, so the open row is the one the path sits under.
-const route = useRoute()
 const openRow = computed(() => groups.value[0]!.items.find(item => item.to && (route.path === item.to || route.path.startsWith(`${item.to}/`)))?.id ?? null)
 
 function runRowAction(id: string) {
@@ -442,7 +463,7 @@ provide(accountEditorKey, {
   photoPreview, photoSaving, photoError, pickPhoto,
   nameInput, nameDirty, nameSaving, nameError, nameTouched, saveNameInline,
   phoneInput, phoneDirty, phoneSaving, phoneError, phoneTouched, requestPhoneVerify,
-  googleStatus, sessions, sessionsError, revoking, revokeDevice, describeDevice, formatExactDateTime,
+  loginProviderStatus, connectingProvider, connectError, connectProvider, sessions, sessionsError, revoking, revokeDevice, describeDevice, formatExactDateTime,
   deleteError, deleting, deleteConfirmText, confirmDeleteAccount,
   themeInput, themeOptions: [...THEME_OPTIONS], saveDisabled,
   revert: cancelEdit,
