@@ -171,8 +171,11 @@ so elapsed time or an empty lease query alone cannot establish that work ended.
 Capture the final delta only after old writers finish, and verify that the
 retired source remains unchanged during and after capture. If it changes,
 discard the unapplied capture and repeat the read-only preflight against the
-same initial artifact. Apply the verified capture with `--source-file`, then
-reconcile changed/deleted keys and read back the affected state.
+same initial artifact. Once the source is stable, run the named-source final
+delta with its environment load flag and `--delta-from`; `--source-file` is
+read-only preflight input. Retain the final raw `--export` and require its
+content-and-schema hash to match the verified source capture. Reconcile
+changed/deleted keys and read back the affected state before completion.
 
 For the v7-to-v8 integrations replacement, create empty v8 databases with
 location hint `wnam` and apply the generated baseline with `wrangler d1
@@ -634,20 +637,12 @@ before either binding or loading:
 - `krabiclaw-staging-v22`: `f88d2d02-401b-41b2-97f4-f546009d380c`
 - `krabiclaw-production-v22`: `f359de5d-e97d-4a14-9467-44d5b9e5c52f`
 
-Apply the generated baseline through `wrangler d1 migrations apply`, then load
-each unbound replacement through `scripts/pull-production-snapshot.ts` from its
-own explicitly named v21 source. Retain initial comparison artifacts privately
-under `~/.codex/krabiclaw-db-replacements/v22/`. Repository bindings name the
-prepared replacements; deployed Workers keep their existing v21 databases
-until the normal environment deployment. Before each cutover, perform a
-read-only delta preflight (`--out` without an environment load flag) from that
-environment's v21 source against its initial artifact. After the binding moves
-and old invocations finish, capture and apply the verified final delta once
-against that initial artifact. Inspect
-changed/deleted keys and carry important edits explicitly without overwriting
-replacement writes. Verify deployed schema, foreign keys and the
-affected guest workflows before retiring either v21 database. Production,
-development and E2E bindings use the same production replacement.
+The completed v21-to-v22 replacement used the generated baseline, native
+`wrangler d1 migrations apply` and the canonical initial-copy/final-delta
+procedure against each environment's own v21 source. Its comparison artifacts
+remain private under `~/.codex/krabiclaw-db-replacements/v22/`. Production,
+development and E2E shared the production v22 binding. These historical source
+identities describe that completed replacement.
 
 The staging initial copy on 2026-10-29 loaded all 117 tables and 107,587 rows
 from staging v21. Independent API reads confirmed the replacement's baseline
