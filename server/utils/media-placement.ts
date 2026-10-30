@@ -24,6 +24,7 @@ import { isStayPhotoRoom, parseStaySleepingArrangements, type StayPhotoRoom } fr
 import { isStayAmenity, STAY_AMENITIES, stayCodes } from '~/shared/stay-listing'
 import { isStayHomeAccessibility, isStayHomeAccessibilityFeature, isStayRoomAccessibilityFeature, STAY_HOME_ACCESSIBILITY_FEATURES, stayRoomAccessibilityFeatures, type StayHomeAccessibility } from '~/shared/stay-accessibility'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
+import { organizationEventQuery } from '~/server/utils/organization-events'
 
 export { EDITABLE_MEDIA_PLACEMENT_OWNERS, MEDIA_CATEGORIES, WRITABLE_MEDIA_CATEGORIES, isMediaCategory } from '~/shared/media-placement-contract'
 export type { MediaCategory } from '~/shared/media-placement-contract'
@@ -105,7 +106,7 @@ async function postMediaQueries(db: DbClient, input: PlacementAuthInput): Promis
   return await postMediaMutationQueries(db, { organizationId: input.organizationId, ownerType: input.placement.owner_type, ownerId: input.placement.owner_id, slot: input.placement.slot })
 }
 
-async function authorizePlacementWrite(db: DbClient, input: PlacementAuthInput): Promise<void> {
+async function authorizePlacementWrite(db: DbClient, input: PlacementAuthInput): Promise<string | null> {
   const locationId = await requirePlacementOwner(db, input)
   if (input.placement.owner_type === 'content_document' || input.placement.owner_type === 'content_block') {
     const document = await queryFirst<{ kind: string }>(db,
@@ -120,14 +121,12 @@ async function authorizePlacementWrite(db: DbClient, input: PlacementAuthInput):
     // the ones on `input`. They are the same at every call site today, and this
     // is what keeps it that way: authorizing one scope while writing to another
     // is the whole failure this check exists to prevent.
-    if (
-      input.principal.organizationId !== input.organizationId
-      || input.principal.organizationId !== input.organizationId
-    ) {
+    if (input.principal.organizationId !== input.organizationId) {
       throw new HTTPError({ statusCode: 403, statusMessage: 'Access denied' })
     }
     await assertResourceAccess(db, { ...input.principal, resourceLocationId: locationId })
   }
+  return locationId
 }
 
 // The canonical, server-authoritative state of one owner+slot's media after
@@ -169,7 +168,7 @@ export async function setSingleMediaPlacement(db: DbClient, input: {
   /** A logo placement's shape and focal point. */
   presentation?: LogoPresentation | null
 }) {
-  await authorizePlacementWrite(db, input)
+  const locationId = await authorizePlacementWrite(db, input)
   const postQueries = await postMediaQueries(db, input)
   const refs: MediaAssetRefInput[] = input.assetId ? [{ asset_id: input.assetId }] : []
   const media = await hydrateMediaAssetRefs(db, {
@@ -178,9 +177,21 @@ export async function setSingleMediaPlacement(db: DbClient, input: {
     allowedKinds: allowedKindsFor(input.placement),
     fieldName: 'asset_id',
   })
+  const current = await canonicalPlacementState(db, input)
+  const presentation = input.presentation ?? null
+  if (current.asset_ids.length === media.length
+    && current.asset_ids.every((id, index) => id === media[index]?.asset_id)
+    && JSON.stringify(current.media[0]?.presentation ?? null) === JSON.stringify(presentation)) {
+    await refreshSocialCardForPlacement(db, input)
+    return canonicalPlacementState(db, input)
+  }
   await executeBatch(db, [
     ...postQueries,
     ...buildSingleMediaPlacementQueries({ ...input, media: media.map(item => ({ ...item, presentation: input.presentation })) }),
+    organizationEventQuery({ organizationId: input.organizationId, locationId, actorId: input.principal?.userId,
+      eventType: 'media.placement_changed', entityType: input.placement.owner_type, entityId: input.placement.owner_id,
+      metadata: { operation: 'set', slot: input.placement.slot, changed_fields: [`media.${input.placement.slot}`] },
+      afterState: { asset_id: input.assetId, presentation }, onlyIfPreviousChangedOneRow: true }),
     ...(input.placement.owner_type === 'product' && input.placement.slot === 'image' ? [pruneStayPhotoRoomMembershipsQuery(input.organizationId, input.placement.owner_id), ...stayAccessibilityEvidenceGuardQueries(input.organizationId, { productId: input.placement.owner_id })] : []),
   ]).catch((error: unknown) => { throw stayAccessibilityEvidenceWriteError(error) })
   await refreshSocialCardForPlacement(db, input)
@@ -199,12 +210,13 @@ export async function getMediaPlacements(db: DbClient, input: {
 async function refreshSocialCardForPlacement(db: DbClient, input: {
   env: CloudflareEnv
   placement: MediaPlacementKey
+  principal?: MemberAccessPrincipal
 }) {
   // The placement write has committed, and the card is derived from it. A card
   // that did not regenerate is the wrong image on every share of that page, which
   // is not something the console should be the only one to know.
   const owners = await socialCardRefreshOwnersForPlacement(db, input.placement)
-  for (const owner of owners) await refreshSocialCard({ db, env: input.env, owner })
+  for (const owner of owners) await refreshSocialCard({ db, env: input.env, owner, actorId: input.principal?.userId })
 }
 
 // Append a new asset atomically; an existing membership remains in its current position.
@@ -220,7 +232,7 @@ export async function attachMediaPlacement(db: DbClient, input: {
   if (isSingleMediaPlacement(input.placement)) {
     throw new HTTPError({ statusCode: 400, statusMessage: 'This placement is single-valued; use setSingleMediaPlacement instead' })
   }
-  await authorizePlacementWrite(db, input)
+  const locationId = await authorizePlacementWrite(db, input)
   const postQueries = await postMediaQueries(db, input)
   const [asset] = await hydrateMediaAssetRefs(db, {
     organizationId: input.organizationId,
@@ -256,7 +268,10 @@ export async function attachMediaPlacement(db: DbClient, input: {
         ...owner.params!,
         asset.asset_id, input.organizationId,
       ],
-    }])
+    }, organizationEventQuery({ organizationId: input.organizationId, locationId, actorId: input.principal?.userId,
+      eventType: 'media.placement_changed', entityType: input.placement.owner_type, entityId: input.placement.owner_id,
+      metadata: { operation: 'attach', slot: input.placement.slot, asset_id: input.assetId, changed_fields: [`media.${input.placement.slot}`] },
+      onlyIfPreviousChangedOneRow: true })])
   } catch (error) {
     if (isUniqueConstraintError(error)) {
       const saved = await canonicalPlacementState(db, input)
@@ -290,11 +305,22 @@ export async function removeMediaPlacement(db: DbClient, input: {
   placement: MediaPlacementKey
   assetId: string
 }) {
-  await authorizePlacementWrite(db, input)
+  const locationId = await authorizePlacementWrite(db, input)
+  const existing = await queryFirst<{ id: string }>(db, `SELECT id FROM media_placements
+    WHERE organization_id = ? AND owner_type = ? AND owner_id = ? AND slot = ? AND asset_id = ?`,
+  [input.organizationId, input.placement.owner_type, input.placement.owner_id, input.placement.slot, input.assetId])
+  if (!existing) {
+    await refreshSocialCardForPlacement(db, input)
+    return canonicalPlacementState(db, input)
+  }
   await executeBatch(db, [...await postMediaQueries(db, input), { query: `
     DELETE FROM media_placements
      WHERE organization_id = ?  AND owner_type = ? AND owner_id = ? AND slot = ? AND asset_id = ?
   `, params: [input.organizationId, input.placement.owner_type, input.placement.owner_id, input.placement.slot, input.assetId] },
+  organizationEventQuery({ organizationId: input.organizationId, locationId, actorId: input.principal?.userId,
+    eventType: 'media.placement_changed', entityType: input.placement.owner_type, entityId: input.placement.owner_id,
+    metadata: { operation: 'remove', slot: input.placement.slot, asset_id: input.assetId, changed_fields: [`media.${input.placement.slot}`] },
+    onlyIfPreviousChangedOneRow: true }),
   ...(input.placement.owner_type === 'product' && ['image', 'gallery'].includes(input.placement.slot) ? [pruneStayPhotoRoomMembershipsQuery(input.organizationId, input.placement.owner_id), ...stayAccessibilityEvidenceGuardQueries(input.organizationId, { productId: input.placement.owner_id })] : []),
   ]).catch((error: unknown) => { throw stayAccessibilityEvidenceWriteError(error) })
   await refreshSocialCardForPlacement(db, input)
@@ -341,7 +367,7 @@ export async function reorderMediaPlacements(db: DbClient, input: {
   if (isSingleMediaPlacement(input.placement)) {
     throw new HTTPError({ statusCode: 400, statusMessage: 'This placement is single-valued and has no order' })
   }
-  await authorizePlacementWrite(db, input)
+  const locationId = await authorizePlacementWrite(db, input)
   if (input.moves.length === 0) return canonicalPlacementState(db, input)
 
   const scopeParams = [input.organizationId, input.placement.owner_type, input.placement.owner_id, input.placement.slot]
@@ -368,6 +394,7 @@ export async function reorderMediaPlacements(db: DbClient, input: {
 
   let order = [...currentOrder]
   for (const move of input.moves) {
+    if (move.before_asset_id === move.asset_id || move.after_asset_id === move.asset_id) continue
     order = order.filter(assetId => assetId !== move.asset_id)
     if (move.before_asset_id) {
       const anchorIndex = order.indexOf(move.before_asset_id)
@@ -378,6 +405,11 @@ export async function reorderMediaPlacements(db: DbClient, input: {
     } else {
       order.push(move.asset_id)
     }
+  }
+
+  if (order.every((assetId, index) => assetId === currentOrder[index])) {
+    await refreshSocialCardForPlacement(db, input)
+    return canonicalPlacementState(db, input)
   }
 
   const queries: BatchQuery[] = [...await postMediaQueries(db, input), buildMembershipGuardQuery({
@@ -397,6 +429,9 @@ export async function reorderMediaPlacements(db: DbClient, input: {
       params: [index, new Date().toISOString(), ...scopeParams, assetId],
     })
   })
+  queries.push(organizationEventQuery({ organizationId: input.organizationId, locationId, actorId: input.principal?.userId,
+    eventType: 'media.placement_changed', entityType: input.placement.owner_type, entityId: input.placement.owner_id,
+    metadata: { operation: 'reorder', slot: input.placement.slot, moves: input.moves, changed_fields: [`media.${input.placement.slot}`] }, afterState: { asset_ids: order } }))
 
   try {
     await executeBatch(db, queries)
@@ -589,6 +624,11 @@ export async function prepareArrangeProductPhotos(db: DbClient, input: {
     JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id AND ma.status = 'active'
     WHERE mp.organization_id = ? AND mp.owner_type = 'product' AND mp.owner_id = ? AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'`
   const now = new Date().toISOString()
+  // The same visible order can still need a cover restored or duplicate slots
+  // normalized. Only an identical slot, position and asset arrangement is a no-op.
+  const intendedPlacements = new Set(input.to.map((assetId, index) => `${index ? 'gallery' : 'image'}:${index ? index - 1 : 0}:${assetId}`))
+  const photosChanged = placements.length !== intendedPlacements.size
+    || placements.some(item => !intendedPlacements.has(`${item.slot}:${item.sort_order}:${item.asset_id}`))
   const queries: BatchQuery[] = [
       {
         query: `INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id, sort_order, status, created_at, updated_at)
@@ -601,8 +641,13 @@ export async function prepareArrangeProductPhotos(db: DbClient, input: {
           expected, input.organizationId, input.productId,
         ],
       },
-      ...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId, placement: cover, media: media.slice(0, 1), now }),
-      ...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId, placement: gallery, media: media.slice(1), now }),
+      ...(photosChanged ? [
+        ...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId, placement: cover, media: media.slice(0, 1), now }),
+        ...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId, placement: gallery, media: media.slice(1), now }),
+        organizationEventQuery({ organizationId: input.organizationId, actorId: input.principal.userId,
+          eventType: 'media.placement_changed', entityType: 'product', entityId: input.productId,
+          metadata: { operation: 'arrange', slots: ['image', 'gallery'], changed_fields: ['media.image', 'media.gallery'] }, afterState: { asset_ids: [...input.to] } }),
+      ] : []),
       ...(input.roomAssignment ? [{
         query: 'INSERT INTO product_stay_photo_room_memberships (organization_id, product_id, asset_id, room_id) VALUES (?, ?, ?, ?)',
         params: [input.organizationId, input.productId, input.roomAssignment.assetId, input.roomAssignment.roomId],
@@ -613,7 +658,7 @@ export async function prepareArrangeProductPhotos(db: DbClient, input: {
   ]
   return {
     queries,
-    async complete() { await refreshSocialCardForPlacement(db, { env: input.env, placement: cover }) },
+    async complete() { await refreshSocialCardForPlacement(db, { env: input.env, placement: cover, principal: input.principal }) },
     writeError(error: unknown): unknown {
       const evidenceError = stayAccessibilityEvidenceWriteError(error)
       if (evidenceError !== error) return evidenceError

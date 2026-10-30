@@ -151,12 +151,11 @@ export function mediaPlacementOwnerQuery(input: {
     query: `SELECT r.location_id FROM activity_entries e JOIN requests r ON r.id = e.request_id
       WHERE e.id = ? AND r.organization_id = ?`, params,
   }
-  // A product is organization-owned and is public through its publication.
-  // Its locations are a many relationship (product_locations), so there is no
-  // single location to narrow authorization by.
+  // Product ownership exists before its optional publication row. Draft homes
+  // still own their photos. Product locations are a many relationship
+  // (product_locations), so there is no single location to narrow authorization by.
   if (input.ownerType === 'product') return {
     query: `SELECT NULL AS location_id FROM products p
-      JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
       WHERE p.id = ? AND p.organization_id = ?`, params,
   }
   const table = OWNER_TABLES[input.ownerType]

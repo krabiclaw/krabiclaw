@@ -9,7 +9,7 @@ export default defineHandler(async (event) => {
   const qaId = getRouterParam(event, 'qaId')
   if (!organizationId || !locationId || !qaId) return jsonResponse({ error: 'Missing params' }, { status: 400 })
 
-  const { db, organization } = await requireLocationAccess(event, organizationId, locationId)
+  const { db, organization, session } = await requireLocationAccess(event, organizationId, locationId)
 
   const rawBody = await readBody(event)
   if (typeof rawBody !== 'object' || rawBody === null || Array.isArray(rawBody)) {
@@ -24,7 +24,7 @@ export default defineHandler(async (event) => {
     sort_order?: unknown
   }
 
-  const result = await updateQa(db, { organizationId: organization.id, locationId }, qaId, body)
+  const result = await updateQa(db, { organizationId: organization.id, locationId }, qaId, body, session.user)
   return jsonResponse(result)
 })
 import { defineHandler } from 'nitro';
