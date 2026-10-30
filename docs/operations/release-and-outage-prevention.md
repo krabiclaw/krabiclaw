@@ -721,8 +721,9 @@ remain stable between the initial copy and final delta.
 At cutover, use each environment's explicit v22 source and its initial artifact
 for the normal final delta. Review changed/deleted keys before carrying updates;
 do not overwrite progress the replacement has made. After deployment, run the
-existing `airbnb-sync` task and inspect each listing's visible sync outcome;
-staging has no cron. Verify live Airbnb defaults and actual optional rules were
+existing `airbnb-sync` task and inspect each listing's visible sync outcome.
+Staging schedules only the Channex queues, including this task every two minutes.
+Verify live Airbnb defaults and actual optional rules were
 read, host edits remained intact, Channex rolling defaults and calendar pushes
 were confirmed, and public dates and quotes agree. A source or push failure must
 remain a failed sync, with its recorded reason. Read schema drift, the native
@@ -734,6 +735,17 @@ Imports and provider setting writes reject non-empty Airbnb seasonal-minimum
 rules visibly. Their range endpoints and precedence are not established by the
 published API contract; no local seasonal feature or guessed interpretation is
 offered. Explicit dated night overrides remain supported.
+
+The initial WNAM copies were prepared and independently read back on
+2026-10-30: staging has 119 tables and 110,569 rows; production has 119 tables
+and 170,344 rows. Both record only `0000_baseline.sql`, have no foreign-key
+violations, retain all saved home minimums, and initially leave the new optional
+rules NULL until the existing sync job reads the real provider. Production
+records 30 original-minimum fingerprints and queues 29 eligible syncs; one
+unproven legacy minimum remains unchanged. Staging queues one sync and its
+approved 163 arrival minimums read back as 10 one-night, 152 two-night and one
+three-night values. The live Worker bindings remained on v22; no cutover or
+deployment was performed. Retain the initial artifacts for the final delta.
 
 Before dropping or retiring a legacy table or writer:
 
