@@ -1220,8 +1220,8 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { import_stage: 'complete', enabled: 1 })
     assert.equal(((await call('GET')).body.listings as Array<Record<string, unknown>>)[0]!.next_attempt_at, null)
 
-    // Growth ends: Stripe deletes the subscription and Better Auth marks it canceled. On Basic, the newest live home
-    // past the two included, the Airbnb one, goes back to a draft: KrabiClaw queues its stop itself, and the task runs it.
+    // Growth ends: Stripe deletes the subscription and Better Auth marks it canceled. On Basic, the newest live homes
+    // past the one it includes, the Airbnb one among them, go back to drafts: KrabiClaw queues its stop itself, and the task runs it.
     await db.prepare("UPDATE organization SET stripeCustomerId = 'cus_org' WHERE id = ?").bind(ORG).run()
     await db.prepare("UPDATE subscription SET status = 'canceled' WHERE id = 'sub-org'").run()
     await returnExtrasToDraftsForPlanEnd(env, db, { type: 'customer.subscription.deleted', data: { object: { id: 'sub-org', customer: 'cus_org', status: 'canceled' } } } as unknown as Stripe.Event)
@@ -1229,7 +1229,7 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     await runCron()
     assert.deepEqual(await job(), { action: 'stop', state: 'done', product_id: productId, last_error_code: null, attempts: 0 })
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { import_stage: 'draft', enabled: 0 })
-    assert.deepEqual([channex.channel.ratePlans, await countActiveHomes(db, ORG)], [[], 2])
+    assert.deepEqual([channex.channel.ratePlans, await countActiveHomes(db, ORG)], [[], 1])
 
     // On Basic, syncing it again is a Business feature: refused at the request.
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 403)

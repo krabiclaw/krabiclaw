@@ -4,7 +4,7 @@ import { useRuntimeConfig } from 'nitro/runtime-config'
 import { cloudflareEnv, textResponse } from '~/server/utils/api-response'
 import { getCachedPlans, type EnvWithOrganizationCache, type Plan } from '~/server/utils/billing-plans'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
-import { additionalHomePrice, BUSINESS_PLAN_ID, INCLUDED_HOMES, nextAdditionalHomePrice, PAYMENTS_FEE, pricingNotice, SERVICES } from '~/shared/billing-model'
+import { BASIC_HOMES, BUSINESS_PLAN_ID, homePrice, nextHomePrice, PAYMENTS_FEE, pricingNotice, SERVICES } from '~/shared/billing-model'
 
 export function renderPlansMarkdown(plans: Plan[]): string {
   const betaSpotsLeft = plans.find(plan => plan.betaSpotsLeft !== undefined)?.betaSpotsLeft ?? 0
@@ -25,12 +25,12 @@ export function renderPlansMarkdown(plans: Plan[]): string {
 
     lines.push(`## ${plan.name}`)
     lines.push(`- **Price**: ${priceLabel}`)
-    const betaHomes = monthlyPrice && betaSpotsLeft > 0 ? ` (beta price; ${nextAdditionalHomePrice()} per additional home per month once the beta spots are taken)` : ''
-    lines.push(`- **Homes**: ${INCLUDED_HOMES} included${monthlyPrice ? `, then ${additionalHomePrice()}${betaHomes}` : ''}. A home is a place to stay.`)
+    const betaHomes = betaSpotsLeft > 0 ? ` (beta price; ${nextHomePrice()} per home per month once the beta spots are taken)` : ''
+    lines.push(`- **Homes**: ${monthlyPrice ? `${homePrice()}${betaHomes}` : `${BASIC_HOMES} included`}. A home is a place to stay.`)
     if (plan.id === BUSINESS_PLAN_ID) {
       lines.push(`- **Payments fees**: ${PAYMENTS_FEE}.`)
     }
-    if (monthlyPrice) lines.push('- **Billing**: Additional homes and fees are billed on your subscription invoice at the end of each month.')
+    if (monthlyPrice) lines.push('- **Billing**: Homes and fees are billed on your subscription invoice at the end of each month.')
     lines.push(`- **Tagline**: ${plan.tagline}`)
 
     if (plan.limits) {

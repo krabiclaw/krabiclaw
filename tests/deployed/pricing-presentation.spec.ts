@@ -5,12 +5,12 @@ import { testBaseUrl } from '../e2e/test-env'
 // What the plans say about beta pricing follows the live count of beta spots left.
 function betaPricing(spotsLeft: number) {
   return spotsLeft > 0
-    ? { homes: '2 homes included, then $12 $4 per additional home per month', chip: `Beta price · ${spotsLeft} ${spotsLeft === 1 ? 'spot' : 'spots'} left`,
-      notice: `Beta pricing: ${spotsLeft} of 10 spots left. After that, new subscribers pay $12 per additional home per month. You keep the price you subscribe at for 12 months.`,
-      markdownHomes: '- **Homes**: 2 included, then $4 per additional home per month (beta price; $12 per additional home per month once the beta spots are taken).' }
-    : { homes: '2 homes included, then $4 per additional home per month', chip: null,
+    ? { homes: '$12 $4 per home per month', chip: `Beta price · ${spotsLeft} ${spotsLeft === 1 ? 'spot' : 'spots'} left`,
+      notice: `Beta pricing: ${spotsLeft} of 10 spots left. After that, new subscribers pay $12 per home per month. You keep the price you subscribe at for 12 months.`,
+      markdownHomes: '- **Homes**: $4 per home per month (beta price; $12 per home per month once the beta spots are taken).' }
+    : { homes: '$4 per home per month', chip: null,
       notice: 'Beta pricing. Prices will rise for new subscribers as KrabiClaw grows; you keep the price you subscribe at for 12 months.',
-      markdownHomes: '- **Homes**: 2 included, then $4 per additional home per month. A home is a place to stay.' }
+      markdownHomes: '- **Homes**: $4 per home per month. A home is a place to stay.' }
 }
 
 // Real page + canonical billing endpoint. No routes replace billing or CMS data.
@@ -29,13 +29,13 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   await expect(comparison).toBeVisible()
   await expect(comparison.locator('tr[data-feature-id]')).toHaveCount(37)
   await expect(comparison.locator('tr[data-feature-id="locations.included"]')).toHaveCount(0)
-  // Homes are billed by count: 2 included, then $4 each on a paid plan.
+  // Homes are billed by count: $4 each on a paid plan; Basic includes one.
   const homes = comparison.locator('tr[data-feature-id="homes.included"]')
   await expect(homes).toContainText('Homes')
   await expect(homes.locator('td')).toHaveText([
-    '2 included',
-    '2 included, then $4 per additional home per month',
-    '2 included, then $4 per additional home per month',
+    '1 home',
+    '$4 per home per month',
+    '$4 per home per month',
   ])
   // Locations and homes are the counts billed: no plan has a rental-unit row.
   await expect(comparison.locator('tr[data-feature-id="rental-units.included"]')).toHaveCount(0)
@@ -97,7 +97,7 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   expect(business.prices).toEqual([expect.objectContaining({ amount: 14900, currency: 'usd', interval: 'month' })])
   await expect(cards.nth(2).locator('.kc-plan-price')).toHaveText('$149')
   await expect(page.locator('[data-plan-locations]')).toHaveCount(0)
-  await expect(cards.nth(0).locator('[data-plan-homes]')).toHaveText('2 homes included')
+  await expect(cards.nth(0).locator('[data-plan-homes]')).toHaveText('1 home included')
   for (const index of [1, 2]) await expect(cards.nth(index).locator('[data-plan-homes]')).toHaveText(beta.homes)
   await expect(cards.nth(0).locator('[data-plan-beta]')).toHaveCount(0)
   for (const index of [1, 2]) {
@@ -214,7 +214,7 @@ test('pricing remains readable with JavaScript disabled', async ({ browser }) =>
     await expect(cards.nth(2).getByRole('heading', { name: 'Business', exact: true })).toBeVisible()
     await expect(cards.nth(2).locator('.kc-plan-price')).toHaveText('$149')
     await expect(page.locator('[data-plan-locations]')).toHaveCount(0)
-    await expect(cards.nth(0).locator('[data-plan-homes]')).toHaveText('2 homes included')
+    await expect(cards.nth(0).locator('[data-plan-homes]')).toHaveText('1 home included')
     for (const index of [1, 2]) await expect(cards.nth(index).locator('[data-plan-homes]')).toHaveText(beta.homes)
     await expect(cards.nth(2).getByRole('link', { name: 'Get Business', exact: true })).toHaveAttribute('href', '/signup?plan=business&redirect=%2Fapi%2Fpost-login%3Fplan%3Dbusiness')
     await expect(page.locator('[data-price-unavailable]')).toHaveCount(0)

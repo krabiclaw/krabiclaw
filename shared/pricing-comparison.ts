@@ -1,6 +1,6 @@
 import { getPlanEntitlements } from '../server/utils/billing-entitlements'
 import { PLATFORM_LOCALES } from './platform-locales'
-import { additionalHomePrice, INCLUDED_HOMES, isKnownRecurringPlan, PAYMENTS_FEE } from './billing-model'
+import { BASIC_HOMES, homePrice, isKnownRecurringPlan, PAYMENTS_FEE } from './billing-model'
 
 const ADDITIONAL_LANGUAGE_NAMES = new Intl.ListFormat('en', { type: 'conjunction' }).format(
   PLATFORM_LOCALES.filter(({ locale }) => locale !== 'en')
@@ -34,9 +34,9 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
     { id: 'catalog.products', label: 'Menus, offerings, homes and photos', detail: 'Manage products and media for your business type.', included: 'Included' },
     { id: 'media.management', label: 'Image and video library', detail: 'Upload and place supported media on your site; videos need a poster image.', included: 'Included' },
     { id: 'analytics.reports', label: 'Website analytics', detail: 'Read available organization-scoped reports. Connected Google reports require provider setup.', included: 'Included' },
-    { id: 'homes.included', label: 'Homes', detail: `${INCLUDED_HOMES} live homes included on every plan. Growth and Business add more at ${additionalHomePrice()}. A home counts while active at an active location and either published on your site or syncing through an enabled Airbnb mapping; drafts are free.`, planValue: planId => isKnownRecurringPlan(planId)
-      ? `${INCLUDED_HOMES} included, then ${additionalHomePrice()}`
-      : `${INCLUDED_HOMES} included` },
+    { id: 'homes.included', label: 'Homes', detail: `Basic includes ${BASIC_HOMES} live home. Growth and Business bill ${homePrice()}. A home counts while active at an active location and either published on your site or syncing through an enabled Airbnb mapping; drafts are free.`, planValue: planId => isKnownRecurringPlan(planId)
+      ? homePrice()
+      : `${BASIC_HOMES} home` },
     { id: 'locations.management', label: 'Locations and calendar', detail: 'Manage location details and available dates.', included: 'Included' },
     { id: 'posts.website', label: 'Website posts', detail: 'Create and publish posts on your website.', included: 'Included' },
     { id: 'social.external-channels', label: 'Facebook, Instagram and Discord publishing', detail: 'Explicit publishing to connected channels requires provider permissions and valid media.', entitlement: 'managed_service' },

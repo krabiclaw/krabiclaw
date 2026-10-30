@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { basename, dirname } from 'node:path'
-import { BILLING_METER_KEYS, BILLING_METERS, INCLUDED_HOMES, NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES, PAYMENTS_FEE, SERVICE_PRICES, additionalHomePrice } from '../../shared/billing-model.ts'
+import { BILLING_METER_KEYS, BILLING_METERS, NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES, PAYMENTS_FEE, SERVICE_PRICES, homePrice } from '../../shared/billing-model.ts'
 
 export const CATALOG_PLAN_SCHEMA_VERSION = 14
 export const CATALOG_APPLY_JOURNAL_SCHEMA_VERSION = 1
@@ -55,7 +55,7 @@ export const PLAN_DEFINITIONS = Object.freeze([
     imagePath: 'scripts/assets/stripe/growth.jpg',
     features: [
       'Business websites for restaurants, experiences, law firms and lodging',
-      `${INCLUDED_HOMES} homes included, then ${additionalHomePrice()}`,
+      homePrice(),
       'Your own domain (yourbusiness.com)',
       'Update supported content, menus and photos through ChatGPT',
       'Bookings, consultation requests and ticketed experiences',
@@ -420,15 +420,12 @@ function existingProductNeedsUpdate(existing, definition, priceRef, imageSha256)
  * The exact monthly price an offered definition sells at. A plan, a service
  * and Site Language are flat unit prices; a metered definition is the
  * monthly price on its meter (`meter` is its id, or the reference to the meter
- * this plan creates): graduated tiers after an included count, or a decimal
- * amount per reported cent.
+ * this plan creates): a decimal amount per reported unit.
  */
 export function desiredPriceParams(definition, meter) {
   if (definition.meter) {
     const recurring = { interval: 'month', interval_count: 1, usage_type: 'metered', meter }
-    return definition.meter.tiers
-      ? { currency: 'usd', recurring, billing_scheme: 'tiered', tiers_mode: 'graduated', tiers: definition.meter.tiers.map(tier => ({ ...tier })) }
-      : { currency: 'usd', recurring, billing_scheme: 'per_unit', unit_amount_decimal: definition.meter.unitAmountDecimal }
+    return { currency: 'usd', recurring, billing_scheme: 'per_unit', unit_amount_decimal: definition.meter.unitAmountDecimal }
   }
   return { currency: 'usd', recurring: { interval: 'month', interval_count: 1 }, billing_scheme: 'per_unit', unit_amount: definition.amountCents }
 }
