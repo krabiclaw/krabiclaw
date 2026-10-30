@@ -803,6 +803,7 @@ test('Payments usage reaches its Stripe meters once, a correction as a negative 
 })
 
 test('a stay purchase claim cancels Stripe before releasing only its held nights, and a replay completes without a second cancellation', { timeout: 120_000 }, async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse(NOW) })
   const { db, runtime } = await boot()
   try {
     const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
@@ -851,6 +852,21 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
     assert.equal(cancellations, 0)
     assert.equal(await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='changing'").first('status'), 'active')
     nativeStatus = 'requires_payment_method'
+    const originalPayment = await requirePayment(db, ORG, 'changing')
+    const originalNights = (await db.prepare('SELECT * FROM stay_nights ORDER BY date').all()).results
+    for (const table of ['payment_attempts', 'payment_claims']) {
+      const expiry = await db.prepare(`SELECT expires_at FROM ${table} WHERE payment_id='changing'`).first<string>('expires_at')
+      assert(expiry)
+      await db.prepare(`UPDATE ${table} SET expires_at=? WHERE payment_id='changing'`).bind(NOW).run()
+      const expired = await cancel(claims.get('changing')!)
+      assert.equal(expired.status, 409)
+      assert.equal((await expired.json() as { data: { code: string } }).data.code, 'payment_expired')
+      assert.equal(cancellations, 0)
+      assert.deepEqual(await requirePayment(db, ORG, 'changing'), originalPayment)
+      assert.deepEqual((await db.prepare('SELECT * FROM stay_nights ORDER BY date').all()).results, originalNights)
+      assert.deepEqual((await db.prepare('SELECT payment_id,status FROM payment_checkout_holds ORDER BY payment_id').all()).results, [{ payment_id: 'changing', status: 'active' }, { payment_id: 'other-stay', status: 'active' }])
+      await db.prepare(`UPDATE ${table} SET expires_at=? WHERE payment_id='changing'`).bind(expiry).run()
+    }
     const canceled = await cancel(claims.get('changing')!)
     assert.equal(canceled.status, 200, await canceled.clone().text())
     assert.deepEqual(await canceled.json(), { status: 'canceled' })
@@ -861,6 +877,8 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
     ])
     assert.deepEqual((await db.prepare('SELECT payment_id,status FROM payment_checkout_holds ORDER BY payment_id').all()).results, [{ payment_id: 'changing', status: 'released' }, { payment_id: 'other-stay', status: 'active' }])
     assert.equal(await db.prepare("SELECT COUNT(*) FROM stay_nights WHERE hold_id='h:changing'").first('COUNT(*)'), 0)
+    await db.prepare("UPDATE payment_claims SET expires_at=? WHERE payment_id='changing'").bind(NOW).run()
+    await db.prepare("UPDATE payment_attempts SET expires_at=? WHERE payment_id='changing'").bind(NOW).run()
     const replay = await cancel(claims.get('changing')!)
     assert.equal(replay.status, 200)
     assert.deepEqual(await replay.json(), { status: 'canceled' })
