@@ -1376,6 +1376,30 @@
         "destructive_justification": "Creates or overwrites translated resource values and supplied translated content."
       }
     },
+    "query_google_ads_report": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads search term, keyword or landing page performance for chosen days from the Google Ads account the selected business connected.",
+        "open_world_justification": "Reads search term, keyword or landing page performance for chosen days from the Google Ads account the selected business connected. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads search term, keyword or landing page performance for chosen days from the Google Ads account the selected business connected."
+      }
+    },
+    "query_google_analytics": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads a report from the Google Analytics 4 property the selected business connected.",
+        "open_world_justification": "Reads a report from the Google Analytics 4 property the selected business connected. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads a report from the Google Analytics 4 property the selected business connected."
+      }
+    },
     "query_organization_analytics": {
       "annotations": {
         "readOnlyHint": true,
@@ -1386,6 +1410,18 @@
         "read_only_justification": "Reads individual native analytics events, retained sessions and grouped breakdowns from the selected organization's stored analytics without modifying them.",
         "open_world_justification": "Reads individual native analytics events, retained sessions and grouped breakdowns from the selected organization's stored analytics without modifying them. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
         "destructive_justification": "Reads individual native analytics events, retained sessions and grouped breakdowns from the selected organization's stored analytics without modifying them."
+      }
+    },
+    "query_search_console": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads organic search performance from the Search Console property the selected business connected.",
+        "open_world_justification": "Reads organic search performance from the Search Console property the selected business connected. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads organic search performance from the Search Console property the selected business connected."
       }
     },
     "reassign_product_booking": {

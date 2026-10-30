@@ -332,6 +332,7 @@ export async function executeMcpToolCall(
     throw new HTTPError({
       statusCode: 403,
       statusMessage: `${humanizeEntitlement(tool.requiredEntitlement)} is not enabled for this organization.`,
+      data: { code: 'ENTITLEMENT_REQUIRED' },
     });
   }
 

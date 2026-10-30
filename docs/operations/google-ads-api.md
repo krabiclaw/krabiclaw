@@ -27,9 +27,10 @@ All calls are in `server/utils/google-ads.ts`, against `v25`.
 | Call | Used by |
 | --- | --- |
 | `customers:listAccessibleCustomers`, `googleAds:search` on `customer` | Integrations → Google Ads: list the login's accounts with their names, currency and time zone; pick one |
-| `googleAds:search` on `campaign` | Insights → Google Ads (campaigns by spend for a range); `list_google_ads_campaigns`; Today's Google Ads card totals |
+| `googleAds:search` on `campaign` | Insights → Google Ads (campaigns by spend for a range); `list_google_ads_campaigns` (all-time, or for chosen days); Today's Google Ads card totals |
 | `googleAds:search` on `ad_group`, `ad_group_criterion`, `ad_group_ad` | `get_google_ads_campaign` detail |
-| `googleAds:mutate` | `create_google_ads_search_campaign`, `update_google_ads_campaign` (status, budget) — Business plan only |
+| `googleAds:search` on `search_term_view`, `keyword_view`, `landing_page_view` | `query_google_ads_report` for chosen days |
+| `googleAds:mutate` | `create_google_ads_search_campaign`, `update_google_ads_campaign` (status, budget) — Business plan only (`google_ads_management`); every read above is free with the connection |
 | `googleAds:search` on `customer` metrics for one day | `marketing:ad-spend-daily`: a managed account's finished day, billed at 10% |
 
 Reads are live and never stored. The only persisted Google Ads figures are the

@@ -20,7 +20,7 @@ export function getPlanEntitlements(plan: string): EntitlementsMap {
     messaging: false,
     review_requests: false,
     additional_languages: false,
-    marketing: false,
+    google_ads_management: false,
     calendar_sync: false,
     channel_sync: false,
   }
@@ -33,7 +33,8 @@ export function getPlanEntitlements(plan: string): EntitlementsMap {
       return {
         ...base,
         payments: plan !== 'growth',
-        marketing: plan === 'marketing' || plan === 'business',
+        // Creating and changing campaigns; reading them is free with the connection.
+        google_ads_management: plan === 'marketing' || plan === 'business',
         // Two-way Google Calendar sync and the Airbnb channel: Business keeps
         // both sides in step for a team; Growth takes bookings on the site.
         calendar_sync: plan === 'business',
