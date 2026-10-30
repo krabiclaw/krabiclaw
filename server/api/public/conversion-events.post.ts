@@ -206,12 +206,13 @@ export default defineHandler(async (event) => {
     const dialed = cleanString(body.phone, 40)
     if (!dialed) return jsonResponse({ error: 'phone is required' }, { status: 400 })
     // A call counts only to the business's own number, the one a live location lists; a page may
-    // also link to someone else's number, and that call is not this business's lead.
+    // also link to someone else's number, and that call is not this business's lead. A number two
+    // locations share names neither of them.
     const locations = await queryAll<{ id: string; phone: string }>(db,
       "SELECT id, phone FROM business_locations WHERE organization_id = ? AND status = 'active' AND phone IS NOT NULL", [organizationId])
-    const location = locations.find(candidate => dialsSameNumber(candidate.phone, dialed))
-    if (!location) return jsonResponse({ ok: true, ignored: true })
-    locationId = location.id; ctaDestination = 'tel'
+    const matches = locations.filter(candidate => dialsSameNumber(candidate.phone, dialed))
+    if (matches.length === 0) return jsonResponse({ ok: true, ignored: true })
+    locationId = matches.length === 1 ? matches[0]!.id : null; ctaDestination = 'tel'
   } else {
     return jsonResponse({ error: 'Submission conversions are server-produced' }, { status: 400 })
   }

@@ -156,7 +156,7 @@ export function formatPhone(value: string): string {
 /**
  * Whether two written numbers ring the same line. A number written with its calling code lends its
  * country to one written without, so "+19847778288" and "(984) 777-8288" match; two national
- * numbers match only digit for digit.
+ * numbers match only digit for digit. An extension is part of the line.
  */
 export function dialsSameNumber(a: string, b: string): boolean {
   const country = (parsePhoneNumberFromString(a) ?? parsePhoneNumberFromString(b))?.country
@@ -164,7 +164,10 @@ export function dialsSameNumber(a: string, b: string): boolean {
     const [x, y] = [a, b].map(value => value.replace(/\D/g, ''))
     return x!.length >= 7 && x === y
   }
-  const [x, y] = [a, b].map(value => parsePhoneNumberFromString(value, country)?.number)
+  const [x, y] = [a, b].map((value) => {
+    const parsed = parsePhoneNumberFromString(value, country)
+    return parsed ? `${parsed.number};ext=${parsed.ext ?? ''}` : null
+  })
   return !!x && x === y
 }
 

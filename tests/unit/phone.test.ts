@@ -13,4 +13,7 @@ test('a phone link matches the location number it dials, however each is written
   assert.equal(dialsSameNumber('(984) 777-8288', '+19195550123'), false)
   assert.equal(dialsSameNumber('(984) 777-8288', '(919) 555-0123'), false)
   assert.equal(dialsSameNumber('911', '911'), false)
+  // Another extension is another line.
+  assert.equal(dialsSameNumber('+19847778288;ext=12', '(984) 777-8288'), false)
+  assert.equal(dialsSameNumber('+19847778288;ext=12', '+1 984 777 8288 ext. 12'), true)
 })

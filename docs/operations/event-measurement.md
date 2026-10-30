@@ -31,7 +31,7 @@ enforces the shape and the once-per-subject rule.
 | `purchase` | invoice | Stripe `invoice.paid` with a positive amount | `purchase` | Measurement Protocol |
 | `refund` | refund | Stripe refund with status `succeeded` | `refund` | Measurement Protocol |
 | `consultation_cta_click`, `product_order_external_click`, `link_click`, `donation_click` | handoffs | every click; a handoff is not a booking, payment or donation | same name | browser |
-| `phone_click` | none (the location whose number it is) | every tap on a `tel:` link to the number an active location lists; another number is ignored | same name | browser |
+| `phone_click` | none (the location whose number it is, when only one lists it) | every tap on a `tel:` link to the number an active location lists; another number is ignored | same name | browser |
 
 ### Interactions and their producers
 
