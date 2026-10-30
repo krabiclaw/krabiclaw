@@ -523,10 +523,12 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
   }
 })
 
-test('actual weekday and weekend rules survive default edits, protected refresh and the rolling window', { timeout: 120_000 }, async (context) => {
+test('actual dated, weekday and weekend rules survive default edits, protected refresh and the rolling window', { timeout: 120_000 }, async (context) => {
   const { runtime, db, env } = await boot()
   const channex = new FakeChannex()
   const firstDate = today()
+  const seasonal = [{ start_date: addDays(firstDate, -10), end_date: addDays(firstDate, -5), min_nights: 7 }]
+  channex.availabilityRules.seasonal_min_nights = seasonal
   channex.availabilityRules.day_of_week_min_nights = [2, -1, -1, -1, -1, -1, -1]
   channex.availabilityRules.booking_lead_time = 48
   channex.weekendPrice = 225
@@ -545,6 +547,7 @@ test('actual weekday and weekend rules survive default edits, protected refresh 
     assert.deepEqual(await db.prepare('SELECT min_stay_arrival, price_minor FROM product_nights WHERE product_id = ? AND date = ?').bind(productId, firstDate).first(), { min_stay_arrival: 11, price_minor: 21000 })
     await updateStayHome(env, db, manager, productId, { min_nights: 9, base_price_minor: 20000 })
     assert.equal(((channex.settings.find(settings => settings.availability_settings)!.availability_settings as { availability_settings: { booking_lead_time: number } }).availability_settings).booking_lead_time, 48)
+    assert.deepEqual((channex.settings.find(settings => settings.availability_settings)!.availability_settings as { availability_settings: { seasonal_min_nights: unknown } }).availability_settings.seasonal_min_nights, seasonal)
     await connection.refreshContent(productId)
     await updateStayHome(env, db, manager, productId, { min_nights: 10, base_price_minor: 21000 })
     const changed = await readStayCalendar(db, manager, { productId, from: monday, to: addDays(tuesday, 1) })
@@ -1820,7 +1823,6 @@ test('the import asks only for what Airbnb leaves out, and stops when Airbnb has
     }
     channex.availabilityRules = realRules
     for (const rules of [
-      { ...realRules, seasonal_min_nights: [{ start_date: today(), end_date: addDays(today(), 2), min_nights: 7 }] },
       { ...realRules, day_of_week_min_nights: [1, 2] },
       { ...realRules, day_of_week_min_nights: [0, -1, -1, -1, -1, -1, -1] },
     ]) {
