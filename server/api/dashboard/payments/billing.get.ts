@@ -5,6 +5,6 @@ import {assertRoleAllows} from '~/server/utils/member-access'
 import {paymentsUsage} from '~/server/domain/payments/usage'
 export default defineHandler(async event=>{
  const {db,env,organization}=await getDashboardContext(event,{})
- await assertRoleAllows({organizationId:organization.id,role:organization.role,permissions:{payments:['integration']}})
+ await assertRoleAllows({organizationId:organization.id,role:organization.role,permissions:{billing:['read']}})
  return jsonResponse(await paymentsUsage(db,env,organization.id))
 })

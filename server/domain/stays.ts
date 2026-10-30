@@ -2720,3 +2720,20 @@ export async function stayCalendarExport(db: DbClient, token: string): Promise<s
     'END:VCALENDAR', '',
   ].join('\r\n')
 }
+
+/** Channel reservation values by arrival date. A reservation amount is never a bank-transfer record. */
+export async function channelReservationAmounts(db: DbClient, organizationId: string, from: string, until: string) {
+  const rows = await queryAll<{ channel: string; currency: string; amount: number; count: number }>(db,
+    `SELECT channel, currency, SUM(total_minor) AS amount, COUNT(*) AS count FROM stays
+      WHERE organization_id = ? AND owner = 'channel' AND status = 'confirmed'
+      AND check_in_date >= ? AND check_in_date < ? GROUP BY channel, currency ORDER BY channel, currency`,
+    [organizationId, from, until])
+  for (const row of rows) {
+    if (!['airbnb', 'booking_com', 'vrbo'].includes(row.channel) || !isCurrencyCode(row.currency)
+      || !Number.isSafeInteger(row.amount) || row.amount < 0 || !Number.isSafeInteger(row.count) || row.count < 1) {
+      throw new HTTPError({ statusCode: 500, statusMessage: 'A channel reservation summary is invalid',
+        data: { code: 'CHANNEL_RESERVATION_AMOUNT_INVALID', field: `channelReservations.${row.channel}.${row.currency}` } })
+    }
+  }
+  return rows
+}

@@ -1,4 +1,4 @@
-import { PAYMENT_TERMS } from '~/shared/billing-model'
+import { SURCHARGE_POLICY } from '~/shared/billing-model'
 import { defineHandler, HTTPError } from 'nitro'
 import { getDashboardContext } from '~/server/utils/dashboard-context'
 import { assertRoleAllows } from '~/server/utils/member-access'
@@ -36,5 +36,5 @@ export default defineHandler(async (event) => {
     if (bank?.object === 'bank_account' && schedule) payout = { bankName: bank.bank_name ?? null, last4: bank.last4, currency: bank.currency.toUpperCase(), schedule: { interval: schedule.interval, delayDays: schedule.delay_days } }
 
   }
-  return jsonResponse({ success: true, account, payout, surchargePolicy: PAYMENT_TERMS })
+  return jsonResponse({ success: true, account, payout, surchargePolicy: SURCHARGE_POLICY })
 })

@@ -1,5 +1,5 @@
 import { authClient } from '~/lib/auth-client'
-import { isKnownBillingPlan } from '~/shared/billing-model'
+import { isBillingResponse, type BillingStatus } from '~/composables/usePaymentsSettings'
 
 function checkoutReturnUrls(): { successUrl: string; cancelUrl: string; returnUrl: string } {
   const current = new URL(window.location.href)
@@ -15,27 +15,9 @@ function checkoutReturnUrls(): { successUrl: string; cancelUrl: string; returnUr
 async function organizationSubscriptionId(
   dashboardApi: ReturnType<typeof useDashboardApi>,
   organizationId: string,
-): Promise<{ id?: string; status?: string; plan: string }> {
-  // A business on Starter has no subscription row, so the id and status are
-  // absent from the response rather than present and empty.
-  type BillingStatusResponse = {
-    success: true
-    billing: { stripeSubscriptionId?: string; subscriptionStatus?: string; plan: string }
-  }
-  const response = await dashboardApi<BillingStatusResponse>('/api/billing/status', {
-    query: { organizationId },
-    validate: (value): value is BillingStatusResponse => {
-      if (typeof value !== 'object' || value === null || !('success' in value) || value.success !== true || !('billing' in value)) return false
-      const billing = value.billing
-      return typeof billing === 'object'
-        && billing !== null
-        && (!('stripeSubscriptionId' in billing) || billing.stripeSubscriptionId === undefined || typeof billing.stripeSubscriptionId === 'string')
-        && (!('subscriptionStatus' in billing) || billing.subscriptionStatus === undefined || typeof billing.subscriptionStatus === 'string')
-        && 'plan' in billing
-        && isKnownBillingPlan(billing.plan)
-    },
-  })
-  return { id: response.billing.stripeSubscriptionId, status: response.billing.subscriptionStatus, plan: response.billing.plan }
+): Promise<{ id?: string; status?: string; plan: string; canUpdate: boolean; actions: BillingStatus['actions'] }> {
+  const response = await dashboardApi('/api/billing/status', { query: { organizationId }, validate: isBillingResponse })
+  return { id: response.billing.stripeSubscriptionId, status: response.billing.subscriptionStatus, plan: response.billing.plan, canUpdate: response.billing.canUpdate, actions: response.billing.actions }
 }
 
 export const useOrganizationSubscription = () => {
@@ -72,10 +54,7 @@ export const useOrganizationSubscription = () => {
   // once Better Auth confirms the subscription through Stripe.
   async function startOrganizationCheckout(organizationId: string, plan: string) {
     const subscription = await organizationSubscriptionId(dashboardApi, organizationId)
-    if (subscription.status === 'past_due') {
-      await openBillingPortal()
-      return
-    }
+    if (!subscription.canUpdate || !subscription.actions.changes.some(change => change.plan === plan)) throw new Error('This plan change is no longer available. Review Plan and billing before approving another change.')
     const currentPlan = subscription.plan
     // Better Auth swaps the plan price and adds or removes the plans' metered
     // items in one change; what they bill is charged at the end of the period.

@@ -7,11 +7,12 @@
   <DashboardLeafPanel
     id="organization-upgrade"
     :title="onStarter ? 'Choose a plan' : 'Upgrade to Business'"
-    :lead="onStarter ? 'Change or cancel at any time. Stripe shows the total before you pay.' : `${formatRecurring(PAID_PLAN_PRICES[BUSINESS_PLAN_ID].monthly - PAID_PLAN_PRICES[GROWTH_PLAN_ID].monthly, 'USD')} more than ${planName(GROWTH_PLAN_ID)}. Stripe charges the difference for the rest of this period${billing?.currentPeriodEnd ? `, then ${formatRecurring(PAID_PLAN_PRICES[BUSINESS_PLAN_ID].monthly, 'USD')} from ${formatExactDateTime(billing.currentPeriodEnd)}` : ''}.`"
+    :lead="onStarter ? 'Change or cancel at any time. Stripe shows the total before you pay.' : 'This upgrade applies immediately. Stripe calculates any prorated charge for the rest of your billing period.'"
     :footer="dashboard.canUpdateBilling.value"
     :saving="busy"
-    :error="error"
-    save-label="Continue"
+    :error="error || (billingError ? getErrorMessage(billingError, 'The plan could not be loaded') : '')"
+    :disabled="!billing || (onStarter && !chosen)"
+    :save-label="onStarter ? 'Continue to Stripe' : 'Agree and upgrade to Business'"
     @save="upgrade"
   >
     <p v-if="!dashboard.canUpdateBilling.value" class="mb-6 text-base text-muted">Owners change the plan.</p>
@@ -42,15 +43,14 @@ definePageMeta({ layout: 'dashboard' })
 const dashboard = useDashboardOrganization()
 const { startOrganizationCheckout } = useOrganizationSubscription()
 const { plans, formatRecurring } = await usePlans()
-const { billing } = await useOrganizationBilling()
-const { formatExactDateTime } = useHumanTime()
+const { billing, billingError } = await useOrganizationBilling()
 const onStarter = computed(() => billing.value?.plan === STARTER_PLAN_ID && !billing.value.stripeSubscriptionId)
 useSeoMeta({ title: () => `${onStarter.value ? 'Choose a plan' : 'Upgrade to Business'} | KrabiClaw`, robots: 'noindex, nofollow' })
 
 // Business has nothing above it, and a plan already changing has no second change to start.
 watchEffect(() => {
   const status = billing.value
-  if (status && (status.plan === BUSINESS_PLAN_ID || status.cancelAtPeriodEnd || status.scheduledPlan)) showError({ statusCode: 404, statusMessage: 'There is no upgrade for this plan' })
+  if (status && (!status.actions.changes.some(change => change.timing === 'immediate'))) showError({ statusCode: 404, statusMessage: 'There is no upgrade for this plan' })
 })
 
 // Each addition leads with its offer's illustration, the same picture Menu and Today offered it with.

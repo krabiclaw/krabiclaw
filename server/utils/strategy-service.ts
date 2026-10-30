@@ -61,8 +61,9 @@ export async function readStrategy(env: CloudflareEnv, db: DbClient, organizatio
     return null
   }
   if (!agreement) throw new Error(`Stripe subscription item ${item.id} is the strategy service but no agreement is recorded`)
-  if (typeof item.price.unit_amount !== 'number') throw new Error(`Stripe strategy item ${item.id} has no amount`)
-  return { item_id: item.id, price_id: item.price.id, amount: item.price.unit_amount, currency: item.price.currency.toUpperCase(), interval: item.price.recurring?.interval ?? 'month', since: new Date(item.created * 1000).toISOString() }
+  if (typeof item.price.unit_amount !== 'number' || !Number.isSafeInteger(item.price.unit_amount) || item.price.unit_amount < 0) throw new HTTPError({ statusCode: 502, statusMessage: 'The strategy subscription has no valid amount', data: { code: 'SERVICE_BILLING_INVALID', field: 'services.strategy.amount' } })
+  if (item.price.recurring?.interval !== 'month' || item.price.recurring.interval_count !== 1) throw new HTTPError({ statusCode: 502, statusMessage: 'The strategy subscription has no valid monthly interval', data: { code: 'SERVICE_BILLING_INVALID', field: 'services.strategy.interval' } })
+  return { item_id: item.id, price_id: item.price.id, amount: item.price.unit_amount, currency: item.price.currency.toUpperCase(), interval: item.price.recurring.interval, since: new Date(item.created * 1000).toISOString() }
 }
 
 /** One consent attempt: the browser names it, so a retry of the same attempt is deduplicated and a later attempt is not. */
@@ -72,15 +73,15 @@ export function isAttemptId(value: unknown): value is string {
 
 export async function startStrategy(env: CloudflareEnv, db: DbClient, organizationId: string, userId: string, attempt: string): Promise<StrategyService> {
   const found = await planSubscription(env, db, organizationId)
-  if (!found || !['active', 'trialing'].includes(found.subscription.status)) throw new HTTPError({ statusCode: 409, statusMessage: 'Choose a plan before adding the strategy service; it is billed with the plan.' })
-  if (strategyItem(found.subscription)) throw new HTTPError({ statusCode: 409, statusMessage: 'The strategy service is already on' })
+  if (!found || !['active', 'trialing'].includes(found.subscription.status)) throw new HTTPError({ statusCode: 409, statusMessage: 'Choose a plan before adding the strategy service; it is billed with the plan.', data: { code: 'SERVICE_OPERATION_REFUSED', field: 'service' } })
+  if (strategyItem(found.subscription)) throw new HTTPError({ statusCode: 409, statusMessage: 'The strategy service is already on', data: { code: 'SERVICE_ALREADY_ACTIVE', field: 'service' } })
   const price = await strategyPrice(found.stripe)
   // The agreement row goes first: its unique index admits one activation at a time, so two clicks cannot both add an item.
   const agreementId = crypto.randomUUID()
   try {
     await execute(db, 'INSERT INTO organization_services(id,organization_id,service,terms_version,agreed_by_user_id,agreed_at) VALUES(?,?,?,?,?,?)', [agreementId, organizationId, 'strategy', STRATEGY_TERMS_VERSION, userId, new Date().toISOString()])
   } catch (cause) {
-    throw new HTTPError({ statusCode: 409, statusMessage: 'The strategy service is already being turned on', cause })
+    throw new HTTPError({ statusCode: 409, statusMessage: 'The strategy service is already being turned on', cause, data: { code: 'SERVICE_CHANGE_IN_PROGRESS', field: 'service' } })
   }
   let updated: Stripe.Subscription
   try {
@@ -112,7 +113,7 @@ export async function startStrategy(env: CloudflareEnv, db: DbClient, organizati
 export async function endStrategy(env: CloudflareEnv, db: DbClient, organizationId: string, userId: string, attempt: string): Promise<void> {
   const found = await planSubscription(env, db, organizationId)
   const item = found && strategyItem(found.subscription)
-  if (!found || !item) throw new HTTPError({ statusCode: 409, statusMessage: 'The strategy service is not on' })
+  if (!found || !item) throw new HTTPError({ statusCode: 409, statusMessage: 'The strategy service is not on', data: { code: 'SERVICE_NOT_ACTIVE', field: 'service' } })
   await found.stripe.subscriptionItems.del(item.id, { proration_behavior: 'create_prorations' }, { idempotencyKey: `strategy-end:${organizationId}:${attempt}` })
   // The subscription itself says the item is gone; only then does the agreement close.
   const after = await found.stripe.subscriptions.retrieve(found.subscription.id, { expand: ['items.data.price.product'] })

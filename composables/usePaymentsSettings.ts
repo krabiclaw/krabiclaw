@@ -1,4 +1,4 @@
-import { isKnownBillingPlan } from '~/shared/billing-model'
+import { isKnownBillingPlan, isNewSalePlan, type billingPlanActions } from '~/shared/billing-model'
 import { isCurrencyCode } from '~/shared/currencies'
 import type { PaymentMethodRow } from '~/server/utils/billing-customer'
 import type { HomesQuote } from '~/server/utils/billing'
@@ -10,9 +10,12 @@ import type { HomesQuote } from '~/server/utils/billing'
  * serves both and a leaf's refresh updates the row it came from.
  */
 
-export interface BillingStatus { organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month'; subscriptionPrice?: { name: string; amount: number; currency: string; interval: 'month'; meters: string[]; trial: { end: string; withoutPaymentMethod: 'cancel' | 'create_invoice' | 'pause' } | null }; usage: { homes: number }; scheduledPlan?: { plan: string; at: string } | null }
-const isBillingResponse = (value: unknown): value is { success: true; billing: BillingStatus } =>
+export interface BillingStatus { canUpdate: boolean; actions: ReturnType<typeof billingPlanActions>; organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month'; subscriptionPrice?: { name: string; amount: number; currency: string; interval: 'month'; meters: string[]; trial: { end: string; withoutPaymentMethod: 'cancel' | 'create_invoice' | 'pause' } | null }; usage: { homes: number }; scheduledPlan?: { plan: string; at: string } | null }
+export const isBillingResponse = (value: unknown): value is { success: true; billing: BillingStatus } =>
   isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.organizationId === 'string' && isKnownBillingPlan(value.billing.plan)
+  && typeof value.billing.canUpdate === 'boolean' && isRecord(value.billing.actions)
+  && (value.billing.actions.label === null || typeof value.billing.actions.label === 'string') && typeof value.billing.actions.restore === 'boolean'
+  && Array.isArray(value.billing.actions.changes) && value.billing.actions.changes.every(change => isRecord(change) && isNewSalePlan(change.plan) && (change.timing === 'immediate' || change.timing === 'period_end'))
   && isRecord(value.billing.usage) && Number.isSafeInteger(value.billing.usage.homes)
   && (value.billing.subscriptionPrice === undefined || (isRecord(value.billing.subscriptionPrice) && typeof value.billing.subscriptionPrice.name === 'string' && Number.isSafeInteger(value.billing.subscriptionPrice.amount) && isCurrencyCode(value.billing.subscriptionPrice.currency) && value.billing.subscriptionPrice.interval === 'month'
     && Array.isArray(value.billing.subscriptionPrice.meters) && value.billing.subscriptionPrice.meters.every(meter => typeof meter === 'string')
@@ -30,9 +33,12 @@ export async function useOrganizationBilling() {
   return { billing: computed(() => data.value?.billing ?? null), billingError: error, refreshBilling: refresh }
 }
 
+const isUpgradeQuote = (value: unknown): value is NonNullable<HomesQuote['upgrade']> => isRecord(value) && ['billable_homes', 'unit_amount_minor', 'amount_minor'].every(key => Number.isSafeInteger(value[key]) && Number(value[key]) >= 0)
 const isHomesQuote = (value: unknown): value is HomesQuote =>
   isRecord(value) && isKnownBillingPlan(value.plan) && value.currency === 'USD'
+  && (value.upgrade === null || isUpgradeQuote(value.upgrade))
   && isRecord(value.homes) && Number.isSafeInteger(value.homes.used) && Number.isSafeInteger(value.homes.drafts) && Number.isSafeInteger(value.homes.included) && Number.isSafeInteger(value.homes.additional_price_minor) && Number.isSafeInteger(value.homes.amount_minor)
+  && (value.homes.limit === null || (Number.isSafeInteger(value.homes.limit) && Number(value.homes.limit) >= 0))
   && isRecord(value.adding) && Number.isSafeInteger(value.adding.count) && Number.isSafeInteger(value.adding.additional_homes) && Number.isSafeInteger(value.adding.amount_minor) && typeof value.adding.allowed === 'boolean'
   && isRecord(value.billing) && (value.billing.period_end === null || typeof value.billing.period_end === 'string') && (value.billing.trial_end === null || typeof value.billing.trial_end === 'string') && value.billing.prorated === false
 
@@ -53,32 +59,15 @@ export async function useHomesQuote(organizationId: string, adding: MaybeRefOrGe
 export type Strategy = { item_id: string; amount: number; currency: string; interval: string; since: string }
 export type Services = { managed_ads: { id: string; agreed_at: string } | null; strategy: Strategy | null }
 const isStrategy = (value: unknown): value is Strategy => isRecord(value) && typeof value.item_id === 'string' && Number.isSafeInteger(value.amount) && isCurrencyCode(value.currency) && typeof value.since === 'string'
-export const isServices = (value: unknown): value is { success: true; services: Services } => isRecord(value) && value.success === true && isRecord(value.services) && (value.services.managed_ads === null || (isRecord(value.services.managed_ads) && typeof value.services.managed_ads.agreed_at === 'string')) && (value.services.strategy === null || isStrategy(value.services.strategy))
+type ServicesContract = { success: true; services: Services; requirements?: { strategy?: { paid_plan: boolean } } }
+export const isServices = (value: unknown): value is ServicesContract => isRecord(value) && value.success === true && isRecord(value.services) && (value.services.managed_ads === null || (isRecord(value.services.managed_ads) && typeof value.services.managed_ads.agreed_at === 'string')) && (value.services.strategy === null || isStrategy(value.services.strategy))
 
-export async function useOrganizationServices() {
+export async function useOrganizationServices(requirements?: 'strategy') {
   const route = useRoute()
   const dashboardApi = useDashboardApi()
-  const { data, error, refresh } = await useAsyncData(`dashboard-services:${String(route.params.orgSlug)}`, () => dashboardApi('/api/dashboard/services', { validate: isServices }))
+  const { data, error, refresh } = await useAsyncData(`dashboard-services:${String(route.params.orgSlug)}:${requirements ?? 'state'}`, () => dashboardApi('/api/dashboard/services', { query: requirements ? { requirements } : undefined, validate: (value): value is ServicesContract => isServices(value) && (requirements === undefined || (isRecord(value) && isRecord(value.requirements) && isRecord(value.requirements.strategy) && typeof value.requirements.strategy.paid_plan === 'boolean')) }))
   // Unknown until read: a failed read shows its error and offers no service action.
   return { servicesResource: data, services: computed(() => data.value?.services), servicesError: error, refreshServices: refresh }
-}
-
-export type Pricing = { captured_volume_rate_percent: string; ad_spend_rate_percent: string | null; livemode: boolean }
-export type PendingUsage = { kind: string; event_count: number; action_required: boolean }
-export type PaymentTerms = { fee: string; source: 'offer' | 'subscription'; stripe: string; billing: string; surcharge: string; minimumBasisPoints: number; maximumBasisPoints: number }
-export type UsageBilling = { configured: boolean; pricing: Pricing | null; pending: PendingUsage[]; terms: PaymentTerms }
-const isUsageBilling = (value: unknown): value is UsageBilling => isRecord(value) && typeof value.configured === 'boolean'
-  && isRecord(value.terms) && typeof value.terms.fee === 'string' && typeof value.terms.stripe === 'string' && typeof value.terms.billing === 'string' && typeof value.terms.surcharge === 'string' && ['offer', 'subscription'].includes(String(value.terms.source)) && Number.isSafeInteger(value.terms.minimumBasisPoints) && Number.isSafeInteger(value.terms.maximumBasisPoints)
-  && Array.isArray(value.pending) && value.pending.every(row => isRecord(row) && typeof row.kind === 'string' && Number.isSafeInteger(row.event_count) && typeof row.action_required === 'boolean')
-  && (value.pricing === null || (isRecord(value.pricing) && (value.pricing.ad_spend_rate_percent === null || typeof value.pricing.ad_spend_rate_percent === 'string') && typeof value.pricing.captured_volume_rate_percent === 'string' && typeof value.pricing.livemode === 'boolean'))
-
-export async function usePaymentsUsage() {
-  const route = useRoute()
-  const dashboardApi = useDashboardApi()
-  // Lazy on purpose: this reads the plan subscription's metered prices from
-  // Stripe, and the plan rows do not wait on that provider round trip.
-  const { data, error, refresh } = await useAsyncData(`payments-billing:${String(route.params.orgSlug)}`, () => dashboardApi<UsageBilling>('/api/dashboard/payments/billing', { validate: isUsageBilling }), { lazy: true })
-  return { usage: data, usageError: error, refreshUsage: refresh }
 }
 
 export type ConnectStatus = 'creating' | 'creation_failed' | 'action_required' | 'pending_review' | 'restricted' | 'ready'
