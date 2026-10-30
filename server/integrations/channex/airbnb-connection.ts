@@ -972,6 +972,8 @@ export class AirbnbConnection {
       }
       return kept
     }
+    // NULL inherits the canonical home, even after a global host edit leaves this row source='import'.
+    // Airbnb's calendar echoes our resolved ARI values; importing those would freeze inheritance.
     await execute(this.db, `UPDATE product_nights SET min_stay_arrival = CASE WHEN product_nights.min_stay_arrival IS NULL THEN NULL ELSE json_extract(value, '$.min_stay_arrival') END, price_minor = CASE WHEN product_nights.price_minor IS NULL THEN NULL ELSE json_extract(value, '$.price_minor') END
       FROM json_each(?) WHERE organization_id = ? AND product_id = ? AND source = 'import' AND date = json_extract(value, '$.date')`,
     [JSON.stringify(inherited), this.organizationId, mapping.product_id])

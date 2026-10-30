@@ -202,6 +202,8 @@ function typeCheckIn(event: Event) {
   const date = typedDate(event)
   if (date) setCheckIn(date)
   else clearDates()
+  // An empty checkout gives Reka no selected date to bring the typed arrival into view.
+  if (date && checkIn.value === date && !checkOut.value) calendarPlaceholder.value = parseDate(date)
   // A refused date must not remain in the native input beside a quote for the previous dates.
   ;(event.target as HTMLInputElement).value = checkIn.value ?? ''
 }
