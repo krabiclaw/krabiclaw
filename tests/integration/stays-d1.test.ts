@@ -1099,7 +1099,8 @@ test('a channel stay is read-only here and is paid through its channel; an app s
   }
 })
 
-test('the host sets nights apart from the defaults and resets them', { timeout: 120_000 }, async () => {
+test('the host sets nights apart from the defaults and resets them', { timeout: 120_000 }, async context => {
+  context.mock.timers.enable({ apis: ['Date'], now: Date.parse(NOW) })
   const { runtime, db, env } = await boot()
   try {
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
