@@ -5,6 +5,7 @@ import { seededSiteHeaders, seededSiteURL, testBaseUrl } from './test-env'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
+import { dialsSameNumber } from '../../utils/phone'
 
 // Tenant behaviour that writes content or reads local-only routing. Real
 // customer content is checked read-only against deployed sites in tests/deployed.
@@ -182,7 +183,10 @@ test('a tap on the practice’s phone number is a call to its office; a number i
   expect(rendered?.status()).toBe(200)
   await waitForNuxtHydration(page)
   const recorded = page.waitForResponse(response => new URL(response.url()).pathname === '/api/public/conversion-events' && response.request().postDataJSON()?.event_name === 'phone_click')
-  await page.locator('a[href="tel:+19195550123"]').first().click()
+  // The page writes the office's number however the office stored it.
+  const link = page.locator('a[href^="tel:"]').first()
+  expect(dialsSameNumber((await link.getAttribute('href'))!.slice('tel:'.length), '+19195550123')).toBe(true)
+  await link.click()
   const call = await recorded
   expect(call.status(), await call.text()).toBe(201)
   const callId = (await call.json() as { id: string }).id
