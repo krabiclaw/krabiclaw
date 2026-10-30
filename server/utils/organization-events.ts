@@ -1,11 +1,11 @@
 import { queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 
 export type OrganizationEventType =
-  | 'post.created' | 'post.published' | 'post.deleted' | 'post.channel_deleted' | 'article.created' | 'article.updated' | 'article.published'
+  | 'post.created' | 'post.published' | 'post.deleted' | 'post.channel_deleted' | 'post.publication_started' | 'article.created' | 'article.updated' | 'article.published'
   | 'goal.created' | 'goal.updated' | 'recommendation.feedback'
   | 'product.created' | 'product.updated' | 'product.deleted' | 'product.reordered'
   | 'product.category_created' | 'product.category_renamed' | 'product.category_deleted'
-  | 'content.updated' | 'content.published' | 'media.uploaded' | 'media.deleted'
+  | 'content.updated' | 'content.published' | 'media.uploaded' | 'media.deleted' | 'media.placement_changed'
   | 'review.received' | 'review.replied'
   | 'location.created' | 'location.updated'
   | 'experience.created'
@@ -16,8 +16,11 @@ export type OrganizationEventType =
   | 'canonical_domain_changed' | 'cloudflare_create_failed' | 'cloudflare_delete_failed'
   | 'domain_added' | 'domain_deleted' | 'domain_state_changed'
   | 'member.invited' | 'member.role_changed' | 'member.removed' | 'member.access_scope_revoked'
+  | 'google_ads.campaign_change_requested' | 'google_ads.campaign_created' | 'google_ads.campaign_updated' | 'google_ads.campaign_change_failed' | 'google_ads.campaign_change_unconfirmed'
 
 export interface OrganizationEvent {
+  /** An operation may retain this identity as its causal activity reference. */
+  id?: string
   organizationId: string
   locationId?: string | null
   actorId?: string | null
@@ -56,7 +59,7 @@ export interface OrganizationEvent {
  */
 export function organizationEventQuery(event: OrganizationEvent): BatchQuery {
   const { organizationId, locationId, actorId, eventType, entityType, entityId, metadata, actorType, message, beforeState, afterState } = event
-  const id = crypto.randomUUID()
+  const id = event.id ?? crypto.randomUUID()
   const actorKind = actorType === 'cloudflare' ? 'cloudflare' : actorId ? 'member' : 'system'
   const now = new Date().toISOString()
   return {

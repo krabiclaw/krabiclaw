@@ -1,10 +1,12 @@
 import { HTTPError } from 'nitro'
 import { FAQ_BLOCK_SOURCES, type FaqBlockSource } from '~/shared/faq-block'
 import { getPersistedSourceLocale } from '~/server/utils/localization'
-import { createContentDocumentWithBlocks, documentOfRootSql, prepareContentDocumentDeletion } from '~/server/utils/content/documents'
-import { executeBatch, queryAll, queryFirst, type DbClient } from '../db/index.ts'
+import { prepareContentDocumentWithBlocks, documentOfRootSql, prepareContentDocumentDeletion } from '~/server/utils/content/documents'
+import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '../db/index.ts'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { d1JsonStringSet, d1JsonValue } from '../db/d1-limits.ts'
+import { organizationEventQuery } from '~/server/utils/organization-events'
+import type { AuthUserIdentity } from '~/server/utils/auth'
 
 export interface QaScope {
   organizationId: string
@@ -180,9 +182,13 @@ export async function attachPageQa<T extends { type: string; data: Record<string
  * authored — NCLS's practice-area answers and KrabiClaw's own 50 docs questions
  * among them — with no way left to correct a word.
  */
-export async function createQa(db: DbClient, scope: QaScope, input: CreateQaInput) {
+export async function createQa(db: DbClient, scope: QaScope, input: CreateQaInput, actor: AuthUserIdentity | null) {
   await assertQaScope(db, scope)
   const normalized = normalizeQaInput(input, true)
+  if (actor !== null && (!actor || typeof actor.id !== 'string' || !actor.id.trim() || typeof actor.name !== 'string')) badQaInput('actor must be the authenticated identity or explicitly null')
+  const actorId = actor?.id ?? null
+  const actorName = actor?.name ?? null
+  const now = new Date().toISOString()
   const question = normalized.question as string
   const answer = stringOrNull(normalized.answer, 2000)
   const status = normalized.status === 'hidden' ? 'hidden' : 'published'
@@ -192,22 +198,28 @@ export async function createQa(db: DbClient, scope: QaScope, input: CreateQaInpu
   const id = crypto.randomUUID()
   const pagePath = scope.locationId === null ? normalizePagePath(scope.pagePath) : null
   const scoped = scopeSql(scope.locationId, pagePath)
-  await createContentDocumentWithBlocks(db, {
+  const prepared = prepareContentDocumentWithBlocks({
     id, rowRole: 'root', kind: 'qa', locale: source.locale, organizationId: scope.organizationId,
     locationId: scope.locationId, scopePath: pagePath, status, source: 'manual', sortOrder: explicitSortOrder ?? 0,
-    title: question, summary: answer,
+    title: question, summary: answer, createdBy: actorId, updatedBy: actorId,
     metadata: { question_author: stringOrNull(normalized.question_author, 120),
-      question_date: null, answer_author: null, answer_date: null,
+      question_date: null, answer_author: answer ? actorName : null, answer_date: answer ? now : null,
       is_owner_answer: normalized.is_owner_answer === false ? 0 : 1, upvote_count: 0 },
   }, [], {
-    additionalQueriesAfter: explicitSortOrder === null ? [{
+    additionalQueriesAfter: [...(explicitSortOrder === null ? [{
       query: `UPDATE content_documents SET sort_order = (
         SELECT COALESCE(MAX(sort_order), -1) + 1 FROM content_documents
         WHERE row_role = 'root' AND kind = 'qa' AND organization_id = ? AND ${scoped.clause} AND id <> ?
       ) WHERE id = ?`,
       params: [scope.organizationId, ...scoped.params, id, id],
-    }] : [],
+    }] : [])],
   })
+  await executeBatch(db, [...prepared.queries,
+    organizationEventQuery({ organizationId: scope.organizationId, locationId: scope.locationId, actorId,
+      eventType: 'content.updated', entityType: 'qa', entityId: id,
+      afterState: { updated_at: prepared.document.updated_at, status },
+      metadata: { operation: 'created', changed_fields: ['question', ...(answer ? ['answer'] : []), 'status'], evidence_basis: 'persisted_change', page_path: pagePath } }),
+    publicResourceCacheInvalidationQuery(scope.organizationId, 'qa-create')])
   const inserted = await queryFirst<{ sort_order: number }>(db, 'SELECT sort_order FROM content_documents WHERE id = ?', [id])
   if (!inserted) throw new Error('Created Q&A document was not found')
   const sortOrder = inserted.sort_order
@@ -233,57 +245,53 @@ export async function createQa(db: DbClient, scope: QaScope, input: CreateQaInpu
   }
 }
 
-export async function updateQa(db: DbClient, scope: QaScope, qaId: string, input: UpdateQaInput) {
+export async function updateQa(db: DbClient, scope: QaScope, qaId: string, input: UpdateQaInput, actor: AuthUserIdentity | null) {
   await assertQaScope(db, scope)
   const updates = normalizeQaInput(input)
-  const sets = ['updated_at = ?']
-  const params: unknown[] = [new Date().toISOString()]
-  const contentPaths: string[] = []
-  const contentValues: unknown[] = []
-  if (updates.question !== undefined) {
-    sets.push('title = ?')
-    params.push(updates.question)
-  }
-  if (updates.answer !== undefined) {
-    sets.push('summary = ?')
-    params.push(stringOrNull(updates.answer, 2000))
-  }
-  if (updates.question_author !== undefined) {
-    contentPaths.push('$.question_author', '?')
-    contentValues.push(stringOrNull(updates.question_author, 120))
-  }
-  if (updates.is_owner_answer !== undefined) {
-    contentPaths.push('$.is_owner_answer', '?')
-    contentValues.push(updates.is_owner_answer === false ? 0 : 1)
-  }
-  if (updates.status !== undefined) {
-    sets.push('status = ?')
-    params.push(updates.status)
-  }
-  if (updates.sort_order !== undefined) {
-    sets.push('sort_order = ?')
-    params.push(updates.sort_order)
-  }
-  if (contentPaths.length) {
-    sets.push(`metadata_json = json_set(metadata_json, ${contentPaths.map((value, index) => index % 2 === 0 ? `'${value}'` : value).join(', ')})`)
-    params.push(...contentValues)
-  }
-  if (sets.length === 1) badQaInput('No update fields provided')
-
+  if (actor !== null && (!actor || typeof actor.id !== 'string' || !actor.id.trim() || typeof actor.name !== 'string')) badQaInput('actor must be the authenticated identity or explicitly null')
+  const actorId = actor?.id ?? null
+  const actorName = actor?.name ?? null
   const scoped = scopeSql(scope.locationId, scope.pagePath)
-  params.push(qaId, scope.organizationId, ...scoped.params)
-  // The purge rides in the same batch as the write, as it does for a page, an
-  // article and a picture: an answer edited on its own stayed on the cached
-  // page until something else happened to purge it.
+  const current = await queryFirst<{ title: string; summary: string | null; status: string; sort_order: number; metadata_json: string; updated_at: string }>(db,
+    `SELECT title, summary, status, sort_order, metadata_json, updated_at FROM content_documents
+      WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual' AND id = ? AND organization_id = ? AND ${scoped.clause}`,
+    [qaId, scope.organizationId, ...scoped.params])
+  if (!current) throw new HTTPError({ statusCode: 404, statusMessage: 'Q&A not found' })
+  const fields = ['question', 'answer', 'question_author', 'is_owner_answer', 'status', 'sort_order'] as const
+  if (!fields.some(field => updates[field] !== undefined)) badQaInput('No update fields provided')
+  const metadata = JSON.parse(current.metadata_json) as Record<string, unknown>
+  const changedFields = fields.filter(field => updates[field] !== undefined && updates[field] !== (
+    field === 'question' ? current.title : field === 'answer' ? current.summary : field === 'is_owner_answer' ? metadata.is_owner_answer !== 0
+      : field === 'question_author' ? metadata.question_author ?? null : current[field]))
+  if (!changedFields.length) return { updated: false, qa_id: qaId }
+  const now = new Date(Math.max(Date.now(), Date.parse(current.updated_at) + 1)).toISOString()
+  const sets = ['updated_at = ?', 'updated_by = ?']
+  const params: unknown[] = [now, actorId]
+  for (const field of changedFields) {
+    if (field === 'question_author' || field === 'is_owner_answer') metadata[field] = field === 'is_owner_answer' ? updates[field] ? 1 : 0 : updates[field]
+    else {
+      sets.push(`${field === 'question' ? 'title' : field === 'answer' ? 'summary' : field} = ?`)
+      params.push(updates[field])
+    }
+  }
+  if (changedFields.includes('answer')) {
+    metadata.answer_author = updates.answer ? actorName : null
+    metadata.answer_date = updates.answer ? now : null
+  }
+  if (changedFields.some(field => field === 'question_author' || field === 'is_owner_answer' || field === 'answer')) {
+    sets.push('metadata_json = ?')
+    params.push(JSON.stringify(metadata))
+  }
   const [result] = await executeBatch(db, [{
-    query: `
-    UPDATE content_documents
-    SET ${sets.join(', ')}
-    WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual' AND id = ? AND organization_id = ? AND ${scoped.clause}
-  `,
-    params,
-  }, publicResourceCacheInvalidationQuery(scope.organizationId, 'qa-update')])
-  if (!Number(result?.meta.changes ?? 0)) throw new HTTPError({ statusCode: 404, statusMessage: 'Q&A not found' })
+    query: `UPDATE content_documents SET ${sets.join(', ')}
+      WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual' AND id = ? AND organization_id = ? AND ${scoped.clause} AND updated_at = ?`,
+    params: [...params, qaId, scope.organizationId, ...scoped.params, current.updated_at],
+  }, organizationEventQuery({ organizationId: scope.organizationId, locationId: scope.locationId, actorId,
+    eventType: 'content.updated', entityType: 'qa', entityId: qaId,
+    beforeState: { updated_at: current.updated_at, status: current.status }, afterState: { updated_at: now, status: updates.status ?? current.status },
+    metadata: { changed_fields: changedFields, evidence_basis: 'persisted_change', page_path: normalizePagePath(scope.pagePath) }, onlyIfPreviousChangedOneRow: true }),
+  publicResourceCacheInvalidationQuery(scope.organizationId, 'qa-update')])
+  if (Number(result?.meta.changes ?? 0) !== 1) throw new HTTPError({ statusCode: 409, statusMessage: 'Q&A changed concurrently. Reload and try again.' })
   return { updated: true, qa_id: qaId }
 }
 
@@ -303,8 +311,11 @@ export async function reorderQa(
   db: DbClient,
   scope: QaScope,
   updates: Array<{ id: string; sort_order: number }>,
+  actor: AuthUserIdentity | null,
 ) {
   await assertQaScope(db, scope)
+  if (actor !== null && (!actor || typeof actor.id !== 'string' || !actor.id.trim() || typeof actor.name !== 'string')) badQaInput('actor must be the authenticated identity or explicitly null')
+  const actorId = actor?.id ?? null
   if (!Array.isArray(updates)) badQaInput('Q&A reorder requires an updates array')
   if (!updates.length || updates.some(update => !update || typeof update.id !== 'string' || !update.id || !Number.isSafeInteger(update.sort_order))) {
     badQaInput('Q&A reorder requires ids with integer sort_order values')
@@ -314,34 +325,52 @@ export async function reorderQa(
   }
 
   const scoped = scopeSql(scope.locationId, scope.pagePath)
-  const validation = await queryFirst<{ valid_count: number }>(db, `
-    SELECT COUNT(*) AS valid_count
+  const current = await queryAll<{ id: string; sort_order: number; status: string; updated_at: string }>(db, `
+    SELECT id, sort_order, status, updated_at
     FROM content_documents
     WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual' AND id IN (SELECT value FROM json_each(?)) AND organization_id = ? AND ${scoped.clause}
   `, [d1JsonStringSet(updates.map(update => update.id)), scope.organizationId, ...scoped.params])
-  if (Number(validation?.valid_count ?? 0) !== updates.length) {
+  if (current.length !== updates.length) {
     throw new HTTPError({ statusCode: 404, statusMessage: 'Q&A reorder contains records outside the requested scope' })
   }
 
-  const now = new Date().toISOString()
+  const orders = new Map(updates.map(update => [update.id, update.sort_order]))
+  const changed = current.filter(row => row.sort_order !== orders.get(row.id))
+  if (!changed.length) return { updated: 0 }
+  const now = new Date(Math.max(Date.now(), ...current.map(row => Date.parse(row.updated_at) + 1))).toISOString()
   const ids = d1JsonStringSet(updates.map(update => update.id))
-  // One guarded UPDATE: every requested row must still be manual and in scope
-  // at write time. A failed precondition changes no row, even after the read.
-  const [result] = await executeBatch(db, [{
-    query: `UPDATE content_documents SET sort_order = (
-      SELECT json_extract(value, '$.sort_order') FROM json_each(?) WHERE json_extract(value, '$.id') = content_documents.id
-    ), updated_at = ?
-    WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual' AND organization_id = ? AND ${scoped.clause}
-      AND id IN (SELECT value FROM json_each(?))
-      AND (SELECT count(*) FROM content_documents WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual'
-        AND organization_id = ? AND ${scoped.clause} AND id IN (SELECT value FROM json_each(?))) = ?`,
-    params: [d1JsonValue(updates), now, scope.organizationId, ...scoped.params, ids, scope.organizationId, ...scoped.params, ids, updates.length],
-  }, publicResourceCacheInvalidationQuery(scope.organizationId, 'qa-reorder')])
-  const changed = Number(result?.meta.changes ?? 0)
-  if (changed !== updates.length) {
+  // A failed group guard deliberately violates updated_at's NOT NULL
+  // constraint, rolling back every row and its audit in the same D1 batch.
+  const guard = (expected: typeof current): BatchQuery => ({
+    query: `UPDATE content_documents SET updated_at = NULL
+      WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?)) AND (
+        SELECT count(*) FROM content_documents JOIN json_each(?) expected ON json_extract(expected.value, '$.id') = content_documents.id
+        WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual' AND organization_id = ? AND ${scoped.clause}
+          AND sort_order = json_extract(expected.value, '$.sort_order') AND updated_at = json_extract(expected.value, '$.updated_at')
+      ) <> ?`,
+    params: [scope.organizationId, ids, d1JsonValue(expected), scope.organizationId, ...scoped.params, current.length],
+  })
+  const writes = changed.flatMap(row => [{
+    query: `UPDATE content_documents SET sort_order = ?, updated_at = ?, updated_by = ?
+      WHERE row_role = 'root' AND kind = 'qa' AND source = 'manual' AND organization_id = ? AND ${scoped.clause} AND id = ? AND updated_at = ?`,
+    params: [orders.get(row.id)!, now, actorId, scope.organizationId, ...scoped.params, row.id, row.updated_at],
+  }, organizationEventQuery({ organizationId: scope.organizationId, locationId: scope.locationId, actorId,
+    eventType: 'content.updated', entityType: 'qa', entityId: row.id,
+    beforeState: { updated_at: row.updated_at, status: row.status, sort_order: row.sort_order },
+    afterState: { updated_at: now, status: row.status, sort_order: orders.get(row.id)! },
+    metadata: { changed_fields: ['sort_order'], evidence_basis: 'persisted_change', page_path: normalizePagePath(scope.pagePath) }, onlyIfPreviousChangedOneRow: true })])
+  const results = await executeBatch(db, [guard(current), ...writes,
+    guard(current.map(row => row.sort_order === orders.get(row.id) ? row : { ...row, sort_order: orders.get(row.id)!, updated_at: now })),
+    publicResourceCacheInvalidationQuery(scope.organizationId, 'qa-reorder')]).catch(error => {
+    if (/NOT NULL constraint failed: content_documents\.updated_at/.test(error instanceof Error ? error.message : String(error))) {
+      throw new HTTPError({ statusCode: 409, statusMessage: 'Q&A reorder changed concurrently. Reload and try again.', cause: error })
+    }
+    throw error
+  })
+  if (changed.some((_, index) => Number(results[1 + index * 2]?.meta.changes ?? 0) !== 1)) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Q&A reorder changed concurrently. Reload and try again.' })
   }
-  return { updated: updates.length }
+  return { updated: changed.length }
 }
 
 export const listLocationQa = (db: DbClient, organizationId: string, locationId: string) => listQa(db, organizationId, locationId)
@@ -351,8 +380,9 @@ export function createLocationQa(
   organizationId: string,
   locationId: string,
   input: CreateQaInput,
+  actor: AuthUserIdentity | null,
 ) {
-  return createQa(db, { organizationId, locationId }, input)
+  return createQa(db, { organizationId, locationId }, input, actor)
 }
 
 export function deleteLocationQa(db: DbClient, organizationId: string, locationId: string, qaId: string) {

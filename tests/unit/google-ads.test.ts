@@ -206,6 +206,7 @@ test('creating a search campaign submits its budget, targeting and copy atomical
     adGroupResourceName: 'customers/3317427925/adGroups/333',
     adResourceName: 'customers/3317427925/adGroupAds/555',
     status: 'PAUSED',
+    requestId: null,
   })
 })
 

@@ -389,7 +389,8 @@ export class AirbnbConnection {
 
   private async connected(): Promise<ConnectionRow & { channel_id: string }> {
     const row = await this.row()
-    if (!row || row.status !== 'connected' || !row.channel_id) fail(409, 'NOT_CONNECTED', 'Connect your Airbnb account first.')
+    // The journal fences writes; listing reads must remain available to verify an uncertain write.
+    if (!row || !row.channel_id || !['connected', 'needs_review'].includes(row.status)) fail(409, 'NOT_CONNECTED', 'Connect your Airbnb account first.')
     return row as ConnectionRow & { channel_id: string }
   }
 

@@ -585,7 +585,7 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
       )
       const block = blocks[0]!
       // One batch: the block and its media land together or not at all.
-      await appendContentBlock(organization.db, document.id, { id, type: block.type, data: block.data, level: block.level ?? null, after_block_id: afterBlockId ?? null }, { additionalQueriesAfter: placementQueries })
+      await appendContentBlock(organization.db, document.id, { id, type: block.type, data: block.data, level: block.level ?? null, after_block_id: afterBlockId ?? null }, { additionalQueriesAfter: placementQueries, actorId: organization.userId })
       return await contentBlocksChanged(ctx, document, id, `Added a ${block.type} block.`)
     }
     case "replace_content_block": {
@@ -596,14 +596,14 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
         organization.db, [{ id: blockId, type: existing.type, data: args.data as Record<string, unknown>, media: (args.media ?? existing.media) as ContentBlockMedia[], level: existing.level }],
         organization.organizationId,
       )
-      await replaceContentBlock(organization.db, blockId, { data: blocks[0]!.data, expected_updated_at: requiredString(args, "expected_updated_at") }, { additionalQueriesAfter: placementQueries })
+      await replaceContentBlock(organization.db, blockId, { data: blocks[0]!.data, expected_updated_at: requiredString(args, "expected_updated_at") }, { additionalQueriesAfter: placementQueries, actorId: organization.userId })
       return await contentBlocksChanged(ctx, document, blockId, `Replaced the ${existing.type} block.`)
     }
     case "delete_content_block": {
       const blockId = requiredString(args, "block_id")
       const existing = await getContentBlock(organization.db, blockId)
       const document = await requireOrganizationDocument(ctx, existing.document_id)
-      await deleteContentBlock(organization.db, blockId, { expected_updated_at: requiredString(args, "expected_updated_at") })
+      await deleteContentBlock(organization.db, blockId, { expected_updated_at: requiredString(args, "expected_updated_at"), actorId: organization.userId })
       return await contentBlocksChanged(ctx, document, null, `Deleted the ${existing.type} block.`)
     }
     default:

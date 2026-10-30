@@ -19,7 +19,8 @@ import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import todayRoute from '../../server/api/dashboard/today.get.ts'
 import type { TodayFeedPayload } from '../../shared/dashboard-today.ts'
 import { guestThreadListPage, parseGuestThreadListQuery } from '../../server/utils/dashboard-guest-threads.ts'
-import { assertAssignedBookingAccess, memberAccessPrincipal } from '../../server/utils/member-access.ts'
+import { assertAssignedBookingAccess, memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
+import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
 
 const ORG = 'org', OWNER = 'owner'
 const NOW = '2026-10-16T00:00:00.000Z'
@@ -336,6 +337,9 @@ test('replies use actual provider receipts once; an uncertain write remains visi
   let releaseRetry: (() => void) | undefined
   globalThis.fetch = provider.fetch as typeof fetch
   try {
+    const membership = await resolveMembership(env, { organizationId: ORG, userId: OWNER })
+    assert.ok(membership)
+    const principal = memberAccessPrincipal(membership, { env })
     const result = await mirrorChannexThread(db, env, 'thread', 'property')
     assert.equal(result.status, 'mirrored')
     if (result.status !== 'mirrored') throw new Error('Expected mapped inquiry')
@@ -377,6 +381,10 @@ test('replies use actual provider receipts once; an uncertain write remains visi
     assert.ok(refusedEntry)
     assert.deepEqual(await db.prepare('SELECT status, provider_message_id, non_delivery_confirmed FROM guest_thread_deliveries WHERE entry_id = ?').bind(refusedEntry.id).first(),
       { status: 'failed', provider_message_id: null, non_delivery_confirmed: 1 })
+    const refusedProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
+    assert.deepEqual(refusedProgress?.verification, { status: 'failed', basis: 'provider_acceptance', receipts: [{
+      id: `guest-thread-channex:${result.request_id}:certain-refusal`, channel: 'airbnb', provider: 'channex', status: 'failed', providerMessageId: null, nonDeliveryConfirmed: true,
+    }] })
     provider.refuseMessage = false
     const started = new Promise<void>(resolve => { provider.onSend = resolve })
     provider.holdReply = new Promise<void>(resolve => { releaseRetry = resolve })
@@ -384,6 +392,9 @@ test('replies use actual provider receipts once; an uncertain write remains visi
     await started
     assert.deepEqual(await db.prepare('SELECT status, error, non_delivery_confirmed FROM guest_thread_deliveries WHERE entry_id = ?').bind(refusedEntry.id).first(),
       { status: 'sending', error: null, non_delivery_confirmed: null }, 'claiming the retry atomically clears the previous attempt’s non-delivery proof')
+    const sendingProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
+    assert.deepEqual([sendingProgress?.verification.status, sendingProgress?.verification.receipts.map(receipt => [receipt.status, receipt.nonDeliveryConfirmed])],
+      ['unconfirmed', [['sending', null]]])
     releaseRetry!()
     const recovered = await recovering
     provider.holdReply = undefined
@@ -400,6 +411,9 @@ test('replies use actual provider receipts once; an uncertain write remains visi
     assert.deepEqual(await db.prepare(`SELECT d.status, d.provider_message_id, d.error, d.non_delivery_confirmed FROM guest_thread_deliveries d
       JOIN activity_entries a ON a.id = d.entry_id WHERE a.dedupe_key = ?`).bind(`guest-thread-operation:${result.request_id}:certain-refusal`).first(),
       { status: 'accepted', provider_message_id: 'accepted-4', error: null, non_delivery_confirmed: 0 })
+    const recoveredProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
+    assert.deepEqual([recoveredProgress?.verification.status, recoveredProgress?.verification.receipts.map(receipt => [receipt.status, receipt.providerMessageId, receipt.nonDeliveryConfirmed])],
+      ['verified', [['accepted', 'accepted-4', false]]])
 
     // A Channex 422 carrying an upstream Airbnb 500 does not prove refusal.
     provider.airbnbUnavailable = true
@@ -433,6 +447,9 @@ test('replies use actual provider receipts once; an uncertain write remains visi
       assert.deepEqual([blocked.status, blocked.code, blocked.retry_with_same_idempotency_key], [409, 'CHANNEL_REPLY_REVIEW_REQUIRED', false])
       assert.deepEqual(await db.prepare('SELECT status, non_delivery_confirmed FROM guest_thread_deliveries WHERE id = ?').bind(oldReceipt.id).first(),
         { status: 'failed', non_delivery_confirmed: proof })
+      const oldProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === oldEntry.id)
+      assert.deepEqual([oldProgress?.verification.status, oldProgress?.verification.receipts.map(receipt => [receipt.status, receipt.nonDeliveryConfirmed])],
+        ['unconfirmed', [['failed', proof === null ? null : false]]])
     }
     assert.equal(provider.sends, 5, 'neither an old-writer null nor explicit negative proof permits another provider call')
   } finally { releaseRetry?.(); globalThis.fetch = realFetch; await runtime.dispose() }

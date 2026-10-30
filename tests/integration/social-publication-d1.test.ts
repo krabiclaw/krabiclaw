@@ -28,6 +28,8 @@ import { createBlogPost, getBlogPost } from '../../server/utils/content/publishi
 import { fetchTransformedImageAsDataUri } from '../../server/utils/og-image/fetch-image.ts'
 import { renderOgImagePng } from '../../server/utils/og-image/render.ts'
 import { PostValidationError, POST_TITLE_MAX } from '../../shared/posts.ts'
+import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
+import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 
 /**
  * Publication, channel management and erasure against real local D1, with Meta and
@@ -378,6 +380,11 @@ test('AVIF article and Post pictures render through native Images and retries co
 test('publication: one result, one external post per target, and no blind resend under any fault', async () => {
   const { runtime, db, env, cardless, meta, run, asset, restore } = await setUp()
   try {
+    await run("INSERT INTO user (id, name, email) VALUES ('publisher', 'Publisher', 'publisher@proof.example')")
+    await run("INSERT INTO member (id, organizationId, userId, role) VALUES ('progress-owner', 'org-a', 'owner', 'owner')")
+    const membership = await resolveMembership(env, { organizationId: 'org-a', userId: 'owner' })
+    assert.ok(membership)
+    const progress = () => listBusinessOutcomes(db, memberAccessPrincipal(membership, { env }), { limit: 100 })
     await asset('a1', 'image/jpeg')
     await asset('a2', 'image/jpeg')
     await asset('a3', 'image/png')
@@ -416,7 +423,7 @@ test('publication: one result, one external post per target, and no blind resend
     assert.deepEqual(await db.prepare('SELECT status, published_at FROM content_documents WHERE id = ?').bind(empty.post.id).first(), { status: 'draft', published_at: null })
 
     // Website, Facebook photos and an Instagram carousel in one call.
-    const all = await publishPost(env, 'org-a', first.post.id, { expectedUpdatedAt: first.post.updated_at, targets: [targets.website, targets.facebook(), targets.instagram()] }, 'owner')
+    const all = await publishPost(env, 'org-a', first.post.id, { expectedUpdatedAt: first.post.updated_at, targets: [targets.website, targets.facebook(), targets.instagram()] }, 'publisher')
     assert.equal(all.ok, true, JSON.stringify(all.outcomes))
     assert.deepEqual(all.outcomes.map(outcome => [outcome.channel, outcome.status]), [['organization', 'published'], ['facebook', 'published'], ['instagram', 'published']])
     // What Facebook received: two unpublished photos in order, then one published post attaching them with the caption and link line.
@@ -436,6 +443,34 @@ test('publication: one result, one external post per target, and no blind resend
     assert.equal(meta.sent(request => request.path.endsWith('media_publish')).length, 1)
     const stored = await db.prepare("SELECT channel, state, provider_post_id, provider_permalink, attempt_id FROM post_publications WHERE post_id = ? ORDER BY channel").bind(first.post.id).all()
     assert.deepEqual(stored.results.map(row => [row.channel, row.state, row.attempt_id]), [['facebook', 'published', null], ['instagram', 'published', null]])
+    const initiators = await db.prepare(`SELECT p.id, p.channel, p.state, p.attempt_id, p.initiating_activity_id, a.actor_user_id, a.payload_json
+      FROM post_publications p JOIN activity_entries a ON a.id = p.initiating_activity_id AND a.organization_id = p.organization_id
+      WHERE p.post_id = ? ORDER BY p.channel`).bind(first.post.id).all<{ id: string; channel: string; state: string; attempt_id: string | null; initiating_activity_id: string; actor_user_id: string; payload_json: string }>()
+    assert.equal(initiators.results.length, 2)
+    for (const row of initiators.results) {
+      assert.equal(row.actor_user_id, 'publisher', 'the initiating publisher is not the post creator or linked provider-account owner')
+      assert.equal(row.state, 'published')
+      assert.equal(row.attempt_id, null, 'terminal publication clears only its in-flight fence, not its causal activity')
+      const event = JSON.parse(row.payload_json) as { entityId: string; metadata: { post_id: string; attempt_id: string; channel: string } }
+      assert.equal(event.entityId, row.id)
+      assert.equal(event.metadata.post_id, first.post.id)
+      assert.equal(event.metadata.channel, row.channel)
+      assert.ok(event.metadata.attempt_id)
+    }
+    const receiptIds = new Set(initiators.results.map(row => row.id))
+    const firstProgress = await progress()
+    const publicationFacts = firstProgress.outcomes.filter(fact => fact.source.table === 'post_publications' && receiptIds.has(fact.source.id))
+    assert.equal(publicationFacts.length, 2)
+    assert.deepEqual(publicationFacts.map(fact => fact.source.id).sort(), [...receiptIds].sort())
+    for (const fact of publicationFacts) {
+      assert.equal(fact.event, 'post.publication')
+      assert.equal(fact.subject.kind, 'post_publication')
+      assert.equal(fact.subject.id, fact.source.id)
+      assert.deepEqual(fact.actor, { kind: 'member', userId: 'publisher' })
+      assert.equal(fact.state, 'published')
+      assert.equal(fact.verification.status, 'verified')
+    }
+    assert.equal(firstProgress.outcomes.some(fact => String(fact.event) === 'post.publication_started'), false, 'the claim is provenance for the provider receipt, not another completed publication')
 
     // A repeat reads the receipts: nothing is sent again and the publication date stays.
     const requestCount = meta.requests.length
@@ -446,6 +481,8 @@ test('publication: one result, one external post per target, and no blind resend
     assert.equal(meta.requests.filter(request => request.method !== 'GET').length, meta.requests.slice(0, requestCount).filter(request => request.method !== 'GET').length)
     assert.equal((await getPost(db, env, 'org-a', first.post.id))!.published_at, published!.published_at)
     assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE event_name = 'post.published'").first('count(*)'), 1)
+    assert.deepEqual((await db.prepare(`SELECT p.initiating_activity_id FROM post_publications p WHERE p.post_id = ? ORDER BY p.channel`).bind(first.post.id).all()).results,
+      initiators.results.map(row => ({ initiating_activity_id: row.initiating_activity_id })), 'a receipt-only retry keeps the actual initiator')
     // The public projection carries only confirmed publications, with Meta's own links.
     const feedPage = await listPublicSocialPosts(env, db, 'org-a', { locale: 'en', window: { limit: 12, offset: 0 }, resource: 'r' })
     assert.deepEqual(feedPage.posts[0]!.publications, [{ channel: 'facebook', url: `https://www.facebook.com/${PAGE}_3`, account_name: 'Krabi Claw' }, { channel: 'instagram', url: `https://www.instagram.com/p/${[...meta.igMedia.keys()][0]}/`, account_name: 'krabiclaw' }])
@@ -481,15 +518,32 @@ test('publication: one result, one external post per target, and no blind resend
     meta.fault('reject', request => request.path.endsWith(`${PAGE}/photos`))
     const rejected = await publishPost(env, 'org-a', third.post.id, { expectedUpdatedAt: third.post.updated_at, targets: [targets.facebook()] }, 'owner')
     assert.deepEqual([rejected.ok, rejected.outcomes[0]!.status, rejected.outcomes[0]!.code], [false, 'failed', 'provider_rejected'])
-    const retried = await publishPost(env, 'org-a', third.post.id, { expectedUpdatedAt: third.post.updated_at, targets: [targets.facebook()] }, 'owner')
+    const failedFact = (await progress()).outcomes.find(fact => fact.source.table === 'post_publications' && fact.source.id === rejected.outcomes[0]!.publication_id)
+    assert.equal(failedFact?.state, 'failed')
+    assert.equal(failedFact?.verification.status, 'failed')
+    const retried = await publishPost(env, 'org-a', third.post.id, { expectedUpdatedAt: third.post.updated_at, targets: [targets.facebook()] }, 'publisher')
     assert.equal(retried.outcomes[0]!.status, 'published')
     await publishedOnMeta(third.post.id, 'facebook')
+    const retryInitiator = await db.prepare(`SELECT a.actor_user_id FROM post_publications p JOIN activity_entries a ON a.id = p.initiating_activity_id
+      WHERE p.post_id = ? AND p.channel = 'facebook'`).bind(third.post.id).first<{ actor_user_id: string }>()
+    assert.equal(retryInitiator?.actor_user_id, 'publisher')
+    const retriedFact = (await progress()).outcomes.find(fact => fact.source.table === 'post_publications' && fact.source.id === retried.outcomes[0]!.publication_id)
+    assert.deepEqual(retriedFact?.actor, { kind: 'member', userId: 'publisher' })
+    assert.equal(retriedFact?.verification.status, 'verified')
+    const attempts = await db.prepare(`SELECT actor_user_id, payload_json FROM activity_entries WHERE event_name = 'post.publication_started'
+      AND json_extract(payload_json, '$.metadata.post_id') = ?`).bind(third.post.id).all<{ actor_user_id: string; payload_json: string }>()
+    assert.equal(attempts.results.length, 2)
+    assert.deepEqual(attempts.results.map(row => row.actor_user_id).sort(), ['owner', 'publisher'])
+    assert.equal(new Set(attempts.results.map(row => JSON.parse(row.payload_json).metadata.attempt_id)).size, 2)
 
     // The final call's connection dropped before Facebook answered: unknown, never sent again; its photos stay saved.
     const fourth = await create('key-4', { body: 'Lost feed', media: [{ asset_id: 'a2', slot: 'cover' }] })
     meta.fault('dropped', request => request.path.endsWith(`${PAGE}/feed`))
     const lost = await publishPost(env, 'org-a', fourth.post.id, { expectedUpdatedAt: fourth.post.updated_at, targets: [targets.facebook()] }, 'owner')
     assert.deepEqual([lost.ok, lost.outcomes[0]!.status, lost.outcomes[0]!.code], [false, 'unknown', 'final_unconfirmed'])
+    const unknownFact = (await progress()).outcomes.find(fact => fact.source.table === 'post_publications' && fact.source.id === lost.outcomes[0]!.publication_id)
+    assert.equal(unknownFact?.state, 'unknown')
+    assert.equal(unknownFact?.verification.status, 'unconfirmed')
     const pinned = (await getPost(db, env, 'org-a', fourth.post.id))!
     await assert.rejects(updatePost(db, cardless, 'org-a', fourth.post.id, { changes: { body: 'Edited' }, expectedUpdatedAt: pinned.updated_at }, 'owner'), /unresolved/)
     await assert.rejects(deletePost(db, 'org-a', fourth.post.id, 'owner'), /unresolved/)

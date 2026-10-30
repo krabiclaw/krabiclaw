@@ -201,8 +201,10 @@ test('a home authors room details and manages its product photos through authent
     const clearedVersion = currentHome.product_updated_at
     const alreadyUnknown = await call(owner, 'PATCH', `/${productId}/accessibility`, { expected_updated_at: clearedVersion, accessibility: { feature: 'pool_hoist', available: null, photo_ids: [] } })
     assert.equal(alreadyUnknown.status, 200, JSON.stringify(alreadyUnknown.body))
-    assert.notEqual((alreadyUnknown.body.home as StayHome).product_updated_at, clearedVersion)
-    assert.deepEqual(refusal(await call(owner, 'PATCH', `/${productId}/accessibility`, { expected_updated_at: clearedVersion, accessibility: { feature: 'pool_hoist', available: false, photo_ids: [] } })), { status: 409, code: 'STAY_ACCESSIBILITY_CHANGED', field: 'expected_updated_at' })
+    // The old assertion consumed a revision while clearing an answer that
+    // was already unknown. No domain fact changed, so its valid token stays.
+    assert.equal((alreadyUnknown.body.home as StayHome).product_updated_at, clearedVersion)
+    assert.deepEqual(refusal(await call(owner, 'PATCH', `/${productId}/accessibility`, { expected_updated_at: firstVersion, accessibility: { feature: 'pool_hoist', available: false, photo_ids: [] } })), { status: 409, code: 'STAY_ACCESSIBILITY_CHANGED', field: 'expected_updated_at' })
 
     // The room allocates the explicitly declared listing inventory; neither
     // its photos nor its sleeping arrangements create a listing bed total.

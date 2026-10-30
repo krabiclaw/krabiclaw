@@ -318,6 +318,7 @@ interface PublicationRecord {
   provider_handles_json: string
   payload_hash: string | null
   attempt_id: string | null
+  initiating_activity_id: string | null
   error_code: string | null
   error_message: string | null
   published_at: string | null
@@ -738,8 +739,10 @@ function providerAppId(env: CloudflareEnv, channel: SocialChannel): string {
 async function claimPublication(
   db: DbClient, env: CloudflareEnv, organizationId: string, post: Post,
   target: Extract<PublishTarget, { channel: SocialChannel }>, identity: { appId: string; subjectId: string }, payloadHash: string,
+  actorId: string | null,
 ): Promise<{ publication: PublicationRecord; attemptId: string } | PublishOutcome> {
   const attemptId = crypto.randomUUID()
+  const activityId = crypto.randomUUID()
   const existing = await readPublication(db, organizationId, { postId: post.id, channel: target.channel })
   if (!existing) {
     const id = crypto.randomUUID()
@@ -748,7 +751,13 @@ async function claimPublication(
       await executeBatch(db, [{ query: `INSERT INTO post_publications (id, organization_id, post_id, channel, provider_app_id, provider_subject_id, provider_target_id,
           state, payload_hash, attempt_id, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'preparing', ?, ?, ?, ?)`,
-      params: [id, organizationId, post.id, target.channel, identity.appId, identity.subjectId, target.target_id, payloadHash, attemptId, nowIso(), nowIso()] }])
+      params: [id, organizationId, post.id, target.channel, identity.appId, identity.subjectId, target.target_id, payloadHash, attemptId, nowIso(), nowIso()] },
+      organizationEventQuery({ id: activityId, organizationId, locationId: post.location_id, actorId,
+        eventType: 'post.publication_started', entityType: 'post_publication', entityId: id,
+        metadata: { post_id: post.id, attempt_id: attemptId, channel: target.channel, target_id: target.target_id, payload_hash: payloadHash },
+        afterState: { state: 'preparing' }, onlyIfPreviousChangedOneRow: true }),
+      { query: 'UPDATE post_publications SET initiating_activity_id = ? WHERE id = ? AND attempt_id = ? AND changes() = 1',
+        params: [activityId, id, attemptId] }])
     } catch (error) {
       if (!/UNIQUE constraint failed/.test(messageOf(error))) throw error
       // A concurrent call claimed it first; it does the work.
@@ -764,12 +773,18 @@ async function claimPublication(
         message: `The unpublished objects of the earlier attempt could not be removed, so nothing new was prepared: ${messageOf(error)}` }
     }
   }
-  const reclaim = await execute(db, `UPDATE post_publications SET state = 'preparing', attempt_id = ?, payload_hash = ?, error_code = NULL, error_message = NULL,
+  const [reclaim] = await executeBatch(db, [{ query: `UPDATE post_publications SET state = 'preparing', attempt_id = ?, payload_hash = ?, error_code = NULL, error_message = NULL,
       provider_handles_json = CASE WHEN state = 'failed' AND payload_hash IS NOT ? THEN '{}' ELSE provider_handles_json END,
       provider_post_id = CASE WHEN state = 'failed' AND payload_hash IS NOT ? THEN NULL ELSE provider_post_id END, updated_at = ?
     WHERE id = ? AND updated_at = ? AND (state = 'failed' OR (state = 'preparing' AND (attempt_id IS NULL OR updated_at < ?)))`,
-  [attemptId, payloadHash, payloadHash, payloadHash, nowIso(), existing.id, existing.updated_at, staleBefore])
-  if (Number(reclaim.meta?.changes ?? 0) !== 1) {
+  params: [attemptId, payloadHash, payloadHash, payloadHash, nowIso(), existing.id, existing.updated_at, staleBefore] },
+  organizationEventQuery({ id: activityId, organizationId, locationId: post.location_id, actorId,
+    eventType: 'post.publication_started', entityType: 'post_publication', entityId: existing.id,
+    metadata: { post_id: post.id, attempt_id: attemptId, channel: target.channel, target_id: target.target_id, payload_hash: payloadHash },
+    afterState: { state: 'preparing' }, onlyIfPreviousChangedOneRow: true }),
+  { query: 'UPDATE post_publications SET initiating_activity_id = ? WHERE id = ? AND attempt_id = ? AND changes() = 1',
+    params: [activityId, existing.id, attemptId] }])
+  if (Number(reclaim?.meta.changes ?? 0) !== 1) {
     return { channel: target.channel, target_id: target.target_id, status: 'processing', publication_id: existing.id, code: 'in_progress', message: 'Another call is publishing this post to this channel' }
   }
   return { publication: (await readPublication(db, organizationId, { id: existing.id }))!, attemptId }
@@ -778,6 +793,7 @@ async function claimPublication(
 async function publishExternal(
   db: DbClient, env: CloudflareEnv, organizationId: string, post: Post, assets: AssetFacts[],
   target: Extract<PublishTarget, { channel: SocialChannel }>,
+  actorId: string | null,
 ): Promise<PublishOutcome> {
   const connection = await readConnection(env, organizationId, target.channel)
   if (!connection.connected || connection.targetId !== target.target_id || connection.revision !== target.connection_revision) return { channel: target.channel, target_id: target.target_id, status: 'failed', code: 'connection_changed', message: 'The channel connection changed; read get_social_connections again.' }
@@ -785,7 +801,7 @@ async function publishExternal(
   if (!account) return { channel: target.channel, target_id: target.target_id, status: 'skipped', code: 'account_unlinked', message: `The ${target.channel} account behind this connection is no longer linked. Connect it again.` }
   const appId = providerAppId(env, target.channel)
   const payloadHash = await postPayloadFingerprint(post, { channel: target.channel, target_id: target.target_id })
-  const claim = await claimPublication(db, env, organizationId, post, target, { appId, subjectId: account.accountId }, payloadHash)
+  const claim = await claimPublication(db, env, organizationId, post, target, { appId, subjectId: account.accountId }, payloadHash, actorId)
   if (!('attemptId' in claim)) return claim
   const context: ChannelContext = {
     db, env, organizationId, post, caption: providerCaption(post.body, post.call_to_action), publication: claim.publication,
@@ -921,7 +937,7 @@ export async function publishPost(
       outcomes.push(staleOutcome('organization', organizationId))
     }
   }
-  for (const target of external) outcomes.push(await publishExternal(db, env, organizationId, post, assets, target))
+  for (const target of external) outcomes.push(await publishExternal(db, env, organizationId, post, assets, target, actorId))
 
   const order = input.targets.map(target => target.channel)
   outcomes.sort((a, b) => order.indexOf(a.channel) - order.indexOf(b.channel))
