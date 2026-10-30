@@ -238,6 +238,8 @@ export function localDevelopmentOrigin(value: string | undefined): string | null
 
 /** Where Stripe Checkout hands a host back to the iPhone app. */
 export const NATIVE_BILLING_RETURN_ORIGIN = 'krabiclaw://billing'
+/** Where social authentication hands a session back to the iPhone app. */
+export const NATIVE_AUTH_RETURN_ORIGIN = 'krabiclaw://auth-callback'
 
 function trustedOriginsForAuth(env: CloudflareEnv): string[] | ((_request?: Request) => string[]) {
   const origins = new Set<string>()
@@ -252,6 +254,7 @@ function trustedOriginsForAuth(env: CloudflareEnv): string[] | ((_request?: Requ
   // Better Auth matches a custom scheme by scheme and authority, so only the
   // billing returns are trusted, not any krabiclaw:// address.
   origins.add(NATIVE_BILLING_RETURN_ORIGIN)
+  origins.add(NATIVE_AUTH_RETURN_ORIGIN)
   // Sign in with Apple returns to the website by posting a form from Apple.
   origins.add('https://appleid.apple.com')
   if (import.meta.dev || env.E2E_ALLOW_DEV_ROUTES === 'true') {
