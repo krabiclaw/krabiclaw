@@ -716,10 +716,10 @@ const trafficSeries = computed(() => [
 type FunnelCounts = Omit<AnalyticsReport['funnel'], 'bySource' | 'byLocation'>
 const FUNNEL_KEYS = ['visits', 'viewed', 'intent', 'submitted', 'confirmed', 'paid'] as const
 const FUNNEL_WORDS = {
-  service: { long: ['Visits', 'Viewed a practice area', 'Clicked Book a consultation', 'Requested a consultation', 'Scheduled', 'Paid'], short: ['Visits', 'Viewed', 'Clicked', 'Requested', 'Scheduled', 'Paid'], confirmedNoun: 'consultation' },
-  restaurant: { long: ['Visits', 'Viewed a dish', 'Started a reservation', 'Reserved', 'Seated', 'Paid'], short: ['Visits', 'Viewed', 'Started', 'Reserved', 'Seated', 'Paid'], confirmedNoun: 'reservation' },
-  experience: { long: ['Visits', 'Viewed', 'Started checkout', 'Booked', 'Confirmed', 'Paid'], short: ['Visits', 'Viewed', 'Started', 'Booked', 'Confirmed', 'Paid'], confirmedNoun: 'booking' },
-  lodging: { long: ['Visits', 'Viewed', 'Started checkout', 'Booked', 'Confirmed', 'Paid'], short: ['Visits', 'Viewed', 'Started', 'Booked', 'Confirmed', 'Paid'], confirmedNoun: 'stay' },
+  service: { long: ['Visits', 'Viewed a practice area', 'Clicked Book a consultation or called', 'Requested a consultation', 'Scheduled', 'Paid'], short: ['Visits', 'Viewed', 'Clicked or called', 'Requested', 'Scheduled', 'Paid'], confirmedNoun: 'consultation' },
+  restaurant: { long: ['Visits', 'Viewed a dish', 'Started a reservation or called', 'Reserved', 'Seated', 'Paid'], short: ['Visits', 'Viewed', 'Started or called', 'Reserved', 'Seated', 'Paid'], confirmedNoun: 'reservation' },
+  experience: { long: ['Visits', 'Viewed', 'Started checkout or called', 'Booked', 'Confirmed', 'Paid'], short: ['Visits', 'Viewed', 'Started or called', 'Booked', 'Confirmed', 'Paid'], confirmedNoun: 'booking' },
+  lodging: { long: ['Visits', 'Viewed', 'Started checkout or called', 'Booked', 'Confirmed', 'Paid'], short: ['Visits', 'Viewed', 'Started or called', 'Booked', 'Confirmed', 'Paid'], confirmedNoun: 'stay' },
   platform: { long: ['Visits', 'Viewed an offering', 'Showed intent', 'Submitted', 'Confirmed', 'Paid'], short: ['Visits', 'Viewed', 'Intent', 'Submitted', 'Confirmed', 'Paid'], confirmedNoun: 'booking' },
 } as const
 const dashboard = useDashboardOrganization()
