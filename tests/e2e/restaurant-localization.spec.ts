@@ -66,11 +66,9 @@ test.beforeAll(async ({ playwright }, testInfo) => {
   readSeed()
   const baseURL = testBaseUrl()
   const owner = await playwright.request.newContext({ baseURL })
-  await loginAs(owner, baseURL)
 
   try {
-    await expectStatus(await owner.post(`/api/editor/organizations/${organizationId}/locales/${locale}/add`), 200)
-
+    await loginAs(owner, baseURL)
     await putLocalization(owner, 'organization', organizationId, {
       values: {
         name: thai.name,
