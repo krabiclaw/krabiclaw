@@ -197,14 +197,14 @@ same link. A used, expired or withdrawn link says so.
 
 New subscriptions use `growth` ($49/month) and `business` ($149/month); `free` is
 Basic with no subscription. Business includes Growth, online payments, direct stay
-booking and managed advertising. Growth and Business include 2 homes, then $4
-per additional home per month, billed at the end of the period. These are beta
+booking and managed advertising. Growth and Business bill $4 per home per month,
+billed at the end of the period. These are beta
 prices: a later price applies to new subscribers, and a subscription keeps its
 prices for 12 months. The first 10 businesses that start a paid plan from
 2026-10-30 take the beta spots, which /pricing counts live from Stripe; after
-them, new subscribers pay $12 per additional home per month. A home (a place to stay) is a lodging unit. Only live homes count; drafts are free and
-unlimited. Locations are not billed on any plan. Basic includes 2 live homes and
-refuses a third. Existing subscriptions without the homes price keep their
+them, new subscribers pay $12 per home per month. A home (a place to stay) is a lodging unit. Only live homes count; drafts are free and
+unlimited. Locations are not billed on any plan. Basic includes 1 live home and
+refuses a second. Existing subscriptions without the homes price keep their
 prices. The iOS app is a free companion to the
 account where distribution access is available; this does not establish a public
 App Store release. Commerce ($89), Marketing ($99) and Business subscriptions on the earlier

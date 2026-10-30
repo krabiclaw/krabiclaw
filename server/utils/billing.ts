@@ -6,7 +6,7 @@ import { hasPermission } from 'better-auth/plugins'
 import { organizationAdapter } from '~/server/utils/member-access'
 import { getPlanEntitlements, type EntitlementsMap } from '~/server/utils/billing-entitlements'
 import { entitlingSubscription, getOrganizationEntitlements, planFromSubscriptions, readOrganizationSubscriptions } from '~/server/utils/billing-access'
-import { BILLING_METER_KEYS, BILLING_METERS, INCLUDED_HOMES, isKnownRecurringPlan, type BillingMeterKey } from '~/shared/billing-model'
+import { BASIC_HOMES, BILLING_METER_KEYS, BILLING_METERS, isKnownRecurringPlan, type BillingMeterKey } from '~/shared/billing-model'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
@@ -240,14 +240,14 @@ export interface CapacityRefusal {
   data: { error: string; code: 'HOME_LIMIT'; homes: { used: number; covered: number } }
 }
 
-/** The refusal for a home past what Basic includes. */
+/** The refusal for a home past what Basic allows. */
 export function homeLimit(used: number): CapacityRefusal {
   return {
     status: 402,
     data: {
-      error: `Basic includes ${INCLUDED_HOMES} homes. Choose Growth or Business in Billing to add more.`,
+      error: `Basic includes ${BASIC_HOMES} live home. Choose Growth or Business in Billing to add more.`,
       code: 'HOME_LIMIT',
-      homes: { used, covered: INCLUDED_HOMES },
+      homes: { used, covered: BASIC_HOMES },
     },
   }
 }
@@ -303,25 +303,18 @@ function additionalHomes(included: number, used: number, adding: number): number
 }
 
 /**
- * A homes price as Stripe bills it: its graduated tiers at no charge are the
- * included homes, and the open-ended tier after them is each further home.
- * Any other shape is not one KrabiClaw sells and fails visibly.
+ * A homes price as Stripe bills it: the same amount for every live home. Any
+ * other shape is not one KrabiClaw sells and fails visibly.
  */
-function homesPriceTerms(price: Stripe.Price): { included: number; additional: number } {
-  const tiers = price.tiers
-  if (price.billing_scheme !== 'tiered' || price.tiers_mode !== 'graduated' || !tiers?.length) throw new Error(`Stripe homes price ${price.id} is not read with graduated tiers`)
-  const free = tiers.slice(0, -1)
-  const further = tiers.at(-1)!
-  if (free.some(tier => tier.up_to === null || tier.unit_amount !== 0 || (tier.flat_amount ?? 0) !== 0)
-    || further.up_to !== null || !Number.isSafeInteger(further.unit_amount) || (further.flat_amount ?? 0) !== 0) {
-    throw new Error(`Stripe homes price ${price.id} must include homes at no charge and price each further one`)
-  }
-  return { included: free.at(-1)?.up_to ?? 0, additional: further.unit_amount! }
+function homePriceMinor(price: Stripe.Price): number {
+  const amount = Number(String(price.unit_amount_decimal))
+  if (price.billing_scheme !== 'per_unit' || !Number.isSafeInteger(amount)) throw new Error(`Stripe homes price ${price.id} must bill each home at one amount`)
+  return amount
 }
 
 /**
  * Whether this organization's plan allows `adding` more homes: Basic refuses
- * past the homes it includes, a paid plan never does. The capacity check and
+ * past the homes it allows, a paid plan never does. The capacity check and
  * the quote both decide by this, so a quote that allows the homes is one the
  * write will allow. Reads the subscription rows and nothing from Stripe.
  */
@@ -330,18 +323,18 @@ export async function homeAllowance(env: CloudflareEnv, db: DbClient, organizati
   const rows = subscriptions.get(organizationId) ?? []
   const plan = planFromSubscriptions(organizationId, rows)
   const paid = isKnownRecurringPlan(plan)
-  return { plan, used, subscription: paid ? entitlingSubscription(organizationId, rows) : null, allowed: paid || used + adding <= INCLUDED_HOMES }
+  return { plan, used, subscription: paid ? entitlingSubscription(organizationId, rows) : null, allowed: paid || used + adding <= BASIC_HOMES }
 }
 
 /**
  * The quote for adding `adding` homes to this organization, priced as Stripe
- * bills them. A paid plan bills each home past the included ones at the end of
- * the period through the homes price on its subscription, read with its tiers;
- * a subscription from before homes were priced carries none and is charged
- * nothing for them, so its price per home is 0. A subscription in its free
- * trial bills no usage until the trial ends, which `trial_end` says. Basic has
- * no period and is quoted the published homes price from the Stripe catalog,
- * what the homes past its included ones cost once Growth or Business is chosen.
+ * bills them. A paid plan bills every live home at the end of the period
+ * through the homes price on its subscription; a subscription from before
+ * homes were priced carries none and is charged nothing for them, so its price
+ * per home is 0. A subscription in its free trial bills no usage until the
+ * trial ends, which `trial_end` says. Basic is never billed: it includes the
+ * homes it allows, and is quoted the published homes price from the Stripe
+ * catalog, what each home costs once Growth or Business is chosen.
  */
 export async function homesQuote(env: CloudflareEnv, db: DbClient, organizationId: string, adding: number): Promise<HomesQuote> {
   const [{ plan, used, subscription, allowed }, drafts] = await Promise.all([homeAllowance(env, db, organizationId, adding), queryFirst<{ homes: number }>(db, `SELECT (${DRAFT_HOMES_SQL}) AS homes`, [organizationId])])
@@ -355,10 +348,10 @@ export async function homesQuote(env: CloudflareEnv, db: DbClient, organizationI
     const customerId = typeof native.customer === 'string' ? native.customer : native.customer.id
     if (customerId !== subscription.stripeCustomerId) throw new Error('Stripe subscription customer does not match its organization')
     const homes = native.items.data.find(row => typeof row.price.product !== 'string' && !row.price.product.deleted && row.price.product.metadata.product_family === 'homes')
-    terms = homes ? homesPriceTerms(homes.price) : { included: INCLUDED_HOMES, additional: 0 }
+    terms = { included: 0, additional: homes ? homePriceMinor(homes.price) : 0 }
     trialEnd = subscriptionTrial(native)?.end ?? null
   } else {
-    terms = { included: INCLUDED_HOMES, additional: homesPriceTerms(selectMeteredPrices(await readStripeCatalog(stripe)).homes).additional }
+    terms = { included: BASIC_HOMES, additional: homePriceMinor(selectMeteredPrices(await readStripeCatalog(stripe)).homes) }
   }
   const added = additionalHomes(terms.included, used, adding)
   return {
@@ -427,7 +420,7 @@ export async function executeWithinCapacity(
       results = await executeBatch(db, writes, { operation: options.operation })
     } else {
       try {
-        results = await executeBatch(db, [...writes, homeGuard(organizationId, Math.max(homes, INCLUDED_HOMES))], { operation: options.operation })
+        results = await executeBatch(db, [...writes, homeGuard(organizationId, Math.max(homes, BASIC_HOMES))], { operation: options.operation })
       } catch (error) {
         if (!guardFailure(error)) throw error
         throw capacityRefusalError(homeLimit(homes))

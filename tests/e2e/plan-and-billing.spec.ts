@@ -87,7 +87,7 @@ test.describe('Plan and billing', () => {
         expect((await contextResponse.json() as { organization: { id: string; vertical: string } }).organization).toMatchObject({ id: BASIC_ID, vertical: 'service' })
         expect(await homesResponse.json() as HomesQuote).toMatchObject({
           plan: 'free', currency: 'USD',
-          homes: { used: 0, drafts: 0, included: 2, amount_minor: 0 },
+          homes: { used: 0, drafts: 0, included: 1, amount_minor: 0 },
           adding: { count: 0, additional_homes: 0, amount_minor: 0, allowed: true },
           billing: { period_end: null, trial_end: null, prorated: false },
         })

@@ -13,7 +13,7 @@ from the catalog, and `server/utils/stripe-catalog.ts` validates the catalog.
 | Line | Stripe price |
 | --- | --- |
 | Plan (Growth $49 / Business $149) | flat monthly, quantity 1 |
-| Homes (Growth, Business) | metered, meter `krabiclaw_homes`, formula `last`, graduated: 2 included, then $4 per additional home per month |
+| Homes (Growth, Business) | metered, meter `krabiclaw_homes`, formula `last`, $4 per home per month |
 | Payments fee (Business) | metered, meter `krabiclaw_captured_volume`, formula `sum`, 0.014 cents per captured USD cent (1.4% of payment volume) |
 | Stripe fees (Business) | metered, meter `krabiclaw_stripe_cost`, formula `sum`, 1 cent per cost cent (at cost) |
 | Managed ads (Business) | metered, meter `krabiclaw_ad_spend`, formula `sum`, 0.1 cent per ad-spend cent (10% of monthly ad spend) |
@@ -39,8 +39,8 @@ change it (`executeWithinCapacity` for creating or reactivating a location or
 a stay product, publication or Airbnb activation and disconnection, and
 location or home deletion) and on each
 `customer.subscription.created`/`updated` event, which starts every period and
-every plan change with its count. Basic has no subscription, includes 2 homes,
-and refuses a third (`HOME_LIMIT`). A subscription from before the homes price
+every plan change with its count. Basic has no subscription, includes 1 home,
+and refuses a second (`HOME_LIMIT`). A subscription from before the homes price
 carries no homes item: its homes are reported and bill nothing. A subscription
 from when locations were metered keeps its retired location item, which is sent
 no events and bills nothing.

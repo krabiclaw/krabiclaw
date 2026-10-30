@@ -65,7 +65,7 @@
           </span>
         </div>
         <p data-plan-homes class="text-xs font-semibold mt-2" :class="isHighlighted ? 'text-white/70' : 'text-muted'">
-          <template v-if="betaSpotsLeft">{{ INCLUDED_HOMES }} homes included, then <s data-plan-next-price class="opacity-60">{{ nextAdditionalHomePrice() }}</s> {{ additionalHomePrice() }}</template>
+          <template v-if="betaSpotsLeft"><s data-plan-next-price class="opacity-60">{{ nextHomePrice() }}</s> {{ homePrice() }}</template>
           <template v-else>{{ homesNote }}</template>
         </p>
         <p v-if="betaSpotsLeft" data-plan-beta class="mt-3 inline-block px-3 py-1 text-[11px] font-bold tracking-widest uppercase rounded-full" :class="chipClass">
@@ -119,7 +119,7 @@
 <script setup lang="ts">
 import { useEventListener } from '@vueuse/core'
 import type { Plan } from '~/composables/usePlans'
-import { additionalHomePrice, INCLUDED_HOMES, nextAdditionalHomePrice } from '~/shared/billing-model'
+import { BASIC_HOMES, homePrice, nextHomePrice } from '~/shared/billing-model'
 
 const props = defineProps<{
   plan: Plan
@@ -159,15 +159,15 @@ const currentPrice = computed(() => displayPrice(props.plan))
 
 const billingPeriodLabel = computed(() => props.photo && props.plan.id === 'free' ? 'No subscription' : '/mo')
 
-// Stripe's own phrasing: the included allowance, then the charge per additional home (a place to stay).
+// Stripe's own phrasing: what Basic includes, or the charge per home (a place to stay).
 // A paid plan's beta spots left; the struck next price and the chip show only while some are.
 const betaSpotsLeft = computed(() => props.plan.prices.length ? props.plan.betaSpotsLeft ?? 0 : 0)
 // Badges take the feature checks' tint: a pale primary chip on a light card, a deeper one on a dark card.
 const chipClass = computed(() => props.photo || !isHighlighted.value ? 'bg-primary/10 text-primary-600' : 'bg-primary/20 text-primary-300')
 
 const homesNote = computed(() => {
-  if (!props.plan.prices.length) return `${INCLUDED_HOMES} homes included`
-  return `${INCLUDED_HOMES} homes included, then ${additionalHomePrice()}`
+  if (!props.plan.prices.length) return `${BASIC_HOMES} home included`
+  return homePrice()
 })
 
 </script>

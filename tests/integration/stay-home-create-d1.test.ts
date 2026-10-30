@@ -306,8 +306,8 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.equal(((await call(owner, 'GET')).body.homes as Array<{ product_id: string; published: boolean }>).find(home => home.product_id === made.product_id)!.published, true)
     assert.deepEqual(await db.prepare('SELECT published FROM product_publications WHERE product_id = ?').bind(made.product_id).all().then(result => result.results), [{ published: 1 }])
 
-    // Adding homes is never refused on Basic: new homes are drafts. The plan covers live homes,
-    // and publishing a third is refused as a home while two are live.
+    // Adding homes is never refused on Basic: new homes are drafts. The plan covers one live home,
+    // and publishing a second is refused as a home while one is live.
     const hosted = async (key: string) => {
       const added = await call(owner, 'POST', { ...cabin, idempotency_key: key, name: key })
       assert.equal(added.status, 201)
@@ -318,16 +318,19 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     }
     const barn = await hosted('Barn')
     const shed = await hosted('Shed')
+    const homeLimit = { status: 402, error: 'Basic includes 1 live home. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 1, covered: 1 } }
+    assert.deepEqual(refusal(await call(owner, 'PATCH', { published: true }, barn.product_id)), homeLimit)
+    // Taking the cabin off the site frees the one place for the barn.
+    assert.equal((await edit(owner, { published: false })).status, 200)
     const published = await call(owner, 'PATCH', { published: true }, barn.product_id)
     assert.deepEqual([published.status, (published.body.home as { live: boolean }).live], [200, true])
-    const homeLimit = { status: 402, error: 'Basic includes 2 homes. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 2, covered: 2 } }
     assert.deepEqual(refusal(await call(owner, 'PATCH', { published: true }, shed.product_id)), homeLimit)
     assert.deepEqual(await db.prepare('SELECT published FROM product_publications WHERE product_id = ?').bind(shed.product_id).first('published'), 0)
     // A live home whose location is taken off the site frees its slot, and putting it back is refused as a home while every slot is in use.
     assert.equal((await updateLocation(db, ORG, barn.location_id, { status: 'inactive' }, 'owner', env)).status, 200)
     assert.equal((await call(owner, 'PATCH', { published: true }, shed.product_id)).status, 200)
     assert.deepEqual(await updateLocation(db, ORG, barn.location_id, { status: 'active' }, 'owner', env), {
-      status: 402, data: { error: homeLimit.error, code: 'HOME_LIMIT', homes: { used: 2, covered: 2 } },
+      status: 402, data: { error: homeLimit.error, code: 'HOME_LIMIT', homes: { used: 1, covered: 1 } },
     })
     assert.equal((await getLocation(db, ORG, barn.location_id))!.status, 'inactive')
     // The check-in window's end: leaving the key out keeps it; null makes it flexible again, read back through the product.

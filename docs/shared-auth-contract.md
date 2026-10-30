@@ -100,20 +100,20 @@ Team changes affect authorized work, without creating chat participation.
 
 ### 3.1 Homes quote
 
-`GET /api/organizations/:id/billing/homes?adding=N`, owner or admin. `adding` is optional, default 1, an integer from 0 to 500: the homes about to go live (§3.4). Anything else is 422 `INVALID_QUERY` with `field: "adding"`. Every amount is read from Stripe: a paid plan's from the homes price on its own subscription (its graduated tiers: the ones at no charge are the included homes, the next is each further home), billed at the end of the period, never prorated; Basic's from the published homes price in the Stripe catalog. Basic includes 2 live homes and refuses a third. Drafts are free and unlimited on every plan. When a paid plan ends (Stripe deletes the subscription, or pauses it when a trial ends without a card), the organization is on Basic and its newest live homes and active locations past the 2 included go back to drafts: a home is taken off the site and its Airbnb sync stopped (a stop job with no requester, which the airbnb-sync task runs), and a location is turned off.
+`GET /api/organizations/:id/billing/homes?adding=N`, owner or admin. `adding` is optional, default 1, an integer from 0 to 500: the homes about to go live (§3.4). Anything else is 422 `INVALID_QUERY` with `field: "adding"`. Every amount is read from Stripe: a paid plan's from the homes price on its own subscription (one amount for every live home), billed at the end of the period, never prorated; Basic's from the published homes price in the Stripe catalog. Basic includes 1 live home and refuses a second. Drafts are free and unlimited on every plan. When a paid plan ends (Stripe deletes the subscription, or pauses it when a trial ends without a card), the organization is on Basic and its newest live homes past the 1 Basic includes go back to drafts: a home is taken off the site and its Airbnb sync stopped (a stop job with no requester, which the airbnb-sync task runs), and a location is turned off.
 
 ```json
 {
   "plan": "growth",
   "currency": "USD",
-  "homes": { "used": 2, "drafts": 1, "included": 2, "additional_price_minor": 900, "amount_minor": 0 },
-  "adding": { "count": 1, "additional_homes": 1, "amount_minor": 900, "allowed": true },
+  "homes": { "used": 2, "drafts": 1, "included": 0, "additional_price_minor": 400, "amount_minor": 800 },
+  "adding": { "count": 1, "additional_homes": 1, "amount_minor": 400, "allowed": true },
   "billing": { "period_end": "2026-11-21T00:00:00.000Z", "trial_end": null, "prorated": false }
 }
 ```
 
 - `plan`: the plan id (`free`, `growth`, `business`), derived the way the capacity check derives it.
-- `homes.used`: live homes now; `homes.drafts`: homes that are not live (integer, always present); `homes.included`: live homes the plan includes; `homes.additional_price_minor`: USD cents per month for each live home beyond those, the subscription's homes price (the published one on Basic), or `0` on a paid subscription from before homes were priced, which is charged nothing for them; `homes.amount_minor`: what the live homes add to the month, `max(0, used − included) × additional_price_minor`.
+- `homes.used`: live homes now; `homes.drafts`: homes that are not live (integer, always present); `homes.included`: live homes the plan includes at no charge (Basic's 1; 0 on a paid plan, which bills every live home); `homes.additional_price_minor`: USD cents per month for each live home beyond those, the subscription's homes price (the published one on Basic), or `0` on a paid subscription from before homes were priced, which is charged nothing for them; `homes.amount_minor`: what the live homes add to the month, `max(0, used − included) × additional_price_minor`.
 - `adding.count`: `N`; `adding.additional_homes`: the homes among the `N` that fall beyond the included ones; `adding.amount_minor`: `additional_homes × additional_price_minor`; `adding.allowed`: `false` only when the plan refuses, that is Basic with `used + N > included`.
 - `billing.period_end`: ISO instant of the current subscription period's end, when the invoice bills the homes, or `null` on Basic; `billing.trial_end`: ISO instant a subscription's free trial ends, or `null` outside one. Stripe bills no usage during a trial, so the amounts above apply from the period that starts when it ends; `billing.prorated` is always `false`.
 
@@ -174,10 +174,10 @@ A photo Airbnb cannot serve at 2560 px stops the stage with 502 `PHOTO_FETCH_FAI
 A home is **live** when it is active at its active location and either published on the site (`product_publications.published = 1`) or synced with Airbnb (its Channex mapping is enabled). Any other home is a **draft**: free and unlimited on every plan. Billing (`homes.used`, the Stripe homes meter) and Basic's limit count live homes only.
 
 - Adding a home (`POST /api/dashboard/stay-homes`) is never refused for the plan: the new home is a draft. An Airbnb sync request (§3.5), including one that imports a new home, checks the resulting live-home allowance before anything is queued.
-- Publishing a home (`PATCH /api/dashboard/stay-homes/:productId` `{published: true}`, the product publication route, the MCP tool), syncing an Airbnb listing (§3.5), reconnecting a listing, turning a home or its location back on: each that makes one more home live past Basic's 2 is refused with 402:
+- Publishing a home (`PATCH /api/dashboard/stay-homes/:productId` `{published: true}`, the product publication route, the MCP tool), syncing an Airbnb listing (§3.5), reconnecting a listing, turning a home or its location back on: each that makes one more home live past Basic's 1 is refused with 402:
 
 ```json
-{ "error": "Basic includes 2 homes. Choose Growth or Business in Billing to add more.", "code": "HOME_LIMIT", "homes": { "used": 2, "covered": 2 } }
+{ "error": "Basic includes 1 live home. Choose Growth or Business in Billing to add more.", "code": "HOME_LIMIT", "homes": { "used": 1, "covered": 1 } }
 ```
 
   On Growth and Business nothing is refused, and every change to the live count is reported to the Stripe homes meter.
@@ -193,10 +193,10 @@ Stages of a listing's import, in order: `property`, `room`, `rate`, `inventory`,
 { "sync": [{ "listing_id": "39313043" }, { "listing_id": "40112808", "details": { "zipCode": "84103", "propertyType": "apartment" } }], "stop": ["8d0c…"] }
 ```
 
-`sync` names listings of the connected Airbnb account to import (if they are not homes yet) and make live, each with `details` (optional): values for the fields `GET …/listings/:listingId` reports in `missingFields`, each text, used when the home is made. Contact email and phone default to the organization's. `stop` names homes imported from the account to stop syncing; they become free drafts only when they are not otherwise live through website publication (§3.4). The plan is checked once for the whole request, before anything is queued: the live homes it leaves are the live homes now, plus each synced listing not live yet, less each stopped home that is not also published on the site. Past Basic's 2 it is 402, nothing queued:
+`sync` names listings of the connected Airbnb account to import (if they are not homes yet) and make live, each with `details` (optional): values for the fields `GET …/listings/:listingId` reports in `missingFields`, each text, used when the home is made. Contact email and phone default to the organization's. `stop` names homes imported from the account to stop syncing; they become free drafts only when they are not otherwise live through website publication (§3.4). The plan is checked once for the whole request, before anything is queued: the live homes it leaves are the live homes now, plus each synced listing not live yet, less each stopped home that is not also published on the site. Past Basic's 1 it is 402, nothing queued:
 
 ```json
-{ "error": "Basic includes 2 homes. Choose Growth or Business in Billing to add more.", "code": "HOME_LIMIT", "homes": { "used": 2, "covered": 2 }, "quote": { "plan": "free", "currency": "USD", "homes": { "used": 2, "drafts": 0, "included": 2, "additional_price_minor": 900, "amount_minor": 0 }, "adding": { "count": 1, "additional_homes": 1, "amount_minor": 900, "allowed": false }, "billing": { "period_end": null, "trial_end": null, "prorated": false } } }
+{ "error": "Basic includes 1 live home. Choose Growth or Business in Billing to add more.", "code": "HOME_LIMIT", "homes": { "used": 1, "covered": 1 }, "quote": { "plan": "free", "currency": "USD", "homes": { "used": 1, "drafts": 0, "included": 1, "additional_price_minor": 400, "amount_minor": 0 }, "adding": { "count": 1, "additional_homes": 1, "amount_minor": 400, "allowed": false }, "billing": { "period_end": null, "trial_end": null, "prorated": false } } }
 ```
 
 `quote` is the homes quote (§3.1) with `adding` the increase. Otherwise 202 with the named listings as `GET` returns them; each replaces any earlier request for that listing. 422 `VALIDATION_ERROR` when it names nothing or names a listing in both; 404 `LISTING_NOT_FOUND` (`listing_id`) for a listing not on the account, 404 `IMPORT_NOT_FOUND` (`product_id`) for a home not imported from it.

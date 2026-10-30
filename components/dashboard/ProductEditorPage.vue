@@ -834,9 +834,9 @@ const homeBilling = computed<{ text: string; billing?: string } | null>(() => {
   if (isNew.value && form.kind === 'stay') return { text: 'A new home is a free draft until it is published or synced with Airbnb.' }
   const quote = homeQuote.value
   if (!quote) return null
-  if (!quote.adding.allowed) return { text: `Basic includes ${quote.homes.included} live homes. Choose Growth or Business to publish this one.`, billing: `/dashboard/${String(route.params.orgSlug)}/billing` }
+  if (!quote.adding.allowed) return { text: `Basic includes ${quote.homes.included} live ${quote.homes.included === 1 ? 'home' : 'homes'}. Choose Growth or Business to publish this one.`, billing: `/dashboard/${String(route.params.orgSlug)}/billing` }
   const billed = homeLive.value ? quote.homes.used > quote.homes.included : quote.adding.additional_homes > 0
-  if (!billed) return { text: homeLive.value ? `This home is one of your ${quote.homes.included} included homes.` : `Published, this home is one of your ${quote.homes.included} included homes.` }
+  if (!billed) return { text: homeLive.value ? 'This home is included in Basic.' : 'Published, this home is included in Basic.' }
   if (!quote.homes.additional_price_minor) return { text: 'This home is not billed on your current subscription.' }
   const adds = `${homeLive.value ? 'This home adds' : 'Published, this home adds'} ${formatPlanPrice(quote.homes.additional_price_minor)} per month to your plan`
   // Stripe bills no usage in a free trial: the home is billed from the period that starts when the trial ends.
