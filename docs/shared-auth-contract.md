@@ -106,6 +106,7 @@ Team changes affect authorized work, without creating chat participation.
 {
   "plan": "growth",
   "currency": "USD",
+  "upgrade": null,
   "homes": { "used": 2, "drafts": 1, "included": 0, "limit": null, "additional_price_minor": 400, "amount_minor": 800 },
   "adding": { "count": 1, "additional_homes": 1, "amount_minor": 400, "allowed": true },
   "billing": { "period_end": "2026-11-21T00:00:00.000Z", "trial_end": null, "prorated": false }
@@ -336,3 +337,5 @@ The homes quote includes required nullable `homes.limit`: the live-home limit fo
 `GET /api/dashboard/payments?view=performance` retains direct Stripe captured/refunded payment totals by payment month (UTC), and adds `channelReservations: [{channel, currency, amount, count}]` for confirmed channel reservations arriving in the requested month. The stay domain reads these existing imported values; no provider secret or new client-side provider request is introduced. Amounts remain separated by channel and currency and are never added to captured-payment totals. They are reservation amounts, not a channel settlement ledger. Payout history remains explicitly Stripe's transfers; balance, scheduled transfers, sent transfers and failed/cancelled transfers are distinct. Payout dates are Stripe's reported arrival dates. Website Insights links to this canonical financial report rather than treating site activity as channel revenue. Vrbo has no validated sample and remains a future channel.
 
 Better Auth may return either an HTTPS hosted approval URL or the exact requested `krabiclaw://billing/return` after applying a metered-item change or scheduling a downgrade. Native handles these as separate results, never opens a completed change as a browser URL, and re-reads canonical billing state. Existing paid-plan changes require explicit review and approval before the upgrade request; clients do not promise a second Stripe confirmation screen.
+
+The homes quote includes required nullable `upgrade`: on Basic it reports `{billable_homes, unit_amount_minor, amount_minor}` for all homes that would be live after choosing a paid plan; on an existing paid plan it is `null`. This is separate from Basic’s own allowance. Native upgrade approval displays this platform quote without subtracting Basic’s included home from the paid-plan charge.

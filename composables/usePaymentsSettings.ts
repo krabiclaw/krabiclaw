@@ -11,7 +11,7 @@ import type { HomesQuote } from '~/server/utils/billing'
  */
 
 export interface BillingStatus { canUpdate: boolean; actions: ReturnType<typeof billingPlanActions>; organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month'; subscriptionPrice?: { name: string; amount: number; currency: string; interval: 'month'; meters: string[]; trial: { end: string; withoutPaymentMethod: 'cancel' | 'create_invoice' | 'pause' } | null }; usage: { homes: number }; scheduledPlan?: { plan: string; at: string } | null }
-const isBillingResponse = (value: unknown): value is { success: true; billing: BillingStatus } =>
+export const isBillingResponse = (value: unknown): value is { success: true; billing: BillingStatus } =>
   isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.organizationId === 'string' && isKnownBillingPlan(value.billing.plan)
   && typeof value.billing.canUpdate === 'boolean' && isRecord(value.billing.actions)
   && (value.billing.actions.label === null || typeof value.billing.actions.label === 'string') && typeof value.billing.actions.restore === 'boolean'
@@ -33,8 +33,10 @@ export async function useOrganizationBilling() {
   return { billing: computed(() => data.value?.billing ?? null), billingError: error, refreshBilling: refresh }
 }
 
+const isUpgradeQuote = (value: unknown): value is NonNullable<HomesQuote['upgrade']> => isRecord(value) && ['billable_homes', 'unit_amount_minor', 'amount_minor'].every(key => Number.isSafeInteger(value[key]) && Number(value[key]) >= 0)
 const isHomesQuote = (value: unknown): value is HomesQuote =>
   isRecord(value) && isKnownBillingPlan(value.plan) && value.currency === 'USD'
+  && (value.upgrade === null || isUpgradeQuote(value.upgrade))
   && isRecord(value.homes) && Number.isSafeInteger(value.homes.used) && Number.isSafeInteger(value.homes.drafts) && Number.isSafeInteger(value.homes.included) && Number.isSafeInteger(value.homes.additional_price_minor) && Number.isSafeInteger(value.homes.amount_minor)
   && (value.homes.limit === null || (Number.isSafeInteger(value.homes.limit) && Number(value.homes.limit) >= 0))
   && isRecord(value.adding) && Number.isSafeInteger(value.adding.count) && Number.isSafeInteger(value.adding.additional_homes) && Number.isSafeInteger(value.adding.amount_minor) && typeof value.adding.allowed === 'boolean'

@@ -303,7 +303,7 @@ test('live homes are reported to their Stripe meter, drafts and locations are fr
     // ($7 a home): four more are each billed at the end of the period.
     const growerPeriodEnd = (await db.prepare("SELECT periodEnd FROM subscription WHERE referenceId = 'grower'").first('periodEnd')) as number
     assert.deepEqual(await homesQuote(env, db, 'grower', 4), {
-      plan: 'growth', currency: 'USD',
+      plan: 'growth', currency: 'USD', upgrade: null,
       homes: { used: 1, drafts: 0, included: 0, limit: null, additional_price_minor: 700, amount_minor: 700 },
       adding: { count: 4, additional_homes: 4, amount_minor: 2800, allowed: true },
       billing: { period_end: new Date(growerPeriodEnd * 1000).toISOString(), trial_end: null, prorated: false },
@@ -340,6 +340,7 @@ test('live homes are reported to their Stripe meter, drafts and locations are fr
     // Basic's quote: no period, nothing billed, and a home past the included ones not allowed to go live.
     const starterQuote = (used: number, drafts: number, adding: number, allowed: boolean) => ({
       plan: 'free', currency: 'USD',
+      upgrade: { billable_homes: used + adding, unit_amount_minor: 400, amount_minor: (used + adding) * 400 },
       homes: { used, drafts, included: 1, limit: 1, additional_price_minor: 400, amount_minor: 0 },
       adding: { count: adding, additional_homes: Math.max(0, used + adding - 1) - Math.max(0, used - 1), amount_minor: allowed ? 0 : 400 * (Math.max(0, used + adding - 1) - Math.max(0, used - 1)), allowed },
       billing: { period_end: null, trial_end: null, prorated: false },
