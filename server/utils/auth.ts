@@ -9,6 +9,7 @@ import { oauthProvider } from '@better-auth/oauth-provider'
 import { cimd } from '@better-auth/cimd'
 import { fetchCimdMetadataResource } from '~/server/utils/cimd-metadata-fetch'
 import type { GenericEndpointContext } from '@better-auth/core'
+import { getCurrentAuthEndpointContext } from '@better-auth/core/context'
 import { HTTPError, type H3Event } from 'nitro';
 import { createDb, execute, executeBatch, queryAll, queryFirst, schema, type BatchQuery } from '~/server/db'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
@@ -353,12 +354,13 @@ function buildAuth(env: CloudflareEnv) {
   }
   // Removed by an owner, leaving, or deleting the account: one departure, one
   // record, after Better Auth has deleted the member.
-  const recordMemberDeparture = (member: { id: string; organizationId: string; userId: string }) => recordMemberChange(member.organizationId, [organizationEventQuery({
+  const recordMemberDeparture = (member: { id: string; organizationId: string; userId: string }, actorId: string | null, operation: 'removed' | 'left' | 'account_deleted') => recordMemberChange(member.organizationId, [organizationEventQuery({
     organizationId: member.organizationId,
+    actorId,
     eventType: 'member.removed',
     entityType: 'member',
     entityId: member.id,
-    metadata: { userId: member.userId },
+    metadata: { userId: member.userId, operation },
   })])
   // Better Auth's user delete.after receives only the user; the memberships
   // its delete cascades away are read in delete.before of the same request.
@@ -370,14 +372,28 @@ function buildAuth(env: CloudflareEnv) {
       beforeUpdateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
       afterAddMember: async ({ member }: { member: { organizationId: string } }) => recordMemberChange(member.organizationId),
       afterAcceptInvitation: async ({ member }: { member: { organizationId: string } }) => recordMemberChange(member.organizationId),
-      afterRemoveMember: async ({ member }: { member: { id: string; organizationId: string; userId: string } }) => recordMemberDeparture(member),
-      afterUpdateMemberRole: async ({ member }: { member: { id: string; organizationId: string; userId: string; role: string } }) => recordMemberChange(member.organizationId, [organizationEventQuery({
-        organizationId: member.organizationId,
-        eventType: 'member.role_changed',
-        entityType: 'member',
-        entityId: member.id,
-        metadata: { userId: member.userId, role: member.role },
-      })]),
+      afterRemoveMember: async ({ member }: { member: { id: string; organizationId: string; userId: string } }) => {
+        // The hook's user is the affected member. The endpoint context holds
+        // the person Better Auth actually authorized to remove them.
+        const { session } = getCurrentAuthEndpointContext().context
+        if (!session) throw new Error('Member removal has no authenticated actor')
+        await recordMemberDeparture(member, session.user.id, 'removed')
+      },
+      afterUpdateMemberRole: async ({ member, previousRole }: { member: { id: string; organizationId: string; userId: string; role: string }; previousRole: string }) => {
+        if (previousRole === member.role) return
+        const { session } = getCurrentAuthEndpointContext().context
+        if (!session) throw new Error('Member role change has no authenticated actor')
+        await recordMemberChange(member.organizationId, [organizationEventQuery({
+          organizationId: member.organizationId,
+          actorId: session.user.id,
+          eventType: 'member.role_changed',
+          entityType: 'member',
+          entityId: member.id,
+          beforeState: { role: previousRole },
+          afterState: { role: member.role },
+          metadata: { userId: member.userId, previousRole, role: member.role },
+        })])
+      },
       afterAddTeamMember: async ({ team, user }: { team: { organizationId: string }; user: { id: string } }) => {
         const { materializeMemberSessions } = await import('~/server/utils/availability')
         await materializeMemberSessions(db, { organizationId: team.organizationId, userId: user.id, actorId: 'system' })
@@ -466,7 +482,10 @@ function buildAuth(env: CloudflareEnv) {
         if (ctx.path === '/organization/leave') {
           const left = ctx.context.returned
           if (left instanceof Error) return
-          await recordMemberDeparture(left as { id: string; organizationId: string; userId: string })
+          // This provider operation only removes the signed-in person, so
+          // its returned user ID is the authenticated leaver, not a guess.
+          const membership = left as { id: string; organizationId: string; userId: string }
+          await recordMemberDeparture(membership, membership.userId, 'left')
           return
         }
         if (ctx.path !== '/callback/:id') return
@@ -559,7 +578,9 @@ function buildAuth(env: CloudflareEnv) {
             const memberships = departingMemberships.get(user.id)
             if (!memberships) throw new Error('A deleted account\'s memberships were not read before its deletion')
             departingMemberships.delete(user.id)
-            for (const member of memberships) await recordMemberDeparture(member)
+            // The user no longer exists, so the audit cannot reference them
+            // through its user foreign key. Preserve the provider operation.
+            for (const member of memberships) await recordMemberDeparture(member, null, 'account_deleted')
           },
         },
         update: {

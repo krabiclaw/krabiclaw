@@ -16,9 +16,9 @@ export default defineHandler(async (event) => {
     sort_order?: number
   }>(event)
 
-  const { db, organization } = await requireLocationAccess(event, organizationId, locationId)
+  const { db, organization, session } = await requireLocationAccess(event, organizationId, locationId)
   const result = await createLocationQa(db, organization.id, locationId, {
-    question: body?.question ?? '', answer: body?.answer ?? null, question_author: body?.question_author ?? null, is_owner_answer: body?.is_owner_answer, sort_order: body?.sort_order, status: body?.status, })
+    question: body?.question ?? '', answer: body?.answer ?? null, question_author: body?.question_author ?? null, is_owner_answer: body?.is_owner_answer, sort_order: body?.sort_order, status: body?.status, }, session.user)
 
   return jsonResponse(result.data, { status: result.status })
 })

@@ -13,6 +13,10 @@ import { recordTenantPageview, type TenantPageviewInput } from '../../server/uti
 import { completeOnboarding } from '../../server/utils/organization-provisioning.ts'
 import { hashEmail } from '../../server/utils/email-delivery.ts'
 import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
+import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
+import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
+import { createQa } from '../../server/utils/location-qa.ts'
+import { findAuthUsersByIds, type CloudflareEnv } from '../../server/utils/auth.ts'
 
 const SESSION = '11111111-1111-4111-8111-111111111111'
 const VISITOR = '22222222-2222-4222-8222-222222222222'
@@ -141,6 +145,55 @@ test('conversion measurement: contract, values, idempotency, report and cohort o
     const cohorts = (await getAnalyticsReport(db, { organizationId: 'org-platform', ...period })).signupCohort.bySignupAttribution
       .filter(row => row.source === 'cohort-proof')
     assert.deepEqual(cohorts.map(row => row.revenue.map(value => value.netMinor)).sort(), [[100], [200]])
+
+    // Progress reads these same canonical results, rather than copying an
+    // analytics report or treating the assigned member as the acting user.
+    await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('customer-en', 'org-customer', 'en', 1, 'published')").run()
+    const env = { DB: db, BETTER_AUTH_SECRET: 'progress-data-proof-secret-at-least-32-characters', BETTER_AUTH_URL: 'https://progress.example',
+      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://progress.example', STRIPE_SECRET_KEY: 'sk_test_progress_data_no_provider_requests' } as CloudflareEnv
+    const qaActor = (await findAuthUsersByIds(env, ['user-a'])).get('user-a')
+    assert(qaActor, 'The acting user must be resolved by the existing authentication adapter')
+    const qa = await createQa(db, { organizationId: 'org-customer', locationId: null }, { question: 'What should I bring?', answer: 'Bring your relevant documents.' }, qaActor)
+    const qaId = (qa.data as { id: string }).id
+    const customerPayment = { organizationId: 'org-customer', eventName: 'payment_paid', stage: 'completed', surface: 'stripe', entityType: 'payment', entityId: 'payment-progress',
+      occurredAt: '2026-09-12T03:00:00.000Z', value: { basis: 'purchase', amount_minor: 5000, collected_minor: 5350, currency: 'THB', transaction_id: 'pi_progress' }, properties: { member_id: 'assigned-member' } } as const
+    const paidResult = await recordOrganizationConversionEvent(db, null, customerPayment)
+    await recordOrganizationConversionEvent(db, null, customerPayment)
+    const refundedResult = await recordOrganizationConversionEvent(db, null, { organizationId: 'org-customer', eventName: 'payment_refunded', stage: 'completed', surface: 'stripe', entityType: 'refund', entityId: 're_progress',
+      occurredAt: '2026-09-12T04:00:00.000Z', actor: { type: 'staff', id: 'user-a' }, value: { basis: 'refund', amount_minor: 1000, collected_minor: 1000, currency: 'THB', transaction_id: 're_progress' } })
+    const membership = await resolveMembership(env, { organizationId: 'org-customer', userId: 'user-a' })
+    assert(membership)
+    const principal = memberAccessPrincipal(membership, { env })
+    const progress = await listBusinessOutcomes(db, principal, { limit: 100 })
+    const qaFact = progress.outcomes.find(item => item.subject.kind === 'qa' && item.subject.id === qaId)
+    assert(qaFact)
+    assert.deepEqual(qaFact.actor, { kind: 'member', userId: 'user-a' })
+    assert.deepEqual(qaFact.changedFields, ['question', 'answer', 'status'])
+    const paidFacts = progress.outcomes.filter(item => item.source.table === 'analytics_events' && item.source.id === paidResult.id)
+    assert.equal(paidFacts.length, 1)
+    assert.deepEqual(paidFacts[0]!.actor, { kind: 'unknown', userId: null })
+    assert.equal(paidFacts[0]!.measurement?.assignedMemberId, 'assigned-member')
+    assert.equal(paidFacts[0]!.measurement?.attribution, null)
+    assert.equal(paidFacts[0]!.moneyOwner, 'customer_business')
+    assert.deepEqual(paidFacts[0]!.value, customerPayment.value)
+    const refundFact = progress.outcomes.find(item => item.source.id === refundedResult.id)
+    assert(refundFact)
+    assert.deepEqual(refundFact.actor, { kind: 'member', userId: 'user-a' })
+    assert.equal(refundFact.value?.basis, 'refund')
+    assert.equal(refundFact.value?.amount_minor, 1000)
+    assert.equal(progress.outcomes.some(item => item.moneyOwner === 'platform'), false, 'platform invoices do not become this customer business’s revenue')
+    assert.deepEqual(progress.outcomes.filter(item => item.value?.basis === 'quoted').map(item => item.subject.id), ['req-1'])
+    const paged = []
+    let next: number | null = 0
+    do {
+      const page = await listBusinessOutcomes(db, principal, { limit: 1, offset: next })
+      assert.equal(page.outcomes.length, 1)
+      paged.push(...page.outcomes)
+      next = page.pagination.nextOffset
+    } while (next !== null)
+    assert.deepEqual(paged, progress.outcomes, 'mixed canonical sources share one stable database ordering and pagination')
+    assert.equal(new Set(paged.map(item => item.id)).size, paged.length)
+
   } finally { await runtime.dispose() }
 })
 

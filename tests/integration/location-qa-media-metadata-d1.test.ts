@@ -7,11 +7,14 @@ import { hashPassword } from 'better-auth/crypto'
 import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import organizationQaRoute from '../../server/api/editor/organizations/[organizationId]/qa.get.ts'
+import createOrganizationQaRoute from '../../server/api/editor/organizations/[organizationId]/qa.post.ts'
+import updateOrganizationQaRoute from '../../server/api/editor/organizations/[organizationId]/qa/[qaId].patch.ts'
 import { createQa, deleteQa, listQa, reorderQa, updateQa } from '../../server/utils/location-qa.ts'
 import { createContentDocumentWithBlocks } from '../../server/utils/content/documents.ts'
 import { getMediaAsset, updateMediaAssetMetadata } from '../../server/utils/media-asset-manager.ts'
 import { applyOnboardingDraft } from '../../server/utils/onboarding-apply.ts'
 import { buildOnboardingDraftPayload } from '../../server/utils/onboarding-drafts.ts'
+import { createLocation, getLocation, updateLocation } from '../../server/utils/location-management.ts'
 
 const ORG = 'org'
 const OTHER_ORG = 'other-org'
@@ -77,9 +80,9 @@ test('organization Q&A route finds a page record by id without widening tenant a
     await db.prepare("INSERT INTO user (id, name, email, emailVerified) VALUES ('qa-owner', 'QA Owner', 'qa-owner@proof.example', 1)").run()
     await db.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES ('qa-member', ?, 'qa-owner', 'owner')").bind(ORG).run()
     await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password) VALUES ('qa-credential', 'qa-owner', 'credential', 'qa-owner', ?)").bind(await hashPassword(password)).run()
-    const general = await createQa(db, { organizationId: ORG, locationId: null }, { question: 'General question', answer: 'General answer' })
-    const pricing = await createQa(db, { organizationId: ORG, locationId: null, pagePath: '/pricing' }, { question: 'Pricing question', answer: 'Pricing answer' })
-    const other = await createQa(db, { organizationId: OTHER_ORG, locationId: null, pagePath: '/pricing' }, { question: 'Other tenant question', answer: 'Private answer' })
+    const general = await createQa(db, { organizationId: ORG, locationId: null }, { question: 'General question', answer: 'General answer' }, null)
+    const pricing = await createQa(db, { organizationId: ORG, locationId: null, pagePath: '/pricing' }, { question: 'Pricing question', answer: 'Pricing answer' }, null)
+    const other = await createQa(db, { organizationId: OTHER_ORG, locationId: null, pagePath: '/pricing' }, { question: 'Other tenant question', answer: 'Private answer' }, null)
     const generalId = (general.data as { id: string }).id
     const pricingId = (pricing.data as { id: string }).id
     const otherId = (other.data as { id: string }).id
@@ -94,6 +97,8 @@ test('organization Q&A route finds a page record by id without widening tenant a
     const cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
     const app = new H3()
     app.get('/api/editor/organizations/:organizationId/qa', organizationQaRoute)
+    app.post('/api/editor/organizations/:organizationId/qa', createOrganizationQaRoute)
+    app.patch('/api/editor/organizations/:organizationId/qa/:qaId', updateOrganizationQaRoute)
     const request = (org: string, query = '', authenticated = true) => app.request(Object.assign(new Request(`https://proof.example/api/editor/organizations/${org}/qa${query}`, {
       headers: authenticated ? { cookie } : {},
     }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
@@ -113,6 +118,45 @@ test('organization Q&A route finds a page record by id without widening tenant a
     }
     assert.equal((await request(OTHER_ORG, `?id=${otherId}`)).status, 404)
     assert.equal((await request(ORG, `?id=${pricingId}`, false)).status, 401)
+    const mutate = (path: string, method: string, body: unknown) => app.request(Object.assign(new Request(`https://proof.example/api/editor/organizations/${ORG}/qa${path}`, {
+      method, headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body),
+    }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    const createdResponse = await mutate('', 'POST', { question: 'Who answers?', answer: 'The legal team.', page_path: '/pricing', created_by: 'spoofed-user' })
+    assert.equal(createdResponse.status, 201)
+    const createdId = (await createdResponse.json() as { id: string }).id
+    const createdRow = await db.prepare('SELECT created_by, updated_by, updated_at FROM content_documents WHERE id = ?').bind(createdId).first<{ created_by: string; updated_by: string; updated_at: string }>()
+    assert.equal(createdRow?.created_by, 'qa-owner')
+    assert.equal(createdRow?.updated_by, 'qa-owner')
+    const readCreated = (await (await request(ORG, `?id=${createdId}`)).json()).qa[0]
+    assert.equal(readCreated.answer_author, 'QA Owner')
+    assert.match(readCreated.answer_date, /^\d{4}-\d{2}-\d{2}T/)
+    const changed = await mutate(`/${createdId}`, 'PATCH', { answer: 'An attorney answers.', page_path: '/pricing', updated_by: 'spoofed-user' })
+    assert.equal(changed.status, 200)
+    const readChanged = (await (await request(ORG, `?id=${createdId}`)).json()).qa[0]
+    assert.equal(readChanged.answer, 'An attorney answers.')
+    assert.equal(readChanged.answer_author, 'QA Owner')
+    assert.notEqual(readChanged.answer_date, readCreated.answer_date)
+    const beforeRepeat = await db.prepare('SELECT updated_at FROM content_documents WHERE id = ?').bind(createdId).first('updated_at')
+    const repeat = await mutate(`/${createdId}`, 'PATCH', { answer: 'An attorney answers.', page_path: '/pricing' })
+    assert.equal(repeat.status, 200)
+    assert.deepEqual(await repeat.json(), { updated: false, qa_id: createdId })
+    assert.equal(await db.prepare('SELECT updated_at FROM content_documents WHERE id = ?').bind(createdId).first('updated_at'), beforeRepeat)
+    const receipts = await db.prepare("SELECT actor_user_id, payload_json FROM activity_entries WHERE event_name = 'content.updated' AND json_extract(payload_json, '$.entityId') = ? ORDER BY occurred_at").bind(createdId).all<{ actor_user_id: string; payload_json: string }>()
+    assert.equal(receipts.results.length, 2)
+    assert.ok(receipts.results.every(entry => entry.actor_user_id === 'qa-owner'))
+    assert.deepEqual(JSON.parse(receipts.results[1]!.payload_json).metadata.changed_fields, ['answer'])
+    assert.deepEqual(JSON.parse(receipts.results[0]!.payload_json).afterState, { updated_at: createdRow!.updated_at, status: 'published' })
+    assert.deepEqual(JSON.parse(receipts.results[1]!.payload_json).afterState, { updated_at: readChanged.updated_at, status: 'published' })
+    const hidden = await mutate(`/${createdId}`, 'PATCH', { status: 'hidden', page_path: '/pricing' })
+    assert.equal(hidden.status, 200)
+    const hiddenRow = (await (await request(ORG, `?id=${createdId}`)).json()).qa[0]
+    assert.equal(hiddenRow.status, 'hidden')
+    const statusReceipt = await db.prepare("SELECT payload_json FROM activity_entries WHERE event_name = 'content.updated' AND json_extract(payload_json, '$.entityId') = ? ORDER BY occurred_at DESC, id DESC LIMIT 1").bind(createdId).first<string>('payload_json')
+    const statusPayload = JSON.parse(statusReceipt!)
+    assert.deepEqual(statusPayload.metadata.changed_fields, ['status'])
+    assert.deepEqual(statusPayload.afterState, { updated_at: hiddenRow.updated_at, status: 'hidden' })
+
+
   } finally {
     await runtime.dispose()
   }
@@ -126,11 +170,11 @@ test('a Q&A can be edited and deleted through the scoped writers', async () => {
   const { runtime, db } = await boot()
   try {
     const scope = { organizationId: ORG, locationId: null, pagePath: '/pricing' }
-    const created = await createQa(db, scope, { question: 'Is there a free plan?', answer: 'Yes.', status: 'published' })
+    const created = await createQa(db, scope, { question: 'Is there a free plan?', answer: 'Yes.', status: 'published' }, null)
     assert.equal(created.status, 201)
     const qaId = (created.data as { id: string }).id
 
-    const updated = await updateQa(db, scope, qaId, { answer: 'Yes, on a KrabiClaw subdomain.' })
+    const updated = await updateQa(db, scope, qaId, { answer: 'Yes, on a KrabiClaw subdomain.' }, null)
     assert.deepEqual(updated, { updated: true, qa_id: qaId })
     const [row] = await listQa(db, ORG, null, false, '/pricing')
     assert.equal(row?.answer, 'Yes, on a KrabiClaw subdomain.')
@@ -138,11 +182,11 @@ test('a Q&A can be edited and deleted through the scoped writers', async () => {
     assert.equal(await purges(), 1, 'an edited answer queues a purge of the cached pages')
 
     await assert.rejects(
-      updateQa(db, { ...scope, organizationId: OTHER_ORG }, qaId, { answer: 'stolen' }),
+      updateQa(db, { ...scope, organizationId: OTHER_ORG }, qaId, { answer: 'stolen' }, null),
       /Q&A not found/,
     )
 
-    const second = await createQa(db, scope, { question: 'Can I use my own domain?', answer: 'Yes.' })
+    const second = await createQa(db, scope, { question: 'Can I use my own domain?', answer: 'Yes.' }, null)
     const secondId = (second.data as { id: string }).id
     await reorderQa(db, scope, [{ id: secondId, sort_order: 0 }, { id: qaId, sort_order: 1 }])
     assert.deepEqual((await listQa(db, ORG, null, false, '/pricing')).map(item => item.id), [secondId, qaId])
@@ -179,8 +223,8 @@ test('authored Q&A validation is shared and mixed imported reorders are atomic',
   const { runtime, db } = await boot()
   const scope = { organizationId: ORG, locationId: null, pagePath: '/pricing' }
   try {
-    const authored = await createQa(db, scope, { question: '  Authored question  ', answer: '  Original answer  ', sort_order: 4 })
-    const imported = await createQa(db, scope, { question: 'Imported fixture', sort_order: 7 })
+    const authored = await createQa(db, scope, { question: '  Authored question  ', answer: '  Original answer  ', sort_order: 4 }, null)
+    const imported = await createQa(db, scope, { question: 'Imported fixture', sort_order: 7 }, null)
     await db.prepare("UPDATE content_documents SET source = 'import' WHERE id = ?").bind(imported.data.id).run()
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('qa-locale-ja', ?, 'ja', 0, 'published')").bind(ORG).run()
     await createContentDocumentWithBlocks(db, {
@@ -197,8 +241,8 @@ test('authored Q&A validation is shared and mixed imported reorders are atomic',
       [{ answer: 123 }, /answer must be a string or null/],
       [{ status: 'draft' }, /Invalid Q&A status/],
     ] as const) {
-      await assert.rejects(createQa(db, scope, { question: 'Valid', ...input }), expected)
-      await assert.rejects(updateQa(db, scope, authored.data.id, input), expected)
+      await assert.rejects(createQa(db, scope, { question: 'Valid', ...input }, null), expected)
+      await assert.rejects(updateQa(db, scope, authored.data.id, input, null), expected)
     }
     await assert.rejects(reorderQa(db, scope, [{ id: authored.data.id, sort_order: 0 }, { id: imported.data.id, sort_order: 1 }]), /outside the requested scope/)
     assert.deepEqual(await listQa(db, ORG, null, false, '/pricing'), before)
@@ -212,11 +256,11 @@ test('authored Q&A validation is shared and mixed imported reorders are atomic',
       await db.prepare('DROP TRIGGER skip_qa_reorder').run()
     }
 
-    await assert.rejects(updateQa(db, scope, imported.data.id, { answer: 'Overwrite' }), /Q&A not found/)
+    await assert.rejects(updateQa(db, scope, imported.data.id, { answer: 'Overwrite' }, null), /Q&A not found/)
     assert.equal((await deleteQa(db, scope, imported.data.id)).status, 404)
-    await assert.rejects(createQa(db, { ...scope, locationId: 'foreign-location', pagePath: null }, { question: 'Wrong tenant' }), /Q&A scope not found/)
-    await assert.rejects(createQa(db, { ...scope, locationId: 'foreign-location' }, { question: 'Ambiguous scope' }), /not both/)
-    await updateQa(db, scope, authored.data.id, { answer: null, is_owner_answer: false })
+    await assert.rejects(createQa(db, { ...scope, locationId: 'foreign-location', pagePath: null }, { question: 'Wrong tenant' }, null), /Q&A scope not found/)
+    await assert.rejects(createQa(db, { ...scope, locationId: 'foreign-location' }, { question: 'Ambiguous scope' }, null), /not both/)
+    await updateQa(db, scope, authored.data.id, { answer: null, is_owner_answer: false }, null)
     const changed = (await listQa(db, ORG, null, false, '/pricing')).find(row => row.id === authored.data.id)
     assert.equal(changed?.answer, null)
     assert.equal(changed?.is_owner_answer, 0)
@@ -225,5 +269,38 @@ test('authored Q&A validation is shared and mixed imported reorders are atomic',
     await deleteQa(db, scope, authored.data.id)
     assert.equal(await db.prepare('SELECT count(*) n FROM content_documents WHERE id = ? OR root_id = ?').bind(authored.data.id, authored.data.id).first('n'), 0)
     assert.equal((await listQa(db, ORG, null, false, '/pricing'))[0]?.source, 'import')
+  } finally { await runtime.dispose() }
+})
+
+
+test('location edits record exact changed facts and do not manufacture an edit for unchanged input', async () => {
+  const { runtime, db } = await boot()
+  try {
+    const actor = 'location-editor'
+    await db.prepare("INSERT INTO user (id, name, email, emailVerified) VALUES (?, 'Editor', 'location-editor@proof.example', 1)").bind(actor).run()
+    await db.prepare("UPDATE organization SET onboarding_status = 'active' WHERE id = ?").bind(ORG).run()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db } as CloudflareEnv
+    const created = await createLocation(env, db, ORG, { title: 'Office', timezone: 'Asia/Bangkok' }, actor)
+    assert.equal(created.status, 201)
+    const id = (created.data as { location: { id: string } }).location.id
+    const original = await getLocation(db, ORG, id)
+    assert.ok(original)
+    const changed = await updateLocation(db, ORG, id, { phone: '+66812345678', expected_updated_at: original.updated_at }, actor, env)
+    assert.equal(changed.status, 200)
+    const read = await getLocation(db, ORG, id)
+    assert.equal(read!.phone, '+66812345678')
+    const entries = async () => (await db.prepare("SELECT actor_user_id, payload_json FROM activity_entries WHERE event_name = 'location.updated' AND json_extract(payload_json, '$.entityId') = ?")
+      .bind(id).all<{ actor_user_id: string; payload_json: string }>()).results
+    const receipts = await entries()
+    assert.equal(receipts.length, 1)
+    assert.equal(receipts[0]!.actor_user_id, actor)
+    assert.deepEqual(JSON.parse(receipts[0]!.payload_json).metadata.changed_fields, ['phone'])
+    const repeat = await updateLocation(db, ORG, id, { phone: '+66812345678', expected_updated_at: read!.updated_at }, actor, env)
+    assert.equal(repeat.status, 200)
+    assert.equal((await getLocation(db, ORG, id))!.updated_at, read!.updated_at)
+    assert.deepEqual(await entries(), receipts)
+    const stale = await updateLocation(db, ORG, id, { phone: '+66812345679', expected_updated_at: original.updated_at }, actor, env)
+    assert.equal(stale.status, 409)
+    assert.equal((await getLocation(db, ORG, id))!.phone, '+66812345678')
   } finally { await runtime.dispose() }
 })

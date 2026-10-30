@@ -36,7 +36,7 @@ export async function returnExtrasToDraftsForPlanEnd(env: CloudflareEnv, db: D1D
     FROM products p WHERE p.organization_id = ? AND ${liveHomeSql('p')} ORDER BY p.created_at DESC, p.id DESC`, [organizationId])
   const extraHomes = homes.slice(0, Math.max(0, homes.length - BASIC_HOMES))
   for (const home of extraHomes.filter(row => row.published)) {
-    await setProductPublication(db, { organizationId, productId: home.id, published: false, actor: { actorId: SYSTEM_ACTOR }, env })
+    await setProductPublication(db, { organizationId, productId: home.id, published: false, actor: { actorId: SYSTEM_ACTOR, actorType: 'system' }, env })
   }
   await stopAirbnbSyncForPlanEnd(db, organizationId, extraHomes.filter(row => row.syncing).map(row => row.id))
 }

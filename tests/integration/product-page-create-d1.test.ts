@@ -6,7 +6,7 @@ import * as schema from '../../server/db/schema.ts'
 import { executeBatch } from '../../server/db/index.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { createContentDocumentWithBlocks } from '../../server/utils/content/documents.ts'
-import { getPublishedTenantPage, isProductPageConflict, listPublishedTenantPagePaths, prepareTenantPageCreate } from '../../server/utils/content/pages.ts'
+import { createTenantPage, getPublishedTenantPage, getTenantPageForEditor, isProductPageConflict, listPublishedTenantPagePaths, prepareTenantPageCreate, updateTenantPage } from '../../server/utils/content/pages.ts'
 import { createProduct, getProduct, productPublicPresentation, reconcileProducts, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
 import { setProductBookingConfig } from '../../server/utils/availability.ts'
 
@@ -218,4 +218,34 @@ test('a bound page and its share address follow publication while its booking is
   } finally {
     await runtime.dispose()
   }
+})
+
+
+test('page edits retain actor and meaningful revisions while unchanged saves retain the document', async () => {
+  const { runtime, db, env } = await boot('growth')
+  try {
+    const { page } = await createTenantPage(db, { organizationId: ORG, userId: ACTOR.actorId, env, data: {
+      path: '/services/foundation', title: 'Foundation', summary: 'Keep this summary', pageType: 'custom', recipe: null, sortOrder: 0,
+      blocks: [{ type: 'markdown', data: { markdown: 'Original practice information.', editor_mode: 'rich' } }],
+    } })
+    const data = { path: page.path, title: 'Foundation updated', pageType: page.page_type, recipe: page.recipe,
+      sortOrder: page.sort_order, blocks: page.blocks, expectedUpdatedAt: page.document.updated_at }
+    await updateTenantPage(db, page.id, { userId: ACTOR.actorId, scope: { organizationId: ORG }, env, data })
+    const read = await getPublishedTenantPage(db, ORG, page.path)
+    assert.equal(read?.title, 'Foundation updated')
+    assert.equal(read?.summary, 'Keep this summary', 'an omitted optional summary retains its canonical value')
+    assert.equal(read?.blocks[0]?.data.markdown, 'Original practice information.')
+    const receipts = async () => (await db.prepare("SELECT actor_user_id, payload_json FROM activity_entries WHERE event_name = 'content.updated' AND json_extract(payload_json, '$.entityId') = ? ORDER BY occurred_at, id")
+      .bind(page.id).all<{ actor_user_id: string; payload_json: string }>()).results.map(row => ({ actor: row.actor_user_id, ...JSON.parse(row.payload_json) }))
+    const savedReceipts = await receipts()
+    assert.equal(savedReceipts.length, 2)
+    assert.ok(savedReceipts.every(row => row.actor === ACTOR.actorId))
+    assert.deepEqual(savedReceipts[1].metadata.changed_fields, ['title'])
+    assert.equal(savedReceipts[0].afterState.updated_at, page.document.updated_at)
+    assert.equal(savedReceipts[1].afterState.updated_at, read!.document.updated_at)
+    const current = await getTenantPageForEditor(db, page.id, { organizationId: ORG })
+    await updateTenantPage(db, page.id, { userId: ACTOR.actorId, scope: { organizationId: ORG }, env, data: { ...data, expectedUpdatedAt: current.document.updated_at } })
+    assert.equal((await getTenantPageForEditor(db, page.id)).document.updated_at, current.document.updated_at)
+    assert.deepEqual(await receipts(), savedReceipts)
+  } finally { await runtime.dispose() }
 })

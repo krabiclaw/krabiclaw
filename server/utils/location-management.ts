@@ -530,7 +530,7 @@ export async function updateLocation(
 
   const responsibility = await assertResponsibilityTarget(db, organizationId, input, { assigned_member_id: existing.assigned_member_id ?? null, assigned_team_id: existing.assigned_team_id ?? null });
 
-  const now = new Date().toISOString();
+  const now = new Date(Math.max(Date.now(), Date.parse(existing.updated_at!) + 1)).toISOString();
   const sets: string[] = ["updated_at = ?"];
   const params: Array<string | number | null> = [now];
   if (input.title !== undefined) {
@@ -611,20 +611,44 @@ export async function updateLocation(
     params.push(input.review_count ?? null);
   }
 
+  const stale = {
+    status: 409,
+    data: { error: "The location changed since it was read. Reload it and try again.", code: 'LOCATION_VERSION_CONFLICT', field: 'expected_updated_at' },
+  };
+  if (input.expected_updated_at !== undefined && input.expected_updated_at !== existing.updated_at) return stale;
+  const changedFields: string[] = [];
+  for (let index = 1; index < sets.length; index++) {
+    const field = sets[index]!.split(' = ')[0] as keyof LocationRecord;
+    const previous = existing[field] ?? null;
+    const next = params[index] ?? null;
+    const structured = ['address', 'opening_hours', 'special_hours'].includes(field);
+    const equal = structured
+      ? await creationRequestHash(typeof previous === 'string' ? JSON.parse(previous) : previous) === await creationRequestHash(typeof next === 'string' ? JSON.parse(next) : next)
+      : previous === next;
+    if (!equal) changedFields.push(field);
+  }
+  if (!changedFields.length) {
+    await reportBillingUsage(env, db, organizationId, { committed: true });
+    if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId });
+    await purgePublicResourceCacheNow(env, organizationId);
+    await publishHomes(existing.updated_at);
+    return { status: 200, data: { success: true, location: existing } };
+  }
+
   // A read-modify-write on a JSON column — hours, special hours — must land on
   // the row it read. With the caller's updated_at in the WHERE, a row that
   // moved since matches nothing and the write is refused rather than applied
   // over someone else's.
-  const guarded = typeof input.expected_updated_at === "string";
+  const expectedUpdatedAt = input.expected_updated_at ?? existing.updated_at;
   const runUpdate = async (boundParams: Array<string | number | null>): Promise<boolean> => {
     const statements: BatchQuery[] = [];
     statements.push({
       query: `
         UPDATE business_locations
         SET ${sets.join(", ")}
-        WHERE id = ? AND organization_id = ?${guarded ? " AND updated_at = ?" : ""}
+        WHERE id = ? AND organization_id = ? AND updated_at = ?
       `,
-      params: guarded ? [...boundParams, input.expected_updated_at!] : boundParams,
+      params: [...boundParams, expectedUpdatedAt],
     });
     statements.push(organizationEventQuery({
       organizationId,
@@ -633,8 +657,12 @@ export async function updateLocation(
       eventType: "location.updated",
       entityType: "business_location",
       entityId: locationId,
+      beforeState: { updated_at: existing.updated_at },
+      afterState: { updated_at: now },
       metadata: {
         title: input.title?.trim() ?? existing.title ?? null,
+        changed_fields: changedFields,
+        evidence_basis: 'persisted_change',
       },
       onlyIfPreviousChangedOneRow: true,
     }));
@@ -651,10 +679,6 @@ export async function updateLocation(
     // The saved privacy mode must be visible even if readback or card work fails.
     if (changed) await purgePublicResourceCacheNow(env, organizationId);
     return changed;
-  };
-  const stale = {
-    status: 409,
-    data: { error: "The location changed since it was read. Reload it and try again.", code: 'LOCATION_VERSION_CONFLICT', field: 'expected_updated_at' },
   };
 
   params.push(locationId, organizationId);

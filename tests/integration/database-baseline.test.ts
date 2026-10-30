@@ -66,6 +66,32 @@ test('the migration chain applies from zero and builds every table the schema de
   }
 })
 
+test('publication attribution retains historical receipts as unknown and references the exact initiating activity', () => {
+  const database = new Database(':memory:')
+  database.pragma('foreign_keys = ON')
+  try {
+    const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
+    const at = journal.entries.findIndex(entry => entry.tag === '0002_social_publication_attribution')
+    assert.notEqual(at, -1)
+    for (const entry of journal.entries.slice(0, at)) database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
+    database.prepare("INSERT INTO organization(id,name,slug,default_currency,timezone) VALUES('publisher-business','Publisher','publisher-business','USD','UTC')").run()
+    database.prepare(`INSERT INTO post_publications(id,organization_id,channel,provider_app_id,provider_subject_id,provider_target_id,state,payload_hash)
+      VALUES('historical-publication','publisher-business','facebook','app','account','page','preparing','recorded-payload')`).run()
+    const historical = database.prepare("SELECT * FROM post_publications WHERE id='historical-publication'").get()
+    database.exec(readFileSync(`migrations/${journal.entries[at]!.tag}.sql`, 'utf8'))
+    assert.deepEqual(database.prepare("SELECT * FROM post_publications WHERE id='historical-publication'").get(), { ...historical as Record<string, unknown>, initiating_activity_id: null })
+
+    database.prepare(`INSERT INTO activity_entries(id,kind,scope_kind,organization_id,actor_kind,event_name,payload_json,dedupe_key,occurred_at)
+      VALUES('exact-publication-claim','audit','organization','publisher-business','system','post.publication_started','{}','exact-publication-claim','2026-10-30T12:30:00.000Z')`).run()
+    database.prepare("UPDATE post_publications SET initiating_activity_id='exact-publication-claim' WHERE id='historical-publication'").run()
+    assert.equal((database.prepare("SELECT initiating_activity_id FROM post_publications WHERE id='historical-publication'").get() as { initiating_activity_id: string }).initiating_activity_id, 'exact-publication-claim')
+    assert.throws(() => database.prepare("UPDATE post_publications SET initiating_activity_id='missing-claim' WHERE id='historical-publication'").run(), /FOREIGN KEY constraint failed/)
+    database.prepare("DELETE FROM activity_entries WHERE id='exact-publication-claim'").run()
+    assert.deepEqual(database.prepare("SELECT * FROM post_publications WHERE id='historical-publication'").get(), { ...historical as Record<string, unknown>, initiating_activity_id: null })
+    assert.deepEqual(database.pragma('foreign_key_check'), [])
+  } finally { database.close() }
+})
+
 test('channel retry proof preserves every historical receipt as unknown and leaves old writers unable to assert non-delivery', () => {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
