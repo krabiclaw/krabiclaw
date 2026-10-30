@@ -32,6 +32,7 @@ import servicesGetRoute from '../../server/api/dashboard/services.get.ts'
 import mcpRoute from '../../server/api/mcp.ts'
 import paymentReturnRoute from '../../server/api/public/payments/[paymentId]/return.post.ts'
 import paymentCancelRoute from '../../server/api/public/payments/[paymentId]/cancel.post.ts'
+import paymentHandoffRoute from '../../server/api/public/payments/[paymentId].get.ts'
 import { readStayCalendar } from '../../server/domain/stays.ts'
 import bookingReceiptRoute from '../../server/api/public/booking-requests/[requestId].get.ts'
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '../../server/utils/reservation-cancel-token.ts'
@@ -806,7 +807,7 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse(NOW) })
   const { db, runtime } = await boot()
   try {
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_boundary', NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: 'pk_test_local_boundary' }
     await db.prepare("INSERT INTO business_locations(id,organization_id,slug,title,timezone) VALUES('cabin-site',?,'cabin-site','Cabin','UTC')").bind(ORG).run()
     await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('stay','cabin',?,'Cabin','cabin','host','host')").bind(ORG).run()
     await db.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,created_by,updated_by) VALUES(?,'cabin','cabin-site','host','host')").bind(ORG).run()
@@ -824,6 +825,16 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
       await db.prepare("INSERT INTO product_nights(organization_id,product_id,date,price_minor,min_stay_arrival,source,updated_by) VALUES(?,'cabin',?,10000,1,'host','host')").bind(ORG, date).run()
       await db.prepare("INSERT INTO stay_nights(organization_id,product_id,date,hold_id) VALUES(?,'cabin',?,?)").bind(ORG, date, hold).run()
     }
+    const stayPurchase = {
+      product_id: 'cabin', location_id: 'cabin-site', timezone: 'UTC', check_in_date: '2099-10-01', check_out_date: '2099-10-03',
+      adults: 1, children: 0, infants: 0, total_minor: 20000, currency: 'USD', cancellation_policy: 'flexible',
+      nightly: [{ date: '2099-10-01', price_minor: 10000 }, { date: '2099-10-02', price_minor: 10000 }],
+      guest: { name: 'Guest', email: 'guest@example.com', phone: null, notes: null },
+    }
+    await db.prepare("UPDATE payments SET amount=20000,price_snapshot_json=? WHERE id='changing'").bind(JSON.stringify({
+      title: 'Cabin', quantity: 1, method_configuration_id: 'pmc_cabin', price: { unit_amount: 20000, currency: 'USD', tax_behavior: 'exclusive' }, stay: stayPurchase,
+    })).run()
+    await db.prepare("UPDATE payment_checkout_holds SET amount=20000 WHERE payment_id='changing'").run()
     let nativeStatus = 'processing'
     let cancellations = 0
     const originalFetch = globalThis.fetch
@@ -838,10 +849,11 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
         cancellations++
         nativeStatus = 'canceled'
       } else assert.equal(url.pathname, '/v1/payment_intents/pi_changing')
-      return Response.json({ id: 'pi_changing', object: 'payment_intent', status: nativeStatus, amount: 10000, currency: 'usd', livemode: false, metadata: { krabiclaw_payment_id: 'changing' } })
+      return Response.json({ id: 'pi_changing', object: 'payment_intent', status: nativeStatus, amount: 20000, currency: 'usd', livemode: false, payment_method_types: ['card'], metadata: { krabiclaw_payment_id: 'changing' } })
     })
     const app = new H3()
     app.use(event => { event.context.organizationId = event.req.headers.get('x-test-organization') ?? ORG })
+    app.get('/api/public/payments/:paymentId', paymentHandoffRoute)
     app.post('/api/public/payments/:paymentId/cancel', paymentCancelRoute)
     const cancel = (claim: string, organizationId = ORG) => app.request(Object.assign(new Request('https://payments.proof.example/api/public/payments/changing/cancel', {
       method: 'POST', headers: { 'content-type': 'application/json', 'x-test-organization': organizationId }, body: JSON.stringify({ claim }),
@@ -854,6 +866,16 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
     assert.equal(cancellations, 0)
     assert.equal(await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='changing'").first('status'), 'active')
     nativeStatus = 'requires_payment_method'
+    const openHandoff = await app.request(Object.assign(new Request(`https://payments.proof.example/api/public/payments/changing?claim=${claims.get('changing')!}`), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    assert.equal(openHandoff.status, 200, await openHandoff.clone().text())
+    const open = await openHandoff.json()
+    assert.deepEqual(open, {
+      payment_id: 'changing', state: 'open', title: 'Cabin', quantity: 1, unit_amount: 20000,
+      stay: { product_id: 'cabin', check_in_date: '2099-10-01', check_out_date: '2099-10-03', nights: 2, nightly: [10000, 10000], adults: 1, children: 0, infants: 0, cancellation_policy: 'flexible' },
+      kind: 'stay', image_url: null, starts_at: null, ends_at: null, timezone: null, product_slug: 'cabin', location_slug: 'cabin-site', cancellation_policy: null,
+      subtotal: 20000, currency: 'USD', expires_at: '2099-09-30T00:00:00.000Z', stripe_account_id: 'acct_seller', publishable_key: 'pk_test_local_boundary',
+      payment_method_types: ['card'], customer_session_client_secret: null, surcharge_basis_points: null, review: null,
+    })
     const originalPayment = await requirePayment(db, ORG, 'changing')
     const originalNights = (await db.prepare('SELECT * FROM stay_nights ORDER BY date').all()).results
     for (const table of ['payment_attempts', 'payment_claims']) {
@@ -863,6 +885,9 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
       const expired = await cancel(claims.get('changing')!)
       assert.equal(expired.status, 409)
       assert.equal((await expired.json() as { data: { code: string } }).data.code, 'payment_expired')
+      const expiredHandoff = await app.request(Object.assign(new Request(`https://payments.proof.example/api/public/payments/changing?claim=${claims.get('changing')!}`), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+      assert.equal(expiredHandoff.status, 200, await expiredHandoff.clone().text())
+      assert.deepEqual(await expiredHandoff.json(), { ...open, state: 'expired', ...(table === 'payment_attempts' ? { expires_at: NOW } : {}) })
       assert.equal(cancellations, 0)
       assert.deepEqual(await requirePayment(db, ORG, 'changing'), originalPayment)
       assert.deepEqual((await db.prepare('SELECT * FROM stay_nights ORDER BY date').all()).results, originalNights)
@@ -873,6 +898,9 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
     assert.equal(canceled.status, 200, await canceled.clone().text())
     assert.deepEqual(await canceled.json(), { status: 'canceled' })
     assert.equal((await requirePayment(db, ORG, 'changing')).state, 'failed')
+    const failedHandoff = await app.request(Object.assign(new Request(`https://payments.proof.example/api/public/payments/changing?claim=${claims.get('changing')!}`), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    assert.equal(failedHandoff.status, 200, await failedHandoff.clone().text())
+    assert.deepEqual(await failedHandoff.json(), { ...open, state: 'failed' })
     const calendar = await readStayCalendar(db, { organizationId: ORG, actorId: 'host', manage: true }, { productId: 'cabin', from: '2099-10-01', to: '2099-10-04' })
     assert.deepEqual(calendar.nights.map(night => [night.date, night.available, night.held_until === null]), [
       ['2099-10-01', true, true], ['2099-10-02', true, true], ['2099-10-03', false, false],

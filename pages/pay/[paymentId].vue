@@ -401,10 +401,12 @@ async function changeStay(edit: 'dates' | 'guests') {
   working.value = true
   actionError.value = ''
   try {
-    await publicApiMutation<{ status: 'canceled' }>(`/api/public/payments/${encodeURIComponent(paymentId)}/cancel`, {
-      method: 'POST', body: { claim: claim.value },
-      validate: (result): result is { status: 'canceled' } => isRecord(result) && result.status === 'canceled',
-    })
+    if (value.state === 'open') {
+      await publicApiMutation<{ status: 'canceled' }>(`/api/public/payments/${encodeURIComponent(paymentId)}/cancel`, {
+        method: 'POST', body: { claim: claim.value },
+        validate: (result): result is { status: 'canceled' } => isRecord(result) && result.status === 'canceled',
+      })
+    }
     await navigateTo({ path: offeringPath.value, query: {
       check_in_date: value.stay.check_in_date, check_out_date: value.stay.check_out_date,
       adults: String(value.stay.adults), children: String(value.stay.children), infants: String(value.stay.infants), stay_edit: edit,
