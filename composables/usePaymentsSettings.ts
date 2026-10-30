@@ -65,8 +65,10 @@ export async function useOrganizationServices() {
 
 export type Pricing = { captured_volume_rate_percent: string; ad_spend_rate_percent: string | null; livemode: boolean }
 export type PendingUsage = { kind: string; event_count: number; action_required: boolean }
-export type UsageBilling = { configured: boolean; pricing: Pricing | null; pending: PendingUsage[] }
+export type PaymentTerms = { fee: string; source: 'offer' | 'subscription'; stripe: string; billing: string; surcharge: string; minimumBasisPoints: number; maximumBasisPoints: number }
+export type UsageBilling = { configured: boolean; pricing: Pricing | null; pending: PendingUsage[]; terms: PaymentTerms }
 const isUsageBilling = (value: unknown): value is UsageBilling => isRecord(value) && typeof value.configured === 'boolean'
+  && isRecord(value.terms) && typeof value.terms.fee === 'string' && typeof value.terms.stripe === 'string' && typeof value.terms.billing === 'string' && typeof value.terms.surcharge === 'string' && ['offer', 'subscription'].includes(String(value.terms.source)) && Number.isSafeInteger(value.terms.minimumBasisPoints) && Number.isSafeInteger(value.terms.maximumBasisPoints)
   && Array.isArray(value.pending) && value.pending.every(row => isRecord(row) && typeof row.kind === 'string' && Number.isSafeInteger(row.event_count) && typeof row.action_required === 'boolean')
   && (value.pricing === null || (isRecord(value.pricing) && (value.pricing.ad_spend_rate_percent === null || typeof value.pricing.ad_spend_rate_percent === 'string') && typeof value.pricing.captured_volume_rate_percent === 'string' && typeof value.pricing.livemode === 'boolean'))
 

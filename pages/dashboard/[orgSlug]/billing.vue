@@ -133,8 +133,9 @@ const pending = computed(() => !!billing.value && (!!billing.value.cancelAtPerio
 // Beside a pane the index opens a way up; Business, with nothing above it, opens its first service.
 const firstLeaf = computed(() => !dashboard.canUpdateBilling.value ? null : change.value && !change.value.outline ? change.value.to : to('managed-ads'))
 
-// Homes from the quote the capacity check answers by: live (billed), drafts
-// (free), included, and what the live ones past those cost each month. A
+// Homes from the quote the capacity check answers by: live (billed on a paid
+// plan, up to what Basic includes on Basic), drafts (free), and what the live
+// ones cost each month. A
 // subscription from before homes were priced carries no homes price and is
 // charged nothing for them, so the row says so.
 const homesRow = computed<EditorNavigationItem | null>(() => {
@@ -142,9 +143,9 @@ const homesRow = computed<EditorNavigationItem | null>(() => {
   if (!current || (!current.homes.used && !current.homes.drafts && dashboard.organization.value?.vertical !== 'lodging')) return null
   const counted = `${current.homes.used} live · ${current.homes.drafts} ${current.homes.drafts === 1 ? 'draft' : 'drafts'}`
   const summary = onStarter.value
-    ? `${counted} · ${current.homes.included} included · ${nameOf(STARTER_PLAN_ID)} stops at ${current.homes.included}`
+    ? `${counted} · ${nameOf(STARTER_PLAN_ID)} includes ${current.homes.included}`
     : current.homes.additional_price_minor
-      ? `${counted} · ${current.homes.included} included · ${formatPrice(current.homes.amount_minor)} per month${current.billing.trial_end ? ' after your free trial' : ''}`
+      ? `${counted} · ${formatPrice(current.homes.amount_minor)} per month${current.billing.trial_end ? ' after your free trial' : ''}`
       : `${counted} · not billed on this subscription`
   return { id: 'homes', label: 'Homes', summary }
 })

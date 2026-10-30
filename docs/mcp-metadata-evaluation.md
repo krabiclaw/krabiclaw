@@ -166,9 +166,8 @@ Airbnb stay are distinct fixtures; never create one to stand in for another.
 | `cancel_scheduled_guest_message` | Cancel this exact pending automatic guest message. | Do not send that queued arrival message. | Cancel or resend a message already sending, sent or requiring review. |
 
 Verify home publication against the live-home allowance separately: Basic includes
-2 live homes and refuses a third; drafts remain free and unlimited. Growth and
-Business include 2 live homes, then $4 per additional home per month, separately
-from business locations. For a connected home, read both the saved calendar and
+1 live home and refuses a second; drafts remain free and unlimited. Growth and
+Business bill $4 per home per month; business locations are not billed. For a connected home, read both the saved calendar and
 the channel result. For a public paid stay, inspect the guest receipt, confirmed
 stay, held nights and recorded Stripe payment; a manual stay is no substitute.
 

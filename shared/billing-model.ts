@@ -37,11 +37,11 @@ export const SERVICE_PRICES = Object.freeze({
   strategy: Object.freeze({ monthly: 200000 }),
 })
 
-/** Homes (places to stay, each a lodging unit) every plan's price includes. */
-export const INCLUDED_HOMES = 2
+/** Live homes (places to stay, each a lodging unit) Basic allows; Growth and Business bill every live home. */
+export const BASIC_HOMES = 1
 
-/** USD cents for each home beyond the included ones, per month, the same on Growth and Business. */
-export const ADDITIONAL_HOME_PRICE = 400
+/** USD cents for each live home, per month, the same on Growth and Business. */
+export const HOME_PRICE = 400
 
 /** Business's Payments fee: a share of the payment volume it captures. */
 export const PAYMENTS_FEE_RATE = 0.014
@@ -59,13 +59,33 @@ export function ratePercent(rate: number): string {
   return String(Math.round(rate * 1e6) / 1e4)
 }
 
-/** Stripe's phrasing for the per-unit charge after an included allowance: "$4 per additional home per month". */
-export function additionalHomePrice(): string {
-  return `$${ADDITIONAL_HOME_PRICE / 100} per additional home per month`
+/** Stripe's phrasing for the per-unit charge: "$4 per home per month". */
+export function homePrice(): string {
+  return `$${HOME_PRICE / 100} per home per month`
 }
 
 /** The pricing page's and its Markdown's beta notice: new subscribers get each later price; a subscription keeps its prices for 12 months. */
 export const PRICING_NOTICE = 'Beta pricing. Prices will rise for new subscribers as KrabiClaw grows; you keep the price you subscribe at for 12 months.'
+
+/**
+ * Beta spots: each business that starts a paid plan from BETA_STARTED_AT takes
+ * one of BETA_SPOTS. Once they are taken, new subscribers pay NEXT_HOME_PRICE
+ * (USD cents) per home.
+ */
+export const BETA_SPOTS = 10
+export const BETA_STARTED_AT = '2026-10-30T00:00:00.000Z'
+export const NEXT_HOME_PRICE = 1200
+
+/** The per-home price after the beta spots, as the struck price shows it: "$12". */
+export function nextHomePrice(): string {
+  return `$${NEXT_HOME_PRICE / 100}`
+}
+
+/** The notice under the plans and in their Markdown: the beta spots left, or the beta notice once none are. */
+export function pricingNotice(betaSpotsLeft: number): string {
+  if (betaSpotsLeft < 1) return PRICING_NOTICE
+  return `Beta pricing: ${betaSpotsLeft} of ${BETA_SPOTS} spots left. After that, new subscribers pay ${nextHomePrice()} per home per month. You keep the price you subscribe at for 12 months.`
+}
 
 /** The fee as the pricing page and the plan screen state it. */
 export const PAYMENTS_FEE = `${ratePercent(PAYMENTS_FEE_RATE)}% of payment volume, plus Stripe fees`
@@ -82,8 +102,8 @@ export const BUSINESS_ADDITIONS = Object.freeze([
  * What a plan subscription bills beside its flat price, each a Stripe meter
  * and the monthly metered price that bills it at the end of the period:
  *
- * - homes report their live count (`last`), billed in graduated tiers after
- *   the included ones; locations are never billed;
+ * - homes report their live count (`last`), each billed at the home price;
+ *   locations are never billed;
  * - captured volume, Stripe cost and ad spend report USD cents as they occur
  *   (`sum`), billed at a flat rate per cent.
  *
@@ -91,13 +111,13 @@ export const BUSINESS_ADDITIONS = Object.freeze([
  */
 export const BILLING_METERS = Object.freeze({
   homes: Object.freeze({
-    name: 'Additional home',
+    name: 'Home',
     eventName: 'krabiclaw_homes',
     formula: 'last',
     unitLabel: 'home',
     plans: [GROWTH_PLAN_ID, BUSINESS_PLAN_ID],
-    tiers: [{ up_to: INCLUDED_HOMES, unit_amount: 0 }, { up_to: 'inf', unit_amount: ADDITIONAL_HOME_PRICE }],
-    description: `${INCLUDED_HOMES} homes included, then ${additionalHomePrice()}.`,
+    unitAmountDecimal: String(HOME_PRICE),
+    description: `${homePrice()}.`,
   }),
   captured_volume: Object.freeze({
     name: 'Payments fee',
@@ -206,3 +226,12 @@ export function getNewSalePlan(value: unknown): NewSalePlanId | null {
   const normalized = normalizeBillingPlanId(value)
   return isNewSalePlan(normalized) ? normalized : null
 }
+
+/** Payment explanations and surcharge bounds shared by web and native clients. */
+export const PAYMENT_TERMS = Object.freeze({
+  stripe: 'Stripe processing fees also apply. The amount depends on the payment method and transaction.',
+  billing: 'Payment volume and Stripe costs are metered and billed at the end of each period on your Business subscription.',
+  surcharge: 'Pass credit card fees on to the buyer. The surcharge is shown before they pay and included in the total. Stripe caps it for each card and never adds one to debit or prepaid cards.',
+  minimumBasisPoints: 1,
+  maximumBasisPoints: 10_000,
+})
