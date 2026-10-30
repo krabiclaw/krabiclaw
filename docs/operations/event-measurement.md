@@ -31,6 +31,7 @@ enforces the shape and the once-per-subject rule.
 | `purchase` | invoice | Stripe `invoice.paid` with a positive amount | `purchase` | Measurement Protocol |
 | `refund` | refund | Stripe refund with status `succeeded` | `refund` | Measurement Protocol |
 | `consultation_cta_click`, `product_order_external_click`, `link_click`, `donation_click` | handoffs | every click; a handoff is not a booking, payment or donation | same name | browser |
+| `phone_click` | none (the location whose number it is) | every tap on a `tel:` link to the number an active location lists; another number is ignored | same name | browser |
 
 ### Interactions and their producers
 
@@ -56,6 +57,7 @@ event (delivered with keepalive) but no GA copy.
 | --- | --- | --- |
 | `product_view`, `checkout_start` | `ProductDetailPage.vue` via `useOrganizationConversionTracking` | `view_item`, `begin_checkout` |
 | `consultation_cta_click`, `product_order_external_click`, `link_click`, `donation_click` | `useOrganizationConversionTracking` | same name |
+| `phone_click` | one click listener in `registerPageviewTracking` (`utils/pageview-tracking-runtime.client.ts`) for every `tel:` link on a tracked page, whichever component drew it; the server matches the number to a location (`dialsSameNumber`, `utils/phone.ts`) | same name |
 | `organization_created`, `domain_connected`, `subscription_upgrade`, `subscription_downgrade`, `subscription_checkout_success`, `post_created`, `post_published`, `image_uploaded`, `video_uploaded`, `media_library_viewed`, `dashboard_visited` | `useAnalytics` (measured on the platform organization; subject is the organization worked on, actor is the user; only the catalog's allowlisted scalar `properties` are kept) | same name |
 
 Browser failures use operational logging independently of analytics, authentication,

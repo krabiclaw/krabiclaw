@@ -7,6 +7,7 @@ import { HOUR_MS, getClientIp, hashClientIp, incrementHourlyRateLimit } from '~/
 import { recordOrganizationConversionEvent, type ConversionEntityType, type ConversionStage } from '~/server/utils/organization-conversions'
 import { BROWSER_INTERACTION_EVENT_NAMES, CONVERSION_EVENT_CATALOG, type OrganizationConversionEventName } from '~/utils/organization-conversion-events'
 import { normalizeVertical } from '~/utils/vertical-copy'
+import { dialsSameNumber } from '~/utils/phone'
 import { PUBLIC_PRODUCT_SQL } from '~/server/utils/product-management'
 import { defineHandler } from 'nitro'
 
@@ -198,6 +199,19 @@ export default defineHandler(async (event) => {
     if (!host) return jsonResponse({ error: 'Announcement CTA is unavailable' }, { status: 404 })
     ctaDestination = host
     metadata = { destination_hostname: host }
+  } else if (eventName === 'phone_click') {
+    stage = 'external_handoff'
+    pagePath = cleanString(body.page_path, 300) || null
+    if (pagePath && (!pagePath.startsWith('/') || pagePath.includes('?') || pagePath.includes('#'))) return jsonResponse({ error: 'Invalid page_path' }, { status: 400 })
+    const dialed = cleanString(body.phone, 40)
+    if (!dialed) return jsonResponse({ error: 'phone is required' }, { status: 400 })
+    // A call counts only to the business's own number, the one a live location lists; a page may
+    // also link to someone else's number, and that call is not this business's lead.
+    const locations = await queryAll<{ id: string; phone: string }>(db,
+      "SELECT id, phone FROM business_locations WHERE organization_id = ? AND status = 'active' AND phone IS NOT NULL", [organizationId])
+    const location = locations.find(candidate => dialsSameNumber(candidate.phone, dialed))
+    if (!location) return jsonResponse({ ok: true, ignored: true })
+    locationId = location.id; ctaDestination = 'tel'
   } else {
     return jsonResponse({ error: 'Submission conversions are server-produced' }, { status: 400 })
   }

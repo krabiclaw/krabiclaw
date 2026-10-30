@@ -154,6 +154,21 @@ export function formatPhone(value: string): string {
 }
 
 /**
+ * Whether two written numbers ring the same line. A number written with its calling code lends its
+ * country to one written without, so "+19847778288" and "(984) 777-8288" match; two national
+ * numbers match only digit for digit.
+ */
+export function dialsSameNumber(a: string, b: string): boolean {
+  const country = (parsePhoneNumberFromString(a) ?? parsePhoneNumberFromString(b))?.country
+  if (!country) {
+    const [x, y] = [a, b].map(value => value.replace(/\D/g, ''))
+    return x!.length >= 7 && x === y
+  }
+  const [x, y] = [a, b].map(value => parsePhoneNumberFromString(value, country)?.number)
+  return !!x && x === y
+}
+
+/**
  * Strict variant for manager/operational identity paths that must reject an
  * invalid number outright (mirrors the old `server/utils/whatsapp.ts`
  * `normalizePhone`'s throw-based contract). Guest-facing/lenient call sites

@@ -197,4 +197,12 @@ export function registerPageviewTracking() {
     if (document.visibilityState === 'hidden') sendDuration(currentPage)
   })
   window.addEventListener('pagehide', () => sendDuration(currentPage))
+
+  // A tap on a phone number is a call, whichever component drew the link: one listener here, so no
+  // theme or block has to remember to report it. Only a tracked page's call is a visitor's.
+  const { trackPhoneClick } = useOrganizationConversionTracking()
+  document.addEventListener('click', (event) => {
+    const link = event.target instanceof Element ? event.target.closest('a[href^="tel:"]') : null
+    if (link && currentPage.pageview) trackPhoneClick(link.getAttribute('href')!.slice('tel:'.length), currentPage.path)
+  })
 }
