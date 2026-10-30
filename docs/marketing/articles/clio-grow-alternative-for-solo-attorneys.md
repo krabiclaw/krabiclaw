@@ -69,7 +69,7 @@ Here’s how the plans compare for consultation intake and online payment collec
 | Growth | $49 | Yes | No |
 | Business | $149 | Yes | Yes, with a connected Stripe account in ready status |
 
-Growth and Business include two business locations. Additional locations cost $49 per month each, billed at the end of the period.
+Locations are not billed on any plan.
 
 ### What does Business charge for payments?
 

@@ -341,8 +341,8 @@ test('live homes are reported to their Stripe meter, drafts and locations are fr
     // Basic's quote: no period, nothing billed, and a home past the included ones not allowed to go live.
     const starterQuote = (used: number, drafts: number, adding: number, allowed: boolean) => ({
       plan: 'free', currency: 'USD',
-      homes: { used, drafts, included: 2, additional_price_minor: 900, amount_minor: 0 },
-      adding: { count: adding, additional_homes: Math.max(0, used + adding - 2) - Math.max(0, used - 2), amount_minor: allowed ? 0 : 900 * (Math.max(0, used + adding - 2) - Math.max(0, used - 2)), allowed },
+      homes: { used, drafts, included: 2, additional_price_minor: 400, amount_minor: 0 },
+      adding: { count: adding, additional_homes: Math.max(0, used + adding - 2) - Math.max(0, used - 2), amount_minor: allowed ? 0 : 400 * (Math.max(0, used + adding - 2) - Math.max(0, used - 2)), allowed },
       billing: { period_end: null, trial_end: null, prorated: false },
     })
     assert.deepEqual(await homesQuote(env, db, 'starter', 1), starterQuote(0, 0, 1, true))

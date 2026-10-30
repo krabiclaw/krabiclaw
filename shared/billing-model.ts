@@ -41,7 +41,7 @@ export const SERVICE_PRICES = Object.freeze({
 export const INCLUDED_HOMES = 2
 
 /** USD cents for each home beyond the included ones, per month, the same on Growth and Business. */
-export const ADDITIONAL_HOME_PRICE = 900
+export const ADDITIONAL_HOME_PRICE = 400
 
 /** Business's Payments fee: a share of the payment volume it captures. */
 export const PAYMENTS_FEE_RATE = 0.014
@@ -59,10 +59,13 @@ export function ratePercent(rate: number): string {
   return String(Math.round(rate * 1e6) / 1e4)
 }
 
-/** Stripe's phrasing for the per-unit charge after an included allowance: "$9 per additional home per month". */
+/** Stripe's phrasing for the per-unit charge after an included allowance: "$4 per additional home per month". */
 export function additionalHomePrice(): string {
   return `$${ADDITIONAL_HOME_PRICE / 100} per additional home per month`
 }
+
+/** The pricing page's and its Markdown's beta notice: new subscribers get each later price; a subscription keeps its prices for 12 months. */
+export const PRICING_NOTICE = 'Beta pricing. Prices will rise for new subscribers as KrabiClaw grows; you keep the price you subscribe at for 12 months.'
 
 /** The fee as the pricing page and the plan screen state it. */
 export const PAYMENTS_FEE = `${ratePercent(PAYMENTS_FEE_RATE)}% of payment volume, plus Stripe fees`
