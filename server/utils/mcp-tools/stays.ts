@@ -145,7 +145,6 @@ const stayReceipt = { type: 'object', properties: stayReceiptProperties, require
 const stayMutation = { type: 'object', properties: { stay: stayReceipt, channel_push: channelPush }, required: ['stay', 'channel_push'], additionalProperties: false }
 const paymentBalanceProperties = { stay_id: text, currency: text, paid_minor: { type: 'integer' }, payment_status: stayDetail.properties.payment_status }
 const paymentReceiptProperties = { id: text, stay_id: text, amount_minor: { type: 'integer' }, currency: text, method: payment.properties.method, paid_on: day, reference: nullableText, note: nullableText, created_at: text }
-const nightSettingFields = ['closed', 'price_minor', 'min_stay_arrival', 'max_stay', 'closed_to_arrival', 'closed_to_departure']
 const roomResult = { type: 'object', properties: { product_id: text, room: roomIdentity }, required: ['product_id', 'room'], additionalProperties: false }
 const roomDetailsResult = { type: 'object', properties: { product_id: text, product_updated_at: text, room: STAY_PHOTO_ROOM_SCHEMA }, required: ['product_id', 'product_updated_at', 'room'], additionalProperties: false }
 const roomDeletionResult = { type: 'object', properties: { product_id: text, deleted_room_id: text, photo_memberships: { type: 'array', description: 'Every photo retained on this home in Product photo order, with its current room assignment. Null means Additional photos.', items: { type: 'object', properties: { photo_id: text, room_id: nullableText }, required: ['photo_id', 'room_id'], additionalProperties: false } } }, required: ['product_id', 'deleted_room_id', 'photo_memberships'], additionalProperties: false }
@@ -219,9 +218,7 @@ export const STAYS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'set_stay_nights', domain: 'stays', minimumRole: 'admin', description: 'Close or open nights, set a nightly price, or set stay rules for a date range at one place to stay. Fields left out keep each night’s value; price_minor null inherits the weekend price on Friday/Saturday when configured, otherwise the base price; reset removes the range’s overrides. Updates the website’s bookable nights and, when connected, pushes prices, availability and stay rules to the home’s Airbnb listing through Channex. Returns channel_push on success. A failed channel update raises CHANNEL_PUSH_FAILED with committed:true; read the calendar before retrying.',
     inputSchema: { product_id: productId, from: day, to: { ...day, description: 'Exclusive; at most 500 days after from.' }, closed: { type: 'boolean' }, price_minor: { type: ['integer', 'null'], minimum: 0 },
       min_stay_arrival: { type: ['integer', 'null'], minimum: 1 }, max_stay: { type: ['integer', 'null'], minimum: 1 },
-      closed_to_arrival: { type: 'boolean' }, closed_to_departure: { type: 'boolean' }, reset: { type: 'boolean', description: 'True removes all nightly overrides in the range and cannot be combined with night settings. False or omitted requires at least one night setting.' },
-      // At least one change; reset with night settings is refused by the stay domain.
-      anyOf: ['reset', ...nightSettingFields].map(field => ({ required: [field] })) },
+      closed_to_arrival: { type: 'boolean' }, closed_to_departure: { type: 'boolean' }, reset: { type: 'boolean', description: 'True removes all nightly overrides in the range and cannot be combined with night settings. False or omitted requires at least one night setting.' } },
     required: ['product_id', 'from', 'to'], outputSchema: calendar }),
 ]
 

@@ -310,10 +310,10 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
   const beforeInvalidCalendarResponse = await request.get(calendarPath)
   expect(beforeInvalidCalendarResponse.status()).toBe(200)
   const beforeInvalidCalendar = await beforeInvalidCalendarResponse.json()
-  // The schema asks for at least one change; the stay domain refuses the combinations a client's schema rendering may let through.
+  // The stay domain owns patch validation for every caller, including MCP clients.
   const stayField = (message: string) => JSON.stringify({ status: 422, message, code: 'INVALID_STAY_FIELD' })
   for (const [fields, refusal] of [
-    [{}, 'Invalid arguments for tool set_stay_nights'],
+    [{}, stayField('Name at least one night setting to change, or reset')],
     [{ reset: false }, stayField('Name at least one night setting to change, or reset')],
     [{ reset: true, closed: true }, stayField('reset cannot be combined with night settings')],
     [{ reset: true, price_minor: null }, stayField('reset cannot be combined with night settings')],
