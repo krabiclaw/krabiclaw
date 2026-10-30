@@ -443,6 +443,9 @@ test('members talk in team conversations, see unread state and receive recorded 
     await reconcileResponsibilities(env, db, { organizationId: ORG })
     assert.equal(await assignee(), 'm-cook')
     await db.prepare("DELETE FROM member WHERE id = 'm-cook'").run()
+    // An edit that leaves responsibility alone saves while the departed assignee is still recorded, and keeps it for reconciliation to release.
+    await updateStayHome(env, db, manager, cabin.id, { max_guests: 4 })
+    assert.equal(await assignee(), 'm-cook')
     await Promise.all([
       reconcileResponsibilities(env, db, { organizationId: ORG }),
       updateStayHome(env, db, manager, cabin.id, { max_guests: 3 }),

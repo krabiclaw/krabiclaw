@@ -1,6 +1,6 @@
 import { isStayAmenityCodes, NEW_HOME_CANCELLATION_POLICIES, parseStayAmenityAnswers, planStayAmenityAnswers, STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, stayCodes, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { assertResponsibilityTarget, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership } from '~/server/utils/member-access'
+import { assertResponsibilityTarget, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership, type ResponsibilityTarget } from '~/server/utils/member-access'
 import { assertPublishedHost } from '~/server/utils/public-provider'
 import type { ProductBookingSetupInput, SessionAvailability } from '~/server/utils/availability'
 import { HTTPError } from 'nitro'
@@ -768,7 +768,7 @@ function stayUnitLabel(kind: ProductKind, unitLabel: string | null): string | nu
 }
 
 /** A place to stay is at one location of this organization, with stay settings the calendar and channels enforce. */
-async function planStayConfig(db: DbClient, organizationId: string, kind: ProductKind, value: unknown): Promise<Omit<ProductStayConfig, 'photo_rooms' | 'accessibility' | 'live'> | null> {
+async function planStayConfig(db: DbClient, organizationId: string, kind: ProductKind, value: unknown, stored?: ResponsibilityTarget): Promise<Omit<ProductStayConfig, 'photo_rooms' | 'accessibility' | 'live'> | null> {
   if (kind !== 'stay') {
     if (value !== undefined && value !== null) invalid('Only a place to stay takes stay settings')
     return null
@@ -789,7 +789,11 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
   if (typeof minNights !== 'number' || !Number.isInteger(minNights) || minNights < 1 || minNights > 365) invalid('stay.min_nights must be a whole number from 1 to 365')
   const location = await queryFirst<{ id: string }>(db, 'SELECT id FROM business_locations WHERE organization_id = ? AND id = ?', [organizationId, locationId])
   if (!location) notFound('That location is not in this organization')
-  const target = await assertResponsibilityTarget(db, organizationId, stay)
+  // An edit names the responsibility it changes; the stored target it keeps is carried, not re-checked.
+  const named = stored
+    ? Object.fromEntries((['assigned_member_id', 'assigned_team_id'] as const).filter(field => (stay[field] ?? null) !== stored[field]).map(field => [field, stay[field]]))
+    : stay
+  const target = await assertResponsibilityTarget(db, organizationId, named, stored)
   return { location_id: locationId, check_in_time: stay.check_in_time as string, check_in_end_time: checkInEnd as string | null, check_out_time: stay.check_out_time as string, max_guests: maxGuests, min_nights: minNights,
     ...planStayListing(stay), ...target }
 }
@@ -1041,6 +1045,8 @@ async function planProduct(
     /** Preloaded answers for a batch: same rules, one round trip instead of per product. */
     idOwners?: SuppliedIdOwners
     knownSlugs?: ReadonlyMap<string, string>
+    /** An edited place to stay's saved responsibility, which the edit keeps unless it names another. */
+    stayResponsibility?: ResponsibilityTarget
   },
 ): Promise<PlannedProduct> {
   if (!context.existingId && input.stay && Object.hasOwn(input.stay, 'accessibility')) invalid('Use the home accessibility operation to author accessibility information')
@@ -1075,7 +1081,7 @@ async function planProduct(
     prices: (declaredVariants[index]?.prices ?? []).map((price, priceIndex) =>
       normalizePriceInput(price, defaultCurrency, `variants[${index}].prices[${priceIndex}]`)),
   }))
-  const stay = await planStayConfig(db, organizationId, kind, input.stay)
+  const stay = await planStayConfig(db, organizationId, kind, input.stay, context.stayResponsibility)
   if (stay) {
     try { validateStayAlarmDetails(input.details ?? {}, stay.amenity_answers) }
     catch (error) { if (!(error instanceof ProductDetailError)) throw error; invalid(error.message) }
@@ -1705,6 +1711,7 @@ async function planProductUpdate(db: DbClient, input: {
   const planned = await planProduct(db, organizationId, merged, {
     organizationId: input.organizationId, existingId: productId, existingSlug: current.slug, defaultCurrency: input.defaultCurrency,
     takenSlugs: input.takenSlugs, idOwners: input.idOwners, knownSlugs: input.knownSlugs,
+    stayResponsibility: current.stay ? { assigned_member_id: current.stay.assigned_member_id, assigned_team_id: current.stay.assigned_team_id } : undefined,
   })
   planned.source = current.source
   assertVariantPricesConsistent(planned)
