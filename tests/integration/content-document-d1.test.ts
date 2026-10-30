@@ -81,19 +81,26 @@ test('document scopes, translations, block ownership and concurrent edits persis
       blocks: [{ id: 'link-a-th', source_block_id: 'body', type: 'cta', data: { label: 'Wrong root' } }] }))
     const appended = await appendContentBlock(db, translatedLinks.document.id, {
       source_block_id: 'link-b', type: 'cta', data: { label: 'Translated B' },
-    })
+    }, { actorId: null })
     const appendedLink = appended.blocks.find(block => block.source_block_id === 'link-b')
     assert.ok(appendedLink)
     let translatedBlocks = await listBlocksForDocument(db, translatedLinks.document.id)
     let firstLink = translatedBlocks.find(block => block.id === 'link-a-th')!
     assert.equal(firstLink.source_block_id, 'link-a')
-    await replaceContentBlock(db, firstLink.id, { expected_updated_at: firstLink.updated_at, data: { label: 'Edited A' } })
+    await replaceContentBlock(db, firstLink.id, { expected_updated_at: firstLink.updated_at, data: { label: 'Edited A' } }, { actorId: null })
     translatedBlocks = await listBlocksForDocument(db, translatedLinks.document.id)
     firstLink = translatedBlocks.find(block => block.id === 'link-a-th')!
     assert.equal(firstLink.source_block_id, 'link-a')
+    const afterBlockEdit = await getContentDocumentById(db, translatedLinks.document.id)
+    await replaceContentBlock(db, firstLink.id, { expected_updated_at: firstLink.updated_at, data: { label: 'Edited A' } }, { actorId: null })
+    assert.deepEqual(await getContentDocumentById(db, translatedLinks.document.id), afterBlockEdit, 'an unchanged block is not a document edit')
+    const blockReceipts = await db.prepare("SELECT actor_kind, payload_json FROM activity_entries WHERE event_name = 'content.updated' AND json_extract(payload_json, '$.entityId') = ? ORDER BY occurred_at, id").bind(translatedLinks.document.id).all<{ actor_kind: string; payload_json: string }>()
+    assert.equal(blockReceipts.results.length, 2)
+    assert.equal(JSON.parse(blockReceipts.results[1]!.payload_json).afterState.updated_at, afterBlockEdit!.updated_at)
+    assert.ok(blockReceipts.results.every(row => row.actor_kind === 'system' && JSON.parse(row.payload_json).metadata.changed_fields[0] === 'content_blocks'))
     const secondLink = translatedBlocks.find(block => block.id === appendedLink.id)!
     assert.equal(secondLink.source_block_id, 'link-b')
-    await deleteContentBlock(db, secondLink.id, { expected_updated_at: secondLink.updated_at })
+    await deleteContentBlock(db, secondLink.id, { expected_updated_at: secondLink.updated_at, actorId: null })
     assert.equal((await listBlocksForDocument(db, translatedLinks.document.id)).find(block => block.id === firstLink.id)?.source_block_id, 'link-a')
     await executeBatch(db, [buildMediaPlacementInsertQuery({ id: 'translated-descendant-image', organizationId: 'one',
       ownerType: 'content_block', ownerId: 'translated-link-image', slot: 'media', assetId: 'shared-image', sortOrder: 0 })])

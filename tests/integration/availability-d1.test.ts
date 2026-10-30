@@ -21,7 +21,7 @@ import { executeGuestThreadOperation } from '../../server/domain/guest-threads/o
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
 import { listDashboardLocations } from '../../server/utils/dashboard-context.ts'
-import { getProduct, removeProductLocation } from '../../server/utils/product-management.ts'
+import { getProduct, removeProductLocation, updateProduct } from '../../server/utils/product-management.ts'
 import { occurrenceKey } from '../../shared/bookings.ts'
 import { addLocalDays, localDateTimeToInstant, localNow } from '../../utils/timezone.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
@@ -154,6 +154,30 @@ test('session materialization is idempotent across cancel, edit and reschedule, 
     assert.equal((await getProduct(db, ORG, PRODUCT)).booking?.assigned_member_id, null)
     assert.deepEqual(await listDashboardLocations(db, ORG, ACTOR, true), [], 'historical sessions grant no visibility after host unassignment')
     assert.deepEqual((await listSessions(db, readScope)).map(session => session.id), sessionsBeforeRemoval.map(session => session.id))
+
+    // A booking-only replacement owns real child writes and must advance the
+    // Product CAS token even when its descriptive fields are unchanged.
+    await db.prepare("INSERT INTO prices (id,organization_id,product_variant_id,unit_amount,currency,type,created_by,updated_by) SELECT 'free-'||id,organization_id,id,0,'THB','one_time',?,? FROM product_variants WHERE organization_id=? AND product_id=?")
+      .bind(ACTOR, ACTOR, ORG, PRODUCT).run()
+    await db.prepare("INSERT INTO member_scheduling (member_id,organization_id,public_name,public_approved,calendar_revision,updated_at,updated_by) VALUES (?,?,'Published host',1,'host-profile',?,?)")
+      .bind(member.id, ORG, NOW, ACTOR).run()
+    const beforeBooking = await getProduct(db, ORG, PRODUCT)
+    const bookingReplacement = { organizationId: ORG, productId: PRODUCT, actor: { actorId: ACTOR }, env, patch: {}, idempotencyKey: 'booking-only-replacement',
+      booking: { env, data: { location_id: LOCATION, duration_minutes: 45, default_capacity: 6, assigned_member_id: member.id, online_payment_required: false,
+        weekly_slots: [{ weekday: 0, start_time: '14:00' }] } } }
+    await updateProduct(db, bookingReplacement)
+    const afterBooking = await getProduct(db, ORG, PRODUCT)
+    assert.equal(afterBooking.name, beforeBooking.name)
+    assert.notEqual(afterBooking.updated_at, beforeBooking.updated_at)
+    assert.equal(await db.prepare('SELECT updated_at FROM products WHERE organization_id=? AND id=?').bind(ORG, PRODUCT).first('updated_at'), afterBooking.updated_at)
+    assert.equal(afterBooking.booking?.duration_minutes, 45)
+    const receipt = JSON.parse((await db.prepare("SELECT payload_json FROM activity_entries WHERE dedupe_key=?").bind(`product-update:${ORG}:${PRODUCT}:booking-only-replacement`).first<string>('payload_json'))!)
+    assert.deepEqual(receipt.metadata.changed_fields, ['booking'])
+    assert.equal(receipt.afterState.updated_at, afterBooking.updated_at)
+    await updateProduct(db, bookingReplacement)
+    assert.equal((await getProduct(db, ORG, PRODUCT)).updated_at, afterBooking.updated_at, 'the keyed booking replay keeps the committed Product revision')
+    await assert.rejects(updateProduct(db, { ...bookingReplacement, idempotencyKey: 'stale-booking-replacement', patch: { expected_updated_at: beforeBooking.updated_at } }),
+      { statusCode: 409, data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: PRODUCT } })
   } finally { await runtime.dispose() }
 })
 

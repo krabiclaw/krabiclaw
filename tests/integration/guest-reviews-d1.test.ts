@@ -14,6 +14,8 @@ import reviewTask from '../../server/tasks/review-request-automation.ts'
 import validateRoute from '../../server/api/public/review-requests/validate.get.ts'
 import submitRoute from '../../server/api/public/review-requests/submit.post.ts'
 import { localDateAt } from '../../utils/timezone.ts'
+import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
+import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
 
 const HOUR = 3_600_000
 const at = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString()
@@ -193,6 +195,16 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     assert.equal(consultation.status, 201)
     assert.equal(consultation.body.status, 'private')
     const consultationReviewId = String(consultation.body.reviewId)
+    const progressMembership = await resolveMembership(env, { organizationId: 'org', userId: 'owner' })
+    assert(progressMembership)
+    const reviewProgress = await listBusinessOutcomes(db, memberAccessPrincipal(progressMembership, { env }), { limit: 100 })
+    for (const [reviewId, threadId] of [[dinnerReviewId, T.dinner], [consultationReviewId, T.consultation]]) {
+      const fact = reviewProgress.outcomes.find(item => item.source.table === 'reviews' && item.source.id === reviewId)
+      assert(fact)
+      assert.deepEqual(fact.subject, { kind: 'review', id: reviewId })
+      assert.deepEqual(fact.references, [{ kind: 'guest_thread', id: threadId }], 'the review writer records the actual request id; the progress reference must not use the operational booking id')
+    }
+
     await assert.rejects(setReviewStatus(db, 'org', consultationReviewId, 'approved'), /shared their review privately/)
 
     // Read back through the public projection: before moderation nothing; after, only the consented text.

@@ -347,7 +347,8 @@ async function chooseDates() {
   if (!currentDay.value || start.compare(currentDay.value) < 0) { dateError.value = 'Choose today or a future night in the home’s timezone.'; return }
   if (end.compare(start) < 0 || end.compare(start) >= 500) { dateError.value = 'Choose an end night on or after the start, with at most 500 nights.'; return }
   if (!await changeMonth(start)) { dateError.value = writeError.value; return }
-  selectedDates.value = Array.from({ length: end.compare(start) + 1 }, (_, index) => start.add({ days: index }))
+  // Reka focuses the last selected value; keep a range edit on its start.
+  selectedDates.value = Array.from({ length: end.compare(start) + 1 }, (_, index) => end.subtract({ days: index }))
   datesOpen.value = false
   if (!pane.value) drawerOpen.value = true
 }

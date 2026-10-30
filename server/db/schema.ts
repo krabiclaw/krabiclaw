@@ -105,7 +105,7 @@ export const requests = sqliteTable("requests", {
  // reservation is the bookings / reservations row that links back here; this
  // column only says which kind of thread the inbox is showing. A contact
  // thread is not a degenerate booking and carries no booking columns.
- kind: text({ enum: ["contact", "booking", "reservation", "work"] }).notNull(),
+ kind: text({ enum: ["contact", "booking", "reservation", "stay"] }).notNull(),
  organization_id: text().references((): AnySQLiteColumn => organization.id, { onDelete: "cascade" }),
  location_id: text().references((): AnySQLiteColumn => business_locations.id, { onDelete: "set null" }),
  user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
@@ -2978,6 +2978,9 @@ export const post_publications = sqliteTable("post_publications", {
 	provider_handles_json: text().default("{}").notNull(),
 	payload_hash: text().notNull(),
 	attempt_id: text(),
+	// Retained after the in-flight claim clears, so its actor is read from the
+	// exact initiating activity rather than a timestamp-ordered guess.
+	initiating_activity_id: text().references(() => activity_entries.id, { onDelete: "set null" }),
 	error_code: text(),
 	error_message: text(),
 	published_at: text(),

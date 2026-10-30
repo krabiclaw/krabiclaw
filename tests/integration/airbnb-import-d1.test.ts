@@ -264,7 +264,7 @@ async function boot() {
     const env = {
       ...await runtime.getBindings<CloudflareEnv>(), DB: db, CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k', STRIPE_SECRET_KEY: 'sk_test_local_d1',
       BETTER_AUTH_URL: BASE, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test', GOOGLE_CLIENT_ID: 'test-google-client',
-      GOOGLE_CLIENT_SECRET: 'test-google-secret', APPLE_APP_BUNDLE_ID: 'com.krabiclaw.app', MEDIA_BASE_URL: 'https://media.proof.example', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
+      GOOGLE_CLIENT_SECRET: 'test-google-secret', APPLE_APP_BUNDLE_ID: 'com.krabiclaw.app', APPLE_SERVICES_ID: 'com.krabiclaw.web', MEDIA_BASE_URL: 'https://media.proof.example', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
     } as unknown as CloudflareEnv
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
@@ -523,10 +523,12 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
   }
 })
 
-test('actual weekday and weekend rules survive default edits, protected refresh and the rolling window', { timeout: 120_000 }, async (context) => {
+test('actual dated, weekday and weekend rules survive default edits, protected refresh and the rolling window', { timeout: 120_000 }, async (context) => {
   const { runtime, db, env } = await boot()
   const channex = new FakeChannex()
   const firstDate = today()
+  const seasonal = [{ start_date: addDays(firstDate, -10), end_date: addDays(firstDate, -5), min_nights: 7 }]
+  channex.availabilityRules.seasonal_min_nights = seasonal
   channex.availabilityRules.day_of_week_min_nights = [2, -1, -1, -1, -1, -1, -1]
   channex.availabilityRules.booking_lead_time = 48
   channex.weekendPrice = 225
@@ -545,6 +547,7 @@ test('actual weekday and weekend rules survive default edits, protected refresh 
     assert.deepEqual(await db.prepare('SELECT min_stay_arrival, price_minor FROM product_nights WHERE product_id = ? AND date = ?').bind(productId, firstDate).first(), { min_stay_arrival: 11, price_minor: 21000 })
     await updateStayHome(env, db, manager, productId, { min_nights: 9, base_price_minor: 20000 })
     assert.equal(((channex.settings.find(settings => settings.availability_settings)!.availability_settings as { availability_settings: { booking_lead_time: number } }).availability_settings).booking_lead_time, 48)
+    assert.deepEqual((channex.settings.find(settings => settings.availability_settings)!.availability_settings as { availability_settings: { seasonal_min_nights: unknown } }).availability_settings.seasonal_min_nights, seasonal)
     await connection.refreshContent(productId)
     await updateStayHome(env, db, manager, productId, { min_nights: 10, base_price_minor: 21000 })
     const changed = await readStayCalendar(db, manager, { productId, from: monday, to: addDays(tuesday, 1) })
@@ -827,7 +830,7 @@ test('a connection renewal failure during full sync prevents its second ARI call
   }
 })
 
-test('a renewal failure after the import minimum-stay journal is saved cancels the unsent provider write without holding the connection for review', { timeout: 120_000 }, async (context) => {
+test('a renewal failure before a repeatable minimum-stay update cancels the unsent provider write', { timeout: 120_000 }, async (context) => {
   const { runtime, db, env } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
@@ -840,52 +843,31 @@ test('a renewal failure after the import minimum-stay journal is saved cancels t
     context.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.parse(`${from}T18:00:00.000Z`) })
     assert.equal(today(), from)
     channex.properties[0]!.settings = { min_stay_type: 'both' }
-    await db.prepare(`CREATE TRIGGER refuse_pending_connection_renewal BEFORE UPDATE OF updated_at ON channex_connections
-      WHEN OLD.pending_step = 'update_min_stay_type' AND NEW.pending_step IS OLD.pending_step AND NEW.operation_id IS OLD.operation_id
-      BEGIN SELECT RAISE(ABORT, 'Connection renewal refused while minimum-stay intent is pending'); END`).run()
-    let heldJournal = false
-    const prepare = db.prepare.bind(db)
-    const faultDb = new Proxy(db, { get(target, key) {
-      if (key === 'prepare') return (query: string) => {
-        const statement = prepare(query)
-        return new Proxy(statement, { get(target, key) {
-          if (key === 'bind') return (...values: unknown[]) => {
-            const bound = target.bind(...values)
-            if (heldJournal || !values.includes('update_min_stay_type')) return bound
-            heldJournal = true
-            return new Proxy(bound, { get(target, key) {
-              if (key === 'run') return context.mock.fn(async () => {
-                const written = await target.run()
-                const journal = await db.prepare('SELECT status, operation_id, pending_step FROM channex_connections WHERE organization_id = ?').bind(ORG).first<{ status: string; operation_id: string; pending_step: string }>()
-                assert.equal(journal!.status, 'connected')
-                assert.ok(journal!.operation_id)
-                assert.equal(journal!.pending_step, 'update_min_stay_type')
-                for (let minute = 0; minute < 5; minute++) {
-                  context.mock.timers.tick(60_000)
-                  assert.equal(await db.prepare('SELECT pending_step FROM channex_connections WHERE organization_id = ?').bind(ORG).first('pending_step'), 'update_min_stay_type')
-                }
-                return written
-              })
-              const value = Reflect.get(target, key, target)
-              return typeof value === 'function' ? value.bind(target) : value
-            } })
-          }
-          const value = Reflect.get(target, key, target)
-          return typeof value === 'function' ? value.bind(target) : value
-        } })
+    let reachedUpdateRead = false
+    globalThis.fetch = async (input, init = {}) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
+      const response = await channex.fetch(input, init)
+      if (!reachedUpdateRead && (init.method ?? 'GET') === 'GET' && url.pathname === `/api/v1/properties/${channex.properties[0]!.id}`) {
+        reachedUpdateRead = true
+        await db.prepare(`CREATE TRIGGER refuse_pending_connection_renewal BEFORE UPDATE OF updated_at ON channex_connections
+          WHEN OLD.operation_id IS NOT NULL AND NEW.operation_id IS OLD.operation_id
+          BEGIN SELECT RAISE(ABORT, 'Connection renewal refused before minimum-stay update'); END`).run()
+        for (let minute = 0; minute < 5; minute++) {
+          context.mock.timers.tick(60_000)
+          assert.equal(await db.prepare('SELECT pending_step FROM channex_connections WHERE organization_id = ?').bind(ORG).first('pending_step'), null)
+        }
       }
-      const value = Reflect.get(target, key, target)
-      return typeof value === 'function' ? value.bind(target) : value
-    } })
+      return response
+    }
     const before = channex.seen.length
-    await assert.rejects(new AirbnbConnection(faultDb, env, ORG, OWNER).advance(productId), (error: unknown) => {
+    await assert.rejects(connection.advance(productId), (error: unknown) => {
       assert(error instanceof HTTPError)
       assert.equal(error.status, 503)
       assert.equal(error.data?.code, 'CONNECTION_RENEWAL_FAILED')
-      assert(errorChainForTelemetry(error).some(cause => cause.message.includes('Connection renewal refused while minimum-stay intent is pending')))
+      assert(errorChainForTelemetry(error).some(cause => cause.message.includes('Connection renewal refused before minimum-stay update')))
       return true
     })
-    assert.equal(heldJournal, true)
+    assert.equal(reachedUpdateRead, true)
     assert.deepEqual(channex.seen.slice(before).filter(request => request.method !== 'GET'), [])
     assert.deepEqual(channex.properties[0]!.settings, { min_stay_type: 'both' })
     assert.deepEqual(await db.prepare('SELECT operation_id, pending_step, status FROM channex_connections WHERE organization_id = ?').bind(ORG).first(), { operation_id: null, pending_step: null, status: 'connected' })
@@ -1599,12 +1581,13 @@ for (const target of ['rolling default', 'listing minimum'] as const) {
         const state = await db.prepare('SELECT status, pending_step, operation_id FROM channex_connections').first<{ status: string; pending_step: string | null; operation_id: string | null }>()
         const currentMinimum = target === 'listing minimum' ? await listingMinimumNights(env, channex.channelId, LISTING) : channex.ratePlans.get(channex.ratePlan)!.min_stay_arrival
         if (outcome === 'uncertain') {
-          assert.equal(state!.status, 'needs_review')
-          assert.equal(state!.pending_step, target === 'listing minimum' ? 'update_listing_minimum' : 'update_calendar_defaults')
-          assert.ok(state!.operation_id)
+          assert.deepEqual(state, { status: 'connected', pending_step: null, operation_id: null })
           assert.equal(currentMinimum, canonicalMinimum, 'the unconfirmed mutation actually applied')
-          await assert.rejects(connection.refreshContent(productId), { status: 409, data: { code: 'CONNECTION_NEEDS_REVIEW' } })
-          assert.equal(attempts, 1, 'the uncertain provider write remains fenced')
+          assert.ok((await connection.listings()).some(listing => listing.id === LISTING))
+          assert.equal((await connection.details(LISTING)).minimumNights, channex.availabilityRules.default_min_nights)
+          failWrite = false
+          assert.equal((await connection.refreshContent(productId)).stage, 'complete')
+          assert.equal(attempts, 1, 'readback recognizes the applied update without repeating it')
         } else {
           assert.deepEqual(state, { status: 'connected', pending_step: null, operation_id: null })
           assert.equal(currentMinimum, 1, 'the refused mutation did not apply')
@@ -1820,7 +1803,6 @@ test('the import asks only for what Airbnb leaves out, and stops when Airbnb has
     }
     channex.availabilityRules = realRules
     for (const rules of [
-      { ...realRules, seasonal_min_nights: [{ start_date: today(), end_date: addDays(today(), 2), min_nights: 7 }] },
       { ...realRules, day_of_week_min_nights: [1, 2] },
       { ...realRules, day_of_week_min_nights: [0, -1, -1, -1, -1, -1, -1] },
     ]) {

@@ -35,6 +35,7 @@ import { templateAllowsPageDocumentAt, templatePageDocumentPaths } from '~/share
 import type { PublicTemplateDefinition } from '~/utils/template-registry'
 import { CLAIMED_PUBLIC_ROUTES } from '#claimed-public-routes'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
+import { creationRequestHash, organizationEventQuery } from '~/server/utils/organization-events'
 
 export interface TenantPageEditorInput {
   id?: string
@@ -761,10 +762,12 @@ export async function prepareTenantPageCreate(db: DbClient, input: TenantPageCre
     }),
     path, title: metadata.title, summary: metadata.summary, createdBy: input.userId, updatedBy: input.userId,
   }
-  const prepared = prepareContentDocumentWithBlocks(representation, blocksAsInputs(blocks), {
-    additionalQueriesAfter: [...placementQueries, publicResourceCacheInvalidationQuery(input.organizationId, 'tenant-page-create')],
-  })
-  return { variantId, path, queries: prepared.queries }
+  const prepared = prepareContentDocumentWithBlocks(representation, blocksAsInputs(blocks), { additionalQueriesAfter: placementQueries })
+  return { variantId, path, queries: [...prepared.queries,
+    organizationEventQuery({ organizationId: input.organizationId, actorId: input.userId, eventType: 'content.updated', entityType: 'page', entityId: variantId,
+      afterState: { updated_at: prepared.document.updated_at },
+      metadata: { operation: 'created', changed_fields: ['title', 'summary', 'content_blocks'], evidence_basis: 'persisted_change', locale, page_id: pageId } }),
+    publicResourceCacheInvalidationQuery(input.organizationId, 'tenant-page-create')] }
 }
 
 /** True when a batch failed on the one-page-per-Product index. */
@@ -942,7 +945,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
   // one block" into a silent full-document rewrite, and made the update reject
   // a path the caller never named. pageType and recipe are the page's identity,
   // resolved above against the source-locale rule, not content the caller omits.
-  const effectiveInput = { ...input.data, pageType, recipe: identity.recipe }
+  const effectiveInput = { ...input.data, summary: input.data.summary === undefined ? row.summary : input.data.summary, pageType, recipe: identity.recipe }
   const path = row.path
   const metadata = metadataForInput(effectiveInput, row.locale, path)
   const blocks = normalizeTenantPageBlocks(preserveOmittedBlockMedia(input.data.blocks, currentBlocks))
@@ -963,6 +966,24 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
   }
   const now = new Date().toISOString()
   const placementQueries = await tenantPagePlacementQueries(db, input.scope.organizationId, blocks, now)
+  const blockValues = (items: TenantPageBlock[]) => blocksAsInputs(items).map(block => ({
+    id: block.id, source_block_id: block.source_block_id ?? null, parent_block_id: block.parent_block_id ?? null,
+    level: block.level ?? null, type: block.type, data: block.data,
+  }))
+  const blocksChanged = placementQueries.length > 0 || await creationRequestHash(blockValues(blocks)) !== await creationRequestHash(blockValues(currentBlocks))
+  const changedFields = [
+    ...(metadata.title !== row.title ? ['title'] : []),
+    ...(metadata.summary !== row.summary ? ['summary'] : []),
+    ...(pageType !== row.page_type ? ['page_type'] : []),
+    ...(metadata.recipe !== row.recipe ? ['recipe'] : []),
+    ...(sortOrder !== row.sort_order ? ['sort_order'] : []),
+    ...(bindingQueries.length ? ['product_id'] : []),
+    ...(blocksChanged ? ['content_blocks'] : []),
+  ]
+  if (!changedFields.length) {
+    if (path !== '/') await refreshSocialCard({ db, env: input.env, owner: { owner_type: 'content_document', owner_id: variantId }, actorId: input.userId })
+    return { page: await getTenantPageForEditor(db, variantId, input.scope) }
+  }
   const updateVariant: BatchQuery = {
     query: 'UPDATE content_documents SET path = ?, title = ?, summary = ?, updated_by = ? WHERE id = ? AND organization_id = ?',
     params: [path, metadata.title, metadata.summary, input.userId, variantId, input.scope.organizationId],
@@ -975,8 +996,10 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
       row.page_id, input.scope.organizationId, variantId],
   }
   await updateContentDocument(db, variantId, {
-    blocks: blocksAsInputs(blocks), expected_updated_at: input.data.expectedUpdatedAt,
-    additionalQueriesAfter: [...placementQueries, updateVariant, updatePage, ...bindingQueries, publicResourceCacheInvalidationQuery(input.scope.organizationId, 'tenant-page-update')],
+    blocks: blocksChanged ? blocksAsInputs(blocks) : undefined, expected_updated_at: input.data.expectedUpdatedAt,
+    actorId: input.userId, changedFields,
+    additionalQueriesAfter: [...placementQueries, updateVariant, updatePage, ...bindingQueries,
+      publicResourceCacheInvalidationQuery(input.scope.organizationId, 'tenant-page-update')],
   })
   // The home page has no card of its own, and the organization's card draws
   // the share image rather than anything on the page.

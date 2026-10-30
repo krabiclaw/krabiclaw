@@ -35,10 +35,9 @@ import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
  * listings, disconnect, and release everything in Channex when the organization
  * is deleted.
  *
- * Every step holds the row's operation lock. A provider write is preceded by
- * naming it in pending_step; if that write fails without proof Channex refused
- * it, the connection is held in needs_review so nothing creates a second
- * resource on retry.
+ * Mutating steps hold the row's operation lock. Resource lifecycle changes name
+ * their pending_step so an uncertain result is held for review. Settings PUTs
+ * target existing resources and can be re-read and repeated under that lock.
  */
 
 export type ConnectionStatus = 'not_connected' | 'authorizing' | 'connected' | 'disconnecting' | 'needs_review'
@@ -210,7 +209,7 @@ export class AirbnbConnection {
     await check?.()
     const entries = Object.entries(values)
     const result = await execute(this.db, `
-      UPDATE channex_connections SET ${entries.map(([key]) => `${key} = ?`).join(', ')}, updated_at = ?
+      UPDATE channex_connections SET ${[...entries.map(([key]) => `${key} = ?`), 'updated_at = ?'].join(', ')}
        WHERE organization_id = ? AND operation_id = ?`,
     [...entries.map(([, value]) => value ?? null), now(), this.organizationId, row.operation_id])
     if (!result.meta.changes) fail(409, 'CONNECTION_CHANGED', 'The Airbnb connection changed. Refresh and try again.')
@@ -389,7 +388,8 @@ export class AirbnbConnection {
 
   private async connected(): Promise<ConnectionRow & { channel_id: string }> {
     const row = await this.row()
-    if (!row || row.status !== 'connected' || !row.channel_id) fail(409, 'NOT_CONNECTED', 'Connect your Airbnb account first.')
+    // The journal fences writes; listing reads must remain available to verify an uncertain write.
+    if (!row || !row.channel_id || !['connected', 'needs_review'].includes(row.status)) fail(409, 'NOT_CONNECTED', 'Connect your Airbnb account first.')
     return row as ConnectionRow & { channel_id: string }
   }
 
@@ -1114,10 +1114,11 @@ export class AirbnbConnection {
   /** Send the configured home's calendar through the outbox: one restrictions call and one availability call. */
   private async deliverCalendar(row: ConnectionRow, mapping: MappingRow, lease?: DeliveryLease): Promise<SuccessfulChannelPush> {
     const target = { property_id: string(mapping.property_id, 'property_id'), room_type_id: string(mapping.room_type_id, 'room_type_id'), rate_plan_id: string(mapping.rate_plan_id, 'rate_plan_id') }
-    await configureStayCalendar(this.db, this.env, this.organizationId, await readStayHome(this.db, this.manager(), mapping.product_id), target, async (step, action) => {
-      await this.save(row, { pending_step: step }, lease?.check)
+    // Existing-resource settings PUTs are repeatable; the sync queue re-reads their result under these same lease checks.
+    await configureStayCalendar(this.db, this.env, this.organizationId, await readStayHome(this.db, this.manager(), mapping.product_id), target, async (action) => {
+      await this.save(row, {}, lease?.check)
       await action()
-      await this.save(row, { pending_step: null }, lease?.check)
+      await this.save(row, {}, lease?.check)
     })
     const pushed = await syncStayCalendar(this.db, this.env, this.manager(), mapping.product_id, target, lease)
     if (pushed.state === 'needs_review') fail(502, 'PROVIDER_VERIFICATION_FAILED', `Channex rejected part of the calendar: ${pushed.detail}`)

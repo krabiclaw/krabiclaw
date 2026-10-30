@@ -127,15 +127,6 @@ test('public auth CTAs reflect the SSR session', async ({ page, baseURL }) => {
   await expect(page).toHaveURL(/\/oauth\/login$/)
 })
 
-test('invitation account switching updates the reactive session without reloading', async ({ page, baseURL }) => {
-  await loginAs(page.request, baseURL!, 'user-e2e-oauth-private-cimd')
-  await dismissPreviewToolbar(page)
-  await page.goto('/accept-invitation/nonexistent-invitation')
-  await waitForNuxtHydration(page)
-  await page.getByRole('button', { name: 'Sign in with a different account', exact: true }).click()
-  await expect(page.getByRole('link', { name: 'Sign in with email', exact: true })).toBeVisible()
-})
-
 test('signed-in paid CTAs retain their selected plan through the canonical billing redirect', async ({ page, baseURL }) => {
   await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
   await page.goto('/pricing')

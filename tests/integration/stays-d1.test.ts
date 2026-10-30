@@ -544,8 +544,11 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('room-en', ?, 'en', 1, 'published')").bind(ORG).run()
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
     const lake = await home(db, env, { name: 'Lake house', location: 'lake-site' })
-    // Like the CMS, carry the catalog item on the site while it is unlisted.
+    // A draft home owns its photos before it has a publication row. Withdrawing
+    // an already unlisted home preserves that state instead of inventing one.
     await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: false, actor: { actorId: OWNER } })
+    assert.equal(await db.prepare('SELECT product_id FROM product_publications WHERE organization_id = ? AND product_id = ?').bind(ORG, cabin.id).first(), null)
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).publications, [])
     const membership = await resolveMembership(env, { organizationId: ORG, userId: OWNER })
     assert(membership)
     const principal = memberAccessPrincipal(membership, { env })
@@ -560,7 +563,19 @@ test('authored photo rooms move photos atomically and follow the listing placeme
       await db.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url, thumbnail_url, status) VALUES (?, ?, ?, ?, 'uploaded', ?, ?, ?)")
         .bind(id, organizationId, kind, kind === 'video' ? 'cloudflare_stream' : 'cloudflare_images', `https://imagedelivery.example.test/hash/${id}/public`, kind === 'video' ? 'https://videodelivery.net/room-video/thumbnails/thumbnail.jpg' : null, status).run()
     }
+    await assert.rejects(arrangeProductPhotos(db, { organizationId: 'foreign-host', env, principal, productId: cabin.id, from: [], to: ['room-a'] }), { status: 404 })
+    await assert.rejects(arrangeProductPhotos(db, { organizationId: ORG, env, principal: { ...principal, organizationId: 'foreign-host' }, productId: cabin.id, from: [], to: ['room-a'] }), { status: 403 })
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos, [])
     await arrangeProductPhotos(db, { organizationId: ORG, env, principal, productId: cabin.id, from: [], to: ['room-a', 'room-b', 'room-c'] })
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c'])
+    await arrangeProductPhotos(db, { organizationId: ORG, env, principal, productId: cabin.id, from: ['room-a', 'room-b', 'room-c'], to: ['room-a', 'room-b', 'room-c'] })
+    const photoAudit = await db.prepare(`SELECT actor_kind, actor_user_id, payload_json FROM activity_entries
+      WHERE organization_id = ? AND event_name = 'media.placement_changed' AND json_extract(payload_json, '$.entityId') = ?`).bind(ORG, cabin.id).all<{ actor_kind: string; actor_user_id: string; payload_json: string }>()
+    assert.equal(photoAudit.results.length, 1)
+    assert.deepEqual([photoAudit.results[0]!.actor_kind, photoAudit.results[0]!.actor_user_id], ['member', OWNER])
+    assert.deepEqual(JSON.parse(photoAudit.results[0]!.payload_json), { entityType: 'product', entityId: cabin.id, actorType: 'member', beforeState: null,
+      metadata: { operation: 'arrange', slots: ['image', 'gallery'], changed_fields: ['media.image', 'media.gallery'] },
+      afterState: { asset_ids: ['room-a', 'room-b', 'room-c'] } })
     await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { bedrooms: 2, beds: 3, bathrooms: 1 } } })
     assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, [])
     assert.deepEqual((await readStayHome(db, manager, cabin.id)).photo_rooms, [])
@@ -936,6 +951,8 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     assert.deepEqual(beforeRoomRemoval.photo_rooms, [roomA, roomB, { ...roomC, photo_ids: ['room-c', 'room-a'] }])
     const publicDetail = await loadPublicProductApiDetail(env, db, ORG, true, 'cabin-site', cabin.slug)
     assert(publicDetail)
+    assert.equal(publicDetail.product.image?.asset_id, 'room-c')
+    assert.deepEqual(publicDetail.product.gallery.map(photo => photo.asset_id), ['room-a'])
     assert.deepEqual(publicDetail.product.stay?.photo_rooms, beforeRoomRemoval.photo_rooms)
     // Replacing the only placement through the generic media owner clears its
     // old room too. Restoring the picture cannot restore that old membership.

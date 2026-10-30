@@ -1169,6 +1169,13 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
     assert.ok(['1234567890', '2222222222', '3333333333'].some(id => url.pathname === `/v25/customers/${id}/googleAds:search`), url.pathname)
     if (providerUnavailable) return Response.json({ error: 'Reporting unavailable at external boundary' }, { status: 503 })
     const query = JSON.parse(String(init?.body)).query as string
+    // The mutation now reads the selected campaign before changing it, so
+    // its capture records observed settings rather than caller guesses.
+    if (query.includes('FROM campaign WHERE campaign.id = 222')) {
+     const existing = campaignMutations.at(-1)
+     return Response.json({ results: existing ? [{ campaign: { id: '222', name: 'Paused Search setup', status: existing.status, advertisingChannelType: 'SEARCH' }, campaignBudget: { id: '888', amountMicros: '1000000' } }] : [] })
+    }
+    if (query.includes('FROM ad_group')) return Response.json({ results: [] })
     if (query.includes('metrics.cost_micros')) {
      return Response.json({ results: query.includes("'2026-10-01'") ? [] : [{ customer: { currencyCode: 'USD' }, metrics: { costMicros: '12500000', clicks: '10', impressions: '100', conversions: 1 } }] })
     }

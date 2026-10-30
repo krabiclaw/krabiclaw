@@ -23,15 +23,37 @@ export interface GoogleAdsCustomer {
   error?: string
 }
 
-/** Google's own code and message for a failed Ads request, kept short enough to show. */
-function googleAdsError(status: number, body: string): { code?: string; message: string } {
-  if (!body.trimStart().startsWith('{')) return { message: `${status}: ${body.slice(0, 200)}` }
-  const parsed = JSON.parse(body) as { error?: { message?: string; details?: Array<{ errors?: Array<{ message?: string; errorCode?: Record<string, string>; location?: { fieldPathElements?: Array<{ fieldName: string; index?: number }> } }> }> } }
-  const detail = parsed.error?.details?.[0]?.errors?.[0]
-  const code = detail?.errorCode ? Object.values(detail.errorCode)[0] : undefined
-  const field = detail?.location?.fieldPathElements?.map(element => element.index === undefined ? element.fieldName : `${element.fieldName}[${element.index}]`).join('.')
-  const message = `${detail?.message ?? parsed.error?.message ?? body.slice(0, 200)}${field ? ` (${field})` : ''}`
-  return { code, message: code ? `${code}: ${message}` : `${status}: ${message}` }
+/** Google's structured refusal is stronger evidence than an HTTP/transport failure. */
+function googleAdsError(status: number, body: string): { code?: string; message: string; reason: string; definiteRefusal: boolean } {
+  type Failure = { error?: { code?: number; status?: string; message?: string; details?: Array<{ errors?: Array<{ message?: string; errorCode?: Record<string, string>; location?: { fieldPathElements?: Array<{ fieldName: string; index?: number }> } }> }> } }
+  const parsed = (() => { try { return JSON.parse(body) as Failure } catch { return null } })()
+  if (!parsed) return { message: `${status}: ${body.slice(0, 200)}`, reason: body.slice(0, 500), definiteRefusal: false }
+  const details = (parsed.error?.details ?? []).flatMap(detail => detail.errors ?? [])
+  const code = details[0]?.errorCode ? Object.values(details[0].errorCode)[0] : undefined
+  const reason = details.map(detail => {
+    const detailCode = Object.values(detail.errorCode ?? {})[0]
+    const field = detail.location?.fieldPathElements?.map(element => element.index === undefined ? element.fieldName : `${element.fieldName}[${element.index}]`).join('.')
+    return `${detailCode ? `${detailCode}: ` : ''}${detail.message ?? parsed.error?.message ?? body.slice(0, 200)}${field ? ` (${field})` : ''}`
+  }).join('; ') || parsed.error?.message || body.slice(0, 500)
+  // Our mutate calls keep Google's atomic partialFailure=false default.
+  // Only a structured definite refusal establishes that nothing applied;
+  // deadline/internal errors and unparseable responses remain uncertain.
+  const definiteRefusal = status >= 400 && status < 500 && parsed.error?.code === status && (
+    parsed.error.status
+      ? ['INVALID_ARGUMENT', 'UNAUTHENTICATED', 'PERMISSION_DENIED', 'NOT_FOUND', 'FAILED_PRECONDITION', 'OUT_OF_RANGE', 'ALREADY_EXISTS', 'RESOURCE_EXHAUSTED', 'ABORTED'].includes(parsed.error.status)
+      : details.length > 0 && details.every(detail => detail.errorCode && !('internalError' in detail.errorCode))
+  )
+  return { code, message: code ? reason : `${status}: ${reason}`, reason, definiteRefusal }
+}
+
+export class GoogleAdsMutationError extends Error {
+  readonly outcome: 'not_applied' | 'unknown'
+  readonly requestId: string | null
+  constructor(outcome: 'not_applied' | 'unknown', message: string, options: ErrorOptions & { requestId?: string | null } = {}) {
+    super(message, options)
+    this.outcome = outcome
+    this.requestId = options.requestId ?? null
+  }
 }
 
 /** Formats a 10-digit customer ID as XXX-XXX-XXXX */
@@ -359,6 +381,26 @@ export interface CreateCampaignResult {
   adGroupResourceName: string
   adResourceName: string
   status: string
+  requestId: string | null
+}
+
+export function validateGoogleAdsSearchCampaign(input: CreateSearchCampaignInput): void {
+  if (!input.name.trim()) throw new HTTPError({ statusCode: 400, message: 'Campaign name is required' })
+  if (!Number.isSafeInteger(input.dailyBudgetAmountMicros) || input.dailyBudgetAmountMicros < 1000000) throw new HTTPError({ statusCode: 400, message: 'dailyBudgetAmountMicros must be an integer of at least 1000000' })
+  if (typeof input.containsEuPoliticalAdvertising !== 'boolean') throw new HTTPError({ statusCode: 400, message: 'The advertiser must declare whether the campaign contains EU political advertising' })
+  if (input.status !== undefined && input.status !== 'ENABLED' && input.status !== 'PAUSED') throw new HTTPError({ statusCode: 400, message: 'Campaign status must be ENABLED or PAUSED' })
+  if (input.headlines.length < 3 || input.headlines.length > 15 || new Set(input.headlines).size !== input.headlines.length || input.headlines.some(text => !text.trim() || text.length > 30)) {
+    throw new HTTPError({ statusCode: 400, message: 'Google Responsive Search Ads require 3 to 15 unique nonempty headlines of at most 30 characters each' })
+  }
+  if (input.descriptions.length < 2 || input.descriptions.length > 4 || new Set(input.descriptions).size !== input.descriptions.length || input.descriptions.some(text => !text.trim() || text.length > 90)) {
+    throw new HTTPError({ statusCode: 400, message: 'Google Responsive Search Ads require 2 to 4 unique nonempty descriptions of at most 90 characters each' })
+  }
+  let target: URL
+  try { target = new URL(input.targetUrl) } catch (error) { throw new HTTPError({ statusCode: 400, message: 'targetUrl must be a valid http or https URL', cause: error }) }
+  if (!['http:', 'https:'].includes(target.protocol)) throw new HTTPError({ statusCode: 400, message: 'targetUrl must be a valid http or https URL' })
+  if (input.keywords.some(keyword => !keyword.text.trim() || (keyword.matchType !== undefined && !['EXACT', 'PHRASE', 'BROAD'].includes(keyword.matchType)))) {
+    throw new HTTPError({ statusCode: 400, message: 'Keywords require nonempty text and an EXACT, PHRASE or BROAD match type' })
+  }
 }
 
 /** Atomically creates a Search Campaign with Budget, Ad Group, Keywords, and RSA */
@@ -368,6 +410,7 @@ export async function createGoogleAdsSearchCampaign(
   customerId: string,
   input: CreateSearchCampaignInput,
 ): Promise<CreateCampaignResult> {
+  validateGoogleAdsSearchCampaign(input)
   const cid = cleanCustomerId(customerId)
   const headers = googleAdsHeaders(accessToken, developerToken)
 
@@ -375,24 +418,8 @@ export async function createGoogleAdsSearchCampaign(
   const tempCampaignId = '-2'
   const tempAdGroupId = '-3'
 
-  if (!input.name.trim()) throw new Error('Campaign name is required')
-  if (!Number.isSafeInteger(input.dailyBudgetAmountMicros) || input.dailyBudgetAmountMicros < 1000000) throw new Error('dailyBudgetAmountMicros must be an integer of at least 1000000')
-  if (typeof input.containsEuPoliticalAdvertising !== 'boolean') throw new Error('The advertiser must declare whether the campaign contains EU political advertising')
-  if (input.status !== undefined && input.status !== 'ENABLED' && input.status !== 'PAUSED') throw new Error('Campaign status must be ENABLED or PAUSED')
-  if (input.headlines.length < 3 || input.headlines.length > 15 || new Set(input.headlines).size !== input.headlines.length || input.headlines.some(text => !text.trim() || text.length > 30)) {
-    throw new Error('Google Responsive Search Ads require 3 to 15 unique nonempty headlines of at most 30 characters each')
-  }
-  if (input.descriptions.length < 2 || input.descriptions.length > 4 || new Set(input.descriptions).size !== input.descriptions.length || input.descriptions.some(text => !text.trim() || text.length > 90)) {
-    throw new Error('Google Responsive Search Ads require 2 to 4 unique nonempty descriptions of at most 90 characters each')
-  }
   const headlines = input.headlines.map(text => ({ text }))
   const descriptions = input.descriptions.map(text => ({ text }))
-  if (!['http:', 'https:'].includes(new URL(input.targetUrl).protocol)) {
-    throw new Error('targetUrl must be a valid http or https URL')
-  }
-  if (input.keywords.some(keyword => !keyword.text.trim() || (keyword.matchType !== undefined && !['EXACT', 'PHRASE', 'BROAD'].includes(keyword.matchType)))) {
-    throw new Error('Keywords require nonempty text and an EXACT, PHRASE or BROAD match type')
-  }
 
   const mutateOperations: Array<Record<string, unknown>> = [
     // 1. Budget
@@ -482,7 +509,8 @@ export async function createGoogleAdsSearchCampaign(
   })
 
   if (!response.ok) {
-    throw new Error(`Google Ads campaign creation failed: ${googleAdsError(response.status, await response.text()).message}`)
+    const failure = googleAdsError(response.status, await response.text())
+    throw new GoogleAdsMutationError(failure.definiteRefusal ? 'not_applied' : 'unknown', `Google Ads campaign creation failed: ${failure.message}`, { requestId: response.headers.get('request-id') })
   }
 
   const result = await response.json() as {
@@ -509,7 +537,19 @@ export async function createGoogleAdsSearchCampaign(
     adGroupResourceName: adGroupRes,
     adResourceName: adRes,
     status: input.status ?? 'PAUSED',
+    requestId: response.headers.get('request-id'),
   }
+}
+
+export interface UpdateGoogleAdsCampaignInput { campaignId: string; status?: 'ENABLED' | 'PAUSED'; budgetId?: string; dailyBudgetAmountMicros?: number }
+
+export function validateGoogleAdsCampaignUpdate(input: UpdateGoogleAdsCampaignInput): void {
+  if (!/^\d+$/u.test(input.campaignId)) throw new HTTPError({ statusCode: 400, message: 'campaignId must be a numeric Google Ads campaign ID' })
+  if (input.status !== undefined && input.status !== 'ENABLED' && input.status !== 'PAUSED') throw new HTTPError({ statusCode: 400, message: 'Campaign status must be ENABLED or PAUSED' })
+  if ((input.budgetId !== undefined) !== (input.dailyBudgetAmountMicros !== undefined)) throw new HTTPError({ statusCode: 400, message: 'budget_id and daily_budget_micros must be supplied together' })
+  if (input.status === undefined && input.dailyBudgetAmountMicros === undefined) throw new HTTPError({ statusCode: 400, message: 'Supply a status or daily budget to update' })
+  if (input.dailyBudgetAmountMicros !== undefined && (!Number.isSafeInteger(input.dailyBudgetAmountMicros) || input.dailyBudgetAmountMicros < 1000000)) throw new HTTPError({ statusCode: 400, message: 'dailyBudgetAmountMicros must be an integer of at least 1000000' })
+  if (input.budgetId !== undefined && !/^\d+$/u.test(input.budgetId)) throw new HTTPError({ statusCode: 400, message: 'budgetId must be a numeric Google Ads budget ID' })
 }
 
 /** Updates a campaign's requested status and budget in one Google Ads transaction. */
@@ -517,27 +557,26 @@ export async function updateGoogleAdsCampaign(
   accessToken: string,
   developerToken: string | undefined,
   customerId: string,
-  input: { campaignId: string; status?: 'ENABLED' | 'PAUSED'; budgetId?: string; dailyBudgetAmountMicros?: number },
-): Promise<void> {
-  if (!/^\d+$/u.test(input.campaignId)) throw new Error('campaignId must be a numeric Google Ads campaign ID')
-  if (input.status !== undefined && input.status !== 'ENABLED' && input.status !== 'PAUSED') throw new Error('Campaign status must be ENABLED or PAUSED')
-  if ((input.budgetId !== undefined) !== (input.dailyBudgetAmountMicros !== undefined)) throw new Error('budget_id and daily_budget_micros must be supplied together')
-  if (input.status === undefined && input.dailyBudgetAmountMicros === undefined) throw new Error('Supply a status or daily budget to update')
-  if (input.dailyBudgetAmountMicros !== undefined && (!Number.isSafeInteger(input.dailyBudgetAmountMicros) || input.dailyBudgetAmountMicros < 1000000)) throw new Error('dailyBudgetAmountMicros must be an integer of at least 1000000')
-  if (input.budgetId !== undefined && !/^\d+$/u.test(input.budgetId)) throw new Error('budgetId must be a numeric Google Ads budget ID')
+  input: UpdateGoogleAdsCampaignInput,
+): Promise<{ resourceNames: string[]; requestId: string | null }> {
+  validateGoogleAdsCampaignUpdate(input)
 
   const cid = cleanCustomerId(customerId)
   const headers = googleAdsHeaders(accessToken, developerToken)
   const mutateOperations: Array<Record<string, unknown>> = []
 
   if (input.budgetId !== undefined) {
-    const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/googleAds:search`, {
-      method: 'POST', headers,
-      body: JSON.stringify({ query: `SELECT campaign_budget.id FROM campaign WHERE campaign.id = ${input.campaignId} LIMIT 1` }),
-    })
-    if (!response.ok) throw await googleAdsFailure('Google Ads campaign budget query failed', response)
-    const data = await response.json() as { results?: GoogleAdsSearchRow[] }
-    if (data.results?.[0]?.campaignBudget?.id !== input.budgetId) throw new Error(`Budget ${input.budgetId} does not belong to campaign ${input.campaignId}`)
+    try {
+      const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/googleAds:search`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ query: `SELECT campaign_budget.id FROM campaign WHERE campaign.id = ${input.campaignId} LIMIT 1` }),
+      })
+      if (!response.ok) throw await googleAdsFailure('Google Ads campaign budget query failed', response)
+      const data = await response.json() as { results?: GoogleAdsSearchRow[] }
+      if (data.results?.[0]?.campaignBudget?.id !== input.budgetId) throw new Error(`Budget ${input.budgetId} does not belong to campaign ${input.campaignId}`)
+    } catch (error) {
+      throw new GoogleAdsMutationError('not_applied', error instanceof Error ? error.message : String(error), { cause: error })
+    }
     mutateOperations.push({ campaignBudgetOperation: {
       update: { resourceName: `customers/${cid}/campaignBudgets/${input.budgetId}`, amountMicros: String(input.dailyBudgetAmountMicros) },
       updateMask: 'amountMicros',
@@ -553,11 +592,15 @@ export async function updateGoogleAdsCampaign(
   const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/googleAds:mutate`, {
     method: 'POST', headers, body: JSON.stringify({ mutateOperations }),
   })
-  if (!response.ok) throw await googleAdsFailure('Google Ads campaign update failed', response)
+  if (!response.ok) throw await googleAdsFailure('Google Ads campaign update failed', response, true)
   const result = await response.json() as { mutateOperationResponses?: Array<{ campaignBudgetResult?: { resourceName: string }; campaignResult?: { resourceName: string } }> }
   const receipts = result.mutateOperationResponses ?? []
   if (receipts.length !== mutateOperations.length || (input.budgetId !== undefined && !receipts.some(receipt => receipt.campaignBudgetResult?.resourceName === `customers/${cid}/campaignBudgets/${input.budgetId}`)) || (input.status !== undefined && !receipts.some(receipt => receipt.campaignResult?.resourceName === `customers/${cid}/campaigns/${input.campaignId}`))) {
     throw new Error('Google Ads did not return a complete campaign update receipt; inspect the account before retrying')
+  }
+  return {
+    resourceNames: receipts.map(receipt => (receipt.campaignBudgetResult ?? receipt.campaignResult)!.resourceName),
+    requestId: response.headers.get('request-id'),
   }
 }
 
@@ -566,15 +609,13 @@ export async function updateGoogleAdsCampaign(
  * Google's own reason for a refused request: each error's code and message from
  * the GoogleAdsFailure details, which a truncated body cuts off.
  */
-async function googleAdsFailure(label: string, response: Response): Promise<Error> {
+async function googleAdsFailure(label: string, response: Response, mutation = false): Promise<Error> {
   const text = await response.text()
-  type Failure = { error?: { message?: string; details?: Array<{ errors?: Array<{ errorCode?: Record<string, string>; message?: string }> }> } }
-  // A body that is not Google's JSON failure is reported as it came.
-  const body = (() => { try { return JSON.parse(text) as Failure } catch { return null } })()
-  const reasons = (body?.error?.details ?? []).flatMap(detail => detail.errors ?? [])
-    .map(error => [Object.values(error.errorCode ?? {}).join(', '), error.message].filter(Boolean).join(': '))
-  const reason = reasons.join('; ') || body?.error?.message || text.slice(0, 500)
-  return new Error(`${label} (${response.status}): ${reason}`)
+  const failure = googleAdsError(response.status, text)
+  const message = `${label} (${response.status}): ${failure.reason}`
+  return mutation
+    ? new GoogleAdsMutationError(failure.definiteRefusal ? 'not_applied' : 'unknown', message, { requestId: response.headers.get('request-id') })
+    : new Error(message)
 }
 
 export async function getGoogleAdsCustomer(accessToken: string, developerToken: string | undefined, customerId: string): Promise<{ descriptiveName: string; currencyCode: string; timeZone: string; isManager: boolean }> {

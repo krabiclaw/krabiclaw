@@ -1663,12 +1663,14 @@ async function planProductUpdate(db: DbClient, input: {
   now: string
   env?: CloudflareEnv
   booking?: ProductBookingSetupInput
+  /** Product-owned child changes committed in the same transaction. */
+  additionalChangedFields?: string[]
   defaultCurrency?: CurrencyCode | null
   takenSlugs?: Set<string>
   idOwners?: SuppliedIdOwners
   knownSlugs?: ReadonlyMap<string, string>
   cacheInvalidations: BatchQuery[]
-}): Promise<{ writes: BatchQuery[]; keptVariants: string; product: PlannedProduct; airbnbSettings: AirbnbSettingSections | null }> {
+}): Promise<{ writes: BatchQuery[]; keptVariants: string; product: PlannedProduct; airbnbSettings: AirbnbSettingSections | null; changedFields: string[]; updatedAt: string }> {
   const { current, patch, organizationId } = input
   if ('slug' in patch && patch.slug !== undefined && patch.slug !== current.slug) invalid('A product keeps its saved slug')
   if (patch.expected_updated_at !== undefined) {
@@ -1747,6 +1749,18 @@ async function planProductUpdate(db: DbClient, input: {
     if (!readiness.ready) throw new HTTPError({ statusCode: 409, statusMessage: 'This offering needs booking and payment setup before it can be published', data: { code: 'EXPERIENCE_BOOKING_INCOMPLETE', product_id: current.id, missing: readiness.missing } })
   }
 
+  const comparableCurrent: Record<string, unknown> = {
+    ...current,
+    options: current.options.map(option => ({ id: option.id, name: option.name, sort_order: option.sort_order,
+      values: option.values.map(value => ({ id: value.id, value: value.value, sort_order: value.sort_order })) })),
+    variants: current.variants.map(variant => ({ ...variantInput(variant), prices: variant.prices.map(priceInput) })),
+    stay: planned.stay && current.stay ? Object.fromEntries(Object.keys(planned.stay).map(key => [key, current.stay![key as keyof ProductStayConfig]])) : current.stay,
+  }
+  const changedFields: string[] = [...(input.additionalChangedFields ?? [])]
+  for (const field of ['kind', 'name', 'description', 'active', 'order_url', 'unit_label', 'marketing_features', 'metadata', 'tax_code', 'options', 'variants', 'details', 'stay'] as const) {
+    if (await creationRequestHash(planned[field]) !== await creationRequestHash(comparableCurrent[field])) changedFields.push(field)
+  }
+
   const keptOptions = d1JsonArray(planned.options.map(option => option.id))
   const keptValues = d1JsonArray(planned.options.flatMap(option => option.values.map(value => value.id)))
   const keptVariants = d1JsonArray(planned.variants.map(variant => variant.id))
@@ -1764,7 +1778,7 @@ async function planProductUpdate(db: DbClient, input: {
     const before = current.variants.find(candidate => candidate.id === variant.id)
     return !before || variant.name !== before.name || variant.sku !== before.sku || variant.active !== before.active || variant.sort_order !== before.sort_order
   }).map(variant => variant.id))
-  const writes: BatchQuery[] = [
+  const writes: BatchQuery[] = changedFields.length ? [
     // Option selections are rebuilt from the validated variant plan.
     { query: 'DELETE FROM product_variant_option_values WHERE organization_id = ? AND product_id = ?', params: [organizationId, productId] },
     // Only explicit replacement removes prices; merged omissions remain in the plan.
@@ -1788,14 +1802,25 @@ async function planProductUpdate(db: DbClient, input: {
       // A narrow edit still restates the Product it read, including its details.
       expectedUpdatedAt: current.updated_at,
     }),
+  ] : [{
+    // An unchanged save still names the Product it read, but must not
+    // replace its revision, editor or child rows merely to check that fact.
+    // The deliberately invalid timestamp uses the existing atomic Product
+    // conflict signal, including when the original row was deleted.
+    query: `INSERT INTO products (id, organization_id, kind, name, slug, updated_at, created_by, updated_by)
+      SELECT ?, ?, ?, ?, ?, NULL, ?, ? WHERE NOT EXISTS (
+        SELECT 1 FROM products WHERE organization_id = ? AND id = ? AND updated_at = ?)`,
+    params: [productId, organizationId, planned.kind, planned.name, planned.slug, input.actor.actorId, input.actor.actorId, organizationId, productId, current.updated_at],
+  }]
+  writes.push(
     ...(planned.kind === 'stay' && patch.stay && Object.hasOwn(patch.stay, 'beds') ? [stayBedAllocationGuardQuery(organizationId, productId)] : []),
     ...(guardPublication ? [{
       query: `UPDATE products SET updated_at=CASE WHEN NOT EXISTS (SELECT 1 FROM product_publications WHERE organization_id=? AND product_id=? AND published=1) ${readiness?.allocation ? `OR (${readiness.allocation.query})` : ''} THEN updated_at ELSE NULL END WHERE organization_id=? AND id=?`,
       params: [organizationId, productId, ...(readiness?.allocation?.params ?? []), organizationId, productId],
     }] : []),
     ...input.cacheInvalidations,
-  ]
-  return { writes, keptVariants, product: planned, airbnbSettings }
+  )
+  return { writes, keptVariants, product: planned, airbnbSettings, changedFields, updatedAt: changedFields.length ? now : current.updated_at }
 }
 
 const variantInput = (variant: ProductVariant) => ({
@@ -1971,12 +1996,19 @@ export async function updateProduct(db: DbClient, input: {
   const patch = roomUpdate?.amenities === undefined ? input.patch : {
     stay: { amenities: [...new Set([...current.stay!.amenities, ...roomUpdate.amenities])] },
   }
+  const additionalChangedFields = input.booking ? ['booking'] : []
+  if (homeUpdate) {
+    const existing = current.stay!.accessibility.find(answer => answer.feature === homeUpdate.accessibility.feature)
+    const before = existing?.available === null ? null : existing ?? null
+    const after = homeUpdate.accessibility.available === null ? null : homeUpdate.accessibility
+    if (await creationRequestHash(before) !== await creationRequestHash(after)) additionalChangedFields.push('stay.accessibility')
+  }
   const now = new Date().toISOString()
   // Sleeping/privacy facts have their own room version and live inventory
   // guard. Only room amenity assignments also author the Product's global set.
   const plan = roomUpdate && roomUpdate.amenities === undefined ? null : await planProductUpdate(db, {
     organizationId: input.organizationId, current, patch, actor: input.actor, now,
-    env: input.env, booking: input.booking?.data,
+    env: input.env, booking: input.booking?.data, additionalChangedFields,
     cacheInvalidations: roomUpdate ? [publicResourceCacheInvalidationQuery(input.organizationId, 'stay-photo-room-details')] : await productCacheInvalidations(db, input.organizationId, input.productId, 'product_updated'),
   })
   settings = plan?.airbnbSettings ?? null
@@ -2047,7 +2079,25 @@ export async function updateProduct(db: DbClient, input: {
     writes.push(...await prepareProductBookingSetup(db, { organizationId: input.organizationId, productId: input.productId, actorId: input.actor.actorId, env: input.booking.env, now, booking: input.booking.data }))
     writes.push({ query: `INSERT INTO product_publications(organization_id,product_id,published,created_at,updated_at,created_by,updated_by) VALUES(?,?,1,?,?,?,?) ON CONFLICT(product_id,organization_id) DO UPDATE SET published=1,updated_at=excluded.updated_at,updated_by=excluded.updated_by`, params: [input.organizationId, input.productId, now, now, input.actor.actorId, input.actor.actorId] })
   }
-  if (dedupeKey) writes.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.updated', entityType: 'product', entityId: input.productId, dedupeKey, metadata: { request_hash: requestHash, channel_completion: { nights: reprice, settings } } }))
+  const changedFields = [...(plan?.changedFields ?? [])]
+  if (roomUpdate) {
+    const currentRoom = current.stay!.photo_rooms.find(room => room.id === roomUpdate.roomId)!
+    let detailsChanged = false
+    for (const field of ['sleeping_arrangements', 'private_attached_bathroom', 'amenities'] as const) {
+      if (Object.hasOwn(roomUpdate, field) && await creationRequestHash(roomUpdate[field]) !== await creationRequestHash(currentRoom[field])) detailsChanged = true
+    }
+    if (roomUpdate.accessibility) {
+      const existing = currentRoom.accessibility.find(answer => answer.feature === roomUpdate.accessibility!.feature)
+      const before = existing?.available === null ? null : existing ?? null
+      const after = roomUpdate.accessibility.available === null ? null : roomUpdate.accessibility
+      if (await creationRequestHash(before) !== await creationRequestHash(after)) detailsChanged = true
+    }
+    if (detailsChanged) changedFields.push('stay.photo_rooms')
+  }
+  if (dedupeKey || changedFields.length) writes.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId,
+    eventType: 'product.updated', entityType: 'product', entityId: input.productId, ...(dedupeKey ? { dedupeKey } : {}),
+    beforeState: { updated_at: current.updated_at }, afterState: { updated_at: plan?.updatedAt ?? current.updated_at },
+    metadata: { operation: changedFields.length ? 'updated' : 'unchanged', changed_fields: changedFields, evidence_basis: 'persisted_change', request_hash: requestHash, channel_completion: { nights: reprice, settings } } }))
   const importWrittenIndex = writes.length
   if (input.stayImport) writes.push(stayImportWrittenQuery(input.organizationId, input.productId, input.stayImport, [...Object.keys(input.patch), ...Object.keys(input.patch.stay ?? {}), ...Object.keys(input.patch.details ?? {})]))
   if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This offering exceeds one atomic update')
@@ -2221,7 +2271,7 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
 }
 
 export async function setProductPublication(db: DbClient, input: {
-  organizationId: string; productId: string; published: boolean; actor: Actor; env: CloudflareEnv; allowHomeActivation?: boolean
+  organizationId: string; productId: string; published: boolean; actor: Actor & { actorType?: 'system' }; env: CloudflareEnv; allowHomeActivation?: boolean
 }): Promise<void> {
   const product = await requireOrganizationProduct(db, input)
   if (input.published) await assertStayBookable(db, input.organizationId, product)
@@ -2232,14 +2282,23 @@ export async function setProductPublication(db: DbClient, input: {
     readiness = await productBookingReadiness(db, input.organizationId, product, { requireAllocation: !alreadyPublished, env: input.env })
     if (!readiness.ready) throw new HTTPError({ statusCode: 409, statusMessage: 'This offering needs booking and payment setup before it can be published', data: { code: 'EXPERIENCE_BOOKING_INCOMPLETE', product_id: product.id, missing: readiness.missing } })
   }
+  if (alreadyPublished === input.published) {
+    if (product.kind === 'stay') await reportBillingUsage(input.env, db, input.organizationId, { committed: true })
+    return
+  }
   const now = new Date().toISOString()
   // A home published goes live, so it is billed and held to Basic's limit; one withdrawn reports its count again.
   const writes: BatchQuery[] = [{
     query: `INSERT INTO product_publications (organization_id, product_id, published, created_at, updated_at, created_by, updated_by)
             VALUES (?, ?, CASE WHEN EXISTS(SELECT 1 FROM products p WHERE p.organization_id=? AND p.id=? AND p.updated_at=?) ${readiness?.allocation ? `AND (${readiness.allocation.query})` : ''} ${alreadyPublished ? 'AND EXISTS(SELECT 1 FROM product_publications WHERE organization_id=? AND product_id=? AND published=1)' : ''} THEN ? ELSE NULL END, ?, ?, ?, ?)
-            ON CONFLICT (product_id, organization_id) DO UPDATE SET published = excluded.published, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+            ON CONFLICT (product_id, organization_id) DO UPDATE SET published = excluded.published, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+              WHERE product_publications.published <> excluded.published`,
     params: [input.organizationId, input.productId, input.organizationId, input.productId, product.updated_at, ...(readiness?.allocation?.params ?? []), ...(alreadyPublished ? [input.organizationId, input.productId] : []), input.published ? 1 : 0, now, now, input.actor.actorId, input.actor.actorId],
-  }, publicResourceCacheInvalidationQuery(input.organizationId, 'product_publication_changed')]
+  }, organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorType === 'system' ? null : input.actor.actorId, actorType: input.actor.actorType,
+    eventType: 'product.updated', entityType: 'product', entityId: input.productId,
+    beforeState: { published: alreadyPublished }, afterState: { published: input.published, updated_at: now },
+    metadata: { changed_fields: ['publication'], evidence_basis: 'persisted_change' }, onlyIfPreviousChangedOneRow: true }),
+  publicResourceCacheInvalidationQuery(input.organizationId, 'product_publication_changed')]
   const operation = 'Set product publication'
   await (product.kind === 'stay'
     ? executeWithinCapacity(input.env, db, input.organizationId, writes, { operation, action: 'publish it', allowHomeActivation: input.allowHomeActivation })
@@ -2267,15 +2326,20 @@ export async function setProductLocation(db: DbClient, input: {
     readiness = await productBookingReadiness(db, input.organizationId, prospective, { locationId: input.locationId, prepareAllocation: newPublication, requireActive: newPublication, env: input.env })
     if (!readiness.ready) throw new HTTPError({ statusCode: 409, statusMessage: 'This offering needs booking and payment setup at this location before it can be published', data: { code: 'EXPERIENCE_BOOKING_INCOMPLETE', product_id: product.id, location_id: input.locationId, missing: readiness.missing } })
   }
+  if (currentLocation && currentLocation.active === location.active && currentLocation.published === location.published) return
   const now = new Date().toISOString()
   await executeBatch(db, [{
     query: `INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_at, updated_at, created_by, updated_by)
             VALUES (?, ?, ?, COALESCE(?, 1), COALESCE(?, 1), ?, ?, ?, ?)
             ON CONFLICT (product_id, location_id) DO UPDATE SET active = COALESCE(?, product_locations.active), published = COALESCE(?, product_locations.published),
-              updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+              updated_at = excluded.updated_at, updated_by = excluded.updated_by
+              WHERE product_locations.active <> COALESCE(?, product_locations.active) OR product_locations.published <> COALESCE(?, product_locations.published)`,
     params: [input.organizationId, input.productId, input.locationId, input.active === undefined ? null : Number(input.active), input.published === undefined ? null : Number(input.published),
-      now, now, input.actor.actorId, input.actor.actorId, input.active === undefined ? null : Number(input.active), input.published === undefined ? null : Number(input.published)],
-  }, {
+      now, now, input.actor.actorId, input.actor.actorId, input.active === undefined ? null : Number(input.active), input.published === undefined ? null : Number(input.published), input.active === undefined ? null : Number(input.active), input.published === undefined ? null : Number(input.published)],
+  }, organizationEventQuery({ organizationId: input.organizationId, locationId: input.locationId, actorId: input.actor.actorId,
+    eventType: 'product.updated', entityType: 'product', entityId: input.productId,
+    beforeState: currentLocation ?? null, afterState: { ...location, updated_at: now },
+    metadata: { changed_fields: ['locations'], evidence_basis: 'persisted_change' }, onlyIfPreviousChangedOneRow: true }), {
     query: `UPDATE product_locations SET published=CASE WHEN EXISTS (SELECT 1 FROM products WHERE organization_id=? AND id=? AND updated_at=?) ${readiness?.allocation ? `AND (${readiness.allocation.query})` : ''} THEN published ELSE NULL END
       WHERE organization_id=? AND product_id=? AND location_id=?`,
     params: [input.organizationId, input.productId, expectedProductUpdatedAt, ...(readiness?.allocation?.params ?? []), input.organizationId, input.productId, input.locationId],

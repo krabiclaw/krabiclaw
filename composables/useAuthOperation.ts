@@ -6,6 +6,7 @@ export interface UseAuthOperationResult {
   error: Ref<string | null>
   run: <T>(operation: () => Promise<T>, fallback: string) => Promise<T | null>
   signInWithGoogle: (callbackURL?: string, loginHint?: string) => Promise<unknown>
+  signInWithApple: (callbackURL?: string) => Promise<unknown>
 }
 
 export function useAuthOperation(): UseAuthOperationResult {
@@ -34,5 +35,13 @@ export function useAuthOperation(): UseAuthOperationResult {
     }, 'Google sign in failed. Please try again.')
   }
 
-  return { loading: readonly(loading), error, run, signInWithGoogle }
+  async function signInWithApple(callbackURL?: string) {
+    return run(async () => {
+      const result = await authClient.signIn.social({ provider: 'apple', ...(callbackURL ? { callbackURL } : {}) })
+      if (result?.error) throw new Error(result.error.message || 'Apple sign in failed.')
+      return result
+    }, 'Apple sign in failed. Please try again.')
+  }
+
+  return { loading: readonly(loading), error, run, signInWithGoogle, signInWithApple }
 }
