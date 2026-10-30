@@ -6,6 +6,8 @@ import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededSiteHeaders, seededSiteURL, testBaseUrl } from './test-env'
 import { seededTenant } from './seed/manifest'
 
+test.describe.configure({ mode: 'default' })
+
 // Ember & Slice translated into Thai: its name, its Brooklyn location, the
 // Brooklyn Specials section and its clam pie. Read once the seed has run.
 const locale = 'th'
