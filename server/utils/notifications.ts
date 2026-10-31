@@ -41,6 +41,7 @@ import {
   bookingCreatedMessage,
   contactReceivedMessage,
   guestReplyMessage,
+  teamMessage,
   reservationCancelledMessage,
   reservationCreatedMessage,
   reviewReceivedMessage,
@@ -1916,7 +1917,7 @@ export interface TeamMessageNotificationInput {
   organizationId: string
   threadId: string
   messageId: string
-  /** The message's organization audit entry; every push's delivery receipt hangs off it. */
+  /** The message's organization audit entry; every delivery receipt hangs off it. */
   entryId: string
   senderName: string
   /** The message's words, or what it sent when it has none. */
@@ -1925,36 +1926,66 @@ export interface TeamMessageNotificationInput {
   recipientUserIds: string[]
 }
 
-/**
- * A team message, pushed to every device each other member of the conversation
- * is signed in on, unless they switched team-message push off. Each send is
- * recorded on its own delivery; a recorded failure stays visible on the
- * message and does not undo it, and a replay sends only what has not been sent.
- * Anything that could not even be recorded is raised.
- */
+/** Team participants use the ordinary channel preferences and recorded delivery paths. */
 export async function notifyTeamMessage(env: NotificationEnv, db: DbClient, input: TeamMessageNotificationInput): Promise<void> {
-  const targets = (await Promise.all(input.recipientUserIds.map(async userId =>
-    await wantsNotification(db, userId, 'team_messages', 'push')
-      ? (await listUserDevices(db, userId)).map(device => ({ userId, device }))
-      : []))).flat()
-  const results = await Promise.allSettled(targets.map(({ userId, device }) => sendPushThreadNotification(env, db, {
-    userId,
-    device,
-    delivery: {
-      threadId: null,
-      entryId: input.entryId,
-      purpose: 'team_message',
-      idempotencyKey: `team-message:${input.messageId}:push:${createHash('sha256').update(JSON.stringify([userId, device.token])).digest('hex')}`,
-    },
-    alert: {
-      title: input.senderName,
-      body: input.preview,
-      url: () => dashboardPathUrl(env, db, input.organizationId, `/messages/team/${encodeURIComponent(input.threadId)}?view=team`),
-      threadId: `team:${input.threadId}`,
-      data: { organizationId: input.organizationId, userId, kind: 'team', threadId: input.threadId },
-    },
-  })))
-  raiseUnrecordedOwnerAlertFailures('notifyTeamMessage', `team thread ${input.threadId}`, results.map(result => ({ result, task: 'push' })))
+  if (input.recipientUserIds.length === 0) return
+  const recipientIds = new Set(input.recipientUserIds)
+  const members = await queryAll<{ id: string; userId: string }>(db,
+    'SELECT id, userId FROM member WHERE organizationId = ?', [input.organizationId])
+  const organization = await queryFirst<{ name: string }>(db,
+    'SELECT name FROM organization WHERE id = ?', [input.organizationId])
+  if (!organization) throw new HTTPError({ statusCode: 500, message: 'The team conversation organization is missing', data: { code: 'TEAM_ORGANIZATION_MISSING', field: 'organization_id' } })
+  const replyUrl = await dashboardPathUrl(env, db, input.organizationId, `/messages/team/${encodeURIComponent(input.threadId)}?view=team`)
+  const message = { ...teamMessage({ ...input, organizationName: organization.name, replyUrl }),
+    organizationLogoUrl: await organizationLogo(db, input.organizationId) }
+  const recipients = (await resolveOwnerRecipients(env, db, {
+    organizationId: input.organizationId, category: message.category, emailPurpose: message.emailPurpose,
+    memberIds: members.filter(member => recipientIds.has(member.userId)).map(member => member.id),
+  })).filter(recipient => recipientIds.has(recipient.userId))
+  const context = { guestThreadId: null, sourceEntryId: input.entryId }
+  const sends = recipients.flatMap(recipient => {
+    const tasks: Array<Promise<unknown>> = []
+    if (recipient.email) {
+      const to = recipient.email
+      tasks.push((async () => {
+        const rendered = await renderNotificationEmail(message, {
+          platformDomain: getPlatformDomain(env),
+          preferencesUrl: `https://${getPlatformDomain(env)}/dashboard/account/profile/notifications`,
+          unsubscribeUrl: recipient.unsubscribeUrl,
+        })
+        await sendEmailNotification(env, db, {
+          organizationId: input.organizationId, organizationName: organization.name,
+          to, title: message.title, template: 'team_message', payload: { team_thread_id: input.threadId },
+          email: { subject: sanitizeEmailHeaderValue(message.title), ...rendered },
+          unsubscribeOneClickUrl: recipient.unsubscribeOneClickUrl,
+          delivery: threadDelivery(context, 'team_message', 'email', 'team_message', to),
+        })
+      })())
+    }
+    if (recipient.phone) {
+      const mapped = toWhatsAppVars(message, 'guest_thread_reply_whatsapp')
+      tasks.push(sendWhatsAppThreadNotification(env, db, {
+        organizationId: input.organizationId, toPhone: recipient.phone,
+        template: 'guest_thread_reply_whatsapp', vars: mapped.vars,
+        delivery: threadDelivery(context, 'team_message', 'whatsapp', 'team_message', recipient.phone),
+      }))
+    }
+    tasks.push(...recipient.pushDevices.map(device => sendPushThreadNotification(env, db, {
+      userId: recipient.userId, device,
+      delivery: {
+        threadId: null, entryId: input.entryId, purpose: 'team_message',
+        idempotencyKey: `team-message:${input.messageId}:push:${createHash('sha256').update(JSON.stringify([recipient.userId, device.token])).digest('hex')}`,
+      },
+      alert: {
+        title: input.senderName, body: input.preview, url: async () => replyUrl,
+        threadId: `team:${input.threadId}`,
+        data: { organizationId: input.organizationId, userId: recipient.userId, kind: 'team', threadId: input.threadId },
+      },
+    })))
+    return tasks
+  })
+  const results = await Promise.allSettled(sends)
+  raiseUnrecordedOwnerAlertFailures('notifyTeamMessage', `team thread ${input.threadId}`, results.map(result => ({ result, task: 'teamMessage' })))
 }
 
 export interface OrganizationInvitationInput {

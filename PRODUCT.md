@@ -168,9 +168,9 @@ photos.
 Members of one workspace message each other in team conversations, optionally
 about one stay, with text and photos. Only the members in a conversation can
 read it; leaving the workspace ends a person's place in it, while what they
-wrote remains. Each member has their own unread state. A new message is pushed
-to the other members' phones unless they switched team messages off; team
-messages have no email or WhatsApp channel. Owners and admins choose which
+wrote remains. Each member has their own unread state. A new message reaches only its other participants through the ordinary notification
+preferences and delivery receipts. Email and push are on by default; WhatsApp
+remains opt-in through the existing verified-phone and approved-template path. Owners and admins choose which
 homes a member looks after; each home has one assigned member. A member who
 leaves, is removed or becomes an owner or admin looks after none.
 

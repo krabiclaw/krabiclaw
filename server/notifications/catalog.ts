@@ -17,6 +17,7 @@ import {
   onboardingCompletedMessage,
   contentReportedMessage,
   guestReplyMessage,
+  teamMessage,
   reservationCancelledMessage,
   reservationCreatedMessage,
   reviewReceivedMessage,
@@ -161,6 +162,7 @@ const guestPayments: GuestPaymentNotificationEvent[] = [
 ]
 
 export const NOTIFICATION_CATALOG: CatalogEntry[] = [
+  { id: 'team-message', audience: 'owner', title: 'Team — new message', whatsappTemplate: 'guest_thread_reply_whatsapp', message: ownerAlert(teamMessage({ senderName: 'Alex Carter', preview: 'The home is ready for check-in.', organizationName: studio, replyUrl: inbox })) },
   // Owner alerts — both channels.
   { id: 'reservation-created', audience: 'owner', title: 'Owner — new reservation', whatsappTemplate: 'new_reservation', message: ownerAlert(reservationCreatedMessage(reservation)) },
   { id: 'reservation-cancelled', audience: 'owner', title: 'Owner — reservation cancelled', whatsappTemplate: 'reservation_cancelled', message: ownerAlert(reservationCancelledMessage({ ...reservation, wasConfirmed: true })) },

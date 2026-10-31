@@ -245,12 +245,12 @@ test.describe('lodging identity boundary', () => {
         const cmsMatches = (await cmsNativeRead.json() as { messages: TeamMessage[] }).messages.filter(message => message.body === cmsBody)
         expect(cmsMatches).toHaveLength(1)
         const saved = cmsMatches[0]!
-        expect(saved).toMatchObject({ senderId: fixture.id, deliveries: [expect.objectContaining({ channel: 'push', status: 'failed', error: expect.stringMatching(/^APNS_CONFIG_REQUIRED: /) })] })
+        expect(saved).toMatchObject({ senderId: fixture.id, deliveries: expect.arrayContaining([expect.objectContaining({ channel: 'push', status: 'failed', error: expect.stringMatching(/^APNS_CONFIG_REQUIRED: /) })]) })
         const savedRow = page.locator(`[data-team-message="${saved.id}"]`)
         await expect(savedRow).toContainText(cmsBody)
-        await expect(savedRow).toContainText('Message saved. A push notification failed.')
-        await savedRow.getByRole('button', { name: 'Push error details', exact: true }).click()
-        await expect(savedRow).toContainText(saved.deliveries[0]!.error!)
+        await expect(savedRow).toContainText('Message saved. A notification failed.')
+        await savedRow.getByRole('button', { name: 'Delivery error details', exact: true }).click()
+        await expect(savedRow).toContainText(saved.deliveries.find(delivery => delivery.channel === 'push')!.error!)
         const cmsMcpRead = await teamCall<{ messages: TeamMessage[]; hasMore: boolean }>('get_team_conversation', { thread_id: threadId, limit: 1 }, memberMcp)
         expect(cmsMcpRead).toEqual({ messages: [saved], hasMore: true })
       } finally {
@@ -261,7 +261,7 @@ test.describe('lodging identity boundary', () => {
 
       await page.setViewportSize({ width: 390, height: 844 })
       await expect(composer).toBeVisible()
-      await expect(page.locator('[data-team-push-failure]')).toContainText('Message saved. A push notification failed.')
+      await expect(page.locator('[data-team-delivery-failure]')).toContainText('Message saved. A notification failed.')
       await page.locator('input[type="file"]').setInputFiles({ name: 'team-message-proof.avif', mimeType: 'image/avif', buffer: await sharp('public/platform/apple-touch-icon.png').avif().toBuffer() })
       const photoSent = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `${teamPath}/messages`)
       await page.getByRole('button', { name: 'Send message', exact: true }).click()
@@ -270,7 +270,7 @@ test.describe('lodging identity boundary', () => {
       expect(photoRead.status, await photoRead.text()).toBe(200)
       const photo = (await photoRead.json() as { messages: TeamMessage[] }).messages[0]!
       expect(photo).toMatchObject({ body: '', senderId: fixture.id })
-      expect(photo.deliveries).toEqual([])
+      expect(photo.deliveries).toEqual([expect.objectContaining({ channel: 'email', status: 'sent' })])
       expect(photo.attachments).toHaveLength(1)
       const loadedPhoto = await api.get(photo.attachments[0]!.url)
       expect(loadedPhoto.status).toBe(200)

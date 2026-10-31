@@ -274,6 +274,24 @@ export interface GuestReplyEventInput {
   replyUrl: string | null
 }
 
+export function teamMessage(input: { senderName: string; preview: string; organizationName: string; replyUrl: string }): NotificationMessage {
+  return {
+    title: `${input.senderName} sent a team message`,
+    preheader: input.preview.slice(0, 120),
+    hero: null,
+    facts: facts(
+      fact('guestName', 'From', input.senderName, true),
+      fact('subject', 'Conversation', `Team · ${input.organizationName}`, true),
+      fact('message', 'Message', input.preview, true),
+    ),
+    primaryAction: { url: input.replyUrl, label: 'Open team conversation' },
+    category: 'team_messages',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because you are a participant in this team conversation with ${input.organizationName}.`,
+    organizationName: input.organizationName,
+  }
+}
+
 export function guestReplyMessage(input: GuestReplyEventInput): NotificationMessage {
   // The site name has no slot of its own, so it rides in the subject alongside
   // how the guest wrote in. An owner with several sites needs to know which.

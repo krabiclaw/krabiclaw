@@ -7,7 +7,7 @@ import { REVIEW_CATEGORY_KEYS, type ReviewCategory } from "../../shared/review-q
 import { sqliteTable, integer, text, real, unique, uniqueIndex, index, check, foreignKey, primaryKey } from "drizzle-orm/sqlite-core"
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
 import type { CONTENT_DOCUMENT_KINDS } from "../../shared/content-registries"
-import { NOTIFICATION_CATEGORIES, PUSH_ONLY_CATEGORIES, type NotificationCategory } from "../../shared/notification-categories"
+import { NOTIFICATION_CATEGORIES, type NotificationCategory } from "../../shared/notification-categories"
 import { STAY_AMENITIES, STAY_MAP_SHARING_MODES, type StayAmenity } from "../../shared/stay-listing"
 import { STAY_PHOTO_ROOM_TYPES, type StayPhotoRoomType } from "../../shared/stay-photos"
 import { STAY_HOME_ACCESSIBILITY_FEATURES, STAY_ROOM_ACCESSIBILITY_FEATURES, type StayHomeAccessibilityFeature, type StayRoomAccessibilityFeature } from "../../shared/stay-accessibility"
@@ -3251,7 +3251,6 @@ export const user_notification_preferences = sqliteTable("user_notification_pref
 	check("user_notification_preferences_category_check", sql`category IN (${sql.raw([...NOTIFICATION_CATEGORIES].map(value => `'${value}'`).join(', '))})`),
 	check("user_notification_preferences_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 	check("user_notification_preferences_account_security_check", sql`category != 'account_security' OR email_enabled = 1`),
-	check("user_notification_preferences_push_only_check", sql`category NOT IN (${sql.raw([...PUSH_ONLY_CATEGORIES].map(value => `'${value}'`).join(', '))}) OR (email_enabled = 0 AND whatsapp_enabled = 0)`),
 ]);
 
 // One article, one broadcast, forever. The unique content_document_id is what

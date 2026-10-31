@@ -167,7 +167,7 @@ const accept = () => step(async () => {
   // Joining has succeeded: a browser whose push state cannot be read is reported and not asked.
   await pushSubscription.refresh().catch(error => globalThis.reportError(error))
   if (pushSubscription.state.value.askable) {
-    // Members hear only what is assigned to them and their team conversations, which reach them by push alone.
+    // Members hear about assigned work and their team conversations through their enabled channels.
     await preferences.load(true)
     askingPush.value = true
   }
