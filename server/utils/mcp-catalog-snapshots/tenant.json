@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:75b4c285ce8242a3b6eafeb40ec797cbb458a1b5958ee127c92c0e80a7077d38",
-  "documentationFingerprint": "sha256:6885e2097ae6055d19ffdb892ab0b950e33822a7af9837581f8a1bbfdb7f9147",
+  "fingerprint": "sha256:5cd99a5d890ae1c5cac51069bae129011122e5e3fb824bd4286f0ed47fc916c2",
+  "documentationFingerprint": "sha256:93fdd7ee75dcbcadcaade5e4361e7d5a8ee8dbfc9458342ef309dc66edbf92e8",
   "tools": [
     {
       "name": "add_organization_language",
@@ -64004,7 +64004,12 @@
                   "items": {
                     "properties": {
                       "channel": {
-                        "const": "push"
+                        "enum": [
+                          "email",
+                          "whatsapp",
+                          "push"
+                        ],
+                        "type": "string"
                       },
                       "error": {
                         "type": [
@@ -97328,7 +97333,7 @@
     {
       "name": "send_team_message",
       "title": "Send team message",
-      "description": "Send the text and/or supplied photo to an internal team conversation you belong to. Sends as the authenticated member and records push outcomes; a saved message does not prove delivery to a participant’s device. Reuse the same idempotency_key for an identical retry; a failed realtime publication may report committed:true and must retry that same request. This never replies to a guest.",
+      "description": "Send the text and/or supplied photo to an internal team conversation you belong to. Sends as the authenticated member and records notification outcomes; a saved message does not prove delivery to a participant. Reuse the same idempotency_key for an identical retry; a failed realtime publication may report committed:true and must retry that same request. This never replies to a guest.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -97445,7 +97450,12 @@
                 "items": {
                   "properties": {
                     "channel": {
-                      "const": "push"
+                      "enum": [
+                        "email",
+                        "whatsapp",
+                        "push"
+                      ],
+                      "type": "string"
                     },
                     "error": {
                       "type": [
@@ -124618,7 +124628,7 @@
         "confirm_product_booking": "sha256:d1269994270301b34621918853c929c1e77f702b21fa336ac4dd23dcbf81e18e",
         "get_guest_conversation": "sha256:0e458314aacd4ef9b6f948eea9e5b395c0f6cc4fd6e5a9dd9884f99e008fdfa5",
         "get_product_booking": "sha256:f556f5a1b85a50415d2ec9d1464f44b876afced7651eb51aabd5445eca9ebcaa",
-        "get_team_conversation": "sha256:7b308f8af66846f200d2d30c489b3ddf53c1126bdfc2e91616bf58e7d8f7cec7",
+        "get_team_conversation": "sha256:9f744a1b97e25b1b36fab5184bcd473832f9e7f2510fc292316ee146e5cb700f",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
@@ -124630,7 +124640,7 @@
         "reply_to_guest": "sha256:28402ef75ec3f1464c60ffbaa91a3781f96f9764994e56b2c7362dbd26eefb80",
         "request_product_booking_change": "sha256:d09a9c88466237aff04465bbcffa219f28e197cfad0cb4fdd99f41484343d400",
         "request_table_reservation_change": "sha256:71868f28cc9f329b1f44276ae0a223c487c789f4682c3bb8f3a09b96fde9e2dd",
-        "send_team_message": "sha256:a7e3d79ac0e34594d49274dc922d3d34b13e390b335cd63f2d73f1e53d973171",
+        "send_team_message": "sha256:3865f5f6aeadf25e330b9adf73caece28d6e9044984bdad3bef64eb3f47f0ee7",
         "start_team_conversation": "sha256:b297eb76fda6a481f0246ee8c6c39d5481ebe9379dd979ecee747b54c67f0492",
         "update_team_group": "sha256:e58436da6c0b45816e909c58d6ff9265c364e410a5c5edf696a7c6085bb3f6cb"
       }
