@@ -551,7 +551,7 @@ async function seedUsers(db: D1Database) {
     "INSERT INTO user (id, name, email, emailVerified, isAnonymous) VALUES ('user-anonymous', 'Anonymous', 'anonymous@provider-proof.com', 1, 1)",
     "INSERT INTO user (id, name, email, emailVerified) VALUES ('user-fixture', 'Fixture', 'fixture@example.test', 1)",
     "INSERT INTO user_notification_preferences (user_id, category, email_enabled, whatsapp_enabled, push_enabled) VALUES ('user-off', 'product_news', 0, 0, 0)",
-    "INSERT INTO user_notification_preferences (user_id, category, email_enabled, whatsapp_enabled, push_enabled) VALUES ('user-on', 'guest_messages', 0, 1, 1)",
+    "INSERT INTO user_notification_preferences (user_id, category, email_enabled, whatsapp_enabled, push_enabled) VALUES ('user-on', 'messages', 0, 1, 1)",
   ]) await db.prepare(statement).run()
 }
 
@@ -637,7 +637,7 @@ test('Product News opt-in, opt-out and provider unsubscribes follow the exact su
     let preferences = await getNotificationPreferences(db, 'user-on')
     assert.equal(preferences.product_news.email, false)
     // Other categories and WhatsApp are left exactly as they were.
-    assert.deepEqual(preferences.guest_messages, { email: false, whatsapp: true, push: true })
+    assert.deepEqual(preferences.messages, { email: false, whatsapp: true, push: true })
     assert.equal(resend.writes().length, writes)
 
     // Global unsubscribe through Resend: local off, not echoed back.

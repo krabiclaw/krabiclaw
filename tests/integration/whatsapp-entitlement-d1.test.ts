@@ -72,7 +72,7 @@ test('organization messaging entitlement fences Meta calls while preserving noti
       await db.prepare("UPDATE subscription SET status='active' WHERE id='paid-sub'").run()
 
       // The same owner belongs to both organizations: eligibility is per org.
-      for (const category of ['organization_and_billing', 'guest_messages', 'reservations_bookings']) {
+      for (const category of ['organization_and_billing', 'messages', 'reservations_bookings']) {
         await db.prepare('INSERT INTO user_notification_preferences (user_id,category,email_enabled,whatsapp_enabled,push_enabled) VALUES (?,?,1,1,0)').bind('owner', category).run()
       }
       const domain = (organizationId: string, status: string) => notifyDomainLifecycle(providerEnv, db, { organizationId, domain: 'proof.example', status, title: 'Domain update', message: 'Domain status changed', dashboardUrl: `https://proof.example/dashboard/${organizationId}/settings` })
@@ -100,7 +100,7 @@ test('organization messaging entitlement fences Meta calls while preserving noti
         assert.equal(rows.filter(row => row.channel === 'whatsapp').length, organizationId === 'paid' ? 2 : 0)
         assert.equal(await db.prepare("SELECT count(*) AS count FROM activity_entries WHERE kind='notification' AND organization_id=?").bind(organizationId).first('count'), organizationId === 'paid' ? 4 : 3, 'dashboard alerts persist independently of WhatsApp')
       }
-      await db.prepare("UPDATE user_notification_preferences SET whatsapp_enabled=0 WHERE category='guest_messages'").run()
+      await db.prepare("UPDATE user_notification_preferences SET whatsapp_enabled=0 WHERE category='messages'").run()
       const entry = await appendEntry(db, { threadId: 'contact-paid', kind: 'message', actorKind: 'guest', channel: 'email', body: 'Opted out', dedupeKey: 'reply-optout' })
       const before = metaCalls
       await notifyGuestThreadReply(providerEnv, db, { organizationId: 'paid', organizationName: 'paid', threadId: 'contact-paid', sourceEntryId: entry.id, submissionType: 'contact', submissionId: 'contact-paid', participantLabel: 'Guest', inboundChannel: 'email', messagePreview: 'Opted out' })

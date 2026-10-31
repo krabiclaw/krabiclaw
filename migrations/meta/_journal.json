@@ -29,6 +29,13 @@
       "when": 1793436281752,
       "tag": "0003_team_message_channels",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1793440184801,
+      "tag": "0004_unified_messages",
+      "breakpoints": true
     }
   ]
 }

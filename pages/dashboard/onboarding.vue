@@ -121,7 +121,7 @@ const pushSubscription = usePushSubscription()
 const pushAskHome = ref<string | null>(null)
 const pushAskLede = computed(() => {
   const labels = notificationCategoryLabels([state.value.vertical])
-  return `Get new ${labels.reservations_bookings.toLowerCase()} and ${labels.guest_messages.toLowerCase()} as they arrive.`
+  return `Get new ${labels.reservations_bookings.toLowerCase()} and ${labels.messages.toLowerCase()} as they arrive.`
 })
 const previousStep = computed(() => currentStep.value ? previousOf(currentStep.value.id) : null)
 const nextStep = computed(() => currentStep.value ? nextOf(currentStep.value.id) : null)
