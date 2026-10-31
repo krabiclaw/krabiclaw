@@ -3,7 +3,6 @@ import {
   NOTIFICATION_CATEGORIES,
   NOTIFICATION_CATEGORY_DEFAULTS,
   isMandatoryEmailCategory,
-  isPushOnlyCategory,
   notificationCategoryLabels,
   type NotificationCategory,
   type NotificationCategorySetting,
@@ -86,9 +85,6 @@ export async function setNotificationPreference(
 ): Promise<void> {
   if (isMandatoryEmailCategory(category) && !setting.email) {
     throw new Error(`${category} email cannot be disabled`)
-  }
-  if (isPushOnlyCategory(category) && (setting.email || setting.whatsapp)) {
-    throw new Error(`${category} is delivered by push only`)
   }
   await execute(
     db,

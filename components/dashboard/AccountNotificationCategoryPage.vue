@@ -4,14 +4,12 @@
     <UAlert v-if="failure" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="failure" />
 
     <div>
-      <template v-if="!pushOnly">
-        <UFormField name="email" class="border-b border-default">
-          <SettingRow v-model="draft.email" label="Email" :disabled="emailLocked || saving" />
-        </UFormField>
-        <UFormField name="whatsapp" class="border-b border-default">
-          <SettingRow v-model="draft.whatsapp" label="WhatsApp" :disabled="!phoneVerified || saving" />
-        </UFormField>
-      </template>
+      <UFormField name="email" class="border-b border-default">
+        <SettingRow v-model="draft.email" label="Email" :disabled="emailLocked || saving" />
+      </UFormField>
+      <UFormField name="whatsapp" class="border-b border-default">
+        <SettingRow v-model="draft.whatsapp" label="WhatsApp" :disabled="!phoneVerified || saving" />
+      </UFormField>
       <!-- Reaches every device the person registered: the KrabiClaw app and subscribed browsers. -->
       <UFormField name="push">
         <SettingRow :model-value="draft.push" label="Push" :description="pushLine" :disabled="saving || enablingPush" @update:model-value="setPush">
@@ -20,7 +18,7 @@
       </UFormField>
     </div>
 
-    <NuxtLink v-if="!phoneVerified && !pushOnly" to="/dashboard/account/profile/personal" class="block text-sm text-muted underline underline-offset-2">
+    <NuxtLink v-if="!phoneVerified" to="/dashboard/account/profile/personal" class="block text-sm text-muted underline underline-offset-2">
       Add a WhatsApp number
     </NuxtLink>
   </UForm>
@@ -29,7 +27,7 @@
 <script setup lang="ts">
 import SettingRow from '~/components/dashboard/SettingRow.vue'
 import { authClient } from '~/lib/auth-client'
-import { isMandatoryEmailCategory, isNotificationCategory, isPushOnlyCategory, type NotificationCategory } from '~/shared/notification-categories'
+import { isMandatoryEmailCategory, isNotificationCategory, type NotificationCategory } from '~/shared/notification-categories'
 
 // The category is passed in rather than read from the route, because the index
 // route renders this leaf for the first category with no segment of its own.
@@ -43,7 +41,6 @@ if (!isNotificationCategory(props.category)) throw createError({ statusCode: 404
 
 const setting = computed(() => preferences.value?.[props.category] ?? null)
 const emailLocked = computed(() => isMandatoryEmailCategory(props.category))
-const pushOnly = computed(() => isPushOnlyCategory(props.category))
 const phoneVerified = computed(() => Boolean(sessionData.value?.user?.phoneNumberVerified))
 
 const draft = reactive({ email: true, whatsapp: false, push: false })
