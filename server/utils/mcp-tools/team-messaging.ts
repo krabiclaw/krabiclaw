@@ -44,7 +44,7 @@ export const TEAM_MESSAGING_TOOLS: McpToolDefinition[] = [
     ] }, required: ['thread_id', 'action', 'idempotency_key'],
     outputSchema: { type: 'object', properties: { status: { type: 'string', enum: ['updated', 'left'] }, threadId: text }, required: ['status', 'threadId'] },
   }),
-  organizationTool({ name: 'get_team_conversation', domain: 'team_messaging', minimumRole: 'member', description: 'Read messages and photo/push receipts from one of your internal conversations, newest first. Defaults to 20, maximum 100. When hasMore is true, page back with both before and before_id from the oldest loaded message’s createdAt and id. Reading does not mark the conversation read.',
+  organizationTool({ name: 'get_team_conversation', domain: 'team_messaging', minimumRole: 'member', description: 'Read messages, photos and notification receipts from one of your internal conversations, newest first. Defaults to 20, maximum 100. When hasMore is true, page back with both before and before_id from the oldest loaded message’s createdAt and id. Reading does not mark the conversation read.',
     inputSchema: { thread_id: threadId, limit: { type: 'integer', minimum: 1, maximum: 100 }, before: { ...text, minLength: 1 }, before_id: { ...text, minLength: 1 } }, required: ['thread_id'],
     outputSchema: { type: 'object', properties: { messages: { type: 'array', items: message }, hasMore: { type: 'boolean' } }, required: ['messages', 'hasMore'] },
   }),

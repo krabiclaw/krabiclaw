@@ -6,7 +6,8 @@ import { creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, re
 import { publishDashboardInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { notifyTeamMessage } from '~/server/utils/notifications'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import type { GuestThreadDeliveryChannel, GuestThreadDeliveryStatus } from '~/server/domain/guest-threads/types'
+import type { GuestThreadDeliveryStatus } from '~/server/domain/guest-threads/types'
+import type { NotificationChannel } from '~/shared/notification-categories'
 import { getStay, stayAccessFor } from '~/server/domain/stays'
 import {
   discardMessagePhotos,
@@ -105,7 +106,7 @@ export interface TeamMessage {
   body: string
   attachments: Array<{ id: string; url: string; width: number | null; height: number | null }>
   /** Each push this message was sent as, with Apple's outcome. */
-  deliveries: Array<{ id: string; channel: GuestThreadDeliveryChannel; status: GuestThreadDeliveryStatus; error: string | null; updatedAt: string }>
+  deliveries: Array<{ id: string; channel: NotificationChannel; status: GuestThreadDeliveryStatus; error: string | null; updatedAt: string }>
   createdAt: string
 }
 
@@ -492,7 +493,7 @@ export async function operateTeamGroup(env: TeamEnv, db: DbClient, access: TeamA
 async function readMessages(db: DbClient, organizationId: string, rows: Array<{ id: string; thread_id: string; sender_user_id: string | null; body: string; created_at: string }>): Promise<TeamMessage[]> {
   const [photos, deliveries] = await Promise.all([
     listMessagePhotos(db, 'team_message', rows.map(row => row.id)),
-    rows.length ? queryAll<{ dedupe_key: string; id: string; channel: GuestThreadDeliveryChannel; status: GuestThreadDeliveryStatus; error: string | null; updated_at: string }>(db, `
+    rows.length ? queryAll<{ dedupe_key: string; id: string; channel: NotificationChannel; status: GuestThreadDeliveryStatus; error: string | null; updated_at: string }>(db, `
       SELECT a.dedupe_key, d.id, d.channel, d.status, d.error, d.updated_at FROM guest_thread_deliveries d
         JOIN activity_entries a ON a.id = d.entry_id
        WHERE a.organization_id = ? AND a.scope_kind = 'organization' AND d.purpose = 'team_message'

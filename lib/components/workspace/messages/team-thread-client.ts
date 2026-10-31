@@ -26,7 +26,7 @@ function isTeamMessage(value: unknown): value is TeamMessage {
   return isRecord(value) && typeof value.id === 'string' && typeof value.threadId === 'string' && nullableString(value.senderId)
     && typeof value.body === 'string' && typeof value.createdAt === 'string'
     && Array.isArray(value.attachments) && value.attachments.every(photo => isRecord(photo) && typeof photo.id === 'string' && typeof photo.url === 'string' && (photo.width === null || typeof photo.width === 'number') && (photo.height === null || typeof photo.height === 'number'))
-    && Array.isArray(value.deliveries) && value.deliveries.every(delivery => isRecord(delivery) && typeof delivery.id === 'string' && delivery.channel === 'push' && typeof delivery.status === 'string' && nullableString(delivery.error) && typeof delivery.updatedAt === 'string')
+    && Array.isArray(value.deliveries) && value.deliveries.every(delivery => isRecord(delivery) && typeof delivery.id === 'string' && (delivery.channel === 'email' || delivery.channel === 'whatsapp' || delivery.channel === 'push') && typeof delivery.status === 'string' && nullableString(delivery.error) && typeof delivery.updatedAt === 'string')
 }
 
 export function isTeamMessagesResponse(value: unknown): value is { messages: TeamMessage[]; hasMore: boolean } {

@@ -891,9 +891,9 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads messages, photos and push receipts from one internal conversation the authenticated member participates in, without changing its read position.",
-        "open_world_justification": "Reads messages, photos and push receipts from one internal conversation the authenticated member participates in, without changing its read position. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads messages, photos and push receipts from one internal conversation the authenticated member participates in, without changing its read position."
+        "read_only_justification": "Reads messages, photos and notification receipts from one internal conversation the authenticated member participates in, without changing its read position.",
+        "open_world_justification": "Reads messages, photos and notification receipts from one internal conversation the authenticated member participates in, without changing its read position. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads messages, photos and notification receipts from one internal conversation the authenticated member participates in, without changing its read position."
       }
     },
     "get_website_draft": {
@@ -1695,9 +1695,9 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Saves text and/or a supplied photo as the authenticated participant in an internal conversation, under a stable retry key, and records native push outcomes.",
-        "open_world_justification": "Downloads a supplied host photo when present. The message and native push recipients are bounded to the authenticated member’s internal conversation in the selected business.",
-        "destructive_justification": "Saves text and/or a supplied photo as the authenticated participant in an internal conversation, under a stable retry key, and records native push outcomes."
+        "read_only_justification": "Saves text and/or a supplied photo as the authenticated participant in an internal conversation, under a stable retry key, and records notification outcomes.",
+        "open_world_justification": "Downloads a supplied host photo when present. The message and notification recipients are bounded to the authenticated member’s internal conversation in the selected business.",
+        "destructive_justification": "Saves text and/or a supplied photo as the authenticated participant in an internal conversation, under a stable retry key, and records notification outcomes."
       }
     },
     "set_collection_products": {

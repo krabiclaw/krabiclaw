@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:5cd99a5d890ae1c5cac51069bae129011122e5e3fb824bd4286f0ed47fc916c2",
-  "documentationFingerprint": "sha256:93fdd7ee75dcbcadcaade5e4361e7d5a8ee8dbfc9458342ef309dc66edbf92e8",
+  "fingerprint": "sha256:6e1861aa738c6163aaecbc73d00e4fe8b513703d7e8839493018d46b975e1168",
+  "documentationFingerprint": "sha256:12edee538751b274028cde9b7f08f91d2d50263190b494fe2e56189bee3c004e",
   "tools": [
     {
       "name": "add_organization_language",
@@ -63918,7 +63918,7 @@
     {
       "name": "get_team_conversation",
       "title": "Get team conversation",
-      "description": "Read messages and photo/push receipts from one of your internal conversations, newest first. Defaults to 20, maximum 100. When hasMore is true, page back with both before and before_id from the oldest loaded message’s createdAt and id. Reading does not mark the conversation read.",
+      "description": "Read messages, photos and notification receipts from one of your internal conversations, newest first. Defaults to 20, maximum 100. When hasMore is true, page back with both before and before_id from the oldest loaded message’s createdAt and id. Reading does not mark the conversation read.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -124628,7 +124628,7 @@
         "confirm_product_booking": "sha256:d1269994270301b34621918853c929c1e77f702b21fa336ac4dd23dcbf81e18e",
         "get_guest_conversation": "sha256:0e458314aacd4ef9b6f948eea9e5b395c0f6cc4fd6e5a9dd9884f99e008fdfa5",
         "get_product_booking": "sha256:f556f5a1b85a50415d2ec9d1464f44b876afced7651eb51aabd5445eca9ebcaa",
-        "get_team_conversation": "sha256:9f744a1b97e25b1b36fab5184bcd473832f9e7f2510fc292316ee146e5cb700f",
+        "get_team_conversation": "sha256:68a4390f99121151a6c3dcca2e3cff8675166b27d958e7a1a71dcd3a4c9a81d0",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
