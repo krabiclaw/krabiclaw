@@ -22,6 +22,27 @@
       "when": 1793358981589,
       "tag": "0002_social_publication_attribution",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793436281752,
+      "tag": "0003_team_message_channels",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1793440184801,
+      "tag": "0004_unified_messages",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793443941216,
+      "tag": "0005_canonical_message_deliveries",
+      "breakpoints": true
     }
   ]
 }

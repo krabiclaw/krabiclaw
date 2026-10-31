@@ -58,6 +58,7 @@ test('members talk in team conversations, see unread state and receive recorded 
       await db.prepare('INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, ?, 0)').bind(id, organizationId, userId, role).run()
     }
     // The owner's phone is signed in; APNs is not configured here, so its push is a recorded failure.
+    await setNotificationPreference(db, env, 'owner', 'messages', { email: false, whatsapp: false, push: true })
     await db.prepare("INSERT INTO session (id, expiresAt, token, userId) VALUES ('owner-session', unixepoch() + 3600, 'owner-session-token', 'owner')").run()
     await db.prepare("INSERT INTO device_tokens (token, kind, user_id, session_id, environment) VALUES ('ab12', 'apns', 'owner', 'owner-session', 'sandbox')").run()
     await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
@@ -209,8 +210,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.equal((await listTeamThreads(env, db, owner)).find(thread => thread.id === direct.id)?.unreadCount, 0)
 
     // A member switched team pushes off gets none, and nothing is recorded for them.
-    await setNotificationPreference(db, env as never, 'owner', 'team_messages', { email: false, whatsapp: false, push: false })
-    await assert.rejects(setNotificationPreference(db, env as never, 'owner', 'team_messages', { email: true, whatsapp: false, push: true }), /push only/)
+    await setNotificationPreference(db, env as never, 'owner', 'messages', { email: false, whatsapp: false, push: false })
     const quiet = await sendTeamMessage(env, db, cleaner, direct.id, { body: 'Second', photos: [], idempotencyKey: 'k2', senderName: 'cleaner' })
     assert.deepEqual(quiet.message.deliveries, [])
     assert.equal(await db.prepare(`SELECT COUNT(*) AS n FROM guest_thread_deliveries d JOIN activity_entries a ON a.id = d.entry_id WHERE a.dedupe_key = ?`)

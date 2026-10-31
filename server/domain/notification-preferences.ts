@@ -1,9 +1,10 @@
+import { HTTPError } from 'nitro'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import {
   NOTIFICATION_CATEGORIES,
   NOTIFICATION_CATEGORY_DEFAULTS,
   isMandatoryEmailCategory,
-  isPushOnlyCategory,
+  isNotificationCategory,
   notificationCategoryLabels,
   type NotificationCategory,
   type NotificationCategorySetting,
@@ -49,8 +50,10 @@ export async function getNotificationPreferences(db: DbClient, userId: string): 
     [userId],
   )
   for (const row of rows) {
-    const category = row.category as NotificationCategory
-    if (!(category in preferences)) continue
+    if (!isNotificationCategory(row.category)) {
+      throw new HTTPError({ statusCode: 500, message: 'Stored notification category is invalid', data: { code: 'INVALID_NOTIFICATION_CATEGORY', field: 'category' } })
+    }
+    const category = row.category
     preferences[category] = {
       email: Boolean(row.email_enabled),
       whatsapp: Boolean(row.whatsapp_enabled),
@@ -86,9 +89,6 @@ export async function setNotificationPreference(
 ): Promise<void> {
   if (isMandatoryEmailCategory(category) && !setting.email) {
     throw new Error(`${category} email cannot be disabled`)
-  }
-  if (isPushOnlyCategory(category) && (setting.email || setting.whatsapp)) {
-    throw new Error(`${category} is delivered by push only`)
   }
   await execute(
     db,

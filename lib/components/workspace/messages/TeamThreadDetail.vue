@@ -24,12 +24,12 @@
                 </div>
                 <p v-if="message.body" class="whitespace-pre-wrap break-words rounded-2xl bg-elevated px-4 py-3 text-base leading-normal">{{ message.body }}</p>
                 <UButton v-if="message.senderId !== userId" color="neutral" variant="link" size="xs" class="mt-1 p-0 text-muted" @click="reportError = null; reporting = message">Report</UButton>
-                <div v-if="failedPushes(message).length" class="mt-1 text-xs text-error" data-team-push-failure>
-                  <p>Message saved. {{ failedPushes(message).length === 1 ? 'A push notification failed.' : `${failedPushes(message).length} push notifications failed.` }}</p>
-                  <UCollapsible v-if="failedPushes(message).some(delivery => delivery.error)">
-                    <UButton color="error" variant="link" size="xs" class="p-0" label="Push error details" trailing-icon="i-lucide-chevron-down" />
+                <div v-if="failedDeliveries(message).length" class="mt-1 text-xs text-error" data-team-delivery-failure>
+                  <p>Message saved. {{ failedDeliveries(message).length === 1 ? 'A notification failed.' : `${failedDeliveries(message).length} notifications failed.` }}</p>
+                  <UCollapsible v-if="failedDeliveries(message).some(delivery => delivery.error)">
+                    <UButton color="error" variant="link" size="xs" class="p-0" label="Delivery error details" trailing-icon="i-lucide-chevron-down" />
                     <template #content>
-                      <p v-for="delivery in failedPushes(message).filter(delivery => delivery.error)" :key="delivery.id" class="mt-1 whitespace-pre-wrap break-words">{{ delivery.error }}</p>
+                      <p v-for="delivery in failedDeliveries(message).filter(delivery => delivery.error)" :key="delivery.id" class="mt-1 whitespace-pre-wrap break-words">{{ delivery.channel }}: {{ delivery.error }}</p>
                     </template>
                   </UCollapsible>
                 </div>
@@ -93,7 +93,7 @@ const attempt = ref<{ key: string; body: string; photos: MessagePhotoDraft[] } |
 const scroller = useTemplateRef<HTMLElement>('scroller')
 function author(message: TeamMessage) { return props.thread?.participants.find(member => member.id === message.senderId) }
 function senderName(message: TeamMessage) { return message.senderId === userId.value ? 'You' : author(message)?.name ?? (message.senderId === null ? 'Deleted account' : 'Former team member') }
-function failedPushes(message: TeamMessage) { return message.deliveries.filter(delivery => delivery.channel === 'push' && delivery.status === 'failed') }
+function failedDeliveries(message: TeamMessage) { return message.deliveries.filter(delivery => delivery.status === 'failed') }
 function day(at: string) { return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium' }).format(new Date(at)) }
 function formatClockTime(at: string) { return new Intl.DateTimeFormat(locale.value, { hour: 'numeric', minute: '2-digit' }).format(new Date(at)) }
 function startsRun(message: TeamMessage, index: number) { const before = messages.value[index - 1]; return !before || before.senderId !== message.senderId || day(before.createdAt) !== day(message.createdAt) }

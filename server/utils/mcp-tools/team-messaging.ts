@@ -19,7 +19,7 @@ const conversation = { type: 'object', properties: {
 const message = { type: 'object', properties: {
   id: text, threadId: text, senderId: nullableText, body: text, createdAt: text,
   attachments: { type: 'array', items: { type: 'object', properties: { id: text, url: text, width: { type: ['number', 'null'] }, height: { type: ['number', 'null'] } }, required: ['id', 'url', 'width', 'height'] } },
-  deliveries: { type: 'array', items: { type: 'object', properties: { id: text, channel: { const: 'push' }, status: text, error: nullableText, updatedAt: text }, required: ['id', 'channel', 'status', 'error', 'updatedAt'] } },
+  deliveries: { type: 'array', items: { type: 'object', properties: { id: text, channel: { type: 'string', enum: ['email', 'whatsapp', 'push'] }, status: text, error: nullableText, updatedAt: text }, required: ['id', 'channel', 'status', 'error', 'updatedAt'] } },
 }, required: ['id', 'threadId', 'senderId', 'body', 'createdAt', 'attachments', 'deliveries'] }
 const threadId = { type: 'string', minLength: 1, description: 'Team conversation ID from list_team_conversations or start_team_conversation; never a guest request or Better Auth Team ID.' }
 
@@ -44,11 +44,11 @@ export const TEAM_MESSAGING_TOOLS: McpToolDefinition[] = [
     ] }, required: ['thread_id', 'action', 'idempotency_key'],
     outputSchema: { type: 'object', properties: { status: { type: 'string', enum: ['updated', 'left'] }, threadId: text }, required: ['status', 'threadId'] },
   }),
-  organizationTool({ name: 'get_team_conversation', domain: 'team_messaging', minimumRole: 'member', description: 'Read messages and photo/push receipts from one of your internal conversations, newest first. Defaults to 20, maximum 100. When hasMore is true, page back with both before and before_id from the oldest loaded message’s createdAt and id. Reading does not mark the conversation read.',
+  organizationTool({ name: 'get_team_conversation', domain: 'team_messaging', minimumRole: 'member', description: 'Read messages, photos and notification receipts from one of your internal conversations, newest first. Defaults to 20, maximum 100. When hasMore is true, page back with both before and before_id from the oldest loaded message’s createdAt and id. Reading does not mark the conversation read.',
     inputSchema: { thread_id: threadId, limit: { type: 'integer', minimum: 1, maximum: 100 }, before: { ...text, minLength: 1 }, before_id: { ...text, minLength: 1 } }, required: ['thread_id'],
     outputSchema: { type: 'object', properties: { messages: { type: 'array', items: message }, hasMore: { type: 'boolean' } }, required: ['messages', 'hasMore'] },
   }),
-  organizationTool({ name: 'send_team_message', domain: 'team_messaging', minimumRole: 'member', description: 'Send the text and/or supplied photo to an internal team conversation you belong to. Sends as the authenticated member and records push outcomes; a saved message does not prove delivery to a participant’s device. Reuse the same idempotency_key for an identical retry; a failed realtime publication may report committed:true and must retry that same request. This never replies to a guest.',
+  organizationTool({ name: 'send_team_message', domain: 'team_messaging', minimumRole: 'member', description: 'Send the text and/or supplied photo to an internal team conversation you belong to. Sends as the authenticated member and records notification outcomes; a saved message does not prove delivery to a participant. Reuse the same idempotency_key for an identical retry; a failed realtime publication may report committed:true and must retry that same request. This never replies to a guest.',
     inputSchema: { thread_id: threadId, message: { ...text, minLength: 1, maxLength: 5000 }, file: { ...chatgptFileInput, description: 'Optional photo supplied as a ChatGPT file attachment.' }, idempotency_key: { ...text, minLength: 1, maxLength: 200 }, anyOf: [{ required: ['message'] }, { required: ['file'] }] }, required: ['thread_id', 'idempotency_key'], fileParams: ['file'],
     outputSchema: { type: 'object', properties: { message, created: { type: 'boolean' } }, required: ['message', 'created'] },
   }),

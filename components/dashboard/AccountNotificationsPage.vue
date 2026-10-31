@@ -21,7 +21,9 @@ const session = authClient.useSession()
 const sessionData = computed(() => session.value.data)
 const { preferences, labels, error, load } = useNotificationPreferences(() => sessionData.value?.user?.id)
 // Read on every visit: the labels follow the person's businesses, which change outside this screen.
-await load(true)
+watch(() => sessionData.value?.user?.id, (userId) => {
+  if (userId) void load(true)
+}, { immediate: true })
 
 const groups = computed<EditorNavigationGroup[]>(() => [{
   id: 'categories',

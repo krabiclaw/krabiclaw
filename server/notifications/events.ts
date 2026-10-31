@@ -258,42 +258,40 @@ export function contactReceivedMessage(input: ContactEventInput): NotificationMe
       input.consentAcknowledged ? fact('consent', 'Contact/privacy notice', 'Acknowledged') : null,
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
-    category: 'guest_messages',
+    category: 'messages',
     emailPurpose: 'transactional',
     emailReason: `You received this email because someone contacted ${input.organizationName} and you receive its website messages.`,
     organizationName: input.organizationName,
   }
 }
 
-export interface GuestReplyEventInput {
-  guestName: string
-  guestEmail: string | null
-  inboundChannel: 'email' | 'whatsapp' | 'web'
+export interface MessageEventInput {
+  senderName: string
+  senderEmail: string | null
+  conversationLabel: string
   messagePreview: string
   organizationName: string | null
   replyUrl: string | null
 }
 
-export function guestReplyMessage(input: GuestReplyEventInput): NotificationMessage {
-  // The site name has no slot of its own, so it rides in the subject alongside
-  // how the guest wrote in. An owner with several sites needs to know which.
-  const subject = [input.inboundChannel === 'whatsapp' ? 'WhatsApp reply' : input.inboundChannel==='web'?'Website reply':'Email reply', input.organizationName].filter(Boolean).join(' · ')
+export function messageReceived(input: MessageEventInput): NotificationMessage {
+  const subject = [input.conversationLabel, input.organizationName].filter(Boolean).join(' · ')
   return {
-    title: `New guest reply from ${input.guestName}`,
+    title: `${input.senderName} sent a message`,
     preheader: input.messagePreview.slice(0, 120),
     hero: null,
     facts: facts(
-      fact('guestName', 'From', input.guestName, true),
+      fact('guestName', 'From', input.senderName, true),
       fact('subject', 'Conversation', subject, true),
-      fact('guestEmail', 'Email', input.guestEmail),
+      fact('guestEmail', 'Email', input.senderEmail),
       fact('message', 'Message', input.messagePreview, true),
     ),
-    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open thread in dashboard' } : undefined,
-    category: 'guest_messages',
+    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open conversation' } : undefined,
+    category: 'messages',
     emailPurpose: 'transactional',
     emailReason: input.organizationName
-      ? `You received this email because a guest replied to a conversation with ${input.organizationName} and you receive its guest messages.`
-      : 'You received this email because a guest replied to a conversation you receive notifications about.',
+      ? `You received this email because you receive messages for ${input.organizationName}.`
+      : 'You received this email because you receive notifications about this conversation.',
     organizationName: input.organizationName,
   }
 }

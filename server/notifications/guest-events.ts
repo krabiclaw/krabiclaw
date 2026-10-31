@@ -293,7 +293,7 @@ export function guestContactReceivedMessage(input: {
     sections: [{ title: labels['site.contact_page.your_message']!, body: input.message }],
     emailPurpose: 'transactional',
     emailReason: labels['email.reason.contact']!.replace('{organization}', input.organizationName),
-    category: 'guest_messages',
+    category: 'messages',
     organizationName: input.organizationName,
     organizationLogoUrl: input.organizationLogoUrl,
   }
@@ -321,7 +321,7 @@ export function guestThreadReplyMessage(input: {
     finePrint: 'Reply to this email and your message goes straight back to the same conversation.',
     emailPurpose: 'transactional',
     emailReason: locale.messages['email.reason.reply']!.replace('{organization}', input.organizationName),
-    category: 'guest_messages',
+    category: 'messages',
     organizationName: input.organizationName,
     organizationLogoUrl: input.organizationLogoUrl,
   }
