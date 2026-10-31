@@ -744,12 +744,11 @@ function systemEventLabel(entry: GuestThreadEntryViewModel) {
 }
 
 const DELIVERY_PURPOSE_LABELS = {
-  owner_alert: 'owner alert',
+  owner_alert: 'notification',
   guest_acknowledgement: 'guest acknowledgement',
   member_reply: 'reply',
   status_update: 'status update',
   scheduled_message: 'scheduled message',
-  team_message: 'team message',
 } satisfies Record<GuestThreadDeliveryFailureViewModel['purpose'], string>
 
 function deliveryFailureTitle(failure: GuestThreadDeliveryFailureViewModel) {
