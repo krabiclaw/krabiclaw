@@ -574,7 +574,6 @@ function memberNotificationSends(
   input: OrganizationContext & {
     locationId?: string | null
     context: DeliveryAnchor
-    purpose: GuestThreadDeliveryPurpose
     template: string
     pushTemplate: string
     whatsappTemplate: WhatsAppTemplate | null
@@ -597,7 +596,7 @@ function memberNotificationSends(
         ...input, to, title: input.message.title,
         email: { subject: sanitizeEmailHeaderValue(input.message.title), ...rendered },
         unsubscribeOneClickUrl: recipient.unsubscribeOneClickUrl,
-        delivery: threadDelivery(input.context, input.purpose, 'email', input.template, to, input.eventKey),
+        delivery: threadDelivery(input.context, 'owner_alert', 'email', input.template, to, input.eventKey),
       })
     })())
   }
@@ -609,13 +608,13 @@ function memberNotificationSends(
     sends.push((async () => {
       if (!await sendWhatsAppThreadNotification(env, db, {
         organizationId: input.organizationId, locationId: input.locationId ?? null, toPhone, template, vars: mapped.vars,
-        delivery: threadDelivery(input.context, input.purpose, 'whatsapp', template, toPhone, input.eventKey),
+        delivery: threadDelivery(input.context, 'owner_alert', 'whatsapp', template, toPhone, input.eventKey),
       })) throw new RecordedDeliveryFailure(`WhatsApp notification was not delivered for organization ${input.organizationId}`)
     })())
   }
   sends.push(...recipient.pushDevices.map(device => sendPushThreadNotification(env, db, {
     userId: recipient.userId, device,
-    delivery: threadDelivery(input.context, input.purpose, 'push', input.pushTemplate, device.token, input.eventKey),
+    delivery: threadDelivery(input.context, 'owner_alert', 'push', input.pushTemplate, device.token, input.eventKey),
     alert: {
       title: input.message.title, body: input.message.preheader,
       url: async () => input.message.primaryAction?.url ?? await dashboardPathUrl(env, db, input.organizationId, '/notifications'),
@@ -821,7 +820,7 @@ export async function notifyOwner(
     const projected = !recipient.organizationWide && opts.memberAlert !== undefined
     return memberNotificationSends(env, db, recipient, {
       ...opts, message: projected ? memberMessage : message,
-      context: deliveryContext, purpose: 'owner_alert',
+      context: deliveryContext,
       pushTemplate: opts.template, whatsappTemplate: opts.whatsappTemplate ?? null,
       eventKey: opts.deliveryEventKey,
       target: projected ? { kind: 'stay', stayId: opts.memberAlert!.stayId }
@@ -1825,7 +1824,7 @@ export async function notifyGuestThreadReply(
   })
 
   const results = await Promise.allSettled(recipients.flatMap(recipient => memberNotificationSends(env, db, recipient, {
-    ...opts, context: threadContext, purpose: 'owner_alert',
+    ...opts, context: threadContext,
     template: 'guest_thread_reply_email', pushTemplate: 'guest_thread_reply_push',
     whatsappTemplate: 'guest_thread_reply_whatsapp', payload, message: ownerMessage,
     target: { kind: 'guest', threadId: opts.threadId },
@@ -1864,7 +1863,7 @@ export async function notifyTeamMessage(env: NotificationEnv, db: DbClient, inpu
   const context = { guestThreadId: null, sourceEntryId: input.entryId }
   const results = await Promise.allSettled(recipients.flatMap(recipient => memberNotificationSends(env, db, recipient, {
     organizationId: input.organizationId, organizationName: organization.name,
-    context, purpose: 'team_message', template: 'team_message', pushTemplate: 'team_message',
+    context, template: 'team_message', pushTemplate: 'team_message',
     whatsappTemplate: 'guest_thread_reply_whatsapp', payload: { team_thread_id: input.threadId }, message,
     target: { kind: 'team', threadId: input.threadId },
   })))

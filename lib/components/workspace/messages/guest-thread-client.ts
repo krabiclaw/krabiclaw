@@ -95,7 +95,6 @@ function isDeliveryFailure(value: unknown): value is GuestThreadDeliveryFailureV
       || value.purpose === 'member_reply'
       || value.purpose === 'scheduled_message'
       || value.purpose === 'status_update'
-      || value.purpose === 'team_message'
     )
     && (value.error === null || typeof value.error === 'string')
     && typeof value.createdAt === 'string'
