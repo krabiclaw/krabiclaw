@@ -766,10 +766,11 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       if (!columns(stage, table).includes(column)) stage.exec(`ALTER TABLE ${qi(table)} ADD COLUMN ${qi(column)} ${type}`)
     }
     if (tableNames(stage).includes('user_notification_preferences') && !columns(stage, 'user_notification_preferences').includes('push_enabled')) {
-      const { NOTIFICATION_CATEGORY_DEFAULTS } = await import('../shared/notification-categories.ts')
+      // This v18 → v19 transformation uses v19's policy, independently of later product categories.
+      const pushDefaults = { account_security: 0, reservations_bookings: 1, guest_messages: 1, reviews: 0, review_requests: 0, organization_and_billing: 0, product_news: 0 }
       stage.exec('ALTER TABLE user_notification_preferences ADD COLUMN push_enabled INTEGER')
       const update = stage.prepare('UPDATE user_notification_preferences SET push_enabled = ? WHERE category = ?')
-      const changes = Object.entries(NOTIFICATION_CATEGORY_DEFAULTS).reduce((total, [category, setting]) => total + update.run(setting.push ? 1 : 0, category).changes, 0)
+      const changes = Object.entries(pushDefaults).reduce((total, [category, enabled]) => total + update.run(enabled, category).changes, 0)
       const unmapped = stage.prepare('SELECT count(*) AS n FROM user_notification_preferences WHERE push_enabled IS NULL').get().n
       assert(unmapped === 0, `${unmapped} notification preferences name a category with no push default; no rows were copied`)
       if (changes) manifest.transforms.push({ name: 'notification_preferences_push_default', changes })

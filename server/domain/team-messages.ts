@@ -623,10 +623,9 @@ export async function sendTeamMessage(
   await notifyTeamMessage(env, db, {
     organizationId: access.organizationId,
     threadId,
-    messageId: row.id,
     entryId: entry.id,
     senderName: input.senderName,
-    preview: messagePreview(row.body, photoCount).slice(0, 180),
+    messagePreview: messagePreview(row.body, photoCount),
     recipientUserIds: recipients.map(recipient => recipient.user_id),
   })
   await publishThreadChanged(env, access.organizationId, threadId, { message_id: row.id })

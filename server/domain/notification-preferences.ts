@@ -1,8 +1,10 @@
+import { HTTPError } from 'nitro'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import {
   NOTIFICATION_CATEGORIES,
   NOTIFICATION_CATEGORY_DEFAULTS,
   isMandatoryEmailCategory,
+  isNotificationCategory,
   notificationCategoryLabels,
   type NotificationCategory,
   type NotificationCategorySetting,
@@ -48,8 +50,10 @@ export async function getNotificationPreferences(db: DbClient, userId: string): 
     [userId],
   )
   for (const row of rows) {
-    const category = row.category as NotificationCategory
-    if (!(category in preferences)) continue
+    if (!isNotificationCategory(row.category)) {
+      throw new HTTPError({ statusCode: 500, message: 'Stored notification category is invalid', data: { code: 'INVALID_NOTIFICATION_CATEGORY', field: 'category' } })
+    }
+    const category = row.category
     preferences[category] = {
       email: Boolean(row.email_enabled),
       whatsapp: Boolean(row.whatsapp_enabled),

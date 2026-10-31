@@ -14,8 +14,7 @@
 export const NOTIFICATION_CATEGORIES = [
   'account_security',
   'reservations_bookings',
-  'guest_messages',
-  'team_messages',
+  'messages',
   'reviews',
   'review_requests',
   'organization_and_billing',
@@ -54,8 +53,7 @@ export function isMandatoryEmailCategory(category: NotificationCategory): boolea
 export const NOTIFICATION_CATEGORY_DEFAULTS = {
   account_security: { email: true, whatsapp: false, push: false },
   reservations_bookings: { email: true, whatsapp: true, push: true },
-  guest_messages: { email: true, whatsapp: true, push: true },
-  team_messages: { email: true, whatsapp: false, push: true },
+  messages: { email: true, whatsapp: true, push: true },
   reviews: { email: true, whatsapp: false, push: false },
   review_requests: { email: true, whatsapp: false, push: false },
   organization_and_billing: { email: true, whatsapp: false, push: false },
@@ -65,8 +63,7 @@ export const NOTIFICATION_CATEGORY_DEFAULTS = {
 export const NOTIFICATION_CATEGORY_LABELS = {
   account_security: 'Account and security',
   reservations_bookings: 'Reservations and bookings',
-  guest_messages: 'Guest messages',
-  team_messages: 'Team messages',
+  messages: 'Messages',
   reviews: 'New reviews',
   review_requests: 'Review requests',
   organization_and_billing: 'Organization and billing',
@@ -74,15 +71,14 @@ export const NOTIFICATION_CATEGORY_LABELS = {
 } as const satisfies Record<NotificationCategory, string>
 
 /**
- * What each business calls the requests and the people behind the two
- * categories that name them. A law practice takes consultation requests from
+ * What each business calls the requests in their notification settings. A law practice takes consultation requests from
  * clients; it never has guests or bookings.
  */
 const VERTICAL_CATEGORY_WORDS = {
-  restaurant: { requests: 'Reservations', people: 'Guest' },
-  experience: { requests: 'Bookings', people: 'Guest' },
-  lodging: { requests: 'Stays', people: 'Guest' },
-  service: { requests: 'Consultation requests', people: 'Client' },
+  restaurant: { requests: 'Reservations' },
+  experience: { requests: 'Bookings' },
+  lodging: { requests: 'Stays' },
+  service: { requests: 'Consultation requests' },
 } as const
 
 type CategoryVertical = keyof typeof VERTICAL_CATEGORY_WORDS
@@ -97,8 +93,7 @@ function joinWords(words: readonly string[]): string {
 /**
  * Category names in the words of the businesses this person belongs to, so a
  * lawyer reads "Consultation requests" and someone with a restaurant and a
- * practice reads "Reservations and consultation requests". With no business
- * (or none the table names) the categories keep their general labels.
+ * practice reads "Reservations and consultation requests". Message settings cover every conversation, independently of the business vertical.
  */
 export function notificationCategoryLabels(verticals: readonly string[]): Record<NotificationCategory, string> {
   const words = (Object.keys(VERTICAL_CATEGORY_WORDS) as CategoryVertical[]).filter(vertical => verticals.includes(vertical)).map(vertical => VERTICAL_CATEGORY_WORDS[vertical])
@@ -106,15 +101,13 @@ export function notificationCategoryLabels(verticals: readonly string[]): Record
   return {
     ...NOTIFICATION_CATEGORY_LABELS,
     reservations_bookings: joinWords(words.map(word => word.requests)),
-    guest_messages: `${joinWords(words.map(word => word.people))} messages`,
   }
 }
 
 export const NOTIFICATION_CATEGORY_ICONS = {
   account_security: 'i-lucide-shield-check',
   reservations_bookings: 'i-lucide-calendar-check',
-  guest_messages: 'i-lucide-message-circle',
-  team_messages: 'i-lucide-messages-square',
+  messages: 'i-lucide-message-circle',
   reviews: 'i-lucide-star',
   review_requests: 'i-lucide-message-square-heart',
   organization_and_billing: 'i-lucide-credit-card',

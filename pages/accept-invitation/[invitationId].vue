@@ -177,7 +177,7 @@ const accept = () => step(async () => {
     destination,
     lede: member.role === 'member'
       ? `Get the ${labels.reservations_bookings.toLowerCase()} assigned to you and team messages. Team messages only arrive as notifications.`
-      : `Get new ${labels.reservations_bookings.toLowerCase()} and ${labels.guest_messages.toLowerCase()} as they arrive.`,
+      : `Get new ${labels.reservations_bookings.toLowerCase()} and ${labels.messages.toLowerCase()} as they arrive.`,
   }
 })
 
