@@ -36,6 +36,13 @@
       "when": 1793440184801,
       "tag": "0004_unified_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793443941216,
+      "tag": "0005_canonical_message_deliveries",
+      "breakpoints": true
     }
   ]
 }

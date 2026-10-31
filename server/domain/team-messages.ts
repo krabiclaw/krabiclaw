@@ -496,7 +496,7 @@ async function readMessages(db: DbClient, organizationId: string, rows: Array<{ 
     rows.length ? queryAll<{ dedupe_key: string; id: string; channel: NotificationChannel; status: GuestThreadDeliveryStatus; error: string | null; updated_at: string }>(db, `
       SELECT a.dedupe_key, d.id, d.channel, d.status, d.error, d.updated_at FROM guest_thread_deliveries d
         JOIN activity_entries a ON a.id = d.entry_id
-       WHERE a.organization_id = ? AND a.scope_kind = 'organization' AND d.purpose = 'team_message'
+       WHERE a.organization_id = ? AND a.scope_kind = 'organization' AND d.purpose = 'owner_alert'
          AND a.dedupe_key IN (SELECT value FROM json_each(?))
        ORDER BY d.created_at, d.id`, [organizationId, d1JsonStringSet(rows.map(row => messageEventKey(row.id)))]) : [],
   ])
