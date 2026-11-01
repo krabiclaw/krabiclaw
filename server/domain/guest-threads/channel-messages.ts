@@ -12,11 +12,13 @@ import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import { getMediaAsset, readMediaPlacements } from '~/server/utils/media-asset-manager'
 import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
 import { downloadImageBuffer } from '~/server/utils/cloudflare-images'
-import { stayThreadQueries } from '~/server/domain/requests'
+import { getGuestRequest, requestSummary, stayThreadQueries } from '~/server/domain/requests'
+import { notifyGuestThreadReply } from '~/server/utils/notifications'
+import type { CloudflareEnv } from '~/server/utils/auth'
 import { planStayMessages } from '~/server/domain/scheduled-guest-messages'
 import type { GuestThreadEntryRow } from './types'
 
-type ChannelEnv = ChannexEnv & GuestInboxPublicationEnv
+type ChannelEnv = ChannexEnv & GuestInboxPublicationEnv & CloudflareEnv
 interface HomeMapping { organization_id: string; product_id: string; property_id: string; channel_id: string; location_id: string; enabled: number }
 export interface ChannelThreadMapping { organization_id: string; product_id: string; request_id: string; external_thread_id: string; external_booking_id: string | null; moved_from_thread_id: string | null }
 
@@ -163,7 +165,17 @@ export async function mirrorChannexThread(db: DbClient, env: ChannelEnv, threadI
   return { status: 'mirrored', request_id: mapping.request_id, messages: messages.length }
 }
 
-/** Webhooks are pull triggers; guest data in their payload is never an authority. */
+/**
+ * Webhooks are pull triggers; guest data in their payload is never an authority.
+ *
+ * A `message` event is Channex telling us a guest wrote ("triggered when new
+ * chat message from a guest is registered at Channex"), so the message it
+ * names is the one the owners are told about, once its mirrored entry says a
+ * guest sent it. Nothing else alerts: a backfill, a booking assignment and an
+ * inquiry event name no message, and a conversation's history arrives through
+ * them. A redelivered event finds the same entry, whose alert receipts send
+ * nothing twice.
+ */
 export async function mirrorChannexMessageEvent(db: DbClient, env: ChannelEnv, value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail(400, 'INVALID_WEBHOOK', 'The webhook body must be an object', 'body')
   const body = value as Record<string, unknown>
@@ -177,9 +189,25 @@ export async function mirrorChannexMessageEvent(db: DbClient, env: ChannelEnv, v
   const payload = body.payload as Record<string, unknown>
   const threadId = required(payload.message_thread_id, 'payload.message_thread_id')
   if (body.event !== 'message_thread_booking_assigned' && required(payload.property_id, 'payload.property_id') !== propertyId) fail(400, 'INVALID_WEBHOOK', 'Webhook property IDs disagree', 'payload.property_id')
-  return mirrorChannexThread(db, env, threadId, propertyId,
-    body.event === 'message_thread_booking_assigned' ? required(payload.booking_id, 'payload.booking_id') : undefined,
-    body.event === 'message' ? required(payload.id, 'payload.id') : undefined)
+  const messageId = body.event === 'message' ? required(payload.id, 'payload.id') : undefined
+  const mirrored = await mirrorChannexThread(db, env, threadId, propertyId,
+    body.event === 'message_thread_booking_assigned' ? required(payload.booking_id, 'payload.booking_id') : undefined, messageId)
+  if (mirrored.status !== 'mirrored' || messageId === undefined) return mirrored
+  // A moved conversation's history redelivered under new ids records no entry: there is nothing new to tell.
+  const entry = await findEntryByDedupeKey(db, `channex-message:${messageId}`)
+  if (!entry || entry.actor_kind !== 'guest' || entry.request_id !== mirrored.request_id) return mirrored
+  const request = await getGuestRequest(db, mirrored.request_id)
+  if (!request) fail(500, 'CHANNEL_THREAD_MISSING', 'The mirrored conversation could not be read', 'request_id')
+  const summary = await requestSummary(db, request)
+  const attachments = (parseEntryPayload(entry)?.attachments as unknown[] | undefined)?.length ?? 0
+  await notifyGuestThreadReply(env, db, {
+    organizationId: request.organization_id, locationId: request.location_id,
+    threadId: request.id, sourceEntryId: entry.id, submissionType: 'stay', submissionId: request.id,
+    participantLabel: summary.participantLabel, guestEmail: summary.guestEmail, guestPhone: summary.guestPhone,
+    inboundChannel: 'airbnb',
+    messagePreview: entry.body?.trim() || (attachments === 1 ? 'Sent an attachment' : `Sent ${attachments} attachments`),
+  })
+  return mirrored
 }
 
 export async function backfillChannexMessages(db: DbClient, env: ChannelEnv, propertyId: string, organizationId: string): Promise<{ threads: number }> {

@@ -1,3 +1,4 @@
+import { HTTPError } from 'nitro'
 import { accountActivityPath, isAccountActivityPath, type AccountActivityKind } from '~/shared/account-activity'
 import { buyerRequestActivityPath } from '~/server/domain/payments/buyer'
 import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
@@ -20,26 +21,33 @@ export interface DashboardSlugs {
   locationSlug: string | null
 }
 
-// Thread deep links are scope-sensitive: organization-wide records go to the
-// dashboard inbox, while location-assigned records go to that location's.
+/**
+ * The organization's dashboard, which every member alert opens somewhere
+ * inside. A destination that cannot be named fails the alert with the field
+ * that is missing; an alert is never sent pointing somewhere generic instead.
+ */
 export async function resolveDashboardSlugs(
   env: CloudflareEnv,
   db: DbClient,
   opts: { organizationId: string; locationId?: string | null },
-): Promise<DashboardSlugs | null> {
+): Promise<DashboardSlugs> {
   const organization = await findOrganizationById(env, opts.organizationId)
-  if (!organization) return null
+  if (!organization) throw destinationUnavailable('organization_id', opts.organizationId)
 
   let locationSlug: string | null = null
   if (opts.locationId) {
     const location = await queryFirst<{ slug: string }>(db, `
         SELECT slug FROM business_locations WHERE id = ? AND organization_id = ? LIMIT 1
       `, [opts.locationId, opts.organizationId])
-    locationSlug = location?.slug ?? null
-    if (!locationSlug) return null
+    if (!location?.slug) throw destinationUnavailable('location_id', opts.locationId)
+    locationSlug = location.slug
   }
 
   return { orgSlug: organization.slug, locationSlug }
+}
+
+export function destinationUnavailable(field: string, value: string): HTTPError {
+  return new HTTPError({ statusCode: 500, message: `The notification has no dashboard destination: ${field} ${value} cannot be resolved`, data: { code: 'NOTIFICATION_DESTINATION_UNAVAILABLE', field, value } })
 }
 
 export function platformOrigin(env: DashboardNotificationLinkEnv): string {
@@ -79,7 +87,6 @@ export async function buildOwnerThreadInboxUrl(
   env: DashboardNotificationLinkEnv & CloudflareEnv,
   db: DbClient,
   opts: { organizationId: string; locationId?: string | null; threadId: string },
-): Promise<string | null> {
-  const slugs = await resolveDashboardSlugs(env, db, opts)
-  return slugs ? composeOwnerThreadInboxUrl(env, slugs, opts.threadId) : null
+): Promise<string> {
+  return composeOwnerThreadInboxUrl(env, await resolveDashboardSlugs(env, db, opts), opts.threadId)
 }

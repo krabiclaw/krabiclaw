@@ -77,6 +77,13 @@ export interface NotificationMessage {
   organizationLogoUrl?: string | null
 }
 
+/**
+ * An alert to a member of the business. It always opens the thing it is
+ * about: the email's button, WhatsApp's button and a push all go to this one
+ * destination, and an alert that cannot name it is not sent.
+ */
+export type MemberAlertMessage = NotificationMessage & { primaryAction: NotificationAction }
+
 export function leadFacts(message: NotificationMessage): NotificationFact[] {
   return message.facts.filter(fact => fact.lead)
 }

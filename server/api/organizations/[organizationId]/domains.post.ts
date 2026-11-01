@@ -56,7 +56,7 @@ export default defineHandler(async (event) => {
       env, organizationId: organization.id, organizationSlug: organization.slug }, 'organization.domains')
     for (const domain of domains) {
       await notifyDomainLifecycle(env, db, {
-        organizationId: organization.id, domain: domain.domain, status: domain.status, title: `Domain added: ${domain.domain}`, message: `DNS configuration is required for ${domain.domain}. Follow the dashboard instructions to complete setup.`, dashboardUrl
+        organizationId: organization.id, event: 'added', domain, dashboardUrl
       })
     }
 

@@ -45,6 +45,10 @@ export const WHATSAPP_MAPPINGS: Partial<Record<WhatsAppTemplate, WhatsAppMapping
       context: 'context',
       requests: 'notes',
     },
+    cannotCarry: {
+      // Eight body slots, all spoken for; what was paid online is in the email and on the booking.
+      paid: 'new_reservation has no payment slot; what was paid online is in the email and on the booking',
+    },
   },
   reservation_cancelled: {
     button: { key: 'reply_path' },
@@ -109,10 +113,12 @@ export const WHATSAPP_MAPPINGS: Partial<Record<WhatsAppTemplate, WhatsAppMapping
       message: 'summary',
     },
     cannotCarry: {
-      // The combined label is the email's reading of the date and time slots;
-      // the template carries those slots, or for a proposal that has only the
-      // label, the variant without them.
-      when: 'booking_change_update has date and time slots, not a combined label',
+      // Eight body slots, all spoken for. What these rows change is stated in
+      // the summary the message slot carries ("2 more nights", "Booking total
+      // +$46.01"); the rows themselves are the email's.
+      nights: 'booking_change_update has no nights slot; the summary states the change in nights',
+      total: 'booking_change_update has no total slot; the summary states the change in total',
+      assignee: 'booking_change_update has no assignee slot; the summary states the new assignee',
     },
   },
   domain_update: {
@@ -122,7 +128,7 @@ export const WHATSAPP_MAPPINGS: Partial<Record<WhatsAppTemplate, WhatsAppMapping
       status: 'status',
     },
     cannotCarry: {
-      headline: 'domain_update has a domain slot and a status slot and nothing else',
+      error: 'domain_update has a domain slot and a status slot and nothing else; the reason and the DNS records are in the email and domain settings',
     },
   },
 }

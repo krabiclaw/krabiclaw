@@ -6,6 +6,8 @@ import { channexGet, channexList, channexRequest, type ChannexEnv } from './clie
 import { ChannexDataError, integer, nullableString, object, string, type Resource } from './data'
 
 import type { GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import type { CloudflareEnv } from '~/server/utils/auth'
+import { notifyChannelStay } from '~/server/utils/notifications'
 
 /**
  * Channel bookings arriving through Channex. A revision is the booking as the
@@ -71,8 +73,25 @@ function revisedBooking(revision: Resource, propertyId: string): ChannelBooking 
   }
 }
 
+/**
+ * Whether Channex loaded this revision from Airbnb's existing reservations
+ * (`load_future_reservations`, which "runs in the background and does not
+ * trigger guest notifications") rather than receiving it as it happened. The
+ * revision's `meta.is_imported` says so; Channex's documentation does not list
+ * it, and it is read as the booking revisions on staging.channex.io served it
+ * on 2026-11-01: `true` on every revision a home's import loaded, absent on
+ * every booking, change and cancellation made after.
+ */
+function importedRevision(revision: Resource): boolean {
+  const meta = revision.attributes.meta
+  if (meta === undefined || meta === null) return false
+  const imported = object(meta, 'meta').is_imported
+  if (imported !== undefined && typeof imported !== 'boolean') throw new ChannexDataError(`revision ${revision.id} has a non-boolean meta.is_imported`)
+  return imported === true
+}
+
 /** One revision: read, land, acknowledge. Throws on anything short of the acknowledgement. */
-export async function applyBookingRevision(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv, revisionId: string): Promise<RevisionOutcome> {
+export async function applyBookingRevision(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv & CloudflareEnv, revisionId: string): Promise<RevisionOutcome> {
   let revision: Resource
   try {
     revision = await channexGet(env, `/booking_revisions/${encodeURIComponent(revisionId)}`, 'booking_revision')
@@ -95,7 +114,7 @@ export async function pendingBookingRevisions(env: ChannexEnv, propertyId: strin
 }
 
 /** Land one revision Channex delivered and acknowledge it. */
-export async function landBookingRevision(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv, revision: Resource): Promise<RevisionOutcome> {
+export async function landBookingRevision(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv & CloudflareEnv, revision: Resource): Promise<RevisionOutcome> {
   const revisionId = revision.id
   let mapping: Mapping | null = null
   try {
@@ -108,6 +127,14 @@ export async function landBookingRevision(db: DbClient, env: ChannexEnv & GuestI
       return { status: 'ignored_disconnected' }
     }
     const stay = await applyChannelBooking(db, env, mapping.organization_id, mapping.product_id, revisedBooking(revision, propertyId))
+    // The owners hear what the revision changed before it is acknowledged, so
+    // an alert that could not be prepared leaves the revision in Channex's
+    // feed and its next delivery tells it; the alert's own keys make that
+    // replay send nothing twice. A reservation the import loaded is history,
+    // not news, and a superseded revision changes nothing to tell.
+    if (stay.change && !importedRevision(revision)) {
+      await notifyChannelStay(env, db, mapping.organization_id, { stayId: stay.id, revisionId, ...stay.change })
+    }
     // The outcome is recorded before the acknowledgement: once Channex drops the
     // revision from its feed it cannot be recovered from there. The row reads
     // `applied` until the acknowledgement is confirmed.
@@ -126,7 +153,7 @@ export async function landBookingRevision(db: DbClient, env: ChannexEnv & GuestI
  * webhook that never arrived or failed. Every revision is tried; the run fails
  * naming the ones that did not land.
  */
-export async function runRevisionFeed(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv): Promise<{ acknowledged: number; ignored: number }> {
+export async function runRevisionFeed(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv & CloudflareEnv): Promise<{ acknowledged: number; ignored: number }> {
   const revisions = await channexList(env, '/booking_revisions/feed', 'booking_revision', { 'order[inserted_at]': 'asc' })
   let acknowledged = 0
   let ignored = 0

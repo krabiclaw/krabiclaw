@@ -9,6 +9,7 @@ import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { sendWhatsAppNotification } from '../../server/utils/whatsapp.ts'
 import { hasOrganizationEntitlement } from '../../server/utils/billing.ts'
 import { notifyDomainLifecycle } from '../../server/utils/domain-notifications.ts'
+import type { DomainRecord } from '../../server/utils/domains.ts'
 import { notifyContactSubmitted, notifyGuestThreadReply } from '../../server/utils/notifications.ts'
 import { requestInsertQueries } from '../../server/domain/requests.ts'
 import { createDeliveryReceipt, getDeliveryById, isDeliverySent, isVisibleDeliveryFailure, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
@@ -75,13 +76,13 @@ test('organization messaging entitlement fences Meta calls while preserving noti
       for (const category of ['organization_and_billing', 'messages', 'reservations_bookings']) {
         await db.prepare('INSERT INTO user_notification_preferences (user_id,category,email_enabled,whatsapp_enabled,push_enabled) VALUES (?,?,1,1,0)').bind('owner', category).run()
       }
-      const domain = (organizationId: string, status: string) => notifyDomainLifecycle(providerEnv, db, { organizationId, domain: 'proof.example', status, title: 'Domain update', message: 'Domain status changed', dashboardUrl: `https://proof.example/dashboard/${organizationId}/settings` })
-      await domain('free', 'free')
+      const domain = (organizationId: string, status: DomainRecord['status']) => notifyDomainLifecycle(providerEnv, db, { organizationId, event: 'synced', domain: { domain: 'proof.example', type: 'custom', status } as DomainRecord, dashboardUrl: `https://proof.example/dashboard/${organizationId}/settings` })
+      await domain('free', 'pending')
       assert.equal(metaCalls, 2)
-      await domain('paid', 'paid')
+      await domain('paid', 'active')
       assert.equal(metaCalls, 3)
       await db.prepare("UPDATE user_notification_preferences SET whatsapp_enabled=0 WHERE category='organization_and_billing'").run()
-      await domain('paid', 'preference-off')
+      await domain('paid', 'verifying')
       assert.equal(metaCalls, 3)
 
       for (const organizationId of ['free', 'paid']) {
@@ -93,7 +94,7 @@ test('organization messaging entitlement fences Meta calls while preserving noti
         assert.equal(metaCalls - before, organizationId === 'paid' ? 1 : 0)
         const entry = await appendEntry(db, { threadId: id, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Reply', dedupeKey: `reply-${id}` })
         const replyBefore = metaCalls
-        await notifyGuestThreadReply(providerEnv, db, { organizationId, organizationName: organizationId, threadId: id, sourceEntryId: entry.id, submissionType: 'contact', submissionId: id, participantLabel: 'Guest', guestEmail: 'guest@proof.example', inboundChannel: 'email', messagePreview: 'Reply' })
+        await notifyGuestThreadReply(providerEnv, db, { organizationId, threadId: id, sourceEntryId: entry.id, submissionType: 'contact', submissionId: id, participantLabel: 'Guest', guestEmail: 'guest@proof.example', inboundChannel: 'email', messagePreview: 'Reply' })
         assert.equal(metaCalls - replyBefore, organizationId === 'paid' ? 1 : 0)
         const rows = (await db.prepare('SELECT d.channel,d.status FROM guest_thread_deliveries d JOIN activity_entries e ON e.id=d.entry_id WHERE e.request_id=?').bind(id).all<{ channel: string; status: string }>()).results
         assert(rows.some(row => row.channel === 'email' && row.status === 'sent'), 'email fallback persists')
@@ -103,7 +104,7 @@ test('organization messaging entitlement fences Meta calls while preserving noti
       await db.prepare("UPDATE user_notification_preferences SET whatsapp_enabled=0 WHERE category='messages'").run()
       const entry = await appendEntry(db, { threadId: 'contact-paid', kind: 'message', actorKind: 'guest', channel: 'email', body: 'Opted out', dedupeKey: 'reply-optout' })
       const before = metaCalls
-      await notifyGuestThreadReply(providerEnv, db, { organizationId: 'paid', organizationName: 'paid', threadId: 'contact-paid', sourceEntryId: entry.id, submissionType: 'contact', submissionId: 'contact-paid', participantLabel: 'Guest', inboundChannel: 'email', messagePreview: 'Opted out' })
+      await notifyGuestThreadReply(providerEnv, db, { organizationId: 'paid', threadId: 'contact-paid', sourceEntryId: entry.id, submissionType: 'contact', submissionId: 'contact-paid', participantLabel: 'Guest', inboundChannel: 'email', messagePreview: 'Opted out' })
       assert.equal(metaCalls, before)
       // A notification whose organization downgrades is explicitly skipped,
       // not represented as a failed or sent delivery.

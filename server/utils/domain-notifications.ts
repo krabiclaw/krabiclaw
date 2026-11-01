@@ -2,6 +2,8 @@ import { domainUpdateMessage } from '~/server/notifications/events'
 import type { DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { notifyOwner } from '~/server/utils/notifications'
+import { domainInstructions } from '~/server/utils/domain-read-model'
+import type { DomainRecord } from '~/server/utils/domains'
 
 interface DomainNotificationEnv extends CloudflareEnv {
   PLATFORM_OWNER_EMAILS?: string
@@ -9,10 +11,8 @@ interface DomainNotificationEnv extends CloudflareEnv {
 
 interface DomainNotificationInput {
   organizationId: string
-  domain: string
-  status: string
-  title: string
-  message: string
+  event: 'added' | 'synced' | 'deleted'
+  domain: DomainRecord
   dashboardUrl: string
 }
 
@@ -44,14 +44,20 @@ export async function notifyDomainLifecycle(
   opts: DomainNotificationInput,
 ) {
   const dashboardUrl = safeDashboardUrl(opts.dashboardUrl)
+  const status = opts.event === 'deleted' ? 'deleted' : opts.domain.status
+  const instructions = domainInstructions(opts.domain)
+  const message = domainUpdateMessage({
+    event: opts.event, domain: opts.domain.domain, status, error: opts.domain.error_message?.trim() || null,
+    records: instructions.records, apexNote: instructions.apex_note, dashboardUrl,
+  })
   await notifyOwner(env, db, {
     organizationId: opts.organizationId,
     template: 'domain_update',
-    title: opts.title,
+    title: message.title,
     payload: { deep_link: dashboardUrl },
-    message: domainUpdateMessage({ headline: opts.title, message: opts.message, domain: opts.domain, status: opts.status, dashboardUrl }),
+    message,
     whatsappTemplate: 'domain_update',
-    notification: { message: opts.message, severity: opts.status === 'active' ? 'success' : 'warning' },
+    notification: { message: message.intro!, severity: status === 'active' ? 'success' : 'warning' },
     operatorEmails: platformOperatorEmails(env),
   })
 }
