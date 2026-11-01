@@ -144,26 +144,32 @@ export async function takeAlterationRequest(db: DbClient, env: CloudflareEnv, re
     await updateThreadProjectionIfLatestEntry(db, threadId, entry.id, { conversationState: guest ? 'needs_attention' : 'waiting_on_guest' })
     await publishGuestInboxThreadEvent(env, db, { threadId, type: 'thread.changed' })
   }
-  if (await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)) return 'unchanged'
   const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
   const thread = await queryFirst<{ id: string; organization_id: string; guest_name: string | null }>(db,
     "SELECT id, organization_id, json_extract(payload_json, '$.guest.name') AS guest_name FROM requests WHERE id = ?", [entry.request_id])
   if (!thread) throw new Error(`Conversation ${entry.request_id} disappeared under its change request`)
-  if (request.outcome) {
+  // Each owner alert is sent once: a run that recorded the fact but stopped before alerting alerts on the next one.
+  const alerted = async (entryId: string) => Boolean(await queryFirst(db, "SELECT 1 FROM guest_thread_deliveries WHERE entry_id = ? AND purpose = 'owner_alert'", [entryId]))
+  let decision = await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)
+  const reconciled = !decision && request.outcome !== null
+  if (!decision && request.outcome) {
     await recordOutcome(db, env, entry, proposal, request.outcome, null)
     if (request.outcome === 'accepted') await landAcceptedChange(db, env, proposal)
+    decision = await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)
+    if (!decision) throw new Error(`Airbnb change request ${request.id} has no recorded outcome`)
+  }
+  if (decision) {
     // A guest who withdraws on Airbnb leaves the owners nothing to answer; they
     // were asked, so they are told. An accepted change is told by its stay's
     // revision, and a host answers only here or on Airbnb themselves.
-    const decision = await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)
-    if (!decision) throw new Error(`Airbnb change request ${request.id} has no recorded outcome`)
-    if (request.outcome === 'withdrawn' && proposal.initiated_by === 'guest') await alertOwners(db, env, thread, decision, proposal, 'withdrawn')
-    return 'reconciled'
+    if (decision.event_name === 'booking_change.withdrawn' && proposal.initiated_by === 'guest' && await alerted(entry.id) && !await alerted(decision.id)) {
+      await alertOwners(db, env, thread, decision, proposal, 'withdrawn')
+    }
+    return reconciled ? 'reconciled' : 'unchanged'
   }
   // A change the host proposed on Airbnb waits on the guest there; nobody here is asked.
   if (proposal.initiated_by === 'host') return 'unchanged'
-  // Alerted once: a run that recorded the request but stopped before alerting alerts on the next one.
-  if (await queryFirst(db, "SELECT 1 FROM guest_thread_deliveries WHERE entry_id = ? AND purpose = 'owner_alert'", [entry.id])) return 'unchanged'
+  if (await alerted(entry.id)) return 'unchanged'
   await alertOwners(db, env, thread, entry, proposal, 'requested')
   return 'recorded'
 }

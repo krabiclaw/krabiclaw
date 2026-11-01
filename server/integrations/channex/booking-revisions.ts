@@ -117,8 +117,6 @@ export async function pendingBookingRevisions(env: ChannexEnv, propertyId: strin
 export async function landBookingRevision(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv & CloudflareEnv, revision: Resource): Promise<RevisionOutcome> {
   const revisionId = revision.id
   let mapping: Mapping | null = null
-  let stay: Awaited<ReturnType<typeof applyChannelBooking>>
-  let imported: boolean
   try {
     const propertyId = string(revision.attributes.property_id, 'property_id')
     mapping = await queryFirst<Mapping>(db, "SELECT organization_id, product_id, enabled FROM product_channel_mappings WHERE provider = 'channex' AND property_id = ?", [propertyId])
@@ -128,25 +126,26 @@ export async function landBookingRevision(db: DbClient, env: ChannexEnv & GuestI
       await channexRequest(env, `/booking_revisions/${encodeURIComponent(revisionId)}/ack`, 'POST', {})
       return { status: 'ignored_disconnected' }
     }
-    imported = importedRevision(revision)
-    stay = await applyChannelBooking(db, env, mapping.organization_id, mapping.product_id, revisedBooking(revision, propertyId))
+    const stay = await applyChannelBooking(db, env, mapping.organization_id, mapping.product_id, revisedBooking(revision, propertyId))
+    // The owners hear what the revision changed before it is acknowledged, so
+    // an alert that could not be prepared leaves the revision in Channex's
+    // feed and its next delivery tells it; the alert's own keys make that
+    // replay send nothing twice. A reservation the import loaded is history,
+    // not news, and a superseded revision changes nothing to tell.
+    if (stay.change && !importedRevision(revision)) {
+      await notifyChannelStay(env, db, mapping.organization_id, { stayId: stay.id, previous: stay.change.previous, revisionId })
+    }
     // The outcome is recorded before the acknowledgement: once Channex drops the
     // revision from its feed it cannot be recovered from there. The row reads
     // `applied` until the acknowledgement is confirmed.
     const entry = await log(db, { organizationId: mapping.organization_id, productId: mapping.product_id, revisionId, status: 'applied', detail: stay.overbooked ? 'overbooked' : undefined })
     await channexRequest(env, `/booking_revisions/${encodeURIComponent(revisionId)}/ack`, 'POST', {})
     await execute(db, "UPDATE channel_sync_log SET status = 'acknowledged' WHERE id = ?", [entry])
+    return { status: 'acknowledged', stay_id: stay.id, overbooked: stay.overbooked }
   } catch (error) {
     await log(db, { organizationId: mapping?.organization_id ?? null, productId: mapping?.product_id ?? null, revisionId, status: 'failed', detail: describeErrorForTelemetry(error) })
     throw error
   }
-  // The owners hear what a revision changed. A reservation the import loaded
-  // is history, not news, and a revision that changed nothing — a replay, an
-  // older revision, a re-import — is not told.
-  if (stay.applied && !imported) {
-    await notifyChannelStay(env, db, mapping.organization_id, { stayId: stay.id, previous: stay.previous, revisionId })
-  }
-  return { status: 'acknowledged', stay_id: stay.id, overbooked: stay.overbooked }
 }
 
 /**

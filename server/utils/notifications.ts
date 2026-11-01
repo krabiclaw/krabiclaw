@@ -69,7 +69,7 @@ import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { STAY_CHANNEL_LABELS } from '~/shared/bookings'
-import type { Stay } from '~/server/domain/stays'
+import type { ChannelStayTerms } from '~/server/domain/stays'
 
 // The guest chose a label, not a key: on a studio the option keyed `catering`
 // reads "Workshops & events", so the label comes from the copy the form shows.
@@ -768,6 +768,8 @@ export async function notifyOwner(
      * opens for them. Without one, every recipient reads `message`.
      */
     memberAlert?: { message: MemberAlertMessage; stayId: string }
+    /** The stay an event without a conversation is about, which every recipient's push opens. */
+    stayId?: string
   }
 ) {
   const threadContext = opts.notificationSource
@@ -818,7 +820,8 @@ export async function notifyOwner(
       eventKey: opts.deliveryEventKey,
       target: projected ? { kind: 'stay', stayId: opts.memberAlert!.stayId }
         : deliveryContext.guestThreadId ? { kind: 'guest', threadId: deliveryContext.guestThreadId }
-          : { kind: 'notification', notificationId },
+          : opts.stayId ? { kind: 'stay', stayId: opts.stayId }
+            : { kind: 'notification', notificationId },
     })
   }))
   const memberEmails = new Set(recipients.map(recipient => recipient.email?.toLowerCase()))
@@ -1397,7 +1400,7 @@ const stayNights = (stay: { check_in_date: string; check_out_date: string }) =>
  * identity, and only for what it changed: a revision that restates the stay,
  * as a re-import does, sends nothing.
  */
-export async function notifyChannelStay(env: NotificationEnv, db: DbClient, organizationId: string, input: { stayId: string; previous: Stay | null; revisionId: string }) {
+export async function notifyChannelStay(env: NotificationEnv, db: DbClient, organizationId: string, input: { stayId: string; previous: ChannelStayTerms | null; revisionId: string }) {
   const { readCheckoutStay } = await import('~/server/domain/stays')
   const stay = await readCheckoutStay(db, organizationId, input.stayId)
   const previous = input.previous
@@ -1409,8 +1412,10 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
       || previous.adults !== stay.adults || previous.children !== stay.children || previous.infants !== stay.infants || previous.total_minor !== stay.total_minor)
   if (!booked && !cancelled && !changed && !overlap) return
   if (!isCurrencyCode(stay.currency)) throw new Error('The channel stay has an unsupported currency')
+  // A channel may send a reservation without a guest name; its reservation code still names it.
   const guestName = [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ').trim()
-  if (!guestName) throw new HTTPError({ statusCode: 500, message: 'The channel stay has no guest name to alert its owners with', data: { code: 'CHANNEL_STAY_GUEST_REQUIRED', field: 'guest_name', stay_id: stay.id } })
+    || (stay.channel_booking_id ? `${STAY_CHANNEL_LABELS[stay.channel]} reservation ${stay.channel_booking_id}` : '')
+  if (!guestName) throw new HTTPError({ statusCode: 500, message: 'The channel stay has neither a guest name nor a reservation code to alert its owners with', data: { code: 'CHANNEL_STAY_GUEST_REQUIRED', field: 'guest_name', stay_id: stay.id } })
   const organization = await queryFirst<{ name: string | null }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId])
   const studio = organizationName({ organizationId, organizationName: organization?.name })
   const home = stay.home
@@ -1428,7 +1433,7 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
   const send = (template: string, message: MemberAlertMessage, memberMessage: MemberAlertMessage, whatsappTemplate?: WhatsAppTemplate) => notifyOwner(env, db, {
     organizationId, organizationName: studio, locationId: home.location_id, template, title: message.title,
     payload: { stay_id: stay.id, revision_id: input.revisionId, deep_link: audience.stayUrl },
-    message, idempotencyKey: `notification:${eventKey}`, deliveryEventKey: eventKey,
+    message, idempotencyKey: `notification:${eventKey}`, deliveryEventKey: eventKey, stayId: stay.id,
     memberIds: audience.memberIds, memberAlert: { message: memberMessage, stayId: stay.id }, whatsappTemplate,
   })
   if (cancelled) {
@@ -1439,7 +1444,7 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
     const input = { ...base, total: money(stay.total_minor), paid: null, balance: null, overlap, notes: null }
     return send(overlap ? 'channel_stay.overlap' : 'channel_stay.booked', stayBookedMessage(input), stayBookedMessage(stayTurnoverAlert(input, audience.stayUrl)))
   }
-  const terms = (side: Stay, homeName: string) => ({ date: `${day(side.check_in_date)} – ${day(side.check_out_date)}`, time: null, nights: stayNights(side), partySize: stayParty(side), location: homeName, total: money(side.total_minor), assignee: null })
+  const terms = (side: ChannelStayTerms, homeName: string) => ({ date: `${day(side.check_in_date)} – ${day(side.check_out_date)}`, time: null, nights: stayNights(side), partySize: stayParty(side), location: homeName, total: money(side.total_minor), assignee: null })
   const previousHome = previous!.product_id === stay.product_id ? home.name
     : (await queryFirst<{ name: string }>(db, 'SELECT name FROM products WHERE id = ? AND organization_id = ?', [previous!.product_id, organizationId]))?.name
   if (!previousHome) throw new HTTPError({ statusCode: 500, message: 'The channel stay moved from a home that no longer exists', data: { code: 'CHANNEL_STAY_HOME_MISSING', field: 'product_id', stay_id: stay.id } })
