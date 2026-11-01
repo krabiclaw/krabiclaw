@@ -120,6 +120,23 @@ export function addLocalDays(value: string, days: number): string {
   return date.toISOString().slice(0, 10)
 }
 
+/**
+ * Why a local wall time names no single instant on its date: it falls in a
+ * spring-forward gap and never happens, or in a fall-back fold and happens
+ * twice. Null when it names exactly one.
+ */
+export function unresolvableLocalTime(date: string, time: string, timeZone: string): 'nonexistent_local_time' | 'ambiguous_local_time' | null {
+  try {
+    localDateTimeToInstant(date, time, timeZone, 'reject')
+    return null
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error
+    // '@internationalized/date' says "No such absolute time found" for a gap
+    // and "Multiple possible absolute times found" for a fold.
+    return /multiple|ambiguous/i.test(error.message) ? 'ambiguous_local_time' : 'nonexistent_local_time'
+  }
+}
+
 // Bookings must identify exactly one instant. Calendar-day boundaries explicitly
 // include the whole day: the earlier repeated midnight or the end of a gap.
 export function localDateTimeToInstant(date: string, time: string, timeZone: string, disambiguation: 'reject' | 'compatible' | 'earlier' | 'later' = 'reject'): Date {

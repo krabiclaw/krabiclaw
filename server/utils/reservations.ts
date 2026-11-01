@@ -3,7 +3,7 @@ import { sanitizeUrl } from '~/utils/sanitize'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '../db/index.ts'
 import { generateReservationTimes, parseOpeningHours, parseSpecialHours, locationAllowsBooking } from '~/shared/reservation-hours'
 import { RESERVATION_CAPACITY_CONSUMING_SQL } from '~/shared/bookings'
-import { isValidTimezone, localDateTimeToInstant } from '~/utils/timezone'
+import { isValidTimezone, localDateTimeToInstant, unresolvableLocalTime } from '~/utils/timezone'
 import { requireStripeCheckoutAcceptance } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
@@ -357,7 +357,7 @@ export async function listReservationSlots(db: DbClient, input: {
   date: string
   includePast?: boolean
   excludeReservationId?: string | null
-}): Promise<{ timezone: string; slots: ReservationSlot[] }> {
+}): Promise<{ timezone: string; slots: ReservationSlot[]; unresolvable: Array<{ time_slot: string; reason: 'nonexistent_local_time' | 'ambiguous_local_time' }> }> {
   const location = await queryFirst<LocationHoursRow>(db, `
     SELECT id, organization_id, timezone, status, opening_hours, special_hours
       FROM business_locations WHERE organization_id = ? AND id = ?
@@ -388,13 +388,14 @@ export async function listReservationSlots(db: DbClient, input: {
 
   const closedAllDay = location.status !== 'active'
   const slots: ReservationSlot[] = []
+  const unresolvable: Array<{ time_slot: string; reason: 'nonexistent_local_time' | 'ambiguous_local_time' }> = []
   for (const time of scheduled) {
-    let startsAt: string
-    // A local time that does not exist on this date (a spring-forward gap) is
-    // not offered; picking a neighbouring hour would book a guest at a time
-    // nobody chose.
-    try { startsAt = localDateTimeToInstant(input.date, time, timezone, 'reject').toISOString() }
-    catch (error) { if (error instanceof RangeError) continue; throw error }
+    // A local time that never happens on this date (a spring-forward gap) or
+    // happens twice (a fall-back fold) is not offered; picking one would book a
+    // guest at a time nobody chose. The booking endpoint names which it is.
+    const reason = unresolvableLocalTime(input.date, time, timezone)
+    if (reason) { unresolvable.push({ time_slot: time, reason }); continue }
+    const startsAt = localDateTimeToInstant(input.date, time, timezone, 'reject').toISOString()
     // Advance notice is the policy the guest reads, applied: a start inside the
     // notice is not offered, and the booking endpoint reads the same list.
     if (!input.includePast && Date.parse(startsAt) <= Date.now() + (config.advance_notice_minutes ?? 0) * 60_000) continue
@@ -408,7 +409,7 @@ export async function listReservationSlots(db: DbClient, input: {
       is_closed: closedAllDay, is_full: remaining !== null && remaining <= 0,
     })
   }
-  return { timezone, slots }
+  return { timezone, slots, unresolvable }
 }
 
 export class ReservationUnavailableError extends Error {
