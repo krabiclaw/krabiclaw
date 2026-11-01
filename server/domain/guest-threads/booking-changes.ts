@@ -372,8 +372,11 @@ async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow
   if (!isDeliverySent(sent)) throw new HTTPError({ statusCode: 502, message: sent.error || 'Guest email delivery has not been confirmed. Review the recorded delivery outcome.', data: { code: 'DELIVERY_INCOMPLETE', field: 'delivery', delivery_id: sent.id, delivery_status: sent.status } })
   // A move is the business's own doing; the guest is told, the owners already know.
   if (status === 'moved') return
-  const proposer = await queryFirst<{ name: string | null }>(db, 'SELECT u.name FROM activity_entries e JOIN user u ON u.id = e.actor_user_id WHERE e.id = ? AND e.request_id = ?', [proposalEntryId, thread.id])
-  if (!proposer?.name?.trim()) throw new HTTPError({ statusCode: 409, message: 'The member who proposed this change has no name to show the owners', data: { code: 'CHANGE_PROPOSER_UNKNOWN', field: 'actor_user_id', entry_id: proposalEntryId } })
+  // A pending proposal names the member who just made it; an answer names the guest who gave it.
+  const proposer = status === 'requested'
+    ? await queryFirst<{ name: string | null }>(db, 'SELECT u.name FROM activity_entries e JOIN user u ON u.id = e.actor_user_id WHERE e.id = ? AND e.request_id = ?', [proposalEntryId, thread.id])
+    : null
+  if (status === 'requested' && !proposer?.name?.trim()) throw new HTTPError({ statusCode: 409, message: 'The member who proposed this change has no name to show the owners', data: { code: 'CHANGE_PROPOSER_UNKNOWN', field: 'actor_user_id', entry_id: proposalEntryId } })
   // The owners read English, in each occurrence's own zone.
   const presentation = resolveBookingPresentation(thread.kind === 'reservation' ? 'reservation' : 'booking', guest.vertical)
   const ownerCopy = getVerticalCopy(guest.vertical, 'en')
@@ -391,7 +394,7 @@ async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow
     assignment: thread.kind === 'booking' && proposal.beforeAssignedMemberName !== undefined && proposal.afterAssignedMemberId !== undefined && proposal.afterAssignedMemberName !== undefined
       ? { beforeMemberId: proposal.before.assignedMemberId, beforeName: proposal.beforeAssignedMemberName, afterMemberId: proposal.afterAssignedMemberId, afterName: proposal.afterAssignedMemberName, label: ownerCopy.assigneeLabel } : undefined,
     change: {
-      recordKind: noun, offering: offering?.name ?? null, channel: null, guestName: summary.guestName, requestedBy: { kind: 'business', name: proposer.name }, status,
+      recordKind: noun, offering: offering?.name ?? null, channel: null, guestName: summary.guestName, requestedBy: { kind: 'business', name: proposer?.name ?? null }, status,
       assigneeLabel: ownerCopy.assigneeLabel, current, requested,
       differences: occurrenceChangeDifferences(current, requested, { party: presentation.partyLabel, assignee: ownerCopy.assigneeLabel }),
     },
@@ -679,7 +682,6 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
   if (result && input.decision) {
     const accepted = result.event_name === 'booking_change.accepted'
     await updateThreadProjectionIfLatestEntry(db, thread.id, result.id, { conversationState: 'resolved' })
-    await deliverEmail(db, env, thread as GuestThreadRow, result.id, entry.id, accepted ? 'accepted' : 'declined', proposal, noun)
     if (!result.payload_json) throw new Error('A booking change answer has no recorded payload')
     const answered = JSON.parse(result.payload_json) as { operational_booking_id?: unknown; before?: { assigned_member_id?: string | null }; after?: { assigned_member_id?: string | null } | null }
     if (thread.kind === 'booking' && typeof answered.operational_booking_id === 'string') {
@@ -689,6 +691,8 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
     if (accepted && answered.after && (answered.before?.assigned_member_id ?? null) !== (answered.after.assigned_member_id ?? null)) {
       await publishAccessInvalidation(env, { organizationId: thread.organization_id })
     }
+    // Told once the answer, its analytics and any access change are recorded, so a send that fails cannot skip them.
+    await deliverEmail(db, env, thread as GuestThreadRow, result.id, entry.id, accepted ? 'accepted' : 'declined', proposal, noun)
   }
   const finalState = (await bookingChangeStates(db, [entry.id])).get(entry.id)
   if (!finalState) throw new Error('The booking change proposal disappeared')

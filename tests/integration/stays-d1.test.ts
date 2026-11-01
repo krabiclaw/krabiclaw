@@ -192,6 +192,7 @@ test('a moved channel revision repairs its audited home scopes without rewriting
       channel: 'airbnb', overbooked: false, provider: 'channex', external_booking_id: booking.external_booking_id, revision_id: moved.revision_id, provider_updated_at: moved.provider_updated_at,
       previous_product_id: cabin.id, previous_location_id: 'cabin-site', product_id: lake.id, location_id: 'lake-site',
       previous_terms: { status: 'confirmed', overbooked: false, product_id: cabin.id, check_in_date: '2027-06-01', check_out_date: '2027-06-03', adults: 2, children: 0, infants: 0, total_minor: 20_000 },
+      terms: { status: 'confirmed', overbooked: false, product_id: lake.id, check_in_date: '2027-06-01', check_out_date: '2027-06-03', adults: 2, children: 0, infants: 0, total_minor: 20_000 },
     })
     await hub.fetch('https://inbox.test/failure', { method: 'DELETE' })
     const beforeRepair = (await events()).length

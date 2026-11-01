@@ -2029,12 +2029,13 @@ export type ChannelStayTerms = Pick<Stay, 'status' | 'overbooked' | 'product_id'
 
 /**
  * The stay as the revision left it, whether this revision changed it, and —
- * while it is the stay's current revision — what the stay was before it, read
- * back from the revision's own audit so a replay finds the same change.
- * `change` is null for a revision another has superseded, and for one landed
- * before its prior terms were recorded.
+ * for the revision that wrote it, and on a replay while it is the stay's
+ * current revision — the terms it replaced and the terms it wrote, read back
+ * from the revision's own audit so a replay finds the same change. `change`
+ * is null for a revision another has superseded, and for one landed before
+ * its terms were recorded.
  */
-export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicationEnv, organizationId: string, productId: string, booking: ChannelBooking): Promise<Stay & { applied: boolean; change: { previous: ChannelStayTerms | null } | null }> {
+export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicationEnv, organizationId: string, productId: string, booking: ChannelBooking): Promise<Stay & { applied: boolean; change: { previous: ChannelStayTerms | null; terms: ChannelStayTerms } | null }> {
   date(booking.check_in_date, 'check_in_date')
   date(booking.check_out_date, 'check_out_date')
   if (booking.check_out_date <= booking.check_in_date) throw new Error(`Channel booking ${booking.external_booking_id} ends before it starts`)
@@ -2059,14 +2060,15 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
     throw new HTTPError({ statusCode: 409, message: 'The inquiry and stay already have separate conversations; review both timelines', data: { code: 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', field: 'request_id' } })
   }
   const revisionKey = `channel-revision:${JSON.stringify([organizationId, booking.provider, booking.external_booking_id, booking.revision_id])}`
-  const recordedChange = async (): Promise<{ previous: ChannelStayTerms | null } | null> => {
-    const audit = await queryFirst<{ terms: string | null; type: string | null }>(db, `SELECT json_extract(payload_json, '$.metadata.previous_terms') AS terms,
-      json_type(payload_json, '$.metadata.previous_terms') AS type FROM activity_entries WHERE organization_id = ? AND kind = 'audit' AND dedupe_key = ?`, [organizationId, revisionKey])
+  const recordedChange = async (): Promise<{ previous: ChannelStayTerms | null; terms: ChannelStayTerms } | null> => {
+    const audit = await queryFirst<{ previous: string | null; terms: string | null; type: string | null }>(db, `SELECT json_extract(payload_json, '$.metadata.previous_terms') AS previous,
+      json_extract(payload_json, '$.metadata.terms') AS terms, json_type(payload_json, '$.metadata.previous_terms') AS type
+      FROM activity_entries WHERE organization_id = ? AND kind = 'audit' AND dedupe_key = ?`, [organizationId, revisionKey])
     if (!audit) throw new HTTPError({ statusCode: 503, message: 'The saved channel revision has no audit', data: { code: 'CHANNEL_REVISION_AUDIT_REQUIRED', field: 'revision_id', revision_id: booking.revision_id } })
     if (audit.type === null) return null
-    if (audit.type === 'null') return { previous: null }
-    const terms = JSON.parse(audit.terms!) as ChannelStayTerms
-    return { previous: { ...terms, overbooked: Boolean(terms.overbooked) } }
+    if (!audit.terms) throw new HTTPError({ statusCode: 500, message: 'The channel revision audit records what it replaced but not what it wrote', data: { code: 'CHANNEL_REVISION_AUDIT_INVALID', field: 'terms', revision_id: booking.revision_id } })
+    const read = (value: string) => { const terms = JSON.parse(value) as ChannelStayTerms; return { ...terms, overbooked: Boolean(terms.overbooked) } }
+    return { previous: audit.type === 'null' ? null : read(audit.previous!), terms: read(audit.terms) }
   }
   const publish = async (stored: Stay, currentRevisionId: string | null) => {
     if (currentRevisionId === null) throw new HTTPError({ statusCode: 503, message: 'The saved channel stay has no current revision identity', data: { code: 'CHANNEL_REVISION_ID_REQUIRED', field: 'revision_id', committed: true, stay_id: stored.id, product_id: stored.product_id, version: stored.version } })
@@ -2139,19 +2141,21 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
               revision_id = excluded.revision_id, provider_updated_at = excluded.provider_updated_at,
               cancelled_at = CASE WHEN excluded.status = 'cancelled' THEN COALESCE(stays.cancelled_at, excluded.cancelled_at) ELSE NULL END,
               version = stays.version + 1, updated_at = excluded.updated_at, updated_by = excluded.updated_by
-            WHERE stays.organization_id = excluded.organization_id AND stays.id = ? AND stays.product_id = ?
+            WHERE stays.organization_id = excluded.organization_id AND stays.id = ? AND stays.product_id = ? AND stays.version IS ?
               AND (stays.provider_updated_at IS NULL OR stays.provider_updated_at < excluded.provider_updated_at)`,
     params: [id, organizationId, productId, booking.channel, booking.cancelled ? 'cancelled' : 'confirmed', overbooked, booking.check_in_date, booking.check_out_date,
       booking.adults, booking.children, booking.infants, booking.guest_name, booking.guest_surname, booking.guest_email, booking.guest_phone,
       booking.total_minor, booking.currency, booking.provider, booking.external_booking_id, booking.channel_booking_id, booking.revision_id,
-      booking.provider_updated_at, booking.cancelled ? now : null, now, now, 'channex', 'channex', existing?.id ?? null, previous?.product_id ?? null],
+      booking.provider_updated_at, booking.cancelled ? now : null, now, now, 'channex', 'channex', existing?.id ?? null, previous?.product_id ?? null, previous?.version ?? null],
   },
   organizationEventQuery({ organizationId, locationId: home.location_id, actorId: null, eventType: existing ? 'stay.updated' : 'stay.created', entityType: 'stay', entityId: id,
     dedupeKey: revisionKey, onlyIfPreviousChangedOneRow: true, metadata: { channel: booking.channel, overbooked: overbooked === 1,
       provider: booking.provider, external_booking_id: booking.external_booking_id, revision_id: booking.revision_id, provider_updated_at: booking.provider_updated_at,
       previous_product_id: previous?.product_id ?? null, previous_location_id: previous?.location_id ?? null, product_id: productId, location_id: home.location_id,
       previous_terms: previous && { status: previous.status, overbooked: previous.overbooked, product_id: previous.product_id, check_in_date: previous.check_in_date, check_out_date: previous.check_out_date,
-        adults: previous.adults, children: previous.children, infants: previous.infants, total_minor: previous.total_minor } } }),
+        adults: previous.adults, children: previous.children, infants: previous.infants, total_minor: previous.total_minor },
+      terms: { status: booking.cancelled ? 'cancelled' : 'confirmed', overbooked: overbooked === 1, product_id: productId, check_in_date: booking.check_in_date, check_out_date: booking.check_out_date,
+        adults: booking.adults, children: booking.children, infants: booking.infants, total_minor: booking.total_minor } } }),
   ...reconcileNightsQueries(organizationId, id),
   {
     query: `UPDATE stays SET request_id = t.request_id FROM channel_threads t

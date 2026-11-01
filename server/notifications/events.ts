@@ -180,13 +180,21 @@ export function stayCancelledMessage(input: Omit<StayEventInput, 'notes' | 'tota
 }
 
 /**
+ * The guest as a member who looks after the home reads them: a first name,
+ * or the reservation's own label when its channel sent no name.
+ */
+export function memberGuestName(guest: { name: string } | { label: string }): string {
+  return 'label' in guest ? guest.label : stayGuestFirstName(guest.name) ?? guest.name
+}
+
+/**
  * A stay alert as a member looking after the home receives it: the turnover's
  * facts, with no contact, money or notes, opening the stay instead of the
  * guest's conversation. Owners and admins receive the input as it is.
  */
-export function stayTurnoverAlert<T extends Pick<StayEventInput, 'guestName' | 'guestEmail' | 'guestPhone' | 'replyUrl'>>(input: T, stayUrl: string): T {
+export function stayTurnoverAlert<T extends Pick<StayEventInput, 'guestName' | 'guestEmail' | 'guestPhone' | 'replyUrl'>>(input: T, stayUrl: string, guestName: string): T {
   const money = Object.fromEntries((['notes', 'total', 'paid', 'balance', 'refund'] as const).filter(field => field in input).map(field => [field, null]))
-  return { ...input, ...money, guestName: stayGuestFirstName(input.guestName) ?? input.guestName, guestEmail: null, guestPhone: null, replyUrl: stayUrl }
+  return { ...input, ...money, guestName, guestEmail: null, guestPhone: null, replyUrl: stayUrl }
 }
 
 export interface BookingEventInput extends ReservationEventInput {
@@ -384,8 +392,8 @@ export interface BookingChangeEventInput {
   /** The channel the guest asked on, when it was not this site. */
   channel: string | null
   guestName: string
-  /** Who asked: the guest, or the member of the business who proposed it. */
-  requestedBy: { kind: 'guest' } | { kind: 'business'; name: string }
+  /** Who asked: the guest, or the member of the business who proposed it. Only a pending proposal names its member. */
+  requestedBy: { kind: 'guest' } | { kind: 'business'; name: string | null }
   status: BookingChangeStatus
   current: BookingChangeTerms
   requested: BookingChangeTerms
@@ -398,10 +406,10 @@ export interface BookingChangeEventInput {
   organizationName: string
 }
 
-/** The same change as a member who may not see money reads it: no totals, no price difference. */
-export function bookingChangeWithoutMoney(input: BookingChangeEventInput, replyUrl: string): BookingChangeEventInput {
+/** The same change as a member who may not see money reads it: no totals, no price difference, the guest as `memberGuestName` names them. */
+export function bookingChangeWithoutMoney(input: BookingChangeEventInput, replyUrl: string, guestName: string): BookingChangeEventInput {
   return {
-    ...input, replyUrl,
+    ...input, replyUrl, guestName,
     current: { ...input.current, total: null }, requested: { ...input.requested, total: null },
     differences: input.differences.filter(difference => !difference.financial),
   }
@@ -456,7 +464,7 @@ export function bookingChangeMessage(input: BookingChangeEventInput): MemberAler
   const counterparty = input.counterpartyLabel ?? (input.recordKind === 'consultation' ? 'Client' : 'Guest')
   const partyLabel = input.partyLabel ?? (input.recordKind === 'consultation' ? 'Clients' : input.recordKind === 'stay' ? 'Guests' : 'Party size')
   const what = input.channel ? `${input.channel} ${input.recordKind}` : input.recordKind
-  const asker = input.requestedBy.kind === 'guest' ? input.guestName : input.requestedBy.name
+  const asker = input.requestedBy.kind === 'guest' ? input.guestName : input.requestedBy.name ?? input.organizationName
   const awaitingHost = input.status === 'requested' && input.requestedBy.kind === 'guest'
   const standing = {
     requested: awaitingHost

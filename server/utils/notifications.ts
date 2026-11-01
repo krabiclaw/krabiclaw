@@ -40,6 +40,7 @@ import {
   bookingChangeMessage,
   bookingChangeWithoutMoney,
   bookingCreatedMessage,
+  memberGuestName,
   stayChangeDifferences,
   contactReceivedMessage,
   messageReceived,
@@ -867,7 +868,7 @@ export async function notifyFinancialNotification(
       template: input.eventKey, idempotencyKey: `${input.eventKey}:owner`,
       title: input.ownerMessage.title,
       message: input.ownerMessage.facts.map(fact => `${fact.label}: ${fact.value}`).join('\n'),
-      deepLink: input.deepLink ?? input.ownerMessage.primaryAction?.url ?? null,
+      deepLink: input.deepLink ?? input.ownerMessage.primaryAction.url,
     })
   }
   const tasks: Array<Promise<unknown>> = []
@@ -879,7 +880,7 @@ export async function notifyFinancialNotification(
       organizationName: input.ownerMessage.organizationName,
       template: input.eventKey,
       title: input.ownerMessage.title,
-      payload: { deep_link: input.deepLink ?? input.ownerMessage.primaryAction?.url ?? '' },
+      payload: { deep_link: input.deepLink ?? input.ownerMessage.primaryAction.url },
       message: input.ownerMessage,
       notificationSource: input.sourceEntryId && input.threadId ? { entryId: input.sourceEntryId, threadId: input.threadId } : undefined,
       idempotencyKey: `${input.eventKey}:owner`,
@@ -1397,37 +1398,50 @@ const stayNights = (stay: { check_in_date: string; check_out_date: string }) =>
  * cancellation, or a booking on nights another stay holds. The reservations a
  * home's import loads arrive through the same path and are not told; the
  * caller knows which they are. Each revision is told once, keyed by its own
- * identity, and only for what it changed: a revision that restates the stay,
- * as a re-import does, sends nothing.
+ * identity, from the terms it recorded before and after itself — never from
+ * the stay as a later revision has since left it — and only for what it
+ * changed: a revision that restates the stay, as a re-import does, sends nothing.
  */
-export async function notifyChannelStay(env: NotificationEnv, db: DbClient, organizationId: string, input: { stayId: string; previous: ChannelStayTerms | null; revisionId: string }) {
+export async function notifyChannelStay(env: NotificationEnv, db: DbClient, organizationId: string, input: { stayId: string; revisionId: string; previous: ChannelStayTerms | null; terms: ChannelStayTerms }) {
   const { readCheckoutStay } = await import('~/server/domain/stays')
   const stay = await readCheckoutStay(db, organizationId, input.stayId)
-  const previous = input.previous
-  const cancelled = stay.status === 'cancelled' && previous !== null && previous.status !== 'cancelled'
-  const booked = stay.status !== 'cancelled' && (previous === null || previous.status === 'cancelled')
-  const overlap = stay.overbooked && !previous?.overbooked
-  const changed = !booked && !cancelled && previous !== null && stay.status !== 'cancelled'
-    && (previous.check_in_date !== stay.check_in_date || previous.check_out_date !== stay.check_out_date || previous.product_id !== stay.product_id
-      || previous.adults !== stay.adults || previous.children !== stay.children || previous.infants !== stay.infants || previous.total_minor !== stay.total_minor)
+  const { previous, terms } = input
+  const cancelled = terms.status === 'cancelled' && previous !== null && previous.status !== 'cancelled'
+  const booked = terms.status !== 'cancelled' && (previous === null || previous.status === 'cancelled')
+  const overlap = terms.overbooked && !previous?.overbooked
+  const changed = !booked && !cancelled && previous !== null && terms.status !== 'cancelled'
+    && (previous.check_in_date !== terms.check_in_date || previous.check_out_date !== terms.check_out_date || previous.product_id !== terms.product_id
+      || previous.adults !== terms.adults || previous.children !== terms.children || previous.infants !== terms.infants || previous.total_minor !== terms.total_minor)
   if (!booked && !cancelled && !changed && !overlap) return
   if (!isCurrencyCode(stay.currency)) throw new Error('The channel stay has an unsupported currency')
+  const channel = STAY_CHANNEL_LABELS[stay.channel]
   // A channel may send a reservation without a guest name; its reservation code still names it.
-  const guestName = [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ').trim()
-    || (stay.channel_booking_id ? `${STAY_CHANNEL_LABELS[stay.channel]} reservation ${stay.channel_booking_id}` : '')
-  if (!guestName) throw new HTTPError({ statusCode: 500, message: 'The channel stay has neither a guest name nor a reservation code to alert its owners with', data: { code: 'CHANNEL_STAY_GUEST_REQUIRED', field: 'guest_name', stay_id: stay.id } })
+  const named = [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ').trim()
+  const guestName = named || `${channel} reservation ${stay.channel_booking_id ?? stay.external_booking_id}`
+  const guest: { name: string } | { label: string } = named ? { name: named } : { label: guestName }
+  const homes = await queryAll<{ product_id: string; name: string; location_id: string; check_in_time: string; check_out_time: string }>(db, `SELECT p.id AS product_id, p.name, c.location_id, c.check_in_time, c.check_out_time
+    FROM products p JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id WHERE p.organization_id = ? AND p.id IN (?, ?)`,
+  [organizationId, terms.product_id, previous?.product_id ?? terms.product_id])
+  const homeOf = (productId: string) => {
+    const found = homes.find(home => home.product_id === productId)
+    if (!found) throw new HTTPError({ statusCode: 500, message: 'The channel stay names a home that no longer exists', data: { code: 'CHANNEL_STAY_HOME_MISSING', field: 'product_id', product_id: productId, stay_id: stay.id } })
+    return found
+  }
+  const home = homeOf(terms.product_id)
   const organization = await queryFirst<{ name: string | null }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId])
   const studio = organizationName({ organizationId, organizationName: organization?.name })
-  const home = stay.home
-  const channel = STAY_CHANNEL_LABELS[stay.channel]
-  const [hero, audience] = await Promise.all([messageHero(db, organizationId, { type: 'product', id: home.product_id }), stayTurnoverAudience(env, db, organizationId, stay)])
+  const [hero, audience] = await Promise.all([
+    messageHero(db, organizationId, { type: 'product', id: home.product_id }),
+    stayTurnoverAudience(env, db, organizationId, { id: stay.id, product_id: home.product_id, arrival_time: stay.arrival_time }),
+  ])
+  const memberName = memberGuestName(guest)
   const day = (date: string) => formatCalendarDate(date, 'en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
   const money = (minor: number) => formatMinorAmount(minor, stay.currency as CurrencyCode, 'en-US')
   const eventKey = `channel-stay:${organizationId}:${stay.id}:${input.revisionId}`
   const base = {
     guestName, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name, channel,
-    checkIn: `${day(stay.check_in_date)} · ${formatTime(home.check_in_time, 'en-US')}`, checkOut: `${day(stay.check_out_date)} · ${formatTime(home.check_out_time, 'en-US')}`,
-    arrival: audience.arrival, nights: String(stayNights(stay)), guests: stayParty(stay),
+    checkIn: `${day(terms.check_in_date)} · ${formatTime(home.check_in_time, 'en-US')}`, checkOut: `${day(terms.check_out_date)} · ${formatTime(home.check_out_time, 'en-US')}`,
+    arrival: audience.arrival, nights: String(stayNights(terms)), guests: stayParty(terms),
     organizationName: studio, heroImageUrl: hero?.imageUrl ?? null, replyUrl: audience.stayUrl,
   }
   const send = (template: string, message: MemberAlertMessage, memberMessage: MemberAlertMessage, whatsappTemplate?: WhatsAppTemplate) => notifyOwner(env, db, {
@@ -1437,31 +1451,29 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
     memberIds: audience.memberIds, memberAlert: { message: memberMessage, stayId: stay.id }, whatsappTemplate,
   })
   if (cancelled) {
-    const input = { ...base, refund: null }
-    return send('channel_stay.cancelled', stayCancelledMessage(input), stayCancelledMessage(stayTurnoverAlert(input, audience.stayUrl)))
+    const cancellation = { ...base, refund: null }
+    return send('channel_stay.cancelled', stayCancelledMessage(cancellation), stayCancelledMessage(stayTurnoverAlert(cancellation, audience.stayUrl, memberName)))
   }
   if (booked || !changed) {
-    const input = { ...base, total: money(stay.total_minor), paid: null, balance: null, overlap, notes: null }
-    return send(overlap ? 'channel_stay.overlap' : 'channel_stay.booked', stayBookedMessage(input), stayBookedMessage(stayTurnoverAlert(input, audience.stayUrl)))
+    const booking = { ...base, total: money(terms.total_minor), paid: null, balance: null, overlap, notes: null }
+    return send(overlap ? 'channel_stay.overlap' : 'channel_stay.booked', stayBookedMessage(booking), stayBookedMessage(stayTurnoverAlert(booking, audience.stayUrl, memberName)))
   }
-  const terms = (side: ChannelStayTerms, homeName: string) => ({ date: `${day(side.check_in_date)} – ${day(side.check_out_date)}`, time: null, nights: stayNights(side), partySize: stayParty(side), location: homeName, total: money(side.total_minor), assignee: null })
-  const previousHome = previous!.product_id === stay.product_id ? home.name
-    : (await queryFirst<{ name: string }>(db, 'SELECT name FROM products WHERE id = ? AND organization_id = ?', [previous!.product_id, organizationId]))?.name
-  if (!previousHome) throw new HTTPError({ statusCode: 500, message: 'The channel stay moved from a home that no longer exists', data: { code: 'CHANNEL_STAY_HOME_MISSING', field: 'product_id', stay_id: stay.id } })
+  const before = previous!
+  const previousHome = homeOf(before.product_id)
+  const side = (value: ChannelStayTerms, homeName: string) => ({ date: `${day(value.check_in_date)} – ${day(value.check_out_date)}`, time: null, nights: stayNights(value), partySize: stayParty(value), location: homeName, total: money(value.total_minor), assignee: null })
+  const counts = (value: ChannelStayTerms) => ({ checkIn: value.check_in_date, checkOut: value.check_out_date, guests: value.adults + value.children, infants: value.infants, totalMinor: value.total_minor })
   const change: BookingChangeEventInput = {
     recordKind: 'stay', channel, guestName, requestedBy: { kind: 'guest' }, status: 'changed', locationLabel: 'Home',
     counterpartyLabel: 'Guest', partyLabel: 'Guests',
-    current: terms(previous!, previousHome), requested: terms(stay, home.name),
+    current: side(before, previousHome.name), requested: side(terms, home.name),
     differences: [
       ...(overlap ? [{ text: 'The new nights overlap another stay: resolve the double booking' }] : []),
-      ...(previousHome !== home.name ? [{ text: `Moves to ${home.name}` }] : []),
-      ...stayChangeDifferences(
-        { checkIn: previous!.check_in_date, checkOut: previous!.check_out_date, guests: previous!.adults + previous!.children, infants: previous!.infants, totalMinor: previous!.total_minor },
-        { checkIn: stay.check_in_date, checkOut: stay.check_out_date, guests: stay.adults + stay.children, infants: stay.infants, totalMinor: stay.total_minor }, money),
+      ...(previousHome.product_id !== home.product_id ? [{ text: `Moves to ${home.name}` }] : []),
+      ...stayChangeDifferences(counts(before), counts(terms), money),
     ],
     replyUrl: audience.stayUrl, organizationName: studio,
   }
-  return send('stay.change_changed', bookingChangeMessage(change), bookingChangeMessage(bookingChangeWithoutMoney(change, audience.stayUrl)), 'booking_change_update')
+  return send('stay.change_changed', bookingChangeMessage(change), bookingChangeMessage(bookingChangeWithoutMoney(change, audience.stayUrl, memberName)), 'booking_change_update')
 }
 
 export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organizationId: string, stayId: string) {
@@ -1521,7 +1533,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
     notifyOwner(env, db, {
       organizationId, organizationName: studio, locationId: home.location_id, template: 'new_stay', title: ownerMessage.title, payload, message: ownerMessage,
       notificationSource: { threadId: threadContext.guestThreadId, entryId: threadContext.sourceEntryId },
-      memberIds: audience.memberIds, memberAlert: { message: stayBookedMessage(stayTurnoverAlert(ownerInput, audience.stayUrl)), stayId: stay.id },
+      memberIds: audience.memberIds, memberAlert: { message: stayBookedMessage(stayTurnoverAlert(ownerInput, audience.stayUrl, memberGuestName({ name: stay.guest_name }))), stayId: stay.id },
     }),
     sendEmailNotification(env, db, {
       organizationId, organizationName: studio, locationId: home.location_id, to: stay.guest_email, replyTo,
@@ -1613,7 +1625,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
       organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, template: 'stay_cancelled', payload,
       notificationSource: { threadId: threadContext.guestThreadId, entryId: threadContext.sourceEntryId },
       title: ownerMessage.title, message: ownerMessage,
-      memberIds: audience.memberIds, memberAlert: { message: stayCancelledMessage(stayTurnoverAlert(ownerInput, audience.stayUrl)), stayId: stay.id },
+      memberIds: audience.memberIds, memberAlert: { message: stayCancelledMessage(stayTurnoverAlert(ownerInput, audience.stayUrl, memberGuestName({ name: recorded.owner.guestName }))), stayId: stay.id },
     })] : []),
     sendEmailNotification(env, db, {
       organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, to: recorded.email.to, replyTo: recorded.email.replyTo,
@@ -1772,7 +1784,7 @@ export async function notifyBookingChangeOwner(
     memberIds: audience ? audience.memberIds
       : opts.assignment ? [...new Set([opts.assignment.beforeMemberId, ...(change.status === 'accepted' ? [opts.assignment.afterMemberId] : [])].filter((id): id is string => id !== null))]
         : submissionType === 'booking' ? [] : undefined,
-    memberAlert: audience && opts.stay ? { message: bookingChangeMessage(bookingChangeWithoutMoney(input, audience.stayUrl)), stayId: opts.stay.id } : undefined,
+    memberAlert: audience && opts.stay ? { message: bookingChangeMessage(bookingChangeWithoutMoney(input, audience.stayUrl, memberGuestName({ name: change.guestName }))), stayId: opts.stay.id } : undefined,
     whatsappTemplate: 'booking_change_update',
   })
 }

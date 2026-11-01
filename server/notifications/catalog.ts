@@ -186,7 +186,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     id: 'stay-booked-member',
     audience: 'owner',
     title: 'Member looking after the home — new stay booked on the site',
-    message: ownerAlert(stayBookedMessage(stayTurnoverAlert(stayBooked, stayPreviewUrl))),
+    message: ownerAlert(stayBookedMessage(stayTurnoverAlert(stayBooked, stayPreviewUrl, 'Mina'))),
   },
   {
     id: 'channel-stay-booked',
@@ -230,7 +230,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     id: 'stay-cancelled-member',
     audience: 'owner',
     title: 'Member looking after the home — stay cancelled by its guest',
-    message: ownerAlert(stayCancelledMessage(stayTurnoverAlert(stayCancelled, stayPreviewUrl))),
+    message: ownerAlert(stayCancelledMessage(stayTurnoverAlert(stayCancelled, stayPreviewUrl, 'Mina'))),
   },
   {
     id: 'contact-received',

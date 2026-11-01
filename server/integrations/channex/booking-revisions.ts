@@ -133,7 +133,7 @@ export async function landBookingRevision(db: DbClient, env: ChannexEnv & GuestI
     // replay send nothing twice. A reservation the import loaded is history,
     // not news, and a superseded revision changes nothing to tell.
     if (stay.change && !importedRevision(revision)) {
-      await notifyChannelStay(env, db, mapping.organization_id, { stayId: stay.id, previous: stay.change.previous, revisionId })
+      await notifyChannelStay(env, db, mapping.organization_id, { stayId: stay.id, revisionId, ...stay.change })
     }
     // The outcome is recorded before the acknowledgement: once Channex drops the
     // revision from its feed it cannot be recovered from there. The row reads
