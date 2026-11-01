@@ -2015,6 +2015,8 @@ export interface ChannelBooking {
   guest_phone: string | null
   total_minor: number
   currency: string
+  /** Channex loaded it from the channel's existing reservations (a home's import), rather than receiving it as it was booked. */
+  imported: boolean
 }
 
 /**
@@ -2131,8 +2133,8 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   }, {
     query: `INSERT INTO stays (id, organization_id, product_id, channel, owner, status, overbooked, check_in_date, check_out_date, adults, children, infants,
               guest_name, guest_surname, guest_email, guest_phone, total_minor, currency, provider, external_booking_id, channel_booking_id, revision_id,
-              provider_updated_at, cancelled_at, created_at, updated_at, created_by, updated_by)
-            VALUES (?, ?, ?, ?, 'channel', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              provider_updated_at, cancelled_at, booking_received_at, created_at, updated_at, created_by, updated_by)
+            VALUES (?, ?, ?, ?, 'channel', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (provider, external_booking_id) WHERE external_booking_id IS NOT NULL DO UPDATE SET
               product_id = excluded.product_id, channel = excluded.channel, status = excluded.status, overbooked = excluded.overbooked,
               check_in_date = excluded.check_in_date, check_out_date = excluded.check_out_date, adults = excluded.adults, children = excluded.children,
@@ -2146,7 +2148,8 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
     params: [id, organizationId, productId, booking.channel, booking.cancelled ? 'cancelled' : 'confirmed', overbooked, booking.check_in_date, booking.check_out_date,
       booking.adults, booking.children, booking.infants, booking.guest_name, booking.guest_surname, booking.guest_email, booking.guest_phone,
       booking.total_minor, booking.currency, booking.provider, booking.external_booking_id, booking.channel_booking_id, booking.revision_id,
-      booking.provider_updated_at, booking.cancelled ? now : null, now, now, 'channex', 'channex', existing?.id ?? null, previous?.product_id ?? null, previous?.version ?? null],
+      // A booking received as it happened starts the new-reservation messages; the import's history never does. An update keeps the first answer.
+      booking.provider_updated_at, booking.cancelled ? now : null, booking.imported || booking.cancelled ? null : now, now, now, 'channex', 'channex', existing?.id ?? null, previous?.product_id ?? null, previous?.version ?? null],
   },
   organizationEventQuery({ organizationId, locationId: home.location_id, actorId: null, eventType: existing ? 'stay.updated' : 'stay.created', entityType: 'stay', entityId: id,
     dedupeKey: revisionKey, onlyIfPreviousChangedOneRow: true, metadata: { channel: booking.channel, overbooked: overbooked === 1,

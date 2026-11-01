@@ -21,7 +21,7 @@ import { automaticMessageEditorKey } from './AutomaticMessageEditorPage.vue'
 defineProps<{ concern?: 'content' | 'schedule' }>()
 const editor = inject(automaticMessageEditorKey)!
 const trigger = computed(() => editor.draft.value.schedule.trigger)
-const triggers = [{ label: '5 minutes after a new direct reservation', value: 'booking_received' }, { label: 'Around check-in', value: 'check_in' }, { label: 'Around checkout', value: 'check_out' }]
+const triggers = [{ label: '5 minutes after a new reservation', value: 'booking_received' }, { label: 'Around check-in', value: 'check_in' }, { label: 'Around checkout', value: 'check_out' }]
 const days = Array.from({ length: 15 }, (_, index) => { const value = index - 7; return { value, label: value === 0 ? 'On the day' : `${Math.abs(value)} ${Math.abs(value) === 1 ? 'day' : 'days'} ${value < 0 ? 'before' : 'after'}` } })
 function setTrigger(value: string) {
   if (!editor.manage.value || editor.saving.value) return

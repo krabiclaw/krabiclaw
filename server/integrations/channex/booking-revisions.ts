@@ -70,6 +70,7 @@ function revisedBooking(revision: Resource, propertyId: string): ChannelBooking 
     guest_name: nullableString(customer.name ?? null, 'customer.name'), guest_surname: nullableString(customer.surname ?? null, 'customer.surname'),
     guest_email: nullableString(customer.mail ?? null, 'customer.mail'), guest_phone: nullableString(customer.phone ?? null, 'customer.phone'),
     total_minor: minorUnits(string(attributes.amount, 'amount'), currency, bookingId), currency,
+    imported: importedRevision(revision),
   }
 }
 
@@ -126,13 +127,14 @@ export async function landBookingRevision(db: DbClient, env: ChannexEnv & GuestI
       await channexRequest(env, `/booking_revisions/${encodeURIComponent(revisionId)}/ack`, 'POST', {})
       return { status: 'ignored_disconnected' }
     }
-    const stay = await applyChannelBooking(db, env, mapping.organization_id, mapping.product_id, revisedBooking(revision, propertyId))
+    const booking = revisedBooking(revision, propertyId)
+    const stay = await applyChannelBooking(db, env, mapping.organization_id, mapping.product_id, booking)
     // The owners hear what the revision changed before it is acknowledged, so
     // an alert that could not be prepared leaves the revision in Channex's
     // feed and its next delivery tells it; the alert's own keys make that
     // replay send nothing twice. A reservation the import loaded is history,
     // not news, and a superseded revision changes nothing to tell.
-    if (stay.change && !importedRevision(revision)) {
+    if (stay.change && !booking.imported) {
       await notifyChannelStay(env, db, mapping.organization_id, { stayId: stay.id, revisionId, ...stay.change })
     }
     // The outcome is recorded before the acknowledgement: once Channex drops the
