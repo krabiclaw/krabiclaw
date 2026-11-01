@@ -1456,8 +1456,8 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
       ...(overlap ? [{ text: 'The new nights overlap another stay: resolve the double booking' }] : []),
       ...(previousHome !== home.name ? [{ text: `Moves to ${home.name}` }] : []),
       ...stayChangeDifferences(
-        { checkIn: previous!.check_in_date, checkOut: previous!.check_out_date, guests: previous!.adults + previous!.children, totalMinor: previous!.total_minor },
-        { checkIn: stay.check_in_date, checkOut: stay.check_out_date, guests: stay.adults + stay.children, totalMinor: stay.total_minor }, money),
+        { checkIn: previous!.check_in_date, checkOut: previous!.check_out_date, guests: previous!.adults + previous!.children, infants: previous!.infants, totalMinor: previous!.total_minor },
+        { checkIn: stay.check_in_date, checkOut: stay.check_out_date, guests: stay.adults + stay.children, infants: stay.infants, totalMinor: stay.total_minor }, money),
     ],
     replyUrl: audience.stayUrl, organizationName: studio,
   }
@@ -1740,6 +1740,8 @@ export async function notifyBookingChangeOwner(
   },
 ) {
   const { submissionType, change } = opts
+  // A stay's members read its changes without money; the projection needs the stay.
+  if (submissionType === 'stay' && !opts.stay) throw new HTTPError({ statusCode: 500, message: 'A stay change alert needs its stay to tell the members who look after the home', data: { code: 'STAY_REQUIRED', field: 'stay', thread_id: opts.threadId } })
   const replyUrl = await buildOwnerThreadInboxUrl(env, db, opts)
   const presentation = change.recordKind === 'consultation' || opts.vertical === 'service'
     ? resolveBookingPresentation('booking', 'service')

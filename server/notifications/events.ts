@@ -410,18 +410,20 @@ export function bookingChangeWithoutMoney(input: BookingChangeEventInput, replyU
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
 
 /** What an Airbnb stay change does, read from the two sets of dates, guests and totals. */
-export function stayChangeDifferences(current: { checkIn: string; checkOut: string; guests: number; totalMinor: number }, requested: { checkIn: string; checkOut: string; guests: number; totalMinor: number }, money: (minor: number) => string): BookingChangeDifference[] {
+export function stayChangeDifferences(current: { checkIn: string; checkOut: string; guests: number; infants: number; totalMinor: number }, requested: { checkIn: string; checkOut: string; guests: number; infants: number; totalMinor: number }, money: (minor: number) => string): BookingChangeDifference[] {
   const days = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000)
   const arrival = days(current.checkIn, requested.checkIn)
   const departure = days(current.checkOut, requested.checkOut)
   const nights = days(requested.checkIn, requested.checkOut) - days(current.checkIn, current.checkOut)
   const guests = requested.guests - current.guests
+  const infants = requested.infants - current.infants
   const total = requested.totalMinor - current.totalMinor
   return [
     ...(arrival ? [{ text: `Arrives ${plural(Math.abs(arrival), 'day')} ${arrival < 0 ? 'earlier' : 'later'}` }] : []),
     ...(departure ? [{ text: `Leaves ${plural(Math.abs(departure), 'day')} ${departure < 0 ? 'earlier' : 'later'}` }] : []),
     ...(nights ? [{ text: `${plural(Math.abs(nights), nights > 0 ? 'more night' : 'fewer night', nights > 0 ? 'more nights' : 'fewer nights')}` }] : []),
     ...(guests ? [{ text: `${plural(Math.abs(guests), guests > 0 ? 'more guest' : 'fewer guest', guests > 0 ? 'more guests' : 'fewer guests')}` }] : []),
+    ...(infants ? [{ text: `${plural(Math.abs(infants), infants > 0 ? 'more infant' : 'fewer infant', infants > 0 ? 'more infants' : 'fewer infants')}` }] : []),
     ...(total ? [{ text: `Booking total ${total > 0 ? '+' : '−'}${money(Math.abs(total))}`, financial: true }] : []),
   ]
 }

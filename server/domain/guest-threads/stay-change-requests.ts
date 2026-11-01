@@ -73,6 +73,13 @@ async function recordOutcome(db: DbClient, env: AnswerEnv, entry: GuestThreadEnt
   await publishGuestInboxThreadEvent(env, db, { threadId: entry.request_id, type: 'thread.changed' })
 }
 
+/** Whether the stay was written after an outcome was recorded: the accepted revision, or a later one. */
+async function stayChangedSince(db: DbClient, proposal: Proposal, decision: GuestThreadEntryRow): Promise<boolean> {
+  const stay = await queryFirst<{ updated_at: string }>(db, 'SELECT updated_at FROM stays WHERE id = ?', [proposal.stay_id])
+  if (!stay) throw new Error(`Stay ${proposal.stay_id} disappeared under its change request`)
+  return stay.updated_at > decision.created_at
+}
+
 /** An accepted change arrives as the booking's next revision; land it if Channex already holds it. */
 async function landAcceptedChange(db: DbClient, env: AnswerEnv, proposal: Proposal): Promise<void> {
   for (const revision of await pendingBookingRevisions(env, proposal.property_id, proposal.booking_id)) await landBookingRevision(db, env, revision)
@@ -92,7 +99,7 @@ async function alertOwners(db: DbClient, env: CloudflareEnv, thread: { id: strin
     partySize: stayParty(side),
     total: money(side.total_minor),
   })
-  const counts = (side: Terms) => ({ checkIn: side.check_in_date, checkOut: side.check_out_date, guests: side.adults + side.children, totalMinor: side.total_minor })
+  const counts = (side: Terms) => ({ checkIn: side.check_in_date, checkOut: side.check_out_date, guests: side.adults + side.children, infants: side.infants, totalMinor: side.total_minor })
   await notifyBookingChangeOwner(env, db, {
     organizationId: thread.organization_id, organizationName: home.organization_name, threadId: thread.id, submissionType: 'stay', submissionId: thread.id, sourceEntryId: entry.id,
     locationId: home.location_id, vertical: 'lodging', stay: { id: proposal.stay_id, product_id: home.product_id, arrival_time: home.arrival_time },
@@ -154,11 +161,13 @@ export async function takeAlterationRequest(db: DbClient, env: CloudflareEnv, re
   const reconciled = !decision && request.outcome !== null
   if (!decision && request.outcome) {
     await recordOutcome(db, env, entry, proposal, request.outcome, null)
-    if (request.outcome === 'accepted') await landAcceptedChange(db, env, proposal)
     decision = await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)
     if (!decision) throw new Error(`Airbnb change request ${request.id} has no recorded outcome`)
   }
   if (decision) {
+    // An accepted change lands as the booking's next revision. A run that
+    // recorded the acceptance but stopped before landing it lands it now.
+    if (decision.event_name === 'booking_change.accepted' && !await stayChangedSince(db, proposal, decision)) await landAcceptedChange(db, env, proposal)
     // A guest who withdraws on Airbnb leaves the owners nothing to answer; they
     // were asked, so they are told. An accepted change is told by its stay's
     // revision, and a host answers only here or on Airbnb themselves.
