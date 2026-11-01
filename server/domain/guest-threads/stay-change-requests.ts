@@ -3,7 +3,8 @@ import { z } from 'zod'
 import { queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
-import { notifyBookingChangeOwner } from '~/server/utils/notifications'
+import { notifyBookingChangeOwner, stayParty } from '~/server/utils/notifications'
+import { stayChangeDifferences } from '~/server/notifications/events'
 import { getPersistedSourceLocale } from '~/server/utils/localization'
 import { publishGuestInboxThreadEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { landBookingRevision, pendingBookingRevisions } from '~/server/integrations/channex/booking-revisions'
@@ -37,10 +38,14 @@ const proposalSchema = z.object({ source: z.literal('airbnb'), initiated_by: z.e
 type Terms = z.infer<typeof termsSchema>
 type Proposal = z.infer<typeof proposalSchema>
 type Outcome = NonNullable<AlterationRequest['outcome']>
-type AnswerEnv = ChannexEnv & GuestInboxPublicationEnv
+type AnswerEnv = ChannexEnv & GuestInboxPublicationEnv & CloudflareEnv
 
 export function isStayChangeRequest(entry: Pick<GuestThreadEntryRow, 'event_name' | 'dedupe_key'>): boolean {
   return entry.event_name === 'booking_change.requested' && entry.dedupe_key.startsWith(PREFIX)
+}
+
+function nights(terms: Terms): number {
+  return Math.round((Date.parse(`${terms.check_out_date}T00:00:00Z`) - Date.parse(`${terms.check_in_date}T00:00:00Z`)) / 86_400_000)
 }
 
 function nightsLabel(terms: Terms, locale: string): string {
@@ -68,24 +73,41 @@ async function recordOutcome(db: DbClient, env: AnswerEnv, entry: GuestThreadEnt
   await publishGuestInboxThreadEvent(env, db, { threadId: entry.request_id, type: 'thread.changed' })
 }
 
+/** Whether the stay was written after an outcome was recorded: the accepted revision, or a later one. */
+async function stayChangedSince(db: DbClient, proposal: Proposal, decision: GuestThreadEntryRow): Promise<boolean> {
+  const stay = await queryFirst<{ updated_at: string }>(db, 'SELECT updated_at FROM stays WHERE id = ?', [proposal.stay_id])
+  if (!stay) throw new Error(`Stay ${proposal.stay_id} disappeared under its change request`)
+  return stay.updated_at > decision.created_at
+}
+
 /** An accepted change arrives as the booking's next revision; land it if Channex already holds it. */
 async function landAcceptedChange(db: DbClient, env: AnswerEnv, proposal: Proposal): Promise<void> {
   for (const revision of await pendingBookingRevisions(env, proposal.property_id, proposal.booking_id)) await landBookingRevision(db, env, revision)
 }
 
-async function alertOwners(db: DbClient, env: CloudflareEnv, thread: { id: string; organization_id: string; guest_name: string | null }, entry: GuestThreadEntryRow, proposal: Proposal) {
+async function alertOwners(db: DbClient, env: CloudflareEnv, thread: { id: string; organization_id: string; guest_name: string | null }, entry: GuestThreadEntryRow, proposal: Proposal, status: 'requested' | 'withdrawn') {
   if (!thread.guest_name) throw new Error(`Conversation ${thread.id} has no guest name to alert its owners with`)
-  const home = await queryFirst<{ name: string; location_id: string; assigned_member_id: string | null; organization_name: string }>(db, `SELECT p.name, c.location_id, c.assigned_member_id, o.name AS organization_name
+  const home = await queryFirst<{ name: string; location_id: string; product_id: string; arrival_time: string | null; organization_name: string }>(db, `SELECT p.name, c.location_id, s.product_id, s.arrival_time, o.name AS organization_name
     FROM stays s JOIN products p ON p.id = s.product_id AND p.organization_id = s.organization_id
     JOIN product_stay_configs c ON c.product_id = s.product_id AND c.organization_id = s.organization_id
     JOIN organization o ON o.id = s.organization_id WHERE s.id = ? AND s.organization_id = ?`, [proposal.stay_id, thread.organization_id])
   if (!home) throw new Error(`Stay ${proposal.stay_id} has no home to name in its change request alert`)
+  const money = (minor: number) => formatMinorAmount(minor, proposal.after.currency, 'en-US')
+  if (proposal.before.currency !== proposal.after.currency) throw new HTTPError({ statusCode: 409, message: `Airbnb change request ${proposal.live_feed_event_id} changes the stay's currency`, data: { code: 'CHANGE_REQUEST_CURRENCY_MISMATCH', field: 'bms.currency' } })
+  const terms = (side: Terms) => ({
+    date: nightsLabel(side, 'en'), time: null, nights: nights(side), location: home.name, assignee: null,
+    partySize: stayParty(side),
+    total: money(side.total_minor),
+  })
+  const counts = (side: Terms) => ({ checkIn: side.check_in_date, checkOut: side.check_out_date, guests: side.adults + side.children, infants: side.infants, totalMinor: side.total_minor })
   await notifyBookingChangeOwner(env, db, {
     organizationId: thread.organization_id, organizationName: home.organization_name, threadId: thread.id, submissionType: 'stay', submissionId: thread.id, sourceEntryId: entry.id,
-    guestName: thread.guest_name, status: 'requested', requestedBy: 'guest', noun: 'stay', locationId: home.location_id, locationTitle: home.name,
-    vertical: 'lodging',
-    memberIds: home.assigned_member_id ? [home.assigned_member_id] : [],
-    whenLabel: nightsLabel(proposal.after, 'en'), whenDate: null, whenTime: null, guests: proposal.after.adults + proposal.after.children,
+    locationId: home.location_id, vertical: 'lodging', stay: { id: proposal.stay_id, product_id: home.product_id, arrival_time: home.arrival_time },
+    change: {
+      recordKind: 'stay', channel: 'Airbnb', guestName: thread.guest_name, requestedBy: { kind: 'guest' }, status, locationLabel: 'Home',
+      current: terms(proposal.before), requested: terms(proposal.after),
+      differences: stayChangeDifferences(counts(proposal.before), counts(proposal.after), money),
+    },
   })
 }
 
@@ -129,21 +151,35 @@ export async function takeAlterationRequest(db: DbClient, env: CloudflareEnv, re
     await updateThreadProjectionIfLatestEntry(db, threadId, entry.id, { conversationState: guest ? 'needs_attention' : 'waiting_on_guest' })
     await publishGuestInboxThreadEvent(env, db, { threadId, type: 'thread.changed' })
   }
-  if (await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)) return 'unchanged'
   const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
-  if (request.outcome) {
-    await recordOutcome(db, env, entry, proposal, request.outcome, null)
-    if (request.outcome === 'accepted') await landAcceptedChange(db, env, proposal)
-    return 'reconciled'
-  }
-  // A change the host proposed on Airbnb waits on the guest there; nobody here is asked.
-  if (proposal.initiated_by === 'host') return 'unchanged'
   const thread = await queryFirst<{ id: string; organization_id: string; guest_name: string | null }>(db,
     "SELECT id, organization_id, json_extract(payload_json, '$.guest.name') AS guest_name FROM requests WHERE id = ?", [entry.request_id])
   if (!thread) throw new Error(`Conversation ${entry.request_id} disappeared under its change request`)
-  // Alerted once: a run that recorded the request but stopped before alerting alerts on the next one.
-  if (await queryFirst(db, "SELECT 1 FROM guest_thread_deliveries WHERE entry_id = ? AND purpose = 'owner_alert'", [entry.id])) return 'unchanged'
-  await alertOwners(db, env, thread, entry, proposal)
+  // Each owner alert is sent once: a run that recorded the fact but stopped before alerting alerts on the next one.
+  const alerted = async (entryId: string) => Boolean(await queryFirst(db, "SELECT 1 FROM guest_thread_deliveries WHERE entry_id = ? AND purpose = 'owner_alert'", [entryId]))
+  let decision = await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)
+  const reconciled = !decision && request.outcome !== null
+  if (!decision && request.outcome) {
+    await recordOutcome(db, env, entry, proposal, request.outcome, null)
+    decision = await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)
+    if (!decision) throw new Error(`Airbnb change request ${request.id} has no recorded outcome`)
+  }
+  if (decision) {
+    // An accepted change lands as the booking's next revision. A run that
+    // recorded the acceptance but stopped before landing it lands it now.
+    if (decision.event_name === 'booking_change.accepted' && !await stayChangedSince(db, proposal, decision)) await landAcceptedChange(db, env, proposal)
+    // A guest who withdraws on Airbnb leaves the owners nothing to answer; they
+    // were asked, so they are told. An accepted change is told by its stay's
+    // revision, and a host answers only here or on Airbnb themselves.
+    if (decision.event_name === 'booking_change.withdrawn' && proposal.initiated_by === 'guest' && await alerted(entry.id) && !await alerted(decision.id)) {
+      await alertOwners(db, env, thread, decision, proposal, 'withdrawn')
+    }
+    return reconciled ? 'reconciled' : 'unchanged'
+  }
+  // A change the host proposed on Airbnb waits on the guest there; nobody here is asked.
+  if (proposal.initiated_by === 'host') return 'unchanged'
+  if (await alerted(entry.id)) return 'unchanged'
+  await alertOwners(db, env, thread, entry, proposal, 'requested')
   return 'recorded'
 }
 

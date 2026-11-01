@@ -66,7 +66,7 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
         : input.kind === 'refund_succeeded' ? 'What you paid for was taken before your payment completed, so your booking could not be made and your payment has been refunded in full.' : null,
   }
   const event: PaymentNotificationEvent = input.kind === 'dispute_needs_response' ? { ...details, kind: input.kind, responseDueBy: input.responseDueBy } : { ...details, kind: input.kind }
-  const ownerMessage = organization ? ownerPaymentMessage(event) : undefined
+  const ownerMessage = deepLink ? ownerPaymentMessage({ ...event, action: { url: deepLink, label: 'View details' } }) : undefined
   let sourceEntryId: string | null = null
   if (threadId && ownerMessage) {
     const entry = await appendEntry(db, {
@@ -121,7 +121,7 @@ export async function notifyPayoutState(db: DbClient, env: CloudflareEnv, scope:
   await notifyFinancialNotification(env, db, {
     organizationId: scope.organizationId,
     eventKey: `payments:${scope.stripeAccountId}:${Number(scope.livemode)}:${payout.id}:${payout.status}`,
-    ownerMessage: ownerPaymentMessage(event),
+    ownerMessage: ownerPaymentMessage({ ...event, action: details.action }),
     deepLink,
   })
 }

@@ -19,6 +19,7 @@ import { createDeliveryReceipt, deliverGuestThreadEmail, isDeliverySent } from '
 import { getEmailDeliveryMode } from '~/server/utils/email-delivery'
 import { renderNotificationEmail } from '~/server/emails/render'
 import { bookingChangeProposalMessage } from '~/server/notifications/guest-events'
+import { occurrenceChangeDifferences } from '~/server/notifications/events'
 import { organizationLogo } from '~/server/notifications/hero'
 import { getPlatformDomain, buildBuyerRequestActivityUrl } from '~/server/utils/dashboard-notification-links'
 import { bookingChangeStates, type BookingChangeStatus } from './booking-change-state'
@@ -311,10 +312,11 @@ async function changePresentation(db: DbClient, thread: GuestThreadRow, proposal
     before: { assignedMemberId: proposal.before.assignedMemberId, assignedMemberName: beforeAssignedMemberName, whenLabel: formatTimestamp(proposal.before.startsAt, guest.locale, proposal.before.timezone, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), partySize: proposal.before.partySize },
     after: { assignedMemberId: afterAssignedMemberId, assignedMemberName: afterAssignedMemberName, whenLabel: formatTimestamp(startsAt, guest.locale, timezone, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), partySize: proposal.after.partySize },
     locationTitle: guest.locationName?.trim() || labels['booking.online']!, originalLocationTitle: original.locationName?.trim() || labels['booking.online']!,
+    afterStartsAt: startsAt, afterTimezone: timezone,
   }
 }
 
-async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow, entryId: string, status: 'requested' | 'accepted' | 'declined' | 'moved', proposal: z.infer<typeof proposalSchema>, noun: string) {
+async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow, entryId: string, proposalEntryId: string, status: 'requested' | 'accepted' | 'declined' | 'moved', proposal: z.infer<typeof proposalSchema>, noun: string) {
   const summary = await sourceSummary(db, thread)
   if (!summary.guestEmail) throw new HTTPError({ statusCode: 400, message: 'Guest email is required' })
   const guest = await changePresentation(db, thread, proposal)
@@ -330,12 +332,21 @@ async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow
     purpose: 'status_update',
     idempotencyKey: `booking-change:${entryId}`,
   })
+  // What is booked beside what the change makes it: one row where a detail
+  // stays the same, the before and the proposed where it changes.
   const rows: [string, string][] = []
+  const compare = (label: string, before: string | null, after: string | null) => {
+    if (before === after) { if (after !== null) rows.push([label, after]) }
+    else {
+      if (before !== null) rows.push([`${guest.labels['booking.change_before']} · ${label}`, before])
+      if (after !== null) rows.push([`${guest.labels['booking.change_proposed']} · ${label}`, after])
+    }
+  }
   if (status !== 'declined') {
-    rows.push([`${guest.labels['booking.change_before']} · ${guest.copy.dateLabel}`, guest.before.whenLabel], [`${guest.labels['booking.change_proposed']} · ${guest.copy.dateLabel}`, guest.after.whenLabel])
-    if (guest.before.assignedMemberName) rows.push([`${guest.labels['booking.change_before']} · ${guest.copy.assigneeLabel}`, guest.before.assignedMemberName])
-    if (guest.after.assignedMemberName) rows.push([`${guest.labels['booking.change_proposed']} · ${guest.copy.assigneeLabel}`, guest.after.assignedMemberName])
-    rows.push([guest.copy.locationLabel, guest.locationTitle], [guest.copy.guestsLabel, String(guest.after.partySize)])
+    compare(guest.copy.dateLabel, guest.before.whenLabel, guest.after.whenLabel)
+    compare(guest.copy.assigneeLabel, guest.before.assignedMemberName, guest.after.assignedMemberName)
+    compare(guest.copy.locationLabel, guest.originalLocationTitle, guest.locationTitle)
+    compare(guest.copy.guestsLabel, String(guest.before.partySize), String(guest.after.partySize))
   }
   const sent = await deliverGuestThreadEmail(db, {
     delivery,
@@ -361,16 +372,32 @@ async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow
   if (!isDeliverySent(sent)) throw new HTTPError({ statusCode: 502, message: sent.error || 'Guest email delivery has not been confirmed. Review the recorded delivery outcome.', data: { code: 'DELIVERY_INCOMPLETE', field: 'delivery', delivery_id: sent.id, delivery_status: sent.status } })
   // A move is the business's own doing; the guest is told, the owners already know.
   if (status === 'moved') return
+  // A pending proposal names the member who just made it; an answer names the guest who gave it.
+  const proposer = status === 'requested'
+    ? await queryFirst<{ name: string | null }>(db, 'SELECT u.name FROM activity_entries e JOIN user u ON u.id = e.actor_user_id WHERE e.id = ? AND e.request_id = ?', [proposalEntryId, thread.id])
+    : null
+  if (status === 'requested' && !proposer?.name?.trim()) throw new HTTPError({ statusCode: 409, message: 'The member who proposed this change has no name to show the owners', data: { code: 'CHANGE_PROPOSER_UNKNOWN', field: 'actor_user_id', entry_id: proposalEntryId } })
+  // The owners read English, in each occurrence's own zone.
+  const presentation = resolveBookingPresentation(thread.kind === 'reservation' ? 'reservation' : 'booking', guest.vertical)
+  const ownerCopy = getVerticalCopy(guest.vertical, 'en')
+  const [before, after] = [localParts(proposal.before.startsAt, proposal.before.timezone), localParts(guest.afterStartsAt, guest.afterTimezone)]
+  const offering = proposal.before.productId ? await queryFirst<{ name: string }>(db, 'SELECT name FROM products WHERE id = ? AND organization_id = ?', [proposal.before.productId, thread.organization_id]) : null
+  const current = { date: before.date, time: before.time, nights: null, total: null, partySize: presentation.formatCount(proposal.before.partySize),
+    location: proposal.originalLocationTitle || 'Online', assignee: guest.before.assignedMemberName }
+  const requested = { date: after.date, time: after.time, nights: null, total: null, partySize: presentation.formatCount(proposal.after.partySize),
+    location: proposal.locationTitle || 'Online', assignee: guest.after.assignedMemberName }
   await notifyBookingChangeOwner(env, db, {
     organizationId: thread.organization_id, organizationName: guest.fromName,
     threadId: thread.id, submissionType: thread.kind === 'reservation' ? 'reservation' : 'booking', submissionId: thread.id, sourceEntryId: entryId,
-    guestName: summary.guestName, status, noun,
     vertical: guest.vertical,
-    whenLabel: proposal.afterLabel, whenDate: proposal.afterDate ?? null, whenTime: proposal.afterTime ?? null,
-    guests: proposal.after.partySize, locationTitle: proposal.locationTitle,
     locationId: status === 'declined' ? proposal.before.locationId : proposal.afterLocationId !== undefined ? proposal.afterLocationId : proposal.before.locationId,
     assignment: thread.kind === 'booking' && proposal.beforeAssignedMemberName !== undefined && proposal.afterAssignedMemberId !== undefined && proposal.afterAssignedMemberName !== undefined
-      ? { beforeMemberId: proposal.before.assignedMemberId, beforeName: proposal.beforeAssignedMemberName, afterMemberId: proposal.afterAssignedMemberId, afterName: proposal.afterAssignedMemberName, label: guest.copy.assigneeLabel } : undefined,
+      ? { beforeMemberId: proposal.before.assignedMemberId, beforeName: proposal.beforeAssignedMemberName, afterMemberId: proposal.afterAssignedMemberId, afterName: proposal.afterAssignedMemberName, label: ownerCopy.assigneeLabel } : undefined,
+    change: {
+      recordKind: noun, offering: offering?.name ?? null, channel: null, guestName: summary.guestName, requestedBy: { kind: 'business', name: proposer?.name ?? null }, status,
+      assigneeLabel: ownerCopy.assigneeLabel, current, requested,
+      differences: occurrenceChangeDifferences(current, requested, { party: presentation.partyLabel, assignee: ownerCopy.assigneeLabel }),
+    },
   })
 }
 
@@ -443,7 +470,7 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
   if (!state) throw new Error('The booking change proposal disappeared')
   if (state.status === 'accepted' || state.status === 'declined') return { changeStatus: state.status }
   if (state.status === 'stale' || state.status === 'expired') throw new HTTPError({ statusCode: state.status === 'expired' ? 410 : 409, message: state.message })
-  await deliverEmail(db, env, thread, entry.id, 'requested', proposal, noun)
+  await deliverEmail(db, env, thread, entry.id, entry.id, 'requested', proposal, noun)
   await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id, { conversationState: 'waiting_on_guest' })
   const decision = await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)
   if (decision) {
@@ -521,7 +548,7 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
     if (!entry) throw new HTTPError({ statusCode: 409, message: before.recordKind === 'booking' ? 'That session filled up or the booking changed; it has not moved' : 'This reservation changed or that time is no longer available' })
   }
   const noun = await bookingNoun(db, thread)
-  await deliverEmail(db, env, thread, entry.id, 'moved', proposalSchema.parse(JSON.parse(entry.payload_json || '{}')), noun)
+  await deliverEmail(db, env, thread, entry.id, entry.id, 'moved', proposalSchema.parse(JSON.parse(entry.payload_json || '{}')), noun)
   await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id, { conversationState: 'resolved' })
   return { changeStatus: 'moved' as const }
 }
@@ -655,7 +682,6 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
   if (result && input.decision) {
     const accepted = result.event_name === 'booking_change.accepted'
     await updateThreadProjectionIfLatestEntry(db, thread.id, result.id, { conversationState: 'resolved' })
-    await deliverEmail(db, env, thread as GuestThreadRow, result.id, accepted ? 'accepted' : 'declined', proposal, noun)
     if (!result.payload_json) throw new Error('A booking change answer has no recorded payload')
     const answered = JSON.parse(result.payload_json) as { operational_booking_id?: unknown; before?: { assigned_member_id?: string | null }; after?: { assigned_member_id?: string | null } | null }
     if (thread.kind === 'booking' && typeof answered.operational_booking_id === 'string') {
@@ -665,6 +691,8 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
     if (accepted && answered.after && (answered.before?.assigned_member_id ?? null) !== (answered.after.assigned_member_id ?? null)) {
       await publishAccessInvalidation(env, { organizationId: thread.organization_id })
     }
+    // Told once the answer, its analytics and any access change are recorded, so a send that fails cannot skip them.
+    await deliverEmail(db, env, thread as GuestThreadRow, result.id, entry.id, accepted ? 'accepted' : 'declined', proposal, noun)
   }
   const finalState = (await bookingChangeStates(db, [entry.id])).get(entry.id)
   if (!finalState) throw new Error('The booking change proposal disappeared')

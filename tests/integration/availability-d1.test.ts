@@ -187,12 +187,11 @@ test('DST gaps and folds are reported, never silently resolved', { timeout: 120_
     // Generation is bounded to a year ahead, so the transition dates are found
     // inside that window rather than hardcoded — the test stays true as time
     // passes instead of expiring on a fixed date.
-    const zone = 'America/Los_Angeles'
     // One window for both the search and the generation: searching a day
     // further than sessions are generated could find a transition the run never
     // reached, depending on the date the suite happened to run.
     const WINDOW_DAYS = 359
-    const findSunday = (time: string): string | null => {
+    const findSunday = (zone: string, time: string): string | null => {
       const today = localNow(zone).date
       for (let offset = 1; offset <= WINDOW_DAYS; offset += 1) {
         const date = addLocalDays(today, offset)
@@ -202,23 +201,34 @@ test('DST gaps and folds are reported, never silently resolved', { timeout: 120_
       }
       return null
     }
-    const gapDate = findSunday('02:30')
-    const foldDate = findSunday('01:30')
-    assert(gapDate, 'a spring-forward Sunday exists within the generation window')
-    assert(foldDate, 'a fall-back Sunday exists within the generation window')
+    // A zone's next transition can be 371 days after its last, so for some days
+    // after each one no single zone has both inside the window. Los Angeles
+    // skips its 02:xx hour and repeats 01:xx; Lord Howe skips 02:00–02:29 in
+    // October and repeats 01:30–01:59 in April, so the two are never both out
+    // of reach at once, and on each zone's transition days the other rule's
+    // time still exists.
+    const candidates = [
+      { zone: 'America/Los_Angeles', gapTime: '02:30', foldTime: '01:30' },
+      { zone: 'Australia/Lord_Howe', gapTime: '02:15', foldTime: '01:45' },
+    ].map(candidate => ({ ...candidate, gapDate: findSunday(candidate.zone, candidate.gapTime), foldDate: findSunday(candidate.zone, candidate.foldTime) }))
+    const chosen = candidates.find(candidate => candidate.gapDate && candidate.foldDate)
+    assert(chosen, `a spring-forward and a fall-back Sunday exist within the generation window: ${JSON.stringify(candidates)}`)
+    const { zone, gapTime, foldTime } = chosen
+    const gapDate = chosen.gapDate!
+    const foldDate = chosen.foldDate!
 
     // A rule is at a location, in that location's clock.
     await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at) VALUES ('loc-la', ?, 'la', 'Los Angeles', 'active', ?, ?, ?)`).bind(ORG, zone, NOW, NOW).run()
-    await addRule(db, 'rule-gap', { timezone: zone, weekday: 0, start_time: '02:30', location_id: 'loc-la' })
-    await addRule(db, 'rule-fold', { timezone: zone, weekday: 0, start_time: '01:30', location_id: 'loc-la' })
+    await addRule(db, 'rule-gap', { timezone: zone, weekday: 0, start_time: gapTime, location_id: 'loc-la' })
+    await addRule(db, 'rule-fold', { timezone: zone, weekday: 0, start_time: foldTime, location_id: 'loc-la' })
     const result = await materializeSessions(db, {
       organizationId: ORG, productId: PRODUCT, throughDate: addLocalDays(localNow(zone).date, WINDOW_DAYS), actorId: ACTOR,
     })
 
-    const gap = result.skipped.find(entry => entry.local_date === gapDate && entry.local_start_time === '02:30')
+    const gap = result.skipped.find(entry => entry.local_date === gapDate && entry.local_start_time === gapTime)
     assert(gap, `the spring-forward occurrence on ${gapDate} is reported`)
     assert.equal(gap.reason, 'nonexistent_local_time')
-    const fold = result.skipped.find(entry => entry.local_date === foldDate && entry.local_start_time === '01:30')
+    const fold = result.skipped.find(entry => entry.local_date === foldDate && entry.local_start_time === foldTime)
     assert(fold, `the fall-back occurrence on ${foldDate} is reported`)
     assert.equal(fold.reason, 'ambiguous_local_time')
 
@@ -226,19 +236,19 @@ test('DST gaps and folds are reported, never silently resolved', { timeout: 120_
     assert(rows.results.length > 0, 'the surrounding Sundays still generate')
     const localDay = (instant: string) => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(instant))
     const localTime = (instant: string) => new Intl.DateTimeFormat('en-US', { timeZone: zone, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(instant))
-    // The other rule still runs on each transition date — 01:30 exists on the
-    // spring-forward day and 02:30 exists on the fall-back day. Only the
-    // impossible and the doubled occurrence are absent, and neither was
-    // quietly shifted to a neighbouring hour.
-    assert.equal(rows.results.some(row => localDay(row.starts_at) === gapDate && localTime(row.starts_at) === '02:30'), false, 'the impossible 02:30 occurrence does not exist')
-    assert.equal(rows.results.some(row => localDay(row.starts_at) === foldDate && localTime(row.starts_at) === '01:30'), false, 'the doubled 01:30 occurrence does not exist')
-    assert.equal(rows.results.filter(row => localDay(row.starts_at) === gapDate).length, 1, 'the gap date keeps only its 01:30 session')
-    assert.equal(rows.results.filter(row => localDay(row.starts_at) === foldDate).length, 1, 'the fold date keeps only its 02:30 session')
+    // The other rule still runs on each transition date — the fold time exists
+    // on the spring-forward day and the gap time exists on the fall-back day.
+    // Only the impossible and the doubled occurrence are absent, and neither
+    // was quietly shifted to a neighbouring hour.
+    assert.equal(rows.results.some(row => localDay(row.starts_at) === gapDate && localTime(row.starts_at) === gapTime), false, `the impossible ${gapTime} occurrence does not exist`)
+    assert.equal(rows.results.some(row => localDay(row.starts_at) === foldDate && localTime(row.starts_at) === foldTime), false, `the doubled ${foldTime} occurrence does not exist`)
+    assert.equal(rows.results.filter(row => localDay(row.starts_at) === gapDate).length, 1, `the gap date keeps only its ${foldTime} session`)
+    assert.equal(rows.results.filter(row => localDay(row.starts_at) === foldDate).length, 1, `the fold date keeps only its ${gapTime} session`)
 
     // Local wall time is stable across the offset change: this is the whole
     // reason recurrence is stored as wall time plus a zone, not as an offset.
     const locals = new Set(rows.results.map(row => new Intl.DateTimeFormat('en-US', { timeZone: zone, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(row.starts_at))))
-    assert.deepEqual([...locals].sort(), ['01:30', '02:30'])
+    assert.deepEqual([...locals].sort(), [foldTime, gapTime].sort())
   } finally { await runtime.dispose() }
 })
 

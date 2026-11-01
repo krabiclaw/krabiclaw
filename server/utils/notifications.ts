@@ -32,13 +32,16 @@ import {
   organizationInviteMessage,
   reviewRequestMessage,
 } from '~/server/notifications/guest-events'
-import type { BookingChangeAssignment } from '~/server/notifications/events'
-import type { NotificationMessage } from '~/server/notifications/messages'
+import type { BookingChangeAssignment, BookingChangeEventInput } from '~/server/notifications/events'
+import type { MemberAlertMessage, NotificationMessage } from '~/server/notifications/messages'
 import {
   bookingCancelledMessage,
   calendarSyncMessage,
   bookingChangeMessage,
+  bookingChangeWithoutMoney,
   bookingCreatedMessage,
+  memberGuestName,
+  stayChangeDifferences,
   contactReceivedMessage,
   messageReceived,
   reservationCancelledMessage,
@@ -50,7 +53,7 @@ import {
 } from '~/server/notifications/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { createCanonicalNotification, notifyBuyerThread, type NotificationSeverity } from '~/server/utils/notification-center'
-import { buildOwnerThreadInboxUrl, buildBuyerRequestActivityUrl, dashboardOrigin, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
+import { buildOwnerThreadInboxUrl, buildBuyerRequestActivityUrl, dashboardOrigin, destinationUnavailable, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
 import { insightsPath, reviewEditorPath } from '~/server/utils/dashboard-links'
 import { createDeliveryReceipt, deliverReceiptEmail, isDeliverySent, recordDeliveryOutcome } from '~/server/domain/guest-threads/deliveries'
 import { appendEntry, findEntryByDedupeKey, parseEntryPayload } from '~/server/domain/guest-threads/entries'
@@ -66,6 +69,8 @@ import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
+import { STAY_CHANNEL_LABELS } from '~/shared/bookings'
+import type { ChannelStayTerms } from '~/server/domain/stays'
 
 // The guest chose a label, not a key: on a studio the option keyed `catering`
 // reads "Workshops & events", so the label comes from the copy the form shows.
@@ -111,7 +116,7 @@ interface ReservationNotificationInput extends OrganizationContext {
   paid?: { amount: number; currency: CurrencyCode } | null
   contactPhone?: string | null
   contactEmail?: string | null
-  ownerInboxUrl?: string | null
+  ownerInboxUrl?: string
 }
 
 interface ContactNotificationInput extends OrganizationContext {
@@ -158,7 +163,7 @@ interface BookingNotificationInput extends OrganizationContext {
   paid?: { amount: number; currency: CurrencyCode } | null
   contactPhone?: string | null
   contactEmail?: string | null
-  ownerInboxUrl?: string | null
+  ownerInboxUrl?: string
 }
 
 interface ReviewNotificationInput extends OrganizationContext {
@@ -205,7 +210,8 @@ interface ThreadDeliveryContext {
   idempotencyKey: string
 }
 
-interface GuestThreadReplyNotificationInput extends OrganizationContext {
+/** The business is read from the conversation's organization, never passed in. */
+interface GuestThreadReplyNotificationInput extends Omit<OrganizationContext, 'organizationName'> {
   locationId?: string | null
   threadId: string
   sourceEntryId: string
@@ -215,7 +221,7 @@ interface GuestThreadReplyNotificationInput extends OrganizationContext {
   participantLabel: string
   guestEmail?: string | null
   guestPhone?: string | null
-  inboundChannel: 'email' | 'whatsapp' | 'web'
+  inboundChannel: 'email' | 'whatsapp' | 'web' | 'airbnb'
   messagePreview: string
 }
 
@@ -275,36 +281,27 @@ async function buildOwnerInboxUrl(
     tab: 'contact' | 'reservations' | 'bookings'
     submissionId: string
   }
-): Promise<string | null> {
+): Promise<string> {
   const submissionType = opts.tab === 'contact' ? 'contact' : opts.tab === 'reservations' ? 'reservation' : 'booking'
-  try {
-    const thread = await getGuestRequest(db, opts.submissionId, opts.organizationId, submissionType)
-    if (!thread) throw new Error('Submission not found')
-    await publishGuestInboxThreadEvent(env, db, { threadId: thread.id, type: 'thread.created' })
-    return await buildOwnerThreadInboxUrl(env, db, {
-      organizationId: opts.organizationId,
-      locationId: opts.locationId,
-      threadId: thread.id,
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (message.includes('Submission not found')) return null
-    throw error instanceof Error ? error : new Error(message)
-  }
+  const thread = await getGuestRequest(db, opts.submissionId, opts.organizationId, submissionType)
+  if (!thread) throw destinationUnavailable('submission_id', opts.submissionId)
+  await publishGuestInboxThreadEvent(env, db, { threadId: thread.id, type: 'thread.created' })
+  return await buildOwnerThreadInboxUrl(env, db, {
+    organizationId: opts.organizationId,
+    locationId: opts.locationId,
+    threadId: thread.id,
+  })
 }
 
-// Deep-links an owner notification to the Reviews tab of Reviews and Q&A, at
-// the location the review belongs to when it has one.
+// Deep-links an owner notification to the review itself: in Insights for a
+// visit's review, which its responsible members may read too, or at its own
+// level beside the Reviews tab.
 async function buildOwnerReviewsUrl(
   env: NotificationEnv,
   db: DbClient,
   opts: { organizationId: string; locationId?: string | null; reviewId: string; visit: boolean }
-): Promise<string | null> {
+): Promise<string> {
   const slugs = await resolveDashboardSlugs(env, db, opts)
-  if (!slugs) return null
-
-  // A visit's review is read in Insights, where its responsible members may
-  // read it too; any other review opens its own level beside the Reviews tab.
   return `${platformOrigin(env)}${opts.visit ? insightsPath(slugs.orgSlug, { tab: 'reviews', review: opts.reviewId }) : reviewEditorPath(slugs.orgSlug, opts.reviewId, opts.locationId)}`
 }
 
@@ -554,11 +551,9 @@ async function sendPushThreadNotification(
   throw new RecordedDeliveryFailure(`Push delivery failed: ${result.error}`)
 }
 
-/** The org's in-app notifications, where a push with no link of its own opens. */
+/** A page inside the organization's dashboard. */
 async function dashboardPathUrl(env: NotificationEnv, db: DbClient, organizationId: string, path: string): Promise<string> {
-  const slugs = await resolveDashboardSlugs(env, db, { organizationId })
-  if (!slugs) throw new Error(`Organization ${organizationId} has no dashboard to link a push to`)
-  return `${dashboardOrigin(env, slugs)}${path}`
+  return `${dashboardOrigin(env, await resolveDashboardSlugs(env, db, { organizationId }))}${path}`
 }
 
 type MemberNotificationTarget =
@@ -578,7 +573,7 @@ function memberNotificationSends(
     pushTemplate: string
     whatsappTemplate: WhatsAppTemplate | null
     payload: Record<string, string>
-    message: NotificationMessage
+    message: MemberAlertMessage
     target: MemberNotificationTarget
     eventKey?: string
   },
@@ -617,7 +612,7 @@ function memberNotificationSends(
     delivery: threadDelivery(input.context, 'owner_alert', 'push', input.pushTemplate, device.token, input.eventKey),
     alert: {
       title: input.message.title, body: input.message.preheader,
-      url: async () => input.message.primaryAction?.url ?? await dashboardPathUrl(env, db, input.organizationId, '/notifications'),
+      url: async () => input.message.primaryAction.url,
       threadId: input.target.kind === 'guest' || input.target.kind === 'team' ? input.target.threadId : null,
       data: { organizationId: input.organizationId, userId: recipient.userId, ...input.target },
     },
@@ -750,7 +745,7 @@ export async function notifyOwner(
      * link — and the WhatsApp vars are selected from the same facts, so the
      * two channels cannot describe the event differently.
      */
-    message: NotificationMessage
+    message: MemberAlertMessage
     /** The approved template the same facts are mapped onto. */
     whatsappTemplate?: WhatsAppTemplate
     submissionType?: 'contact' | 'reservation' | 'booking' | 'invitation' | null
@@ -773,10 +768,11 @@ export async function notifyOwner(
      * by the same message builder from the facts they may read, and the stay it
      * opens for them. Without one, every recipient reads `message`.
      */
-    memberAlert?: { message: NotificationMessage; stayId: string }
+    memberAlert?: { message: MemberAlertMessage; stayId: string }
+    /** The stay an event without a conversation is about, which every recipient's push opens. */
+    stayId?: string
   }
 ) {
-  if (opts.memberAlert && opts.whatsappTemplate) throw new Error('A member projection of an alert has no WhatsApp template')
   const threadContext = opts.notificationSource
     ? { guestThreadId: opts.notificationSource.threadId, sourceEntryId: opts.notificationSource.entryId }
     : opts.submissionType && opts.submissionType !== 'invitation' && opts.submissionId
@@ -825,7 +821,8 @@ export async function notifyOwner(
       eventKey: opts.deliveryEventKey,
       target: projected ? { kind: 'stay', stayId: opts.memberAlert!.stayId }
         : deliveryContext.guestThreadId ? { kind: 'guest', threadId: deliveryContext.guestThreadId }
-          : { kind: 'notification', notificationId },
+          : opts.stayId ? { kind: 'stay', stayId: opts.stayId }
+            : { kind: 'notification', notificationId },
     })
   }))
   const memberEmails = new Set(recipients.map(recipient => recipient.email?.toLowerCase()))
@@ -854,7 +851,7 @@ export async function notifyFinancialNotification(
   input: {
     organizationId: string | null
     eventKey: string
-    ownerMessage?: NotificationMessage
+    ownerMessage?: MemberAlertMessage
     guest?: { userId: string | null; email: string | null; message: NotificationMessage }
     sourceEntryId?: string | null
     threadId?: string | null
@@ -871,7 +868,7 @@ export async function notifyFinancialNotification(
       template: input.eventKey, idempotencyKey: `${input.eventKey}:owner`,
       title: input.ownerMessage.title,
       message: input.ownerMessage.facts.map(fact => `${fact.label}: ${fact.value}`).join('\n'),
-      deepLink: input.deepLink ?? input.ownerMessage.primaryAction?.url ?? null,
+      deepLink: input.deepLink ?? input.ownerMessage.primaryAction.url,
     })
   }
   const tasks: Array<Promise<unknown>> = []
@@ -883,7 +880,7 @@ export async function notifyFinancialNotification(
       organizationName: input.ownerMessage.organizationName,
       template: input.eventKey,
       title: input.ownerMessage.title,
-      payload: { deep_link: input.deepLink ?? input.ownerMessage.primaryAction?.url ?? '' },
+      payload: { deep_link: input.deepLink ?? input.ownerMessage.primaryAction.url },
       message: input.ownerMessage,
       notificationSource: input.sourceEntryId && input.threadId ? { entryId: input.sourceEntryId, threadId: input.threadId } : undefined,
       idempotencyKey: `${input.eventKey}:owner`,
@@ -977,6 +974,7 @@ export async function notifyReservationCreated(
     date: prettyDate, time: prettyTime, partySize: formattedGuests,
     locationName: opts.locationName ?? null, organizationName: restaurant,
     notes: opts.requests ?? null, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
+    paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, 'en-US') : null,
   })
   const guest = await guestPresentation(db, opts)
   const guestMessage = guestReservationReceivedMessage({
@@ -1317,6 +1315,7 @@ export async function notifyBookingCreated(
     locationName: null, organizationName: studio, productTitle: opts.productTitle,
     presentation,
     notes: opts.notes ?? null, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
+    paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, 'en-US') : null,
   })
   const guest = await guestPresentation(db, opts)
   const copy = getVerticalCopy(opts.vertical, guest.locale)
@@ -1386,6 +1385,97 @@ async function stayTurnoverAudience(env: NotificationEnv, db: DbClient, organiza
   }
 }
 
+/** Who is staying, as the host reads it: "2 adults, 1 child". */
+export function stayParty(stay: { adults: number; children: number; infants: number }): string {
+  return [`${stay.adults} adult${stay.adults === 1 ? '' : 's'}`, ...(stay.children ? [`${stay.children} child${stay.children === 1 ? '' : 'ren'}`] : []), ...(stay.infants ? [`${stay.infants} infant${stay.infants === 1 ? '' : 's'}`] : [])].join(', ')
+}
+
+const stayNights = (stay: { check_in_date: string; check_out_date: string }) =>
+  Math.round((Date.parse(`${stay.check_out_date}T00:00:00Z`) - Date.parse(`${stay.check_in_date}T00:00:00Z`)) / 86_400_000)
+
+/**
+ * A stay its channel sent as it happened: a new booking, a change, a
+ * cancellation, or a booking on nights another stay holds. The reservations a
+ * home's import loads arrive through the same path and are not told; the
+ * caller knows which they are. Each revision is told once, keyed by its own
+ * identity, from the terms it recorded before and after itself — never from
+ * the stay as a later revision has since left it — and only for what it
+ * changed: a revision that restates the stay, as a re-import does, sends nothing.
+ */
+export async function notifyChannelStay(env: NotificationEnv, db: DbClient, organizationId: string, input: { stayId: string; revisionId: string; previous: ChannelStayTerms | null; terms: ChannelStayTerms }) {
+  const { readCheckoutStay } = await import('~/server/domain/stays')
+  const stay = await readCheckoutStay(db, organizationId, input.stayId)
+  const { previous, terms } = input
+  const cancelled = terms.status === 'cancelled' && previous !== null && previous.status !== 'cancelled'
+  const booked = terms.status !== 'cancelled' && (previous === null || previous.status === 'cancelled')
+  const overlap = terms.overbooked && !previous?.overbooked
+  const changed = !booked && !cancelled && previous !== null && terms.status !== 'cancelled'
+    && (previous.check_in_date !== terms.check_in_date || previous.check_out_date !== terms.check_out_date || previous.product_id !== terms.product_id
+      || previous.adults !== terms.adults || previous.children !== terms.children || previous.infants !== terms.infants || previous.total_minor !== terms.total_minor)
+  if (!booked && !cancelled && !changed && !overlap) return
+  if (!isCurrencyCode(stay.currency)) throw new Error('The channel stay has an unsupported currency')
+  const channel = STAY_CHANNEL_LABELS[stay.channel]
+  // A channel may send a reservation without a guest name; its reservation code still names it.
+  const named = [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ').trim()
+  const guestName = named || `${channel} reservation ${stay.channel_booking_id ?? stay.external_booking_id}`
+  const guest: { name: string } | { label: string } = named ? { name: named } : { label: guestName }
+  const homes = await queryAll<{ product_id: string; name: string; location_id: string; check_in_time: string; check_out_time: string }>(db, `SELECT p.id AS product_id, p.name, c.location_id, c.check_in_time, c.check_out_time
+    FROM products p JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id WHERE p.organization_id = ? AND p.id IN (?, ?)`,
+  [organizationId, terms.product_id, previous?.product_id ?? terms.product_id])
+  const homeOf = (productId: string) => {
+    const found = homes.find(home => home.product_id === productId)
+    if (!found) throw new HTTPError({ statusCode: 500, message: 'The channel stay names a home that no longer exists', data: { code: 'CHANNEL_STAY_HOME_MISSING', field: 'product_id', product_id: productId, stay_id: stay.id } })
+    return found
+  }
+  const home = homeOf(terms.product_id)
+  const organization = await queryFirst<{ name: string | null }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId])
+  const studio = organizationName({ organizationId, organizationName: organization?.name })
+  const [hero, audience] = await Promise.all([
+    messageHero(db, organizationId, { type: 'product', id: home.product_id }),
+    stayTurnoverAudience(env, db, organizationId, { id: stay.id, product_id: home.product_id, arrival_time: stay.arrival_time }),
+  ])
+  const memberName = memberGuestName(guest)
+  const day = (date: string) => formatCalendarDate(date, 'en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+  const money = (minor: number) => formatMinorAmount(minor, stay.currency as CurrencyCode, 'en-US')
+  const eventKey = `channel-stay:${organizationId}:${stay.id}:${input.revisionId}`
+  const base = {
+    guestName, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name, channel,
+    checkIn: `${day(terms.check_in_date)} · ${formatTime(home.check_in_time, 'en-US')}`, checkOut: `${day(terms.check_out_date)} · ${formatTime(home.check_out_time, 'en-US')}`,
+    arrival: audience.arrival, nights: String(stayNights(terms)), guests: stayParty(terms),
+    organizationName: studio, heroImageUrl: hero?.imageUrl ?? null, replyUrl: audience.stayUrl,
+  }
+  const send = (template: string, message: MemberAlertMessage, memberMessage: MemberAlertMessage, whatsappTemplate?: WhatsAppTemplate) => notifyOwner(env, db, {
+    organizationId, organizationName: studio, locationId: home.location_id, template, title: message.title,
+    payload: { stay_id: stay.id, revision_id: input.revisionId, deep_link: audience.stayUrl },
+    message, idempotencyKey: `notification:${eventKey}`, deliveryEventKey: eventKey, stayId: stay.id,
+    memberIds: audience.memberIds, memberAlert: { message: memberMessage, stayId: stay.id }, whatsappTemplate,
+  })
+  if (cancelled) {
+    const cancellation = { ...base, refund: null }
+    return send('channel_stay.cancelled', stayCancelledMessage(cancellation), stayCancelledMessage(stayTurnoverAlert(cancellation, audience.stayUrl, memberName)))
+  }
+  if (booked || !changed) {
+    const booking = { ...base, total: money(terms.total_minor), paid: null, balance: null, overlap, notes: null }
+    return send(overlap ? 'channel_stay.overlap' : 'channel_stay.booked', stayBookedMessage(booking), stayBookedMessage(stayTurnoverAlert(booking, audience.stayUrl, memberName)))
+  }
+  const before = previous!
+  const previousHome = homeOf(before.product_id)
+  const side = (value: ChannelStayTerms, homeName: string) => ({ date: `${day(value.check_in_date)} – ${day(value.check_out_date)}`, time: null, nights: stayNights(value), partySize: stayParty(value), location: homeName, total: money(value.total_minor), assignee: null })
+  const counts = (value: ChannelStayTerms) => ({ checkIn: value.check_in_date, checkOut: value.check_out_date, guests: value.adults + value.children, infants: value.infants, totalMinor: value.total_minor })
+  const change: BookingChangeEventInput = {
+    recordKind: 'stay', channel, guestName, requestedBy: { kind: 'guest' }, status: 'changed', locationLabel: 'Home',
+    counterpartyLabel: 'Guest', partyLabel: 'Guests',
+    current: side(before, previousHome.name), requested: side(terms, home.name),
+    differences: [
+      ...(overlap ? [{ text: 'The new nights overlap another stay: resolve the double booking' }] : []),
+      ...(previousHome.product_id !== home.product_id ? [{ text: `Moves to ${home.name}` }] : []),
+      ...stayChangeDifferences(counts(before), counts(terms), money),
+    ],
+    replyUrl: audience.stayUrl, organizationName: studio,
+  }
+  return send('stay.change_changed', bookingChangeMessage(change), bookingChangeMessage(bookingChangeWithoutMoney(change, audience.stayUrl, memberName)), 'booking_change_update')
+}
+
 export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organizationId: string, stayId: string) {
   // Loaded when used: the stays domain reaches notifications through the guest inbox.
   const { readCheckoutStay } = await import('~/server/domain/stays')
@@ -1411,13 +1501,16 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
     resolveLocationContact(db, organizationId, home.location_id),
     stayTurnoverAudience(env, db, organizationId, stay),
   ])
-  const nights = Math.round((Date.parse(`${stay.check_out_date}T00:00:00Z`) - Date.parse(`${stay.check_in_date}T00:00:00Z`)) / 86_400_000)
+  const nights = stayNights(stay)
   const when = (date: string, time: string, locale: string) => `${formatCalendarDate(date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · ${formatTime(time, locale)}`
-  const party = [`${stay.adults} adult${stay.adults === 1 ? '' : 's'}`, ...(stay.children ? [`${stay.children} child${stay.children === 1 ? '' : 'ren'}`] : []), ...(stay.infants ? [`${stay.infants} infant${stay.infants === 1 ? '' : 's'}`] : [])].join(', ')
+  const party = stayParty(stay)
+  if (paid.currency !== stay.currency) throw new Error('A stay booked on the site was paid in a different currency than it was priced')
   const ownerInput = {
-    guestName: stay.guest_name, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name,
+    guestName: stay.guest_name, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name, channel: null,
     checkIn: when(stay.check_in_date, home.check_in_time, 'en-US'), checkOut: when(stay.check_out_date, home.check_out_time, 'en-US'), arrival: audience.arrival,
-    nights: String(nights), guests: party, total: formatMinorAmount(stay.total_minor, stay.currency, 'en-US'), notes: stay.notes,
+    nights: String(nights), guests: party, notes: stay.notes, overlap: false,
+    total: formatMinorAmount(stay.total_minor, stay.currency, 'en-US'), paid: formatMinorAmount(paid.amount, paid.currency, 'en-US'),
+    balance: stay.total_minor > paid.amount ? formatMinorAmount(stay.total_minor - paid.amount, stay.currency, 'en-US') : null,
     organizationName: studio, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
   }
   const ownerMessage = stayBookedMessage(ownerInput)
@@ -1440,7 +1533,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
     notifyOwner(env, db, {
       organizationId, organizationName: studio, locationId: home.location_id, template: 'new_stay', title: ownerMessage.title, payload, message: ownerMessage,
       notificationSource: { threadId: threadContext.guestThreadId, entryId: threadContext.sourceEntryId },
-      memberIds: audience.memberIds, memberAlert: { message: stayBookedMessage(stayTurnoverAlert(ownerInput, audience.stayUrl)), stayId: stay.id },
+      memberIds: audience.memberIds, memberAlert: { message: stayBookedMessage(stayTurnoverAlert(ownerInput, audience.stayUrl, memberGuestName({ name: stay.guest_name }))), stayId: stay.id },
     }),
     sendEmailNotification(env, db, {
       organizationId, organizationName: studio, locationId: home.location_id, to: stay.guest_email, replyTo,
@@ -1479,7 +1572,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
       guestPresentation(db, { organizationId, organizationName: studio, productId: home.product_id, productTitle: home.name, locationId: home.location_id }),
       resolveLocationContact(db, organizationId, home.location_id),
     ])
-    const nights = Math.round((Date.parse(`${stay.check_out_date}T00:00:00Z`) - Date.parse(`${stay.check_in_date}T00:00:00Z`)) / 86_400_000)
+    const nights = stayNights(stay)
     const day = (date: string, locale: string) => formatCalendarDate(date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
     const guestMessage = guestBookingCancelledMessage({
       manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: stay.request_id }),
@@ -1518,12 +1611,12 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
     email: z.object({ to: z.string().min(1), fromName: z.string().min(1), replyTo: z.string().nullable(), html: z.string().min(1), text: z.string().min(1) }),
     owner: z.object({
       guestName: z.string(), guestEmail: z.string(), guestPhone: z.string().nullable(), homeName: z.string(), checkIn: z.string(), checkOut: z.string(),
-      nights: z.string(), guests: z.string(), refund: z.string(), organizationName: z.string(), heroImageUrl: z.string().nullable(), replyUrl: z.string().nullable(),
+      nights: z.string(), guests: z.string(), refund: z.string(), organizationName: z.string(), heroImageUrl: z.string().nullable(), replyUrl: z.string().min(1),
     }),
   }).parse(stored)
   if (recorded.refund_minor !== refundMinor || entry.body !== recorded.email.text) throw new Error('Stay cancellation notification differs from its recorded refund or email')
   const audience = await stayTurnoverAudience(env, db, organizationId, stay)
-  const ownerInput = { ...recorded.owner, arrival: audience.arrival }
+  const ownerInput = { ...recorded.owner, channel: null, arrival: audience.arrival }
   const ownerMessage = stayCancelledMessage(ownerInput)
   const threadContext = { guestThreadId: stay.request_id, sourceEntryId: entry.id }
   const payload = { stay_id: stay.id, organization_name: recorded.email.fromName, deep_link: recorded.owner.replyUrl ?? '' }
@@ -1532,7 +1625,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
       organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, template: 'stay_cancelled', payload,
       notificationSource: { threadId: threadContext.guestThreadId, entryId: threadContext.sourceEntryId },
       title: ownerMessage.title, message: ownerMessage,
-      memberIds: audience.memberIds, memberAlert: { message: stayCancelledMessage(stayTurnoverAlert(ownerInput, audience.stayUrl)), stayId: stay.id },
+      memberIds: audience.memberIds, memberAlert: { message: stayCancelledMessage(stayTurnoverAlert(ownerInput, audience.stayUrl, memberGuestName({ name: recorded.owner.guestName }))), stayId: stay.id },
     })] : []),
     sendEmailNotification(env, db, {
       organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, to: recorded.email.to, replyTo: recorded.email.replyTo,
@@ -1649,81 +1742,49 @@ export async function notifyBookingChangeOwner(
     submissionType: 'reservation' | 'booking' | 'stay'
     submissionId: string
     sourceEntryId: string
-    guestName: string
-    status: 'requested' | 'accepted' | 'declined'
-    /** A guest asking on their channel (an Airbnb alteration) waits on the owners, not the guest. */
-    requestedBy?: 'guest'
-    /** The stay's assigned member, for a stay; a booking's come from its assignment. */
-    memberIds?: string[]
-    noun: string
     locationId: string | null
-    assignment?: BookingChangeAssignment
-    /**
-     * The occurrence as the guest sees it, already rendered in the
-     * location's own timezone. A split date/time pair here would be a second
-     * place that has to agree with the session's zone, and it would not.
-     */
-    whenLabel: string
-    /**
-     * The same occurrence split for the approved WhatsApp template's date and
-     * time slots, derived beside whenLabel from one formatter. Null on
-     * proposals recorded before those slots were filled correctly.
-     */
-    whenDate: string | null
-    whenTime: string | null
-    guests: number
-    locationTitle: string
     vertical?: string | null
+    /** A booking's assignment before and after, which decides the members told; a stay's members are its home's. */
+    assignment?: BookingChangeAssignment
+    /** The stay changed, for its home's responsible members, who read the change without money and open the stay. */
+    stay?: { id: string; product_id: string; arrival_time: string | null }
+    change: Omit<BookingChangeEventInput, 'replyUrl' | 'organizationName' | 'counterpartyLabel' | 'partyLabel'>
   },
 ) {
-  const { submissionType, requestedBy, memberIds, ...context } = opts
-  const noun = opts.noun
-  const message = requestedBy === 'guest'
-    ? `The guest asked on Airbnb to change their ${noun}. Accept or decline it in the conversation; the ${noun} is unchanged until you accept.`
-    : opts.status === 'requested'
-    ? 'The guest has been asked to accept or decline. The original details remain unchanged until they accept.'
-    : opts.status === 'accepted'
-      ? 'The guest accepted. The updated details are now confirmed.'
-      : 'The guest declined. The original details remain unchanged.'
+  const { submissionType, change } = opts
+  // A stay's members read its changes without money; the projection needs the stay.
+  if (submissionType === 'stay' && !opts.stay) throw new HTTPError({ statusCode: 500, message: 'A stay change alert needs its stay to tell the members who look after the home', data: { code: 'STAY_REQUIRED', field: 'stay', thread_id: opts.threadId } })
   const replyUrl = await buildOwnerThreadInboxUrl(env, db, opts)
-  const presentation = opts.noun === 'consultation' || opts.vertical === 'service'
+  const presentation = change.recordKind === 'consultation' || opts.vertical === 'service'
     ? resolveBookingPresentation('booking', 'service')
-    : opts.submissionType === 'reservation'
+    : submissionType === 'reservation'
       ? resolveBookingPresentation('reservation', opts.vertical ?? 'restaurant')
       : resolveBookingPresentation('booking', opts.vertical ?? 'experience')
-  const partyLabel = (opts.submissionType === 'stay' || opts.noun === 'stay') ? 'Guests' : presentation.partyLabel
-  const formattedPartySize = presentation.formatCount(opts.guests)
-  const ownerMessage = bookingChangeMessage({
-    recordKind: noun,
-    assignment: opts.assignment,
-    guestName: opts.guestName,
+  const input: BookingChangeEventInput = {
+    ...change, replyUrl, organizationName: organizationName(opts),
     counterpartyLabel: presentation.counterpartyLabel,
-    status: opts.status,
-    location: opts.locationTitle,
-    date: opts.whenDate,
-    time: opts.whenTime,
-    whenLabel: opts.whenLabel,
-    partySize: formattedPartySize,
-    partyLabel,
-    summary: message,
-    replyUrl,
-    organizationName: organizationName(opts),
-  })
+    partyLabel: submissionType === 'stay' ? 'Guests' : presentation.partyLabel,
+  }
+  const ownerMessage = bookingChangeMessage(input)
+  const audience = opts.stay ? await stayTurnoverAudience(env, db, opts.organizationId, opts.stay) : null
   await notifyOwner(env, db, {
-    ...context,
-    ...(submissionType === 'stay' ? {} : { submissionType }),
-    template: `${noun}.change_${opts.status}`,
+    organizationId: opts.organizationId, organizationName: opts.organizationName, locationId: opts.locationId,
+    ...(submissionType === 'stay' ? {} : { submissionType, submissionId: opts.submissionId }),
+    template: `${change.recordKind}.change_${change.status}`,
     title: ownerMessage.title,
     payload: {
       request_id: opts.threadId,
       submission_type: submissionType,
       submission_id: opts.submissionId,
-      status: opts.status,
-      deep_link: replyUrl ?? '',
+      status: change.status,
+      deep_link: replyUrl,
     },
     notificationSource: { threadId: opts.threadId, entryId: opts.sourceEntryId },
     message: ownerMessage,
-    memberIds: memberIds ?? (opts.assignment ? [...new Set([opts.assignment.beforeMemberId, ...(opts.status === 'accepted' ? [opts.assignment.afterMemberId] : [])].filter((id): id is string => id !== null))] : submissionType === 'booking' ? [] : undefined),
+    memberIds: audience ? audience.memberIds
+      : opts.assignment ? [...new Set([opts.assignment.beforeMemberId, ...(change.status === 'accepted' ? [opts.assignment.afterMemberId] : [])].filter((id): id is string => id !== null))]
+        : submissionType === 'booking' ? [] : undefined,
+    memberAlert: audience && opts.stay ? { message: bookingChangeMessage(bookingChangeWithoutMoney(input, audience.stayUrl, memberGuestName({ name: change.guestName }))), stayId: opts.stay.id } : undefined,
     whatsappTemplate: 'booking_change_update',
   })
 }
@@ -1766,9 +1827,15 @@ export async function notifyGuestThreadReply(
   opts: GuestThreadReplyNotificationInput,
 ) {
   // A blocked guest's messages are still recorded, but nobody is alerted to them.
-  const thread = await queryFirst<{ blocked_at: string | null }>(db, 'SELECT blocked_at FROM requests WHERE organization_id = ? AND id = ?', [opts.organizationId, opts.threadId])
+  const thread = await getGuestRequest(db, opts.threadId, opts.organizationId)
   if (!thread) throw new Error(`Guest thread ${opts.threadId} does not exist in organization ${opts.organizationId}`)
   if (thread.blocked_at !== null) return
+  // What the conversation is about: the home, class or booking it belongs to, or its location.
+  const [summary, organization] = await Promise.all([
+    requestSummary(db, thread),
+    queryFirst<{ name: string | null }>(db, 'SELECT name FROM organization WHERE id = ?', [opts.organizationId]),
+  ])
+  const business = organizationName({ organizationId: opts.organizationId, organizationName: organization?.name })
   const threadContext = { guestThreadId: opts.threadId, sourceEntryId: opts.sourceEntryId }
   const replyUrl = await buildOwnerThreadInboxUrl(env, db, {
     organizationId: opts.organizationId,
@@ -1790,9 +1857,10 @@ export async function notifyGuestThreadReply(
     ...messageReceived({
       senderName: opts.participantLabel,
       senderEmail: opts.guestEmail ?? null,
-      conversationLabel: { email: 'Email reply', whatsapp: 'WhatsApp reply', web: 'Website reply' }[opts.inboundChannel],
+      conversationLabel: { email: 'Email reply', whatsapp: 'WhatsApp reply', web: 'Website reply', airbnb: 'Airbnb message' }[opts.inboundChannel],
+      about: summary.productTitle ?? summary.locationTitle,
       messagePreview: opts.messagePreview,
-      organizationName: opts.organizationName ?? null,
+      organizationName: business,
       replyUrl,
     }),
     organizationLogoUrl: await organizationLogo(db, opts.organizationId),
@@ -1824,7 +1892,7 @@ export async function notifyGuestThreadReply(
   })
 
   const results = await Promise.allSettled(recipients.flatMap(recipient => memberNotificationSends(env, db, recipient, {
-    ...opts, context: threadContext,
+    ...opts, organizationName: business, context: threadContext,
     template: 'guest_thread_reply_email', pushTemplate: 'guest_thread_reply_push',
     whatsappTemplate: 'guest_thread_reply_whatsapp', payload, message: ownerMessage,
     target: { kind: 'guest', threadId: opts.threadId },
@@ -1854,7 +1922,7 @@ export async function notifyTeamMessage(env: NotificationEnv, db: DbClient, inpu
     'SELECT name FROM organization WHERE id = ?', [input.organizationId])
   if (!organization) throw new HTTPError({ statusCode: 500, message: 'The team conversation organization is missing', data: { code: 'TEAM_ORGANIZATION_MISSING', field: 'organization_id' } })
   const replyUrl = await dashboardPathUrl(env, db, input.organizationId, `/messages/team/${encodeURIComponent(input.threadId)}?view=team`)
-  const message = { ...messageReceived({ senderName: input.senderName, senderEmail: null, conversationLabel: 'Team', messagePreview: input.messagePreview, organizationName: organization.name, replyUrl }),
+  const message = { ...messageReceived({ senderName: input.senderName, senderEmail: null, conversationLabel: 'Team', about: null, messagePreview: input.messagePreview, organizationName: organization.name, replyUrl }),
     organizationLogoUrl: await organizationLogo(db, input.organizationId) }
   const recipients = (await resolveOwnerRecipients(env, db, {
     organizationId: input.organizationId, category: message.category, emailPurpose: message.emailPurpose,
@@ -1905,6 +1973,7 @@ export async function notifyOrganizationInvited(
     inviterName: opts.inviterName,
     role: opts.role,
     inviteUrl,
+    expires: formatTimestamp(opts.expiresAt, 'en-US', 'UTC', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }),
   }), { platformDomain })
 
   await sendEmailNotification(env, db, {

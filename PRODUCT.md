@@ -107,6 +107,34 @@ Workspace members can receive owner notifications as push notifications on the
 KrabiClaw iPhone app, per notification category, alongside email and WhatsApp.
 A push that Apple refuses is recorded as failed.
 
+## Notifications
+
+Every alert to a member names what happened and opens the exact thing it is
+about: the conversation, the stay, the review, the payment or the domain
+settings. Email, WhatsApp and push carry the same facts and the same link.
+
+A change to a booking shows what is booked now beside what the change asks
+for — dates, nights, guests, location, assignee and the booking total where
+those exist — then what actually differs ("Arrives 1 day earlier · 1 more
+night · Booking total +$46.01"), who asked or answered, and whether anything is
+confirmed yet. A change an Airbnb guest asks for opens its conversation with
+"Review requested changes"; nothing changes until the host accepts. A guest
+who withdraws on Airbnb, a change Airbnb confirms and a business's proposal
+that the guest accepts or declines are each told once.
+
+Owners hear about Airbnb guest messages, new Airbnb stays, changes,
+cancellations and stays that land on nights another stay holds, as they happen.
+The reservations an import loads (Channex marks them imported) and the
+conversation history it brings in are not announced, and a redelivered webhook
+or a revision that restates a stay sends nothing.
+
+A new booking or stay shows its total and what was paid online, with any balance
+still due; a stay from Airbnb shows the total Airbnb states, which is not the
+payout. Members who look after a home receive its alerts without money or guest
+contact details, and open the stay rather than the conversation. A domain alert
+says whether the site is live at that domain and lists the DNS records still to
+add. An invitation states when it expires.
+
 ## Linked Vrbo calendars
 
 A host can link a home's Vrbo iCal calendar to import occupied dates, and copy

@@ -20,6 +20,7 @@ import { isBookingComplete } from '~/shared/bookings'
 import { creationRequestHash } from '~/server/utils/organization-events'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { guestPresentation } from '~/server/utils/notifications'
+import type { CloudflareEnv } from '~/server/utils/auth'
 import { platformLocale } from '~/shared/platform-locales'
 import { notifyBuyerThread } from '~/server/utils/notification-center'
 import { formatTimestamp } from '~/utils/timezone'
@@ -73,7 +74,7 @@ export type ExecuteOperationInput = {
   stayManager?: boolean
   /** The photos a reply carries, in the order they were chosen. */
   photos?: MessagePhotoInput
-  env: ReplyEmailEnv & UploadResolvedMediaInput['env'] & ChannexEnv & ContentReportEnv
+  env: ReplyEmailEnv & UploadResolvedMediaInput['env'] & ChannexEnv & ContentReportEnv & CloudflareEnv
   idempotencyKey?: string
   actorUserId: string
   financialAuthorizationId?: string
