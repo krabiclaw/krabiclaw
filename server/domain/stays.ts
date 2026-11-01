@@ -2024,7 +2024,8 @@ export interface ChannelBooking {
  * already stored changes nothing, so repeated and out-of-order deliveries are
  * harmless. Returns the stay as stored.
  */
-export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicationEnv, organizationId: string, productId: string, booking: ChannelBooking): Promise<Stay & { applied: boolean }> {
+/** The stay as the revision left it, whether this revision changed it, and the stay as it was before. */
+export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicationEnv, organizationId: string, productId: string, booking: ChannelBooking): Promise<Stay & { applied: boolean; previous: Stay | null }> {
   date(booking.check_in_date, 'check_in_date')
   date(booking.check_out_date, 'check_out_date')
   if (booking.check_out_date <= booking.check_in_date) throw new Error(`Channel booking ${booking.external_booking_id} ends before it starts`)
@@ -2088,7 +2089,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
     await planStayMessages(db, organizationId, existing.id)
     const stored = await storedStay(db, organizationId, existing.id)
     await publish(stored, existing.revision_id)
-    return { ...await storedStay(db, organizationId, existing.id), applied: false }
+    return { ...await storedStay(db, organizationId, existing.id), applied: false, previous: null }
   }
   const id = existing?.id ?? crypto.randomUUID()
   const previous = existing ? await storedStay(db, organizationId, existing.id) : null
@@ -2165,7 +2166,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   }
   await planStayMessages(db, organizationId, stored.id)
   await publish(stored, current.revision_id)
-  return { ...await storedStay(db, organizationId, stored.id), applied: changed === 1 }
+  return { ...await storedStay(db, organizationId, stored.id), applied: changed === 1, previous }
 }
 
 async function publishStayChange(env: GuestInboxPublicationEnv, db: DbClient, organizationId: string, stay: Stay, nightsChanged: boolean): Promise<void> {

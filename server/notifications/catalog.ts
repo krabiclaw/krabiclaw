@@ -9,6 +9,8 @@ import {
   calendarSyncMessage,
   bookingChangeMessage,
   bookingCreatedMessage,
+  occurrenceChangeDifferences,
+  stayChangeDifferences,
   contactReceivedMessage,
   stayBookedMessage,
   stayCancelledMessage,
@@ -74,6 +76,7 @@ const reservation = {
   notes: 'Window seat, celebrating an anniversary.',
   heroImageUrl: null,
   replyUrl: inbox,
+  paid: '$20.00',
 }
 
 // A real tenant asset, so the preview shows what a hero actually looks like
@@ -90,11 +93,15 @@ const stay = {
   guestName: 'Mina', guestEmail: 'mina@example.com', guestPhone: '+1 415 555 0134', homeName: 'Cedar Loft',
   checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', arrival: '6:00 PM', nights: '3', guests: '2 adults',
   organizationName: 'Pinecone Stays', heroImageUrl: null, replyUrl: 'https://demo.krabiclaw.com/dashboard/pinecone-stays/messages/preview-1',
+  channel: null,
 }
-const stayBooked = { ...stay, total: '$645.00', notes: 'We will bring our dog if that is fine.' }
+const stayBooked = { ...stay, total: '$645.00', paid: '$645.00', balance: null, overlap: false, notes: 'We will bring our dog if that is fine.' }
 const stayCancelled = { ...stay, refund: '$322.50' }
 // A member looking after the home opens the stay itself.
 const stayPreviewUrl = 'https://demo.krabiclaw.com/dashboard/pinecone-stays/bookings/stay/preview-1'
+// A stay Airbnb sent opens the stay: it has a conversation only once the guest writes.
+const airbnbStay = { ...stay, guestName: 'Jamie Rivera', guestEmail: null, guestPhone: null, channel: 'Airbnb', replyUrl: stayPreviewUrl }
+const airbnbBooked = { ...airbnbStay, total: '$1,284.00', paid: null, balance: null, overlap: false, notes: null }
 
 const booking = {
   ...reservation,
@@ -161,7 +168,7 @@ const guestPayments: GuestPaymentNotificationEvent[] = [
 ]
 
 export const NOTIFICATION_CATALOG: CatalogEntry[] = [
-  { id: 'team-message', audience: 'owner', title: 'Team — new message', whatsappTemplate: 'guest_thread_reply_whatsapp', message: ownerAlert(messageReceived({ senderName: 'Alex Carter', senderEmail: null, conversationLabel: 'Team', messagePreview: 'The home is ready for check-in.', organizationName: studio, replyUrl: inbox })) },
+  { id: 'team-message', audience: 'owner', title: 'Team — new message', whatsappTemplate: 'guest_thread_reply_whatsapp', message: ownerAlert(messageReceived({ senderName: 'Alex Carter', senderEmail: null, conversationLabel: 'Team', about: null, messagePreview: 'The home is ready for check-in.', organizationName: studio, replyUrl: inbox })) },
   // Owner alerts — both channels.
   { id: 'reservation-created', audience: 'owner', title: 'Owner — new reservation', whatsappTemplate: 'new_reservation', message: ownerAlert(reservationCreatedMessage(reservation)) },
   { id: 'reservation-cancelled', audience: 'owner', title: 'Owner — reservation cancelled', whatsappTemplate: 'reservation_cancelled', message: ownerAlert(reservationCancelledMessage({ ...reservation, wasConfirmed: true })) },
@@ -180,6 +187,38 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     audience: 'owner',
     title: 'Member looking after the home — new stay booked on the site',
     message: ownerAlert(stayBookedMessage(stayTurnoverAlert(stayBooked, stayPreviewUrl))),
+  },
+  {
+    id: 'channel-stay-booked',
+    audience: 'owner',
+    title: 'Owner — new Airbnb stay',
+    message: ownerAlert(stayBookedMessage(airbnbBooked)),
+  },
+  {
+    id: 'channel-stay-overlap',
+    audience: 'owner',
+    title: 'Owner — Airbnb stay landed on nights another stay holds',
+    message: ownerAlert(stayBookedMessage({ ...airbnbBooked, overlap: true })),
+  },
+  {
+    id: 'channel-stay-cancelled',
+    audience: 'owner',
+    title: 'Owner — Airbnb stay cancelled',
+    message: ownerAlert(stayCancelledMessage({ ...airbnbStay, refund: null })),
+  },
+  {
+    id: 'channel-stay-changed',
+    audience: 'owner',
+    title: 'Owner — Airbnb stay changed',
+    whatsappTemplate: 'booking_change_update',
+    message: ownerAlert(bookingChangeMessage({
+      recordKind: 'stay', channel: 'Airbnb', guestName: 'Jamie Rivera', requestedBy: { kind: 'guest' }, status: 'changed', locationLabel: 'Home',
+      current: { date: 'Fri, Nov 6, 2026 – Mon, Nov 9, 2026', time: null, nights: 3, partySize: '2 adults', location: 'Cedar Loft', total: '$1,284.00', assignee: null },
+      requested: { date: 'Fri, Nov 6, 2026 – Tue, Nov 10, 2026', time: null, nights: 4, partySize: '2 adults', location: 'Cedar Loft', total: '$1,712.00', assignee: null },
+      differences: stayChangeDifferences({ checkIn: '2026-11-06', checkOut: '2026-11-09', guests: 2, totalMinor: 128400 }, { checkIn: '2026-11-06', checkOut: '2026-11-10', guests: 2, totalMinor: 171200 }, minor => `$${(minor / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}`),
+      counterpartyLabel: 'Guest', partyLabel: 'Guests',
+      replyUrl: stayPreviewUrl, organizationName: 'Pinecone Stays',
+    })),
   },
   {
     id: 'stay-cancelled',
@@ -210,7 +249,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     title: 'Owner — guest replied',
     whatsappTemplate: 'guest_thread_reply_whatsapp',
     message: ownerAlert(messageReceived({
-      senderName: 'Jordan Lee', senderEmail: 'jordan@example.com', conversationLabel: 'Email reply',
+      senderName: 'Jordan Lee', senderEmail: 'jordan@example.com', conversationLabel: 'Email reply', about: 'Main Dining Room',
       messagePreview: 'Thanks! One more thing — is the terrace covered if it rains?',
       organizationName: restaurant, replyUrl: inbox,
     })),
@@ -221,9 +260,20 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     title: 'Owner — guest replied in Messages',
     whatsappTemplate: 'guest_thread_reply_whatsapp',
     message: ownerAlert(messageReceived({
-      senderName: 'Jordan Lee', senderEmail: 'jordan@example.com', conversationLabel: 'Website reply',
+      senderName: 'Jordan Lee', senderEmail: 'jordan@example.com', conversationLabel: 'Website reply', about: 'Main Dining Room',
       messagePreview: 'Thanks! See you tomorrow.',
       organizationName: restaurant, replyUrl: inbox,
+    })),
+  },
+  {
+    id: 'airbnb-message',
+    audience: 'owner',
+    title: 'Owner — Airbnb guest sent a message',
+    whatsappTemplate: 'guest_thread_reply_whatsapp',
+    message: ownerAlert(messageReceived({
+      senderName: 'Jamie Rivera', senderEmail: null, conversationLabel: 'Airbnb message', about: 'Cedar Loft',
+      messagePreview: 'Hi! Is early check-in possible on the 14th? Our flight lands at 9am.',
+      organizationName: 'Pinecone Stays', replyUrl: stay.replyUrl,
     })),
   },
   {
@@ -238,17 +288,33 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     })),
   },
   {
-    id: 'booking-change',
+    id: 'stay-change-request',
     audience: 'owner',
-    title: 'Owner — booking change decided',
+    title: 'Owner — Airbnb guest asked to change their stay',
     whatsappTemplate: 'booking_change_update',
     message: ownerAlert(bookingChangeMessage({
-      recordKind: 'booking', guestName: 'Mina Park', status: 'accepted', location: 'Main Studio',
-      date: 'Jul 21, 2026', time: '2:00 PM', whenLabel: 'Tue, Jul 21, 2026 at 2:00 PM',
-      partySize: '2 guests', summary: 'The guest accepted. The updated details are now confirmed.',
-      assignment: { beforeMemberId: 'previous-preview-member', beforeName: 'Priya Shah', afterMemberId: 'next-preview-member', afterName: 'Sam Rivera', label: 'Host' },
-      replyUrl: inbox, organizationName: studio,
+      recordKind: 'stay', channel: 'Airbnb', guestName: 'Jamie Rivera', requestedBy: { kind: 'guest' }, status: 'requested', locationLabel: 'Home',
+      current: { date: 'Nov 15, 2026 – Feb 14, 2027', time: null, nights: 91, partySize: '1 adult', location: 'Cedar Loft', total: '$4,237.63', assignee: null },
+      requested: { date: 'Nov 14, 2026 – Feb 14, 2027', time: null, nights: 92, partySize: '1 adult', location: 'Cedar Loft', total: '$4,283.64', assignee: null },
+      differences: stayChangeDifferences({ checkIn: '2026-11-15', checkOut: '2027-02-14', guests: 1, totalMinor: 423763 }, { checkIn: '2026-11-14', checkOut: '2027-02-14', guests: 1, totalMinor: 428364 }, minor => `$${(minor / 100).toFixed(2)}`),
+      counterpartyLabel: 'Guest', partyLabel: 'Guests',
+      replyUrl: stay.replyUrl, organizationName: 'Pinecone Stays',
     })),
+  },
+  {
+    id: 'booking-change',
+    audience: 'owner',
+    title: 'Owner — guest accepted a booking change',
+    whatsappTemplate: 'booking_change_update',
+    message: ownerAlert(bookingChangeMessage(((current, requested) => ({
+      recordKind: 'booking', offering: 'Pottery Wheel Class', channel: null, guestName: 'Mina Park', requestedBy: { kind: 'business' as const, name: 'Priya Shah' }, status: 'accepted' as const,
+      assigneeLabel: 'Host', current, requested,
+      differences: occurrenceChangeDifferences(current, requested, { party: 'Party size', assignee: 'Host' }),
+      replyUrl: inbox, organizationName: studio,
+    }))(
+      { date: 'Jul 21, 2026', time: '2:00 PM', nights: null, partySize: '2 guests', location: 'Main Studio', total: null, assignee: 'Priya Shah' },
+      { date: 'Jul 22, 2026', time: '2:00 PM', nights: null, partySize: '3 guests', location: 'Main Studio', total: null, assignee: 'Sam Rivera' },
+    ))),
   },
   {
     id: 'domain-update',
@@ -256,8 +322,33 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     title: 'Owner — custom domain updated',
     whatsappTemplate: 'domain_update',
     message: domainUpdateMessage({
-      headline: 'emberslice.com is live', message: 'Your custom domain is verified and serving traffic.',
-      domain: 'emberslice.com', status: 'active',
+      event: 'synced', domain: 'www.emberslice.com', status: 'active', error: null, records: [], apexNote: null,
+      dashboardUrl: 'https://demo.krabiclaw.com/dashboard/ember-slice/website/domains',
+    }),
+  },
+  {
+    id: 'domain-added',
+    audience: 'owner',
+    title: 'Owner — custom domain needs DNS records',
+    whatsappTemplate: 'domain_update',
+    message: domainUpdateMessage({
+      event: 'added', domain: 'www.emberslice.com', status: 'pending', error: null, apexNote: 'Forward emberslice.com to https://www.emberslice.com',
+      records: [
+        { type: 'TXT', name: '_cf-custom-hostname.www.emberslice.com', value: '6f1c2a9e-preview-ownership', purpose: 'ownership' },
+        { type: 'CNAME', name: 'www', value: 'sites.krabiclaw.com', purpose: 'traffic' },
+      ],
+      dashboardUrl: 'https://demo.krabiclaw.com/dashboard/ember-slice/website/domains',
+    }),
+  },
+  {
+    id: 'domain-failed',
+    audience: 'owner',
+    title: 'Owner — custom domain could not be set up',
+    whatsappTemplate: 'domain_update',
+    message: domainUpdateMessage({
+      event: 'synced', domain: 'www.emberslice.com', status: 'failed', apexNote: null,
+      error: 'The CNAME record for www.emberslice.com points to another provider.',
+      records: [{ type: 'CNAME', name: 'www', value: 'sites.krabiclaw.com', purpose: 'traffic' }],
       dashboardUrl: 'https://demo.krabiclaw.com/dashboard/ember-slice/website/domains',
     }),
   },
@@ -288,7 +379,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
   { id: 'auth-verify', audience: 'guest', title: 'Sign-up — verify your email', message: verifyEmailMessage({ verificationUrl: 'https://krabiclaw.com/api/auth/verify-email?token=preview' }) },
   { id: 'auth-sign-in-code', audience: 'guest', title: 'Sign-in — email code', message: signInCodeMessage({ code: '482913' }) },
   { id: 'auth-reset', audience: 'guest', title: 'Sign-in — reset your password', message: resetPasswordMessage({ resetUrl: 'https://krabiclaw.com/reset-password?token=preview' }) },
-  { id: 'organization-invite', audience: 'guest', title: 'Invitee — organization invitation', message: organizationInviteMessage({ organizationName: studio, inviterName: 'Priya Shah', role: 'Admin', inviteUrl: 'https://demo.krabiclaw.com/accept-invitation/preview' }) },
+  { id: 'organization-invite', audience: 'guest', title: 'Invitee — organization invitation', message: organizationInviteMessage({ organizationName: studio, inviterName: 'Priya Shah', role: 'Admin', inviteUrl: 'https://demo.krabiclaw.com/accept-invitation/preview', expires: 'Nov 8, 2026, 2:00 PM UTC' }) },
   { id: 'guest-reservation-received', audience: 'guest', title: 'Guest — reservation confirmed', message: guestReservationReceivedMessage(guestVisit) },
   { id: 'guest-reservation-cancelled', audience: 'guest', title: 'Guest — reservation cancelled', message: guestReservationCancelledMessage({ ...guestVisit, wasConfirmed: true }) },
   { id: 'guest-booking-received', audience: 'guest', title: 'Guest — booking request sent', message: guestBookingReceivedMessage({ ...guestVisit, guestName: 'Mina Park', organizationName: studio, productTitle: 'Pottery Wheel Class', date: 'Mon, Jul 20, 2026', time: '10:00 AM' }) },
@@ -300,6 +391,6 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
   { id: 'guest-booking-change-proposal', audience: 'guest', title: 'Guest — booking change proposed', message: bookingChangeProposalMessage({ guestName: 'Mina Park', organizationName: studio, organizationLogoUrl: sampleLogo, heading: 'Please review changes to your booking', intro: 'Your host has requested changes. Your booking stays exactly as it is until you accept, and the link below expires in 7 days.', rows: [['Location', 'Main Studio'], ['When', 'Tue, Jul 21, 2026 at 2:00 PM'], ['Guests', '2']], actionUrl: 'https://demo.krabiclaw.com/booking-changes/preview', actionLabel: 'Review the changes' }) },
   { id: 'guest-review-request', audience: 'guest', title: 'Guest — review request', message: reviewRequestMessage({ guestName: 'Alex Carter', organizationName: restaurant, locationName: 'Main Dining Room', visitAt: 'Tue, Jul 14, 2026 at 7:00 PM', partySize: '2 guests', reviewUrl: 'https://demo.krabiclaw.com/review-submit?token=preview', organizationLogoUrl: sampleLogo }) },
   { id: 'article-announcement', audience: 'owner', title: 'KrabiClaw news — new article', message: articleAnnouncementMessage({ title: 'Turning walk-ins into repeat guests', summary: 'Three things the best-performing KrabiClaw sites do after a guest leaves.', bodyMarkdown: '## Say thank you the same day\n\nA short note while the meal is still fresh brings guests back more often than any discount.\n\n## Ask for the review\n\n- Send the link once\n- Make it one tap\n\n## Invite them back\n\nTell them what is new next month, and [show them the menu](https://krabiclaw.com).', coverImageUrl: null, articleUrl: 'https://krabiclaw.com/blog/operations/preview' }) },
-  ...ownerPayments.map(event => ({ id: `owner-${event.kind}`, audience: 'owner' as const, title: `Owner — ${ownerPaymentMessage(event).title}`, message: ownerPaymentMessage(event) })),
+  ...ownerPayments.map(event => ({ id: `owner-${event.kind}`, audience: 'owner' as const, title: `Owner — ${ownerPaymentMessage({ ...event, action: payment.action }).title}`, message: ownerPaymentMessage({ ...event, action: payment.action }) })),
   ...guestPayments.map(event => ({ id: `guest-${event.kind}`, audience: 'guest' as const, title: `Guest — ${guestPaymentMessage(event).title}`, message: guestPaymentMessage(event) })),
 ]

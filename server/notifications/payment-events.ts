@@ -1,6 +1,6 @@
 import type { CurrencyCode } from '~/shared/currencies'
 import { paymentMoney } from '~/shared/payment-display'
-import type { NotificationAction, NotificationFact, NotificationMessage } from './messages'
+import type { MemberAlertMessage, NotificationAction, NotificationFact, NotificationMessage } from './messages'
 
 export interface PaymentNotificationInput {
   organizationName: string | null
@@ -128,8 +128,9 @@ function paymentMessage(event: PaymentNotificationEvent, audience: 'owner' | 'gu
   }
 }
 
-export function ownerPaymentMessage(event: PaymentNotificationEvent): NotificationMessage {
-  return paymentMessage(event, 'owner')
+/** The merchant's alert opens the booking, transaction or payout it is about. */
+export function ownerPaymentMessage(event: PaymentNotificationEvent & { action: NotificationAction }): MemberAlertMessage {
+  return { ...paymentMessage(event, 'owner'), primaryAction: event.action }
 }
 
 export function guestPaymentMessage(event: GuestPaymentNotificationEvent): NotificationMessage {

@@ -70,18 +70,21 @@ export function organizationInviteMessage(input: {
   inviterName: string
   role: string
   inviteUrl: string
+  /** When the invitation stops working, as the invitee reads it. */
+  expires: string
 }): NotificationMessage {
   return {
     title: `You're invited to ${input.organizationName}`,
-    preheader: `${input.inviterName} invited you to join ${input.organizationName} on KrabiClaw.`,
+    preheader: `${input.inviterName} invited you to join ${input.organizationName} on KrabiClaw. The invitation expires ${input.expires}.`,
     hero: null,
     facts: facts(
       fact('invitedBy', 'Invited by', input.inviterName),
       fact('organization', 'Organization', input.organizationName),
       fact('role', 'Role', input.role),
+      fact('expires', 'Expires', input.expires),
     ),
     primaryAction: { url: input.inviteUrl, label: 'Accept invitation' },
-    finePrint: 'Not expecting this? You can ignore it — the invitation simply expires.',
+    finePrint: `Accept by ${input.expires}; after that, ask ${input.inviterName} for a new invitation. Not expecting this? You can ignore it.`,
     emailPurpose: 'transactional',
     emailReason: `You received this email because ${input.inviterName} invited you to join ${input.organizationName} on KrabiClaw.`,
     category: 'account_security',

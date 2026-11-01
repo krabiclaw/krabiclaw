@@ -45,13 +45,10 @@ for (const entry of dualChannel) {
     }
   }
 
-  // A declared shortfall that no longer exists is stale documentation, and one
-  // that is now mapped is worse: it leaves an exemption standing that would
-  // hide the fact going missing again later.
+  // An exemption the template now carries is worse than stale: it would hide
+  // the fact going missing again later.
   for (const key of Object.keys(mapping.cannotCarry ?? {})) {
-    if (!message.facts.some(entry => entry.key === key)) {
-      failures.push(`${template}: cannotCarry names "${key}", which this message no longer has`)
-    } else if (!omitted.includes(key)) {
+    if (message.facts.some(entry => entry.key === key) && !omitted.includes(key)) {
       failures.push(`${template}: cannotCarry names "${key}", but the template now carries it — drop the exemption`)
     }
   }
@@ -81,6 +78,16 @@ for (const entry of dualChannel) {
         }
       })
     }
+  }
+}
+
+// A declared shortfall no event sharing the template has any more is stale
+// documentation. One event may lack a row another has — a stay has nights, a
+// class booking an assignee — so this reads the template's events together.
+for (const [template, mapping] of Object.entries(WHATSAPP_MAPPINGS)) {
+  const keys = new Set(dualChannel.filter(entry => entry.whatsappTemplate === template).flatMap(entry => entry.message.facts.map(fact => fact.key)))
+  for (const key of Object.keys(mapping.cannotCarry ?? {})) {
+    if (!keys.has(key)) failures.push(`${template}: cannotCarry names "${key}", which no ${template} event has any more`)
   }
 }
 

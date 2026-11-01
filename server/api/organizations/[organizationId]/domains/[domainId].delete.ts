@@ -12,7 +12,7 @@ export default defineHandler(async (event) => {
 
   const { env, db, session, organization } = await requireOrganizationAccess(event, organizationId)
 
-  const domain = await queryFirst<{ id: string; domain: string }>(db, `
+  const domain = await queryFirst<DomainRecord>(db, `
     SELECT *
     FROM organization_domains
     WHERE id = ? AND organization_id = ? AND type = 'custom'
@@ -23,7 +23,7 @@ export default defineHandler(async (event) => {
   try {
     await deleteCustomDomain(env, db, domainId, organization.member_role as 'owner' | 'admin', session.user.id)
     await notifyDomainLifecycle(env, db, {
-      organizationId: organization.id, domain: domain.domain, status: 'deleted', title: `Domain deleted: ${domain.domain}`, message: `${domain.domain} has been removed from KrabiClaw.`, dashboardUrl: buildDashboardUrl({
+      organizationId: organization.id, event: 'deleted', domain, dashboardUrl: buildDashboardUrl({
         env, organizationId: organization.id, organizationSlug: organization.slug }, 'organization.domains')
     })
     return jsonResponse({ success: true })
@@ -33,4 +33,5 @@ export default defineHandler(async (event) => {
   }
 })
 import { defineHandler } from 'nitro';
+import type { DomainRecord } from '~/server/utils/domains';
 import { getRouterParam } from 'nitro/h3';

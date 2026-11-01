@@ -1,4 +1,4 @@
-import type { NotificationFact, NotificationMessage } from './messages'
+import type { MemberAlertMessage, NotificationFact } from './messages'
 import { formatPhone } from '~/utils/phone'
 import type { BookingPresentation } from '~/utils/booking-presentation'
 import { stayGuestFirstName } from '~/shared/bookings'
@@ -37,10 +37,12 @@ export interface ReservationEventInput {
   organizationName: string
   notes: string | null
   heroImageUrl: string | null
-  replyUrl: string | null
+  replyUrl: string
+  /** What the guest paid online for it; null when nothing was paid on the site. */
+  paid?: string | null
 }
 
-export function reservationCreatedMessage(input: ReservationEventInput): NotificationMessage {
+export function reservationCreatedMessage(input: ReservationEventInput): MemberAlertMessage {
   return {
     title: `New confirmed reservation from ${input.guestName}`,
     preheader: `${input.date} at ${input.time} · ${input.partySize}`,
@@ -54,8 +56,9 @@ export function reservationCreatedMessage(input: ReservationEventInput): Notific
       fact('guestPhone', 'Phone', input.guestPhone && formatPhone(input.guestPhone)),
       fact('guestEmail', 'Email', input.guestEmail, true),
       fact('notes', 'Special requests', input.notes),
+      fact('paid', 'Paid online', input.paid ?? null),
     ),
-    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
+    primaryAction: { url: input.replyUrl, label: 'Reply in dashboard' },
     category: 'reservations_bookings',
     emailPurpose: 'transactional',
     emailReason: `You received this email because you receive reservation notifications for ${input.organizationName}.`,
@@ -63,7 +66,7 @@ export function reservationCreatedMessage(input: ReservationEventInput): Notific
   }
 }
 
-export function reservationCancelledMessage(input: ReservationEventInput & { wasConfirmed: boolean }): NotificationMessage {
+export function reservationCancelledMessage(input: ReservationEventInput & { wasConfirmed: boolean }): MemberAlertMessage {
   // Whether it was confirmed decides how urgently an owner acts, and the
   // approved template has no slot of its own for it — so it leads the venue
   // fact, which WhatsApp does carry, instead of living only in the subject.
@@ -83,7 +86,7 @@ export function reservationCancelledMessage(input: ReservationEventInput & { was
       fact('guestEmail', 'Email', input.guestEmail),
       fact('notes', 'Special requests', input.notes),
     ),
-    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
+    primaryAction: { url: input.replyUrl, label: 'Open in dashboard' },
     category: 'reservations_bookings',
     emailPurpose: 'transactional',
     emailReason: `You received this email because a reservation with ${input.organizationName} was cancelled and you receive its reservation notifications.`,
@@ -91,30 +94,41 @@ export function reservationCancelledMessage(input: ReservationEventInput & { was
   }
 }
 
-/** A stay a guest booked and paid for on the site. */
+/** A stay a guest booked: paid for on the site, or sent by a channel such as Airbnb. */
 export interface StayEventInput {
   guestName: string
   guestEmail: string | null
   guestPhone: string | null
   homeName: string
+  /** The channel the stay was booked on; null for a stay booked on the site. */
+  channel: string | null
   checkIn: string
   checkOut: string
   /** The guest's own arrival time, when they gave one. */
   arrival: string | null
   nights: string
   guests: string
+  /** The booking total; on a channel, the total the channel states, not the payout. */
   total: string | null
+  /** What the guest paid on the site; a channel collects its own. */
+  paid: string | null
+  /** What the guest still owes on the site, when they have not paid it all. */
+  balance: string | null
+  /** The nights are already held by another stay: a double booking to resolve. */
+  overlap: boolean
   notes: string | null
   organizationName: string
   heroImageUrl: string | null
-  replyUrl: string | null
+  replyUrl: string
 }
 
-export function stayBookedMessage(input: StayEventInput): NotificationMessage {
+export function stayBookedMessage(input: StayEventInput): MemberAlertMessage {
+  const what = input.channel ? `${input.channel} stay` : 'stay'
   return {
-    title: `New stay booked by ${input.guestName}`,
+    title: input.overlap ? `Double booking: ${input.guestName}'s ${what} overlaps another stay` : `New ${what} booked by ${input.guestName}`,
     preheader: `${input.homeName} · ${input.checkIn} – ${input.checkOut}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.homeName } : null,
+    intro: input.overlap ? `These nights at ${input.homeName} are already held by another stay. Move or cancel one of them before check-in.` : undefined,
     facts: facts(
       fact('context', 'Place to stay', input.homeName, true),
       fact('guestName', 'Guest', input.guestName, true),
@@ -123,12 +137,14 @@ export function stayBookedMessage(input: StayEventInput): NotificationMessage {
       fact('arrival', 'Arriving', input.arrival),
       fact('nights', 'Nights', input.nights, true),
       fact('partySize', 'Guests', input.guests, true),
-      fact('total', 'Paid', input.total, true),
+      fact('total', input.channel ? `Booking total on ${input.channel}` : 'Booking total', input.total, true),
+      fact('paid', 'Paid online', input.paid, true),
+      fact('balance', 'Balance due', input.balance, true),
       fact('guestPhone', 'Phone', input.guestPhone && formatPhone(input.guestPhone)),
       fact('guestEmail', 'Email', input.guestEmail, true),
       fact('notes', 'Message from the guest', input.notes),
     ),
-    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
+    primaryAction: { url: input.replyUrl, label: input.overlap ? 'Resolve double booking' : input.channel ? 'Open stay' : 'Reply in dashboard' },
     category: 'reservations_bookings',
     emailPurpose: 'transactional',
     emailReason: `You received this email because you receive stay booking notifications for ${input.organizationName}.`,
@@ -136,12 +152,13 @@ export function stayBookedMessage(input: StayEventInput): NotificationMessage {
   }
 }
 
-/** A guest cancelled their stay on the site; the refund is what their booked policy returned. */
-export function stayCancelledMessage(input: Omit<StayEventInput, 'notes' | 'total'> & { refund: string | null }): NotificationMessage {
+/** A stay was cancelled: by its guest on the site, with what their booked policy refunded, or on its channel. */
+export function stayCancelledMessage(input: Omit<StayEventInput, 'notes' | 'total' | 'paid' | 'balance' | 'overlap'> & { refund: string | null }): MemberAlertMessage {
   return {
-    title: `Stay cancelled by ${input.guestName}`,
+    title: input.channel ? `${input.guestName}'s ${input.channel} stay was cancelled` : `Stay cancelled by ${input.guestName}`,
     preheader: `${input.homeName} · ${input.checkIn} – ${input.checkOut}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.homeName } : null,
+    intro: input.channel ? `The stay was cancelled on ${input.channel}, and its nights are open again here. Any refund is ${input.channel}'s to make.` : undefined,
     facts: facts(
       fact('context', 'Place to stay', input.homeName, true),
       fact('guestName', 'Guest', input.guestName, true),
@@ -154,7 +171,7 @@ export function stayCancelledMessage(input: Omit<StayEventInput, 'notes' | 'tota
       fact('guestPhone', 'Phone', input.guestPhone && formatPhone(input.guestPhone)),
       fact('guestEmail', 'Email', input.guestEmail, true),
     ),
-    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
+    primaryAction: { url: input.replyUrl, label: input.channel ? 'Open stay' : 'Open in dashboard' },
     category: 'reservations_bookings',
     emailPurpose: 'transactional',
     emailReason: `You received this email because a stay with ${input.organizationName} was cancelled and you receive its booking notifications.`,
@@ -168,7 +185,7 @@ export function stayCancelledMessage(input: Omit<StayEventInput, 'notes' | 'tota
  * guest's conversation. Owners and admins receive the input as it is.
  */
 export function stayTurnoverAlert<T extends Pick<StayEventInput, 'guestName' | 'guestEmail' | 'guestPhone' | 'replyUrl'>>(input: T, stayUrl: string): T {
-  const money = Object.fromEntries((['notes', 'total', 'refund'] as const).filter(field => field in input).map(field => [field, null]))
+  const money = Object.fromEntries((['notes', 'total', 'paid', 'balance', 'refund'] as const).filter(field => field in input).map(field => [field, null]))
   return { ...input, ...money, guestName: stayGuestFirstName(input.guestName) ?? input.guestName, guestEmail: null, guestPhone: null, replyUrl: stayUrl }
 }
 
@@ -179,7 +196,7 @@ export interface BookingEventInput extends ReservationEventInput {
   counterpartyLabel?: string
 }
 
-export function bookingCreatedMessage(input: BookingEventInput): NotificationMessage {
+export function bookingCreatedMessage(input: BookingEventInput): MemberAlertMessage {
   const counterparty = input.counterpartyLabel ?? input.presentation.counterpartyLabel
   const partyLabel = input.partyLabel ?? input.presentation.partyLabel
   return {
@@ -195,8 +212,9 @@ export function bookingCreatedMessage(input: BookingEventInput): NotificationMes
       fact('guestPhone', 'Phone', input.guestPhone && formatPhone(input.guestPhone)),
       fact('guestEmail', 'Email', input.guestEmail, true),
       fact('notes', 'Special requests', input.notes),
+      fact('paid', 'Paid online', input.paid ?? null),
     ),
-    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
+    primaryAction: { url: input.replyUrl, label: 'Reply in dashboard' },
     category: 'reservations_bookings',
     emailPurpose: 'transactional',
     emailReason: `You received this email because you receive ${input.presentation.noun} notifications for ${input.organizationName}.`,
@@ -204,7 +222,7 @@ export function bookingCreatedMessage(input: BookingEventInput): NotificationMes
   }
 }
 
-export function bookingCancelledMessage(input: BookingEventInput & { wasConfirmed: boolean }): NotificationMessage {
+export function bookingCancelledMessage(input: BookingEventInput & { wasConfirmed: boolean }): MemberAlertMessage {
   const counterparty = input.counterpartyLabel ?? input.presentation.counterpartyLabel
   const partyLabel = input.partyLabel ?? input.presentation.partyLabel
   const standing = input.wasConfirmed ? `Confirmed ${input.presentation.noun}` : `${input.presentation.label} request`
@@ -222,7 +240,7 @@ export function bookingCancelledMessage(input: BookingEventInput & { wasConfirme
       fact('guestEmail', 'Email', input.guestEmail),
       fact('notes', 'Special requests', input.notes),
     ),
-    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
+    primaryAction: { url: input.replyUrl, label: 'Open in dashboard' },
     category: 'reservations_bookings',
     emailPurpose: 'transactional',
     emailReason: `You received this email because a ${input.presentation.noun} with ${input.organizationName} was cancelled and you receive its booking notifications.`,
@@ -238,10 +256,10 @@ export interface ContactEventInput {
   productTitle: string | null
   organizationName: string
   consentAcknowledged: boolean
-  replyUrl: string | null
+  replyUrl: string
 }
 
-export function contactReceivedMessage(input: ContactEventInput): NotificationMessage {
+export function contactReceivedMessage(input: ContactEventInput): MemberAlertMessage {
   // The product a guest is asking about is the whole point of the message, and
   // the approved template has no slot for it — so it rides in the subject,
   // which does have one, rather than staying in the email alone.
@@ -257,7 +275,7 @@ export function contactReceivedMessage(input: ContactEventInput): NotificationMe
       fact('message', 'Message', input.message, true),
       input.consentAcknowledged ? fact('consent', 'Contact/privacy notice', 'Acknowledged') : null,
     ),
-    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
+    primaryAction: { url: input.replyUrl, label: 'Reply in dashboard' },
     category: 'messages',
     emailPurpose: 'transactional',
     emailReason: `You received this email because someone contacted ${input.organizationName} and you receive its website messages.`,
@@ -269,15 +287,17 @@ export interface MessageEventInput {
   senderName: string
   senderEmail: string | null
   conversationLabel: string
+  /** The home, class or booking the conversation belongs to, when it belongs to one. */
+  about: string | null
   messagePreview: string
   organizationName: string | null
-  replyUrl: string | null
+  replyUrl: string
 }
 
-export function messageReceived(input: MessageEventInput): NotificationMessage {
-  const subject = [input.conversationLabel, input.organizationName].filter(Boolean).join(' · ')
+export function messageReceived(input: MessageEventInput): MemberAlertMessage {
+  const subject = [input.conversationLabel, input.about, input.organizationName].filter(Boolean).join(' · ')
   return {
-    title: `${input.senderName} sent a message`,
+    title: input.about ? `${input.senderName} wrote about ${input.about}` : `${input.senderName} sent a message`,
     preheader: input.messagePreview.slice(0, 120),
     hero: null,
     facts: facts(
@@ -286,7 +306,7 @@ export function messageReceived(input: MessageEventInput): NotificationMessage {
       fact('guestEmail', 'Email', input.senderEmail),
       fact('message', 'Message', input.messagePreview, true),
     ),
-    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open conversation' } : undefined,
+    primaryAction: { url: input.replyUrl, label: 'Open conversation' },
     category: 'messages',
     emailPurpose: 'transactional',
     emailReason: input.organizationName
@@ -303,10 +323,10 @@ export interface ReviewEventInput {
   /** The guest also wrote to the business privately; its text is read where it is authorized, never in an alert. */
   hasPrivateFeedback?: boolean
   organizationName: string
-  reviewsUrl: string | null
+  reviewsUrl: string
 }
 
-export function reviewReceivedMessage(input: ReviewEventInput): NotificationMessage {
+export function reviewReceivedMessage(input: ReviewEventInput): MemberAlertMessage {
   // The approved template has a rating slot and an excerpt slot and no author
   // slot, so the author leads the excerpt — the email's own headline is
   // "New review from {author}", and WhatsApp used to name nobody at all.
@@ -320,7 +340,7 @@ export function reviewReceivedMessage(input: ReviewEventInput): NotificationMess
       fact('rating', 'Rating', `${input.rating} / 5`, true),
       fact('review', 'Review', excerpt, true),
     ),
-    primaryAction: input.reviewsUrl ? { url: input.reviewsUrl, label: 'View review' } : undefined,
+    primaryAction: { url: input.reviewsUrl, label: 'View review' },
     category: 'reviews',
     emailPurpose: 'subscribed',
     emailReason: `You receive this email under your review notification preferences for ${input.organizationName}.`,
@@ -334,52 +354,152 @@ export interface BookingChangeAssignment {
   label: string
 }
 
+/** One side of a change: what is booked now, or what the change asks for. */
+export interface BookingChangeTerms {
+  /** A stay's dates, or a booking's date. */
+  date: string
+  /** A booking's time; a stay has none. */
+  time: string | null
+  nights: number | null
+  partySize: string
+  location: string
+  /** The booking total, not the payout; null where the change states no price or the reader may not see money. */
+  total: string | null
+  assignee: string | null
+}
+
+/** A difference between the two sides, worded for an owner; `financial` ones are left out wherever money is. */
+export interface BookingChangeDifference {
+  text: string
+  financial?: boolean
+}
+
+/** `changed` is a change its channel confirmed, which nobody here was asked to answer. */
+export type BookingChangeStatus = 'requested' | 'accepted' | 'declined' | 'withdrawn' | 'changed'
+
 export interface BookingChangeEventInput {
   recordKind: string
-  assignment?: BookingChangeAssignment
+  /** What was booked, when it has a name of its own (a class, a consultation type); it names the booking better than its kind. */
+  offering?: string | null
+  /** The channel the guest asked on, when it was not this site. */
+  channel: string | null
   guestName: string
-  status: 'requested' | 'accepted' | 'declined'
-  location: string
-  date: string | null
-  time: string | null
-  whenLabel: string
-  partySize: string
-  partyLabel?: string
+  /** Who asked: the guest, or the member of the business who proposed it. */
+  requestedBy: { kind: 'guest' } | { kind: 'business'; name: string }
+  status: BookingChangeStatus
+  current: BookingChangeTerms
+  requested: BookingChangeTerms
+  differences: BookingChangeDifference[]
   counterpartyLabel?: string
-  summary: string
-  replyUrl: string | null
+  partyLabel?: string
+  locationLabel?: string
+  assigneeLabel?: string
+  replyUrl: string
   organizationName: string
 }
 
-export function bookingChangeMessage(input: BookingChangeEventInput): NotificationMessage {
-  const assignment = input.assignment
+/** The same change as a member who may not see money reads it: no totals, no price difference. */
+export function bookingChangeWithoutMoney(input: BookingChangeEventInput, replyUrl: string): BookingChangeEventInput {
+  return {
+    ...input, replyUrl,
+    current: { ...input.current, total: null }, requested: { ...input.requested, total: null },
+    differences: input.differences.filter(difference => !difference.financial),
+  }
+}
+
+const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`
+
+/** What an Airbnb stay change does, read from the two sets of dates, guests and totals. */
+export function stayChangeDifferences(current: { checkIn: string; checkOut: string; guests: number; totalMinor: number }, requested: { checkIn: string; checkOut: string; guests: number; totalMinor: number }, money: (minor: number) => string): BookingChangeDifference[] {
+  const days = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000)
+  const arrival = days(current.checkIn, requested.checkIn)
+  const departure = days(current.checkOut, requested.checkOut)
+  const nights = days(requested.checkIn, requested.checkOut) - days(current.checkIn, current.checkOut)
+  const guests = requested.guests - current.guests
+  const total = requested.totalMinor - current.totalMinor
+  return [
+    ...(arrival ? [{ text: `Arrives ${plural(Math.abs(arrival), 'day')} ${arrival < 0 ? 'earlier' : 'later'}` }] : []),
+    ...(departure ? [{ text: `Leaves ${plural(Math.abs(departure), 'day')} ${departure < 0 ? 'earlier' : 'later'}` }] : []),
+    ...(nights ? [{ text: `${plural(Math.abs(nights), nights > 0 ? 'more night' : 'fewer night', nights > 0 ? 'more nights' : 'fewer nights')}` }] : []),
+    ...(guests ? [{ text: `${plural(Math.abs(guests), guests > 0 ? 'more guest' : 'fewer guest', guests > 0 ? 'more guests' : 'fewer guests')}` }] : []),
+    ...(total ? [{ text: `Booking total ${total > 0 ? '+' : '−'}${money(Math.abs(total))}`, financial: true }] : []),
+  ]
+}
+
+/** What a booking or reservation change does, read from the two occurrences. */
+export function occurrenceChangeDifferences(current: BookingChangeTerms, requested: BookingChangeTerms, labels: { party: string; assignee: string }): BookingChangeDifference[] {
+  const moved = current.date !== requested.date
+  const retimed = current.time !== requested.time
+  return [
+    ...(moved || retimed ? [{ text: moved && retimed ? `Moves to ${requested.date} at ${requested.time}` : moved ? `Moves to ${requested.date}` : `Moves to ${requested.time}` }] : []),
+    ...(current.location !== requested.location ? [{ text: `Moves to ${requested.location}` }] : []),
+    ...(current.partySize !== requested.partySize ? [{ text: `${labels.party}: ${requested.partySize}` }] : []),
+    ...(current.assignee !== requested.assignee ? [{ text: `${labels.assignee}: ${requested.assignee ?? 'Unassigned'}` }] : []),
+  ]
+}
+
+// A row both sides lack is absent; one side lacking it is a change to or from nothing.
+function comparison(current: string | null, requested: string | null): string | null {
+  if (current === null && requested === null) return null
+  if (current === requested) return `${requested} (unchanged)`
+  return `${current ?? 'None'} → ${requested ?? 'None'}`
+}
+
+/**
+ * A change to a booking, as its owners read it: what is booked now beside what
+ * the change asks for, each row as "current → requested", what actually
+ * differs, who asked or answered, and whether anything is confirmed yet.
+ */
+export function bookingChangeMessage(input: BookingChangeEventInput): MemberAlertMessage {
   const counterparty = input.counterpartyLabel ?? (input.recordKind === 'consultation' ? 'Client' : 'Guest')
   const partyLabel = input.partyLabel ?? (input.recordKind === 'consultation' ? 'Clients' : input.recordKind === 'stay' ? 'Guests' : 'Party size')
-  const summary = assignment && assignment.beforeMemberId !== assignment.afterMemberId
-    ? `${input.summary} ${input.status === 'accepted' ? assignment.label : `Proposed ${assignment.label.toLowerCase()}`}: ${assignment.beforeName ?? 'Unassigned'} → ${assignment.afterName ?? 'Unassigned'}.`
-    : input.summary
+  const what = input.channel ? `${input.channel} ${input.recordKind}` : input.recordKind
+  const asker = input.requestedBy.kind === 'guest' ? input.guestName : input.requestedBy.name
+  const awaitingHost = input.status === 'requested' && input.requestedBy.kind === 'guest'
+  const standing = {
+    requested: awaitingHost
+      ? `Requested by ${asker}${input.channel ? ` on ${input.channel}` : ''} · not confirmed until you accept`
+      : `Proposed by ${asker} · waiting for ${input.guestName} to accept`,
+    accepted: `Accepted by ${input.guestName} · the new details are confirmed`,
+    declined: `Declined by ${input.guestName} · the current details stay booked`,
+    withdrawn: `Withdrawn by ${input.guestName}${input.channel ? ` on ${input.channel}` : ''} · the current details stay booked`,
+    changed: `Changed${input.channel ? ` on ${input.channel}` : ''} · the new details are confirmed`,
+  }[input.status]
+  const differences = input.differences.map(difference => difference.text).join(' · ') || 'No change to the booked details'
   return {
-    title: input.status === 'requested'
-      ? `Changes requested for ${input.guestName}'s ${input.recordKind}`
-      : `${input.guestName} ${input.status} the ${input.recordKind} changes`,
-    preheader: summary,
+    title: {
+      requested: awaitingHost ? `${input.guestName} asked to change their ${what}` : `Changes proposed for ${input.guestName}'s ${what}`,
+      accepted: `${input.guestName} accepted the ${what} changes`,
+      declined: `${input.guestName} declined the ${what} changes`,
+      withdrawn: `${input.guestName} withdrew their ${what} change request`,
+      changed: `${input.guestName}'s ${what} changed`,
+    }[input.status],
+    preheader: differences,
     hero: null,
-    intro: summary,
+    intro: {
+      requested: awaitingHost
+        ? `Nothing changes until you accept.${input.channel ? ` Your answer goes to ${input.guestName} on ${input.channel}.` : ''}`
+        : `${input.guestName} has been asked to accept or decline. The current details stay booked until they accept.`,
+      accepted: 'The new details are confirmed.',
+      declined: 'The current details stay booked.',
+      withdrawn: 'The current details stay booked, and there is nothing to answer.',
+      changed: `The new details are confirmed${input.channel ? ` on ${input.channel}` : ''}, and the home's calendar here follows them.`,
+    }[input.status],
     facts: facts(
-      fact('recordKind', 'Type', input.recordKind, true),
       fact('guestName', counterparty, input.guestName, true),
-      fact('status', 'Decision', input.status, true),
-      fact('location', 'Location', input.location, true),
-      // A proposal recorded before the date and time were stored separately
-      // has only the combined label. It is stated as itself, never put in the
-      // date slot, and WhatsApp uses the template variant without date and time.
-      fact('when', 'When', input.whenLabel),
-      fact('date', 'Date', input.date, true),
-      fact('time', 'Time', input.time, true),
-      fact('partySize', partyLabel, input.partySize, true),
-      fact('summary', 'Summary', summary, true),
+      fact('status', 'Status', standing, true),
+      fact('summary', 'What changes', differences, true),
+      fact('location', input.locationLabel ?? 'Location', comparison(input.current.location, input.requested.location), true),
+      fact('date', input.recordKind === 'stay' ? 'Dates' : 'Date', comparison(input.current.date, input.requested.date), true),
+      fact('time', 'Time', comparison(input.current.time, input.requested.time), true),
+      fact('nights', 'Nights', comparison(input.current.nights === null ? null : String(input.current.nights), input.requested.nights === null ? null : String(input.requested.nights))),
+      fact('partySize', partyLabel, comparison(input.current.partySize, input.requested.partySize), true),
+      fact('total', 'Booking total', comparison(input.current.total, input.requested.total)),
+      fact('assignee', input.assigneeLabel ?? 'Assigned to', input.current.assignee === null && input.requested.assignee === null ? null
+        : comparison(input.current.assignee ?? 'Unassigned', input.requested.assignee ?? 'Unassigned')),
+      fact('recordKind', 'Booking', input.offering ?? what.charAt(0).toUpperCase() + what.slice(1), true),
     ),
-    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'View in dashboard' } : undefined,
+    primaryAction: { url: input.replyUrl, label: awaitingHost ? 'Review requested changes' : input.status === 'changed' ? 'Open stay' : 'Open conversation' },
     category: 'reservations_bookings',
     emailPurpose: 'transactional',
     emailReason: `You received this email because changes were proposed or answered for a ${input.recordKind} with ${input.organizationName} and you receive its booking notifications.`,
@@ -394,12 +514,12 @@ export interface CalendarSyncEventInput {
   whenLabel: string
   /** Why the move could not be applied; absent for a deletion. */
   reason: string | null
-  replyUrl: string | null
+  replyUrl: string
   organizationName: string
 }
 
 /** Something changed on the business's Google calendar that the booking did not follow. */
-export function calendarSyncMessage(input: CalendarSyncEventInput): NotificationMessage {
+export function calendarSyncMessage(input: CalendarSyncEventInput): MemberAlertMessage {
   const deleted = input.kind === 'event_deleted'
   const summary = deleted
     ? `${input.guestName}'s ${input.recordKind} is still booked for ${input.whenLabel}. Deleting its event in Google Calendar never cancels it or refunds anyone, and the event has been put back. Cancel the ${input.recordKind} in KrabiClaw if you meant to.`
@@ -415,7 +535,7 @@ export function calendarSyncMessage(input: CalendarSyncEventInput): Notification
       fact('when', 'Still booked for', input.whenLabel, true),
       fact('reason', 'Reason', input.reason),
     ),
-    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
+    primaryAction: { url: input.replyUrl, label: 'Open in dashboard' },
     category: 'reservations_bookings',
     emailPurpose: 'transactional',
     emailReason: `You received this email because ${input.guestName}'s ${input.recordKind} with ${input.organizationName} changed on the business's Google Calendar and you receive its booking notifications.`,
@@ -424,24 +544,52 @@ export function calendarSyncMessage(input: CalendarSyncEventInput): Notification
 }
 
 export interface DomainEventInput {
-  headline: string
-  message: string
+  event: 'added' | 'synced' | 'deleted'
   domain: string
   status: string
+  /** Why the domain is not live, as its provider stated it. */
+  error: string | null
+  /** The DNS records still to add at the domain's registrar, with what each is for. */
+  records: Array<{ type: string; name: string; value: string; purpose: string }>
+  /** For an apex domain, the forward the registrar needs instead of a record. */
+  apexNote: string | null
   dashboardUrl: string
 }
 
-export function domainUpdateMessage(input: DomainEventInput): NotificationMessage {
+const DOMAIN_IMPACT: Record<string, string> = {
+  active: 'Your site is live at this domain, with HTTPS.',
+  pending: 'Your site is not live at this domain yet. Add the DNS records below at your domain registrar; KrabiClaw checks them and switches the domain on once they are in place.',
+  verifying: 'The DNS records were found and the domain is being verified. Your site goes live at this domain once verification finishes; nothing else is needed from you unless a record is still listed below.',
+  blocked: 'This domain cannot serve your site. Review the reason below in domain settings.',
+  failed: 'This domain could not be set up, and your site is not live at it. Review the reason below, correct the DNS records, then check the domain again.',
+  disabled: 'This domain no longer serves your site.',
+  deleted: 'This domain no longer serves your site. Remove its KrabiClaw DNS records at your registrar if you are not using them elsewhere.',
+}
+
+const RECORD_PURPOSE: Record<string, string> = { ownership: 'Proves you own the domain', dcv_delegation: 'Lets the certificate renew', traffic: 'Points the domain at your site', ssl: 'Issues the HTTPS certificate' }
+
+export function domainUpdateMessage(input: DomainEventInput): MemberAlertMessage {
+  const headline = { added: `Domain added: ${input.domain}`, synced: input.status === 'active' ? `${input.domain} is live` : `${input.domain} is ${input.status}`, deleted: `Domain removed: ${input.domain}` }[input.event]
+  const impact = DOMAIN_IMPACT[input.status]
+  if (!impact) throw new Error(`Domain status ${input.status} has no stated impact`)
+  const records = input.status === 'active' || input.event === 'deleted' ? [] : input.records
   return {
-    title: input.headline,
+    title: headline,
     preheader: `${input.domain} · ${input.status}`,
     hero: null,
-    intro: input.message,
+    intro: impact,
     facts: facts(
       fact('domain', 'Domain', input.domain, true),
       fact('status', 'Status', input.status, true),
-      fact('headline', 'Update', input.headline),
+      fact('error', 'Reason', input.error),
     ),
+    sections: [
+      ...records.map((record, index) => ({
+        title: `DNS record ${index + 1} of ${records.length}: ${RECORD_PURPOSE[record.purpose] ?? record.purpose}`,
+        facts: facts(fact('type', 'Type', record.type), fact('name', 'Name', record.name), fact('value', 'Value', record.value)),
+      })),
+      ...(input.apexNote && records.length ? [{ title: 'At the domain itself', body: input.apexNote }] : []),
+    ],
     primaryAction: { url: input.dashboardUrl, label: 'Open domain settings' },
     category: 'organization_and_billing',
     emailPurpose: 'transactional',
@@ -469,7 +617,7 @@ export interface ContentReportedInput {
 }
 
 /** A member reported a guest or a teammate; KrabiClaw acts on it within 24 hours. */
-export function contentReportedMessage(input: ContentReportedInput): NotificationMessage {
+export function contentReportedMessage(input: ContentReportedInput): MemberAlertMessage {
   const what = input.subject === 'guest_thread' ? 'a guest conversation' : 'a team message'
   return {
     title: `${input.blocked ? 'Guest blocked and reported' : 'Content reported'} in ${input.organizationName}`,
@@ -488,7 +636,7 @@ export function contentReportedMessage(input: ContentReportedInput): Notificatio
   }
 }
 
-export function onboardingCompletedMessage(input: OnboardingCompletedInput): NotificationMessage {
+export function onboardingCompletedMessage(input: OnboardingCompletedInput): MemberAlertMessage {
   return {
     title: `${input.organizationName} is live on KrabiClaw`,
     preheader: `${input.ownerName} finished onboarding`,

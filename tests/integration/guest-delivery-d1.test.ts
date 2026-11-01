@@ -846,7 +846,7 @@ test('financial notification replay preserves per-recipient receipts and isolate
 
     const eventKey = 'financial-proof:capture'
     const payment = { kind: 'payment_captured' as const, organizationName: 'Merchant', amount: 10000, currency: 'USD' as const, productTitle: 'Class' }
-    const input = { organizationId: 'merchant', eventKey, ownerMessage: ownerPaymentMessage(payment),
+    const input = { organizationId: 'merchant', eventKey, ownerMessage: ownerPaymentMessage({ ...payment, action: { url: 'https://proof.example/dashboard/merchant/earnings', label: 'View details' } }),
       guest: { userId: 'buyer', email: 'buyer@proof.example', message: guestPaymentMessage(payment) } }
     await notifyFinancialNotification(env, db, input)
     const rows = (await db.prepare('SELECT id,scope_kind,organization_id,target_user_id,parent_id,request_id FROM activity_entries WHERE event_name=? ORDER BY scope_kind').bind(eventKey).all()).results
