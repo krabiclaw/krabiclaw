@@ -133,8 +133,9 @@ const router = useRouter()
 // A record being made opens its first step at every width; on wide screens, a bare index opens its default child.
 watch(
   (): [RouteLocationRaw | null | undefined, RouteLevelMode, unknown] => [props.create ?? (pane.value ? props.autoOpen : null), level.mode.value, route.query.editMode],
-  ([target, mode, editMode]) => {
-    if (mode === 'index' && !pane.value && import.meta.client) {
+  ([target, mode, editMode], oldState) => {
+    const prevMode = oldState?.[1]
+    if (mode === 'index' && prevMode && prevMode !== 'index' && !pane.value && import.meta.client) {
       const heading = document.getElementById(`dashboard-panel-${String(instance?.props.id ?? '')}`)?.querySelector<HTMLElement>('h1')
       if (heading) {
         heading.tabIndex = -1
