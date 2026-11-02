@@ -28,6 +28,7 @@ export interface StayBookingContext {
 export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   const context = computed(() => toValue(input))
   const { locale, t, localePath } = useI18n()
+  const { pageEventId } = useOrganizationConversionTracking()
   const route = useRoute()
   const bookingOpen = ref(false)
   const bookingStep = ref(1)
@@ -309,6 +310,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
           idempotency_key: requestKey, check_in_date: checkIn.value, check_out_date: checkOut.value,
           adults: adults.value, children: children.value, infants: infants.value,
           guest_name: guest.name, guest_email: guest.email, guest_phone: guest.phone, notes: guest.notes, locale: locale.value,
+          page_event_id: await pageEventId(),
         },
         validate: (value): value is CheckoutResponse => isRecord(value) && value.success === true && value.status === 'checkout' && typeof value.pay_path === 'string' && value.pay_path.startsWith('/pay/')
           && typeof value.purchase_claim === 'string' && typeof value.payment_id === 'string' && isValidInstant(value.expires_at),

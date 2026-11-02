@@ -29,6 +29,12 @@ interface CheckoutInputBase {
   quantity: number
   idempotencyKey: string
   following: (paymentId: string) => BatchQuery[]
+  /**
+   * The guest's own browser request and the pageview it came from, which say
+   * how the guest arrived; null when the business creates the checkout, whose
+   * staff browsing is never the guest's source.
+   */
+  origin: { request: { headers: Headers }; pageEventId: string | null } | null
 }
 export type CheckoutInput = CheckoutInputBase & (
   | { subjectType: 'booking'; productId: string; variantId: string; sessionId: string }
@@ -175,7 +181,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
   if (expiresAt<=now) throw new HTTPError({statusCode:409,statusMessage:'Checkout hold expired; start a new request',data:{code:'checkout_expired'}})
   const handoff = (paymentId: string): PaymentHandoff => ({ payment_id: paymentId, pay_path: `/pay/${encodeURIComponent(paymentId)}`, purchase_claim: returnToken, expires_at: expiresAt })
   if (previous?.stripe_payment_intent_id) {
-    await recordCheckoutStarted(db, await requirePayment(db,input.organizationId,previous.payment_id), null)
+    await recordCheckoutStarted(db, await requirePayment(db,input.organizationId,previous.payment_id), null, input.origin)
     return handoff(previous.payment_id)
   }
   if (!previous) {
@@ -265,7 +271,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     ],{operation:'Record rejected or uncertain payment intent creation'})
     throw error
   }
-  await recordCheckoutStarted(db, await requirePayment(db,input.organizationId,id), customer?.savedCards ?? 0)
+  await recordCheckoutStarted(db, await requirePayment(db,input.organizationId,id), customer?.savedCards ?? 0, input.origin)
   return handoff(id)
 }
 
