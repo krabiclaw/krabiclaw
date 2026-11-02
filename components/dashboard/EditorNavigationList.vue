@@ -11,8 +11,9 @@
           v-for="(item, index) in group.items"
           :key="item.id"
           v-bind="item.to ? { to: item.to } : item.action ? { type: 'button' } : {}"
-          class="group flex w-full items-center gap-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-highlighted"
+          class="group flex w-full items-center gap-4 text-left transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-highlighted"
           :class="[
+            item.to || item.action ? 'active:scale-[0.99] duration-150' : '',
             variant === 'cards'
               ? ['rounded-xl border-2 p-5 shadow-[0_8px_24px_rgb(0_0_0/0.08)]', item.status ? 'bg-muted shadow-none' : 'bg-elevated', item.id === activeItem ? 'border-(--ui-text-muted)' : 'border-transparent', item.to || item.action ? 'hover:border-(--ui-text-dimmed)' : '']
               : ['min-h-20 px-4 py-4', index > 0 ? 'border-t border-default' : '', item.id === activeItem ? 'bg-elevated shadow-[inset_3px_0_0_var(--ui-primary)]' : '', item.to || item.action ? 'hover:bg-elevated' : ''],

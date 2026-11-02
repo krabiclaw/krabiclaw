@@ -28,7 +28,7 @@
         :aria-label="item.label"
         :aria-current="item.id === activeItem ? 'page' : undefined"
         :data-testid="`selector-item-${item.id}`"
-        class="group block min-w-0"
+        class="group block min-w-0 transition-transform duration-150 active:scale-[0.98]"
         :class="item.id === activeItem ? 'bg-elevated shadow-[inset_3px_0_0_var(--ui-primary)]' : undefined"
       >
         <div :class="rowsOnMobile ? ['flex items-center gap-3 py-5 lg:block lg:p-0', item.actions?.length ? 'pr-16' : 'pr-6'] : undefined">

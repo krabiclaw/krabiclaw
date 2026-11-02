@@ -24,7 +24,8 @@
         v-for="item in items"
         :key="item.key"
         :to="item.to"
-        class="px-4 py-2 text-sm font-medium no-underline transition-colors"
+        prefetch
+        class="px-4 py-2 text-sm font-medium no-underline transition active:scale-95 duration-150"
         :class="item.active
           ? 'text-highlighted underline decoration-2 underline-offset-8'
           : 'text-muted hover:text-highlighted'"
