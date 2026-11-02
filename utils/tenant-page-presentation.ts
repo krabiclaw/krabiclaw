@@ -7,39 +7,10 @@
 //
 // Absence of an entry means the renderer's generic markup.
 
-import type { Component } from 'vue'
+import { defineAsyncComponent, type Component } from 'vue'
 import type { TenantPageBlock, TenantPageBlockType } from '~/utils/tenant-page-blocks'
 import type { PublicTemplateSlug } from '~/utils/template-registry'
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
-import PlatformMarketingHero from '~/components/platform/marketing/PlatformMarketingHero.vue'
-import PlatformFeatureCards from '~/components/platform/marketing/PlatformFeatureCards.vue'
-import PlatformShowcase from '~/components/platform/marketing/PlatformShowcase.vue'
-import PlatformMediaFeature from '~/components/platform/marketing/PlatformMediaFeature.vue'
-import PlatformLanguageReach from '~/components/platform/marketing/PlatformLanguageReach.vue'
-import PlatformSteps from '~/components/platform/marketing/PlatformSteps.vue'
-import PlatformProductNavigation from '~/components/platform/marketing/PlatformProductNavigation.vue'
-import PlatformComparison from '~/components/platform/marketing/PlatformComparison.vue'
-import PlatformProofBand from '~/components/platform/marketing/PlatformProofBand.vue'
-import PlatformWorkflows from '~/components/platform/marketing/PlatformWorkflows.vue'
-import PlatformSeoBand from '~/components/platform/marketing/PlatformSeoBand.vue'
-import PlatformPluginSections from '~/components/platform/marketing/PlatformPluginSections.vue'
-import PlatformProseCard from '~/components/platform/marketing/PlatformProseCard.vue'
-import PlatformBottomCta from '~/components/platform/marketing/PlatformBottomCta.vue'
-import SocialPosts from '~/components/social/SocialPosts.vue'
-import TenantHeroBlock from '~/components/tenant/TenantHeroBlock.vue'
-import TenantFeatureGridBlock from '~/components/tenant/TenantFeatureGridBlock.vue'
-import TenantTeamBlock from '~/components/tenant/TenantTeamBlock.vue'
-import TenantStatGridBlock from '~/components/tenant/TenantStatGridBlock.vue'
-import TenantServicesBlock from '~/components/tenant/TenantServicesBlock.vue'
-import TenantProductGridBlock from '~/components/tenant/TenantProductGridBlock.vue'
-import TenantLocationsGridBlock from '~/components/tenant/TenantLocationsGridBlock.vue'
-import TenantFaqBlock from '~/components/tenant/TenantFaqBlock.vue'
-import TenantReviewsBlock from '~/components/tenant/TenantReviewsBlock.vue'
-import TenantCtaBlock from '~/components/tenant/TenantCtaBlock.vue'
-import TenantDonationChoicesBlock from '~/components/tenant/TenantDonationChoicesBlock.vue'
-import TenantMediaTextBlock from '~/components/tenant/TenantMediaTextBlock.vue'
-import TenantButtonGroupBlock from '~/components/tenant/TenantButtonGroupBlock.vue'
-import TenantContactFormBlock from '~/components/tenant/TenantContactFormBlock.vue'
 
 type BlockPresentation = Component<{ block: TenantPageBlock, page: PublicTenantPage }>
 
@@ -47,42 +18,42 @@ const feedOrBlock = (component: unknown) => component as BlockPresentation
 
 const PRESENTATIONS: Readonly<Record<string, BlockPresentation>> = {
   // KrabiClaw's own platform marketing template.
-  'platform:hero': PlatformMarketingHero,
-  'platform:button_group': PlatformProductNavigation,
-  'platform:feature_grid': PlatformFeatureCards,
-  'platform:comparison': PlatformComparison,
-  'platform:stat_grid': PlatformProofBand,
-  'platform:workflow_grid': PlatformWorkflows,
-  'platform:showcase': PlatformShowcase,
-  'platform:media_text': PlatformMediaFeature,
-  'platform:callout': PlatformSeoBand,
-  'platform:how_to': PlatformPluginSections,
-  'platform:markdown': PlatformProseCard,
-  'platform:faq': TenantFaqBlock,
-  'platform:cta': PlatformBottomCta,
-  'platform:social_posts': feedOrBlock(SocialPosts),
-  'platform:language_reach': PlatformLanguageReach,
-  'platform:steps': PlatformSteps,
+  'platform:hero': defineAsyncComponent(() => import('~/components/platform/marketing/PlatformMarketingHero.vue')),
+  'platform:button_group': defineAsyncComponent(() => import('~/components/platform/marketing/PlatformProductNavigation.vue')),
+  'platform:feature_grid': defineAsyncComponent(() => import('~/components/platform/marketing/PlatformFeatureCards.vue')),
+  'platform:comparison': defineAsyncComponent(() => import('~/components/platform/marketing/PlatformComparison.vue')),
+  'platform:stat_grid': defineAsyncComponent(() => import('~/components/platform/marketing/PlatformProofBand.vue')),
+  'platform:workflow_grid': defineAsyncComponent(() => import('~/components/platform/marketing/PlatformWorkflows.vue')),
+  'platform:showcase': defineAsyncComponent(() => import('~/components/platform/marketing/PlatformShowcase.vue')),
+  'platform:media_text': defineAsyncComponent(() => import('~/components/platform/marketing/PlatformMediaFeature.vue')),
+  'platform:callout': defineAsyncComponent(() => import('~/components/platform/marketing/PlatformSeoBand.vue')),
+  'platform:how_to': defineAsyncComponent(() => import('~/components/platform/marketing/PlatformPluginSections.vue')),
+  'platform:markdown': defineAsyncComponent(() => import('~/components/platform/marketing/PlatformProseCard.vue')),
+  'platform:faq': defineAsyncComponent(() => import('~/components/tenant/TenantFaqBlock.vue')),
+  'platform:cta': defineAsyncComponent(() => import('~/components/platform/marketing/PlatformBottomCta.vue')),
+  'platform:social_posts': feedOrBlock(defineAsyncComponent(() => import('~/components/social/SocialPosts.vue'))),
+  'platform:language_reach': defineAsyncComponent(() => import('~/components/platform/marketing/PlatformLanguageReach.vue')),
+  'platform:steps': defineAsyncComponent(() => import('~/components/platform/marketing/PlatformSteps.vue')),
 
   // Every customer site draws its blocks the same way, whatever its vertical.
-  'tenant:hero': TenantHeroBlock,
-  'tenant:product_grid': TenantProductGridBlock,
-  'tenant:location_grid': TenantLocationsGridBlock,
-  'tenant:feature_grid': TenantFeatureGridBlock,
-  'tenant:team_grid': TenantTeamBlock,
-  'tenant:stat_grid': TenantStatGridBlock,
-  'tenant:page_grid': TenantServicesBlock,
-  'tenant:media_text': TenantMediaTextBlock,
-  'tenant:faq': TenantFaqBlock,
-  'tenant:testimonial_grid': TenantReviewsBlock,
-  'tenant:cta': TenantCtaBlock,
-  'tenant:booking_cta': TenantCtaBlock,
-  'tenant:contact_cta': TenantCtaBlock,
-  'tenant:donation_choices': TenantDonationChoicesBlock,
-  'tenant:video_feature': TenantMediaTextBlock,
-  'tenant:button_group': TenantButtonGroupBlock,
-  'tenant:contact_form': TenantContactFormBlock,
-  'tenant:social_posts': feedOrBlock(SocialPosts),
+  'tenant:hero': defineAsyncComponent(() => import('~/components/tenant/TenantHeroBlock.vue')),
+  'tenant:product_grid': defineAsyncComponent(() => import('~/components/tenant/TenantProductGridBlock.vue')),
+  'tenant:location_grid': defineAsyncComponent(() => import('~/components/tenant/TenantLocationsGridBlock.vue')),
+  'tenant:feature_grid': defineAsyncComponent(() => import('~/components/tenant/TenantFeatureGridBlock.vue')),
+  'tenant:team_grid': defineAsyncComponent(() => import('~/components/tenant/TenantTeamBlock.vue')),
+  'tenant:stat_grid': defineAsyncComponent(() => import('~/components/tenant/TenantStatGridBlock.vue')),
+  'tenant:page_grid': defineAsyncComponent(() => import('~/components/tenant/TenantServicesBlock.vue')),
+  'tenant:media_text': defineAsyncComponent(() => import('~/components/tenant/TenantMediaTextBlock.vue')),
+  'tenant:faq': defineAsyncComponent(() => import('~/components/tenant/TenantFaqBlock.vue')),
+  'tenant:testimonial_grid': defineAsyncComponent(() => import('~/components/tenant/TenantReviewsBlock.vue')),
+  'tenant:cta': defineAsyncComponent(() => import('~/components/tenant/TenantCtaBlock.vue')),
+  'tenant:booking_cta': defineAsyncComponent(() => import('~/components/tenant/TenantCtaBlock.vue')),
+  'tenant:contact_cta': defineAsyncComponent(() => import('~/components/tenant/TenantCtaBlock.vue')),
+  'tenant:donation_choices': defineAsyncComponent(() => import('~/components/tenant/TenantDonationChoicesBlock.vue')),
+  'tenant:video_feature': defineAsyncComponent(() => import('~/components/tenant/TenantMediaTextBlock.vue')),
+  'tenant:button_group': defineAsyncComponent(() => import('~/components/tenant/TenantButtonGroupBlock.vue')),
+  'tenant:contact_form': defineAsyncComponent(() => import('~/components/tenant/TenantContactFormBlock.vue')),
+  'tenant:social_posts': feedOrBlock(defineAsyncComponent(() => import('~/components/social/SocialPosts.vue'))),
 }
 
 /** The component this template draws this block with, or null for the default. */
