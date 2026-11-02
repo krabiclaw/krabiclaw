@@ -11,8 +11,8 @@
       overlay: 'bg-black/40',
       content: 'h-[calc(100dvh-6rem)] max-h-[calc(100dvh-6rem)] rounded-t-2xl overflow-hidden',
     }"
-    @update:open="updateDrawer"
-    @animation-end="finishAnimation"
+    @update:open="(open) => { if (!open) cancel() }"
+    @animation-end="(open) => { if (!open) parent?.focus?.() }"
   >
     <template #content>
       <div ref="drawerTarget" class="flex min-h-0 flex-1 flex-col" />
@@ -61,12 +61,12 @@
         <p v-if="lead" class="mb-8 text-base text-muted">{{ lead }}</p>
 
         <UAlert
-          v-if="error || dismissError"
+          v-if="error"
           class="mb-6"
           color="error"
           variant="soft"
           icon="i-lucide-triangle-alert"
-          :description="dismissError || error"
+          :description="error"
         />
 
         <slot />
@@ -92,26 +92,8 @@
 </template>
 
 <script setup lang="ts">
-import { isNavigationFailure } from 'vue-router'
 import { dashboardGutterClass, dashboardLeafParentKey, dashboardOverlayOpenKey } from './dashboardPanelContext'
-import { getErrorMessage } from '~/utils/errors'
 
-/*
-  A leaf: one thing, its own column, Cancel and Save in the panel's footer —
-  Airbnb's editor-leaf shape, and below lg a drawer over the list it
-  came from. Every leaf in the dashboard is this component with a field in the
-  slot, so the header, the error and the footer are written
-  once rather than re-drawn per screen.
-
-  Cancel is the leaf's own Back: a push to the level that contains it, which is
-  the route record above this one — or, for a step of a record being made,
-  where that record's index goes Back to, so the making is left whole.
-
-  Beside its index — two columns, `lg` — the leaf has no Close and no Cancel:
-  the index's Back is the way out and Save is the only control, which is what
-  Airbnb's editor does at its two-column width (measured 2026-09-21). Both
-  exist only where the leaf is a sheet covering the list it came from.
-*/
 const props = withDefaults(defineProps<{
   id: string
   title: string
@@ -131,71 +113,31 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{ save: []; cancel: [] }>()
 
-const level = useRouteLevel()
 const router = useRouter()
+const level = useRouteLevel()
 const pane = useDashboardPane()
-// An ancestor's fullscreen view owns the modal boundary. Keep this editor in its
-// detached teleport target until that mode closes, including across a resize.
 const overlayOpen = inject(dashboardOverlayOpenKey, null)
 const drawerOpen = ref(true)
 const drawerTarget = useTemplateRef<HTMLDivElement>('drawerTarget')
-// Reka hides the siblings of every live region while a modal mounts. Keep the
-// moving panel detached until its drawer owns it, so a live count is never
-// outside the dialog when that native accessibility boundary is established.
 const pendingDrawerTarget = import.meta.client ? document.createElement('div') : 'body'
-const closeButton = useTemplateRef('closeButton')
-const dismissError = ref('')
-let dismissal: { from: string; to: string } | null = null
-
-// Only the nearest index is the backdrop; other route ancestors keep yielding.
 const parent = inject(dashboardLeafParentKey, null)
-const invoker = import.meta.client && document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null
+let cancelled = false
 
-watch(drawerTarget, async (target) => {
-  if (!target) return
-  await nextTick()
-  if (!pane.value && drawerOpen.value) closeButton.value?.$el.focus({ preventScroll: true })
-})
-
-// Every dismissal discards the parent's retained draft, then follows the same
-// route parent as Cancel. Save keeps the behavior defined by the owning editor.
 function cancel() {
-  if (props.saving || dismissal) return
-  dismissal = { from: router.currentRoute.value.fullPath, to: parent?.exit() ?? level.to.value ?? '/dashboard' }
-  dismissError.value = ''
+  if (props.saving || cancelled) return
+  cancelled = true
   emit('cancel')
-  if (pane.value) return finishDismissal()
   drawerOpen.value = false
-}
-
-function updateDrawer(open: boolean) {
-  if (!open) void cancel()
-}
-
-function finishAnimation(open: boolean) {
-  if (!open) void finishDismissal()
-}
-
-async function finishDismissal() {
-  const pending = dismissal
-  dismissal = null
-  if (!pending || router.currentRoute.value.fullPath !== pending.from) return
-  try {
-    const result = await navigateTo(pending.to)
-    if (isNavigationFailure(result)) throw result
-    await nextTick()
-    if (invoker?.isConnected) invoker.focus({ preventScroll: true })
-    if (document.activeElement !== invoker) parent?.focus()
-  } catch (error) {
-    dismissError.value = getErrorMessage(error, 'The editor could not be closed')
-    drawerOpen.value = true
+  const exitTo = parent?.exit() ?? level.to.value
+  if (exitTo) {
+    const historyBack = import.meta.client ? window.history.state?.back : null
+    const target = router.resolve(exitTo).fullPath
+    if (typeof historyBack === 'string' && router.resolve(historyBack).fullPath === target) {
+      router.back()
+    } else {
+      void navigateTo(exitTo, { replace: true })
+    }
   }
+  if (pane.value) parent?.focus?.()
 }
-
-// A resize moves the existing editor. Complete an already requested dismissal
-// before its drawer disappears, and ignore its later animation callback.
-watch(pane, (wide) => {
-  if (wide && dismissal) void finishDismissal()
-  drawerOpen.value = true
-})
 </script>
