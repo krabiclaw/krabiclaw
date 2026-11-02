@@ -114,6 +114,8 @@ const SERVER_FIELD_MESSAGES: Record<string, () => string> = {
 }
 
 function validate(): boolean {
+  // The phone is checked by the server alone; its refusal stands only until the next attempt.
+  fieldErrors.phone = undefined
   fieldErrors.name = contact.name ? undefined : t('site.contact_page.enter_name')
   fieldErrors.email = !contact.email ? t('site.contact_page.enter_email') : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email) ? undefined : t('site.contact_page.invalid_email')
   const written = props.initialMessage && contact.message.startsWith(props.initialMessage) ? contact.message.slice(props.initialMessage.length) : contact.message
