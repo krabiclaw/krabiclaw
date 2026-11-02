@@ -84,7 +84,7 @@ export function isThreadListResponse(value: unknown): value is ThreadListPage {
     )
 }
 
-function isDeliveryFailure(value: unknown): value is GuestThreadDeliveryFailureViewModel {
+export function isDeliveryFailure(value: unknown): value is GuestThreadDeliveryFailureViewModel {
   return isRecord(value)
     && typeof value.id === 'string'
     && (value.channel === 'email' || value.channel === 'whatsapp' || value.channel === 'airbnb' || value.channel === 'push')
@@ -96,8 +96,29 @@ function isDeliveryFailure(value: unknown): value is GuestThreadDeliveryFailureV
       || value.purpose === 'scheduled_message'
       || value.purpose === 'status_update'
     )
+    && (value.recipient === null || typeof value.recipient === 'string')
     && (value.error === null || typeof value.error === 'string')
     && typeof value.createdAt === 'string'
+}
+
+export const CHANNEL_LABELS = { email: 'email', whatsapp: 'WhatsApp', airbnb: 'Airbnb', push: 'push notification' } as const
+
+/**
+ * What failed, said as the owner reads it: a host alert is told apart from the
+ * guest's own messages. Only a guest acknowledgement names its address, the
+ * guest's own; a host alert's recipient is a teammate's account, which not
+ * everyone who can open the conversation may see.
+ */
+export function deliveryFailureTitle(failure: GuestThreadDeliveryFailureViewModel): string {
+  if (failure.status === 'uncertain') return 'Reply needs review: send outcome unknown'
+  const channel = CHANNEL_LABELS[failure.channel]
+  switch (failure.purpose) {
+    case 'owner_alert': return `Host ${channel} alert could not be delivered`
+    case 'guest_acknowledgement': return `Guest acknowledgement could not be delivered${failure.recipient ? ` to ${failure.recipient}` : ''}`
+    case 'member_reply': return `Reply could not be delivered on ${channel}`
+    case 'status_update': return `Status update could not be delivered on ${channel}`
+    case 'scheduled_message': return `Scheduled message could not be delivered on ${channel}`
+  }
 }
 
 export function isThreadDetailResponse(value: unknown): value is { thread: ThreadDetail } {
