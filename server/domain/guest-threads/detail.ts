@@ -169,7 +169,8 @@ export async function getGuestThreadDetail(
       id: d.id,
       channel: d.channel,
       purpose: d.purpose,
-      recipient: d.channel === 'email' ? deliveryRecipient(d.email_json) : null,
+      // The guest's own address; a host alert's recipient is a teammate's, which is not shown on the conversation.
+      recipient: d.channel === 'email' && d.purpose === 'guest_acknowledgement' ? deliveryRecipient(d.email_json) : null,
       error: d.error,
       status: d.status,
       createdAt: d.created_at,

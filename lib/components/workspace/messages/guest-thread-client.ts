@@ -103,35 +103,22 @@ export function isDeliveryFailure(value: unknown): value is GuestThreadDeliveryF
 
 export const CHANNEL_LABELS = { email: 'email', whatsapp: 'WhatsApp', airbnb: 'Airbnb', push: 'push notification' } as const
 
-export const DELIVERY_PURPOSE_LABELS = {
-  owner_alert: 'owner alert',
-  guest_acknowledgement: 'guest acknowledgement',
-  member_reply: 'reply',
-  status_update: 'status update',
-  scheduled_message: 'scheduled message',
-} satisfies Record<GuestThreadDeliveryFailureViewModel['purpose'], string>
-
+/**
+ * What failed, said as the owner reads it: a host alert is told apart from the
+ * guest's own messages. Only a guest acknowledgement names its address, the
+ * guest's own; a host alert's recipient is a teammate's account, which not
+ * everyone who can open the conversation may see.
+ */
 export function deliveryFailureTitle(failure: GuestThreadDeliveryFailureViewModel): string {
   if (failure.status === 'uncertain') return 'Reply needs review: send outcome unknown'
-  if (failure.purpose === 'owner_alert') {
-    const target = failure.recipient ? ` to ${failure.recipient}` : ''
-    return `Host ${failure.channel} alert could not be delivered${target}`
+  const channel = CHANNEL_LABELS[failure.channel]
+  switch (failure.purpose) {
+    case 'owner_alert': return `Host ${channel} alert could not be delivered`
+    case 'guest_acknowledgement': return `Guest acknowledgement could not be delivered${failure.recipient ? ` to ${failure.recipient}` : ''}`
+    case 'member_reply': return `Reply could not be delivered on ${channel}`
+    case 'status_update': return `Status update could not be delivered on ${channel}`
+    case 'scheduled_message': return `Scheduled message could not be delivered on ${channel}`
   }
-  if (failure.purpose === 'guest_acknowledgement') {
-    const target = failure.recipient ? ` to ${failure.recipient}` : ''
-    return `Guest acknowledgement could not be delivered${target}`
-  }
-  if (failure.purpose === 'member_reply') {
-    return `Reply could not be delivered on ${CHANNEL_LABELS[failure.channel]}`
-  }
-  if (failure.purpose === 'status_update') {
-    return `Status update could not be delivered on ${CHANNEL_LABELS[failure.channel]}`
-  }
-  if (failure.purpose === 'scheduled_message') {
-    return `Scheduled message could not be delivered on ${CHANNEL_LABELS[failure.channel]}`
-  }
-  const delivery = `${CHANNEL_LABELS[failure.channel]} ${DELIVERY_PURPOSE_LABELS[failure.purpose]}`
-  return `${delivery} could not be sent`
 }
 
 export function isThreadDetailResponse(value: unknown): value is { thread: ThreadDetail } {

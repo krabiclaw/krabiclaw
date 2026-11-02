@@ -218,7 +218,7 @@ import type { AvatarProps } from '@nuxt/ui'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 import { isThreadDetailResponse, threadRecordTitle, type ThreadDetail } from '~/lib/components/workspace/messages/guest-thread-client'
 import type { GuestThreadDeliveryFailureViewModel, GuestThreadEntryViewModel } from '~/server/domain/guest-threads/types'
-import { deliveryFailureTitle } from './guest-thread-client'
+import { CHANNEL_LABELS, deliveryFailureTitle } from './guest-thread-client'
 import type { BookingChangeView } from '~/server/domain/guest-threads/booking-changes'
 import { useDashboardInvalidations } from '~/composables/useDashboardInvalidations'
 import { authClient } from '~/lib/auth-client'
@@ -662,7 +662,6 @@ const stream = computed<StreamItem[]>(() => {
 })
 
 const RECEIPT_RANK = ['pending', 'sending', 'accepted', 'sent', 'delivered', 'read'] as const
-const CHANNEL_LABELS = { email: 'email', whatsapp: 'WhatsApp', airbnb: 'Airbnb', push: 'push notification' } as const
 
 function receiptFor(entry: GuestThreadEntryViewModel, participantLabel: string): MessageItem['receipt'] {
   const replies = entry.deliveries.filter(delivery => delivery.purpose === 'member_reply' || delivery.purpose === 'scheduled_message')

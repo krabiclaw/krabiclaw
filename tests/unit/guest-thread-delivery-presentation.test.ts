@@ -11,14 +11,14 @@ test('deliveryFailureTitle clarifies host alerts from guest conversation deliver
     id: 'delivery-1',
     channel: 'email',
     purpose: 'owner_alert',
-    recipient: 'np9gfypzgf@privaterelay.appleid.com',
+    recipient: null,
     error: 'Resend bounced',
     status: 'failed',
     createdAt: '2026-10-30T09:50:25.676Z',
   }
   assert.equal(
     deliveryFailureTitle(hostAlertWithRecipient),
-    'Host email alert could not be delivered to np9gfypzgf@privaterelay.appleid.com',
+    'Host email alert could not be delivered',
   )
 
   const hostAlertWithoutRecipient: GuestThreadDeliveryFailureViewModel = {
@@ -28,7 +28,7 @@ test('deliveryFailureTitle clarifies host alerts from guest conversation deliver
   }
   assert.equal(
     deliveryFailureTitle(hostAlertWithoutRecipient),
-    'Host push alert could not be delivered',
+    'Host push notification alert could not be delivered',
   )
 
   const guestAcknowledgement: GuestThreadDeliveryFailureViewModel = {
