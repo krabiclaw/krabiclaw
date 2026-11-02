@@ -91,5 +91,14 @@ export async function useTeamGroup() {
 export async function useTeamThreads() {
   const dashboard = useDashboardOrganization()
   const api = useDashboardApi()
-  return useAsyncData(() => `team-threads:${dashboard.organizationId.value}`, () => api('/api/dashboard/team/threads', { validate: isTeamThreadsResponse }))
+  return useAsyncData(
+    () => `team-threads:${dashboard.organizationId.value}`,
+    () => api('/api/dashboard/team/threads', { validate: isTeamThreadsResponse }),
+    {
+      getCachedData(cacheKey, nuxtApp, ctx) {
+        if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
+        return nuxtApp.payload.data[cacheKey] as { threads: TeamThread[] } | undefined
+      },
+    },
+  )
 }

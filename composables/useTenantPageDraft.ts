@@ -1,3 +1,4 @@
+import { computed, onMounted, toRaw, toValue, watch, type MaybeRefOrGetter } from 'vue'
 import { slugifyTitle } from '~/utils/post-slugs'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import type { TenantPageBlock, TenantPageType } from '~/utils/tenant-page-blocks'
@@ -183,8 +184,26 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
       ])
       return { context: context.context, page: page?.page ?? null, public_url: page?.public_url ?? null }
     },
+    {
+      getCachedData(cacheKey, nuxtApp, ctx) {
+        if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
+        return nuxtApp.payload.data[cacheKey] as {
+          context: { previewToken: string; sourceLocale: string; organization: { subdomain: string | null } }
+          page: TenantPageResponse | null
+          public_url: string | null
+        } | undefined
+      },
+    },
   )
   const { data, error } = load
+
+  if (import.meta.client) {
+    onMounted(() => {
+      if (useNuxtApp().payload.data[key]) {
+        void load.refresh()
+      }
+    })
+  }
 
   const draft = useState<TenantPageDraft>(`${key}-draft`, emptyDraft)
   /** The draft as it was last seeded or committed, so Save knows there is something to save. */
@@ -202,10 +221,17 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
     seededFrom.value = page?.document.updated_at ?? 'new'
   }
 
+  const dirty = computed(() => JSON.stringify(draft.value) !== baseline.value)
+
   watch(data, (value) => {
     if (!value) return
     const stamp = value.page?.document.updated_at ?? 'new'
     if (seededFrom.value === stamp) return
+    // Retain the editor's uncommitted draft during background refreshes
+    if (dirty.value) {
+      accepted.value = value.page
+      return
+    }
     // Every level that opens re-reads this key, so a read can still be in
     // flight when the level above it writes. Landing afterwards, that read is
     // not an update — it is the page as it was before the write, and seeding it
@@ -225,8 +251,6 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
     // hydration mismatches, and controls that came back disabled because the
     // page they describe was not there yet when the markup was made.
   }, { immediate: true, flush: 'sync' })
-
-  const dirty = computed(() => JSON.stringify(draft.value) !== baseline.value)
 
   /** Discards the draft and returns to the values the page was loaded with. */
   function revert() {

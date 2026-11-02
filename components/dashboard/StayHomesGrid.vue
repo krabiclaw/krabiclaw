@@ -16,6 +16,17 @@
       </div>
     </header>
     <UAlert v-if="error" color="error" variant="soft" title="The homes calendar could not be loaded" :description="getErrorMessage(error, 'Calendar request failed')" :actions="[{ label: 'Try again', color: 'neutral', variant: 'soft', onClick: () => refresh() }]" />
+    <div v-else-if="status === 'pending' && !data" class="overflow-x-auto rounded-xl shadow-sm ring ring-default animate-pulse" role="status" aria-label="Loading calendar...">
+      <div class="p-6 space-y-4">
+        <div class="h-6 w-48 rounded bg-elevated/80" />
+        <div class="space-y-3">
+          <div v-for="i in 3" :key="i" class="flex gap-4">
+            <div class="h-12 w-36 rounded bg-elevated/60 shrink-0" />
+            <div class="h-12 flex-1 rounded bg-elevated/30" />
+          </div>
+        </div>
+      </div>
+    </div>
     <p v-else-if="data && !rows.length" class="py-10 text-center text-sm text-muted">No homes at this location.</p>
     <div v-else-if="data" class="overflow-x-auto rounded-xl shadow-sm ring ring-default" :aria-busy="status === 'pending'" data-testid="stay-homes-grid">
       <div class="grid w-max [--home-column:8rem] sm:[--home-column:14rem]" :style="{ gridTemplateColumns: `var(--home-column) repeat(${dates.length}, 4rem)` }">
@@ -100,7 +111,22 @@ const isPayload = (value: unknown): value is Payload => isRecord(value) && value
 const { data, error, status, refresh } = await useAsyncData(
   () => `stay-homes-grid:${String(route.params.orgSlug)}:${from.value}`,
   (_nuxtApp, { signal }) => api('/api/dashboard/stay-homes/calendar', { query: { from: from.value, to: to.value }, validate: isPayload, signal }),
+  {
+    getCachedData(cacheKey, nuxtApp, ctx) {
+      if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
+      return nuxtApp.payload.data[cacheKey] as Payload | undefined
+    },
+  },
 )
+
+if (import.meta.client) {
+  onMounted(() => {
+    const key = `stay-homes-grid:${String(route.params.orgSlug)}:${from.value}`
+    if (useNuxtApp().payload.data[key]) {
+      void refresh()
+    }
+  })
+}
 
 const guestName = (stay: GridStay) => [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest name not provided'
 // A stay's bar spans the run of nights it holds on screen; a run cut by the window's edge still names its guest.

@@ -44,7 +44,11 @@
     </div>
 
     <!-- Grid -->
-    <div v-if="media?.media.length === 0" class="py-10 text-center">
+    <div v-if="mediaStatus === 'pending' && !media?.media.length" class="grid grid-cols-4 gap-2 sm:grid-cols-5 lg:grid-cols-6 overflow-y-auto max-h-80" role="status" aria-label="Loading media...">
+      <div v-for="i in 12" :key="i" class="aspect-square rounded-lg bg-elevated/70 animate-pulse border-2 border-transparent" />
+    </div>
+
+    <div v-else-if="media?.media.length === 0" class="py-10 text-center">
       <UIcon name="i-lucide-image" class="mx-auto size-8 text-muted" />
       <p class="mt-3 text-sm text-muted">No media yet. Upload your first file.</p>
     </div>
@@ -56,7 +60,7 @@
         type="button"
         :aria-label="asset.alt_text || asset.file_name || asset.kind"
         :aria-pressed="selectedId === asset.id"
-        class="group relative aspect-square overflow-hidden rounded-lg border-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        class="group relative aspect-square overflow-hidden rounded-lg bg-elevated border-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         :class="selectedId === asset.id
           ? 'border-primary'
           : 'border-transparent hover:border-accented'"
@@ -237,7 +241,7 @@ async function upload(file: File) {
 }
 
 // One request answers the grid for the selected kind; an upload refreshes it.
-const { data: media, error: mediaError, refresh } = await useAsyncData(
+const { data: media, error: mediaError, status: mediaStatus, refresh } = await useAsyncData(
   () => `dashboard-media-library:${props.organizationId}:${props.locationId ?? 'organization'}:${kindFilter.value}`,
   async () => {
     const params = new URLSearchParams({ limit: '100' })
@@ -252,5 +256,27 @@ const { data: media, error: mediaError, refresh } = await useAsyncData(
       { validate: isMediaResponse },
     )
   },
+  {
+    getCachedData(cacheKey, nuxtApp, ctx) {
+      if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
+      return nuxtApp.payload.data[cacheKey] as { media: MediaAsset[] } | undefined
+    },
+  },
 )
+
+if (import.meta.client) {
+  onMounted(() => {
+    const key = `dashboard-media-library:${props.organizationId}:${props.locationId ?? 'organization'}:${kindFilter.value}`
+    if (useNuxtApp().payload.data[key]) {
+      void refresh()
+    }
+  })
+  watch(kindFilter, async () => {
+    await nextTick()
+    const key = `dashboard-media-library:${props.organizationId}:${props.locationId ?? 'organization'}:${kindFilter.value}`
+    if (useNuxtApp().payload.data[key]) {
+      void refresh()
+    }
+  })
+}
 </script>

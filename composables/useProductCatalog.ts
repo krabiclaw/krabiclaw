@@ -1,4 +1,4 @@
-import type { Ref } from 'vue'
+import { computed, onMounted, type Ref } from 'vue'
 import type { Collection, Product } from '~/server/types/products'
 import { groupProductsByCollection } from '~/utils/product-presentation'
 import { getErrorMessage } from '~/utils/errors'
@@ -36,8 +36,22 @@ export function useProductCatalog(organizationId: string, locationId: Ref<string
       ])
       return { collections: collectionResponse.collections, products: productResponse.products }
     },
+    {
+      getCachedData(cacheKey, nuxtApp, ctx) {
+        if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
+        return nuxtApp.payload.data[cacheKey] as { collections: Collection[]; products: Product[] } | undefined
+      },
+    },
   )
   const { data, pending, error } = load
+
+  if (import.meta.client) {
+    onMounted(() => {
+      if (useNuxtApp().payload.data[`product-catalog:${organizationId}`]) {
+        void load.refresh()
+      }
+    })
+  }
 
   const collections = computed(() => data.value?.collections ?? [])
   const products = computed(() => (data.value?.products ?? []).filter(product =>
