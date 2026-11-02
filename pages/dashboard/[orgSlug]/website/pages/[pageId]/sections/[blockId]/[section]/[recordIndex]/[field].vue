@@ -33,7 +33,7 @@ const pageId = useTenantPageId().value
 const blockId = String(route.params.blockId ?? '')
 const key = String(route.params.section ?? '')
 const field = String(route.params.field ?? '')
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 
 const collection = computed<TenantPageBlockCollection>(() => {
   const section = editor.sections.value.find(candidate => candidate.key === key)

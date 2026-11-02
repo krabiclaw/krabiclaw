@@ -9,5 +9,5 @@ import TenantPageSections from '~/components/dashboard/TenantPageSections.vue'
 definePageMeta({ layout: 'dashboard' })
 
 const pageId = useTenantPageId()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 </script>

@@ -107,6 +107,7 @@
             <p class="mt-1 text-sm text-muted">{{ reviewStateLabel }}</p>
           </UCard>
 
+          <FormAnswersCard :answers="booking.answers" :title="personalScope ? 'Your answers' : undefined" />
           <UCard v-if="booking.requests" variant="record">
             <h3 class="text-base font-semibold text-highlighted">{{ personalScope ? 'Your requests' : `${recordCopy?.guestLabel.charAt(0).toUpperCase()}${recordCopy?.guestLabel.slice(1)} requests` }}</h3>
             <p class="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-muted">{{ booking.requests }}</p>
@@ -263,6 +264,7 @@ export const bookingEditorKey = Symbol('booking-editor') as InjectionKey<Booking
 </script>
 
 <script setup lang="ts">
+import FormAnswersCard from '~/components/forms/FormAnswersCard.vue'
 import PaymentDetails from '~/components/dashboard/PaymentDetails.vue'
 import { paymentMoney } from '~/shared/payment-display'
 import { authClient } from '~/lib/auth-client'

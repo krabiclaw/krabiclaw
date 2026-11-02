@@ -165,6 +165,7 @@ export const usePublicPageData = async (options: {
   const tenantPage = computed(() => data.value?.tenant_page ?? null);
 
   const reservationPolicyByLocation = computed(() => data.value?.reservationPolicyByLocation ?? {});
+  const reservationQuestionsByLocation = computed(() => data.value?.reservationQuestionsByLocation ?? {});
 
   // ── Content ───────────────────────────────────────────────
   const contentMap = computed(() => {
@@ -257,6 +258,7 @@ export const usePublicPageData = async (options: {
     blogPost,
     tenantPage,
     reservationPolicyByLocation,
+    reservationQuestionsByLocation,
     getField,
     getHero,
     contentMap,

@@ -43,7 +43,7 @@ definePageMeta({ layout: 'dashboard' })
 const route = useRoute()
 const level = useRouteLevel()
 const dashboardApi = useDashboardApi()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const categoryId = computed(() => String(route.params.categoryId))
 
 const { data, error, refresh } = await useAsyncData(

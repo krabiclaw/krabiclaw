@@ -4,6 +4,7 @@ import { expect, test } from '@playwright/test'
 import { buildReplyToAddress } from '../../server/utils/submission-messages'
 import { loginAs } from './helpers/auth'
 import { seededTenant } from './seed/manifest'
+import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { devLoginHeaders, seededSiteHeaders } from './test-env'
 
 test('signed Stripe ingress accepts a signed event and rejects invalid signatures', async ({ request }) => {
@@ -72,7 +73,7 @@ test('signed Resend ingress verifies the raw body and ignores mail that is not a
   expect(await irrelevant.json()).toEqual({ received: 'email.opened', outcome: 'ignored' })
 })
 
-test('native email replies retain their RFC ancestry through repeated dashboard replies and reject changed addresses', async ({ request, baseURL }) => {
+test('native email replies retain their RFC ancestry through repeated dashboard replies and reject changed addresses', async ({ request, baseURL }, testInfo) => {
   test.skip(!baseURL || !['localhost', '127.0.0.1'].includes(new URL(baseURL).hostname), 'native email injection requires disposable local data')
   test.slow()
   const fetchPhase = async (phase: string, path: string, options: Parameters<typeof request.fetch>[1]) => {
@@ -98,6 +99,9 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
     })
   }
   const organizationId = seededTenant('restaurant').organizationId
+  // The restaurant's contact form is shared with specs that change its questions.
+  const release = await acquireTenantMutationLock(testInfo, organizationId)
+  try {
   const name = `E5 ${randomUUID().slice(0, 12)}`
   const guestEmail = 'guest@e2e.example.test'
   const submitted = await fetchPhase('create contact', '/api/public/contact', {
@@ -275,4 +279,7 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   const { thread: replied } = await repliedResponse.json()
   expect(replied.entries.filter((entry: { body: string | null }) => entry.body === staffBody)).toHaveLength(1)
   expect(replied.entries.filter((entry: { body: string | null }) => entry.body === nextStaffBody)).toHaveLength(1)
+  } finally {
+    await release()
+  }
 })

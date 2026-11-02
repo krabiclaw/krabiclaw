@@ -12,6 +12,7 @@ import { HTTPError } from 'nitro'
 import { queryAll, type DbClient } from '~/server/db'
 import { assertPublicOrganizationLanguageEntitlement } from '~/server/utils/localization'
 import { isRecord } from '~/server/utils/type-guards'
+import { formQuestionLocalizationSchema, localizeFormQuestions, type FormQuestion } from '~/shared/form-questions'
 
 export interface StoredPublicLocalizationRow {
   resource_type: string
@@ -97,7 +98,8 @@ export function projectExactLocalizedResource<T extends { id: string }>(
       return []
     }),
   )
-  const projectedValues = { ...localization.values }
+  // Question wording is read by its form (server/domain/form-questions.ts), not projected onto the resource.
+  const projectedValues = Object.fromEntries(Object.entries(localization.values).filter(([field]) => definition.fields[field] !== 'form_questions'))
   if (isRecord(projectedValues.details)) projectedValues.details = { ...unlocalizedDetails, ...projectedValues.details }
   if (resourceType === 'product' && (canonical as { kind?: unknown }).kind === 'stay' && isRecord(projectedValues.details)) {
     const stay = (canonical as { stay?: unknown }).stay
@@ -120,6 +122,14 @@ export function projectExactLocalizedResource<T extends { id: string }>(
   const localizedDescription = descriptionField[resourceType] ? projectedValues[descriptionField[resourceType]] : undefined
   if ('seo_title' in canonical) projectedValues.seo_title = typeof localizedTitle === 'string' ? localizedTitle : null
   if ('seo_description' in canonical) projectedValues.seo_description = typeof localizedDescription === 'string' ? localizedDescription : null
+  // A product's booking or stay questions read in this language; their meaning and revision stay the source's.
+  const questionWording = resourceType === 'product' && localization.values.questions !== undefined ? formQuestionLocalizationSchema.parse(localization.values.questions) : null
+  const questionFields = Object.fromEntries((['booking', 'stay'] as const).flatMap((key) => {
+    const config = (canonical as Record<string, unknown>)[key]
+    return isRecord(config) && Array.isArray(config.questions)
+      ? [[key, { ...config, questions: localizeFormQuestions(config.questions as FormQuestion[], questionWording) }]]
+      : []
+  }))
   const slug = localizedSlug(localization.routePath)
   // An address localizes the parts that are words. The ISO region code and the
   // postcode read the same in every language and are not in the translation, so
@@ -141,6 +151,7 @@ export function projectExactLocalizedResource<T extends { id: string }>(
     ...projectedValues,
     ...addressFields,
     ...routeFields,
+    ...questionFields,
   }
 }
 

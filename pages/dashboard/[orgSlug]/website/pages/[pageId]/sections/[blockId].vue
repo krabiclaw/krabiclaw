@@ -11,5 +11,5 @@ definePageMeta({ layout: 'dashboard' })
 const route = useRoute()
 const pageId = useTenantPageId()
 const blockId = computed(() => String(route.params.blockId ?? ''))
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 </script>

@@ -212,6 +212,7 @@
 
 <script setup lang="ts">
 import { formatPhone } from '~/utils/phone'
+import { formatFormAnswer } from '~/shared/form-questions'
 import { formatCalendarDate, formatTime, isValidInstant } from '~/utils/timezone'
 import { useIntervalFn, useDocumentVisibility } from '@vueuse/core'
 import type { AvatarProps } from '@nuxt/ui'
@@ -532,6 +533,12 @@ const announcement = computed(() => {
   return { title: `New ${recordNoun.value}`, rows }
 })
 
+// What the guest answered to the business's own questions, in the wording they read.
+const answersAnnouncement = computed(() => {
+  const answers = thread.value?.answers ?? []
+  return answers.length ? { title: 'Answers', rows: answers.map(answer => ({ label: answer.label, value: formatFormAnswer(answer, { yes: 'Yes', no: 'No' }) })) } : null
+})
+
 // A contact thread's words are its `message`; a reservation or booking carries
 // them as `notes`. Either way they are what the guest typed to start this.
 const openingMessage = computed(() => {
@@ -614,8 +621,9 @@ const stream = computed<StreamItem[]>(() => {
         booking came in, and the guest's own words. Both read as messages.
       */
       if (announcement.value) message(`${key}:announcement`, entry.occurredAt, null, 'platform', null, { announcement: announcement.value })
+      if (answersAnnouncement.value) message(`${key}:answers`, entry.occurredAt, null, 'platform', null, { announcement: answersAnnouncement.value })
       if (openingMessage.value) message(key, entry.occurredAt, openingMessage.value, 'guest', null)
-      if (!announcement.value && !openingMessage.value) {
+      if (!announcement.value && !answersAnnouncement.value && !openingMessage.value) {
         push(entry.occurredAt, { type: 'event', key, icon: 'i-lucide-sparkles', label: `Conversation with ${current.participantLabel} recorded` })
       }
     } else if (entry.kind === 'message') {

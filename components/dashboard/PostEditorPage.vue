@@ -82,7 +82,7 @@ const level = useRouteLevel()
 const dashboardApi = useDashboardApi()
 const toast = useToast()
 const dashboard = useDashboardOrganization()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const postId = String(route.params.postId ?? '')
 const isNew = postId === 'new'
 const scopeLocationId = useLocationScope()

@@ -61,7 +61,7 @@ const level = useRouteLevel()
 const route = useRoute()
 const router = useRouter()
 const dashboardApi = useDashboardApi()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const locationId = useLocationScope()
 const editor = usePostEditor(organizationId, locationId)
 

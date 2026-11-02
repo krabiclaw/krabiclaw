@@ -8,6 +8,7 @@
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup, type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
+import { formQuestionsSummary } from '~/utils/form-question-editing'
 
 definePageMeta({ layout: 'dashboard' })
 const p = inject(productEditorKey)!
@@ -31,6 +32,7 @@ const groups = computed<EditorNavigationGroup[]>(() => {
     row('capacity', legal.value ? 'Client limit' : 'Guest limit', config.default_capacity === null ? `No ${copy.guestLabel} limit` : config.default_capacity === 1 ? `One ${copy.guestLabel} per ${occurrence}` : config.default_capacity === 0 ? `Closed to new ${copy.guestsLabelPlural}` : `Up to ${config.default_capacity} ${copy.guestsLabelPlural} per ${occurrence}`),
     row('assignment', copy.assigneeLabel, p.assignmentSummary.value, 'i-lucide-user-round'),
     row('confirmation', 'Confirmation', config.confirmation_mode === 'instant' ? 'Confirm automatically' : 'Review each request'),
+    row('questions', 'Questions', formQuestionsSummary(config.questions), 'i-lucide-message-square-text'),
     ...((p.product.value?.kind === 'experience' || legal.value ? config.scheduling_mode === 'provider' : config.held_online)
       ? [{ id: 'hours', icon: 'i-lucide-clock', label: 'Bookable times', summary: config.assigned_team_id ? 'Each team member\'s working hours' : `The ${copy.assigneeNoun}'s working hours`, to: config.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${config.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team` }]
       : []),

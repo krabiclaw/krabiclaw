@@ -208,8 +208,12 @@ export function useDashboardOrganization() {
   }
 }
 
-/** The tenant id, or a thrown error when the context has not loaded. */
-export async function useDashboardOrganizationId() {
+/**
+ * The tenant id, or a thrown error when the context has not loaded. Synchronous
+ * so a composable that reads it keeps the component's context for what it sets
+ * up next: an await here left the location editor's watchers bound to nothing.
+ */
+export function useDashboardOrganizationId(): string {
   const dashboard = useDashboardOrganization()
   if (!dashboard.state.value) throw createError({ statusCode: 503, message: 'Dashboard context not loaded' })
   const organizationId = dashboard.organizationId.value

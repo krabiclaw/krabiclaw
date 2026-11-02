@@ -57,7 +57,7 @@ const collectionId = computed(() => String(route.params.collectionId ?? ''))
 const level = useRouteLevel()
 const collectionPath = level.path
 
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 
 // Catalog's scope: a collection created here belongs to the location the URL
 // names, or to the whole site when it names none.

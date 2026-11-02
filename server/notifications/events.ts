@@ -1,4 +1,5 @@
-import type { MemberAlertMessage, NotificationFact } from './messages'
+import type { MemberAlertMessage, NotificationFact, NotificationSection } from './messages'
+import { formatFormAnswer, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { formatPhone } from '~/utils/phone'
 import type { BookingPresentation } from '~/utils/booking-presentation'
 import { stayGuestFirstName } from '~/shared/bookings'
@@ -26,6 +27,12 @@ function facts(...entries: Array<NotificationFact | null>): NotificationFact[] {
   return entries.filter((entry): entry is NotificationFact => entry !== null)
 }
 
+/** The guest's answers to the business's own questions, as the conversation shows them. */
+function answersSections(answers: readonly FormAnswerSnapshot[] | undefined): NotificationSection[] {
+  if (!answers?.length) return []
+  return [{ title: 'Answers', body: answers.map(answer => `${answer.label}: ${formatFormAnswer(answer, { yes: 'Yes', no: 'No' })}`).join('\n') }]
+}
+
 export interface ReservationEventInput {
   guestName: string
   guestEmail: string
@@ -40,6 +47,8 @@ export interface ReservationEventInput {
   replyUrl: string
   /** What the guest paid online for it; null when nothing was paid on the site. */
   paid?: string | null
+  /** The guest's answers to the business's own questions. */
+  answers?: readonly FormAnswerSnapshot[]
 }
 
 export function reservationCreatedMessage(input: ReservationEventInput): MemberAlertMessage {
@@ -58,6 +67,7 @@ export function reservationCreatedMessage(input: ReservationEventInput): MemberA
       fact('notes', 'Special requests', input.notes),
       fact('paid', 'Paid online', input.paid ?? null),
     ),
+    sections: answersSections(input.answers),
     primaryAction: { url: input.replyUrl, label: 'Reply in dashboard' },
     category: 'reservations_bookings',
     emailPurpose: 'transactional',
@@ -117,6 +127,8 @@ export interface StayEventInput {
   /** The nights are already held by another stay: a double booking to resolve. */
   overlap: boolean
   notes: string | null
+  /** The guest's answers to the home's questions. */
+  answers?: readonly FormAnswerSnapshot[]
   organizationName: string
   heroImageUrl: string | null
   replyUrl: string
@@ -144,6 +156,7 @@ export function stayBookedMessage(input: StayEventInput): MemberAlertMessage {
       fact('guestEmail', 'Email', input.guestEmail, true),
       fact('notes', 'Message from the guest', input.notes),
     ),
+    sections: answersSections(input.answers),
     primaryAction: { url: input.replyUrl, label: input.overlap ? 'Resolve double booking' : input.channel ? 'Open stay' : 'Reply in dashboard' },
     category: 'reservations_bookings',
     emailPurpose: 'transactional',
@@ -193,7 +206,7 @@ export function memberGuestName(guest: { name: string } | { label: string }): st
  * guest's conversation. Owners and admins receive the input as it is.
  */
 export function stayTurnoverAlert<T extends Pick<StayEventInput, 'guestName' | 'guestEmail' | 'guestPhone' | 'replyUrl'>>(input: T, stayUrl: string, guestName: string): T {
-  const money = Object.fromEntries((['notes', 'total', 'paid', 'balance', 'refund'] as const).filter(field => field in input).map(field => [field, null]))
+  const money = Object.fromEntries((['notes', 'answers', 'total', 'paid', 'balance', 'refund'] as const).filter(field => field in input).map(field => [field, null]))
   return { ...input, ...money, guestName, guestEmail: null, guestPhone: null, replyUrl: stayUrl }
 }
 
@@ -222,6 +235,7 @@ export function bookingCreatedMessage(input: BookingEventInput): MemberAlertMess
       fact('notes', 'Special requests', input.notes),
       fact('paid', 'Paid online', input.paid ?? null),
     ),
+    sections: answersSections(input.answers),
     primaryAction: { url: input.replyUrl, label: 'Reply in dashboard' },
     category: 'reservations_bookings',
     emailPurpose: 'transactional',

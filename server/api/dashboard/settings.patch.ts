@@ -1,6 +1,6 @@
 // Direct dashboard settings update handler.
 // Avoids the generic dashboard proxy hop for this request path.
-import { jsonResponse } from '~/server/utils/api-response'
+import { jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
 import { getDashboardContext } from '~/server/utils/dashboard-context'
 import { isDemoOrganization } from '~/shared/demo'
 import { updateOrganizationSettingsFields } from '~/server/utils/organization-settings'
@@ -34,6 +34,8 @@ export default defineHandler(async (event) => {
 
     return jsonResponse(result.data, { status: result.status })
   } catch (error) {
+    // A refusal the writer explains (a conflict, an invalid question) reaches the caller as itself.
+    rethrowHttpError(error)
     console.error('Failed to update organization settings:', error)
     return jsonResponse(
       { error: 'Failed to update organization settings' }, { status: 500 }, )

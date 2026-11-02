@@ -255,7 +255,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     await page.getByLabel(/email/i).fill(email)
     await page.getByLabel(/your message/i).fill('Please tell me more about private pottery classes.')
     const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/api/public/contact'))
-    await page.getByRole('button', { name: /send a message/i }).click()
+    await page.getByRole('button', { name: 'Send message', exact: true }).click()
     expect((await submission).status()).toBe(201)
     await expect(page).toHaveURL(/\/contact\/confirmed/)
     const state = await waitForNotifications(request, seededSiteURL('experience'), seededTenant('experience').organizationId, since, state =>

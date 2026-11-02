@@ -23,6 +23,6 @@ definePageMeta({ layout: 'dashboard' })
 
 const touched = ref(false)
 const dashboardLocation = useDashboardLocation()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const editor = await useLocationEditor(organizationId, dashboardLocation.currentLocationId, 'name')
 </script>

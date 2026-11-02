@@ -58,7 +58,7 @@ const { startOrganizationCheckout, openBillingPortal } = useOrganizationSubscrip
 const { formatExactDateTime } = useHumanTime()
 const { plans, formatPrice, formatRecurring } = await usePlans()
 
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const [{ billing, billingError, refreshBilling }, { services, servicesError }, { methods, methodsError }, { quote: homes, quoteError: homesError, refreshQuote: refreshHomes }] = await Promise.all([
   useOrganizationBilling(), useOrganizationServices(), usePaymentMethods(), useHomesQuote(organizationId, 0),
 ])

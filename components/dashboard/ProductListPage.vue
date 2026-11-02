@@ -37,7 +37,7 @@ import { getErrorMessage } from '~/utils/errors'
 const level = useRouteLevel()
 const route = useRoute()
 const router = useRouter()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 // One authorized organization read. Location narrows this projection by its
 // explicit product relationships, without dropping membership needed by editors.
 const catalog = useProductCatalog(organizationId, ref(null))

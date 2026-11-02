@@ -224,6 +224,18 @@
         "destructive_justification": "Adds an explicitly authored room or space to one home’s photo tour and returns its created ID. Leaves bedroom, bed and bathroom counts, amenities, Product photos and library files unchanged."
       }
     },
+    "create_inquiry": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Records an inquiry or quote request with its contact details, optional message and validated answers to the organization’s inquiry questions in the inbox, with caller idempotency; holds no appointment, capacity or payment and sends canonical notices.",
+        "open_world_justification": "Sends owner alerts and an acknowledgement email to the supplied contact address.",
+        "destructive_justification": "Records an inquiry or quote request with its contact details, optional message and validated answers to the organization’s inquiry questions in the inbox, with caller idempotency; holds no appointment, capacity or payment and sends canonical notices."
+      }
+    },
     "create_location": {
       "annotations": {
         "readOnlyHint": false,

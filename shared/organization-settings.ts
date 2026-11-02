@@ -82,6 +82,8 @@ export interface OrganizationSettings {
     updated_at: string
     updated_by: string | null
   }
+  /** The organization's inquiry form: its own questions beside the shared contact fields. */
+  inquiry?: { questions: import('./form-questions').FormQuestion[] }
   compliance?: Omit<import('../types/public-site').PublicCompliance, 'media'> & {
     metadata_json: Record<string, unknown> | null
     created_at: string

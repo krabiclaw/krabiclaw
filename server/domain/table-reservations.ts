@@ -28,6 +28,8 @@ import { measurementOutcome, readPageEventId, recordOrganizationConversionEvent 
 import { buildOwnerThreadInboxUrl } from '~/server/utils/dashboard-notification-links'
 import { HTTPError, type H3Event } from 'nitro'
 import { localNow } from '~/utils/timezone'
+import { acceptFormAnswers } from '~/server/domain/form-questions'
+import { formAnswersFingerprint } from '~/shared/form-questions'
 
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/
 
@@ -115,7 +117,7 @@ export async function createTableReservation(event: H3Event, input: {
   const idempotencyKey = operator?.idempotencyKey ?? (typeof body.idempotency_key === 'string' ? body.idempotency_key.trim() : '')
   if (!idempotencyKey || idempotencyKey.length > 200) return creationResult({ error: 'A stable reservation request key is required' }, { status: 400 })
   const id = await hashIdentifier(JSON.stringify([operator ? 'reservation' : 'website-reservation', organizationId, idempotencyKey]))
-  const fingerprint = await hashIdentifier(JSON.stringify({ name, email, phone, date, time, guests, requests, locationId, source: operator?.source ?? 'website', externalReference: operator?.externalReference ?? null, guestAcknowledgement: operator?.guestAcknowledgement ?? true }))
+  const fingerprint = await hashIdentifier(JSON.stringify({ name, email, phone, date, time, guests, requests, locationId, answers: formAnswersFingerprint(body.answers), source: operator?.source ?? 'website', externalReference: operator?.externalReference ?? null, guestAcknowledgement: operator?.guestAcknowledgement ?? true }))
   const replay = async () => {
     const row = await queryFirst<{ id: string; status: string; starts_at: string; ends_at: string; timezone: string; party_size: number; location_id: string; fingerprint: string | null; completed: number | null }>(db, `SELECT r.id,r.status,r.starts_at,r.ends_at,r.timezone,r.party_size,r.location_id, json_extract(t.payload_json, '$.provenance.fingerprint') AS fingerprint, json_extract(t.payload_json, '$.provenance.followups_completed') AS completed FROM reservations r JOIN requests t ON t.id = r.request_id AND t.organization_id = r.organization_id WHERE r.organization_id = ? AND t.id = ?`, [organizationId, id])
     if (!row) return null
@@ -157,6 +159,8 @@ export async function createTableReservation(event: H3Event, input: {
   }
   await assertPublicOrganizationLanguageEntitlement(env, db, organizationId, locale)
   const policy = await requireLocationReservationConfig(db, { organizationId, locationId: resolvedLocationId })
+  // Checked and frozen before any table or deposit: a deposit checkout's thread carries them.
+  const answers = await acceptFormAnswers(db, { kind: 'reservation', organizationId, locationId: resolvedLocationId }, { locale, answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })
   if (!Number.isSafeInteger(policy.duration_minutes) || !policy.duration_minutes || policy.duration_minutes < 1) return creationResult({ error: 'Set this location’s reservation duration before taking reservations', missing: ['duration_minutes'] }, { status: 409 })
   const requiresDeposit = policy.deposit_required && (policy.deposit_trigger_party_size === null || partySize >= policy.deposit_trigger_party_size)
   if (requiresDeposit && input.financialWritesAllowed === false) throw new HTTPError({ statusCode: 409, message: 'This reservation requires a deposit. Continue through the business’s payment workflow.', data: { code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(organization.slug)}/calendar/settings/availability/deposit?locationId=${encodeURIComponent(resolvedLocationId)}` } })
@@ -214,7 +218,7 @@ export async function createTableReservation(event: H3Event, input: {
   const userId = operator ? null : await ensureInteractionUser(event, env)
 
   const now = new Date().toISOString()
-  const payload = threadPayloadForGuest({ name, email, phone, locale, notes: requests, ipHash, partySizeIsMinimum: guests.endsWith('+') })
+  const payload = threadPayloadForGuest({ name, email, phone, locale, notes: requests, ipHash, partySizeIsMinimum: guests.endsWith('+'), answers })
   payload.provenance = { source: operator?.source ?? 'website', external_reference: operator?.externalReference ?? null, actor_user_id: operator?.userId ?? null,
     idempotency_key: idempotencyKey, fingerprint, guest_acknowledgement: operator?.guestAcknowledgement ?? true, creation_kind: requiresDeposit ? 'checkout' : 'ordinary', creation_status: 'confirmed', followups_completed: false }
   payload.cancellation = { token_hash: cancellationTokenHash, expires_at: cancellation.expiresAt, used_at: null }

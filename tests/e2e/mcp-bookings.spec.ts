@@ -253,7 +253,9 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       for (const id of ids) {
         if ((await read(id)).record.status !== 'cancelled') await call('cancel_product_booking', { operational_booking_id: id, idempotency_key: crypto.randomUUID() })
       }
-      const restored = await request.put(`${editor}/booking`, { data: priorBooking })
+      // The questions are restated unchanged, so the restore carries no revision to guard.
+      const { questions_revision: _revision, ...priorWritable } = priorBooking!
+      const restored = await request.put(`${editor}/booking`, { data: priorWritable })
       expect(restored.status(), await restored.text()).toBe(200)
       const restoredReadback = await request.get(editor)
       expect(restoredReadback.status()).toBe(200)

@@ -18,6 +18,7 @@ import { moveBooking, requestBookingChange, bookingChangeViews } from '~/server/
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { readPaymentDetails } from '~/server/domain/payments'
+import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { canRetryGuestReservationRefund } from '~/server/domain/payments/visit-refund'
 import {paymentDisplay,paymentRefundsDisplay,paymentOrderDisplay,type PaymentDisplay,type PaymentRefundDisplay,type PaymentOrderDisplay} from '~/shared/payment-display'
 
@@ -53,6 +54,7 @@ interface BookingRow {
   scheduling_mode: string | null
   session_status: string | null
   request_id: string | null
+  answers_json: string | null
   cancellation_used_at: string | null
   created_at: string
   updated_at: string
@@ -116,6 +118,8 @@ export interface DashboardBookingDetails {
   updatedAt: string
   policy: RenderedBookingPolicySummary | null
   notes: DashboardBookingNote[]
+  /** The guest's answers to the business's own questions, in the wording they answered. A request made before questions has none. */
+  answers: FormAnswerSnapshot[]
   /** A change the business proposed that the guest has not answered; Airbnb's "Change requested". */
   pendingChange: { requestId: string; requestedAt: string; beforeLabel: string; afterLabel: string; partySize: number; beforeAssignedMemberName: string | null; afterAssignedMemberName: string | null } | null
   locations: Array<{ id: string; title: string; imageUrl: string | null }>
@@ -173,7 +177,7 @@ async function loadBookingRow(
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
     (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, record.party_size, record.starts_at, record.ends_at, record.timezone, record.status, json_extract(r.payload_json, '$.notes') AS requests,
     record.product_id AS experience_id, record.product_name AS experience_title, record.product_session_id AS session_id,
-    r.id AS request_id, json_extract(r.payload_json, '$.cancellation.used_at') AS cancellation_used_at, r.created_at, r.updated_at, record.no_show_at, r.review_id
+    r.id AS request_id, json_extract(r.payload_json, '$.answers') AS answers_json, json_extract(r.payload_json, '$.cancellation.used_at') AS cancellation_used_at, r.created_at, r.updated_at, record.no_show_at, r.review_id
     FROM requests r
     JOIN organization s ON s.id = r.organization_id
     JOIN (
@@ -346,6 +350,7 @@ async function composeBookingDetails(
     // Products state their current terms; reservations keep their captured location policy.
     policy: policy && policyLocale ? renderBookingPolicySummary(policy, policyLocale, productKind) : null,
     notes,
+    answers: row.answers_json === null ? [] : formAnswerSnapshotsSchema.parse(JSON.parse(row.answers_json)),
     pendingChange: await pendingBookingChange(db, row.request_id),
     locations: visibleLocations.map(location => ({ ...location, imageUrl: locationPictures.get(location.id)?.imageUrl ?? null })),
     payments:reader.buyerUserId||reader.canReadPayments?payments:null,
@@ -465,6 +470,8 @@ async function composePurchaseDetails(db: DbClient, scope: BookingScope, payment
   return {
     assignedMemberId: null, assignedMemberName: null, providerConflict: false, providerCalendarStatus: null, operationalUpdatedAt: payment.updated_at,
     canReassignProvider: false,
+    // A purchase asks no questions.
+    answers: [],
     id: paymentId,
     operationalBookingId: detail.order?.id ?? paymentId,
     type: detail.order ? 'order' : 'payment',

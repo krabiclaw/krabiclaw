@@ -24,6 +24,6 @@ import { getPhoneCountry } from '~/utils/phone'
 definePageMeta({ layout: 'dashboard' })
 
 const dashboardLocation = useDashboardLocation()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const editor = await useLocationEditor(organizationId, dashboardLocation.currentLocationId, 'contact')
 </script>

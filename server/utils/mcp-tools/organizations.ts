@@ -1,5 +1,6 @@
 import type { McpToolDefinition } from './shared'
 import { HTTPError } from 'nitro'
+import { formQuestionsJsonSchema } from '~/shared/form-questions'
 import { currencyCodeSchema, currentUserObject, globalTool, pageInfoObject, paginationInputSchema, organizationSummaryItem, organizationTool, withToolAnnotations, workspaceContextObject, PHONE_FORMAT } from './shared'
 import { ALL_VERTICALS } from '~/utils/vertical-copy'
 import { PLATFORM_LOCALES } from '~/shared/platform-locales'
@@ -97,6 +98,8 @@ const websiteDraftOutputSchema = {
 
 const ORGANIZATION_SETTINGS_READ_PROPERTIES = {
   id: { type: 'string' },
+  inquiry_questions: { ...formQuestionsJsonSchema('read'), description: 'The inquiry form\'s own questions, asked beside name, email, phone and message on every contact form the site places.' },
+  inquiry_questions_revision: { type: 'string', description: 'Send as expected_inquiry_questions_revision when replacing inquiry_questions, and as questions_revision with an inquiry.' },
   organization_id: { type: 'string' },
   subdomain: { type: 'string' },
   theme: { type: 'string' },
@@ -283,7 +286,7 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'update_organization_settings',
-      description: "Change the selected site’s brand, description, website font, colors, button and heading styling, contact email, default currency, visitor announcement banner/popup or Live/Draft status. Only supplied settings change. An announcement replaces all its fields, and null removes it. Logos and announcement images are separate media placements; this tool does not change them. Returns the updated settings. Published website settings change immediately; this does not create a short post, blog article or social publication.",
+      description: "Change the selected site’s brand, description, website font, colors, button and heading styling, contact email, default currency, visitor announcement banner/popup, inquiry form questions or Live/Draft status. Only supplied settings change. An announcement replaces all its fields, and null removes it. Logos and announcement images are separate media placements; this tool does not change them. Returns the updated settings. Published website settings change immediately; this does not create a short post, blog article or social publication.",
       domain: 'organizations',
       minimumRole: 'admin',
       inputSchema: {
@@ -311,6 +314,8 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
         partnerships_email: { type: 'string' },
         catering_email: { type: 'string' },
         careers_email: { type: 'string' },
+        inquiry_questions: { ...formQuestionsJsonSchema('write'), description: 'The inquiry (quote or lead) form\'s own questions, asked beside the shared contact fields wherever the site places its contact form. Replaces the saved list; read get_organization_settings first and keep existing IDs.' },
+        expected_inquiry_questions_revision: { type: 'string', description: 'inquiry_questions_revision from get_organization_settings; required with inquiry_questions.' },
       },
       outputSchema: {
         type: 'object',
@@ -476,8 +481,8 @@ export async function handleOrganizationsTools(ctx: McpExecutorContext): Promise
           ok: true,
           entity: "organization_settings",
           id: organization.organizationId,
-          changed_fields: Object.keys(updates),
-          saved_fields: Object.fromEntries(Object.keys(updates).map(key => [key, settingsResult[key as keyof typeof settingsResult]])),
+          changed_fields: Object.keys(updates).filter(key => key !== 'expected_inquiry_questions_revision'),
+          saved_fields: Object.fromEntries(Object.keys(updates).filter(key => key !== 'expected_inquiry_questions_revision').map(key => [key, settingsResult[key as keyof typeof settingsResult]])),
           ...(settingsResult.address_visibility !== undefined ? { address_visibility: settingsResult.address_visibility } : {}),
           contrast_warnings: settingsResult.palette ? paletteContrast(settingsResult.palette).filter(check => check.ratio < check.minimum) : [],
           updated_at: settingsResult.updated_at,

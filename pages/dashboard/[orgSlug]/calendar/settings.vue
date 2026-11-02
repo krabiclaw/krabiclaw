@@ -21,7 +21,7 @@ definePageMeta({ layout: 'dashboard', key: route => String(route.query.locationI
 
 const route = useRoute()
 const level = useRouteLevel()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const locationId = computed(() => typeof route.query.locationId === 'string' ? route.query.locationId : null)
 const editor = locationId.value ? await useLocationEditor(organizationId, locationId, null) : null
 

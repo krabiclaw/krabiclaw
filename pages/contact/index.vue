@@ -30,65 +30,9 @@
             <h2 class="tenant-display tenant-italic text-3xl text-default">{{ t('site.contact_page.anything_not_location_specific') }}</h2>
             <p class="mt-4 text-sm leading-relaxed text-muted">{{ t('site.contact_page.specific_questions') }}</p>
 
-            <form class="mt-10 space-y-7" novalidate @submit.prevent="handleTenantContact">
-              <div v-if="tenantSubmitError" role="alert" class="rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-red-500">
-                {{ tenantSubmitError }}
-              </div>
-
-              <div class="grid gap-6 sm:grid-cols-2">
-                <TenantFormField
-                  v-slot="{ id, describedBy, invalid }"
-                  :label="t('site.contact_page.your_name')"
-                  name="name"
-                  required
-                  :error="tenantFieldError('name')"
-                >
-                  <input :id="id" v-model="tenantForm.name" type="text" :class="inputClass" :aria-describedby="describedBy" :aria-invalid="invalid" />
-                </TenantFormField>
-                <TenantFormField
-                  v-slot="{ id, describedBy, invalid }"
-                  :label="t('site.contact_page.email')"
-                  name="email"
-                  required
-                  :error="tenantFieldError('email')"
-                >
-                  <input :id="id" v-model="tenantForm.email" type="email" :class="inputClass" :aria-describedby="describedBy" :aria-invalid="invalid" />
-                </TenantFormField>
-              </div>
-
-              <TenantFormField :label="t('site.contact_page.what_about')" name="subject">
-                <div class="mt-2 flex flex-wrap gap-2">
-                  <button
-                    v-for="opt in subjectOptions"
-                    :key="opt.key"
-                    type="button"
-                    :class="[
-                      'rounded-full border px-4 py-2 text-xs font-medium uppercase tracking-widest transition',
-                      tenantForm.subject === opt.key
-                        ? 'border-inverted bg-inverted text-inverted'
-                        : 'border-default bg-default text-muted hover:border-muted hover:text-default'
-                    ]"
-                    @click="tenantForm.subject = opt.key"
-                  >
-                    {{ opt.label }}
-                  </button>
-                </div>
-              </TenantFormField>
-
-              <TenantFormField
-                v-slot="{ id, describedBy, invalid }"
-                :label="t('site.contact_page.your_message')"
-                name="message"
-                required
-                :error="tenantFieldError('message')"
-              >
-                <textarea :id="id" v-model="tenantForm.message" rows="6" :class="inputClass" :aria-describedby="describedBy" :aria-invalid="invalid" />
-              </TenantFormField>
-
-              <TenantButton type="submit" :loading="tenantSubmitting" :disabled="isDraftPreview">
-                {{ t('site.contact_page.send_message') }}
-              </TenantButton>
-            </form>
+            <div class="mt-10">
+              <TenantInquiryForm :subjects="subjectOptions" :initial-message="aboutPrefix" :disabled="isDraftPreview" />
+            </div>
           </section>
 
           <!-- DARK ASIDE: brand contact — hidden when no emails are configured -->
@@ -229,12 +173,12 @@
 
 <script setup lang="ts">
 import { formatPhone } from '~/utils/phone'
-import type { SubmissionMeasurement } from '~/composables/useOrganizationConversionTracking'
+import TenantInquiryForm from '~/components/tenant/TenantInquiryForm.vue'
 
 definePageMeta({ layout: false })
 
 const { previewAuthorized, organization } = useTenantOrganization()
-const { template, id: organizationId } = organization
+const { template } = organization
 const isPlatform = organization.template.slug === 'platform'
 if (isPlatform) throw createError({ statusCode: 404 })
 // A legal practice's contact page is its authored page; a venue's is this form and its branches.
@@ -242,14 +186,9 @@ const legalPractice = isLegalPractice(organization.vertical)
 
 const { locale, localePath, t } = useI18n()
 const vertCopy = computed(() => getVerticalCopy(organization.vertical, locale.value))
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-// Plain-Tailwind form styling — replaces UInput/UTextarea's default look
-// now that this page no longer depends on Nuxt UI (see TenantFormField.vue).
-import { FORM_INPUT_CLASS } from '~/utils/form-constants'
 import { addressPlaceName, formatPostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { publicLocationPath } from '~/utils/product-presentation'
-const inputClass = FORM_INPUT_CLASS
 
 const businessName = organization.name
 // A preview is the real site, so the form is real too — but an owner looking
@@ -268,18 +207,6 @@ const contactAdditionalPage = computed(() => tenantPage.value
 
 interface ContactLocation {
   address?: PostalAddress | null
-}
-
-interface TenantContactForm {
-  name: string
-  email: string
-  subject: string
-  message: string
-}
-
-interface TenantFieldError {
-  name: keyof TenantContactForm
-  message: string
 }
 
 function formatLocAddress(loc: ContactLocation) {
@@ -314,59 +241,6 @@ const subjectOptions = computed(() => [
 const route = useRoute()
 const aboutProduct = typeof route.query.about === 'string' ? route.query.about.trim().slice(0, 120) : ''
 const aboutPrefix = aboutProduct ? `${t('site.contact_page.about_product', { product: aboutProduct })}\n\n` : ''
-const tenantForm = ref<TenantContactForm>({
-  name: '',
-  email: '',
-  subject: 'general',
-  message: aboutPrefix,
-})
-const tenantSubmitting = ref(false)
-const { mirrorSubmission, pageEventId } = useOrganizationConversionTracking()
-const tenantErrors = ref<TenantFieldError[]>([])
-const tenantSubmitError = ref<string | null>(null)
-const tenantFieldError = (name: keyof TenantContactForm) =>
-  tenantErrors.value.find(error => error.name === name)?.message ?? null
-
-const validateTenantContact = (state: TenantContactForm): TenantFieldError[] => {
-  const errors: TenantFieldError[] = []
-  if (!state.name) errors.push({ name: 'name', message: t('site.contact_page.enter_name') })
-  if (!state.email) errors.push({ name: 'email', message: t('site.contact_page.enter_email') })
-  else if (!emailPattern.test(state.email)) errors.push({ name: 'email', message: t('site.contact_page.invalid_email') })
-  // The prefilled product line is context, not the guest's message.
-  const written = state.message.startsWith(aboutPrefix) ? state.message.slice(aboutPrefix.length) : state.message
-  if (!written.trim()) errors.push({ name: 'message', message: t('site.contact_page.enter_message') })
-  return errors
-}
-
-const handleTenantContact = async () => {
-  if (isDraftPreview.value) return
-  if (!organizationId) {
-    tenantSubmitError.value = t('site.contact_page.message_failed')
-    return
-  }
-  tenantSubmitError.value = null
-  tenantErrors.value = validateTenantContact(tenantForm.value)
-  if (tenantErrors.value.length > 0) return
-
-  tenantSubmitting.value = true
-  let submitted: { success: true; measurement?: SubmissionMeasurement }
-  try {
-    submitted = await publicApiMutation<{ success: true; measurement?: SubmissionMeasurement }>(`/api/public/contact`, {
-      method: 'POST',
-      body: { ...tenantForm.value, locale: locale.value, page_event_id: await pageEventId() },
-      validate: (value): value is { success: true; measurement?: SubmissionMeasurement } => isRecord(value) && value.success === true,
-    })
-  } catch {
-    tenantSubmitError.value = t('site.contact_page.message_failed')
-    tenantSubmitting.value = false
-    return
-  }
-  mirrorSubmission('contact_submit', submitted.measurement)
-
-  await navigateTo(localePath('/contact/confirmed'))
-  tenantSubmitting.value = false
-}
-
 // ── SEO ──────────────────────────────────────────────────
 // A page about the business: its image is the organization's.
 useSocialMetadata(() => ({

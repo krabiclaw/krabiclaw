@@ -137,7 +137,7 @@ interface MediaAsset {
 
 const dashboard = useDashboardOrganization()
 const dashboardLocation = useDashboardLocation()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const organizationApiBase = `/api/editor/organizations/${organizationId}`
 const locationId = computed(() => dashboardLocation.currentLocationId.value)
 const attachableAssets = ref<MediaAsset[]>([])

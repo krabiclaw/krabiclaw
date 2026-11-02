@@ -296,7 +296,7 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'update_reservation_policy',
-      description: 'Enable or update table reservations using the location’s saved hours. New setup defaults to two hours, unlimited capacity, no advance notice and no deposit. Use the current updated_at when amending it; omitted fields keep their value. Deposits need an amount, currency, tax treatment and ready Payments.',
+      description: 'Enable or update table reservations using the location’s saved hours, including the questions asked with each reservation. New setup defaults to two hours, unlimited capacity, no advance notice and no deposit. Use the current updated_at when amending it; omitted fields keep their value. Deposits need an amount, currency, tax treatment and ready Payments.',
       domain: 'content',
       minimumRole: 'admin',
       inputSchema: {
@@ -564,7 +564,7 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
           ok: true,
           entity: "reservation_policy",
           location_id: locationId,
-          changed_fields: Object.keys(patch),
+          changed_fields: Object.keys(patch).filter(field => field !== "expected_questions_revision"),
           updated_at: config.updated_at,
           context: policyContext,
           summary: renderBookingPolicySummary(reservationPolicySummarySource(config), locale),
