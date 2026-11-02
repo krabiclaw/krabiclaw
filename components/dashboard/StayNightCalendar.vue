@@ -77,6 +77,7 @@
               color="neutral"
               :disabled="busy || status === 'pending'"
               :ui="{ grid: 'w-full', cellTrigger: 'relative w-full' }"
+              class="w-full cv-auto-month"
               @update:model-value="openYearDate"
             >
               <template #heading><UButton :label="formatCalendarDate(month.toString(), 'en', { month: 'long' })" color="neutral" variant="link" @click="openYearDate(month)" /></template>
@@ -88,7 +89,7 @@
           </div>
           <div v-else-if="data" class="divide-y divide-default border-y border-default">
             <p v-if="!listedStays.length" class="py-10 text-center text-sm text-muted">No stays in {{ placeholder?.year }}.</p>
-            <NuxtLink v-for="stay in listedStays" :key="stay.id" :to="{ path: `/dashboard/${route.params.orgSlug}/calendar/stay/${encodeURIComponent(stay.id)}`, query: route.query }" class="flex items-center justify-between gap-4 py-5">
+            <NuxtLink v-for="stay in listedStays" :key="stay.id" :to="{ path: `/dashboard/${route.params.orgSlug}/calendar/stay/${encodeURIComponent(stay.id)}`, query: route.query }" class="flex items-center justify-between gap-4 py-5 cv-auto-row">
               <div>
                 <p class="font-medium text-highlighted">{{ [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest name not provided' }}</p>
                 <p class="mt-1 text-sm text-muted">{{ formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' }) }} – {{ formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric', year: 'numeric' }) }}</p>

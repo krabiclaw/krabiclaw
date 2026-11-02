@@ -6,7 +6,7 @@
     data-testid="today-card"
     :data-card-id="item.id"
     :data-card-priority="item.priority"
-    class="group block transition hover:bg-elevated active:scale-[0.98] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+    class="group block transition hover:bg-elevated active:scale-[0.98] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary cv-auto-card"
     :ui="{ body: 'flex min-h-36 items-center justify-between gap-4 sm:min-h-40 sm:gap-6' }"
     @click="onCardClick"
   >

@@ -11,7 +11,7 @@
           v-for="(item, index) in group.items"
           :key="item.id"
           v-bind="item.to ? { to: item.to } : item.action ? { type: 'button' } : {}"
-          class="group flex w-full items-center gap-4 text-left transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-highlighted"
+          class="group flex w-full items-center gap-4 text-left transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-highlighted cv-auto-row"
           :class="[
             item.to || item.action ? 'active:scale-[0.99] duration-150' : '',
             variant === 'cards'
