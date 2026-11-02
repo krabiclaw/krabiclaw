@@ -1,6 +1,6 @@
 import type { McpToolDefinition } from './shared'
 import { HTTPError } from 'nitro'
-import { SUPPORTED_CURRENCIES, currentUserObject, globalTool, pageInfoObject, paginationInputSchema, organizationSummaryItem, organizationTool, withToolAnnotations, workspaceContextObject, PHONE_FORMAT } from './shared'
+import { currencyCodeSchema, currentUserObject, globalTool, pageInfoObject, paginationInputSchema, organizationSummaryItem, organizationTool, withToolAnnotations, workspaceContextObject, PHONE_FORMAT } from './shared'
 import { ALL_VERTICALS } from '~/utils/vertical-copy'
 import { PLATFORM_LOCALES } from '~/shared/platform-locales'
 import { timezoneSchema } from '~/utils/timezone'
@@ -154,7 +154,7 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
       idempotency_key: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' },
       name: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[\\s\\S]*\\S[\\s\\S]*$', description: 'Required when creating; omitted on an edit to retain it.' },
       vertical: { type: 'string', enum: ALL_VERTICALS, description: 'Required when creating; omitted on an edit to retain it.' }, source_locale: { type: 'string', enum: PLATFORM_LOCALES.map(locale => locale.locale), description: 'Required when creating; a saved draft cannot be relabelled into another language.' },
-      currency: { type: 'string', enum: SUPPORTED_CURRENCIES }, timezone: timezoneSchema,
+      currency: currencyCodeSchema, timezone: timezoneSchema,
       subdomain: { type: 'string', minLength: 1, maxLength: 63, pattern: '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$' },
       location: websiteDraftLocationSchema,
       hero_headline: { type: 'string', maxLength: 500 }, hero_subtitle: { type: 'string', maxLength: 2000 },
@@ -304,7 +304,7 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
         announcement: ANNOUNCEMENT_SCHEMA,
         contact_email: { type: ['string', 'null'], description: 'Public contact email shown to guests. Pass null to clear it.' },
         address_visibility: { type: 'string', enum: ['visible', 'hidden'], description: 'Show or hide office addresses on service websites.' },
-        default_currency: { type: 'string', enum: [...SUPPORTED_CURRENCIES], description: 'ISO 4217 code. Existing prices keep their stored currency and amount; nothing is converted.' },
+        default_currency: { ...currencyCodeSchema, description: 'ISO 4217 code. Existing prices keep their stored currency and amount; nothing is converted.' },
         timezone: { ...timezoneSchema, description: 'The business\'s reporting timezone: the day boundaries of its analytics. Bookings keep their location\'s or provider\'s timezone.' },
         status: { type: 'string', enum: ['published', 'draft', 'active', 'inactive'], description: 'Website status: published/active is Live (public and indexable), draft/inactive is Draft (preview only). A suspended website cannot be changed.' },
         press_email: { type: 'string' },

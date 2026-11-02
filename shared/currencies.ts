@@ -1,31 +1,39 @@
-export const SUPPORTED_CURRENCIES = [
-  'THB',
-  'USD',
-  'EUR',
-  'GBP',
-  'JPY',
-  'AUD',
-  'CAD',
-  'SGD',
-  'HKD',
-  'MYR',
-  'IDR',
-  'PHP',
-  'VND',
-  'INR',
-] as const
+/**
+ * An ISO 4217 currency code. Which of them a business can charge in is
+ * Stripe's to answer: a price, deposit or PaymentIntent in a currency Stripe
+ * does not support for the connected account is refused by Stripe, and that
+ * refusal reaches the caller.
+ */
+export type CurrencyCode = string
 
-export type CurrencyCode = typeof SUPPORTED_CURRENCIES[number]
+const ISO_CURRENCIES: ReadonlySet<string> = new Set(Intl.supportedValuesOf('currency'))
+
+export function isCurrencyCode(value: unknown): value is CurrencyCode {
+  return typeof value === 'string' && ISO_CURRENCIES.has(value)
+}
+
+// Stripe's minor units for API amounts: https://docs.stripe.com/currencies#zero-decimal
+// Every currency not listed is two-decimal. ISK and UGX are zero-decimal
+// currencies Stripe still represents with two decimals, so they stay at 2.
+const STRIPE_ZERO_DECIMAL: ReadonlySet<string> = new Set(['BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA', 'PYG', 'RWF', 'VND', 'VUV', 'XAF', 'XOF', 'XPF'])
+const STRIPE_THREE_DECIMAL: ReadonlySet<string> = new Set(['BHD', 'JOD', 'KWD', 'OMR', 'TND'])
+
+/** The number of decimals in a Stripe API amount of this currency. */
+export function currencyFractionDigits(currency: CurrencyCode): 0 | 2 | 3 {
+  if (!isCurrencyCode(currency)) throw new Error(`${currency} is not an ISO 4217 currency code`)
+  return STRIPE_ZERO_DECIMAL.has(currency) ? 0 : STRIPE_THREE_DECIMAL.has(currency) ? 3 : 2
+}
+
+const currencyNames = new Intl.DisplayNames(['en'], { type: 'currency' })
+
+export const CURRENCY_OPTIONS: Array<{ label: string; value: CurrencyCode }> = [...ISO_CURRENCIES]
+  .map(code => ({ label: `${currencyNames.of(code)} (${code})`, value: code }))
+  .sort((a, b) => a.label.localeCompare(b.label, 'en'))
 
 /**
- * The currency a country's businesses price in, for the currencies this platform
- * supports. Onboarding proposes this from the country the owner gave, and the
- * owner confirms or changes it on the currency step — so it seeds an answer, it
- * never stands in for one.
- *
- * A country outside this map returns null. That is not a gap to paper over with
- * USD: it means this platform cannot price in that country's currency yet, and
- * the owner picks from the supported list themselves.
+ * The currency a country's businesses price in, used to propose an initial
+ * answer during onboarding from the country the owner entered. The owner
+ * confirms or changes it on the currency step.
  */
 const COUNTRY_CURRENCIES: Readonly<Record<string, CurrencyCode>> = Object.freeze({
   TH: 'THB',
@@ -41,6 +49,8 @@ const COUNTRY_CURRENCIES: Readonly<Record<string, CurrencyCode>> = Object.freeze
   PH: 'PHP',
   VN: 'VND',
   IN: 'INR',
+  NZ: 'NZD',
+  CH: 'CHF',
   // The euro area, plus the microstates and territories that use the euro under
   // monetary agreement.
   AD: 'EUR', AT: 'EUR', BE: 'EUR', CY: 'EUR', DE: 'EUR', EE: 'EUR', ES: 'EUR',
@@ -53,34 +63,4 @@ const COUNTRY_CURRENCIES: Readonly<Record<string, CurrencyCode>> = Object.freeze
 export function currencyForCountry(country: string | null | undefined): CurrencyCode | null {
   if (typeof country !== 'string') return null
   return COUNTRY_CURRENCIES[country.trim().toUpperCase()] ?? null
-}
-
-export const CURRENCY_FRACTION_DIGITS: Readonly<Record<CurrencyCode, 0 | 2>> = Object.freeze({
-  THB: 2, USD: 2, EUR: 2, GBP: 2, JPY: 0, AUD: 2, CAD: 2,
-  SGD: 2, HKD: 2, MYR: 2, IDR: 2, PHP: 2, VND: 0, INR: 2,
-})
-
-export function currencyFractionDigits(currency: CurrencyCode): 0 | 2 {
-  return CURRENCY_FRACTION_DIGITS[currency]
-}
-
-export const CURRENCY_OPTIONS: Array<{ label: string; value: CurrencyCode }> = [
-  { label: 'Thai Baht (THB)', value: 'THB' },
-  { label: 'US Dollar (USD)', value: 'USD' },
-  { label: 'Euro (EUR)', value: 'EUR' },
-  { label: 'British Pound (GBP)', value: 'GBP' },
-  { label: 'Japanese Yen (JPY)', value: 'JPY' },
-  { label: 'Australian Dollar (AUD)', value: 'AUD' },
-  { label: 'Canadian Dollar (CAD)', value: 'CAD' },
-  { label: 'Singapore Dollar (SGD)', value: 'SGD' },
-  { label: 'Hong Kong Dollar (HKD)', value: 'HKD' },
-  { label: 'Malaysian Ringgit (MYR)', value: 'MYR' },
-  { label: 'Indonesian Rupiah (IDR)', value: 'IDR' },
-  { label: 'Philippine Peso (PHP)', value: 'PHP' },
-  { label: 'Vietnamese Dong (VND)', value: 'VND' },
-  { label: 'Indian Rupee (INR)', value: 'INR' },
-]
-
-export function isCurrencyCode(value: unknown): value is CurrencyCode {
-  return typeof value === 'string' && (SUPPORTED_CURRENCIES as readonly string[]).includes(value)
 }

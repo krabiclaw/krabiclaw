@@ -1,12 +1,12 @@
 import { z } from 'zod'
-import { SUPPORTED_CURRENCIES } from './currencies'
+import { isCurrencyCode } from './currencies'
 import { ATTRIBUTION_CHANNELS } from '../utils/analytics-attribution'
 
 const count = z.number().int().nonnegative()
 const amount = z.number()
 const text = z.string()
 const nullableText = text.nullable()
-const currency = z.enum(SUPPORTED_CURRENCIES)
+const currency = z.string().refine(isCurrencyCode, 'ISO 4217 currency code')
 const attribution = { source: text, medium: text, campaign: nullableText, content: nullableText }
 const observedAttribution = { ...attribution, source: nullableText, medium: nullableText }
 const money = { currency, collectedMinor: amount, refundedMinor: amount, netMinor: amount }
