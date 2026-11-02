@@ -915,8 +915,16 @@ function variantPriceMajor(variant: Product['variants'][number]): string {
 /** The options, variants and prices as loaded, so a save can tell what changed. */
 const loadedCatalogShape = ref('')
 const editVersion = ref<string | null>(null)
+function isSectionUnchanged(): boolean {
+  return sectionUnchanged.value
+}
 // The draft is seeded from every read of the row, the first and each writer's re-read.
-watch(product, (row) => { if (row) loadForm(row) }, { immediate: true })
+watch(product, (row) => {
+  if (row) {
+    if (editVersion.value !== null && !isSectionUnchanged()) return
+    loadForm(row)
+  }
+}, { immediate: true })
 
 function loadForm(row: Product) {
   editVersion.value = row.updated_at

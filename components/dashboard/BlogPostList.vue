@@ -135,6 +135,12 @@ if (import.meta.client) {
       void refresh()
     }
   })
+  watch(activeTab, () => {
+    const key = `dashboard-blog-posts:${organizationId}:${orderedCollection.value ?? statusFilter.value ?? 'all'}`
+    if (useNuxtApp().payload.data[key]) {
+      void refresh()
+    }
+  })
 }
 
 const moreError = ref<unknown>(null)

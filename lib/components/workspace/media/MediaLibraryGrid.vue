@@ -271,5 +271,11 @@ if (import.meta.client) {
       void refresh()
     }
   })
+  watch(kindFilter, () => {
+    const key = `dashboard-media-library:${props.organizationId}:${props.locationId ?? 'organization'}:${kindFilter.value}`
+    if (useNuxtApp().payload.data[key]) {
+      void refresh()
+    }
+  })
 }
 </script>

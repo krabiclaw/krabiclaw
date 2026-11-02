@@ -19,9 +19,10 @@ export async function useOrganizationLocations(options: { includeInactive?: bool
     }),
     {
       watch: [orgSlug],
-      getCachedData(cacheKey, nuxtApp, ctx) {
-        if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
-        return nuxtApp.payload.data[cacheKey] as { success: true; locations: DashboardLocation[] } | undefined
+      getCachedData(cacheKey, nuxtApp) {
+        if (nuxtApp.isHydrating) {
+          return nuxtApp.payload.data[cacheKey] as { success: true; locations: DashboardLocation[] } | undefined
+        }
       },
     },
   )

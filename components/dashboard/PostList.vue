@@ -108,6 +108,11 @@ if (import.meta.client) {
       void refresh()
     }
   })
+  watch(activeTab, () => {
+    if (useNuxtApp().payload.data[postsKey.value]) {
+      void refresh()
+    }
+  })
 }
 /** A path in this list's scope: the explicit location rides along. */
 const scoped = (path: string) => router.resolve({ path, query: { location_id: route.query.location_id } }).fullPath

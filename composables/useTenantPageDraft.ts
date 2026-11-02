@@ -221,10 +221,17 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
     seededFrom.value = page?.document.updated_at ?? 'new'
   }
 
+  const dirty = computed(() => JSON.stringify(draft.value) !== baseline.value)
+
   watch(data, (value) => {
     if (!value) return
     const stamp = value.page?.document.updated_at ?? 'new'
     if (seededFrom.value === stamp) return
+    // Retain the editor's uncommitted draft during background refreshes
+    if (dirty.value) {
+      accepted.value = value.page
+      return
+    }
     // Every level that opens re-reads this key, so a read can still be in
     // flight when the level above it writes. Landing afterwards, that read is
     // not an update — it is the page as it was before the write, and seeding it
@@ -244,8 +251,6 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
     // hydration mismatches, and controls that came back disabled because the
     // page they describe was not there yet when the markup was made.
   }, { immediate: true, flush: 'sync' })
-
-  const dirty = computed(() => JSON.stringify(draft.value) !== baseline.value)
 
   /** Discards the draft and returns to the values the page was loaded with. */
   function revert() {
