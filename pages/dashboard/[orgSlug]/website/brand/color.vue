@@ -148,3 +148,7 @@ function contrastFor(mode: SitePaletteMode, role: SitePaletteRole) {
   return { ratio: worst.ratio, minimum: worst.minimum, passes: worst.ratio >= worst.minimum }
 }
 </script>
+
+<style>
+@import "~/assets/css/font-presets.css";
+</style>

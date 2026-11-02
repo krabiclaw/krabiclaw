@@ -24,6 +24,7 @@
 <script setup lang="ts">
 import type { ResolvedMediaAsset } from '~/server/utils/media-asset-manager'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
+import { cfImageVariant } from '~/utils/cf-image'
 
 const props = defineProps<{
   asset?: ResolvedMediaAsset | null
@@ -35,6 +36,9 @@ const props = defineProps<{
 
 // The thumbnail is a scaled-down duplicate of the full asset, so it is the right
 // source for a list and the full image is only fetched where it is displayed big.
-const src = computed(() => mediaStillUrl(props.asset))
+const src = computed(() => {
+  const url = mediaStillUrl(props.asset)
+  return cfImageVariant(url, { width: 160, height: 160, fit: 'cover', format: 'auto' }) || url
+})
 const alt = computed(() => props.asset?.alt_text || props.label)
 </script>

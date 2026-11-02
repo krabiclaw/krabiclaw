@@ -45,7 +45,7 @@
             :data-selector-image="item.id"
           >
             <img
-              :src="item.imageUrl"
+              :src="cfImageVariant(item.imageUrl, { width: 560, height: 532, fit: 'cover', format: 'auto' }) || item.imageUrl"
               :alt="`${item.label} preview`"
               class="size-full"
               :class="item.imageFit === 'contain' ? 'scale-[0.45] object-contain' : 'object-cover'"
@@ -130,6 +130,7 @@
 
 <script setup lang="ts">
 import type { BadgeProps, DropdownMenuItem } from '@nuxt/ui'
+import { cfImageVariant } from '~/utils/cf-image'
 
 export interface OrganizationLocationSelectorItem {
   id: string
