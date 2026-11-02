@@ -113,13 +113,6 @@ const width = computed((): string | undefined => {
 // Read through the instance: vue-tsc cannot type `props.id` here (TS2590), and the id is a plain string.
 const instance = getCurrentInstance()
 provide(dashboardLeafParentKey, {
-  focus: () => {
-    const heading = document.getElementById(`dashboard-panel-${String(instance?.props.id ?? '')}`)?.querySelector<HTMLElement>('h1')
-    if (heading) {
-      heading.tabIndex = -1
-      heading.focus({ preventScroll: true })
-    }
-  },
   exit: () => (instance?.props.create ? level.to.value : null),
 })
 // Not prefixed `dashboard-panel-`: that prefix names panes, and this is a slot inside one.
@@ -129,30 +122,13 @@ provide(dashboardPanelActionsKey, actionsId)
 const pane = useDashboardPane()
 const route = useRoute()
 const router = useRouter()
-const scope = getCurrentScope()
-if (!scope) throw createError({ statusCode: 500, statusMessage: 'Dashboard pane scope is unavailable.', fatal: true })
-// Every arrival at the bare index opens the child again — Back from deeper
-// included. Opening it makes this level a pair, which is what stops the watch.
-// Initial auto-navigation waits for Nuxt to finish hydrating the route's panes.
-onNuxtReady(() => {
-  if (!scope.active) return
-  scope.run(() => {
-    // A record being made opens its step at every width; any other index chooses only beside its child.
-    watch((): [RouteLocationRaw | null | undefined, boolean, RouteLevelMode, unknown, string] => [props.create ?? (pane.value ? props.autoOpen : null), pane.value, level.mode.value, route.query.editMode, route.fullPath], ([target, , mode, editMode]) => {
-      if (!target || mode !== 'index' || editMode) return
-      // Only an arrival opens a child: the router is at this index's own URL.
-      // An index on its way out still reads the route it rendered for, which
-      // may be its bare URL; opening from there pulled the tenant back into the
-      // screen they had just left.
-      // A query change can select another tab or scope at this same path;
-      // wait for Nuxt's rendered route before opening that context's rows.
-      if (router.currentRoute.value.path !== level.path.value || router.currentRoute.value.fullPath !== route.fullPath) return
-      // An index whose rows are still loading offers itself as the first row; its own URL opens nothing.
-      if (router.resolve(target).path === level.path.value) return
-      void navigateTo(target, { replace: true })
-    // The parent derives autoOpen from this route's tab and scope. Wait for
-    // those props to render before choosing a row from the arriving index.
-    }, { immediate: true, flush: 'post' })
-  })
+
+// A record being made opens its first step; on wide screens, a bare index opens its default child on initial mount.
+onMounted(() => {
+  const target = props.create ?? (pane.value ? props.autoOpen : null)
+  if (!target || level.mode.value !== 'index' || route.query.editMode) return
+  if (router.currentRoute.value.path !== level.path.value) return
+  if (router.resolve(target).path === level.path.value) return
+  void navigateTo(target, { replace: true })
 })
 </script>

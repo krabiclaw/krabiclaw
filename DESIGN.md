@@ -738,9 +738,9 @@ underneath; deeper ancestors still yield. Index-to-index navigation remains one
 screen at a time: a parent index is hidden by CSS only while a child index is
 rendered beside it, so it never disappears while its child is still loading
 and a leaf's drawer always rises over it. The drawer is the only motion; a
-level does not animate its own arrival. One persistent editor instance is teleported between the
-drawer and desktop pane, so resizing preserves its draft and form state.
-The drawer does not create another route, editor or draft owner.
+level does not animate its own arrival. The editor renders in the drawer on
+mobile and the desktop pane on wide viewports without creating separate route
+or draft owners.
 
 **The two columns show the deepest two levels, not the first two.** Depth is
 unbounded, and opening a child re-roots the frame: the index column becomes the
@@ -904,8 +904,7 @@ shallower matched level, and Back goes to that level's URL.
 
 A root's exit and its lit tab are separate declarations (see *Tabs, parents
 and exits*). `meta.back` is the exit of a standalone destination root and is
-never used to model pane ancestry; `useRouteLevel()` throws when a level that
-has a matched parent declares one. `meta.tab` is read by the layout from the
+never used to model pane ancestry. `meta.tab` is read by the layout from the
 matched root alone. The booking's are set where `build/booking-routes.ts` mounts
 it, because the same files have a different parent under the calendar day.
 

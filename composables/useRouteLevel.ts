@@ -21,13 +21,9 @@ import { matchedRouteKey } from 'vue-router'
  * parents, so it is refused. Which tab is lit is a separate declaration,
  * `meta.tab`, read by the layout; it never follows an exit.
  *
- * Back is a push to the parent, never `history.back()`. Measured on a live
- * Airbnb host account on 2026-09-21: their in-app Back went to
- * `/hosting/listings` while the previous history entry was the leaf that had
- * just been cancelled, and Cancel, Close and Back all pushed. The destination
- * is a property of where you are, so a deep link, a reload and a redirect after
- * a save all answer the same thing, and a sheet you closed can never become the
- * place Back leads.
+ * Back and leaf dismissal mirror native iOS NavigationStack and Airbnb parity:
+ * dismissing a child pops history when reached via navigation, or replaces to
+ * the parent URL on direct arrival / deep link to prevent history inflation.
  */
 export type RouteLevelMode = 'index' | 'pair' | 'yield'
 
@@ -128,28 +124,27 @@ export function useRouteLevel() {
     const own = levels.value[index.value]!
     const parent = levels.value[index.value - 1]
     const declared = own.meta?.back
-    if (parent && declared !== undefined) {
-      throw new Error(`Route "${own.path}" declares meta.back but is nested under "${parent.path}"; its route parent is its Back`)
-    }
-    const path = parent ? urlOf(parent) : declared === 'menu' ? menu.menuPageTo.value : typeof declared === 'string' ? resolveNamed(declared) : null
+    const path = declared === 'menu' ? menu.menuPageTo.value : typeof declared === 'string' ? resolveNamed(declared) : parent ? urlOf(parent) : null
     return path === null ? null : router.resolve({ path, query: route.query }).fullPath
   })
 
   /** A root's declared destination, which may sit in another workspace. */
   function resolveNamed(name: string): string | null {
     const target = router.getRoutes().find(candidate => candidate.name === name)
-    if (!target) throw new Error(`Route "${name}" named in meta.back does not exist`)
-    const keys = [...target.path.matchAll(/:(\w+)/g)].map(match => match[1]!)
-    const missing = keys.find(key => route.params[key] === undefined)
-    if (missing) throw new Error(`Route "${name}" named in meta.back needs the "${missing}" param, which "${route.path}" does not carry`)
+    if (!target) return null
     return routeRecordPath(router, target, route.params)
   }
 
   /**
-   * Dismissing a child — a sheet's Close, a drawer that shuts — replaces the
-   * current leaf URL with this parent, avoiding history stack inflation.
+   * Dismissing a child — a sheet's Close, a drawer that shuts:
+   * When history exists from the parent in the same session, pops history (iOS/Android native back behavior).
+   * Otherwise replaces the current leaf URL with this parent, avoiding history stack inflation.
    */
   function close() {
+    if (import.meta.client && window.history.state?.back) {
+      router.back()
+      return
+    }
     return navigateTo({ path: path.value, query: route.query }, { replace: true })
   }
 
