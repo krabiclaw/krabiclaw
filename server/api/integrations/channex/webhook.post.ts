@@ -23,7 +23,8 @@ export default defineHandler(async (event) => {
   // it triggered. Guest names, messages and contact details are never logged.
   const ids = body?.payload && typeof body.payload === 'object' ? body.payload as Record<string, unknown> : {}
   console.info('channex_webhook', {
-    event: body?.event, property_id: body?.property_id,
+    ...(typeof body?.event === 'string' ? { event: body.event } : {}),
+    ...(typeof body?.property_id === 'string' ? { property_id: body.property_id } : {}),
     ...Object.fromEntries(['id', 'revision_id', 'booking_id', 'message_thread_id', 'live_feed_event_id'].filter(key => typeof ids[key] === 'string').map(key => [key, ids[key]])),
   })
   // The events registered for this webhook (CHANNEX_WEBHOOK_EVENTS); anything else is ignored.

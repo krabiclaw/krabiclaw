@@ -12,7 +12,7 @@
           <UFormField label="Day"><USelect v-model="editor.draft.value.schedule.offsetDays" :items="days" class="w-full" :disabled="!editor.manage.value || editor.saving.value" /></UFormField>
           <UFormField label="Local time"><UInput v-model="editor.draft.value.schedule.localTime" type="time" class="w-full" :disabled="!editor.manage.value || editor.saving.value" /></UFormField>
         </template>
-        <p class="text-sm text-muted">New-reservation messages apply to new direct reservations. Airbnb stays receive check-in and checkout messages. Every confirmed stay is also sent its home’s check-in instructions the day before arrival. Failed messages remain visible for review.</p>
+        <p class="text-sm text-muted">New-reservation messages apply to new reservations, including Airbnb bookings received as they happen. Imported reservations do not trigger new-reservation messages. Every confirmed stay is also sent its home’s check-in instructions the day before arrival. Failed messages remain visible for review.</p>
     </template>
   </div>
 </template>

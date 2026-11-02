@@ -339,13 +339,13 @@ export interface InquiryEventInput {
 export function inquiryReceivedMessage(input: InquiryEventInput): MemberAlertMessage {
   return {
     title: `${input.guestName} asked about ${input.homeName} on Airbnb`,
-    preheader: `${input.request} · reply by ${input.respondBy}`,
+    preheader: `Reply by ${input.respondBy} · ${input.request}`,
     hero: null,
     intro: `This is an inquiry, not a booking. Airbnb counts your reply as on time until ${input.respondBy}.`,
     facts: facts(
       fact('guestName', 'From', input.guestName, true),
       fact('subject', 'Inquiry', `Airbnb inquiry · ${input.homeName}`, true),
-      fact('message', 'Asking for', `${input.request} · reply by ${input.respondBy}`, true),
+      fact('message', 'Asking for', `Reply by ${input.respondBy} · ${input.request}`, true),
     ),
     primaryAction: { url: input.replyUrl, label: 'Reply to inquiry' },
     category: 'messages',
