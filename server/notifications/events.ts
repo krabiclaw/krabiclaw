@@ -324,6 +324,37 @@ export function messageReceived(input: MessageEventInput): MemberAlertMessage {
   }
 }
 
+export interface InquiryEventInput {
+  guestName: string
+  homeName: string
+  /** "Nov 15, 2026 – Feb 15, 2027 · 92 nights · 1 adult, 1 pet" */
+  request: string
+  /** When Airbnb stops counting a reply as on time, in the home's own clock. */
+  respondBy: string
+  organizationName: string
+  replyUrl: string
+}
+
+/** An Airbnb guest asked about dates before booking; Airbnb times the host's reply. */
+export function inquiryReceivedMessage(input: InquiryEventInput): MemberAlertMessage {
+  return {
+    title: `${input.guestName} asked about ${input.homeName} on Airbnb`,
+    preheader: `Reply by ${input.respondBy} · ${input.request}`,
+    hero: null,
+    intro: `This is an inquiry, not a booking. Airbnb counts your reply as on time until ${input.respondBy}.`,
+    facts: facts(
+      fact('guestName', 'From', input.guestName, true),
+      fact('subject', 'Inquiry', `Airbnb inquiry · ${input.homeName}`, true),
+      fact('message', 'Asking for', `Reply by ${input.respondBy} · ${input.request}`, true),
+    ),
+    primaryAction: { url: input.replyUrl, label: 'Reply to inquiry' },
+    category: 'messages',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because a guest asked ${input.organizationName} about a stay on Airbnb and you receive its messages.`,
+    organizationName: input.organizationName,
+  }
+}
+
 export interface ReviewEventInput {
   authorName: string
   rating: number

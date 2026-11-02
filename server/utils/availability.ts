@@ -17,15 +17,7 @@ import {
   type BookingStatus,
   type ProductSessionStatus,
 } from '~/shared/bookings'
-import {
-  addLocalDays,
-  assertCalendarDate,
-  isValidTimezone,
-  localDateAt,
-  localDateTimeToInstant,
-  localNow,
-  MINUTE_TIME_PATTERN,
-} from '~/utils/timezone'
+import { addLocalDays, assertCalendarDate, isValidTimezone, localDateAt, localDateTimeToInstant, localNow, MINUTE_TIME_PATTERN, unresolvableLocalTime } from '~/utils/timezone'
 
 /**
  * The booking capability.
@@ -360,19 +352,12 @@ function instantsFor(
   localDate: string,
   durationMinutes: number,
 ): { starts_at: string; ends_at: string } | OccurrenceSkip {
-  let start: Date
-  try {
-    // 'reject' refuses both a gap (the wall time never happens) and a fold
-    // (it happens twice). Silently picking one of the two instants would book
-    // guests into an hour the merchant did not choose.
-    start = localDateTimeToInstant(localDate, rule.start_time, rule.timezone, 'reject')
-  } catch (error) {
-    if (!(error instanceof RangeError)) throw error
-    // '@internationalized/date' says "No such absolute time found" for a gap
-    // and "Multiple possible absolute times found" for a fold.
-    const reason = /multiple|ambiguous/i.test(error.message) ? 'ambiguous_local_time' : 'nonexistent_local_time'
-    return { rule_id: rule.id, local_date: localDate, local_start_time: rule.start_time, reason }
-  }
+  // A gap (the wall time never happens) and a fold (it happens twice) are both
+  // refused. Silently picking one of the two instants would book guests into an
+  // hour the merchant did not choose.
+  const reason = unresolvableLocalTime(localDate, rule.start_time, rule.timezone)
+  if (reason) return { rule_id: rule.id, local_date: localDate, local_start_time: rule.start_time, reason }
+  const start = localDateTimeToInstant(localDate, rule.start_time, rule.timezone, 'reject')
   return {
     starts_at: start.toISOString(),
     ends_at: new Date(start.getTime() + durationMinutes * 60_000).toISOString(),

@@ -6,7 +6,7 @@
     data-testid="today-card"
     :data-card-id="item.id"
     :data-card-priority="item.priority"
-    class="group block transition-colors hover:bg-elevated focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+    class="group block transition hover:bg-elevated active:scale-[0.98] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
     :ui="{ body: 'flex min-h-36 items-center justify-between gap-4 sm:min-h-40 sm:gap-6' }"
     @click="onCardClick"
   >
@@ -24,7 +24,7 @@
 
     <div class="relative h-14 w-18 shrink-0 self-start sm:h-20 sm:w-26" aria-hidden="true">
       <UAvatar
-        :src="item.imageUrl || undefined"
+        :src="avatarSrc"
         alt=""
         :icon="item.imageIcon"
         class="size-14 sm:size-20"
@@ -43,6 +43,7 @@
 import { NuxtLink } from '#components'
 import type { TodayCard } from '~/shared/dashboard-today'
 import { useDashboardTelemetry } from '~/composables/useDashboardTelemetry'
+import { cfImageVariant } from '~/utils/cf-image'
 
 const props = defineProps<{
   item: TodayCard
@@ -51,6 +52,12 @@ const props = defineProps<{
 
 const telemetry = useDashboardTelemetry()
 const isOffer = computed(() => props.item.id.startsWith('offer:'))
+const avatarSrc = computed(() => cfImageVariant(props.item.imageUrl, {
+  width: 160,
+  height: 160,
+  fit: props.item.imageFit === 'contain' || isOffer.value ? 'scale-down' : 'cover',
+  format: 'auto',
+}) || props.item.imageUrl || undefined)
 
 function onCardClick() {
   telemetry.track({

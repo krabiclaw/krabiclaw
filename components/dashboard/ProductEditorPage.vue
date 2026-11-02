@@ -1166,7 +1166,7 @@ if (isNew.value && !form.stay_location_id && locationId.value) form.stay_locatio
 // ── The index ─────────────────────────────────────────────
 // Who handles a bookable service's consultations, by name: the same list the
 // assignment concern reads, so it is one request shared by both.
-const { data: schedulingMembers, error: schedulingMembersError } = await useMemberSchedulingList(() => dashboard.organization.value?.id)
+const { data: schedulingMembers, error: schedulingMembersError } = useMemberSchedulingList(() => dashboard.organization.value?.id)
 /** The assignee by its loaded name; a read failure, a pending read or an unknown id says so. */
 function assignmentSummary(): string {
   const assignment = isNew.value ? form : product.value?.booking

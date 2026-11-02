@@ -207,9 +207,9 @@ async function loadConversionReport(db: DbClient, organizationId: string, window
     queryAll<{ date: string; events: number }>(db, `SELECT ${localDay} date, COUNT(*) events
       FROM analytics_events WHERE ${inRange} AND ${eventName} IN (${OUTCOME_EVENT_SQL_LIST}) GROUP BY 1`, [organizationId, start, end]),
     queryAll<Record<string, unknown>>(db, `SELECT ${eventName} event_name, (payload_json ->> '$.stage') stage, (payload_json ->> '$.conversion_type') conversion_type,
-        COUNT(*) events, COUNT(DISTINCT COALESCE(payload_json ->> '$.entity_id', id)) entities, COUNT(DISTINCT session_id) sessions, SUM(session_id IS NULL) nonbrowser
+        COUNT(*) events, COUNT(DISTINCT CASE WHEN (payload_json ->> '$.entity_id') IS NOT NULL THEN (payload_json ->> '$.entity_type') || ':' || (payload_json ->> '$.entity_id') END) entities, COUNT(DISTINCT session_id) sessions, SUM(session_id IS NULL) nonbrowser
       FROM analytics_events WHERE ${inRange} GROUP BY 1,2,3 ORDER BY events DESC, event_name`, [organizationId, start, end]),
-    queryAll<Record<string, unknown>>(db, `SELECT ${snapshot}, ${eventName} event_name, COUNT(*) events, COUNT(DISTINCT COALESCE(payload_json ->> '$.entity_id', id)) entities
+    queryAll<Record<string, unknown>>(db, `SELECT ${snapshot}, ${eventName} event_name, COUNT(*) events, COUNT(DISTINCT CASE WHEN (payload_json ->> '$.entity_id') IS NOT NULL THEN (payload_json ->> '$.entity_type') || ':' || (payload_json ->> '$.entity_id') END) entities
       FROM analytics_events WHERE ${inRange} AND json_type(payload_json, '$.attribution.source') IS 'text' AND ${eventName} IN (${OUTCOME_EVENT_SQL_LIST}) GROUP BY 1,2,3,4,5`, [organizationId, start, end]),
     queryAll<Record<string, unknown>>(db, `SELECT ${eventName} event_name, (payload_json ->> '$.value.basis') basis, (payload_json ->> '$.value.currency') currency,
         COUNT(*) events, SUM(payload_json ->> '$.value.amount_minor') value_minor, SUM(payload_json ->> '$.value.collected_minor') collected_minor, COUNT(payload_json ->> '$.value.collected_minor') collected_events

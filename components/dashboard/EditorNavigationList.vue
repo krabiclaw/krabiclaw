@@ -11,8 +11,9 @@
           v-for="(item, index) in group.items"
           :key="item.id"
           v-bind="item.to ? { to: item.to } : item.action ? { type: 'button' } : {}"
-          class="group flex w-full items-center gap-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-highlighted"
+          class="group flex w-full items-center gap-4 text-left transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-highlighted"
           :class="[
+            item.to || item.action ? 'active:scale-[0.99] duration-150' : '',
             variant === 'cards'
               ? ['rounded-xl border-2 p-5 shadow-[0_8px_24px_rgb(0_0_0/0.08)]', item.status ? 'bg-muted shadow-none' : 'bg-elevated', item.id === activeItem ? 'border-(--ui-text-muted)' : 'border-transparent', item.to || item.action ? 'hover:border-(--ui-text-dimmed)' : '']
               : ['min-h-20 px-4 py-4', index > 0 ? 'border-t border-default' : '', item.id === activeItem ? 'bg-elevated shadow-[inset_3px_0_0_var(--ui-primary)]' : '', item.to || item.action ? 'hover:bg-elevated' : ''],
@@ -33,7 +34,7 @@
           >
             <img
               v-if="item.lead.image"
-              :src="item.lead.image"
+              :src="cfImageVariant(item.lead.image, { width: 96, height: 96, fit: 'cover', format: 'auto' }) || item.lead.image"
               alt=""
               class="size-full"
               :class="[item.lead.imageFit === 'contain' ? 'object-contain' : 'object-cover', item.lead.darkImage ? 'dark:hidden' : '']"
@@ -42,7 +43,7 @@
             >
             <img
               v-if="item.lead.image && item.lead.darkImage"
-              :src="item.lead.darkImage"
+              :src="cfImageVariant(item.lead.darkImage, { width: 96, height: 96, fit: 'cover', format: 'auto' }) || item.lead.darkImage"
               alt=""
               class="hidden size-full dark:block"
               :class="item.lead.imageFit === 'contain' ? 'object-contain' : 'object-cover'"
@@ -66,7 +67,7 @@
             <!-- The picture leads, in the row's own footprint (DESIGN.md). -->
             <img
               v-if="item.image"
-              :src="item.image"
+              :src="cfImageVariant(item.image, { width: 640, fit: 'scale-down', format: 'auto' }) || item.image"
               alt=""
               class="mb-3 aspect-[40/21] w-full rounded-xl object-cover"
               loading="lazy"
@@ -80,7 +81,7 @@
               <img
                 v-for="(picture, at) in item.images"
                 :key="at"
-                :src="picture"
+                :src="cfImageVariant(picture, { width: 240, height: 180, fit: 'cover', format: 'auto' }) || picture"
                 alt=""
                 class="aspect-[20/19] min-w-0 max-w-24 flex-1 rounded-xl object-cover"
                 loading="lazy"
@@ -111,7 +112,7 @@
             <span v-if="item.card" class="mt-3 block overflow-hidden rounded-xl border border-default">
               <img
                 v-if="item.card.image"
-                :src="item.card.image"
+                :src="cfImageVariant(item.card.image, { width: 640, fit: 'scale-down', format: 'auto' }) || item.card.image"
                 alt=""
                 class="aspect-[1200/630] w-full bg-elevated object-cover"
                 loading="lazy"
@@ -145,6 +146,7 @@
 
 <script setup lang="ts">
 import { NuxtLink } from '#components'
+import { cfImageVariant } from '~/utils/cf-image'
 
 export interface EditorNavigationItem {
   id: string

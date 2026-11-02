@@ -13,7 +13,8 @@ import { getMediaAsset, readMediaPlacements } from '~/server/utils/media-asset-m
 import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
 import { downloadImageBuffer } from '~/server/utils/cloudflare-images'
 import { getGuestRequest, requestSummary, stayThreadQueries } from '~/server/domain/requests'
-import { notifyGuestThreadReply } from '~/server/utils/notifications'
+import { notifyGuestThreadReply, notifyAirbnbInquiry } from '~/server/utils/notifications'
+import { readAirbnbInquiry } from '~/server/integrations/channex/live-feed'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { planStayMessages } from '~/server/domain/scheduled-guest-messages'
 import type { GuestThreadEntryRow } from './types'
@@ -171,10 +172,12 @@ export async function mirrorChannexThread(db: DbClient, env: ChannelEnv, threadI
  * A `message` event is Channex telling us a guest wrote ("triggered when new
  * chat message from a guest is registered at Channex"), so the message it
  * names is the one the owners are told about, once its mirrored entry says a
- * guest sent it. Nothing else alerts: a backfill, a booking assignment and an
- * inquiry event name no message, and a conversation's history arrives through
- * them. A redelivered event finds the same entry, whose alert receipts send
- * nothing twice.
+ * guest sent it. An `inquiry` event is a guest asking about dates before
+ * booking: the owners are told the dates and Airbnb's reply deadline, read from
+ * the live feed event it names, beside the alert for its first message. A
+ * backfill and a booking assignment alert nothing; a conversation's history
+ * arrives through them. A redelivered event finds the same entry, whose alert
+ * receipts send nothing twice.
  */
 export async function mirrorChannexMessageEvent(db: DbClient, env: ChannelEnv, value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail(400, 'INVALID_WEBHOOK', 'The webhook body must be an object', 'body')
@@ -190,9 +193,24 @@ export async function mirrorChannexMessageEvent(db: DbClient, env: ChannelEnv, v
   const threadId = required(payload.message_thread_id, 'payload.message_thread_id')
   if (body.event !== 'message_thread_booking_assigned' && required(payload.property_id, 'payload.property_id') !== propertyId) fail(400, 'INVALID_WEBHOOK', 'Webhook property IDs disagree', 'payload.property_id')
   const messageId = body.event === 'message' ? required(payload.id, 'payload.id') : undefined
+  const inquiryId = body.event === 'inquiry' ? required(payload.live_feed_event_id, 'payload.live_feed_event_id') : undefined
   const mirrored = await mirrorChannexThread(db, env, threadId, propertyId,
     body.event === 'message_thread_booking_assigned' ? required(payload.booking_id, 'payload.booking_id') : undefined, messageId)
-  if (mirrored.status !== 'mirrored' || messageId === undefined) return mirrored
+  if (mirrored.status !== 'mirrored') return mirrored
+  if (inquiryId !== undefined) {
+    // The inquiry's own facts come from the event Channex holds, not the webhook body.
+    const inquiry = await readAirbnbInquiry(env, inquiryId)
+    if (inquiry.propertyId !== propertyId || inquiry.messageThreadId !== threadId) fail(409, 'CHANNEL_INQUIRY_MISMATCH', 'The inquiry belongs to another conversation', 'payload.live_feed_event_id')
+    const entry = await appendEntry(db, {
+      threadId: mirrored.request_id, kind: 'operation', actorKind: 'guest', channel: 'airbnb', eventName: 'channel.inquiry_received',
+      dedupeKey: `channex-inquiry:${inquiry.id}`, body: `Asked on Airbnb about ${inquiry.checkInDate} to ${inquiry.checkOutDate}.`,
+      payloadJson: { live_feed_event_id: inquiry.id, check_in_date: inquiry.checkInDate, check_out_date: inquiry.checkOutDate, nights: inquiry.nights,
+        adults: inquiry.adults, children: inquiry.children, infants: inquiry.infants, pets: inquiry.pets, respond_by: inquiry.respondBy },
+    })
+    await notifyAirbnbInquiry(env, db, { threadId: mirrored.request_id, entryId: entry.id, inquiry })
+    return mirrored
+  }
+  if (messageId === undefined) return mirrored
   // A moved conversation's history redelivered under new ids records no entry: there is nothing new to tell.
   const entry = await findEntryByDedupeKey(db, `channex-message:${messageId}`)
   if (!entry || entry.actor_kind !== 'guest' || entry.request_id !== mirrored.request_id) return mirrored

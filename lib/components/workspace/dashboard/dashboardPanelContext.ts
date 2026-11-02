@@ -45,7 +45,7 @@ export const dashboardPanelActionsKey: InjectionKey<ComputedRef<string>> = Symbo
  * An index making a record names `exit`: dismissing one of its steps leaves the
  * making, for where the index's own Back goes, rather than returning to it.
  */
-export const dashboardLeafParentKey: InjectionKey<{ focus: () => void; exit: () => string | null }> = Symbol('dashboard-leaf-parent')
+export const dashboardLeafParentKey: InjectionKey<{ focus?: () => void; exit: () => string | null }> = Symbol('dashboard-leaf-parent')
 
 /** An owning ancestor's fullscreen overlay keeps focus while its leaf retains its draft. */
 export const dashboardOverlayOpenKey: InjectionKey<ComputedRef<boolean>> = Symbol('dashboard-overlay-open')

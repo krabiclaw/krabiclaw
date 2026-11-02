@@ -65,7 +65,8 @@
   A form that remounts the field binds `v-model:country` to keep that choice.
 */
 import { parseIncompletePhoneNumber } from 'libphonenumber-js/min'
-import { examplePhone, exceedsPhoneLength, formatPhoneAsTyped, listPhoneCountries, parsePhone, type CountryCode } from '~/utils/phone'
+import { examplePhone } from '~/utils/phone-examples'
+import { exceedsPhoneLength, formatPhoneAsTyped, listPhoneCountries, parsePhone, type CountryCode } from '~/utils/phone'
 
 const props = withDefaults(defineProps<{
   id: string
@@ -81,7 +82,15 @@ const field = ref<{ inputRef: HTMLInputElement | null } | null>(null)
 const input = computed(() => field.value?.inputRef ?? null)
 const touched = ref(false)
 const chosen = defineModel<CountryCode | undefined>('country')
-const country = computed(() => chosen.value ?? props.defaultCountry)
+const localCountry = ref<CountryCode | undefined>(chosen.value)
+watch(chosen, value => {
+  if (value !== localCountry.value) localCountry.value = value
+})
+function setCountry(value: CountryCode | undefined) {
+  localCountry.value = value
+  chosen.value = value
+}
+const country = computed(() => localCountry.value ?? props.defaultCountry)
 const display = ref('')
 
 const countries = computed(() => {
@@ -118,7 +127,7 @@ function show(value: string) {
 function load(value: string) {
   const number = parsePhone(value)
   if (number.valid && number.country) {
-    chosen.value = number.country
+    setCountry(number.country)
     show(formatPhoneAsTyped(number.nationalFormat ?? value, number.country))
     return
   }
@@ -135,7 +144,7 @@ function format(value: string): string {
   if (!isInternational(value)) return formatPhoneAsTyped(value, country.value)
   const number = parsePhone(value)
   if (!number.country) return formatPhoneAsTyped(value)
-  chosen.value = number.country
+  setCountry(number.country)
   return number.valid && number.nationalFormat ? formatPhoneAsTyped(number.nationalFormat, number.country) : formatPhoneAsTyped(value)
 }
 
@@ -143,7 +152,7 @@ function selectCountry(value: CountryCode | undefined) {
   if (!value) return
   // A number already complete keeps its digits, read nationally in the new country.
   const digits = parsed.value.valid ? parsed.value.nationalFormat ?? display.value : display.value
-  chosen.value = value
+  setCountry(value)
   show(formatPhoneAsTyped(digits, value))
 }
 

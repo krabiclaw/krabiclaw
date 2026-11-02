@@ -30,3 +30,7 @@ definePageMeta({ layout: 'dashboard' })
 const editor = inject(organizationSettingsEditorKey)!
 const fontItems = [...ORGANIZATION_FONT_OPTIONS]
 </script>
+
+<style>
+@import "~/assets/css/font-presets.css";
+</style>

@@ -170,7 +170,17 @@ export async function createTableReservation(event: H3Event, input: {
 
   const availability = await listReservationSlots(db, { organizationId: organization.id, locationId: resolvedLocationId, date })
   const slot = availability.slots.find(entry => entry.time_slot === time)
-  if (!slot) return creationResult({ error: 'Please choose a valid time — this location is closed at that time.' }, { status: 400 })
+  if (!slot) {
+    // The location serves the time, but the clocks change through it that night.
+    const unresolvable = availability.unresolvable.find(entry => entry.time_slot === time)?.reason
+    if (unresolvable) return creationResult({
+      error: unresolvable === 'ambiguous_local_time'
+        ? `${time} happens twice on ${date} because the clocks go back. Please choose another time.`
+        : `${time} does not happen on ${date} because the clocks go forward. Please choose another time.`,
+      code: unresolvable === 'ambiguous_local_time' ? 'RESERVATION_TIME_AMBIGUOUS' : 'RESERVATION_TIME_NONEXISTENT', field: 'time',
+    }, { status: 400 })
+    return creationResult({ error: 'Please choose a valid time — this location is closed at that time.' }, { status: 400 })
+  }
   if (slot.is_closed) return creationResult({ error: 'This time is closed for booking.' }, { status: 409 })
   // An early answer so the form can say something useful. The claim below
   // carries its own predicate and is the authoritative one.
