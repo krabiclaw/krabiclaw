@@ -71,7 +71,7 @@ test('an owner adds an inquiry question in Website, a visitor answers it, and th
 
     const thread = await owner.get(`/api/dashboard/organizations/${restaurant.organizationId}/guest-threads/${requestId}`)
     expect(thread.status(), await thread.text()).toBe(200)
-    const answers = (await thread.json() as { thread: { answers: FormAnswerSnapshot[] } }).thread.answers
+    const answers = (await thread.json() as { thread: { source: { fields: { answers: FormAnswerSnapshot[] } } } }).thread.source.fields.answers
     expect(answers).toEqual([{ question_id: question.id, label: 'How did you hear about us?', type: 'single_choice', help_text: null, value: 'instagram', selected_choices: [{ id: 'instagram', label: 'Instagram' }] }])
     await openTenantPage(cms, `${baseURL}/dashboard/${restaurant.slug}/messages/${requestId}`, {})
     const answered = cms.getByText('How did you hear about us?', { exact: true })
@@ -87,7 +87,7 @@ test('an owner adds an inquiry question in Website, a visitor answers it, and th
     expect(removed.status(), await removed.text()).toBe(200)
     expect((await read()).inquiry_questions).toEqual(original.inquiry_questions)
     const kept = await owner.get(`/api/dashboard/organizations/${restaurant.organizationId}/guest-threads/${requestId}`)
-    expect((await kept.json() as { thread: { answers: FormAnswerSnapshot[] } }).thread.answers).toEqual(answers)
+    expect((await kept.json() as { thread: { source: { fields: { answers: FormAnswerSnapshot[] } } } }).thread.source.fields.answers).toEqual(answers)
   } finally {
     const current = await read()
     if (current.inquiry_questions_revision !== original.inquiry_questions_revision) {

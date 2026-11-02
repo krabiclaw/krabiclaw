@@ -41,7 +41,7 @@ async function readConversation(ctx: McpExecutorContext, requestId: string) {
   if (!detail) throw new HTTPError({ statusCode: 404, message: 'Guest conversation not found' })
   return { request_id: detail.id, type: detail.submissionType, state: detail.conversationState, archived: detail.manuallyArchived, updated_at: detail.updatedAt,
     participant_label: detail.participantLabel, reply_channel: detail.replyChannel,
-    guest: { name: detail.guestName, email: detail.guestEmail, phone: detail.guestPhone }, answers: detail.answers, operational_record: detail.operationalRecord,
+    guest: { name: detail.guestName, email: detail.guestEmail, phone: detail.guestPhone }, answers: detail.source.fields.answers, operational_record: detail.operationalRecord,
     entries: detail.entries.map(entry => ({ id: entry.id, kind: entry.kind, actor: entry.actorLabel, channel: entry.channel, body: entry.body, event: entry.eventName, payload: entry.payload, booking_change: entry.bookingChange, occurred_at: entry.occurredAt, provider_timestamp: entry.providerTimestamp, deliveries: entry.deliveries, attachments: entry.attachments })),
   }
 }

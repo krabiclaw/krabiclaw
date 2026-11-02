@@ -137,7 +137,6 @@ export async function getGuestThreadDetail(
     submissionId: thread.id,
     locationLabel: summary.locationTitle,
     conversationState: audience ? null : await guestThreadConversationState(db, thread.id, now),
-    answers,
     operationalRecord: record ? { id: record.id, kind: record.kind, status: record.status, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, party_size: record.party_size, check_in_date: record.check_in_date, check_out_date: record.check_out_date } : null,
     source: {
       submissionType: thread.kind,
@@ -145,14 +144,14 @@ export async function getGuestThreadDetail(
       operationalStatus: record?.status ?? null,
       operationalStatusLabel: record ? formatOperationalStatusLabel(thread.kind, record.status) : null,
       fields: thread.kind === 'contact'
-        ? { subject: thread.payload.subject, message: thread.payload.message, locationTitle: summary.locationTitle, productTitle: summary.productTitle }
+        ? { subject: thread.payload.subject, message: thread.payload.message, locationTitle: summary.locationTitle, productTitle: summary.productTitle, answers }
         : thread.kind === 'stay'
           ? {
               // A stay is its nights in its own dates; it has no start time to localize.
               whenLabel: record?.check_in_date && record.check_out_date ? stayPreview({ check_in_date: record.check_in_date, check_out_date: record.check_out_date, party_size: record.party_size }) : null,
               startsAt: null, endsAt: null, timezone: record?.timezone ?? null,
               guests: record ? String(record.party_size) : null, partySize: record?.party_size ?? null,
-              notes: null, locationTitle: summary.locationTitle, productTitle: summary.productTitle,
+              notes: null, locationTitle: summary.locationTitle, productTitle: summary.productTitle, answers,
             }
           : {
             whenLabel: record ? new Intl.DateTimeFormat('en-US', { timeZone: record.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(record.starts_at)) : null,
@@ -164,6 +163,7 @@ export async function getGuestThreadDetail(
             notes: thread.payload.notes,
             locationTitle: summary.locationTitle,
             productTitle: summary.productTitle,
+            answers,
           },
     },
     entries,

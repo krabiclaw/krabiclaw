@@ -48,6 +48,7 @@ export const WHATSAPP_MAPPINGS: Partial<Record<WhatsAppTemplate, WhatsAppMapping
     cannotCarry: {
       // Eight body slots, all spoken for; what was paid online is in the email and on the booking.
       paid: 'new_reservation has no payment slot; what was paid online is in the email and on the booking',
+      answers: 'new_reservation has no slot for the business\'s own questions; the answers are in the email, the notification and the conversation',
     },
   },
   reservation_cancelled: {

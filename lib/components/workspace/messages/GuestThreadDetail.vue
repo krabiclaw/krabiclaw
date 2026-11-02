@@ -516,8 +516,12 @@ const recordNoun = computed(() => thread.value
 */
 const announcement = computed(() => {
   const current = thread.value
-  if (!current?.operationalRecord) return null
+  if (!current) return null
   const fields = current.source.fields
+  // The guest's answers are rows of the form they sent, after what the record states.
+  const answered = fields.answers.map(answer => ({ label: answer.label, value: formatFormAnswer(answer, { yes: 'Yes', no: 'No' }) }))
+  // An inquiry is its message; it is announced only for the answers it carries.
+  if (!current.operationalRecord) return answered.length ? { title: 'New message', rows: answered } : null
   // `guests` is the party size alone ("6", or "6+" when it is a minimum).
   const isConsultation = recordNoun.value === 'consultation'
   const noun = isConsultation ? (fields.guests === '1' ? 'client' : 'clients') : (fields.guests === '1' ? 'guest' : 'guests')
@@ -530,13 +534,7 @@ const announcement = computed(() => {
     { label: 'Email', value: current.guestEmail },
     { label: 'Phone', value: current.guestPhone && formatPhone(current.guestPhone) },
   ].filter((row): row is { label: string; value: string } => typeof row.value === 'string' && row.value.trim().length > 0)
-  return { title: `New ${recordNoun.value}`, rows }
-})
-
-// What the guest answered to the business's own questions, in the wording they read.
-const answersAnnouncement = computed(() => {
-  const answers = thread.value?.answers ?? []
-  return answers.length ? { title: 'Answers', rows: answers.map(answer => ({ label: answer.label, value: formatFormAnswer(answer, { yes: 'Yes', no: 'No' }) })) } : null
+  return { title: `New ${recordNoun.value}`, rows: [...rows, ...answered] }
 })
 
 // A contact thread's words are its `message`; a reservation or booking carries
@@ -621,9 +619,8 @@ const stream = computed<StreamItem[]>(() => {
         booking came in, and the guest's own words. Both read as messages.
       */
       if (announcement.value) message(`${key}:announcement`, entry.occurredAt, null, 'platform', null, { announcement: announcement.value })
-      if (answersAnnouncement.value) message(`${key}:answers`, entry.occurredAt, null, 'platform', null, { announcement: answersAnnouncement.value })
       if (openingMessage.value) message(key, entry.occurredAt, openingMessage.value, 'guest', null)
-      if (!announcement.value && !answersAnnouncement.value && !openingMessage.value) {
+      if (!announcement.value && !openingMessage.value) {
         push(entry.occurredAt, { type: 'event', key, icon: 'i-lucide-sparkles', label: `Conversation with ${current.participantLabel} recorded` })
       }
     } else if (entry.kind === 'message') {
