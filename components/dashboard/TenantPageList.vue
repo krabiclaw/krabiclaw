@@ -3,6 +3,7 @@
   <DashboardListEditor
     title="Pages"
     :items="listItems"
+    :loading="status === 'pending'"
     empty-title="No pages yet"
     empty-icon="i-lucide-file-text"
     add-label="Add a page"
@@ -16,6 +17,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
 import DashboardListEditor from '~/components/dashboard/DashboardListEditor.vue'
 import { getErrorMessage } from '~/utils/errors'
 import { isRecord } from '~/utils/api-clients'
@@ -37,10 +39,24 @@ const linksPath = computed(() => router.resolve({
   params: { orgSlug: route.params.orgSlug },
 }).path)
 
-const { data, error, refresh } = await useAsyncData(
+const { data, error, status, refresh } = await useAsyncData(
   `tenant-pages-${organizationId}`,
   () => dashboardApi<{ pages: TenantPageListRow[] }>(`/api/editor/organizations/${organizationId}/pages`, { validate: isTenantPageListResponse }),
+  {
+    getCachedData(cacheKey, nuxtApp, ctx) {
+      if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
+      return nuxtApp.payload.data[cacheKey] as { pages: TenantPageListRow[] } | undefined
+    },
+  },
 )
+
+if (import.meta.client) {
+  onMounted(() => {
+    if (useNuxtApp().payload.data[`tenant-pages-${organizationId}`]) {
+      void refresh()
+    }
+  })
+}
 
 const loadError = computed(() => (error.value ? getErrorMessage(error.value, 'Failed to load pages') : null))
 
@@ -61,16 +77,34 @@ const deleteError = ref<string | null>(null)
  * keeping a second copy of the rule that would drift from it.
  */
 async function remove(item: { id: string; updatedAt: string }) {
+  if (removingId.value) return
   removingId.value = item.id
   deleteError.value = null
+  const previousPages = data.value?.pages ? [...data.value.pages] : []
+  // Optimistic update: remove immediately from UI
+  if (data.value?.pages) {
+    data.value = {
+      ...data.value,
+      pages: data.value.pages.filter(p => p.id !== item.id),
+    }
+  }
+  let deleted = false
   try {
     await dashboardApi(`/api/editor/organizations/${organizationId}/pages/${item.id}`, {
       method: 'DELETE',
       body: { expectedUpdatedAt: item.updatedAt },
       validate: isRecord,
     })
+    deleted = true
     await refresh()
   } catch (error) {
+    // Rollback only if the delete itself failed
+    if (!deleted && data.value) {
+      data.value = {
+        ...data.value,
+        pages: previousPages,
+      }
+    }
     deleteError.value = getErrorMessage(error, 'Failed to remove the page')
   } finally {
     removingId.value = null

@@ -4,6 +4,8 @@
       v-model:editing="editing"
       title="Blog"
       :items="listItems"
+      :loading="status === 'pending'"
+      :thumbnail-skeleton="true"
       :error="loadError"
       empty-title="No posts yet"
       empty-icon="i-lucide-newspaper"
@@ -115,10 +117,32 @@ async function fetchFirst(): Promise<BlogPage> {
   }
   return { posts, page_info: info }
 }
-const { data, error, refresh } = await useAsyncData(
+const { data, error, status, refresh } = await useAsyncData(
   () => `dashboard-blog-posts:${organizationId}:${orderedCollection.value ?? statusFilter.value ?? 'all'}`,
   fetchFirst,
+  {
+    getCachedData(cacheKey, nuxtApp, ctx) {
+      if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
+      return nuxtApp.payload.data[cacheKey] as { posts: BlogPost[]; page_info: { has_more: boolean; next_cursor: string | null } } | undefined
+    },
+  },
 )
+
+if (import.meta.client) {
+  onMounted(() => {
+    const key = `dashboard-blog-posts:${organizationId}:${orderedCollection.value ?? statusFilter.value ?? 'all'}`
+    if (useNuxtApp().payload.data[key]) {
+      void refresh()
+    }
+  })
+  watch(activeTab, async () => {
+    await nextTick()
+    const key = `dashboard-blog-posts:${organizationId}:${orderedCollection.value ?? statusFilter.value ?? 'all'}`
+    if (useNuxtApp().payload.data[key]) {
+      void refresh()
+    }
+  })
+}
 
 const moreError = ref<unknown>(null)
 const loadError = computed(() => {
@@ -234,8 +258,17 @@ watch(activeTab, () => { moreError.value = null; void commitOrder() })
 
 /** Removal lives in the list's edit state, the way every other list does it. */
 async function removePost(item: { id: string }) {
+  if (removingId.value) return
   removingId.value = item.id
   listError.value = null
+  const base = data.value
+  const targetKey = `dashboard-blog-posts:${organizationId}:${orderedCollection.value ?? statusFilter.value ?? 'all'}`
+  if (data.value) {
+    data.value = {
+      ...data.value,
+      posts: data.value.posts.filter(post => post.id !== item.id),
+    }
+  }
   try {
     await repository.delete(item.id)
     // A deleted article leaves the order being edited too, or the order written
@@ -243,6 +276,8 @@ async function removePost(item: { id: string }) {
     if (localOrder.value) localOrder.value = { ...localOrder.value, posts: localOrder.value.posts.filter(post => post.id !== item.id) }
     await refresh()
   } catch (error) {
+    const currentKey = `dashboard-blog-posts:${organizationId}:${orderedCollection.value ?? statusFilter.value ?? 'all'}`
+    if (base && currentKey === targetKey) data.value = base
     listError.value = getErrorMessage(error, 'Failed to delete the post')
   } finally {
     removingId.value = null

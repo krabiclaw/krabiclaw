@@ -584,7 +584,15 @@ const { data: loaded, error: loadFailure, refresh } = await useAsyncData(
     }
     return { collections: collectionResponse.collections, product: productResponse.product, previewToken, publicUrl: productResponse.public_url, publicUrls: productResponse.public_urls }
   },
+  {
+    getCachedData(cacheKey, nuxtApp, ctx) {
+      if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
+      if (!nuxtApp.isHydrating) return undefined
+      return nuxtApp.payload.data[cacheKey] as { collections: Collection[]; product: Product; previewToken: string | null; publicUrl: string | null; publicUrls: Record<string, string> } | null | undefined
+    },
+  },
 )
+
 const product = computed(() => loaded.value?.product ?? null)
 const stayLocation = computed(() => allOrganizationLocations.value.find(entry => entry.id === product.value?.stay?.location_id) ?? null)
 const stayLocationError = computed(() => {
@@ -748,6 +756,8 @@ const loadError = computed(() => (loadFailure.value && !isNotFoundError(loadFail
   ? getErrorMessage(loadFailure.value, `Failed to load this ${itemLabel.value.toLowerCase()}`)
   : stayConfigError.value))
 
+const editVersion = ref<string | null>(null)
+
 /**
  * A writer's re-read. A save or a photo change has just made this row different
  * from what was loaded; the photo preview and every index summary read
@@ -756,6 +766,7 @@ const loadError = computed(() => (loadFailure.value && !isNotFoundError(loadFail
 async function reload() {
   await refresh()
   if (loadFailure.value) throw loadFailure.value
+  if (product.value) editVersion.value = product.value.updated_at
   await Promise.all([refreshCatalog(), refreshHomeQuote()])
 }
 
@@ -899,9 +910,17 @@ function variantPriceMajor(variant: Product['variants'][number]): string {
 
 /** The options, variants and prices as loaded, so a save can tell what changed. */
 const loadedCatalogShape = ref('')
-const editVersion = ref<string | null>(null)
+const baselineFormSnapshot = ref<string>('')
+function isFormDirty(): boolean {
+  return baselineFormSnapshot.value !== '' && JSON.stringify(form) !== baselineFormSnapshot.value
+}
 // The draft is seeded from every read of the row, the first and each writer's re-read.
-watch(product, (row) => { if (row) loadForm(row) }, { immediate: true })
+watch(product, (row) => {
+  if (row) {
+    if (editVersion.value !== null && isFormDirty()) return
+    loadForm(row)
+  }
+}, { immediate: true })
 
 function loadForm(row: Product) {
   editVersion.value = row.updated_at
@@ -970,6 +989,7 @@ function loadForm(row: Product) {
   form.stay_cancellation_policy = stay ? stay.cancellation_policy : NEW_HOME_CANCELLATION_POLICIES.cancellation_policy
   form.stay_long_term_cancellation_policy = stay ? stay.long_term_cancellation_policy : NEW_HOME_CANCELLATION_POLICIES.long_term_cancellation_policy
   loadedCatalogShape.value = catalogShapeOf()
+  baselineFormSnapshot.value = JSON.stringify(form)
 }
 
 /** Option and value identities keep a saved configuration's prices through edits. */
@@ -1852,6 +1872,7 @@ async function commit(concern?: ProductConcern) {
       }
     }
     await reload()
+    if (product.value) loadForm(product.value)
     if (concern === 'additional-rules' || concern === 'arrival-time') restoreHouseRules(false)
     // A booking write changes what the schedule is: its start times, whether the
     // product has a calendar at all, or the time zone an online one runs in.
@@ -2025,6 +2046,7 @@ async function createPage() {
       validate: (value: unknown): value is { page: { id: string } } => isRecord(value) && isRecord(value.page) && typeof value.page.id === 'string',
     })
     await reload()
+    if (product.value) loadForm(product.value)
     // The page is edited where every page is.
     await navigateTo(`/dashboard/${String(route.params.orgSlug)}/website/pages/${encodeURIComponent(created.page.id)}`)
   } catch (error) {
@@ -2044,6 +2066,7 @@ async function setPrimaryImage(assetId: string | null) {
     })
     form.image_asset_id = assetId
     await reload()
+    if (product.value) loadForm(product.value)
   } catch (error) {
     photoError.value = getErrorMessage(error, 'Failed to update the photo')
   }
@@ -2073,6 +2096,7 @@ async function changeGallery(change: () => Promise<void>) {
   // Whatever the outcome: a failed change may have made part of its writes.
   try {
     await reload()
+    if (product.value) loadForm(product.value)
   } catch (error) {
     photoError.value ??= getErrorMessage(error, 'Failed to read the photos again')
   }
@@ -2144,6 +2168,7 @@ async function changeStayPhotos(change: () => Promise<unknown>): Promise<boolean
     // case, while keeping the submitted draft and the original failure.
     try {
       await reload()
+    if (product.value) loadForm(product.value)
     } catch (error) {
       const reason = getErrorMessage(error, 'Read failed')
       photoError.value = photoError.value ? `${photoError.value} The photos could not be read again: ${reason}` : `The photos could not be read again: ${reason}`

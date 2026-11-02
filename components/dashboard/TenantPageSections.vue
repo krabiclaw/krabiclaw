@@ -10,6 +10,7 @@
       v-model:editing="editing"
       title="Sections"
       :items="listItems"
+      :thumbnail-skeleton="true"
       empty-title="No sections yet"
       empty-icon="i-lucide-layout-list"
       add-label="Add a section"

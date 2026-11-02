@@ -7,6 +7,7 @@
       v-model:selected="selected"
       :title="collection?.name ?? 'Collection'"
       :items="listItems"
+      :loading="catalog.pending.value"
       :error="loadError"
       :disabled="busy || Boolean(loadError)"
       :addable="!editing"
@@ -200,11 +201,17 @@ async function removeSelected() {
   const expected = expectedOrder()
   removing.value = true
   orderError.value = null
+  const previousLocalOrder = localOrder.value
+  // Optimistic update: temporarily update local order so items disappear immediately
+  localOrder.value = products.value.filter(product => !chosen.has(product.id))
   try {
     await catalog.setCollectionProducts(sourceId, remaining, expected)
     resetEditing()
-  } catch (error) { orderError.value = getErrorMessage(error, 'The items could not be removed from this section') }
-  finally { removing.value = false }
+  } catch (error) {
+    // Error rollback: restore previous local order
+    localOrder.value = previousLocalOrder
+    orderError.value = getErrorMessage(error, 'The items could not be removed from this section')
+  } finally { removing.value = false }
 }
 
 const addDialogOpen = ref(false)

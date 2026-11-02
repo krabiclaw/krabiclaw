@@ -177,6 +177,22 @@
         </div>
       </TransitionGroup>
 
+      <!-- Structured shimmer skeletons matching thread rows -->
+      <div v-if="pending && !threads.length" class="space-y-1" role="status" aria-label="Loading messages...">
+        <div v-for="index in 4" :key="index" class="-mx-3 flex items-start gap-3 rounded-xl px-3 py-3 animate-pulse">
+          <div class="flex h-14 w-2 shrink-0 items-center justify-center" />
+          <div class="size-12 shrink-0 rounded-full bg-elevated/80" />
+          <div class="min-w-0 flex-1 space-y-2 py-1">
+            <div class="flex justify-between gap-3">
+              <div class="h-4 w-1/3 rounded bg-elevated/80" />
+              <div class="h-3 w-12 rounded bg-elevated/40" />
+            </div>
+            <div class="h-3 w-1/4 rounded bg-elevated/50" />
+            <div class="h-3 w-3/4 rounded bg-elevated/40" />
+          </div>
+        </div>
+      </div>
+
       <div v-if="data?.pagination.hasMore" class="flex justify-center py-3">
         <UButton color="neutral" variant="ghost" :loading="loadingMore" :disabled="pending" @click="loadMore">Load more conversations</UButton>
       </div>
@@ -441,7 +457,21 @@ const { data, pending, error: threadsError, refresh } = await useAsyncData<Threa
   if (scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
   loadedPages = fetched
   return page
-}, { server: !props.personalScope })
+}, {
+  server: !props.personalScope,
+  getCachedData(cacheKey, nuxtApp, ctx) {
+    if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
+    return nuxtApp.payload.data[cacheKey] as ThreadListPage | undefined
+  },
+})
+
+if (import.meta.client) {
+  onMounted(() => {
+    if (useNuxtApp().payload.data[listKey.value]) {
+      void refresh()
+    }
+  })
+}
 const threads = computed(() => data.value?.threads ?? [])
 
 async function loadMore() {
