@@ -6,6 +6,21 @@
     </header>
     <div class="min-h-0 flex-1 overflow-y-auto" :class="dashboardGutterClass">
       <UAlert v-if="error" class="mb-4" color="error" title="Team conversations could not be loaded" :description="getErrorMessage(error, 'Team conversation request failed')" />
+      <!-- Structured shimmer skeletons matching team thread rows -->
+      <div v-if="pending && !threads.length" class="space-y-1" role="status" aria-label="Loading team messages...">
+        <div v-for="index in 4" :key="index" class="-mx-3 flex items-start gap-3 rounded-xl px-3 py-4 animate-pulse">
+          <div class="flex h-12 w-2 shrink-0 items-center justify-center" />
+          <div class="size-11 shrink-0 rounded-full bg-elevated/80" />
+          <div class="min-w-0 flex-1 space-y-2 py-0.5">
+            <div class="flex justify-between gap-3">
+              <div class="h-4 w-1/3 rounded bg-elevated/80" />
+              <div class="h-3 w-12 rounded bg-elevated/40" />
+            </div>
+            <div class="h-3 w-1/2 rounded bg-elevated/40" />
+            <div class="h-3 w-4/5 rounded bg-elevated/30" />
+          </div>
+        </div>
+      </div>
       <NuxtLink v-for="thread in threads" :key="thread.id" :to="target(thread.id)" :data-team-thread="thread.id" class="-mx-3 flex items-start gap-3 rounded-xl px-3 py-4 transition hover:bg-elevated/60" :class="route.params.teamThreadId === thread.id ? 'bg-elevated' : undefined">
         <div class="flex h-12 w-2 shrink-0 items-center justify-center"><span v-if="thread.unread" class="size-2 rounded-full bg-primary" aria-label="Unread" /></div>
         <UAvatar :src="thread.participants.find(person => person.id !== userId)?.image ?? undefined" :alt="teamThreadName(thread, userId)" size="xl" />

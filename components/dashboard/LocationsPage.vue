@@ -12,6 +12,18 @@
       />
     </template>
     <UAlert v-if="locationsError" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Could not load locations" :description="getErrorMessage(locationsError, 'Locations could not be loaded')" />
+    <div
+      v-else-if="locationsPending && !locations.length"
+      class="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-6 animate-pulse"
+      role="status"
+      aria-label="Loading locations..."
+    >
+      <div v-for="i in 3" :key="i" class="space-y-3">
+        <div class="aspect-[20/19] w-full rounded-2xl bg-elevated/70" />
+        <div class="h-4 w-2/3 rounded bg-elevated/80" />
+        <div class="h-3 w-1/3 rounded bg-elevated/40" />
+      </div>
+    </div>
     <UEmpty
       v-else-if="!locations.length"
       icon="i-lucide-map-pin"
@@ -42,7 +54,7 @@ const { organizationPaths } = dashboard
 const organization = computed(() => dashboard.organization.value)
 
 const orgSlug = computed(() => String(route.params.orgSlug || ''))
-const { locations, error: locationsError } = await useOrganizationLocations()
+const { locations, error: locationsError, pending: locationsPending } = await useOrganizationLocations()
 
 // A Legal Services site calls these offices. The vocabulary comes from
 // the same capabilities the rest of the dashboard reads; it depends on the

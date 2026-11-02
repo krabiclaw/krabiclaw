@@ -584,7 +584,22 @@ const { data: loaded, error: loadFailure, refresh } = await useAsyncData(
     }
     return { collections: collectionResponse.collections, product: productResponse.product, previewToken, publicUrl: productResponse.public_url, publicUrls: productResponse.public_urls }
   },
+  {
+    getCachedData(cacheKey, nuxtApp, ctx) {
+      if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
+      return nuxtApp.payload.data[cacheKey] as { collections: Collection[]; product: Product; previewToken: string | null; publicUrl: string | null; publicUrls: Record<string, string> } | null | undefined
+    },
+  },
 )
+
+if (import.meta.client) {
+  onMounted(() => {
+    const key = `dashboard-product:${organizationId}:${locationScope.value ?? 'organization'}:${productId.value}`
+    if (useNuxtApp().payload.data[key]) {
+      void refresh()
+    }
+  })
+}
 const product = computed(() => loaded.value?.product ?? null)
 const stayLocation = computed(() => allOrganizationLocations.value.find(entry => entry.id === product.value?.stay?.location_id) ?? null)
 const stayLocationError = computed(() => {

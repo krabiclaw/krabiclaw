@@ -10,12 +10,21 @@ import { dashboardFetch } from '~/composables/dashboardFetch'
 export async function useOrganizationLocations(options: { includeInactive?: boolean } = {}) {
   const route = useRoute()
   const orgSlug = computed(() => String(route.params.orgSlug || ''))
-  const { data, error, pending } = await useAsyncData(() => `dashboard-org-locations:${orgSlug.value}${options.includeInactive ? ':all' : ''}`, () =>
-    dashboardFetch<{ success: true; locations: DashboardLocation[] }>('/api/dashboard/locations', { orgSlug: orgSlug.value }, {
+  const { data, error, pending } = await useAsyncData(
+    () => `dashboard-org-locations:${orgSlug.value}${options.includeInactive ? ':all' : ''}`,
+    () => dashboardFetch<{ success: true; locations: DashboardLocation[] }>('/api/dashboard/locations', { orgSlug: orgSlug.value }, {
       query: { organization: 'true', status: options.includeInactive ? 'all' : undefined },
       validate: (value): value is { success: true; locations: DashboardLocation[] } =>
         isRecord(value) && value.success === true && Array.isArray(value.locations),
-    }), { watch: [orgSlug] })
+    }),
+    {
+      watch: [orgSlug],
+      getCachedData(cacheKey, nuxtApp, ctx) {
+        if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
+        return nuxtApp.payload.data[cacheKey] as { success: true; locations: DashboardLocation[] } | undefined
+      },
+    },
+  )
   const locations = computed(() => data.value?.locations ?? [])
   return { locations, error, pending }
 }

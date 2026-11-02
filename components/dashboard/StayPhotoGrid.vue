@@ -26,8 +26,10 @@
         </MediaPicker>
       </template>
       <template #tile="{ item }">
-        <img v-if="mediaStillUrl(item.photo)" :src="mediaStillUrl(item.photo) || undefined" :alt="item.photo.alt_text || ''" class="h-full w-full object-cover" loading="lazy">
-        <span v-else class="flex h-full w-full items-center justify-center bg-elevated"><UIcon name="i-lucide-image" class="size-8 text-muted" /></span>
+        <div class="relative size-full overflow-hidden bg-elevated">
+          <img v-if="mediaStillUrl(item.photo)" :src="mediaStillUrl(item.photo) || undefined" :alt="item.photo.alt_text || ''" class="size-full object-cover" loading="lazy" decoding="async">
+          <span v-else class="flex size-full items-center justify-center bg-elevated"><UIcon name="i-lucide-image" class="size-8 text-muted" /></span>
+        </div>
         <span v-if="item.cover" class="absolute left-3 top-3 rounded-full bg-default px-3 py-1.5 text-xs font-medium text-highlighted" data-testid="stay-cover-photo">Cover photo</span>
       </template>
       <template v-if="allPhotos" #tile-actions="{ item }">

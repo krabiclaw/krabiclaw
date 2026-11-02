@@ -58,6 +58,17 @@
       :description="error"
     />
 
+    <ul v-else-if="loading && !items.length" class="divide-y divide-default border-y border-default" role="status" aria-label="Loading...">
+      <li v-for="index in skeletonCount" :key="index" class="flex items-center gap-3 py-4 animate-pulse">
+        <div v-if="thumbnailSkeleton" class="size-12 shrink-0 rounded-xl bg-elevated/70" />
+        <div class="min-w-0 flex-1 space-y-2">
+          <div class="h-4 w-1/3 rounded bg-elevated/80" />
+          <div class="h-3 w-1/2 rounded bg-elevated/40" />
+        </div>
+        <div class="size-4 shrink-0 rounded bg-elevated/30" />
+      </li>
+    </ul>
+
     <UEmpty v-else-if="!items.length" :icon="emptyIcon" :title="emptyTitle" data-testid="list-editor-empty" />
 
     <ul v-else class="divide-y divide-default border-y border-default">
@@ -183,7 +194,13 @@ const props = withDefaults(defineProps<{
   removingId?: string | null
   /** Swaps the per-row remove control for a checkbox so several rows act at once. */
   selectable?: boolean
-}>(), { addable: true, disabled: false })
+  /** Renders structured shimmer skeleton rows while initial data loads. */
+  loading?: boolean
+  /** Number of skeleton rows to render while loading. */
+  skeletonCount?: number
+  /** Whether each skeleton row includes a thumbnail box placeholder. */
+  thumbnailSkeleton?: boolean
+}>(), { addable: true, disabled: false, loading: false, skeletonCount: 4, thumbnailSkeleton: false })
 
 defineEmits<{
   add: []

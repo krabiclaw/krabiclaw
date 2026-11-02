@@ -254,7 +254,22 @@ const { data, error, status, refresh } = await useAsyncData(
     }
     return { home: chunks[0]!.home, nights: chunks.flatMap(chunk => chunk.nights), stays: [...new Map(chunks.flatMap(chunk => chunk.stays).map(stay => [stay.id, stay])).values()] }
   },
+  {
+    getCachedData(cacheKey, nuxtApp, ctx) {
+      if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
+      return nuxtApp.payload.data[cacheKey] as { home: CalendarPayload['home']; nights: CalendarPayload['nights']; stays: CalendarPayload['stays'] } | null | undefined
+    },
+  },
 )
+
+if (import.meta.client) {
+  onMounted(() => {
+    const key = `stay-night-calendar:${String(route.params.orgSlug)}:${props.productId}:${readRanges.value.map(range => `${range.from}:${range.to}`).join('|')}`
+    if (useNuxtApp().payload.data[key]) {
+      void refresh()
+    }
+  })
+}
 const nightsByDate = computed(() => new Map((data.value?.nights ?? []).map(night => [night.date, night])))
 const staysById = computed(() => new Map((data.value?.stays ?? []).map(stay => [stay.id, stay])))
 const night = (day: DateValue) => nightsByDate.value.get(day.toString())

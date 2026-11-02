@@ -41,7 +41,15 @@
       :description="error"
     />
 
-    <UEmpty v-if="!error && !items.length" :icon="emptyIcon" :title="emptyTitle" data-testid="grid-editor-empty" />
+    <div v-else-if="loading && !items.length" :class="gridClass" role="status" aria-label="Loading...">
+      <div
+        v-for="index in (skeletonCount ?? 6)"
+        :key="index"
+        class="aspect-square overflow-hidden rounded-lg bg-elevated/60 animate-pulse border-2 border-transparent"
+      />
+    </div>
+
+    <UEmpty v-else-if="!error && !items.length" :icon="emptyIcon" :title="emptyTitle" data-testid="grid-editor-empty" />
 
     <div v-if="items.length" :class="gridClass">
       <div
@@ -52,7 +60,7 @@
         <ULink
           raw
           :to="item.to"
-          class="group relative block aspect-square overflow-hidden rounded-lg border-2 border-transparent text-left"
+          class="group relative block aspect-square overflow-hidden rounded-lg bg-elevated border-2 border-transparent text-left"
           :aria-label="`Open ${item.title}`"
           @click="!item.to && $emit('open', item)"
         >
@@ -179,6 +187,10 @@ const props = defineProps<{
   gridClass?: string
   /** A bulk removal is in flight. */
   removing?: boolean
+  /** Renders structured shimmer skeleton cards while initial data loads. */
+  loading?: boolean
+  /** Number of skeleton cards to render while loading. */
+  skeletonCount?: number
 }>()
 
 defineEmits<{

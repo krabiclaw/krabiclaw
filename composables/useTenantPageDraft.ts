@@ -1,3 +1,4 @@
+import { computed, onMounted, toRaw, toValue, watch, type MaybeRefOrGetter } from 'vue'
 import { slugifyTitle } from '~/utils/post-slugs'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import type { TenantPageBlock, TenantPageType } from '~/utils/tenant-page-blocks'
@@ -183,8 +184,26 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
       ])
       return { context: context.context, page: page?.page ?? null, public_url: page?.public_url ?? null }
     },
+    {
+      getCachedData(cacheKey, nuxtApp, ctx) {
+        if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
+        return nuxtApp.payload.data[cacheKey] as {
+          context: { previewToken: string; sourceLocale: string; organization: { subdomain: string | null } }
+          page: TenantPageResponse | null
+          public_url: string | null
+        } | undefined
+      },
+    },
   )
   const { data, error } = load
+
+  if (import.meta.client) {
+    onMounted(() => {
+      if (useNuxtApp().payload.data[key]) {
+        void load.refresh()
+      }
+    })
+  }
 
   const draft = useState<TenantPageDraft>(`${key}-draft`, emptyDraft)
   /** The draft as it was last seeded or committed, so Save knows there is something to save. */
