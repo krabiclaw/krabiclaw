@@ -55,6 +55,7 @@
       :items="showNavChrome ? primaryNavItems : []"
       :home-to="topNavHomeTo"
       :menu-active="isMenuPageActive"
+      :menu-unread="menuUnread"
       @menu="menuOpen = true"
     />
 
@@ -100,7 +101,10 @@
         :class="item.active ? 'text-primary' : 'text-dimmed hover:text-highlighted'"
         :aria-current="item.active ? 'page' : undefined"
       >
-        <UIcon :name="item.icon" class="size-6 shrink-0" />
+        <span class="relative">
+          <UIcon :name="item.icon" class="size-6 shrink-0" />
+          <span v-if="item.badge" class="absolute -right-2.5 -top-1.5 h-4 min-w-4 rounded-full bg-error px-1 text-center text-xs font-semibold leading-4 text-white" :aria-label="`${item.badge} unread`">{{ item.badge > 99 ? '99+' : item.badge }}</span>
+        </span>
         <span class="text-xs leading-tight font-medium">{{ item.label }}</span>
       </NuxtLink>
       <NuxtLink
@@ -111,7 +115,10 @@
         :aria-current="isMenuPageActive ? 'page' : undefined"
         data-testid="dashboard-mobile-nav-menu-link"
       >
-        <UIcon name="i-lucide-menu" class="size-6 shrink-0" />
+        <span class="relative">
+          <UIcon name="i-lucide-menu" class="size-6 shrink-0" />
+          <span v-if="menuUnread" class="absolute -right-1 -top-0.5 size-2.5 rounded-full bg-error" aria-label="Unread notifications" data-testid="dashboard-menu-unread" />
+        </span>
         <span class="text-xs leading-tight font-medium">Menu</span>
       </NuxtLink>
     </nav>
@@ -373,6 +380,8 @@ interface DashboardMobileNavItem {
   icon: string
   to?: string
   active?: boolean
+  /** Conversations with something unread, on Messages. */
+  badge?: number
 }
 
 /**
@@ -412,7 +421,10 @@ const navTargets = computed<DashboardMobileNavItem[]>(() => {
 // it, because a slideover is the wrong control on a phone.
 const menuOpen = ref(false)
 
-const primaryNavItems = computed(() => navTargets.value.map(item => ({ ...item, active: item.key === activeTab.value })))
+// What is unread: conversations on Messages, and the notifications the Menu's bell lists as a dot on Menu.
+const { unreadCount, unreadConversations } = useNotificationUnreadCount()
+const primaryNavItems = computed(() => navTargets.value.map(item => ({ ...item, active: item.key === activeTab.value, ...(item.key === 'messages' ? { badge: unreadConversations.value } : {}) })))
+const menuUnread = computed(() => unreadCount.value > 0)
 // A signed-in owner always gets the header: the wordmark and the account menu
 // are user-scoped and need no organization. Only the nav links and the bottom
 // bar wait for an organization, because Today, Calendar, Catalog and Messages do not
