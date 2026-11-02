@@ -84,6 +84,8 @@
   "payment.price_details": "料金の詳細",
   "payment.unit_line": "{price} x {count}",
   "payment.surcharge": "カード手数料",
+  "payment.tax": "税金",
+  "payment.tax_included": "{amount}の税金が含まれています。",
   "payment.total": "合計",
   "payment.change": "変更",
   "payment.surcharge_applies": "このカードには手数料がかかります。料金の詳細に表示され、合計に含まれています。",

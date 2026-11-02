@@ -6,6 +6,7 @@ import { connectedBuyerCustomer } from '~/server/utils/billing-customer'
 import { claimCheckoutReturn, tokenHash } from './buyer'
 import { requirePayment, type Payment } from './index'
 import { isStayPurchase, surchargeBasisPoints, type PaymentReview } from './checkout'
+import { PRICE_TAX_BEHAVIORS, type Price } from '~/shared/prices'
 import { reconcilePaymentIntent } from './events'
 import { notifyPaymentFinancialEvent } from './notifications'
 import { loadOwnerPictures } from '~/server/notifications/hero'
@@ -37,18 +38,23 @@ export async function requireOpenAttempt(db: DbClient, organizationId: string, p
 function parseReview(value: string | null): PaymentReview | null {
   if (!value) return null
   const review = JSON.parse(value) as PaymentReview
-  if (typeof review.payment_method_id !== 'string' || !Number.isSafeInteger(review.subtotal) || !Number.isSafeInteger(review.surcharge) || review.total !== review.subtotal + review.surcharge) throw new Error('Stored payment review is invalid')
+  if (typeof review.payment_method_id !== 'string' || ![review.subtotal, review.tax, review.tax_included, review.surcharge].every(Number.isSafeInteger) || review.total !== review.subtotal + review.tax + review.surcharge) throw new Error('Stored payment review is invalid')
   return review
 }
 
 function snapshotOf(payment: Payment) {
-  const snapshot = JSON.parse(payment.price_snapshot_json) as { title?: unknown; quantity?: unknown; method_configuration_id?: unknown; stay?: unknown; price?: { unit_amount?: unknown }; product_id?: unknown }
-  if (typeof snapshot.title !== 'string' || !Number.isSafeInteger(snapshot.quantity) || typeof snapshot.method_configuration_id !== 'string' || !Number.isSafeInteger(snapshot.price?.unit_amount)) throw new Error('Payment purchase snapshot is invalid')
+  const snapshot = JSON.parse(payment.price_snapshot_json) as { title?: unknown; quantity?: unknown; method_configuration_id?: unknown; stay?: unknown; price?: { unit_amount?: unknown; tax_behavior?: unknown }; product_id?: unknown; automatic_tax?: unknown; tax_code?: unknown }
+  if (typeof snapshot.title !== 'string' || !Number.isSafeInteger(snapshot.quantity) || typeof snapshot.method_configuration_id !== 'string' || !Number.isSafeInteger(snapshot.price?.unit_amount)
+    || typeof snapshot.automatic_tax !== 'boolean' || (snapshot.tax_code !== null && typeof snapshot.tax_code !== 'string')
+    || !PRICE_TAX_BEHAVIORS.includes(snapshot.price!.tax_behavior as Price['tax_behavior'])) throw new Error('Payment purchase snapshot is invalid')
   if (payment.subject_type === 'stay' && !isStayPurchase(snapshot.stay)) throw new Error('Stay payment has no valid stay purchase')
   const stay = payment.subject_type === 'stay' && isStayPurchase(snapshot.stay)
     ? { check_in_date: snapshot.stay.check_in_date, check_out_date: snapshot.stay.check_out_date, nights: snapshot.stay.nightly.length, nightly: snapshot.stay.nightly.map(night => night.price_minor), adults: snapshot.stay.adults, children: snapshot.stay.children, infants: snapshot.stay.infants, cancellation_policy: snapshot.stay.cancellation_policy, product_id: snapshot.stay.product_id }
     : null
-  return { title: snapshot.title, quantity: snapshot.quantity as number, unit_amount: snapshot.price!.unit_amount as number, product_id: typeof snapshot.product_id === 'string' ? snapshot.product_id : null, stay }
+  return {
+    title: snapshot.title, quantity: snapshot.quantity as number, unit_amount: snapshot.price!.unit_amount as number, product_id: typeof snapshot.product_id === 'string' ? snapshot.product_id : null, stay,
+    automatic_tax: snapshot.automatic_tax, tax_code: snapshot.tax_code as string | null, tax_behavior: snapshot.price!.tax_behavior as Price['tax_behavior'],
+  }
 }
 
 /**
@@ -101,7 +107,6 @@ export async function paymentHandoff(db: DbClient, stripe: Stripe, publishableKe
     stripe_account_id: payment.stripe_account_id, publishable_key: publishableKey, payment_method_types: intent.payment_method_types,
     customer_session_client_secret: customerSession,
     surcharge_basis_points: await surchargeBasisPoints(db, organizationId, payment.stripe_account_id),
-    review: parseReview(attempt.review_json),
   }
 }
 
@@ -125,36 +130,64 @@ export async function cancelStayPayment(db: DbClient, stripe: Stripe, env: Cloud
 }
 
 /**
- * The buyer's chosen method, attached to the intent so Stripe can say whether
- * this card may carry a surcharge and how much at most. The business's rate is
- * applied inside that bound; an ineligible card carries none. Stripe's answer
- * missing is an error, never a free payment.
+ * The buyer's chosen method, priced before anything is confirmed. A business
+ * that collects tax through Stripe Tax has it calculated by Stripe from the
+ * method's billing address, or the buyer's IP address when the method carries
+ * none, and the calculation is attached to the intent so Stripe records the tax
+ * transaction when it succeeds and reverses it on refund. Stripe then says
+ * whether the method may carry a surcharge on that taxed amount and how much at
+ * most; the business's rate is applied inside that bound and an ineligible card
+ * carries none. Stripe's answer missing is an error, never a free payment.
  */
-export async function reviewPayment(db: DbClient, stripe: Stripe, organizationId: string, paymentId: string, claim: string, paymentMethodId: string) {
+export async function reviewPayment(db: DbClient, stripe: Stripe, organizationId: string, paymentId: string, claim: string, paymentMethodId: string, buyerIp: string | null) {
   const { payment, attempt, state } = await requireOpenAttempt(db, organizationId, paymentId, claim)
   if (state !== 'open') throw new HTTPError({ statusCode: 409, statusMessage: state === 'paid' ? 'This payment is already complete' : state === 'expired' ? 'This payment has expired; start the booking again' : 'This payment was not accepted; start the booking again', data: { code: `payment_${state}` } })
   if (!/^pm_[A-Za-z0-9]+$/u.test(paymentMethodId)) throw new HTTPError({ statusCode: 400, statusMessage: 'Payment method required' })
+  const snapshot = snapshotOf(payment)
   const rate = await surchargeBasisPoints(db, organizationId, payment.stripe_account_id)
+  const method = await stripe.paymentMethods.retrieve(paymentMethodId, {}, { stripeAccount: payment.stripe_account_id })
+  const tax = snapshot.automatic_tax ? await calculateTax(stripe, payment, snapshot, method, buyerIp) : null
+  const amount = tax?.amount_total ?? payment.amount
   const intent = await stripe.paymentIntents.update(attempt.stripe_payment_intent_id, {
-    payment_method: paymentMethodId,
-    expand: ['payment_method'],
+    payment_method: method.id,
+    amount,
+    ...(tax ? { hooks: { inputs: { tax: { calculation: tax.id } } } } : {}),
     ...(rate !== null ? { amount_details: { surcharge: { enforce_validation: 'enabled' } } } : {}),
   } as Stripe.PaymentIntentUpdateParams, { stripeAccount: payment.stripe_account_id }) as IntentWithSurcharge
-  if (intent.metadata.krabiclaw_payment_id !== payment.id || intent.livemode !== Boolean(payment.livemode) || intent.amount !== payment.amount || intent.currency.toUpperCase() !== payment.currency) throw new Error('Stripe PaymentIntent does not match the purchase')
-  const method = intent.payment_method
-  if (!method || typeof method === 'string') throw new Error('Stripe did not return the attached payment method')
+  if (intent.metadata.krabiclaw_payment_id !== payment.id || intent.livemode !== Boolean(payment.livemode) || intent.amount !== amount || intent.currency.toUpperCase() !== payment.currency) throw new Error('Stripe PaymentIntent does not match the purchase')
   let surcharge = 0
   if (rate !== null) {
     const native = intent.amount_details?.surcharge
     if (native?.status !== 'available' && native?.status !== 'unavailable') throw new Error('Stripe did not report surcharge availability for this payment method')
     if (native.status === 'available') {
       if (!Number.isSafeInteger(native.maximum_amount)) throw new Error('Stripe did not report the maximum surcharge')
-      surcharge = Math.min(Math.floor(payment.amount * rate / 10_000), native.maximum_amount as number)
+      surcharge = Math.min(Math.floor(amount * rate / 10_000), native.maximum_amount as number)
     }
   }
-  const review: PaymentReview = { payment_method_id: method.id, subtotal: payment.amount, surcharge, total: payment.amount + surcharge, reviewed_at: new Date().toISOString() }
+  const review: PaymentReview = { payment_method_id: method.id, subtotal: payment.amount, tax: tax?.tax_amount_exclusive ?? 0, tax_included: tax?.tax_amount_inclusive ?? 0, surcharge, total: amount + surcharge, reviewed_at: new Date().toISOString() }
+  if (review.total !== review.subtotal + review.tax + review.surcharge) throw new Error('Stripe Tax returned a total that does not add up')
   await execute(db, 'UPDATE payment_attempts SET review_json=?,updated_at=? WHERE id=?', [JSON.stringify(review), review.reviewed_at, attempt.id])
   return { ...review, currency: payment.currency, method: { type: method.type, brand: method.card?.brand ?? null, last4: method.card?.last4 ?? method.us_bank_account?.last4 ?? null, funding: method.card?.funding ?? null, wallet: method.card?.wallet?.type ?? null, bank_name: method.us_bank_account?.bank_name ?? null } }
+}
+
+/** Stripe Tax's calculation for the purchase, located where Stripe says it can locate the buyer. */
+async function calculateTax(stripe: Stripe, payment: Payment, snapshot: ReturnType<typeof snapshotOf>, method: Stripe.PaymentMethod, buyerIp: string | null) {
+  const address = method.billing_details.address
+  const located = address?.country
+    ? { address: { country: address.country, line1: address.line1, line2: address.line2, city: address.city, state: address.state, postal_code: address.postal_code }, address_source: 'billing' as const }
+    : buyerIp ? { ip_address: buyerIp } : null
+  if (!located) throw new HTTPError({ statusCode: 409, statusMessage: 'Enter your billing address so tax can be calculated', data: { code: 'customer_tax_location_invalid' } })
+  try {
+    return await stripe.tax.calculations.create({
+      currency: payment.currency.toLowerCase(),
+      // An unspecified price takes the account's default tax behavior in Stripe Tax settings.
+      line_items: [{ amount: payment.amount, reference: payment.id, ...(snapshot.tax_behavior !== 'unspecified' ? { tax_behavior: snapshot.tax_behavior } : {}), ...(snapshot.tax_code ? { tax_code: snapshot.tax_code } : {}) }],
+      customer_details: located,
+    }, { stripeAccount: payment.stripe_account_id })
+  } catch (error) {
+    if (error instanceof stripe.errors.StripeInvalidRequestError && error.code === 'customer_tax_location_invalid') throw new HTTPError({ statusCode: 409, statusMessage: error.message, data: { code: error.code }, cause: error })
+    throw error
+  }
 }
 
 /**
@@ -169,7 +202,7 @@ export async function confirmPayment(db: DbClient, stripe: Stripe, env: Cloudfla
   if (!review || review.payment_method_id !== input.payment_method_id || review.total !== input.total) throw new HTTPError({ statusCode: 409, statusMessage: 'Review the payment again before confirming', data: { code: 'review_required' } })
   const current = await stripe.paymentIntents.retrieve(attempt.stripe_payment_intent_id, {}, { stripeAccount: payment.stripe_account_id })
   const attached = typeof current.payment_method === 'string' ? current.payment_method : current.payment_method?.id
-  if (current.status !== 'requires_confirmation' || attached !== review.payment_method_id || current.amount !== review.subtotal) throw new HTTPError({ statusCode: 409, statusMessage: 'The payment changed since it was reviewed; review it again', data: { code: 'review_required' } })
+  if (current.status !== 'requires_confirmation' || attached !== review.payment_method_id || current.amount !== review.subtotal + review.tax) throw new HTTPError({ statusCode: 409, statusMessage: 'The payment changed since it was reviewed; review it again', data: { code: 'review_required' } })
   const confirmed = await stripe.paymentIntents.confirm(attempt.stripe_payment_intent_id, {
     // A method that leaves the site comes back to this pay page, which completes the return there.
     return_url: new URL(`/pay/${encodeURIComponent(payment.id)}?claim=${encodeURIComponent(claim)}`, siteOrigin).toString(),

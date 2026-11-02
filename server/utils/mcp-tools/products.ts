@@ -2,11 +2,10 @@ import { STAY_CALENDAR_RULES_SCHEMA, STAY_HOME_ACCESSIBILITY_SCHEMA, STAY_LISTIN
 import type { McpToolDefinition } from './shared'
 import { HTTPError } from 'nitro'
 import { formQuestionsJsonSchema } from '~/shared/form-questions'
-import { pageInfoObject, paginationInputSchema, resolvedMediaAssetObject, organizationTool } from './shared'
+import { currencyCodeSchema, pageInfoObject, paginationInputSchema, resolvedMediaAssetObject, organizationTool } from './shared'
 import { TENANT_PAGE_BLOCKS_SCHEMA, TENANT_PAGE_METADATA_SCHEMA } from './content'
 import { productEditorPath } from '~/server/utils/dashboard-links'
 import { PRODUCT_LIMITS } from '~/server/utils/product-validation'
-import { SUPPORTED_CURRENCIES } from '~/shared/currencies'
 import { MAX_STAY_NIGHTS } from '~/shared/bookings'
 import { PRODUCT_KINDS, productDetailsSchema } from '~/shared/product-details'
 import { selectPrice, PRICE_RECURRING_INTERVALS, PRICE_TAX_BEHAVIORS, PRICE_TYPES, type PriceBilling } from '~/shared/prices'
@@ -82,7 +81,7 @@ const priceWrite = {
   properties: {
     id: { type: 'string', description: 'The id of a price this variant already has. Restating it keeps the price row, which payments and checkout holds reference; a price without an id is a new offer.' },
     unit_amount: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
-    currency: { type: 'string', enum: [...SUPPORTED_CURRENCIES] },
+    currency: currencyCodeSchema,
     location_id: { type: ['string', 'null'], description: 'Scope this offer to one location, or null for every location the product is offered at.' },
     active: { type: 'boolean' },
     type: { type: 'string', enum: [...PRICE_TYPES] },
@@ -295,7 +294,7 @@ const productListItemObject = {
     locations: { type: 'array', items: productLocationObject },
     prices: { type: 'array', items: { type: 'object', properties: {
       variant_id: { type: 'string' }, location_id: { type: ['string', 'null'] },
-      currency: { type: 'string', enum: SUPPORTED_CURRENCIES }, unit_amount: { type: 'integer', minimum: 0 },
+      currency: currencyCodeSchema, unit_amount: { type: 'integer', minimum: 0 },
       type: { type: 'string', enum: [...PRICE_TYPES] },
       recurring_interval: { type: 'string', enum: [...PRICE_RECURRING_INTERVALS] }, recurring_interval_count: { type: 'integer', minimum: 1 },
     }, required: ['variant_id', 'location_id', 'currency', 'unit_amount', 'type'] } },

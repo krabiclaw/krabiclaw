@@ -143,7 +143,7 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     title: () => 'What currency do you price in?',
     lede: state => currencyForCountry(state.details.country)
       ? 'Taken from the country you gave. Change it if that is not what you charge in.'
-      : 'We could not tell from the country you gave, so pick the one you charge in.',
+      : 'Pick the currency you charge in.',
     complete: state => state.details.currency !== null,
   },
   {

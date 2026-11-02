@@ -63,8 +63,12 @@ export function isStayPurchase(value: unknown): value is StayPurchase {
     // A purchase frozen before homes asked questions carries no answers, and none were asked.
     && (guest.answers === undefined || formAnswerSnapshotsSchema.safeParse(guest.answers).success)
 }
-/** The amount the buyer was shown and confirmed on the site, kept on the attempt until Stripe answers. */
-export interface PaymentReview { payment_method_id: string; subtotal: number; surcharge: number; total: number; reviewed_at: string }
+/**
+ * The amount the buyer was shown and confirmed on the site, kept on the attempt
+ * until Stripe answers: the purchase, the tax Stripe Tax added on top of it (and
+ * the tax already inside it), and the card surcharge on that taxed amount.
+ */
+export interface PaymentReview { payment_method_id: string; subtotal: number; tax: number; tax_included: number; surcharge: number; total: number; reviewed_at: string }
 export interface PaymentHandoff { payment_id: string; pay_path: string; purchase_claim: string; expires_at: string }
 /** Stripe's PaymentIntent owns payment; one atomic batch owns the guest request, expiring capacity hold and immutable purchase. */
 export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, input: CheckoutInput, retry = false) {
@@ -173,8 +177,6 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
   }
   if(!price || !connected?.stripeAccountId || automaticTax === undefined || !methodConfigurationId)throw new Error('Immutable checkout price or connected account is missing')
   const stripe = paymentsStripe(env, connected.livemode)
-  // Stripe Tax calculated the hosted Checkout's tax. The on-site payment does not run Stripe Tax calculations yet, so a business registered for it is refused rather than charged without tax.
-  if (automaticTax) throw new HTTPError({ statusCode: 409, statusMessage: 'This business collects tax through Stripe Tax, which online payments on the site do not calculate yet', data: { code: 'stripe_tax_unsupported' } })
   const amount = price.unit_amount*purchaseQuantity
   assertMinorAmount(amount)
   const id = previous?.payment_id ?? crypto.randomUUID(), attemptId = previous?.id ?? crypto.randomUUID(), holdId = crypto.randomUUID()

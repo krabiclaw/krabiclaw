@@ -157,10 +157,36 @@ the existing `TodayAgendaCard` presentation: one small time or status line,
 headline, location or context, image and badge, with the entire card a link.
 An undated task states its status rather than inventing an appointment time.
 
-Owner/admin cards order outstanding decisions, replies and current failures
-before scheduled activity, then at most two factual performance or content
-opportunities. Assigned service members see only
-their own authorized appointments and related work. Lodging members see only
+Today shows three things, in this order: work that is due now, scheduled
+activity, and optional work. Work is due when a recorded fact makes it so: a
+booking awaiting the owner's decision, an unanswered guest message about a live
+(pending or confirmed, not yet ended) commitment, an unanswered message or
+contact form from the last seven days, or a failed publication. Inbox state
+alone is not due work: an older unanswered inquiry with no live commitment
+stays in Messages and is not mandatory on Today.
+
+Optional work comes only from capabilities Today can recognise as finished —
+replying to a guest (`guest_thread.reply`) and publishing a blog draft
+(`article.publish`) — and only when the owner has a reason for it: an active
+priority whose words the work shares, their own earlier choice to do it, or a
+deferral that has come due. At most three are shown; a day with no such work
+shows none. Analytics, advertising, plan offers, photos and social shares do not
+earn a card by existing.
+
+Owners and admins state priorities on Today; they are `organization_goals`.
+Every suggested card carries its reason and, for owners and admins, the
+evidence revision it was suggested on. "I'll do this", "Later", "Dismiss" and
+"Correct" save `recommendation_feedback` against that evidence and the matched
+priority. A current dismissal or correction removes the card without touching
+the conversation or article; a deferral moves it to its chosen day, where
+Upcoming shows it at that action time ahead of the occurrence it prepares for.
+When the evidence, the priority or the deferral date changes, the decision no
+longer applies and the card returns with the reason it returned. Upcoming
+orders by action time, then occurrence time, and the page keeps the server's
+order.
+
+Assigned service members see only their own authorized appointments and related
+work. Lodging members see only
 the arrivals and departures at homes assigned to them through Better Auth
 members or teams. Owners and admins also see guests currently staying, between
 their arrival and departure days; these are not extra cleanings for assigned
@@ -169,15 +195,13 @@ arrives on its checkout date.
 
 The card is an entrance to its data owner, never a second editor or task
 database. A reply opens its conversation; a decision opens its booking; a
-missing photo opens that Product's photo; a draft opens its article or post.
-An article-to-Facebook suggestion opens the canonical short Post creation
-flow with that article prepared, then the existing publishing controls for
-review. A performance card retains its exact reporting dates in Insights.
+draft opens its article; a failed publication opens its publishing controls.
 
 Current domain state determines whether work remains outstanding. Reading a
 notification does not complete it; several notifications for one concern make
 one card. Resolved work disappears, while unresolved work survives midnight.
-Booking occurrences retain their own location's timezone. Future bookings
+A reply that reached the guest or a published draft is recognised on the next
+read. Booking occurrences retain their own location's timezone. Future bookings
 needing a decision belong in Today now and retain their actual booking date.
 
 Stay cards read the canonical agenda and open `O/bookings/stay/:stayId`.

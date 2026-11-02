@@ -84,6 +84,8 @@
   "payment.price_details": "รายละเอียดราคา",
   "payment.unit_line": "{price} x {count}",
   "payment.surcharge": "ค่าธรรมเนียมบัตร",
+  "payment.tax": "ภาษี",
+  "payment.tax_included": "รวมภาษี {amount} แล้ว",
   "payment.total": "ยอดรวม",
   "payment.change": "เปลี่ยน",
   "payment.surcharge_applies": "บัตรนี้มีค่าธรรมเนียมเพิ่มเติม ซึ่งแสดงในรายละเอียดราคาและรวมอยู่ในยอดรวมแล้ว",

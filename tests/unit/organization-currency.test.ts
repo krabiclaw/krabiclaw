@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { currencyForCountry, isCurrencyCode, SUPPORTED_CURRENCIES } from '../../shared/currencies.ts'
+import { currencyForCountry, currencyFractionDigits, isCurrencyCode } from '../../shared/currencies.ts'
 import { ONBOARDING_STEPS, type OnboardingFlowState } from '../../composables/useOnboardingFlow.ts'
 
 const step = (id: string) => {
@@ -18,35 +18,27 @@ const answers = (over: Partial<OnboardingFlowState['details']> = {}) => ({
   },
 } as OnboardingFlowState)
 
-test('a country proposes the currency its businesses price in', () => {
+test('any ISO 4217 code is a currency; Stripe answers which ones the business can charge in', () => {
+  for (const code of ['THB', 'USD', 'KRW', 'CHF', 'NZD', 'MXN', 'BRL', 'AED', 'ZAR', 'NGN']) assert.equal(isCurrencyCode(code), true, code)
+  for (const value of ['usd', 'XYZ', '', 'US', null, undefined, 840]) assert.equal(isCurrencyCode(value), false, String(value))
+})
+
+test('minor units follow Stripe’s API representation', () => {
+  for (const code of ['JPY', 'KRW', 'VND', 'CLP', 'XOF']) assert.equal(currencyFractionDigits(code), 0, code)
+  for (const code of ['KWD', 'BHD', 'JOD', 'OMR', 'TND']) assert.equal(currencyFractionDigits(code), 3, code)
+  // Zero-decimal currencies Stripe still represents with two decimals.
+  for (const code of ['ISK', 'UGX', 'HUF', 'TWD', 'USD', 'THB', 'IDR']) assert.equal(currencyFractionDigits(code), 2, code)
+  assert.throws(() => currencyFractionDigits('XYZ'), /not an ISO 4217/)
+})
+
+test('proposes a default currency for known countries without restricting options', () => {
   assert.equal(currencyForCountry('TH'), 'THB')
   assert.equal(currencyForCountry('US'), 'USD')
-  assert.equal(currencyForCountry('FR'), 'EUR')
+  assert.equal(currencyForCountry('GB'), 'GBP')
   assert.equal(currencyForCountry('DE'), 'EUR')
   assert.equal(currencyForCountry('JP'), 'JPY')
-  // Case and surrounding space come from form input, not from a normalized store.
-  assert.equal(currencyForCountry(' th '), 'THB')
-  assert.equal(currencyForCountry('th'), 'THB')
-})
-
-test('a country with no supported currency proposes nothing rather than USD', () => {
-  // Mexico, Brazil and the UAE are real countries this platform cannot price in
-  // yet. Answering USD for them is the bug, not the fallback.
-  for (const country of ['MX', 'BR', 'AE', 'ZA', 'NG']) {
-    assert.equal(currencyForCountry(country), null, `${country} must not propose a currency`)
-  }
-  assert.equal(currencyForCountry(''), null)
+  assert.equal(currencyForCountry('unknown'), null)
   assert.equal(currencyForCountry(null), null)
-  assert.equal(currencyForCountry(undefined), null)
-  assert.equal(currencyForCountry('not a country'), null)
-})
-
-test('every proposed currency is one the platform supports', () => {
-  for (const country of ['TH', 'US', 'GB', 'JP', 'AU', 'CA', 'SG', 'HK', 'MY', 'ID', 'PH', 'VN', 'IN', 'IE', 'PT']) {
-    const currency = currencyForCountry(country)
-    assert.ok(currency && isCurrencyCode(currency), `${country} proposed an unsupported ${currency}`)
-    assert.ok((SUPPORTED_CURRENCIES as readonly string[]).includes(currency))
-  }
 })
 
 test('the optional location step accepts authored partial addresses', () => {

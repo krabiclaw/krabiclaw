@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:628daac169f79550aa178521eaf69e31e4616de4e4339ae4c8aa3d902274506d",
-  "documentationFingerprint": "sha256:00b53e36b3a88605c4a395f887ff32018d758c4a45a82de62b305fdd71897beb",
+  "fingerprint": "sha256:1daa91533b54dd2980df09384ff8f4b3af1d84030bc4fd6b5728e4ddcd433a70",
+  "documentationFingerprint": "sha256:3fcb32851576e686a9fe85c5786e05f32c5150a4b3d8731c003a03b6b742ebe6",
   "tools": [
     {
       "name": "add_organization_language",
@@ -9435,22 +9435,8 @@
                               ]
                             },
                             "currency": {
-                              "enum": [
-                                "THB",
-                                "USD",
-                                "EUR",
-                                "GBP",
-                                "JPY",
-                                "AUD",
-                                "CAD",
-                                "SGD",
-                                "HKD",
-                                "MYR",
-                                "IDR",
-                                "PHP",
-                                "VND",
-                                "INR"
-                              ],
+                              "description": "ISO 4217 currency code.",
+                              "pattern": "^[A-Z]{3}$",
                               "type": "string"
                             },
                             "id": {
@@ -26014,22 +26000,8 @@
                         ]
                       },
                       "currency": {
-                        "enum": [
-                          "THB",
-                          "USD",
-                          "EUR",
-                          "GBP",
-                          "JPY",
-                          "AUD",
-                          "CAD",
-                          "SGD",
-                          "HKD",
-                          "MYR",
-                          "IDR",
-                          "PHP",
-                          "VND",
-                          "INR"
-                        ],
+                        "description": "ISO 4217 currency code.",
+                        "pattern": "^[A-Z]{3}$",
                         "type": "string"
                       },
                       "id": {
@@ -48916,22 +48888,6 @@
                   ]
                 },
                 "currency": {
-                  "enum": [
-                    "THB",
-                    "USD",
-                    "EUR",
-                    "GBP",
-                    "JPY",
-                    "AUD",
-                    "CAD",
-                    "SGD",
-                    "HKD",
-                    "MYR",
-                    "IDR",
-                    "PHP",
-                    "VND",
-                    "INR"
-                  ],
                   "type": "string"
                 },
                 "medium": {
@@ -49041,29 +48997,9 @@
                   "type": "integer"
                 },
                 "currency": {
-                  "anyOf": [
-                    {
-                      "enum": [
-                        "THB",
-                        "USD",
-                        "EUR",
-                        "GBP",
-                        "JPY",
-                        "AUD",
-                        "CAD",
-                        "SGD",
-                        "HKD",
-                        "MYR",
-                        "IDR",
-                        "PHP",
-                        "VND",
-                        "INR"
-                      ],
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
+                  "type": [
+                    "string",
+                    "null"
                   ]
                 },
                 "locationId": {
@@ -49385,22 +49321,6 @@
                             "type": "number"
                           },
                           "currency": {
-                            "enum": [
-                              "THB",
-                              "USD",
-                              "EUR",
-                              "GBP",
-                              "JPY",
-                              "AUD",
-                              "CAD",
-                              "SGD",
-                              "HKD",
-                              "MYR",
-                              "IDR",
-                              "PHP",
-                              "VND",
-                              "INR"
-                            ],
                             "type": "string"
                           }
                         },
@@ -49482,22 +49402,6 @@
                             "type": "number"
                           },
                           "currency": {
-                            "enum": [
-                              "THB",
-                              "USD",
-                              "EUR",
-                              "GBP",
-                              "JPY",
-                              "AUD",
-                              "CAD",
-                              "SGD",
-                              "HKD",
-                              "MYR",
-                              "IDR",
-                              "PHP",
-                              "VND",
-                              "INR"
-                            ],
                             "type": "string"
                           }
                         },
@@ -49562,22 +49466,6 @@
                       "type": "number"
                     },
                     "currency": {
-                      "enum": [
-                        "THB",
-                        "USD",
-                        "EUR",
-                        "GBP",
-                        "JPY",
-                        "AUD",
-                        "CAD",
-                        "SGD",
-                        "HKD",
-                        "MYR",
-                        "IDR",
-                        "PHP",
-                        "VND",
-                        "INR"
-                      ],
                       "type": "string"
                     }
                   },
@@ -49675,22 +49563,6 @@
                   "type": "number"
                 },
                 "currency": {
-                  "enum": [
-                    "THB",
-                    "USD",
-                    "EUR",
-                    "GBP",
-                    "JPY",
-                    "AUD",
-                    "CAD",
-                    "SGD",
-                    "HKD",
-                    "MYR",
-                    "IDR",
-                    "PHP",
-                    "VND",
-                    "INR"
-                  ],
                   "type": "string"
                 },
                 "netMinor": {
@@ -49862,22 +49734,6 @@
                             "type": "number"
                           },
                           "currency": {
-                            "enum": [
-                              "THB",
-                              "USD",
-                              "EUR",
-                              "GBP",
-                              "JPY",
-                              "AUD",
-                              "CAD",
-                              "SGD",
-                              "HKD",
-                              "MYR",
-                              "IDR",
-                              "PHP",
-                              "VND",
-                              "INR"
-                            ],
                             "type": "string"
                           },
                           "netMinor": {
@@ -50007,22 +49863,6 @@
                   ]
                 },
                 "currency": {
-                  "enum": [
-                    "THB",
-                    "USD",
-                    "EUR",
-                    "GBP",
-                    "JPY",
-                    "AUD",
-                    "CAD",
-                    "SGD",
-                    "HKD",
-                    "MYR",
-                    "IDR",
-                    "PHP",
-                    "VND",
-                    "INR"
-                  ],
                   "type": "string"
                 },
                 "eventName": {
@@ -55480,23 +55320,8 @@
                 ]
               },
               "deposit_currency": {
-                "enum": [
-                  "THB",
-                  "USD",
-                  "EUR",
-                  "GBP",
-                  "JPY",
-                  "AUD",
-                  "CAD",
-                  "SGD",
-                  "HKD",
-                  "MYR",
-                  "IDR",
-                  "PHP",
-                  "VND",
-                  "INR",
-                  null
-                ],
+                "description": "ISO 4217 currency code.",
+                "pattern": "^[A-Z]{3}$",
                 "type": [
                   "string",
                   "null"
@@ -67364,22 +67189,8 @@
                   "items": {
                     "properties": {
                       "currency": {
-                        "enum": [
-                          "THB",
-                          "USD",
-                          "EUR",
-                          "GBP",
-                          "JPY",
-                          "AUD",
-                          "CAD",
-                          "SGD",
-                          "HKD",
-                          "MYR",
-                          "IDR",
-                          "PHP",
-                          "VND",
-                          "INR"
-                        ],
+                        "description": "ISO 4217 currency code.",
+                        "pattern": "^[A-Z]{3}$",
                         "type": "string"
                       },
                       "location_id": {
@@ -70291,22 +70102,8 @@
                   "items": {
                     "properties": {
                       "currency": {
-                        "enum": [
-                          "THB",
-                          "USD",
-                          "EUR",
-                          "GBP",
-                          "JPY",
-                          "AUD",
-                          "CAD",
-                          "SGD",
-                          "HKD",
-                          "MYR",
-                          "IDR",
-                          "PHP",
-                          "VND",
-                          "INR"
-                        ],
+                        "description": "ISO 4217 currency code.",
+                        "pattern": "^[A-Z]{3}$",
                         "type": "string"
                       },
                       "location_id": {
@@ -85489,22 +85286,8 @@
                               ]
                             },
                             "currency": {
-                              "enum": [
-                                "THB",
-                                "USD",
-                                "EUR",
-                                "GBP",
-                                "JPY",
-                                "AUD",
-                                "CAD",
-                                "SGD",
-                                "HKD",
-                                "MYR",
-                                "IDR",
-                                "PHP",
-                                "VND",
-                                "INR"
-                              ],
+                              "description": "ISO 4217 currency code.",
+                              "pattern": "^[A-Z]{3}$",
                               "type": "string"
                             },
                             "id": {
@@ -99011,22 +98794,8 @@
         "additionalProperties": false,
         "properties": {
           "currency": {
-            "enum": [
-              "THB",
-              "USD",
-              "EUR",
-              "GBP",
-              "JPY",
-              "AUD",
-              "CAD",
-              "SGD",
-              "HKD",
-              "MYR",
-              "IDR",
-              "PHP",
-              "VND",
-              "INR"
-            ],
+            "description": "ISO 4217 currency code.",
+            "pattern": "^[A-Z]{3}$",
             "type": "string"
           },
           "draft_id": {
@@ -99831,22 +99600,8 @@
                   "items": {
                     "properties": {
                       "currency": {
-                        "enum": [
-                          "THB",
-                          "USD",
-                          "EUR",
-                          "GBP",
-                          "JPY",
-                          "AUD",
-                          "CAD",
-                          "SGD",
-                          "HKD",
-                          "MYR",
-                          "IDR",
-                          "PHP",
-                          "VND",
-                          "INR"
-                        ],
+                        "description": "ISO 4217 currency code.",
+                        "pattern": "^[A-Z]{3}$",
                         "type": "string"
                       },
                       "location_id": {
@@ -110960,22 +110715,8 @@
                                     ]
                                   },
                                   "currency": {
-                                    "enum": [
-                                      "THB",
-                                      "USD",
-                                      "EUR",
-                                      "GBP",
-                                      "JPY",
-                                      "AUD",
-                                      "CAD",
-                                      "SGD",
-                                      "HKD",
-                                      "MYR",
-                                      "IDR",
-                                      "PHP",
-                                      "VND",
-                                      "INR"
-                                    ],
+                                    "description": "ISO 4217 currency code.",
+                                    "pattern": "^[A-Z]{3}$",
                                     "type": "string"
                                   },
                                   "id": {
@@ -112159,22 +111900,7 @@
           },
           "default_currency": {
             "description": "ISO 4217 code. Existing prices keep their stored currency and amount; nothing is converted.",
-            "enum": [
-              "THB",
-              "USD",
-              "EUR",
-              "GBP",
-              "JPY",
-              "AUD",
-              "CAD",
-              "SGD",
-              "HKD",
-              "MYR",
-              "IDR",
-              "PHP",
-              "VND",
-              "INR"
-            ],
+            "pattern": "^[A-Z]{3}$",
             "type": "string"
           },
           "expected_inquiry_questions_revision": {
@@ -115530,22 +115256,8 @@
                         ]
                       },
                       "currency": {
-                        "enum": [
-                          "THB",
-                          "USD",
-                          "EUR",
-                          "GBP",
-                          "JPY",
-                          "AUD",
-                          "CAD",
-                          "SGD",
-                          "HKD",
-                          "MYR",
-                          "IDR",
-                          "PHP",
-                          "VND",
-                          "INR"
-                        ],
+                        "description": "ISO 4217 currency code.",
+                        "pattern": "^[A-Z]{3}$",
                         "type": "string"
                       },
                       "id": {
@@ -118468,23 +118180,8 @@
             ]
           },
           "deposit_currency": {
-            "enum": [
-              "THB",
-              "USD",
-              "EUR",
-              "GBP",
-              "JPY",
-              "AUD",
-              "CAD",
-              "SGD",
-              "HKD",
-              "MYR",
-              "IDR",
-              "PHP",
-              "VND",
-              "INR",
-              null
-            ],
+            "description": "ISO 4217 currency code.",
+            "pattern": "^[A-Z]{3}$",
             "type": [
               "string",
               "null"
@@ -127388,18 +127085,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:7b8b285337b9b0e7985a5483445de564eb68954c0ab0ae580d12f7e04709e024",
+        "create_product": "sha256:ae4d41ae341faf5a382fdec03c6048f96f4aaca1b3aa1a99da4fd9fe9c41d9e6",
         "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
-        "list_location_products": "sha256:3d072da910400920fd6ff0679ad8d99e1fdf2494d6f0d7feb3bee5082ce13d9e",
+        "list_location_products": "sha256:2015626d39e62ce848fe36e9f0b99ac1e50b9afb915d67d7ce067553afb700b6",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
-        "reconcile_products": "sha256:0bd589440db2dbec9f1b1969d66c7c5d191afd669d9597d1804338bcecf19209",
+        "reconcile_products": "sha256:8ade448d4e4bd44500ec34127612e7c5fbf58a6e73f20d3674d8696a079da202",
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
-        "set_collection_products": "sha256:16e3e08ee87d86dcb6735b1d2fc9a43600aca70ea8715af3aadfdce5690b8463",
-        "update_menu": "sha256:ed70b2c30b8fa7ff3e2ff83d103e650b762b7214797f62934c45e51dbfd39735",
-        "update_product": "sha256:4983940f2519f4796fafb5adccbd7c902c0f37f98ca3bb94d88e8c70ce3f1aaf"
+        "set_collection_products": "sha256:124140d2c1f17f41c466ca886c7fcabdfa4d9f34d9b6f0da8a1299548ae49289",
+        "update_menu": "sha256:cd6ae334587cddc89c052c08d9f30ce9855bd0394c95eb87d69378a393068269",
+        "update_product": "sha256:a6f1e84c2f216c0cf5f12ff3c680f5227a03b34c951caf3cf75f9d5580ca7372"
       }
     },
     {
@@ -127444,12 +127141,12 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:7b8b285337b9b0e7985a5483445de564eb68954c0ab0ae580d12f7e04709e024",
+        "create_product": "sha256:ae4d41ae341faf5a382fdec03c6048f96f4aaca1b3aa1a99da4fd9fe9c41d9e6",
         "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
-        "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
+        "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93"
       }
     },
@@ -127532,19 +127229,19 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:7b8b285337b9b0e7985a5483445de564eb68954c0ab0ae580d12f7e04709e024",
+        "create_product": "sha256:ae4d41ae341faf5a382fdec03c6048f96f4aaca1b3aa1a99da4fd9fe9c41d9e6",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
-        "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
+        "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "publish_website": "sha256:939b1ce7c3fd387584cc132ae36ef88ea13eb064617de0ba0764e5a81f572f3f",
-        "save_website_draft": "sha256:e65a7a223712c5d820ccd7d2ec84abb8da6602e898a89516f1a1caf4d17d171b",
-        "update_menu": "sha256:ed70b2c30b8fa7ff3e2ff83d103e650b762b7214797f62934c45e51dbfd39735",
-        "update_organization_settings": "sha256:cd820096d8970fbbbec9f12eb04f90d8cc26c32ab6aaf532a3f4b3fedc2074da",
+        "save_website_draft": "sha256:6a7e9c21393133afa96ef5bd80d3ca08ced43fc89e669394496d8d4785ed82ab",
+        "update_menu": "sha256:cd6ae334587cddc89c052c08d9f30ce9855bd0394c95eb87d69378a393068269",
+        "update_organization_settings": "sha256:7191c77fc0ed6eb5ce818283be58acb26679a8cf793cbba600dccb694e8051a6",
         "update_site_page": "sha256:59cdde1aa4d584134607413f633453123521abe519087d8322525faa96f98bfb"
       }
     },
@@ -127559,15 +127256,15 @@
       "toolContracts": {
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
         "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
-        "get_reservation_policy": "sha256:052dfd92abcd07879b59caac65a2b13ea2ffb4fe2fc870681021ac996904fb75",
+        "get_reservation_policy": "sha256:671949950829fad652e09245cb65c14b456e28519e4e5f01a0fcbaca2bb3e78f",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
-        "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
+        "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "replace_product_weekly_schedule": "sha256:cc5f48fb054661e70ce26d988fc12a29f4325c7fc59b5b20852fb98d0e0e2451",
         "set_product_booking_config": "sha256:325fc0b5cb4d6ab6c21227ea94b6d2c22a1192af199b3286145207bbd58b1379",
-        "update_product": "sha256:4983940f2519f4796fafb5adccbd7c902c0f37f98ca3bb94d88e8c70ce3f1aaf",
-        "update_reservation_policy": "sha256:bc082ba4964d16b782d08f37c04eb5afed1cde19847f15c174b0b3da6ad8f1b5"
+        "update_product": "sha256:a6f1e84c2f216c0cf5f12ff3c680f5227a03b34c951caf3cf75f9d5580ca7372",
+        "update_reservation_policy": "sha256:11892e568dc0af3a9a3bcd0e6ddcf1081e146d1f36dfea443650f602348d30cb"
       }
     },
     {
@@ -127583,10 +127280,10 @@
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
-        "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
+        "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_product": "sha256:4983940f2519f4796fafb5adccbd7c902c0f37f98ca3bb94d88e8c70ce3f1aaf",
+        "update_product": "sha256:a6f1e84c2f216c0cf5f12ff3c680f5227a03b34c951caf3cf75f9d5580ca7372",
         "update_site_page": "sha256:59cdde1aa4d584134607413f633453123521abe519087d8322525faa96f98bfb"
       }
     },
@@ -127601,15 +127298,15 @@
       "toolContracts": {
         "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
         "get_guest_conversation": "sha256:d8fb6d75bd38fb53f6bc46dab6207535ffe1c55e57bc1b22b95be6df051aeed8",
-        "get_organization_analytics": "sha256:ddf37dc2b954d9949313e911828f7b7816c51697308b8f458ca44395df81ec7f",
+        "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
         "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
-        "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
+        "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
         "reply_to_guest": "sha256:28402ef75ec3f1464c60ffbaa91a3781f96f9764994e56b2c7362dbd26eefb80",
-        "update_product": "sha256:4983940f2519f4796fafb5adccbd7c902c0f37f98ca3bb94d88e8c70ce3f1aaf"
+        "update_product": "sha256:a6f1e84c2f216c0cf5f12ff3c680f5227a03b34c951caf3cf75f9d5580ca7372"
       }
     }
   ]
