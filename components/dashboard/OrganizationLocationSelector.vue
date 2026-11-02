@@ -20,7 +20,7 @@
     <div
       v-for="item in items"
       :key="item.id"
-      class="relative min-w-0 cv-auto-card"
+      class="relative min-w-0"
       :class="rowsOnMobile ? 'border-b border-default last:border-b-0 lg:border-b-0' : undefined"
     >
       <NuxtLink

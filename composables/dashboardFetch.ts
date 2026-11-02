@@ -6,7 +6,6 @@ type DashboardFetchOptions<T> = Omit<FetchOptions<'json'>, 'method'> & {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   validate: Validator<T>
   coalesceKey?: string
-  cachePolicy?: 'cache-first' | 'no-store'
 }
 
 type DashboardRequestOptions = Omit<FetchOptions<'json'>, 'method'> & {
@@ -17,19 +16,7 @@ export interface DashboardRequestScope {
   orgSlug: string
 }
 
-interface CachedDashboardEntry<T> {
-  value: T
-  cachedAt: number
-}
-
-const dashboardResponseCache = new Map<string, CachedDashboardEntry<unknown>>()
 const dashboardInFlightReads = new Map<string, Promise<unknown>>()
-
-export const DASHBOARD_CACHE_TTL_MS = 30_000
-
-export function clearDashboardCache(): void {
-  dashboardResponseCache.clear()
-}
 
 const stableValue = (value: unknown): string => {
   if (value === undefined) return ''
@@ -72,41 +59,16 @@ async function executeApiFetch<T>(
     }
   }
 
-  if (method !== 'GET') {
-    try {
-      return await run()
-    } finally {
-      clearDashboardCache()
-    }
-  }
-
-  if (fetchOptions.signal || fetchOptions.cachePolicy === 'no-store') {
-    return await run()
-  }
-
-  // Coalescing and caching are browser-only to prevent SSR cross-request data leakage.
+  if (method !== 'GET' || fetchOptions.signal) return await run()
+  // Coalescing is browser-only to prevent SSR cross-request data leakage.
   // In server context, every request must stand alone without shared state.
   if (import.meta.server) return await run()
-
   const key = coalesceKey ?? `${request}:${stableValue(fetchOptions.query)}:${stableValue([...headers])}`
-
-  const cached = dashboardResponseCache.get(key) as CachedDashboardEntry<T> | undefined
-  if (cached && (Date.now() - cached.cachedAt) < DASHBOARD_CACHE_TTL_MS) {
-    return cached.value
-  }
-
   const existing = dashboardInFlightReads.get(key) as Promise<T> | undefined
   if (existing) return await existing
-
-  const pending = run()
-    .then((fresh) => {
-      dashboardResponseCache.set(key, { value: fresh, cachedAt: Date.now() })
-      return fresh
-    })
-    .finally(() => {
-      if (dashboardInFlightReads.get(key) === pending) dashboardInFlightReads.delete(key)
-    })
-
+  const pending = run().finally(() => {
+    if (dashboardInFlightReads.get(key) === pending) dashboardInFlightReads.delete(key)
+  })
   dashboardInFlightReads.set(key, pending)
   return await pending
 }

@@ -154,7 +154,7 @@
         <!-- List: the days of the month that have something, Airbnb's agenda, with the rows the day leaf draws. -->
         <p v-else-if="!scheduledDays.length" class="py-10 text-center text-sm text-muted">Nothing scheduled in {{ periodLabel }}.</p>
         <div v-else class="divide-y divide-default border-y border-default">
-          <div v-for="dayKey in scheduledDays" :key="dayKey" class="grid grid-cols-[3.5rem_1fr] gap-3 py-3 cv-auto-row" :data-day="dayKey">
+          <div v-for="dayKey in scheduledDays" :key="dayKey" class="grid grid-cols-[3.5rem_1fr] gap-3 py-3" :data-day="dayKey">
             <NuxtLink :to="dayTo(dayKey)" class="pt-1 text-center">
               <span
                 class="mx-auto flex size-7 items-center justify-center rounded-full text-sm font-medium"
@@ -171,7 +171,7 @@
 
       <!-- Year: Tailwind's twelve small months; a dot where the day has something. -->
       <div v-else-if="view === 'year'" class="grid grid-cols-1 gap-x-8 gap-y-12 py-4 sm:grid-cols-2 xl:grid-cols-3">
-        <section v-for="block in yearMonths" :key="block.key" class="text-center cv-auto-month" :data-month="block.key">
+        <section v-for="block in yearMonths" :key="block.key" class="text-center" :data-month="block.key">
           <button type="button" class="text-sm font-semibold text-highlighted hover:text-primary" @click="openMonth(block.key)">{{ block.label }}</button>
           <USkeleton v-if="block.status === 'loading'" class="mt-6 h-40 w-full" />
           <UAlert

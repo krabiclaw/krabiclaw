@@ -74,23 +74,5 @@
   }
 }
 
-/*
- * High-performance offscreen DOM culling for large lists and multi-month calendar views.
- * Browser skips layout and painting for offscreen elements while preserving Ctrl+F, a11y tree, and scrollbar.
- */
-.cv-auto-month {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 280px;
-}
-
-.cv-auto-card {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 160px;
-}
-
-.cv-auto-row {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 72px;
-}
 
 
