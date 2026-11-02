@@ -3,8 +3,8 @@
   <div class="space-y-8">
     <URadioGroup v-model="type" :items="types" variant="card" indicator="hidden" color="neutral" :disabled="disabled" aria-label="Answer type" :ui="tileUi">
       <template #label="{ item }">
-        <span class="flex flex-col gap-3">
-          <UIcon :name="item.icon" class="size-8 text-highlighted" aria-hidden="true" />
+        <span class="flex flex-col items-start gap-3 text-left">
+          <UIcon :name="item.pictogram" class="size-8 text-highlighted" aria-hidden="true" />
           <span class="text-base font-medium text-highlighted">{{ item.label }}</span>
         </span>
       </template>
@@ -31,7 +31,8 @@ defineProps<{ disabled?: boolean }>()
 const type = defineModel<FormQuestionType>('type', { required: true })
 const choices = defineModel<FormQuestionChoiceDraft[]>('choices', { required: true })
 const crypto = globalThis.crypto
-const types = FORM_QUESTION_TYPES.map(value => ({ value, ...FORM_QUESTION_TYPE_LABELS[value] }))
+// `pictogram`, not `icon`: the radio group draws an item's `icon` itself, beside the label slot.
+const types = FORM_QUESTION_TYPES.map(value => ({ value, label: FORM_QUESTION_TYPE_LABELS[value].label, pictogram: FORM_QUESTION_TYPE_LABELS[value].icon }))
 const tileUi = { fieldset: 'grid grid-cols-2 gap-3 sm:grid-cols-3', item: 'block min-w-0 rounded-2xl p-4', wrapper: 'w-full', label: 'block w-full' }
 // A choice needs two options to be one; switching to it starts with two to fill in.
 watch(type, (next) => {
