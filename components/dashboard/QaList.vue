@@ -45,7 +45,7 @@ const dashboardApi = useDashboardApi()
 const level = useRouteLevel()
 const route = useRoute()
 const router = useRouter()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const selectedPagePath = computed({
   get() {
     if (locationScope.value || route.query.page_path === undefined) return 'general'

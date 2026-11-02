@@ -16,7 +16,8 @@ export function useFormQuestionState(source: MaybeRefOrGetter<{ questions: FormQ
   const answerErrors = ref<Record<string, string>>({})
   const notice = ref('')
   watch(() => toValue(source), (next) => {
-    if (!next || next.questions_revision === revision.value) return
+    // The same revision can be worded in another language; a form shows the wording it will snapshot.
+    if (!next || next.questions_revision === revision.value && JSON.stringify(next.questions) === JSON.stringify(questions.value)) return
     draft.value = reconcileFormAnswerDraft(questions.value, next.questions, draft.value)
     questions.value = next.questions
     revision.value = next.questions_revision

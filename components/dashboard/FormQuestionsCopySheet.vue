@@ -31,7 +31,7 @@ interface Source { key: string; label: string; description: string; questions: F
 
 const dashboardApi = useDashboardApi()
 const dashboard = useDashboardOrganization()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const sources = ref<Source[]>([])
 const chosenKey = ref<string | undefined>()
 const chosen = computed(() => sources.value.find(source => source.key === chosenKey.value) ?? null)

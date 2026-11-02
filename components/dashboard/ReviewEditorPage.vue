@@ -74,7 +74,7 @@ const route = useRoute()
 const router = useRouter()
 const dashboardApi = useDashboardApi()
 const level = useRouteLevel()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 
 const reviewId = computed(() => String(route.params.reviewId ?? ''))
 const recordPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/website/qa/reviews/${reviewId.value}`)

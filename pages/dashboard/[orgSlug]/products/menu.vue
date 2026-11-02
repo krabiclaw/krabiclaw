@@ -28,7 +28,7 @@ definePageMeta({ layout: 'dashboard' })
 
 const router = useRouter()
 const level = useRouteLevel()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const locationId = useLocationScope()
 const catalog = useProductCatalog(organizationId, locationId)
 await catalog.load

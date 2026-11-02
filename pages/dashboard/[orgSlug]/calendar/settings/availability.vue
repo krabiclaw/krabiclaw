@@ -11,7 +11,7 @@ import {hoursSummary,noticeSummary,seatsSummary} from '~/shared/availability-set
 import {formQuestionsSummary} from '~/utils/form-question-editing'
 definePageMeta({layout:'dashboard',key:route=>String(route.query.locationId??'business')})
 const level=useRouteLevel(),route=useRoute(),router=useRouter()
-const organizationId=await useDashboardOrganizationId()
+const organizationId=useDashboardOrganizationId()
 const editor=typeof route.query.locationId==='string'?await useCalendarLocationEditor(null):null
 const to=(segment:string)=>router.resolve({path:`${level.path.value}/${segment}`,query:route.query}).fullPath
 const groups=computed<EditorNavigationGroup[]>(()=>[

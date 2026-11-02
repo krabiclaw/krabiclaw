@@ -66,7 +66,6 @@ export async function useFormQuestionsOwner(): Promise<FormQuestionsOwner> {
     }
   }
   if (kind === 'reservations') {
-    const organizationId = await useDashboardOrganizationId()
     const editor = await useCalendarLocationEditor(null)
     return {
       get key() { return `reservations:${editor.location.value?.id ?? ''}` },
@@ -75,7 +74,7 @@ export async function useFormQuestionsOwner(): Promise<FormQuestionsOwner> {
       requiredDescription: 'Guests can’t reserve without answering',
       questions: editor.reservationQuestions,
       error: editor.error,
-      localization: computed(() => editor.location.value ? { organizationId, resourceType: 'business_location', resourceId: editor.location.value.id, field: 'reservation_questions', label: editor.location.value.title } : null),
+      localization: computed(() => editor.location.value ? { organizationId: editor.organizationId, resourceType: 'business_location', resourceId: editor.location.value.id, field: 'reservation_questions', label: editor.location.value.title } : null),
       write: editor.saveReservationQuestions,
     }
   }

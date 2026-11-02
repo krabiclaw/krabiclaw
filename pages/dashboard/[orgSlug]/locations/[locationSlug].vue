@@ -91,7 +91,7 @@ const dashboardLocation = useDashboardLocation()
 const level = useRouteLevel()
 const locationPath = level.path
 
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const newLocation = useNewLocation(organizationId, null)
 const isNew = newLocation.isNew
 

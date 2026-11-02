@@ -104,7 +104,7 @@ const recordPath = level.path
 /** A level below this page, keeping whatever scope the URL carries. */
 const sectionUrl = (section: string) => router.resolve({ path: `${recordPath.value}/${section}`, query: route.query }).fullPath
 
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const dashboardApi = useDashboardApi()
 
 const { load, data, error, draft, dirty, revert, commit, isNew, previewUrl, publicUrl } = useTenantPageDraft(organizationId, pageId.value)

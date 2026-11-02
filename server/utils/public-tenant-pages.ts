@@ -426,7 +426,7 @@ async function hydrateBlocks(
     if (block.type === 'contact_form') {
       // The offering's own page, opened on its booking; an offering this site no longer publishes offers no link.
       const product = typeof data.booking_product_id === 'string' ? productById.get(data.booking_product_id) : undefined
-      data.booking = product?.public_path && product.available ? { url: `${product.public_path}?book=1`, label: typeof data.booking_label === 'string' && data.booking_label.trim() ? data.booking_label : null } : null
+      data.booking = product?.public_path && product.available ? { url: `${product.public_path}${product.public_path.includes('?') ? '&' : '?'}book=1`, label: typeof data.booking_label === 'string' && data.booking_label.trim() ? data.booking_label : null } : null
     }
     if (block.type === 'page_grid') {
       data.items = (data.page_ids as string[]).map((id) => {

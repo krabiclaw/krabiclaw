@@ -367,7 +367,7 @@ const month = computed<MonthBlock>(() => monthData.value.get(monthKey.value) ?? 
 const isLocationHours = (value: unknown): value is { location: CalendarLocation } =>
   isRecord(value) && isRecord(value.location) && typeof value.location.id === 'string' && typeof value.location.status === 'string'
   && typeof value.location.updated_at === 'string' && 'opening_hours' in value.location && 'special_hours' in value.location
-const organizationId = props.personalScope ? null : await useDashboardOrganizationId()
+const organizationId = props.personalScope ? null : useDashboardOrganizationId()
 
 const sessionProduct = computed(() => props.sessionProduct)
 const productLocations = computed(() => (sessionProduct.value?.locations ?? []).map(placement => {

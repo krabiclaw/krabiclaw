@@ -355,7 +355,9 @@ async function loadAvailability() {
   }
 }
 
-watch(() => reservationForm.value.location_id, (id) => {
+watch(() => reservationForm.value.location_id, (id, previous) => {
+  // Each location asks its own questions; an answer given to another location's is not one to this.
+  if (previous !== undefined && id !== previous) contactForm.value.answers = {}
   if (id && import.meta.client) {
     timeSelection.value = null
     loadAvailability()

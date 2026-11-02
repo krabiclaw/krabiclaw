@@ -26,7 +26,7 @@ import { isTenantPageListResponse, tenantPageRows, type TenantPageListRow } from
 const route = useRoute()
 const router = useRouter()
 const dashboardApi = useDashboardApi()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const level = useRouteLevel()
 
 /**

@@ -72,7 +72,7 @@ const route = useRoute()
 const level = useRouteLevel()
 const dashboard = useDashboardOrganization()
 const dashboardApi = useDashboardApi()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const base = computed(() => `/dashboard/${String(route.params.orgSlug)}/integrations`)
 const isSummaryResponse = (value: unknown): value is { settings: { integrations: IntegrationsSummary } } =>
   isRecord(value) && isRecord(value.settings) && isRecord(value.settings.integrations)

@@ -3,5 +3,5 @@
 import MemberAvailabilityIndex from '~/components/dashboard/MemberAvailabilityIndex.vue'
 definePageMeta({layout:'dashboard'})
 const route=useRoute(),memberId=String(route.params.memberId)
-const organizationId=await useDashboardOrganizationId()
+const organizationId=useDashboardOrganizationId()
 </script>

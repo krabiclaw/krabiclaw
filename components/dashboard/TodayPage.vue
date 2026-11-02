@@ -123,7 +123,7 @@ const apiBase = props.personalScope ? '/api/account' : '/api/dashboard'
 const realtime = useDashboardInvalidations()
 const orgSlug = computed(() => props.personalScope ? 'account' : String(route.params.orgSlug ?? ''))
 const { signature: filterSignature, active: hasActiveFilters, query: filterQuery, range: activeRange, failure: navigationError } = useAgendaFilters()
-const organizationId = props.personalScope ? null : await useDashboardOrganizationId()
+const organizationId = props.personalScope ? null : useDashboardOrganizationId()
 const { organization } = useDashboardOrganization()
 const canAddStay = computed(() => {
   const role = organization.value?.role as keyof typeof organizationRoles | undefined

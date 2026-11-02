@@ -122,7 +122,7 @@ const isLinksWriteResponse = (
   && Array.isArray((value as Record<string, unknown>).created_item_ids)
   && ((value as Record<string, unknown>).created_item_ids as unknown[]).every(id => typeof id === 'string')
 
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const saving = ref(false)
 const errorMessage = ref('')
 

@@ -471,7 +471,7 @@ function sectionPath(section: string) {
   return router.resolve({ path: `${itemPath.value}/${section}`, query }).fullPath
 }
 
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const { refresh: refreshCatalog, collectionProductIds, setCollectionProducts } = useProductCatalog(organizationId, ref(null))
 const dashboard = useDashboardOrganization()
 // The context mints a site-wide preview token. Assigned Product access alone

@@ -577,7 +577,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   else bind()
 
   return {
-    error, location, saving, saveDisabled, validationMessage, dirty,
+    organizationId, error, location, saving, saveDisabled, validationMessage, dirty,
     editorError: computed(() => isNew.value ? newLocation.createError.value : editorError.value),
     saveLabel: newLocation.saveLabel,
     detailsForm, hoursForm, reservationForm, reservationConfigExists, closingReservations,
@@ -594,7 +594,7 @@ import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vu
 
 const level = useRouteLevel()
 const dashboardLocation = useDashboardLocation()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const editor = await useLocationEditor(organizationId, dashboardLocation.currentLocationId, null, level.path)
 
 useSeoMeta({ title: 'Settings | KrabiClaw', robots: 'noindex, nofollow' })

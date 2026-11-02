@@ -62,7 +62,7 @@ const editor = inject(tenantPageBlockEditorKey)!
 const pageId = useTenantPageId().value
 const blockId = String(route.params.blockId ?? '')
 const key = String(route.params.section ?? '')
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 
 const section = computed(() => editor.sections.value.find(candidate => candidate.key === key) ?? null)
 /** Set when this concern is a list of records: by its section, or because a one-section block hangs its records straight off itself. */

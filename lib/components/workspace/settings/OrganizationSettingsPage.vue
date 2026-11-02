@@ -141,7 +141,7 @@ const settingsPath = computed(() => `${organizationDashboardPath.value}/website`
 // `<RouterView>` above rendered, and an `await` before it would bind nothing.
 const level = useRouteLevel()
 
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 
 interface SettingsPageResource {
   settings: { success: boolean; settings: OrganizationSettingsResponse }

@@ -98,7 +98,7 @@ defineProps<{ rows: EditorNavigationGroup[] }>()
 const route = useRoute()
 const level = useRouteLevel()
 const router = useRouter()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const collectionId = computed(() => String(route.params.collectionId ?? ''))
 const locationId = useLocationScope()
 // A section's full membership is independent of the location used for prices.
