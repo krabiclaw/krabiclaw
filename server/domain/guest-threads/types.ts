@@ -191,6 +191,7 @@ export interface GuestThreadDeliveryFailureViewModel {
   id: string
   channel: GuestThreadDeliveryChannel
   purpose: GuestThreadDeliveryPurpose
+  recipient: string | null
   error: string | null
   status: GuestThreadDeliveryStatus
   createdAt: string

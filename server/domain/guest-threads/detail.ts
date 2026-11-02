@@ -12,6 +12,12 @@ import { providerTimestamp } from '~/server/integrations/channex/messages'
 import { guestThreadConversationState } from './booking-change-state'
 import { bookingChangeViews } from './booking-changes'
 
+function deliveryRecipient(emailJson: string | null): string | null {
+  if (!emailJson) return null
+  const parsed = JSON.parse(emailJson) as { message?: { to?: unknown } }
+  return typeof parsed.message?.to === 'string' && parsed.message.to.trim() ? parsed.message.to.trim() : null
+}
+
 /** Builds the full canonical thread detail view model — the sole source for the detail API. */
 export async function getGuestThreadDetail(
   db: DbClient,
@@ -163,6 +169,7 @@ export async function getGuestThreadDetail(
       id: d.id,
       channel: d.channel,
       purpose: d.purpose,
+      recipient: d.channel === 'email' ? deliveryRecipient(d.email_json) : null,
       error: d.error,
       status: d.status,
       createdAt: d.created_at,

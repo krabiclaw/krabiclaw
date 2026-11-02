@@ -180,7 +180,7 @@
             :key="failure.id"
             color="error"
             variant="soft"
-            icon="i-lucide-mail-warning"
+            :icon="failure.purpose === 'owner_alert' ? 'i-lucide-bell-ring' : 'i-lucide-mail-warning'"
             :title="deliveryFailureTitle(failure)"
             :description="deliveryFailureDescription(failure)"
             class="mb-1"
@@ -218,6 +218,7 @@ import type { AvatarProps } from '@nuxt/ui'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 import { isThreadDetailResponse, threadRecordTitle, type ThreadDetail } from '~/lib/components/workspace/messages/guest-thread-client'
 import type { GuestThreadDeliveryFailureViewModel, GuestThreadEntryViewModel } from '~/server/domain/guest-threads/types'
+import { deliveryFailureTitle } from './guest-thread-client'
 import type { BookingChangeView } from '~/server/domain/guest-threads/booking-changes'
 import { useDashboardInvalidations } from '~/composables/useDashboardInvalidations'
 import { authClient } from '~/lib/auth-client'
@@ -741,20 +742,6 @@ function systemEventLabel(entry: GuestThreadEntryViewModel) {
   // belong to the history of the ones that have them.
   if (entry.kind === 'resolution') return `${actor}${entry.eventName === 'thread.resolved' ? 'resolved' : 'reopened'} this thread`.trim()
   return entry.eventName ?? 'Recorded on this conversation'
-}
-
-const DELIVERY_PURPOSE_LABELS = {
-  owner_alert: 'notification',
-  guest_acknowledgement: 'guest acknowledgement',
-  member_reply: 'reply',
-  status_update: 'status update',
-  scheduled_message: 'scheduled message',
-} satisfies Record<GuestThreadDeliveryFailureViewModel['purpose'], string>
-
-function deliveryFailureTitle(failure: GuestThreadDeliveryFailureViewModel) {
-  if (failure.status === 'uncertain') return 'Reply needs review: send outcome unknown'
-  const delivery = `${CHANNEL_LABELS[failure.channel]} ${DELIVERY_PURPOSE_LABELS[failure.purpose]}`
-  return `${delivery} could not be sent`
 }
 
 function deliveryFailureDescription(failure: GuestThreadDeliveryFailureViewModel) {
