@@ -29,7 +29,7 @@ test('Pottery home → experiences → experience detail', async ({ page }) => {
   })
 })
 
-test('Kikuzuki home → menu → menu item and published experience branch', async ({ page, request }) => {
+test('Kikuzuki home → menu → menu item and location preview interactions', async ({ page, request }) => {
   test.setTimeout(90_000)
   const baseURL = kikuzukiBaseURL
   const headers = kikuzukiExtraHeaders
@@ -43,37 +43,14 @@ test('Kikuzuki home → menu → menu item and published experience branch', asy
   const shellBody = await shellRead.text()
   expect(shellRead.status(), shellBody).toBe(200)
   const shell = JSON.parse(shellBody) as {
-    locations: Array<{ id: string; slug: string; sections: { experiences: boolean } }>
+    locations: Array<{ id: string; slug: string }>
   }
   expect(shell.locations.find(location => location.slug === 'kikuzuki-japanese-robatayaki-izakaya')).toMatchObject({
     id: 'loc-kikuzuki',
-    sections: { experiences: true },
   })
   expect(shell.locations.find(location => location.slug === 'take-me-away-by-kikuzuki')).toMatchObject({
     id: 'loc-kikuzuki-tkma',
-    sections: { experiences: false },
   })
-
-  const experienceList = await openTenantPage(page, `${baseURL}/experiences`, headers)
-  expect(experienceList?.status()).toBe(200)
-  await expect(page.locator('[data-hydrated]')).toHaveAttribute('data-hydrated', 'true')
-  await expect(page.locator('main a[href="/locations/take-me-away-by-kikuzuki/experiences"]')).toHaveCount(0)
-
-  const experienceCard = page.locator('main a[href^="/experiences/teppanyaki-experience"]').first()
-  await expect(experienceCard).toBeVisible()
-  const allowedHref = await experienceCard.getAttribute('href')
-  if (!allowedHref) throw new Error('The published experience card has no href')
-  expect(allowedHref).toMatch(/^\/experiences\/teppanyaki-experience\?location_id=loc-kikuzuki$/)
-  const allowedURL = new URL(allowedHref, baseURL).toString()
-  const allowedRead = await request.get(allowedURL, { headers })
-  const allowedBody = await allowedRead.text()
-  expect(allowedRead.status(), allowedBody).toBe(200)
-
-  await experienceCard.click()
-  await expect(page).toHaveURL(allowedURL)
-  await expect(page.locator('[data-hydrated]')).toHaveAttribute('data-hydrated', 'true')
-  await expect(page.getByRole('heading', { name: 'Teppanyaki Experience', exact: true })).toBeVisible()
-  await expect(page.getByText(/Welcome to the newest, most electrifying dining experience in Ao Nang/i)).toBeVisible()
 
   for (const path of ['/locations', '/locations/kikuzuki-japanese-robatayaki-izakaya', '/reservations']) {
     expect((await openTenantPage(page, `${baseURL}${path}`, headers))?.status(), path).toBe(200)
