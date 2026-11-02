@@ -2,6 +2,7 @@ import { queryFirst, type DbClient } from '~/server/db'
 import { recordOrganizationConversionEvent } from '~/server/utils/organization-conversions'
 import { getPlatformOrganization } from '~/server/utils/platform-organization'
 import { AUTHORIZATION_WINDOW_SECONDS, type Payment } from '~/server/domain/payments'
+import type { AttributionTouch } from '~/utils/analytics-attribution'
 
 /**
  * What a business's paid bookings and decisions look like in its analytics: each event is recorded
@@ -22,16 +23,38 @@ async function paymentSubject(db: DbClient, payment: Payment): Promise<PaymentSu
   }
 }
 
-/** `savedCardsOffered` is null on a retry that reuses the Checkout already created, where the count was not observed. */
-export async function recordCheckoutStarted(db: DbClient, payment: Payment, savedCardsOffered: number | null) {
+/**
+ * A checkout the guest started, read in the guest's own request: how they
+ * arrived is its attribution, as for any other website event. The event is
+ * once per payment, so a retry, even from another campaign, keeps the first.
+ * `savedCardsOffered` is null on a retry that reuses the Checkout already
+ * created, where the count was not observed.
+ */
+export async function recordCheckoutStarted(db: DbClient, payment: Payment, savedCardsOffered: number | null, origin: { request: { headers: Headers }; pageEventId: string | null } | null) {
   const subject = await paymentSubject(db, payment)
-  await recordOrganizationConversionEvent(db, null, {
+  await recordOrganizationConversionEvent(db, origin?.request ?? null, {
     organizationId: payment.organization_id, eventName: 'payment_checkout_started', stage: 'started', surface: 'website',
     locationId: payment.location_id, productId: subject.productId, variantId: subject.variantId,
-    entityType: 'payment', entityId: payment.id,
+    entityType: 'payment', entityId: payment.id, originEventId: origin?.pageEventId ?? null,
     value: { basis: 'quoted', amount_minor: payment.amount, currency: payment.currency },
     properties: { member_id: subject.memberId, saved_cards_offered: savedCardsOffered },
   })
+}
+
+/**
+ * How the guest who started a payment's checkout arrived, as that event
+ * recorded it. Stripe's capture and refund events have no browser, so they are
+ * credited to the checkout's own source; a payment whose checkout recorded
+ * none, or that predates recording one, stays unattributed.
+ */
+async function checkoutAttribution(db: DbClient, payment: Payment): Promise<{ touch: AttributionTouch; attributedAt: string } | null> {
+  const started = await queryFirst<{ touch: string | null; attributed_at: string | null }>(db, `SELECT json_extract(payload_json, '$.attribution') AS touch,
+    json_extract(payload_json, '$.attributed_at') AS attributed_at FROM analytics_events
+    WHERE organization_id = ? AND kind = 'interaction' AND json_extract(payload_json, '$.event_name') = 'payment_checkout_started'
+      AND json_extract(payload_json, '$.entity_type') = 'payment' AND json_extract(payload_json, '$.entity_id') = ?`, [payment.organization_id, payment.id])
+  if (!started?.touch) return null
+  if (!started.attributed_at) throw new Error(`Checkout of payment ${payment.id} recorded an attribution without its time`)
+  return { touch: JSON.parse(started.touch) as AttributionTouch, attributedAt: started.attributed_at }
 }
 
 /** A captured payment: its value excludes tax, its collected amount is what the buyer paid. */
@@ -40,7 +63,7 @@ export async function recordPaymentPaid(db: DbClient, payment: Payment, intentId
   await recordOrganizationConversionEvent(db, null, {
     organizationId: payment.organization_id, eventName: 'payment_paid', stage: 'completed', surface: 'stripe',
     locationId: payment.location_id, productId: subject.productId, variantId: subject.variantId,
-    entityType: 'payment', entityId: payment.id,
+    entityType: 'payment', entityId: payment.id, attribution: await checkoutAttribution(db, payment),
     value: { basis: 'purchase', amount_minor: payment.captured_amount - payment.tax_amount, collected_minor: payment.captured_amount, currency: payment.currency, transaction_id: intentId },
     properties: { member_id: subject.memberId, saved_card: savedCard },
   })
@@ -58,7 +81,7 @@ export async function recordPaymentRefunded(db: DbClient, payment: Payment, refu
   await recordOrganizationConversionEvent(db, null, {
     organizationId: payment.organization_id, eventName: 'payment_refunded', stage: 'completed', surface: 'stripe',
     locationId: payment.location_id, productId: subject.productId, variantId: subject.variantId,
-    entityType: 'refund', entityId: refund.id,
+    entityType: 'refund', entityId: refund.id, attribution: await checkoutAttribution(db, payment),
     value: { basis: 'refund', amount_minor: refund.amount, collected_minor: refund.amount, currency: payment.currency, transaction_id: refund.id },
     actor: origin?.created_by ? { type: 'staff', id: origin.created_by } : null,
     properties: {
