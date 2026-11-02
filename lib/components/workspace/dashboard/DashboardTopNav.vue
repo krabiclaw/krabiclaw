@@ -32,7 +32,8 @@
         :aria-current="item.active ? 'page' : undefined"
       >
         {{ item.label }}
-        <span v-if="item.badge" class="ms-1.5 inline-block h-4 min-w-4 rounded-full bg-error px-1 text-center text-xs font-semibold leading-4 text-white no-underline" :aria-label="`${item.badge} unread`" data-testid="dashboard-nav-unread">{{ item.badge > 99 ? '99+' : item.badge }}</span>
+        <UIcon v-if="item.badgeUnavailable" name="i-lucide-circle-alert" class="ms-1.5 size-3.5 align-[-2px] text-warning" aria-label="Unread messages could not be loaded" data-testid="dashboard-nav-unread-unavailable" />
+        <span v-else-if="item.badge" class="ms-1.5 inline-block h-4 min-w-4 rounded-full bg-error px-1 text-center text-xs font-semibold leading-4 text-white no-underline" :aria-label="`${item.badge} unread`" data-testid="dashboard-nav-unread">{{ item.badge > 99 ? '99+' : item.badge }}</span>
       </NuxtLink>
     </nav>
 
@@ -99,6 +100,8 @@ export interface DashboardTopNavItem {
   active?: boolean
   /** Conversations with something unread. */
   badge?: number
+  /** The unread counts could not be read. */
+  badgeUnavailable?: boolean
 }
 
 defineProps<{

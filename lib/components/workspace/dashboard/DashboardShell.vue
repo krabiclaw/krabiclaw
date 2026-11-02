@@ -103,7 +103,8 @@
       >
         <span class="relative">
           <UIcon :name="item.icon" class="size-6 shrink-0" />
-          <span v-if="item.badge" class="absolute -right-2.5 -top-1.5 h-4 min-w-4 rounded-full bg-error px-1 text-center text-xs font-semibold leading-4 text-white" :aria-label="`${item.badge} unread`">{{ item.badge > 99 ? '99+' : item.badge }}</span>
+          <UIcon v-if="item.badgeUnavailable" name="i-lucide-circle-alert" class="absolute -right-1.5 -top-1 size-3.5 text-warning" aria-label="Unread messages could not be loaded" />
+          <span v-else-if="item.badge" class="absolute -right-2.5 -top-1.5 h-4 min-w-4 rounded-full bg-error px-1 text-center text-xs font-semibold leading-4 text-white" :aria-label="`${item.badge} unread`">{{ item.badge > 99 ? '99+' : item.badge }}</span>
         </span>
         <span class="text-xs leading-tight font-medium">{{ item.label }}</span>
       </NuxtLink>
@@ -382,6 +383,8 @@ interface DashboardMobileNavItem {
   active?: boolean
   /** Conversations with something unread, on Messages. */
   badge?: number
+  /** The unread counts could not be read. */
+  badgeUnavailable?: boolean
 }
 
 /**
@@ -422,9 +425,10 @@ const navTargets = computed<DashboardMobileNavItem[]>(() => {
 const menuOpen = ref(false)
 
 // What is unread: conversations on Messages, and the notifications the Menu's bell lists as a dot on Menu.
-const { unreadCount, unreadConversations } = useNotificationUnreadCount()
-const primaryNavItems = computed(() => navTargets.value.map(item => ({ ...item, active: item.key === activeTab.value, ...(item.key === 'messages' ? { badge: unreadConversations.value } : {}) })))
-const menuUnread = computed(() => unreadCount.value > 0)
+const { unreadCount, unreadConversations, unavailable: unreadUnavailable } = useNotificationUnreadCount()
+const primaryNavItems = computed(() => navTargets.value.map(item => ({ ...item, active: item.key === activeTab.value, ...(item.key === 'messages' ? { badge: unreadConversations.value, badgeUnavailable: unreadUnavailable.value } : {}) })))
+// A count that could not be read is marked as such on Messages, never shown stale.
+const menuUnread = computed(() => !unreadUnavailable.value && unreadCount.value > 0)
 // A signed-in owner always gets the header: the wordmark and the account menu
 // are user-scoped and need no organization. Only the nav links and the bottom
 // bar wait for an organization, because Today, Calendar, Catalog and Messages do not

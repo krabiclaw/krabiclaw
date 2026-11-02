@@ -45,7 +45,7 @@ test('a new guest conversation is counted on Messages and the app badge until it
     // The dashboard shows the same count on Messages and marks the Menu.
     const page = await dashboard.newPage()
     await openTenantPage(page, `${baseURL}/dashboard/${restaurant.slug}`, {})
-    await expect(page.getByTestId('dashboard-nav-unread')).toHaveText(String(arrived.unread_conversations))
+    await expect(page.getByTestId('dashboard-nav-unread')).toHaveText(arrived.unread_conversations > 99 ? '99+' : String(arrived.unread_conversations))
     await expect(page.getByTestId('dashboard-top-nav-menu-button').getByTestId('dashboard-menu-unread')).toBeVisible()
 
     // Opening the conversation reads it: Messages and the icon drop by what it carried.

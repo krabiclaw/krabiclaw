@@ -20,3 +20,9 @@ export async function hasPlatformEventPermission(
     throw new HTTPError({ statusCode: error.statusCode, message: error.message, data: error.body, cause: error })
   }
 }
+
+/** The same check for a person who is not the caller, such as the recipient of a push. */
+export async function hasPlatformUserPermission(env: CloudflareEnv, userId: string, permissions: PlatformAdminPermission): Promise<boolean> {
+  const result = await createAuth(env).api.userHasPermission({ body: { userId, permissions } })
+  return result.success
+}

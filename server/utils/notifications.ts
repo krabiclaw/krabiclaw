@@ -506,7 +506,7 @@ async function dispatchPush(env: NotificationEnv, db: DbClient, userId: string, 
   if (device.kind === 'apns') {
     const apnsId = crypto.randomUUID()
     // Read when it is sent, after the notification it announces was recorded, so the icon counts it.
-    const result = await sendApnsAlert(env, { deviceToken: device.token, environment: device.environment, apnsId, alert: { ...alert, badge: await unreadBadge(db, userId) } })
+    const result = await sendApnsAlert(env, { deviceToken: device.token, environment: device.environment, apnsId, alert: { ...alert, badge: await unreadBadge(env, db, userId) } })
     return result.status === 'sent' ? { status: 'sent', providerMessageId: apnsId } : { status: 'failed', error: result.error, deviceGone: result.tokenRetired }
   }
   const result = await sendWebPush(env, {

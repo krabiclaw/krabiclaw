@@ -1,5 +1,7 @@
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { buildNotificationVisibilityFilter, type NotificationVisibilityPrincipal } from '~/server/utils/notification-access'
+import { hasPlatformUserPermission } from '~/server/utils/platform-admin-users'
+import type { CloudflareEnv } from '~/server/utils/auth'
 
 /**
  * What a person has not read in one scope: the notifications they can see, and
@@ -45,11 +47,15 @@ export async function unreadTeamConversations(db: DbClient, userId: string, orga
  * The app icon's number: everything a person has not read in every workspace
  * they belong to, and their own account's notifications.
  */
-export async function unreadBadge(db: DbClient, userId: string): Promise<number> {
-  const memberships = await queryAll<{ organizationId: string; role: string }>(db, 'SELECT "organizationId", role FROM member WHERE "userId" = ?', [userId])
+export async function unreadBadge(env: CloudflareEnv, db: DbClient, userId: string): Promise<number> {
+  const [memberships, platformAdmin] = await Promise.all([
+    queryAll<{ organizationId: string; role: string }>(db, 'SELECT "organizationId", role FROM member WHERE "userId" = ?', [userId]),
+    // A platform administrator's own scope also lists the platform's notifications, as their bell does.
+    hasPlatformUserPermission(env, userId, { platform: ['access'] }),
+  ])
   const scopes = [null, ...memberships.map(membership => ({ id: membership.organizationId, role: membership.role }))]
   const [notifications, team] = await Promise.all([
-    Promise.all(scopes.map(organization => unreadNotifications(db, { userId, platformAdmin: false, organization }))),
+    Promise.all(scopes.map(organization => unreadNotifications(db, { userId, platformAdmin: organization === null && platformAdmin, organization }))),
     unreadTeamConversations(db, userId, null),
   ])
   return notifications.reduce((sum, scope) => sum + scope.notifications, 0) + team
