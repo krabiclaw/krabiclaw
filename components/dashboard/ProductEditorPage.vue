@@ -587,19 +587,12 @@ const { data: loaded, error: loadFailure, refresh } = await useAsyncData(
   {
     getCachedData(cacheKey, nuxtApp, ctx) {
       if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
+      if (!nuxtApp.isHydrating) return undefined
       return nuxtApp.payload.data[cacheKey] as { collections: Collection[]; product: Product; previewToken: string | null; publicUrl: string | null; publicUrls: Record<string, string> } | null | undefined
     },
   },
 )
 
-if (import.meta.client) {
-  onMounted(() => {
-    const key = `dashboard-product:${organizationId}:${locationScope.value ?? 'organization'}:${productId.value}`
-    if (useNuxtApp().payload.data[key]) {
-      void refresh()
-    }
-  })
-}
 const product = computed(() => loaded.value?.product ?? null)
 const stayLocation = computed(() => allOrganizationLocations.value.find(entry => entry.id === product.value?.stay?.location_id) ?? null)
 const stayLocationError = computed(() => {
