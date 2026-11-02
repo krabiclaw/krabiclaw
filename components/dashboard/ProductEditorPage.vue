@@ -922,7 +922,10 @@ function isFormDirty(): boolean {
 // The draft is seeded from every read of the row, the first and each writer's re-read.
 watch(product, (row) => {
   if (row) {
-    if (editVersion.value !== null && isFormDirty()) return
+    if (editVersion.value !== null && isFormDirty()) {
+      editVersion.value = row.updated_at
+      return
+    }
     loadForm(row)
   }
 }, { immediate: true })
@@ -1877,6 +1880,7 @@ async function commit(concern?: ProductConcern) {
       }
     }
     await reload()
+    if (product.value) loadForm(product.value)
     if (concern === 'additional-rules' || concern === 'arrival-time') restoreHouseRules(false)
     // A booking write changes what the schedule is: its start times, whether the
     // product has a calendar at all, or the time zone an online one runs in.
@@ -2050,6 +2054,7 @@ async function createPage() {
       validate: (value: unknown): value is { page: { id: string } } => isRecord(value) && isRecord(value.page) && typeof value.page.id === 'string',
     })
     await reload()
+    if (product.value) loadForm(product.value)
     // The page is edited where every page is.
     await navigateTo(`/dashboard/${String(route.params.orgSlug)}/website/pages/${encodeURIComponent(created.page.id)}`)
   } catch (error) {
@@ -2069,6 +2074,7 @@ async function setPrimaryImage(assetId: string | null) {
     })
     form.image_asset_id = assetId
     await reload()
+    if (product.value) loadForm(product.value)
   } catch (error) {
     photoError.value = getErrorMessage(error, 'Failed to update the photo')
   }
@@ -2098,6 +2104,7 @@ async function changeGallery(change: () => Promise<void>) {
   // Whatever the outcome: a failed change may have made part of its writes.
   try {
     await reload()
+    if (product.value) loadForm(product.value)
   } catch (error) {
     photoError.value ??= getErrorMessage(error, 'Failed to read the photos again')
   }
@@ -2169,6 +2176,7 @@ async function changeStayPhotos(change: () => Promise<unknown>): Promise<boolean
     // case, while keeping the submitted draft and the original failure.
     try {
       await reload()
+    if (product.value) loadForm(product.value)
     } catch (error) {
       const reason = getErrorMessage(error, 'Read failed')
       photoError.value = photoError.value ? `${photoError.value} The photos could not be read again: ${reason}` : `The photos could not be read again: ${reason}`

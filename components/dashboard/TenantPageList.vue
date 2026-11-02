@@ -87,16 +87,18 @@ async function remove(item: { id: string; updatedAt: string }) {
       pages: data.value.pages.filter(p => p.id !== item.id),
     }
   }
+  let deleted = false
   try {
     await dashboardApi(`/api/editor/organizations/${organizationId}/pages/${item.id}`, {
       method: 'DELETE',
       body: { expectedUpdatedAt: item.updatedAt },
       validate: isRecord,
     })
+    deleted = true
     await refresh()
   } catch (error) {
-    // Rollback on failure
-    if (data.value) {
+    // Rollback only if the delete itself failed
+    if (!deleted && data.value) {
       data.value = {
         ...data.value,
         pages: previousPages,

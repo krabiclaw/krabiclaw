@@ -261,6 +261,7 @@ async function removePost(item: { id: string }) {
   removingId.value = item.id
   listError.value = null
   const base = data.value
+  const targetKey = `dashboard-blog-posts:${organizationId}:${orderedCollection.value ?? statusFilter.value ?? 'all'}`
   if (data.value) {
     data.value = {
       ...data.value,
@@ -274,7 +275,8 @@ async function removePost(item: { id: string }) {
     if (localOrder.value) localOrder.value = { ...localOrder.value, posts: localOrder.value.posts.filter(post => post.id !== item.id) }
     await refresh()
   } catch (error) {
-    if (base) data.value = base
+    const currentKey = `dashboard-blog-posts:${organizationId}:${orderedCollection.value ?? statusFilter.value ?? 'all'}`
+    if (base && currentKey === targetKey) data.value = base
     listError.value = getErrorMessage(error, 'Failed to delete the post')
   } finally {
     removingId.value = null

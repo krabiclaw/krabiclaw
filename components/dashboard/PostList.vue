@@ -187,6 +187,7 @@ function openNew() {
 async function removePost(item: { id: string }) {
   removingId.value = item.id
   const base = data.value
+  const targetKey = postsKey.value
   if (data.value) {
     data.value = {
       ...data.value,
@@ -195,9 +196,9 @@ async function removePost(item: { id: string }) {
   }
   try {
     if (await editor.remove(item.id)) await refresh()
-    else if (base) data.value = base
+    else if (base && postsKey.value === targetKey) data.value = base
   } catch (err) {
-    if (base) data.value = base
+    if (base && postsKey.value === targetKey) data.value = base
     throw err
   } finally {
     removingId.value = null
