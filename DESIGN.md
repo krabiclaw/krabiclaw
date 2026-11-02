@@ -887,20 +887,14 @@ when the pane becomes a drawer.
 
 ### Where a level goes when it closes
 
-Back, Close and Cancel navigate to `useRouteLevel().to`, a push to the level
-above with its query preserved. Close, Cancel, backdrop, Escape and swipe
-dismissal all discard the leaf's unsaved edits through its existing cancel
-handler, then return to that same parent after the drawer closes. Save keeps
-the record's existing commit and navigation behavior. A direct leaf URL has
-the same parent and dismissal behavior. Nothing calls `router.back()`.
-
-Measured on a live Airbnb host account (2026-09-21): their in-app Back went to
-`/hosting/listings` while the previous history entry was the leaf that had just
-been cancelled — Back, Cancel and Close all pushed. The destination is a
-property of where you are, so a deep link, a reload, and a redirect after a save
-all answer the same thing, and a drawer you just closed can never become the
-place Back leads. Reading history is what produced the loop where closing a
-sheet and then pressing Back reopened it.
+Close, Cancel, backdrop, Escape, and swipe dismissal discard the leaf's unsaved
+edits through its existing cancel handler, then return to the parent level. When
+the user navigated from that parent, dismissing pops history (`router.back()`);
+when arriving via a deep link or refresh, it navigates to the parent with
+`{ replace: true }`. This prevents history inflation and ensures that Android's
+predictive back gesture and browser Back navigate backward through real context
+rather than looping back into the closed sheet. Save keeps the record's existing
+commit and navigation behavior.
 
 **There is one parent graph, and it is the nested route tree.** Any
 relationship that is expected to render as a desktop parent/child pair must

@@ -146,11 +146,11 @@ export function useRouteLevel() {
   }
 
   /**
-   * Dismissing a child — a sheet's Close, a drawer that shuts — is the same
-   * navigation as that child's own Back, so it is a push to here.
+   * Dismissing a child — a sheet's Close, a drawer that shuts — replaces the
+   * current leaf URL with this parent, avoiding history stack inflation.
    */
   function close() {
-    return navigateTo({ path: path.value, query: route.query })
+    return navigateTo({ path: path.value, query: route.query }, { replace: true })
   }
 
   return { mode, to, path, child, close }

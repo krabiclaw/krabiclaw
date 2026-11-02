@@ -181,7 +181,7 @@ async function finishDismissal() {
   dismissal = null
   if (!pending || router.currentRoute.value.fullPath !== pending.from) return
   try {
-    const result = await navigateTo(pending.to)
+    const result = await navigateTo(pending.to, { replace: true })
     if (isNavigationFailure(result)) throw result
     await nextTick()
     if (invoker?.isConnected) invoker.focus({ preventScroll: true })
@@ -191,6 +191,13 @@ async function finishDismissal() {
     drawerOpen.value = true
   }
 }
+
+// Discard unsaved changes when navigating away without an explicit dismissal (e.g. Android back gesture).
+onBeforeUnmount(() => {
+  if (!dismissal && !props.saving) {
+    emit('cancel')
+  }
+})
 
 // A resize moves the existing editor. Complete an already requested dismissal
 // before its drawer disappears, and ignore its later animation callback.
