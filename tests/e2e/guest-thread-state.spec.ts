@@ -642,15 +642,17 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await dismissPreviewToolbar(page)
 
   await page.goto(`${baseURL}/dashboard/${demoSlug()}`)
-  // Today counts outstanding work now; this new reservation is a review card
-  // whose whole-card link must still open the exact booking's actions.
+  // A new confirmed reservation is a commitment, not a task: it is on today's
+  // schedule, and its whole-card link opens the exact booking's actions.
   const todayResponse = await page.request.get('/api/dashboard/today', { params: { org: demoSlug() } })
   await expectStatus(todayResponse, 200)
   const todayFeed = await todayResponse.json() as TodayFeedPayload
-  const reviewCard = todayFeed.cards.find(card => card.id === `attention:${bookingIds[0]}`)
-  expect(reviewCard?.headline).toBe(`Review ${guestName}’s reservation`)
+  expect(todayFeed.cards.some(card => card.id === `attention:${bookingIds[0]}`)).toBe(false)
+  const reviewCard = todayFeed.cards.find(card => card.id === `reservation:${bookingIds[0]}`)
+  expect(reviewCard?.priority).toBe('schedule')
   expect(reviewCard?.to).toBe(`/dashboard/${demoSlug()}/bookings/reservation/${bookingIds[0]}`)
-  await expect(page.getByRole('heading', { name: /^You have \d+ things? to do$/ })).toBeVisible()
+  const due = todayFeed.cards.filter(card => card.priority === 'attention').length
+  await expect(page.getByRole('heading', { name: due ? `You have ${due} ${due === 1 ? 'thing' : 'things'} to do` : 'Your day at a glance', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Filter activity', exact: true })).toBeVisible()

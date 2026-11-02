@@ -26,6 +26,21 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
       guest_phone: '+12025550188', idempotency_key: 'seed-restaurant-reservation', source: 'phone', guest_acknowledgement: false,
     })
 
+    // Today's reservations for Brooklyn dining room: lunch and dinner services.
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: tenant.timezone }).format(Date.now())
+    const todaySeatings = [
+      { time: '12:00', party_size: 2, guest_name: 'Jordan Lee', guest_email: 'jordan.lee@playwright.example', guest_phone: '+12025550171', key: 'seed-restaurant-today-1' },
+      { time: '13:30', party_size: 4, guest_name: 'Sam Taylor', guest_email: 'sam.taylor@playwright.example', guest_phone: '+12025550172', key: 'seed-restaurant-today-2' },
+      { time: '18:00', party_size: 2, guest_name: 'Alex Rivera', guest_email: 'alex.rivera@playwright.example', guest_phone: '+12025550173', key: 'seed-restaurant-today-3' },
+      { time: '19:30', party_size: 5, guest_name: 'Morgan Smith', guest_email: 'morgan.smith@playwright.example', guest_phone: '+12025550174', key: 'seed-restaurant-today-4' },
+    ]
+    for (const p of todaySeatings) {
+      await tool('create_table_reservation', {
+        location_id: brooklyn.id, date: today, time: p.time, party_size: p.party_size, guest_name: p.guest_name, guest_email: p.guest_email,
+        guest_phone: p.guest_phone, idempotency_key: p.key, source: 'phone', guest_acknowledgement: false,
+      })
+    }
+
     const margherita = await seedMedia(owner, tenant, 'margherita', 'dish.avif', 'Margherita pizza with basil')
     const burrata = await seedMedia(owner, tenant, 'burrata', 'venue.avif', 'Burrata with tomatoes')
     const diningRoom = await seedMedia(owner, tenant, 'dining-room', 'room.avif', 'The Brooklyn dining room')

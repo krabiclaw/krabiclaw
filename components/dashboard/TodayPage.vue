@@ -32,6 +32,23 @@
         </template>
       </UAlert>
 
+      <section v-if="priorities" class="mb-8" aria-labelledby="today-priorities-heading" data-testid="today-priorities">
+        <h2 id="today-priorities-heading" class="text-base font-semibold text-highlighted">Your priority</h2>
+        <p class="mt-1 text-sm text-muted">Today suggests optional work that serves what you say matters now.</p>
+        <ul v-if="priorities.length" class="mt-4 space-y-2">
+          <li v-for="goal in priorities" :key="goal.id" class="flex items-start justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2" data-testid="today-priority">
+            <span class="min-w-0 text-sm text-highlighted">{{ goal.intent }}</span>
+            <UButton size="xs" color="neutral" variant="ghost" icon="i-lucide-x" :aria-label="`Remove priority: ${goal.intent}`" :loading="priorityBusy === goal.id" :disabled="priorityBusy !== null" @click="removePriority(goal)" />
+          </li>
+        </ul>
+        <form class="mt-4 flex gap-2" @submit.prevent="addPriority">
+          <UInput v-model="priorityDraft" class="flex-1" :maxlength="2000" required placeholder="What should the business focus on now?" aria-label="New priority" />
+          <UButton type="submit" color="neutral" variant="soft" label="Add" :loading="priorityBusy === 'new'" :disabled="priorityBusy !== null || !priorityDraft.trim()" />
+        </form>
+      </section>
+
+      <UAlert v-if="decisionError" class="mb-6" color="error" variant="soft" title="Your choice was not saved" :description="getErrorMessage(decisionError, 'The request failed')" />
+
       <h2 v-if="!personalScope || visibleItems.length" class="text-base font-semibold text-highlighted">
         {{ heading }}
       </h2>
@@ -42,6 +59,7 @@
           :key="item.id"
           :item="item"
           :surface="activeRange"
+          :on-decide="decide"
         />
       </div>
 
@@ -79,7 +97,7 @@ import AgendaFilters from './AgendaFilters.vue'
 import TodayAgendaCard from './TodayAgendaCard.vue'
 import { bookingCountLabel, resolveAggregateBookingPresentation } from '~/utils/booking-presentation'
 import { getErrorMessage } from '~/utils/errors'
-import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayFeedPayload } from '~/shared/dashboard-today'
+import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayDecisionInput, type TodayFeedPayload, type TodayPriority } from '~/shared/dashboard-today'
 import type { AgendaItem, AgendaPayload } from '~/server/utils/dashboard-agenda'
 import { useDashboardTelemetry } from '~/composables/useDashboardTelemetry'
 import { authClient } from '~/lib/auth-client'
@@ -148,6 +166,10 @@ let upcomingEpoch = 0
 const resolvedAt = computed(() => todayData.value?.resolvedAt ?? null)
 const upcomingHorizon = computed(() => resolvedAt.value ? addDays(resolvedAt.value.slice(0, 10), UPCOMING_HORIZON_DAYS + 1) : null)
 const todayCards = computed(() => todayData.value?.cards ?? [])
+const priorities = computed(() => props.personalScope ? null : todayData.value?.priorities ?? null)
+const priorityDraft = ref('')
+const priorityBusy = ref<string | null>(null)
+const decisionError = ref<unknown>(null)
 const allRangeItems = computed(() => activeRange.value === 'today' ? todayCards.value : upcomingItems.value)
 const visibleItems = computed(() => (activeRange.value === 'today' ? todayCards.value.slice(0, todayVisibleCount.value) : upcomingItems.value).map(cardWithContext))
 const hasMore = computed(() => activeRange.value === 'today'
@@ -229,8 +251,8 @@ async function loadUpcoming() {
       if (epoch !== upcomingEpoch) return
       const existing = new Set(upcomingItems.value.map(item => item.id))
       const additions = cards.filter(item => !existing.has(item.id))
+      // Each window arrives in the server's order and windows arrive in date order.
       upcomingItems.value.push(...additions)
-      upcomingItems.value.sort((left, right) => (left.occurrenceAt ?? '').localeCompare(right.occurrenceAt ?? '') || left.id.localeCompare(right.id))
       upcomingCursor.value = addDays(to, 1)
       if (additions.length) break
     }
@@ -249,6 +271,53 @@ async function loadMore() {
 
 async function refreshAgenda() {
   await refreshToday()
+}
+
+const organizationApi = computed(() => `/api/organizations/${encodeURIComponent(organizationId ?? '')}`)
+const isSavedGoal = (value: unknown): value is { goal: TodayPriority } => isRecord(value) && isRecord(value.goal) && typeof value.goal.id === 'string' && typeof value.goal.revision === 'string'
+const isSavedFeedback = (value: unknown): value is { feedback: { id: string; decision: string } } => isRecord(value) && isRecord(value.feedback) && typeof value.feedback.id === 'string' && typeof value.feedback.decision === 'string'
+
+/** Saves one decision against the evidence the card was suggested on, then reads Today again. */
+async function decide(item: TodayCard, input: TodayDecisionInput) {
+  if (!item.decision) throw new Error(`Card ${item.id} has no decision to record`)
+  decisionError.value = null
+  const { operation, subjectId, evidenceRevision, goalId, goalRevision, revision } = item.decision
+  try {
+    await applicationFetch(`${organizationApi.value}/recommendation-feedback`, { method: 'PUT', validate: isSavedFeedback, body: {
+      operation, subjectId, evidenceRevision, decision: input.decision, note: input.note, deferUntil: input.deferUntil, revision,
+      ...(goalId && goalRevision ? { goalId, goalRevision } : {}),
+    } })
+  } catch (cause) {
+    decisionError.value = cause
+    return false
+  }
+  await refreshToday()
+  return true
+}
+
+async function changePriorities(busy: string, request: () => Promise<unknown>) {
+  priorityBusy.value = busy
+  decisionError.value = null
+  try {
+    await request()
+  } catch (cause) {
+    decisionError.value = cause
+    return
+  } finally {
+    priorityBusy.value = null
+  }
+  await refreshToday()
+}
+
+async function addPriority() {
+  const intent = priorityDraft.value.trim()
+  if (!intent) return
+  await changePriorities('new', () => applicationFetch(`${organizationApi.value}/goals`, { method: 'POST', validate: isSavedGoal, body: { idempotencyKey: crypto.randomUUID(), intent } }))
+  if (!decisionError.value) priorityDraft.value = ''
+}
+
+async function removePriority(goal: TodayPriority) {
+  await changePriorities(goal.id, () => applicationFetch(`${organizationApi.value}/goals/${encodeURIComponent(goal.id)}`, { method: 'PATCH', validate: isSavedGoal, body: { revision: goal.revision, status: 'archived' } }))
 }
 function addDays(dateKey: string, days: number): string {
   const date = new Date(`${dateKey}T00:00:00Z`)
