@@ -135,7 +135,8 @@ if (import.meta.client) {
       void refresh()
     }
   })
-  watch(activeTab, () => {
+  watch(activeTab, async () => {
+    await nextTick()
     const key = `dashboard-blog-posts:${organizationId}:${orderedCollection.value ?? statusFilter.value ?? 'all'}`
     if (useNuxtApp().payload.data[key]) {
       void refresh()

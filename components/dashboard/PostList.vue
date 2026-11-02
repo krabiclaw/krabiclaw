@@ -108,7 +108,8 @@ if (import.meta.client) {
       void refresh()
     }
   })
-  watch(activeTab, () => {
+  watch(activeTab, async () => {
+    await nextTick()
     if (useNuxtApp().payload.data[postsKey.value]) {
       void refresh()
     }

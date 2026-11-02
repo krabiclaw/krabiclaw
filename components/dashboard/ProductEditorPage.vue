@@ -915,13 +915,14 @@ function variantPriceMajor(variant: Product['variants'][number]): string {
 /** The options, variants and prices as loaded, so a save can tell what changed. */
 const loadedCatalogShape = ref('')
 const editVersion = ref<string | null>(null)
-function isSectionUnchanged(): boolean {
-  return sectionUnchanged.value
+const baselineFormSnapshot = ref<string>('')
+function isFormDirty(): boolean {
+  return baselineFormSnapshot.value !== '' && JSON.stringify(form) !== baselineFormSnapshot.value
 }
 // The draft is seeded from every read of the row, the first and each writer's re-read.
 watch(product, (row) => {
   if (row) {
-    if (editVersion.value !== null && !isSectionUnchanged()) return
+    if (editVersion.value !== null && isFormDirty()) return
     loadForm(row)
   }
 }, { immediate: true })
@@ -993,6 +994,7 @@ function loadForm(row: Product) {
   form.stay_cancellation_policy = stay ? stay.cancellation_policy : NEW_HOME_CANCELLATION_POLICIES.cancellation_policy
   form.stay_long_term_cancellation_policy = stay ? stay.long_term_cancellation_policy : NEW_HOME_CANCELLATION_POLICIES.long_term_cancellation_policy
   loadedCatalogShape.value = catalogShapeOf()
+  baselineFormSnapshot.value = JSON.stringify(form)
 }
 
 /** Option and value identities keep a saved configuration's prices through edits. */

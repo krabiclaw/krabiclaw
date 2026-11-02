@@ -50,6 +50,13 @@ const session = authClient.useSession()
 const userId = computed(() => session.value.data?.user.id)
 const { formatRelativeTime } = useHumanTime()
 const { data, pending, error, refresh } = await useTeamThreads()
+if (import.meta.client) {
+  onMounted(() => {
+    if (useNuxtApp().payload.data[`team-threads:${dashboard.organizationId.value}`]) {
+      void refresh()
+    }
+  })
+}
 const unreadOnly = computed(() => route.query.unread === '1')
 const threads = computed(() => (data.value?.threads ?? []).filter(thread => !unreadOnly.value || thread.unread))
 const target = (id: string) => ({ path: `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages/team/${encodeURIComponent(id)}`, query: { view: 'team', unread: unreadOnly.value ? '1' : undefined } })
