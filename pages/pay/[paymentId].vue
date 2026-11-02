@@ -2,8 +2,9 @@
   <!--
     Paying for a booking on the site itself. Stripe's Payment Element collects
     the method; the business's server attaches it to the payment and says what
-    the card will cost — with any surcharge Stripe permits for it — before the
-    buyer confirms. Nothing is charged until Pay.
+    the card will cost — with the tax Stripe Tax calculates for the business and
+    any surcharge Stripe permits for it — before the buyer confirms. Nothing is
+    charged until Pay.
   -->
   <!-- White, as Airbnb's checkout is: Stripe's fields are white and sit on the page, not in a panel. -->
   <main class="platform-theme min-h-screen bg-white px-5 py-10 lg:py-14 text-default dark:bg-default">
@@ -74,6 +75,10 @@
                 <dt class="text-default">{{ line.label }}</dt>
                 <dd class="tabular-nums text-default">{{ line.amount }}</dd>
               </div>
+              <div v-if="review && review.tax > 0" class="flex justify-between gap-4" data-payment-tax>
+                <dt class="text-default">{{ t('payment.tax') }}</dt>
+                <dd class="tabular-nums text-default">{{ paymentMoney(review.tax, review.currency) }}</dd>
+              </div>
               <div v-if="review && review.surcharge > 0" class="flex justify-between gap-4" data-payment-surcharge>
                 <dt class="text-default">{{ t('payment.surcharge') }}</dt>
                 <dd class="tabular-nums text-default">{{ paymentMoney(review.surcharge, review.currency) }}</dd>
@@ -87,6 +92,7 @@
               {{ paymentMoney(review ? review.total : handoff.subtotal, handoff.currency) }}
             </span>
           </div>
+          <p v-if="review && review.tax_included > 0" class="text-xs text-muted" data-payment-tax-included>{{ t('payment.tax_included', { amount: paymentMoney(review.tax_included, review.currency) }) }}</p>
         </aside>
 
         <div class="lg:order-1 min-w-0 space-y-6">
@@ -174,7 +180,7 @@ type Handoff = Awaited<ReturnType<typeof paymentHandoff>>
 type Review = Awaited<ReturnType<typeof reviewPayment>>
 type Confirmation = Awaited<ReturnType<typeof confirmPayment>>
 const isHandoff = (value: unknown): value is Handoff => isRecord(value) && value.payment_id === paymentId && typeof value.title === 'string' && Number.isSafeInteger(value.subtotal) && typeof value.currency === 'string' && typeof value.stripe_account_id === 'string' && typeof value.publishable_key === 'string' && Array.isArray(value.payment_method_types) && value.payment_method_types.every(type => typeof type === 'string') && ['open', 'paid', 'failed', 'expired'].includes(String(value.state))
-const isReview = (value: unknown): value is Review => isRecord(value) && typeof value.payment_method_id === 'string' && Number.isSafeInteger(value.subtotal) && Number.isSafeInteger(value.surcharge) && value.total === (value.subtotal as number) + (value.surcharge as number) && isRecord(value.method)
+const isReview = (value: unknown): value is Review => isRecord(value) && typeof value.payment_method_id === 'string' && [value.subtotal, value.tax, value.tax_included, value.surcharge].every(Number.isSafeInteger) && value.total === (value.subtotal as number) + (value.tax as number) + (value.surcharge as number) && isRecord(value.method)
 const isConfirmation = (value: unknown): value is Confirmation => isRecord(value) && typeof value.status === 'string' && typeof value.requires_action === 'boolean'
 const isReturn = (value: unknown): value is PaymentReturn => isRecord(value) && (value.state === 'processing' || value.state === 'refunded' || (value.state === 'paid' && (
   (value.kind === 'stay' && typeof value.activity_id === 'string' && typeof value.receipt_token === 'string')
@@ -265,7 +271,6 @@ watch(handoff, (value) => {
 watch([handoff, mount], async ([value, container]) => {
   if (!value || value.state !== 'open' || !container || mounting || import.meta.server) return
   mounting = true
-  if (value.review) review.value = null // A stored review is re-read only through its method; the buyer reviews again here.
   try {
     stripe = await loadStripe(value.publishable_key, { stripeAccount: value.stripe_account_id })
     if (!stripe) throw new Error('Stripe could not be loaded')
@@ -295,13 +300,13 @@ watch([handoff, mount], async ([value, container]) => {
 }, { immediate: true })
 
 /**
- * Airbnb's one button. The method is priced first; with no surcharge the
- * reviewed total is the one on screen, so it is paid at once. A surcharge is
- * shown, and the buyer pays the new total with a second press.
+ * Airbnb's one button. The method is priced first; when tax and surcharge add
+ * nothing the reviewed total is the one on screen, so it is paid at once.
+ * Otherwise the new total is shown and the buyer pays it with a second press.
  */
 async function confirmAndPay() {
   await reviewMethod()
-  if (review.value && review.value.surcharge === 0) await pay()
+  if (review.value && review.value.total === review.value.subtotal) await pay()
 }
 
 async function reviewMethod() {

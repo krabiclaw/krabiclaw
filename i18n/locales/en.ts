@@ -29,6 +29,8 @@ export default {
     "price_details": "Price details",
     "unit_line": "{price} x {count}",
     "surcharge": "Card surcharge",
+    "tax": "Taxes",
+    "tax_included": "Includes {amount} in taxes.",
     "total": "Total",
     "change": "Change",
     "surcharge_applies": "A surcharge applies to this card. It is shown in the price details and included in the total.",

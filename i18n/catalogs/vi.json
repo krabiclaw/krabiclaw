@@ -65,6 +65,8 @@
   "payment.price_details": "Chi tiết giá",
   "payment.unit_line": "{price} x {count}",
   "payment.surcharge": "Phụ phí thẻ",
+  "payment.tax": "Thuế",
+  "payment.tax_included": "Đã bao gồm {amount} tiền thuế.",
   "payment.total": "Tổng cộng",
   "payment.change": "Thay đổi",
   "payment.surcharge_applies": "Thẻ này có phụ phí. Phụ phí được hiển thị trong chi tiết giá và đã bao gồm trong tổng.",

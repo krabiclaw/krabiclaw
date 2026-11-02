@@ -427,14 +427,27 @@ availability query ignores a hold past it, and the confirm endpoint refuses an
 attempt past it, so an unpaid intent simply stays unused at Stripe. A capture that
 lands late anyway takes the unfulfillable-capture path and is refunded.
 
-A business with Stripe Tax configured is refused (409 `stripe_tax_unsupported`)
-rather than charged without the tax Checkout used to calculate.
+**Tax.** A business in a Stripe Tax business location
+(https://docs.stripe.com/tax/supported-countries) with active Stripe Tax
+settings and an active registration collects tax through Stripe Tax on
+PaymentIntents. Stripe Tax answers a seller anywhere else with a 400 that
+carries no error code, so checkout reads Tax only for a seller country on that
+list. When the buyer chooses a method, review creates a Tax Calculation for the
+purchase (its amount, tax code and tax behavior) located by the method's
+billing address, or the buyer's IP address when the method carries none; Stripe's
+`customer_tax_location_invalid` is returned to the buyer as a 409. The intent is
+updated to the calculation's `amount_total` with `hooks.inputs.tax.calculation`,
+so Stripe records the tax transaction when it succeeds and reverses it on
+refund. The surcharge applies to the taxed amount. The buyer sees the tax line
+(or the tax included in the price) before Pay, and confirmation requires the
+intent to still hold the reviewed taxed amount. On capture, `tax_amount` is the
+calculation's inclusive plus exclusive tax.
 
 The PaymentIntent is created only for a booked session through `createProductBooking`;
 there is no merchant payment link or MCP order checkout. Existing one-time order
 payments keep their immutable lines and Price snapshots and remain serviceable.
-Native automatic tax is enabled only for a merchant with active configured Stripe
-Tax settings/registrations. No registration or service taxability is invented.
+Stripe Tax is used only for a merchant with active Stripe Tax settings and
+registrations. No registration or service taxability is invented.
 
 Financial read, refund, dispute, payout and integration permissions are
 separate. Refund and paid-review rejection require an actor-bound, expiring explicit

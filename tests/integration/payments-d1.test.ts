@@ -73,7 +73,7 @@ async function boot(){
  }catch(error){await runtime.dispose();throw error}
 }
 async function payable(db:D1Database,id:string,expires='2099-09-30T00:00:00.000Z'){
- await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,currency,amount,price_snapshot_json,created_at,updated_at) VALUES(?,?,'guest','acct_seller',0,'booking','USD',10000,?,?,?)").bind(id,ORG,JSON.stringify({title:'Consultation',price:{unit_amount:10000,currency:'USD'},quantity:1}),NOW,NOW).run()
+ await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,currency,amount,price_snapshot_json,created_at,updated_at) VALUES(?,?,'guest','acct_seller',0,'booking','USD',10000,?,?,?)").bind(id,ORG,JSON.stringify({title:'Consultation',tax_code:null,price:{unit_amount:10000,currency:'USD',tax_behavior:'exclusive'},quantity:1,automatic_tax:false,method_configuration_id:'pmc_seller'}),NOW,NOW).run()
  await db.prepare("INSERT INTO payment_attempts(id,payment_id,idempotency_key,stripe_payment_intent_id,return_token,status,expires_at,created_at,updated_at) VALUES(?,?,?,?,'test-return-proof','open',?,?,?)").bind(`a:${id}`,id,`checkout:${id}`,`pi_${id}`,expires,NOW,NOW).run()
  await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,buyer_user_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at,assigned_member_id) VALUES(?,?,'product','variant','price','session','guest',?,1,10000,'USD','2099-10-01T13:00:00.000Z','2099-10-01T14:00:00.000Z','active',?,?,'host-member')").bind(`h:${id}`,ORG,id,expires,NOW).run()
 }
@@ -521,13 +521,15 @@ test('a payment back on the business’s site claims for that site’s buyer and
    assert.equal(init?.method, 'GET')
    assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer sk_test_local_boundary')
-   const charge = { id: 'ch_deposit', object: 'charge', livemode: false, amount: 10000, currency: 'usd', created: 1_790_000_000, payment_intent: 'pi_deposit', payment_method: 'pm_card', receipt_url: 'https://pay.stripe.com/receipts/deposit', billing_details: { email: 'card@example.com' } }
+   const charge = { id: 'ch_deposit', object: 'charge', livemode: false, amount: 10800, currency: 'usd', created: 1_790_000_000, payment_intent: 'pi_deposit', payment_method: 'pm_card', receipt_url: 'https://pay.stripe.com/receipts/deposit', billing_details: { email: 'card@example.com' } }
    if (url.pathname === '/v1/charges/ch_deposit') return Response.json(charge)
+   // The deposit's tax is the Stripe Tax calculation its intent carried.
+   if (url.pathname === '/v1/tax/calculations/taxcalc_deposit') return Response.json({ id: 'taxcalc_deposit', object: 'tax.calculation', amount_total: 10800, tax_amount_exclusive: 800, tax_amount_inclusive: 0 })
    const id = url.pathname.split('/').at(-1)!
    assert.ok(id in statuses, `Unexpected Stripe request: ${url.pathname}`)
    if (id === 'pi_deposit') assert.equal(url.searchParams.get('expand[0]'), 'latest_charge')
    const paid = statuses[id] === 'succeeded'
-   return Response.json({ id, object: 'payment_intent', livemode: false, currency: 'usd', amount: 10000, amount_received: paid ? 10000 : 0, status: statuses[id], customer: null, application_fee_amount: null, latest_charge: paid ? charge : null, last_payment_error: null, metadata: { krabiclaw_payment_id: id.slice(3) } })
+   return Response.json({ id, object: 'payment_intent', livemode: false, currency: 'usd', amount: paid ? 10800 : 10000, amount_received: paid ? 10800 : 0, status: statuses[id], customer: null, application_fee_amount: null, latest_charge: paid ? charge : null, last_payment_error: null, metadata: { krabiclaw_payment_id: id.slice(3) }, ...(paid ? { hooks: { inputs: { tax: { calculation: 'taxcalc_deposit' } } } } : {}) })
   })
 
   const app = new H3()
@@ -570,7 +572,7 @@ test('a payment back on the business’s site claims for that site’s buyer and
   assert.deepEqual(await db.prepare("SELECT claimed_user_id FROM payment_claims WHERE payment_id='deposit'").first(), { claimed_user_id: buyer })
   const reservationId = await db.prepare("SELECT converted_reservation_id FROM payment_checkout_holds WHERE id='deposit-hold' AND status='converted'").first<string>('converted_reservation_id')
   assert.equal(typeof reservationId, 'string')
-  assert.deepEqual(await db.prepare("SELECT buyer_user_id,state,captured_amount,receipt_url,subject_id FROM payments WHERE id='deposit'").first(), { buyer_user_id: buyer, state: 'captured', captured_amount: 10000, receipt_url: 'https://pay.stripe.com/receipts/deposit', subject_id: reservationId })
+  assert.deepEqual(await db.prepare("SELECT buyer_user_id,state,amount,tax_amount,captured_amount,receipt_url,subject_id FROM payments WHERE id='deposit'").first(), { buyer_user_id: buyer, state: 'captured', amount: 10000, tax_amount: 800, captured_amount: 10800, receipt_url: 'https://pay.stripe.com/receipts/deposit', subject_id: reservationId })
   assert.deepEqual(await db.prepare('SELECT request_id,user_id,status FROM reservations WHERE id=?').bind(reservationId).first(), { request_id: 'deposit-request', user_id: buyer, status: 'confirmed' })
   // The capture alert went to the buyer who proved the purchase, once.
   assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE request_id='deposit-request' AND event_name='payment.payment_captured'").first('n'), 1)
@@ -832,7 +834,7 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
       guest: { name: 'Guest', email: 'guest@example.com', phone: null, notes: null },
     }
     await db.prepare("UPDATE payments SET amount=20000,price_snapshot_json=? WHERE id='changing'").bind(JSON.stringify({
-      title: 'Cabin', quantity: 1, method_configuration_id: 'pmc_cabin', price: { unit_amount: 20000, currency: 'USD', tax_behavior: 'exclusive' }, stay: stayPurchase,
+      title: 'Cabin', tax_code: null, quantity: 1, automatic_tax: false, method_configuration_id: 'pmc_cabin', price: { unit_amount: 20000, currency: 'USD', tax_behavior: 'exclusive' }, stay: stayPurchase,
     })).run()
     await db.prepare("UPDATE payment_checkout_holds SET amount=20000 WHERE payment_id='changing'").run()
     let nativeStatus = 'processing'
@@ -874,7 +876,7 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
       stay: { product_id: 'cabin', check_in_date: '2099-10-01', check_out_date: '2099-10-03', nights: 2, nightly: [10000, 10000], adults: 1, children: 0, infants: 0, cancellation_policy: 'flexible' },
       kind: 'stay', image_url: null, starts_at: null, ends_at: null, timezone: null, product_slug: 'cabin', location_slug: 'cabin-site', cancellation_policy: null,
       subtotal: 20000, currency: 'USD', expires_at: '2099-09-30T00:00:00.000Z', stripe_account_id: 'acct_seller', publishable_key: 'pk_test_local_boundary',
-      payment_method_types: ['card'], customer_session_client_secret: null, surcharge_basis_points: null, review: null,
+      payment_method_types: ['card'], customer_session_client_secret: null, surcharge_basis_points: null,
     })
     const originalPayment = await requirePayment(db, ORG, 'changing')
     const originalNights = (await db.prepare('SELECT * FROM stay_nights ORDER BY date').all()).results
@@ -946,16 +948,20 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
               status: 'unavailable',
             },
           },
-          payment_method: {
-            id: 'pm_achproof123',
-            object: 'payment_method',
-            type: 'us_bank_account',
-            us_bank_account: {
-              bank_name: 'STRIPE TEST BANK',
-              last4: '6789',
-              routing_number: '110000000',
-              account_holder_type: 'individual',
-            },
+          payment_method: 'pm_achproof123',
+        })
+      }
+      if (url.pathname === '/v1/payment_methods/pm_achproof123' && init?.method === 'GET') {
+        return Response.json({
+          id: 'pm_achproof123',
+          object: 'payment_method',
+          type: 'us_bank_account',
+          billing_details: { address: { country: 'US', postal_code: '94103', line1: null, line2: null, city: null, state: null } },
+          us_bank_account: {
+            bank_name: 'STRIPE TEST BANK',
+            last4: '6789',
+            routing_number: '110000000',
+            account_holder_type: 'individual',
           },
         })
       }
@@ -1005,8 +1011,9 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
     assert.equal((await requireOpenAttempt(db, ORG, 'ach-payment', claim)).state, 'open')
     assert.deepEqual(await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first(), originalHold)
 
-    const review = await reviewPayment(db, stripe, ORG, 'ach-payment', claim, 'pm_achproof123')
+    const review = await reviewPayment(db, stripe, ORG, 'ach-payment', claim, 'pm_achproof123', null)
     assert.equal(review.surcharge, 0)
+    assert.equal(review.tax, 0)
     assert.equal(review.total, 10000)
     assert.equal(review.method.type, 'us_bank_account')
     assert.equal(review.method.bank_name, 'STRIPE TEST BANK')
@@ -1045,6 +1052,79 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
     assert.equal((await requireOpenAttempt(db, ORG, 'ach-payment', claim)).state, 'failed')
     const releasedHold = await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='ach-payment'").first<{ status: string }>()
     assert.equal(releasedHold?.status, 'released')
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('a business registered for Stripe Tax has tax calculated by Stripe from the billing address, attached to the intent and confirmed as reviewed', { timeout: 120_000 }, async (t) => {
+  const { db, runtime } = await boot()
+  try {
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+    await payable(db, 'taxed')
+    await db.prepare("UPDATE payments SET price_snapshot_json=? WHERE id='taxed'").bind(JSON.stringify({ title: 'Consultation', tax_code: 'txcd_20030000', price: { unit_amount: 10000, currency: 'USD', tax_behavior: 'exclusive' }, quantity: 1, automatic_tax: true, method_configuration_id: 'pmc_seller' })).run()
+    await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,surcharge_basis_points,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',300,?,?)").bind(ORG, NOW, NOW).run()
+    const claim = crypto.randomUUID() + crypto.randomUUID()
+    await db.prepare("INSERT INTO payment_claims(token_hash, payment_id, expires_at) VALUES (?, 'taxed', '2099-01-01T00:00:00.000Z')").bind(await tokenHash(claim)).run()
+    const sent: Record<string, URLSearchParams> = {}
+    let calculations = 0
+    const originalFetch = globalThis.fetch
+    t.mock.method(globalThis, 'fetch', async (request, init) => {
+      const url = new URL(request instanceof Request ? request.url : String(request))
+      if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
+      assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
+      const body = new URLSearchParams(String(init?.body ?? ''))
+      if (url.pathname === '/v1/payment_methods/pm_cardUS' && init?.method === 'GET') {
+        return Response.json({ id: 'pm_cardUS', object: 'payment_method', type: 'card', billing_details: { address: { country: 'US', postal_code: '98104', line1: null, line2: null, city: null, state: null } }, card: { brand: 'visa', last4: '4242', funding: 'credit', wallet: null } })
+      }
+      if (url.pathname === '/v1/tax/calculations' && init?.method === 'POST') {
+        calculations += 1
+        sent.calculation = body
+        return Response.json({ id: 'taxcalc_taxed', object: 'tax.calculation', amount_total: 11025, tax_amount_exclusive: 1025, tax_amount_inclusive: 0 })
+      }
+      if (url.pathname === '/v1/payment_intents/pi_taxed' && init?.method === 'POST') {
+        sent.update = body
+        return Response.json({ id: 'pi_taxed', object: 'payment_intent', status: 'requires_confirmation', amount: Number(body.get('amount')), currency: 'usd', livemode: false, metadata: { krabiclaw_payment_id: 'taxed' }, payment_method: 'pm_cardUS', amount_details: { surcharge: { status: 'available', maximum_amount: 330 } } })
+      }
+      if (url.pathname === '/v1/payment_intents/pi_taxed' && init?.method === 'GET') {
+        return Response.json({ id: 'pi_taxed', object: 'payment_intent', status: 'requires_confirmation', amount: 11025, currency: 'usd', livemode: false, metadata: { krabiclaw_payment_id: 'taxed' }, payment_method: 'pm_cardUS' })
+      }
+      if (url.pathname === '/v1/payment_intents/pi_taxed/confirm' && init?.method === 'POST') {
+        sent.confirm = body
+        return Response.json({ id: 'pi_taxed', object: 'payment_intent', status: 'processing', amount: 11355, currency: 'usd', client_secret: 'pi_taxed_secret', payment_method: 'pm_cardUS' })
+      }
+      throw new Error(`Unexpected Stripe request: ${init?.method} ${url.pathname}`)
+    })
+    const stripe = getStripe(env)
+
+    const review = await reviewPayment(db, stripe, ORG, 'taxed', claim, 'pm_cardUS', '203.0.113.9')
+    // Stripe Tax located the buyer by the card's billing address, for the purchase's own amount, tax code and behavior.
+    assert.equal(calculations, 1)
+    assert.equal(sent.calculation!.get('currency'), 'usd')
+    assert.equal(sent.calculation!.get('line_items[0][amount]'), '10000')
+    assert.equal(sent.calculation!.get('line_items[0][reference]'), 'taxed')
+    assert.equal(sent.calculation!.get('line_items[0][tax_behavior]'), 'exclusive')
+    assert.equal(sent.calculation!.get('line_items[0][tax_code]'), 'txcd_20030000')
+    assert.equal(sent.calculation!.get('customer_details[address][country]'), 'US')
+    assert.equal(sent.calculation!.get('customer_details[address][postal_code]'), '98104')
+    assert.equal(sent.calculation!.get('customer_details[address_source]'), 'billing')
+    assert.equal(sent.calculation!.get('customer_details[ip_address]'), null)
+    // The intent charges Stripe's taxed total and carries the calculation, so Stripe records the tax transaction.
+    assert.equal(sent.update!.get('amount'), '11025')
+    assert.equal(sent.update!.get('hooks[inputs][tax][calculation]'), 'taxcalc_taxed')
+    assert.equal(sent.update!.get('payment_method'), 'pm_cardUS')
+    // The surcharge is the business's rate on the taxed amount, inside Stripe's maximum.
+    assert.deepEqual({ subtotal: review.subtotal, tax: review.tax, tax_included: review.tax_included, surcharge: review.surcharge, total: review.total }, { subtotal: 10000, tax: 1025, tax_included: 0, surcharge: 330, total: 11355 })
+    const stored = JSON.parse(await db.prepare("SELECT review_json FROM payment_attempts WHERE payment_id='taxed'").first<string>('review_json') ?? '{}')
+    assert.deepEqual({ tax: stored.tax, total: stored.total }, { tax: 1025, total: 11355 })
+
+    // A total other than the one reviewed is not confirmed.
+    await assert.rejects(confirmPayment(db, stripe, env, ORG, 'taxed', claim, { payment_method_id: 'pm_cardUS', total: 10330 }, 'https://payments.proof.example'), /Review the payment again/u)
+    assert.equal(sent.confirm, undefined)
+    const confirmed = await confirmPayment(db, stripe, env, ORG, 'taxed', claim, { payment_method_id: 'pm_cardUS', total: 11355 }, 'https://payments.proof.example')
+    assert.equal(confirmed.status, 'processing')
+    assert.equal(sent.confirm!.get('amount_to_confirm'), '11355')
+    assert.equal(sent.confirm!.get('amount_details[surcharge][amount]'), '330')
   } finally {
     await runtime.dispose()
   }
