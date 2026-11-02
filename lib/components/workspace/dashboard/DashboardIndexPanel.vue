@@ -113,6 +113,13 @@ const width = computed((): string | undefined => {
 // Read through the instance: vue-tsc cannot type `props.id` here (TS2590), and the id is a plain string.
 const instance = getCurrentInstance()
 provide(dashboardLeafParentKey, {
+  focus: () => {
+    const heading = document.getElementById(`dashboard-panel-${String(instance?.props.id ?? '')}`)?.querySelector<HTMLElement>('h1')
+    if (heading) {
+      heading.tabIndex = -1
+      heading.focus({ preventScroll: true })
+    }
+  },
   exit: () => (instance?.props.create ? level.to.value : null),
 })
 // Not prefixed `dashboard-panel-`: that prefix names panes, and this is a slot inside one.

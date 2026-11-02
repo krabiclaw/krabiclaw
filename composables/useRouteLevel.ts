@@ -137,12 +137,12 @@ export function useRouteLevel() {
 
   /**
    * Dismissing a child — a sheet's Close, a drawer that shuts:
-   * If the previous history entry matches this level's parent, pops history.
-   * Otherwise replaces the current leaf URL with the parent URL, avoiding history stack inflation.
+   * Returns to this level's own URL (path.value).
+   * If the previous history entry matches this level's URL, pops history.
+   * Otherwise replaces the child URL with this level's URL.
    */
   function close() {
-    const target = to.value
-    if (!target) return
+    const target = router.resolve({ path: path.value, query: route.query }).fullPath
     const historyBack = import.meta.client ? window.history.state?.back : null
     if (typeof historyBack === 'string' && router.resolve(historyBack).fullPath === target) {
       router.back()

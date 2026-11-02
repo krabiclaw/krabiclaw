@@ -127,7 +127,7 @@ function cancel() {
   cancelled = true
   emit('cancel')
   drawerOpen.value = false
-  const exitTo = parent?.exit()
+  const exitTo = parent?.exit() ?? level.to.value
   if (exitTo) {
     const historyBack = import.meta.client ? window.history.state?.back : null
     const target = router.resolve(exitTo).fullPath
@@ -136,9 +136,8 @@ function cancel() {
     } else {
       void navigateTo(exitTo, { replace: true })
     }
-  } else {
-    level.close()
   }
+  parent?.focus?.()
 }
 
 // Discard unsaved changes when navigating away without an explicit dismissal (e.g. Android back gesture).
