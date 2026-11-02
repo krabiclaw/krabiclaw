@@ -15,6 +15,7 @@ import { assignedResponsibilitySql, listOrganizationNotificationMembers } from '
 import { wantsNotification } from '~/server/domain/notification-preferences'
 import { listUserDevices, retireDevice, type UserDevice } from '~/server/domain/devices'
 import { sendApnsAlert, type ApnsAlert, type ApnsEnv } from '~/server/utils/apns'
+import { unreadBadge } from '~/server/domain/unread'
 import { sendWebPush, type WebPushEnv } from '~/server/utils/web-push'
 import { isRecord } from '~/server/utils/type-guards'
 import { buildUnsubscribeUrls } from '~/server/utils/unsubscribe'
@@ -494,17 +495,18 @@ async function sendWhatsAppThreadNotification(
  * built only for a browser and inside its send, so a link that cannot be built
  * is that browser's recorded failure and never stops a phone's alert.
  */
-type PushAlert = ApnsAlert & { url: () => Promise<string> }
+type PushAlert = Omit<ApnsAlert, 'badge'> & { url: () => Promise<string> }
 
 type PushDispatch =
   | { status: 'sent'; providerMessageId: string | null }
   | { status: 'failed'; error: string; deviceGone: boolean }
 
 /** The device's own push service: Apple for the app, the browser's push service for a subscription. */
-async function dispatchPush(env: NotificationEnv, device: UserDevice, alert: PushAlert): Promise<PushDispatch> {
+async function dispatchPush(env: NotificationEnv, db: DbClient, userId: string, device: UserDevice, alert: PushAlert): Promise<PushDispatch> {
   if (device.kind === 'apns') {
     const apnsId = crypto.randomUUID()
-    const result = await sendApnsAlert(env, { deviceToken: device.token, environment: device.environment, apnsId, alert })
+    // Read when it is sent, after the notification it announces was recorded, so the icon counts it.
+    const result = await sendApnsAlert(env, { deviceToken: device.token, environment: device.environment, apnsId, alert: { ...alert, badge: await unreadBadge(env, db, userId) } })
     return result.status === 'sent' ? { status: 'sent', providerMessageId: apnsId } : { status: 'failed', error: result.error, deviceGone: result.tokenRetired }
   }
   const result = await sendWebPush(env, {
@@ -542,7 +544,7 @@ async function sendPushThreadNotification(
   }
   let result: PushDispatch
   try {
-    result = await dispatchPush(env, opts.device, opts.alert)
+    result = await dispatchPush(env, db, opts.userId, opts.device, opts.alert)
   } catch (error) {
     const code = HTTPError.isError(error) && isRecord(error.data) && typeof error.data.code === 'string' ? `${error.data.code}: ` : ''
     await record({ status: 'failed', error: `${code}${error instanceof Error ? error.message : String(error)}` })
