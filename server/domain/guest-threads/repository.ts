@@ -19,6 +19,20 @@ import { HTTPError } from 'nitro'
 const SOURCE_GUEST_NAME_SQL = "json_extract(gt.payload_json, '$.guest.name')"
 const REPLY_CHANNEL_SQL = "CASE WHEN EXISTS (SELECT 1 FROM channel_threads ct WHERE ct.request_id = gt.id AND ct.organization_id = gt.organization_id) OR EXISTS (SELECT 1 FROM stays st WHERE st.request_id = gt.id AND st.organization_id = gt.organization_id AND st.owner = 'channel') THEN 'airbnb' ELSE 'email' END"
 
+/** No reply from the business after this guest entry has reached the guest: stored on the web or accepted for delivery. */
+function answeredAfterSql(guestEntry: string): string {
+  return `EXISTS (
+        SELECT 1 FROM activity_entries reply
+        WHERE reply.request_id = ${guestEntry}.request_id
+          AND reply.kind = 'message' AND reply.actor_kind = 'member'
+          AND reply.event_name = 'thread.member_reply' AND reply.sequence > ${guestEntry}.sequence
+          AND (reply.channel = 'web' OR EXISTS (
+            SELECT 1 FROM guest_thread_deliveries delivery
+            WHERE delivery.entry_id = reply.id AND delivery.status IN ('accepted', 'sent', 'delivered', 'read')
+          ))
+      )`
+}
+
 function unansweredGuestMessagesSql(threadId: string, afterCancellation = false): string {
   return `EXISTS (
     SELECT 1 FROM activity_entries guest_message
@@ -31,17 +45,28 @@ function unansweredGuestMessagesSql(threadId: string, afterCancellation = false)
           AND json_extract(cancelled.payload_json, '$.afterStatus') = 'cancelled'
           AND cancelled.sequence >= guest_message.sequence
       )` : ''}
-      AND NOT EXISTS (
-        SELECT 1 FROM activity_entries reply
-        WHERE reply.request_id = guest_message.request_id
-          AND reply.kind = 'message' AND reply.actor_kind = 'member'
-          AND reply.event_name = 'thread.member_reply' AND reply.sequence > guest_message.sequence
-          AND (reply.channel = 'web' OR EXISTS (
-            SELECT 1 FROM guest_thread_deliveries delivery
-            WHERE delivery.entry_id = reply.id AND delivery.status IN ('accepted', 'sent', 'delivered', 'read')
-          ))
-      )
+      AND NOT ${answeredAfterSql('guest_message')}
   )`
+}
+
+/**
+ * When the guest last said something the business has not answered: their
+ * latest message, or a contact form they submitted, with no delivered reply
+ * after it. A thread absent from the result has nothing unanswered.
+ */
+export async function latestUnansweredGuestEntryTimes(db: DbClient, organizationId: string, threadIds: readonly string[]): Promise<Map<string, string>> {
+  const times = new Map<string, string>()
+  for (let index = 0; index < threadIds.length; index += 200) {
+    const rows = await queryAll<{ request_id: string; occurred_at: string }>(db, `
+      SELECT guest_entry.request_id, MAX(guest_entry.occurred_at) AS occurred_at
+        FROM activity_entries guest_entry JOIN requests r ON r.id = guest_entry.request_id AND r.organization_id = ?
+       WHERE guest_entry.request_id IN (SELECT value FROM json_each(?)) AND guest_entry.actor_kind = 'guest'
+         AND (guest_entry.kind = 'message' OR (guest_entry.kind = 'submission' AND r.kind = 'contact'))
+         AND NOT ${answeredAfterSql('guest_entry')}
+       GROUP BY guest_entry.request_id`, [organizationId, d1JsonStringSet(threadIds.slice(index, index + 200))])
+    for (const row of rows) times.set(row.request_id, row.occurred_at)
+  }
+  return times
 }
 
 // Old guest cancellations left the request open. The cancellation ends that

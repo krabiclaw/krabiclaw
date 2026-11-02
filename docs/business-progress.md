@@ -1,9 +1,10 @@
 # Business progress foundation
 
-This backend contract supports future web and native presentations of owner
-intent, useful work and recommendation feedback. Today keeps its current
-selector. Booky Boo can consume the same domain operations when
-its presentation reaches parity; none of these records require lodging.
+This contract records owner intent, useful work and recommendation feedback.
+The dashboard's Today and Upcoming views select optional work from active goals
+and apply the caller's feedback (see Today and Upcoming in `DESIGN.md`). Booky
+Boo can consume the same domain operations when its presentation reaches
+parity; none of these records require lodging.
 
 ## Canonical records
 
@@ -26,10 +27,11 @@ conversation. Audit entries preserve edits to goals and feedback.
 
 Article activity is recorded by ordinary CMS/MCP writes; reply evidence comes
 from the existing conversation activity and delivery receipts. Goals and feedback
-are collected only through explicit submissions to their APIs. No current UI
-submits those goals or feedback, and no recommendation impression, exposure,
-usefulness, effort saved or achieved business goal is established by these
-records.
+are collected only through explicit submissions to their APIs: Today's priority
+form creates and archives goals, and its card controls save feedback against
+the evidence revision and goal revision the card was selected with. No
+recommendation impression, exposure, usefulness, effort saved or achieved
+business goal is established by these records.
 
 ## API
 
@@ -48,8 +50,8 @@ functions enforce the same access rules as the HTTP routes.
 | `PUT /recommendation-feedback` | Save `{operation, subjectId, evidenceRevision, decision}` with optional `note`, `deferUntil`, `goalId`, `goalRevision`, and edit `revision`. Returns `{feedback}`. |
 
 The experimental `POST /api/organizations/:organizationId/recommendations/preview`
-endpoint has been removed and returns 404. The data foundation does not generate
-recommendations or invoke a model.
+endpoint has been removed and returns 404. Today's selector matches a goal's
+own words against the work's recorded text; it does not invoke a model.
 
 Operations currently supported for feedback are `article.update`,
 `article.publish` and `guest_thread.reply`. These name existing canonical
@@ -84,7 +86,9 @@ The read reports `applicability.current` and explicit reasons:
 `evidence_changed`, `subject_missing`, `goal_changed`, `goal_archived` or
 `defer_elapsed`. Historical feedback stays intact. Consumers must
 reassess changed evidence and interpret the person's decision; this API does
-not remove inbox history, hide obligations, or automatically resurface work.
+not remove inbox history. Today is the consumer that hides work under a current
+dismissal, correction or deferral and resurfaces it, with its reason, once the
+decision no longer applies.
 
 ## What progress proves
 
@@ -101,7 +105,7 @@ time and verification basis:
 
 `coverage` makes those limits part of the response. There is no aggregate
 business-success score, currency, reward eligibility, wallet or redemption
-policy. Recommendation selection, exposure measurement, owner validation and
+policy. Exposure measurement, owner validation of Today's selection and
 economic policy remain separate decisions under issues
 [#1606](https://github.com/krabiclaw/krabiclaw/issues/1606),
 [#1607](https://github.com/krabiclaw/krabiclaw/issues/1607) and
