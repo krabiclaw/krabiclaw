@@ -756,6 +756,8 @@ const loadError = computed(() => (loadFailure.value && !isNotFoundError(loadFail
   ? getErrorMessage(loadFailure.value, `Failed to load this ${itemLabel.value.toLowerCase()}`)
   : stayConfigError.value))
 
+const editVersion = ref<string | null>(null)
+
 /**
  * A writer's re-read. A save or a photo change has just made this row different
  * from what was loaded; the photo preview and every index summary read
@@ -764,6 +766,7 @@ const loadError = computed(() => (loadFailure.value && !isNotFoundError(loadFail
 async function reload() {
   await refresh()
   if (loadFailure.value) throw loadFailure.value
+  if (product.value) editVersion.value = product.value.updated_at
   await Promise.all([refreshCatalog(), refreshHomeQuote()])
 }
 
@@ -907,7 +910,6 @@ function variantPriceMajor(variant: Product['variants'][number]): string {
 
 /** The options, variants and prices as loaded, so a save can tell what changed. */
 const loadedCatalogShape = ref('')
-const editVersion = ref<string | null>(null)
 const baselineFormSnapshot = ref<string>('')
 function isFormDirty(): boolean {
   return baselineFormSnapshot.value !== '' && JSON.stringify(form) !== baselineFormSnapshot.value
