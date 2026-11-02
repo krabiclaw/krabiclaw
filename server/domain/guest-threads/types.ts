@@ -85,6 +85,8 @@ export interface ThreadDetailSourceFields {
   notes?: string | null
   locationTitle?: string | null
   productTitle?: string | null
+  /** The guest's answers to the business's own questions, in the wording they answered: part of the form like its notes. */
+  answers: import('~/shared/form-questions').FormAnswerSnapshot[]
 }
 
 export interface ThreadDetailSourceModel {

@@ -39,6 +39,14 @@ import {
 import { assertProductKind, patchProductDetails, validateProductDetails, validateStayAlarmDetails, ProductDetailError, PRICING_NOTE_HANDLE, PRODUCT_KINDS, type ProductDetailValue, type ProductKind } from '~/shared/product-details'
 import { presentationForProduct, type CatalogCounts } from '~/utils/product-presentation'
 import { resolvePublicTenantOrigin } from '~/server/utils/public-base'
+import { FormQuestionDefinitionError, formQuestionsRevision, normalizeFormQuestionsInput, parseStoredFormQuestions } from '~/shared/form-questions'
+import { prepareFormQuestionsWrite } from '~/server/domain/form-questions'
+
+/** A stored question collection and the revision a form built from it carries. */
+function storedQuestions(value: unknown) {
+  const questions = parseStoredFormQuestions(String(value))
+  return { questions, questions_revision: formQuestionsRevision(questions) }
+}
 import type {
   Collection,
   CreateCollectionInput,
@@ -266,14 +274,14 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY location_id`, params: [organizationId, ids] },
     { query: `SELECT product_id, collection_id, sort_order FROM collection_products
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY collection_id`, params: [organizationId, ids] },
-    { query: `SELECT product_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, assigned_team_id FROM product_booking_configs
+    { query: `SELECT product_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, assigned_team_id, questions FROM product_booking_configs
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
       WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
     { query: `SELECT c.product_id, c.location_id, c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, c.calendar_rules, c.property_type_group, c.property_type,
         c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
-        c.cancellation_policy, c.long_term_cancellation_policy, c.assigned_member_id, c.assigned_team_id, ${liveHomeSql('p')} AS live
+        c.cancellation_policy, c.long_term_cancellation_policy, c.assigned_member_id, c.assigned_team_id, c.questions, ${liveHomeSql('p')} AS live
       FROM product_stay_configs c JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
       WHERE c.organization_id = ? AND c.product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
   ], { operation: 'Hydrate products' }), readStayPhotoRooms(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id)), readStayHomeAccessibility(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id))])
@@ -300,6 +308,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
       live: Number(row.live) === 1,
+      ...storedQuestions(row.questions),
     }
     if (product?.stay) validateStayAlarmDetails(product.details, product.stay.amenity_answers)
   }
@@ -320,6 +329,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       held_online: Number(row.held_online) === 1,
       scheduling_mode: row.scheduling_mode as 'legacy' | 'provider', assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
+      ...storedQuestions(row.questions),
     }
   }
 
@@ -814,8 +824,14 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
     ? Object.fromEntries((['assigned_member_id', 'assigned_team_id'] as const).filter(field => (stay[field] ?? null) !== stored[field]).map(field => [field, stay[field]]))
     : stay
   const target = await assertResponsibilityTarget(db, organizationId, named, stored)
+  let questions: ProductStayConfig['questions']
+  try { questions = normalizeFormQuestionsInput(stay.questions ?? []) }
+  catch (error) {
+    if (!(error instanceof FormQuestionDefinitionError)) throw error
+    invalidStayField('questions', error.message)
+  }
   return { location_id: locationId, check_in_time: stay.check_in_time as string, check_in_end_time: checkInEnd as string | null, check_out_time: stay.check_out_time as string, max_guests: maxGuests, min_nights: minNights, calendar_rules: calendarRules,
-    ...planStayListing(stay), ...target }
+    ...planStayListing(stay), ...target, questions, questions_revision: formQuestionsRevision(questions) }
 }
 
 function invalidStayField(field: string, message: string): never {
@@ -1176,7 +1192,7 @@ function productWrites(
     const columns = [
       'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'property_type_group', 'property_type',
       'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit',
-      'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy', 'assigned_member_id', 'assigned_team_id',
+      'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy', 'assigned_member_id', 'assigned_team_id', 'questions',
     ] as const satisfies readonly (keyof ProductStayConfig)[]
     const assignments = columns.filter(column => options.stayFields === undefined || options.stayFields.includes(column) || (column === 'amenities' && options.stayFields.includes('amenity_answers')))
       .map(column => `${column} = excluded.${column}`)
@@ -1191,8 +1207,8 @@ function productWrites(
     }, {
       query: `INSERT INTO product_stay_configs (product_id, organization_id, location_id, check_in_time, check_in_end_time, check_out_time, max_guests, min_nights, calendar_rules,
                  property_type_group, property_type, listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit,
-                 bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id, created_at, updated_at, created_by, updated_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id, questions, created_at, updated_at, created_by, updated_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (product_id) DO UPDATE SET ${[...assignments, 'updated_at = excluded.updated_at', 'updated_by = excluded.updated_by'].join(', ')}
                WHERE product_stay_configs.organization_id = excluded.organization_id AND product_stay_configs.location_id = excluded.location_id`,
       params: [planned.id, organizationId, planned.stay.location_id, planned.stay.check_in_time, planned.stay.check_in_end_time, planned.stay.check_out_time,
@@ -1200,7 +1216,7 @@ function productWrites(
         planned.stay.listing_type, planned.stay.total_floors, planned.stay.listing_floor, planned.stay.year_built, planned.stay.property_size, planned.stay.property_size_unit,
         planned.stay.bedrooms, planned.stay.beds, planned.stay.bathrooms,
         JSON.stringify(planned.stay.amenity_answers), planned.stay.cancellation_policy, planned.stay.long_term_cancellation_policy,
-        planned.stay.assigned_member_id, planned.stay.assigned_team_id, now, now, actor.actorId, actor.actorId],
+        planned.stay.assigned_member_id, planned.stay.assigned_team_id, JSON.stringify(planned.stay.questions), now, now, actor.actorId, actor.actorId],
     })
     if (upsert && (options.stayFields === undefined || options.stayFields.includes('amenities') || options.stayFields.includes('amenity_answers'))) {
       // A removed listing fact cannot retain room references. Invalidate every
@@ -1671,13 +1687,21 @@ async function planProductUpdate(db: DbClient, input: {
   knownSlugs?: ReadonlyMap<string, string>
   cacheInvalidations: BatchQuery[]
 }): Promise<{ writes: BatchQuery[]; keptVariants: string; product: PlannedProduct; airbnbSettings: AirbnbSettingSections | null; changedFields: string[]; updatedAt: string }> {
-  const { current, patch, organizationId } = input
+  const { current, organizationId } = input
+  let { patch } = input
   if ('slug' in patch && patch.slug !== undefined && patch.slug !== current.slug) invalid('A product keeps its saved slug')
   if (patch.expected_updated_at !== undefined) {
     if (typeof patch.expected_updated_at !== 'string' || !Number.isFinite(Date.parse(patch.expected_updated_at))) invalid('expected_updated_at must be the Product updated_at value from the latest read')
     if (patch.expected_updated_at !== current.updated_at) throw new HTTPError({ statusCode: 409, statusMessage: 'The product changed while you were editing. Nothing was changed; read it again before saving.', data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: current.id } })
   }
   if (patch.stay && Object.hasOwn(patch.stay, 'accessibility')) invalid('Use the home accessibility operation to author accessibility information')
+  if (patch.stay?.expected_questions_revision !== undefined && patch.stay.questions === undefined) invalidStayField('expected_questions_revision', 'stay.expected_questions_revision is only sent with stay.questions')
+  // A home's questions are replaced whole, against the revision the caller read.
+  if (patch.stay?.questions !== undefined) {
+    if (!current.stay) invalid('Only a place to stay takes stay settings')
+    const { expected_questions_revision: expectedRevision, ...stayPatch } = patch.stay
+    patch = { ...patch, stay: { ...stayPatch, questions: prepareFormQuestionsWrite(current.stay.questions, { questions: patch.stay.questions, expectedRevision }) } }
+  }
   const previousUpdate = Date.parse(current.updated_at)
   const requestedUpdate = Date.parse(input.now)
   if (!Number.isFinite(previousUpdate) || !Number.isFinite(requestedUpdate)) throw new Error('The Product update timestamp is invalid')

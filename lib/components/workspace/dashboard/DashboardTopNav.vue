@@ -32,6 +32,8 @@
         :aria-current="item.active ? 'page' : undefined"
       >
         {{ item.label }}
+        <UIcon v-if="item.badgeUnavailable" name="i-lucide-circle-alert" class="ms-1.5 size-3.5 align-[-2px] text-warning" aria-label="Unread messages could not be loaded" data-testid="dashboard-nav-unread-unavailable" />
+        <span v-else-if="item.badge" class="ms-1.5 inline-block h-4 min-w-4 rounded-full bg-error px-1 text-center text-xs font-semibold leading-4 text-white no-underline" :aria-label="`${item.badge} unread`" data-testid="dashboard-nav-unread">{{ item.badge > 99 ? '99+' : item.badge }}</span>
       </NuxtLink>
     </nav>
 
@@ -68,13 +70,15 @@
         :color="menuActive ? 'primary' : 'neutral'"
         variant="soft"
         square
-        class="rounded-full"
+        class="relative rounded-full"
         icon="i-lucide-menu"
         aria-label="Open menu"
         :aria-current="menuActive ? 'page' : undefined"
         data-testid="dashboard-top-nav-menu-button"
         @click="$emit('menu')"
-      />
+      >
+        <span v-if="menuUnread" class="absolute right-0.5 top-0.5 size-2.5 rounded-full bg-error" data-testid="dashboard-menu-unread" />
+      </UButton>
     </div>
   </header>
 </template>
@@ -94,6 +98,10 @@ export interface DashboardTopNavItem {
   label: string
   to?: string
   active?: boolean
+  /** Conversations with something unread. */
+  badge?: number
+  /** The unread counts could not be read. */
+  badgeUnavailable?: boolean
 }
 
 defineProps<{
@@ -101,6 +109,8 @@ defineProps<{
   homeTo: string
   /** The screen's declared tab is Menu. */
   menuActive?: boolean
+  /** The Menu's bell has unread notifications. */
+  menuUnread?: boolean
 }>()
 
 defineEmits<{ menu: [] }>()

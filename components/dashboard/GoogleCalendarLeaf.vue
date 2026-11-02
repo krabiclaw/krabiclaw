@@ -33,7 +33,7 @@ import { INTEGRATION_SCOPES, type GoogleCalendarIntegration } from '~/shared/org
 const route = useRoute()
 // The Integrations summary names the KrabiClaw user who linked the account; the leaf's own read does not.
 const integrations = inject(integrationsKey, null)
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const dashboard = useDashboardOrganization()
 const entitled = computed(() => dashboard.entitlements.value.calendar_sync === true)
 const api = `/api/organizations/${organizationId}/integrations/google-calendar`

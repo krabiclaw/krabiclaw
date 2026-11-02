@@ -181,16 +181,21 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     assert.ok(token)
     const app = new H3()
     app.get('/api/dashboard/today', todayRoute)
-    const response = await app.request(Object.assign(new Request('https://proof.example/api/dashboard/today?org=org', { headers: { authorization: `Bearer ${token}` } }),
-      { runtime: { name: 'cloudflare', cloudflare: { env } } }))
-    assert.equal(response.status, 200)
-    const today = await response.json() as TodayFeedPayload
-    assert.equal(today.cards.find(card => card.id === 'offer:calendar_sync')?.imageUrl, 'https://proof.example/images/offers/calendar.webp', 'Today exposes its platform illustration as an absolute HTTPS URL for native clients')
-    assert.deepEqual(today.cards.filter(card => card.priority === 'attention').map(card => ({ id: card.id, headline: card.headline, to: card.to, bookingKind: card.bookingKind,
+    const readToday = async () => {
+      const response = await app.request(Object.assign(new Request('https://proof.example/api/dashboard/today?org=org', { headers: { authorization: `Bearer ${token}` } }),
+        { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+      assert.equal(response.status, 200)
+      return await response.json() as TodayFeedPayload
+    }
+    // The inquiry arrived just now and has no reply: it is due. Today shows its
+    // recorded conversation title without inventing a guest identity.
+    const today = await readToday()
+    assert.deepEqual(today.cards.filter(card => card.priority === 'attention').map(card => ({ id: card.id, headline: card.headline, reason: card.reason, to: card.to, bookingKind: card.bookingKind,
       stayId: card.stayId, productId: card.productId, occurrenceAt: card.occurrenceAt, timeZone: card.timeZone, imageIcon: card.imageIcon })), [{
-      id: `attention:${rows[0]!.id}`, headline: 'Review conversation: Conversation supplied by Airbnb', to: `/dashboard/org/messages/${rows[0]!.id}`,
+      id: `attention:${rows[0]!.id}`, headline: 'Review conversation: Conversation supplied by Airbnb', reason: today.cards[0]!.reason, to: `/dashboard/org/messages/${rows[0]!.id}`,
       bookingKind: null, stayId: null, productId, occurrenceAt: null, timeZone: null, imageIcon: 'i-lucide-message-circle',
     }])
+    assert.match(today.cards[0]!.reason!, /^The guest wrote .* and has no reply yet\.$/)
     const afterToday = (await getGuestThreadDetail(db, rows[0]!.id, ORG))!
     assert.deepEqual([afterToday.guestName, afterToday.guestEmail, afterToday.guestPhone, afterToday.operationalRecord], [null, null, null, null])
     assert.equal(await db.prepare('SELECT count(*) FROM stays').first('count(*)'), 0)

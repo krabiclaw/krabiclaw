@@ -32,7 +32,9 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
   const sellableVariants = computed(() => context.value.product.variants.filter(variant => variant.active))
   const bookingOpen = ref(false)
   const bookingStep = ref(1)
-  const contactForm = ref<ContactFormState>({ name: '', email: '', phone: '', notes: '' })
+  const contactForm = ref<ContactFormState>({ name: '', email: '', phone: '', notes: '', answers: {} })
+  // The offering's own questions, asked beside the contact details.
+  const formQuestions = useFormQuestionState(() => context.value.product.booking, computed({ get: () => contactForm.value.answers, set: (answers) => { contactForm.value.answers = answers } }))
   const defaultPhoneCountry = computed(() => getPhoneCountry(context.value.location?.address?.regionCode)?.code)
   const showPartySize = computed(() => context.value.showPartySize !== false)
   const selectedPartySize = ref(1)
@@ -242,12 +244,13 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
     }
     submitting.value = true
     bookingError.value = ''
+    formQuestions.clear()
     try {
       const fingerprint = JSON.stringify({
         organizationId: context.value.organizationId, productId: context.value.product.id,
         sessionId: session.id, variantId: selectedVariantId.value, partySize: partySize.value,
         name: contact.name.trim(), email: contact.email.trim(),
-        phone: contact.phone?.trim() || null, notes: contact.notes?.trim() || null,
+        phone: contact.phone?.trim() || null, notes: contact.notes?.trim() || null, ...formQuestions.submission(),
       })
       if (fingerprint !== checkoutFingerprint) {
         checkoutRequestKey.value = crypto.randomUUID()
@@ -269,6 +272,7 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
             guest_email: contact.email,
             guest_phone: contact.phone || null,
             notes: contact.notes || null,
+            ...formQuestions.submission(),
             locale: locale.value,
             page_event_id: await pageEventId(),
           },
@@ -315,13 +319,14 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
         checkoutRequestKey.value = null
         checkoutFingerprint = null
       }
-      bookingError.value = failure.message
+      // Changed questions are a review of what was entered, not a failure to retype.
+      bookingError.value = formQuestions.handleRefusal(failure) && formQuestions.notice.value ? '' : failure.message
     } finally {
       submitting.value = false
     }
   }
 
-    return { bookingOpen, bookingStep, contactForm, defaultPhoneCountry, partySize, showPartySize, allowTimezoneSelection, guestTimezone, bookingTimezone, timezoneOptions, selectedVariantId, selectedPrice, sellableVariants, variantPriceLabel,
+    return { bookingOpen, bookingStep, contactForm, formQuestions, defaultPhoneCountry, partySize, showPartySize, allowTimezoneSelection, guestTimezone, bookingTimezone, timezoneOptions, selectedVariantId, selectedPrice, sellableVariants, variantPriceLabel,
       timeSelection, submitting, bookingError, sessions, sessionsPending, availabilityDates, referenceDate, guestsMax,
       selectedSession, loadSessions, openBooking, openBookingAt, upcomingSessions,
       sessionDayLabel, sessionTimeLabel, submitBooking }

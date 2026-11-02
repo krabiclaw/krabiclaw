@@ -162,8 +162,7 @@ watch(() => props.step.id, (id) => {
 }, { immediate: true })
 
 // Same shape for the currency: the country proposes it, the owner confirms it on
-// this step, and an answer already given is never overwritten. A country this
-// platform has no supported currency for proposes nothing and the owner picks.
+// this step, and an answer already given is never overwritten.
 watch(() => props.step.id, (id) => {
   if (id !== 'currency' || state.value.details.currency) return
   state.value.details.currency = currencyForCountry(state.value.details.country)

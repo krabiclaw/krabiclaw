@@ -3,6 +3,20 @@ import type { AgendaItem, AgendaLocation } from '~/server/utils/dashboard-agenda
 import { formatTimestamp, localDateAt } from '~/utils/timezone'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { STAY_CHANNELS } from '~/shared/bookings'
+import type { BusinessGoal, RecommendationFeedback } from '~/shared/business-progress'
+
+/** What the caller can decide about one suggested piece of work, bound to the evidence it was suggested on. */
+const todayDecisionSchema = z.object({
+  operation: z.enum(['article.update', 'article.publish', 'guest_thread.reply']), subjectId: z.string(), evidenceRevision: z.string(),
+  goalId: z.string().nullable(), goalRevision: z.string().nullable(),
+  /** The revision of the caller's saved decision under exactly this evidence and goal; null when a decision would be new. */
+  revision: z.string().nullable(),
+  current: z.object({ decision: z.enum(['accept', 'dismiss', 'defer', 'correct']), note: z.string().nullable(), deferUntil: z.string().nullable() }).nullable(),
+})
+export type TodayDecision = z.infer<typeof todayDecisionSchema>
+const todayPrioritySchema = z.object({ id: z.string(), intent: z.string(), constraints: z.string().nullable(), targetAt: z.string().nullable(), revision: z.string() })
+export type TodayPriority = Pick<BusinessGoal, 'id' | 'intent' | 'constraints' | 'targetAt' | 'revision'>
+export type TodayDecisionInput = Pick<RecommendationFeedback, 'decision' | 'note' | 'deferUntil'>
 
 export const todayCardSchema = z.object({
   id: z.string(), to: z.string(), eyebrow: z.string(), headline: z.string(), description: z.string().nullable(),
@@ -13,6 +27,11 @@ export const todayCardSchema = z.object({
   productId: z.string().nullable(),
   stayChannel: z.enum(STAY_CHANNELS).nullable(),
   occurrenceAt: z.iso.datetime({ offset: true }).nullable(), timeZone: z.string().nullable(),
+  /** When the work itself should be done, when that differs from the occurrence it serves. Upcoming orders by this before occurrenceAt. */
+  actionAt: z.iso.datetime({ offset: true }).nullable(),
+  /** Why this work is here now, in terms of the recorded facts, the owner's priority and their earlier decisions. */
+  reason: z.string().nullable(),
+  decision: todayDecisionSchema.nullable(),
   priority: z.enum(['attention', 'schedule', 'opportunity']),
 })
 export type TodayCard = z.infer<typeof todayCardSchema>
@@ -20,12 +39,15 @@ export const todayFeedSchema = z.object({
   cards: z.array(todayCardSchema), availableKinds: z.array(z.enum(['reservation', 'booking', 'stay'])),
   locations: z.array(z.object({ id: z.string(), organizationId: z.string(), title: z.string(), imageUrl: z.string().nullable() })),
   resolvedAt: z.string(),
+  /** The owner's active priorities; null when the caller cannot author them. */
+  priorities: z.array(todayPrioritySchema).nullable(),
 })
 export interface TodayFeedPayload {
   cards: TodayCard[]
   availableKinds: Array<'reservation' | 'booking' | 'stay'>
   locations: AgendaLocation[]
   resolvedAt: string
+  priorities: TodayPriority[] | null
 }
 
 /** One projection for business and personal Today, including future agenda windows. */
@@ -55,6 +77,6 @@ export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string;
     imageUrl: input.personal ? item.resourceImageUrl : item.guestImageUrl, imageFit: 'cover', imageIcon: input.personal ? resourceIcon : 'i-lucide-user',
     badgeImageUrl: input.personal ? null : item.resourceImageUrl, badgeIcon: input.personal ? null : resourceIcon,
     locationId: item.locationId, assignedMemberId: item.assignedMemberId, bookingKind: item.kind, stayId: item.stayId, productId: item.productId, stayChannel: item.stayChannel,
-    occurrenceAt: item.stayMoment === 'current' ? null : item.startsAt, timeZone: item.timeZone, priority: 'schedule',
+    occurrenceAt: item.stayMoment === 'current' ? null : item.startsAt, timeZone: item.timeZone, actionAt: null, reason: null, decision: null, priority: 'schedule',
   }
 }

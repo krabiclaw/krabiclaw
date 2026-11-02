@@ -15,7 +15,7 @@ definePageMeta({ layout: 'dashboard' })
 
 const level = useRouteLevel()
 const dashboardLocation = useDashboardLocation()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const editor = await useLocationEditor(organizationId, dashboardLocation.currentLocationId, null)
 
 const groups = computed<EditorNavigationGroup[]>(() => [

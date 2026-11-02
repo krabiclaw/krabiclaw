@@ -27,6 +27,8 @@ export interface ApnsAlert {
   /** Groups the alert with others about the same conversation; absent when it belongs to none. */
   threadId: string | null
   data: Record<string, string>
+  /** The app icon's number when the alert arrives: everything its person has not read. */
+  badge: number
 }
 
 export type ApnsSendResult =
@@ -120,6 +122,7 @@ export async function sendApnsAlert(
       aps: {
         'alert': { title: input.alert.title, body: input.alert.body },
         'sound': 'default',
+        'badge': input.alert.badge,
         ...(input.alert.threadId ? { 'thread-id': input.alert.threadId } : {}),
       },
       ...input.alert.data,

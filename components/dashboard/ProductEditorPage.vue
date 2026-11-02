@@ -204,10 +204,11 @@ import type { StaySafetySection } from '~/shared/stay-safety'
 import type { StayPhotoRoom, StayPhotoRoomType } from '~/shared/stay-photos'
 import type { StayRoomAccessibility, StayHomeAccessibility } from '~/shared/stay-accessibility'
 import type { VerticalCopy } from '~/utils/vertical-copy'
+import { formQuestionsSummary, type FormQuestionWrite } from '~/utils/form-question-editing'
 
 export const SECTION_KEYS = [
   'photo', 'kind', 'name', 'price', 'description', 'page', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections',
-  'guests', 'availability', 'arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'house-rules', 'checkout-instructions', 'property-type', 'rooms', 'amenities', 'accessibility', 'cancellation', 'team', 'guest-safety', 'location',
+  'guests', 'availability', 'arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'house-rules', 'checkout-instructions', 'property-type', 'rooms', 'amenities', 'accessibility', 'cancellation', 'team', 'guest-safety', 'location', 'questions',
 ] as const
 export type SectionKey = typeof SECTION_KEYS[number]
 export type BookingConcern = 'enabled' | 'duration' | 'capacity' | 'confirmation' | 'payment' | 'location' | 'assignment' | number
@@ -388,6 +389,8 @@ export interface ProductEditor {
   arrivalManage: ComputedRef<boolean>
   arrivalChanged: (fields: readonly StayArrivalField[]) => boolean
   saveArrival: (fields: readonly StayArrivalField[], closeTo?: string) => Promise<void>
+  /** Replaces the booking's or the home's questions over the revision last read, then re-reads the product. */
+  saveQuestions: (owner: 'booking' | 'stay', questions: readonly FormQuestionWrite[]) => Promise<void>
 }
 
 export const productEditorKey = Symbol('product-editor') as InjectionKey<ProductEditor>
@@ -468,7 +471,7 @@ function sectionPath(section: string) {
   return router.resolve({ path: `${itemPath.value}/${section}`, query }).fullPath
 }
 
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const { refresh: refreshCatalog, collectionProductIds, setCollectionProducts } = useProductCatalog(organizationId, ref(null))
 const dashboard = useDashboardOrganization()
 // The context mints a site-wide preview token. Assigned Product access alone
@@ -503,6 +506,7 @@ const sectionLabels: Record<SectionKey, string> = {
   get price() { return product.value?.kind === 'service' ? 'Consultation pricing' : 'Price' },
   get description() { return product.value?.kind === 'experience' ? 'What you’ll do' : product.value?.kind === 'service' ? 'Short description' : 'Description' },
   'page': 'Page content',
+  'questions': 'Questions',
   get 'order-url'() { return product.value?.kind === 'experience' ? 'External booking link' : product.value?.kind === 'service' ? 'External consultation link' : 'External link' },
   get attributes() { return product.value?.kind === 'dish' ? 'Food information' : 'Details' },
   'publication': 'Status',
@@ -641,6 +645,15 @@ function revertArrival() {
 watch(arrivalHome, () => { if (!saving.value) revertArrival() }, { immediate: true, flush: 'sync' })
 function arrivalChanged(fields: readonly StayArrivalField[]) {
   return Boolean(arrivalHome.value && arrivalDraft.value && fields.some(field => JSON.stringify(arrivalHome.value![field]) !== JSON.stringify(arrivalDraft.value![field])))
+}
+async function saveQuestions(owner: 'booking' | 'stay', questions: readonly FormQuestionWrite[]) {
+  const saved = owner === 'booking' ? product.value?.booking : product.value?.stay
+  if (!saved) throw new Error('Read the saved product before editing its questions.')
+  const url = `/api/editor/organizations/${organizationId}/products/${productId.value}`
+  const body = { questions, expected_questions_revision: saved.questions_revision }
+  if (owner === 'booking') await dashboardApi(`${url}/booking`, { method: 'PUT', body, validate: (value: unknown): value is { success: true } => isRecord(value) && value.success === true })
+  else await dashboardApi(url, { method: 'PATCH', body: { stay: body }, validate: isMutation })
+  await reload()
 }
 async function saveArrival(fields: readonly StayArrivalField[], target?: string) {
   if (saving.value) return
@@ -1423,6 +1436,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       { id: 'guest-safety', label: 'Guest safety', summary: savedSafety.value.join('\n') || 'Add details', placeholder: !savedSafety.value.length, to: sectionPath('guest-safety') },
       { id: 'location', label: 'Location', summary: stayLocationError.value || (stayLocation.value ? formatPostalAddress(stayLocation.value.address) || 'Add address' : 'Loading location…'), placeholder: !stayLocation.value?.address, to: sectionPath('location') },
       { id: 'team', label: 'Looked after by', summary: stayTeamSummary(), to: sectionPath('team') },
+      { id: 'questions', label: 'Questions', icon: 'i-lucide-message-square-text', summary: formQuestionsSummary(product.value.stay!.questions), placeholder: !product.value.stay!.questions.length, to: sectionPath('questions') },
       ...otherDetails,
       ...(form.collection_ids.length ? [{ id: 'collections', label: sectionLabels.collections, summary: collectionsSummary(), to: sectionPath('collections') }] : []),
       {
@@ -1450,7 +1464,7 @@ const activeNavigationItem = computed(() => {
 const LEAF_SECTIONS: readonly string[] = ['photo', 'name', 'description', 'price', 'kind', 'order-url', 'property-type', 'rooms', 'guests', 'availability', 'arrival-time', 'directions', 'wifi', 'house-manual', 'house-rules', 'team']
 const autoOpenTarget = computed(() => navigationGroups.value[0]?.items.find(item => LEAF_SECTIONS.includes(item.id) && !(stayEditor.value && item.id === 'description') && item.to === sectionPath(item.id))?.to ?? null)
 
-const STAY_ROW_ORDER = ['publication', 'photo', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'accessibility', 'location', 'house-rules', 'guest-safety', 'cancellation', 'team', 'featured', 'collections']
+const STAY_ROW_ORDER = ['publication', 'photo', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'accessibility', 'location', 'house-rules', 'guest-safety', 'cancellation', 'team', 'questions', 'featured', 'collections']
 function rowRank(id: string) {
   const at = STAY_ROW_ORDER.indexOf(id)
   return at === -1 ? STAY_ROW_ORDER.length : at
@@ -2321,7 +2335,7 @@ async function saveProductLocalization(locale: string, submitted: Record<string,
   if (!row) throw new Error(`The ${itemLabel.value.toLowerCase()} is unavailable.`)
   const state = productLocalizationState
   if (!state || state.productId !== row.id || state.locale !== locale) throw new Error('Choose the language again before saving.')
-  const values = Object.fromEntries(['name', 'description', 'marketing_features', 'unit_label', 'details']
+  const values = Object.fromEntries(['name', 'description', 'marketing_features', 'unit_label', 'details', 'questions']
     .filter(key => Object.hasOwn(state.values, key)).map(key => [key, structuredClone(state.values[key])]))
   const details = isRecord(values.details) ? values.details : {}
   // Only the displayed fields are changed. The resource writer replaces the
@@ -2418,5 +2432,6 @@ provide(productEditorKey, {
   arrivalManage,
   arrivalChanged,
   saveArrival,
+  saveQuestions,
 })
 </script>

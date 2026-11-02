@@ -81,7 +81,7 @@ const route = useRoute()
 const level = useRouteLevel()
 const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
 const apiBase = props.personalScope ? '/api/account' : '/api/dashboard'
-const organizationId = props.personalScope ? null : await useDashboardOrganizationId()
+const organizationId = props.personalScope ? null : useDashboardOrganizationId()
 const calendarSessions = inject(calendarSessionsKey, null)
 const sessionProduct = computed(() => calendarSessions?.product.value)
 const day = computed(() => String(route.params.day ?? ''))

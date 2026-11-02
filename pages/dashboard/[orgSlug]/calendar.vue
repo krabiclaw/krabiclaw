@@ -32,7 +32,7 @@ definePageMeta({ layout: 'dashboard', tab: 'calendar' })
 
 const route = useRoute()
 const api = useDashboardApi()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const dashboard = useDashboardOrganization()
 const hasProductScope = computed(() => Object.hasOwn(route.query, 'product_id'))
 const productId = computed(() => typeof route.query.product_id === 'string' && route.query.product_id.trim() ? route.query.product_id : null)

@@ -11,6 +11,14 @@ import { HTTPError } from 'nitro'
 import { providerTimestamp } from '~/server/integrations/channex/messages'
 import { guestThreadConversationState } from './booking-change-state'
 import { bookingChangeViews } from './booking-changes'
+import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
+
+/** What the guest answered when they wrote in or booked: on the thread, or on the stay the thread is about. */
+async function threadAnswers(db: DbClient, thread: NonNullable<Awaited<ReturnType<typeof getGuestRequest>>>): Promise<FormAnswerSnapshot[]> {
+  if (thread.kind !== 'stay') return thread.payload.answers
+  const stay = await queryFirst<{ answers: string }>(db, 'SELECT answers FROM stays WHERE organization_id = ? AND request_id = ?', [thread.organization_id, thread.id])
+  return stay ? formAnswerSnapshotsSchema.parse(JSON.parse(stay.answers)) : []
+}
 
 function deliveryRecipient(emailJson: string | null): string | null {
   if (!emailJson) return null
@@ -34,11 +42,12 @@ export async function getGuestThreadDetail(
   if (!organization) throw new Error('Conversation has no organization')
 
 
-  const [entryRows, deliveryRows, channelThread] = await Promise.all([
+  const [entryRows, deliveryRows, channelThread, answers] = await Promise.all([
     listThreadEntries(db, threadId),
     listThreadDeliveries(db, threadId),
     queryFirst(db, `SELECT request_id FROM channel_threads WHERE organization_id = ? AND request_id = ?
       UNION ALL SELECT request_id FROM stays WHERE organization_id = ? AND request_id = ? AND owner = 'channel' LIMIT 1`, [organizationId, threadId, organizationId, threadId]),
+    threadAnswers(db, thread),
   ])
 
   // One read of the deliveries answers both questions the thread asks of them:
@@ -135,14 +144,14 @@ export async function getGuestThreadDetail(
       operationalStatus: record?.status ?? null,
       operationalStatusLabel: record ? formatOperationalStatusLabel(thread.kind, record.status) : null,
       fields: thread.kind === 'contact'
-        ? { subject: thread.payload.subject, message: thread.payload.message, locationTitle: summary.locationTitle, productTitle: summary.productTitle }
+        ? { subject: thread.payload.subject, message: thread.payload.message, locationTitle: summary.locationTitle, productTitle: summary.productTitle, answers }
         : thread.kind === 'stay'
           ? {
               // A stay is its nights in its own dates; it has no start time to localize.
               whenLabel: record?.check_in_date && record.check_out_date ? stayPreview({ check_in_date: record.check_in_date, check_out_date: record.check_out_date, party_size: record.party_size }) : null,
               startsAt: null, endsAt: null, timezone: record?.timezone ?? null,
               guests: record ? String(record.party_size) : null, partySize: record?.party_size ?? null,
-              notes: null, locationTitle: summary.locationTitle, productTitle: summary.productTitle,
+              notes: null, locationTitle: summary.locationTitle, productTitle: summary.productTitle, answers,
             }
           : {
             whenLabel: record ? new Intl.DateTimeFormat('en-US', { timeZone: record.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(record.starts_at)) : null,
@@ -154,6 +163,7 @@ export async function getGuestThreadDetail(
             notes: thread.payload.notes,
             locationTitle: summary.locationTitle,
             productTitle: summary.productTitle,
+            answers,
           },
     },
     entries,

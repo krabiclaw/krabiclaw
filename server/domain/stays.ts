@@ -1,4 +1,6 @@
 import { HTTPError } from 'nitro'
+import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevision, parseStoredFormQuestions, type FormAnswerSnapshot, type FormQuestion } from '~/shared/form-questions'
+import { acceptFormAnswers } from '~/server/domain/form-questions'
 import { MAX_STAY_NIGHTS, STAY_CALENDAR_DAYS, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNEL_LABELS, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -101,6 +103,8 @@ export interface Stay {
   cancellation_policy: StayBookedPolicy | null
   /** Staff recorded the guest did not arrive; their review invitation is never sent. */
   no_show_at: string | null
+  /** The guest's answers to the home's questions, worded as they answered them; empty when none were asked. */
+  answers: FormAnswerSnapshot[]
   version: number
   created_at: string
   updated_at: string
@@ -235,6 +239,9 @@ export interface StayHome {
   photos: StayPhoto[]
   photo_rooms: StayPhotoRoom[]
   accessibility: StayHomeAccessibility[]
+  /** The host's own questions asked with each direct stay, and the revision a form built from them carries. */
+  questions: FormQuestion[]
+  questions_revision: string
 }
 
 /** A home's address as a home is added with it: street, city, state, ISO country and postal code. */
@@ -360,11 +367,11 @@ function amount(value: unknown, field: string, allowNegative = false): number {
 
 const STAY_COLUMNS = `s.id, s.product_id, c.location_id, l.timezone, s.channel, s.owner, s.status, s.overbooked, s.check_in_date, s.check_out_date, s.arrival_time,
   s.adults, s.children, s.infants, s.guest_name, s.guest_surname, s.guest_email, s.guest_phone, s.user_id, s.total_minor, s.currency, s.notes,
-  s.provider, s.external_booking_id, s.channel_booking_id, s.request_id, s.cancelled_at, s.cancellation_reason, s.cancellation_policy, s.no_show_at, s.version, s.created_at, s.updated_at`
+  s.provider, s.external_booking_id, s.channel_booking_id, s.request_id, s.cancelled_at, s.cancellation_reason, s.cancellation_policy, s.no_show_at, s.answers, s.version, s.created_at, s.updated_at`
 
 function mapStay(row: Record<string, unknown>): Stay {
   const code = row.channel_booking_id
-  return { ...row, overbooked: Number(row.overbooked) === 1,
+  return { ...row, overbooked: Number(row.overbooked) === 1, answers: formAnswerSnapshotsSchema.parse(JSON.parse(String(row.answers))),
     channel_booking_url: row.channel === 'airbnb' && typeof code === 'string' ? `https://www.airbnb.com/hosting/reservations/details/${encodeURIComponent(code)}` : null } as unknown as Stay
 }
 
@@ -394,7 +401,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
            c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, c.calendar_rules, c.property_type_group, c.property_type,
            c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
            c.cancellation_policy, c.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
-           c.directions, c.house_manual, c.checkout_instructions, c.assigned_member_id, c.assigned_team_id,
+           c.directions, c.house_manual, c.checkout_instructions, c.assigned_member_id, c.assigned_team_id, c.questions,
            COALESCE((SELECT pp.published FROM product_publications pp WHERE pp.organization_id = c.organization_id AND pp.product_id = c.product_id), 0) AS published,
            ${liveHomeSql('p')} AS live, m.enabled AS channel_enabled, m.import_stage AS channel_stage, m.listing_id AS airbnb_listing_id
       FROM product_stay_configs c
@@ -448,6 +455,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       checkout_instructions: JSON.parse(String(row.checkout_instructions)) as StayCheckoutInstruction[],
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
+      ...(() => { const questions = parseStoredFormQuestions(String(row.questions)); return { questions, questions_revision: formQuestionsRevision(questions) } })(),
       channel: row.channel_stage === null ? null : {
         provider: 'channex',
         status: Number(row.channel_enabled) === 1 ? 'connected' : row.channel_stage === 'reservations' || row.channel_stage === 'messages' || row.channel_stage === 'complete' ? 'disconnected' : 'importing',
@@ -640,7 +648,7 @@ const LISTING_FIELDS = ['property_type_group', 'property_type', 'listing_type', 
 const ARRIVAL_FIELDS = [...Object.keys(STAY_ARRIVAL_TEXT_LIMITS) as Array<keyof typeof STAY_ARRIVAL_TEXT_LIMITS>, 'check_in_method', 'checkout_instructions'] as const
 const LOCATION_FIELDS = ['address', 'latitude', 'longitude', 'stay_map_sharing'] as const
 const EDITABLE_HOME_FIELDS = ['name', 'description', 'published', 'timezone', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'base_price_minor',
-  'assigned_member_id', 'assigned_team_id', ...LISTING_FIELDS, ...Object.values(STAY_ALARM_DETAIL_KEYS), ...ARRIVAL_FIELDS, ...LOCATION_FIELDS] as const
+  'assigned_member_id', 'assigned_team_id', 'questions', 'expected_questions_revision', ...LISTING_FIELDS, ...Object.values(STAY_ALARM_DETAIL_KEYS), ...ARRIVAL_FIELDS, ...LOCATION_FIELDS] as const
 
 /** The arrival guide fields a request names, checked; each problem names its field. */
 function arrivalPatch(body: Record<string, unknown>): Record<string, string | null> {
@@ -742,6 +750,9 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   for (const field of ['assigned_member_id', 'assigned_team_id'] as const) {
     if (body[field] !== undefined) stay[field] = body[field] as string | null
   }
+  // Questions are replaced whole by the product writer, against the revision the host read.
+  if ('questions' in body) Object.assign(stay, { questions: body.questions, expected_questions_revision: body.expected_questions_revision })
+  else if ('expected_questions_revision' in body) fail(422, 'INVALID_DETAIL', 'expected_questions_revision is only sent with questions', 'expected_questions_revision')
   const alarmDetails = Object.fromEntries(Object.values(STAY_ALARM_DETAIL_KEYS).filter(key => Object.hasOwn(body, key)).map(key => [key, body[key]]))
   const patch: UpdateProductInput = Object.keys(alarmDetails).length
     ? { details_mode: 'merge', details: alarmDetails as NonNullable<UpdateProductInput['details']> }
@@ -1536,11 +1547,14 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
   // A payment the guest already made is written with the stay, so a stay never exists without it.
   const payment = input.payment === undefined || input.payment === null ? null : stayPaymentFields(input.payment, 'payment.', false)
   await requireChannelPush(db, env, access.organizationId, home.product_id)
+  // The guest's answers to the home's questions, as the host took them; a retry with other answers is another stay.
+  const answered = JSON.stringify(formAnswersFingerprint(input.answers))
   const replay = async () => {
-    const existing = await queryFirst<StayFields & { id: string; product_id: string }>(db,
-      `SELECT id, product_id, ${Object.keys(fields).join(', ')} FROM stays WHERE organization_id = ? AND idempotency_key = ?`, [access.organizationId, key])
+    const existing = await queryFirst<StayFields & { id: string; product_id: string; answers: string }>(db,
+      `SELECT id, product_id, answers, ${Object.keys(fields).join(', ')} FROM stays WHERE organization_id = ? AND idempotency_key = ?`, [access.organizationId, key])
     if (!existing) return null
-    if (existing.product_id !== home.product_id || Object.entries(fields).some(([field, value]) => existing[field as keyof StayFields] !== value)) {
+    if (existing.product_id !== home.product_id || Object.entries(fields).some(([field, value]) => existing[field as keyof StayFields] !== value)
+      || JSON.stringify(formAnswersFingerprint(formAnswerSnapshotsSchema.parse(JSON.parse(existing.answers)))) !== answered) {
       fail(409, 'IDEMPOTENCY_CONFLICT', 'This key belongs to a stay with different saved details. Reload the stay before another change; a create retry does not edit an existing stay.', 'idempotency_key')
     }
     const initialPayment = await queryFirst<StayPaymentFields>(db,
@@ -1561,16 +1575,19 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
   }
   const earlier = await replay()
   if (earlier) return pushed(earlier)
+  // A stay the host takes asks the home's questions as its direct booking does; the host's words are in the site's own language.
+  const answers = await acceptFormAnswers(db, { kind: 'stay', organizationId: access.organizationId, productId: home.product_id }, {
+    locale: null, answers: input.answers, questionsRevision: input.questions_revision, revisionRequired: false })
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
   try {
     await executeBatch(db, [
       {
         query: `INSERT INTO stays (id, organization_id, product_id, channel, owner, status, check_in_date, check_out_date, arrival_time, adults, children, infants,
-                  guest_name, guest_surname, guest_email, guest_phone, total_minor, currency, notes, idempotency_key, booking_received_at, created_at, updated_at, created_by, updated_by)
-                VALUES (?, ?, ?, 'direct', 'app', 'confirmed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  guest_name, guest_surname, guest_email, guest_phone, total_minor, currency, notes, idempotency_key, booking_received_at, created_at, updated_at, created_by, updated_by, answers)
+                VALUES (?, ?, ?, 'direct', 'app', 'confirmed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         params: [id, access.organizationId, home.product_id, fields.check_in_date, fields.check_out_date, fields.arrival_time, fields.adults, fields.children, fields.infants,
-          fields.guest_name, fields.guest_surname, fields.guest_email, fields.guest_phone, fields.total_minor, home.currency, fields.notes, key, now, now, now, access.actorId, access.actorId],
+          fields.guest_name, fields.guest_surname, fields.guest_email, fields.guest_phone, fields.total_minor, home.currency, fields.notes, key, now, now, now, access.actorId, access.actorId, JSON.stringify(answers)],
       },
       ...reconcileNightsQueries(access.organizationId, id),
       ...stayThreadQueries({ organizationId: access.organizationId, stayId: id, now, openedBy: { userId: access.actorId } }),
@@ -2426,7 +2443,8 @@ export async function releaseLapsedStayHolds(db: DbClient, env: StayMutationEnv,
 /** What a captured checkout made a stay of: its frozen quote and the guest who paid. */
 export interface CheckoutStay {
   quote: Pick<StayQuote, 'product_id' | 'check_in_date' | 'check_out_date' | 'adults' | 'children' | 'infants' | 'total_minor' | 'currency' | 'cancellation_policy'>
-  guest: { name: string; email: string; phone: string | null; notes: string | null }
+  /** `answers` are the home's questions as the guest answered them, frozen with the purchase. */
+  guest: { name: string; email: string; phone: string | null; notes: string | null; answers?: FormAnswerSnapshot[] }
 }
 
 /**
@@ -2440,11 +2458,11 @@ export function stayFromCheckoutQueries(input: { organizationId: string; locatio
     { query: 'DELETE FROM stay_nights WHERE hold_id = ?', params: [input.holdId] },
     {
       query: `INSERT INTO stays (id, organization_id, product_id, channel, owner, status, check_in_date, check_out_date, adults, children, infants,
-                guest_name, guest_email, guest_phone, user_id, total_minor, currency, notes, idempotency_key, booking_received_at, created_at, updated_at, cancellation_policy)
-              SELECT ?, ?, ?, 'direct', 'app', 'confirmed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                guest_name, guest_email, guest_phone, user_id, total_minor, currency, notes, idempotency_key, booking_received_at, created_at, updated_at, cancellation_policy, answers)
+              SELECT ?, ?, ?, 'direct', 'app', 'confirmed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                WHERE EXISTS (SELECT 1 FROM payments WHERE id = ? AND organization_id = ? AND state = 'captured' AND refunded_amount = 0)`,
       params: [input.stayId, input.organizationId, quote.product_id, quote.check_in_date, quote.check_out_date, quote.adults, quote.children, quote.infants,
-        guest.name, guest.email, guest.phone, input.buyerUserId, quote.total_minor, quote.currency, guest.notes, `checkout:${input.paymentId}`, input.now, input.now, input.now, quote.cancellation_policy,
+        guest.name, guest.email, guest.phone, input.buyerUserId, quote.total_minor, quote.currency, guest.notes, `checkout:${input.paymentId}`, input.now, input.now, input.now, quote.cancellation_policy, JSON.stringify(guest.answers ?? []),
         input.paymentId, input.organizationId],
     },
     organizationEventQuery({ organizationId: input.organizationId, locationId: input.locationId, actorId: null, eventType: 'stay.created', entityType: 'stay', entityId: input.stayId, metadata: { channel: 'direct', payment_id: input.paymentId }, onlyIfPreviousChangedOneRow: true }),

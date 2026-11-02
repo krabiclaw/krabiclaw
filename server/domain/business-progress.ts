@@ -143,6 +143,50 @@ function recommendationFeedbackApplicability(value: RecommendationFeedback, refe
   return { current: reasons.length === 0, reasons }
 }
 
+async function referenceOrNull(db: DbClient, principal: MemberAccessPrincipal, subject: Pick<RecommendationFeedback, 'operation' | 'subjectId'>) {
+  try {
+    return await readBusinessProgressReference(db, principal, subject)
+  } catch (error) {
+    if (!(error instanceof HTTPError) || error.statusCode !== 404) throw error
+    return null
+  }
+}
+
+const subjectKey = (subject: Pick<RecommendationFeedback, 'operation' | 'subjectId'>) => JSON.stringify([subject.operation, subject.subjectId])
+
+/** All goals and, per operation and subject, the caller's decisions newest first. Nothing here reads evidence. */
+export async function readRecommendationDecisionInputs(db: DbClient, principal: MemberAccessPrincipal) {
+  await authorize(db, principal)
+  const [goalRows, feedbackRows] = await Promise.all([
+    queryAllPages<GoalRow>(db, 'SELECT * FROM organization_goals WHERE organization_id = ? ORDER BY updated_at DESC, id DESC', [principal.organizationId]),
+    queryAllPages<FeedbackRow>(db, 'SELECT * FROM recommendation_feedback WHERE organization_id = ? AND user_id = ? ORDER BY updated_at DESC, id DESC', [principal.organizationId, principal.userId]),
+  ])
+  const bySubject = new Map<string, RecommendationFeedback[]>()
+  for (const row of feedbackRows) {
+    const value = feedbackOf(row)
+    bySubject.set(subjectKey(value), [...(bySubject.get(subjectKey(value)) ?? []), value])
+  }
+  return { goals: goalRows.map(goalOf), decided: (subject: Pick<RecommendationFeedback, 'operation' | 'subjectId'>) => bySubject.get(subjectKey(subject)) ?? [] }
+}
+
+/** The current evidence for each named subject and the caller's latest decision about it, judged against that evidence. */
+export async function readRecommendationDecisions(
+  db: DbClient,
+  principal: MemberAccessPrincipal,
+  inputs: Awaited<ReturnType<typeof readRecommendationDecisionInputs>>,
+  subjects: Array<Pick<RecommendationFeedback, 'operation' | 'subjectId'>>,
+  now = new Date(),
+) {
+  const decisions = new Map<string, { reference: BusinessProgressReference; feedback: RecommendationFeedbackView | null; saved: RecommendationFeedback[] }>()
+  await Promise.all(subjects.map(async (subject) => {
+    const reference = await referenceOrNull(db, principal, subject)
+    if (!reference) return
+    const saved = inputs.decided(subject), latest = saved[0] ?? null
+    decisions.set(subjectKey(subject), { reference, saved, feedback: latest && { ...latest, applicability: recommendationFeedbackApplicability(latest, reference, inputs.goals, now) } })
+  }))
+  return { get: (subject: Pick<RecommendationFeedback, 'operation' | 'subjectId'>) => decisions.get(subjectKey(subject)) ?? null }
+}
+
 /** Authored intent, personal feedback and canonical evidence; no generated task, reward or completion store. */
 export async function readBusinessProgress(db: DbClient, principal: MemberAccessPrincipal, page: { limit?: number; offset?: number } = {}) {
   await authorize(db, principal)
@@ -153,19 +197,12 @@ export async function readBusinessProgress(db: DbClient, principal: MemberAccess
     queryAll<FeedbackRow>(db, 'SELECT * FROM recommendation_feedback WHERE organization_id = ? AND user_id = ? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?', [principal.organizationId, principal.userId, limit + 1, offset]),
   ])
   const goals = goalRows.map(goalOf)
-  const references = new Map<string, ReturnType<typeof readBusinessProgressReference>>()
+  const references = new Map<string, ReturnType<typeof referenceOrNull>>()
   const now = new Date()
   const feedback = await Promise.all(feedbackRows.slice(0, limit).map(async (row): Promise<RecommendationFeedbackView> => {
     const value = feedbackOf(row)
-    const key = JSON.stringify([value.operation, value.subjectId])
-    if (!references.has(key)) references.set(key, readBusinessProgressReference(db, principal, value))
-    let reference: BusinessProgressReference | null = null
-    try {
-      reference = await references.get(key)!
-    } catch (error) {
-      if (!(error instanceof HTTPError) || error.statusCode !== 404) throw error
-    }
-    return { ...value, applicability: recommendationFeedbackApplicability(value, reference, goals, now) }
+    if (!references.has(subjectKey(value))) references.set(subjectKey(value), referenceOrNull(db, principal, value))
+    return { ...value, applicability: recommendationFeedbackApplicability(value, await references.get(subjectKey(value))!, goals, now) }
   }))
   const hasMore = feedbackRows.length > limit
   return { goals, feedback, feedbackPagination: { limit, offset, hasMore, nextOffset: hasMore ? offset + limit : null }, ...outcomes }

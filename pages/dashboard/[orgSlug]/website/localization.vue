@@ -74,7 +74,7 @@ const isLocalizationProgress = (value: unknown): value is LocalizationProgress =
     && typeof item.completed === 'number' && typeof item.total === 'number')
 
 const dashboardApi = useDashboardApi()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const localesPath = `/api/editor/organizations/${organizationId}/locales`
 
 // The organization's languages, then how far each added one is translated —

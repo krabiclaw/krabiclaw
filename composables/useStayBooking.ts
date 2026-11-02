@@ -32,7 +32,9 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   const route = useRoute()
   const bookingOpen = ref(false)
   const bookingStep = ref(1)
-  const contactForm = ref<ContactFormState>({ name: '', email: '', phone: '', notes: '' })
+  const contactForm = ref<ContactFormState>({ name: '', email: '', phone: '', notes: '', answers: {} })
+  // The home's own questions, asked beside the guest's contact details.
+  const formQuestions = useFormQuestionState(() => context.value.product.stay, computed({ get: () => contactForm.value.answers, set: (answers) => { contactForm.value.answers = answers } }))
   const defaultPhoneCountry = computed(() => getPhoneCountry(context.value.location?.address?.regionCode)?.code)
   const calendar = ref<PublicStayCalendar | null>(null)
   const calendarPending = ref(false)
@@ -296,9 +298,10 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     }
     submitting.value = true
     bookingError.value = ''
+    formQuestions.clear()
     try {
       const guest = { name: contact.name.trim(), email: contact.email.trim(), phone: contact.phone?.trim() || null, notes: contact.notes?.trim() || null }
-      const fingerprint = JSON.stringify([context.value.product.id, checkIn.value, checkOut.value, adults.value, children.value, infants.value, guest.name, guest.email, guest.phone, guest.notes])
+      const fingerprint = JSON.stringify([context.value.product.id, checkIn.value, checkOut.value, adults.value, children.value, infants.value, guest.name, guest.email, guest.phone, guest.notes, formQuestions.submission()])
       if (fingerprint !== requestFingerprint) {
         requestKey = crypto.randomUUID()
         requestFingerprint = fingerprint
@@ -309,7 +312,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
         body: {
           idempotency_key: requestKey, check_in_date: checkIn.value, check_out_date: checkOut.value,
           adults: adults.value, children: children.value, infants: infants.value,
-          guest_name: guest.name, guest_email: guest.email, guest_phone: guest.phone, notes: guest.notes, locale: locale.value,
+          guest_name: guest.name, guest_email: guest.email, guest_phone: guest.phone, notes: guest.notes, ...formQuestions.submission(), locale: locale.value,
           page_event_id: await pageEventId(),
         },
         validate: (value): value is CheckoutResponse => isRecord(value) && value.success === true && value.status === 'checkout' && typeof value.pay_path === 'string' && value.pay_path.startsWith('/pay/')
@@ -320,7 +323,8 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     } catch (error) {
       const failure = normalizeApiError(error)
       if (failure.code === 'checkout_expired' || failure.code === 'checkout_failed') requestFingerprint = null
-      bookingError.value = refusal(error)
+      // Changed questions are a review of what was entered, not a failure to retype.
+      bookingError.value = formQuestions.handleRefusal(failure) && formQuestions.notice.value ? '' : refusal(error)
       if (failure.code.startsWith('STAY_')) {
         bookingStep.value = 1
         void loadCalendar()
@@ -339,7 +343,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
 
   return {
     checkout, enquiryPath,
-    bookingOpen, bookingStep, contactForm, defaultPhoneCountry, calendar, calendarPending, calendarError, checkIn, checkOut, dateField, adults, children, infants, maxGuests,
+    bookingOpen, bookingStep, contactForm, formQuestions, defaultPhoneCountry, calendar, calendarPending, calendarError, checkIn, checkOut, dateField, adults, children, infants, maxGuests,
     quote, quotePending, bookingError, submitting, breakdown, rangeLabel, guestsLabel, nightCount,
     loadCalendar, night, canCheckIn, canCheckOut, checkInHint, checkOutHint, firstCheckIn, earliestCheckOut, selectDay, setCheckIn, setCheckOut, clearDates, clearCheckOut, openBooking, submitBooking, money, nightsLabel, dateLabel,
   }

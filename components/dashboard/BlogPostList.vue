@@ -63,7 +63,7 @@ import { mediaStillUrl } from '~/shared/media-placement-contract'
 const dashboardApi = useDashboardApi()
 const route = useRoute()
 const router = useRouter()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const orgSlug = route.params.orgSlug as string
 const level = useRouteLevel()
 

@@ -3,22 +3,16 @@ import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { listAgenda, listTodayAgenda, parseAgendaQuery, type AgendaQuery } from '~/server/utils/dashboard-agenda'
 import { getDashboardMemberContext, type DashboardOrganizationRow } from '~/server/utils/dashboard-context'
 import { memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
-import { listOrganizationGuestThreads } from '~/server/domain/guest-threads/repository'
+import { latestUnansweredGuestEntryTimes, listOrganizationGuestThreads } from '~/server/domain/guest-threads/repository'
 import type { GuestThreadListItemViewModel } from '~/server/domain/guest-threads/types'
-import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayFeedPayload } from '~/shared/dashboard-today'
-import { addLocalDays, localDateAt } from '~/utils/timezone'
+import { readRecommendationDecisionInputs, readRecommendationDecisions } from '~/server/domain/business-progress'
+import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayDecision, type TodayFeedPayload } from '~/shared/dashboard-today'
+import type { BusinessGoal, RecommendationFeedback, RecommendationFeedbackView } from '~/shared/business-progress'
+import type { BusinessProgressOperation } from '~/shared/business-outcomes'
+import { formatTimestamp, localDateAt } from '~/utils/timezone'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
-import { articleFacebookPostPath, blogEditorPath, bookingEditorPath, guestConversationPath, insightsPath, postEditorPath, productEditorPath } from '~/server/utils/dashboard-links'
+import { blogEditorPath, bookingEditorPath, guestConversationPath, postEditorPath } from '~/server/utils/dashboard-links'
 import { loadOwnerPictures } from '~/server/notifications/hero'
-import { getAnalyticsReport, resolveOrganizationAnalyticsContext } from '~/server/utils/analytics-report'
-import { localDateBounds } from '~/server/utils/analytics-calendar'
-import { readIntegration } from '~/server/utils/organization-integrations'
-import { linkedAccountAccessToken, type CloudflareEnv } from '~/server/utils/auth'
-import { getGoogleAdsCustomer, getGoogleAdsPerformanceSummary } from '~/server/utils/google-ads'
-import { getBlogPost } from '~/server/utils/content/publishing'
-import { planOffers } from '~/shared/offers'
-import { getOrganizationEntitlements } from '~/server/utils/billing-access'
-import { platformOrigin } from '~/server/utils/dashboard-notification-links'
 
 export interface TodayFeedQuery {
   range: 'today' | 'upcoming'
@@ -42,40 +36,65 @@ export function parseTodayFeedQuery(query: Record<string, unknown>): TodayFeedQu
 
 function card(input: Pick<TodayCard, 'id' | 'to' | 'eyebrow' | 'headline' | 'priority'> & Partial<TodayCard>): TodayCard {
   return { description: null, imageUrl: null, imageFit: 'cover', imageIcon: 'i-lucide-circle-check', badgeImageUrl: null, badgeIcon: null,
-    locationId: null, assignedMemberId: null, bookingKind: null, stayId: null, productId: null, stayChannel: null, occurrenceAt: null, timeZone: null, ...input }
+    locationId: null, assignedMemberId: null, bookingKind: null, stayId: null, productId: null, stayChannel: null, occurrenceAt: null, timeZone: null,
+    actionAt: null, reason: null, decision: null, ...input }
 }
 
-function attentionCard(thread: GuestThreadListItemViewModel, organization: DashboardOrganizationRow): TodayCard {
+/**
+ * A guest who wrote within this long and has had no reply is waiting on the
+ * business now. An older unanswered message is history unless a live booking,
+ * the owner's priority or the owner's own decision makes it current again.
+ */
+const RECENT_GUEST_ENTRY_MS = 7 * 86_400_000
+/** Optional work is offered sparingly and only with a reason; a day with none shows none. */
+const OPTIONAL_LIMIT = 3
+
+/** One piece of work the records support, before the owner's priorities and decisions are applied. */
+interface Work {
+  card: TodayCard
+  /** The canonical operation and subject a decision about this work names; null when it cannot be decided from Today. */
+  subject: { operation: BusinessProgressOperation; subjectId: string } | null
+  /** The recorded fact that makes this work due now; null for optional work. */
+  obligation: string | null
+  /** The recorded fact optional work stands on. */
+  fact: string
+  /** The words the owner's priority is compared with. */
+  text: string
+  recency: string
+}
+
+function threadWork(thread: GuestThreadListItemViewModel, unansweredAt: string | undefined, organization: DashboardOrganizationRow, zone: string, now: Date): Work | null {
+  if (thread.manuallyArchived || thread.mailbox === 'blocked') return null
   if (thread.guestName !== null && (typeof thread.guestName !== 'string' || !thread.guestName.trim())) throw new Error(`Guest name is missing for request ${thread.id}`)
   const conversation = thread.guestName === null
   const bookingKind = thread.submissionType === 'contact' || conversation && thread.operationalStatus === null ? null : thread.submissionType
-  const pending = bookingKind === 'booking' && thread.operationalStatus === 'pending'
-  const cancelled = (bookingKind === 'booking' || bookingKind === 'reservation') && thread.operationalStatus === 'cancelled'
-  const reply = conversation || thread.submissionType === 'contact' || thread.latestMessageFromGuest || cancelled
+  const pending = bookingKind === 'booking' && thread.operationalStatus === 'pending' && thread.mailbox === 'current'
+  if (!pending && !unansweredAt) return null
   const noun = bookingKind === 'stay' ? 'stay' : bookingKind ? resolveBookingPresentation(bookingKind, organization.vertical).noun : null
-  return card({
-    id: `attention:${thread.id}`, priority: 'attention',
-    to: bookingKind !== null && bookingKind !== 'stay' && (pending || !reply) ? bookingEditorPath(organization.slug, bookingKind, thread.id) : guestConversationPath(organization.slug, thread.id),
-    eyebrow: pending ? 'Awaiting your decision' : 'Needs attention',
-    headline: conversation && !cancelled ? `Review conversation: ${thread.participantLabel}` : pending ? `Review ${thread.guestName}’s ${noun}` : reply
-      ? `Reply to ${thread.guestName ?? thread.participantLabel}` : `Review ${thread.guestName}’s ${noun}`,
-    description: [thread.locationLabel, thread.whenLabel, reply ? thread.preview?.text : null].filter(Boolean).join(' · '),
-    imageUrl: thread.imageUrl, imageFit: thread.imageFit, imageIcon: bookingKind ? 'i-lucide-calendar-clock' : 'i-lucide-message-circle',
-    locationId: thread.locationId, productId: thread.productId, stayChannel: thread.stayChannel, assignedMemberId: thread.assignedMemberId, bookingKind,
-    occurrenceAt: thread.occurrenceAt, timeZone: thread.timeZone,
-  })
-}
-
-async function attentionThreads(db: DbClient, organization: DashboardOrganizationRow, principal: ReturnType<typeof memberAccessPrincipal>, input: TodayFeedQuery) {
-  const threads: GuestThreadListItemViewModel[] = []
-  for (let offset = 0; ; offset += 200) {
-    const page = await listOrganizationGuestThreads(db, {
-      organizationId: organization.id, principal, userId: organization.userId, conversationState: 'needs_attention',
-      locationId: input.locationId, assignedMemberId: input.assignedMemberId, limit: 200, offset,
-    })
-    threads.push(...page.filter(thread => !thread.manuallyArchived && (thread.mailbox === 'current' || thread.latestMessageFromGuest || thread.submissionType !== 'stay' && thread.operationalStatus === 'cancelled')
-      && (!input.kinds?.length || thread.submissionType !== 'contact' && input.kinds.includes(thread.submissionType))))
-    if (page.length < 200) return threads
+  // A conversation without a recorded guest identity is described without inventing one.
+  const name = thread.guestName ?? 'The guest'
+  const live = noun !== null && thread.occurrenceAt !== null && thread.mailbox === 'current' && (thread.operationalStatus === 'pending' || thread.operationalStatus === 'confirmed')
+  const waited = unansweredAt ? now.getTime() - Date.parse(unansweredAt) : null
+  const obligation = pending ? `${name} is waiting for you to accept or decline their ${noun}${thread.whenLabel ? ` for ${thread.whenLabel}` : ''}.`
+    : live ? `${name} has an unanswered message about their ${noun}${thread.whenLabel ? ` for ${thread.whenLabel}` : ''}.`
+      : waited !== null && waited <= RECENT_GUEST_ENTRY_MS ? `${name} wrote ${formatTimestamp(unansweredAt!, 'en', zone, { weekday: 'long', hour: 'numeric', minute: '2-digit' })} and has no reply yet.`
+        : null
+  return {
+    card: card({
+      id: `${obligation ? 'attention' : 'reply'}:${thread.id}`, priority: obligation ? 'attention' : 'opportunity',
+      to: pending ? bookingEditorPath(organization.slug, 'booking', thread.id) : guestConversationPath(organization.slug, thread.id),
+      eyebrow: pending ? 'Awaiting your decision' : obligation ? 'Needs attention' : 'Unanswered message',
+      headline: pending ? `Review ${name}’s ${noun}` : conversation && thread.operationalStatus !== 'cancelled' ? `Review conversation: ${thread.participantLabel}` : `Reply to ${thread.guestName ?? thread.participantLabel}`,
+      description: [thread.locationLabel, thread.whenLabel, pending ? null : thread.preview?.text].filter(Boolean).join(' · '),
+      imageUrl: thread.imageUrl, imageFit: thread.imageFit, imageIcon: bookingKind ? 'i-lucide-calendar-clock' : 'i-lucide-message-circle',
+      locationId: thread.locationId, productId: thread.productId, stayChannel: thread.stayChannel, assignedMemberId: thread.assignedMemberId, bookingKind,
+      occurrenceAt: thread.occurrenceAt, timeZone: thread.timeZone,
+    }),
+    subject: pending ? null : { operation: 'guest_thread.reply', subjectId: thread.id },
+    obligation,
+    fact: `${name} has had no reply since ${formatTimestamp(unansweredAt ?? thread.lastActivityAt, 'en', zone, { dateStyle: 'medium' })}.`,
+    text: [thread.guestName, thread.participantLabel, thread.locationLabel, thread.preview?.text].filter(Boolean).join(' '),
+    recency: unansweredAt ?? thread.lastActivityAt,
   }
 }
 
@@ -96,96 +115,88 @@ async function publicationCards(db: DbClient, organization: DashboardOrganizatio
   }))
 }
 
-async function performanceCard(db: DbClient, organization: DashboardOrganizationRow, now: Date): Promise<TodayCard | null> {
-  const context = await resolveOrganizationAnalyticsContext(db, organization.id)
-  const endDate = addLocalDays(localDateAt(now, context.timezone), -1)
-  const startDate = addLocalDays(endDate, -6)
-  // A week that ended before the business's own analytics began has nothing to compare.
-  if (!context.analyticsDataStartAt || localDateBounds(endDate, context.timezone).end <= context.analyticsDataStartAt) return null
-  const report = await getAnalyticsReport(db, { organizationId: organization.id, startDate, endDate, now })
-  if (report.metrics.changePercent === null || report.metrics.changePercent === 0) return null
-  const change = report.metrics.changePercent
-  return card({ id: `performance:${startDate}:${endDate}`, to: insightsPath(organization.slug, { startDate, endDate }), priority: 'opportunity',
-    eyebrow: 'Your last 7 complete days', headline: `${report.metrics.pageViews.toLocaleString('en')} page views`,
-    description: `${Math.abs(change)}% ${change > 0 ? 'more' : 'fewer'} than the previous 7 days. View your website performance.`, imageIcon: 'i-lucide-chart-no-axes-combined' })
+async function threadWorks(db: DbClient, organization: DashboardOrganizationRow, principal: ReturnType<typeof memberAccessPrincipal>, input: TodayFeedQuery, zone: string, now: Date) {
+  const threads: GuestThreadListItemViewModel[] = []
+  for (let offset = 0; ; offset += 200) {
+    const page = await listOrganizationGuestThreads(db, {
+      organizationId: organization.id, principal, userId: organization.userId, conversationState: 'needs_attention',
+      locationId: input.locationId, assignedMemberId: input.assignedMemberId, limit: 200, offset,
+    })
+    threads.push(...page.filter(thread => !input.kinds?.length || thread.submissionType !== 'contact' && input.kinds.includes(thread.submissionType)))
+    if (page.length < 200) break
+  }
+  const unanswered = await latestUnansweredGuestEntryTimes(db, organization.id, threads.map(thread => thread.id))
+  return threads.map(thread => threadWork(thread, unanswered.get(thread.id), organization, zone, now)).filter((work): work is Work => work !== null)
 }
 
-// Airbnb's suggestion card: the first thing the plan lacks, offered to someone who can take it, with the same picture Menu offers it with.
-async function offerCard(env: CloudflareEnv, organization: DashboardOrganizationRow): Promise<TodayCard | null> {
-  const [offer] = planOffers(await getOrganizationEntitlements(env, organization.id))
-  if (!offer || !('plan' in offer.unlock)) return null
-  const plan = offer.unlock.plan
-  return card({ id: `offer:${offer.id}`, to: `/dashboard/${encodeURIComponent(organization.slug)}/${offer.path}`, priority: 'opportunity',
-    eyebrow: `Included with ${plan.charAt(0).toUpperCase() + plan.slice(1)}`, headline: offer.headline, description: offer.line,
-    imageUrl: new URL(offer.illustration, platformOrigin(env)).toString(), imageFit: 'contain', imageIcon: 'i-lucide-sparkles' })
+/** Blog drafts: finished when published, which the next read observes from the article itself. */
+async function draftWorks(db: DbClient, organization: DashboardOrganizationRow, zone: string, locationId?: string): Promise<Work[]> {
+  const rows = await queryAll<{ id: string; title: string | null; summary: string | null; location_id: string | null; updated_at: string }>(db, `
+    SELECT id,title,summary,location_id,updated_at FROM content_documents
+     WHERE organization_id=? AND row_role='root' AND kind='article' AND status='draft' AND (metadata_json ->> '$.collection')='blog'
+       ${locationId ? 'AND location_id=?' : ''} ORDER BY updated_at DESC,id LIMIT 100`, [organization.id, ...(locationId ? [locationId] : [])])
+  const pictures = await loadOwnerPictures(db, organization.id, 'content_document', rows.map(row => row.id))
+  return rows.map(row => ({
+    card: card({ id: `draft:${row.id}`, to: blogEditorPath(organization.slug, row.id), priority: 'opportunity', eyebrow: 'Draft article',
+      headline: row.title ? `Finish and publish “${row.title}”` : 'Finish and publish your draft article', description: row.summary,
+      imageUrl: pictures.get(row.id)?.imageUrl ?? null, imageIcon: 'i-lucide-file-pen-line', locationId: row.location_id }),
+    subject: { operation: 'article.publish', subjectId: row.id },
+    obligation: null,
+    fact: `Saved as a draft, last edited ${formatTimestamp(row.updated_at, 'en', zone, { dateStyle: 'medium' })}.`,
+    text: [row.title, row.summary].filter(Boolean).join(' '),
+    recency: row.updated_at,
+  }))
 }
 
-// What the connected Google Ads account did in the last 7 complete days, in its own currency as Google reports it.
-async function googleAdsCard(db: DbClient, env: CloudflareEnv, organization: DashboardOrganizationRow, now: Date): Promise<TodayCard | null> {
-  const connection = await readIntegration(db, organization.id, 'google_ads')
-  if (!connection) return null
-  const { accessToken } = await linkedAccountAccessToken(env, connection.account_id)
-  // Google reports a day in the account's own time zone, so a complete day is one that has closed there.
-  const customer = await getGoogleAdsCustomer(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, connection.target_id)
-  // A manager account has no results of its own; the business chooses the account it advertises from.
-  if (customer.isManager) {
-    return card({ id: `google-ads-manager:${connection.target_id}`, to: `/dashboard/${encodeURIComponent(organization.slug)}/integrations/google-ads`, priority: 'attention',
-      eyebrow: 'Google Ads', headline: 'Choose the Google Ads account you advertise from',
-      description: `${connection.target_name} is a manager account, which has no campaigns or results of its own. Disconnect it and choose one of the accounts it manages.`, imageIcon: 'i-lucide-megaphone' })
-  }
-  const endDate = addLocalDays(localDateAt(now, customer.timeZone), -1)
-  const startDate = addLocalDays(endDate, -6)
-  const summary = await getGoogleAdsPerformanceSummary(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, connection.target_id, startDate, endDate)
-  if (summary.costMicros === 0) return null
-  const spend = new Intl.NumberFormat('en', { style: 'currency', currency: summary.currencyCode, maximumFractionDigits: 2 }).format(summary.costMicros / 1_000_000)
-  // Conversions can be fractional, as Google attributes them.
-  const conversions = summary.conversions.toLocaleString('en', { maximumFractionDigits: 1 })
-  return card({ id: `google-ads:${startDate}:${endDate}`, to: insightsPath(organization.slug, { startDate, endDate, tab: 'ads' }), priority: 'opportunity',
-    eyebrow: 'Google Ads, your last 7 complete days', headline: summary.conversions === 0 ? `${spend} on ads, no conversions` : `${spend} on ads, ${conversions} ${summary.conversions === 1 ? 'conversion' : 'conversions'}`,
-    description: `${summary.clicks.toLocaleString('en')} ${summary.clicks === 1 ? 'click' : 'clicks'} from ${connection.target_name}. See your campaigns in Insights.`, imageIcon: 'i-lucide-megaphone' })
+const STOP_WORDS = new Set(('the and for with our your you this that these those next last week weeks month today tomorrow more most less get make help '
+  + 'finish keep start about from into have has had will want need all any new who what when where which there their them they are was were been '
+  + 'being can could should would please also just only very than then some out off over its not but how why each every other such our ours us '
+  + 'we me my mine him her his hers one two three day days time now soon still again done do does did').split(' '))
+
+function stem(word: string) {
+  const base = word.replace(/['’]s$/, '')
+  if (base.length > 4 && base.endsWith('ies')) return `${base.slice(0, -3)}y`
+  if (base.length > 4 && /(?:ss|x|ch|sh)es$/.test(base)) return base.slice(0, -2)
+  if (base.length > 5 && base.endsWith('ing')) return base.slice(0, -3)
+  if (base.length > 4 && base.endsWith('ed')) return base.slice(0, -2)
+  if (base.length > 3 && base.endsWith('s') && !base.endsWith('ss')) return base.slice(0, -1)
+  return base.length > 3 && base.endsWith('e') ? base.slice(0, -1) : base
 }
 
-async function contentOpportunities(db: DbClient, organization: DashboardOrganizationRow, env: Parameters<typeof getBlogPost>[3], locationId?: string): Promise<TodayCard[]> {
-  const [draft, missingPhoto, article, facebook] = await Promise.all([
-    queryFirst<{ id: string; kind: string; title: string | null; location_id: string | null }>(db, `SELECT id,kind,title,location_id FROM content_documents
-      WHERE organization_id=? AND row_role='root' AND status='draft' AND (kind='social_post' OR (kind='article' AND (metadata_json ->> '$.collection')='blog'))
-      ${locationId ? 'AND location_id=?' : ''} ORDER BY updated_at DESC,id LIMIT 1`, [organization.id, ...(locationId ? [locationId] : [])]),
-    queryFirst<{ id: string; name: string }>(db, `SELECT p.id,p.name FROM products p JOIN product_publications pub ON pub.product_id=p.id AND pub.organization_id=p.organization_id
-      WHERE p.organization_id=? AND p.active=1 AND pub.published=1 AND p.kind <> 'service'
-      ${locationId ? 'AND EXISTS (SELECT 1 FROM product_locations pl WHERE pl.product_id=p.id AND pl.organization_id=p.organization_id AND pl.location_id=? AND pl.published=1)' : ''}
-      AND NOT EXISTS (SELECT 1 FROM media_placements mp JOIN media_assets ma ON ma.id=mp.asset_id AND ma.status='active' WHERE mp.owner_type='product' AND mp.owner_id=p.id AND mp.organization_id=p.organization_id AND mp.status='active' AND mp.slot IN ('image','gallery') AND ma.kind='image')
-      ORDER BY p.name,p.id LIMIT 1`, [organization.id, ...(locationId ? [locationId] : [])]),
-    locationId || !organization.public_url ? Promise.resolve(null) : queryFirst<{ id: string; title: string }>(db, `SELECT id,title FROM content_documents WHERE organization_id=? AND kind='article' AND row_role='root' AND status='published' AND (metadata_json ->> '$.collection')='blog' ORDER BY published_at DESC,id LIMIT 1`, [organization.id]),
-    readIntegration(db, organization.id, 'facebook'),
-  ])
-  const cards: TodayCard[] = []
-  if (draft) {
-    const picture = await loadOwnerPictures(db, organization.id, 'content_document', [draft.id])
-    cards.push(card({ id: `draft:${draft.id}`, to: draft.kind === 'article' ? blogEditorPath(organization.slug, draft.id) : postEditorPath(organization.slug, draft.id), priority: 'opportunity',
-      eyebrow: 'Continue your draft', headline: draft.title ? `Finish “${draft.title}”` : 'Finish your draft post',
-      description: draft.kind === 'article' ? 'Your blog article is saved as a draft.' : 'Your post is saved as a draft.', imageUrl: picture.get(draft.id)?.imageUrl ?? null, imageIcon: 'i-lucide-file-pen-line', locationId: draft.location_id }))
+function terms(text: string) {
+  return new Set((text.toLowerCase().match(/[\p{L}\p{N}'’]+/gu) ?? []).filter(word => !STOP_WORDS.has(word)).map(stem).filter(word => word.length > 2 && !STOP_WORDS.has(word)))
+}
+
+/** The active priority whose own words this work shares most, if any. */
+function priorityFor(goals: BusinessGoal[], text: string) {
+  const words = terms(text)
+  let best: { goal: BusinessGoal; score: number } | null = null
+  for (const goal of goals) {
+    const score = [...terms(`${goal.intent} ${goal.constraints ?? ''}`)].filter(word => words.has(word)).length
+    if (score > 0 && (!best || score > best.score)) best = { goal, score }
   }
-  if (missingPhoto) cards.push(card({ id: `photo:${missingPhoto.id}`, to: `${productEditorPath(organization.slug, missingPhoto.id)}/photo${locationId ? `?location_id=${encodeURIComponent(locationId)}` : ''}`,
-    priority: 'opportunity', eyebrow: 'Missing a photo', headline: `Add a photo of ${missingPhoto.name}`, description: 'This published item has no photo.', imageIcon: 'i-lucide-image-plus', locationId: locationId ?? null, productId: missingPhoto.id }))
-  if (article && facebook?.status === 'active' && organization.public_url) {
-    const source = await getBlogPost(db, article.id, organization.id, env)
-    if (typeof source.public_path !== 'string') throw new Error('Published article has no public path')
-    const url = new URL(source.public_path, organization.public_url).toString()
-    const shared = await queryFirst<{ id: string }>(db, `SELECT id FROM content_documents WHERE organization_id=? AND kind='social_post' AND row_role='root' AND (metadata_json ->> '$.call_to_action.url')=? LIMIT 1`, [organization.id, url])
-    if (!shared) {
-      const picture = await loadOwnerPictures(db, organization.id, 'content_document', [article.id])
-      cards.push(card({ id: `share:${article.id}`, to: articleFacebookPostPath(organization.slug, article.id), priority: 'opportunity', eyebrow: 'Share your article',
-        headline: `Share “${article.title}” on Facebook`, description: `Your published article has no saved post linking to it. Prepare a draft for ${facebook.target_name}.`,
-        imageUrl: picture.get(article.id)?.imageUrl ?? null, imageIcon: 'i-lucide-share-2' }))
-    }
-  }
-  return cards
+  return best
+}
+
+const DECIDED: Record<RecommendationFeedback['decision'], string> = { accept: 'chose to do', dismiss: 'dismissed', defer: 'set aside', correct: 'corrected' }
+
+function resurfacedBecause(feedback: RecommendationFeedbackView, subject: Work['subject'], zone: string) {
+  const when = formatTimestamp(feedback.revision, 'en', zone, { dateStyle: 'medium' })
+  const reasons = feedback.applicability.reasons
+  return [
+    reasons.includes('defer_elapsed') ? `You set this aside until ${formatTimestamp(feedback.deferUntil!, 'en', zone, { dateStyle: 'medium', timeStyle: 'short' })}.` : null,
+    reasons.includes('evidence_changed') ? `${subject?.operation === 'guest_thread.reply' ? 'There is new activity in this conversation' : 'This draft changed'} since you ${DECIDED[feedback.decision]} it on ${when}.` : null,
+    reasons.includes('goal_changed') || reasons.includes('goal_archived') ? `The priority you ${DECIDED[feedback.decision]} this under has changed.` : null,
+  ].filter(Boolean).join(' ')
 }
 
 export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, now = new Date()): Promise<TodayFeedPayload> {
   const { db, env, organization } = await getDashboardMemberContext(event, {})
   const principal = memberAccessPrincipal(organization, { env, event })
   const organizationWide = await roleAllows({ ...organization, permissions: { operations: ['read'] } })
+  // Priorities and decisions belong to people who can direct the whole business.
+  const canDecide = organizationWide && await roleAllows({ ...organization, permissions: { organization: ['update'] } })
+  const ownerScope = organizationWide && !input.assignedMemberId && !input.kinds?.length
   const resolvedAt = now.toISOString()
   const query: AgendaQuery = { from: input.from!, to: input.to!, kinds: input.kinds ?? ['reservation','booking','stay'], locationId: input.locationId,
     assignedMemberId: input.assignedMemberId, organizationSlug: organization.slug, principal: { env, membership: organization } }
@@ -193,6 +204,9 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
     ? await listTodayAgenda(db, { organizationId: organization.id }, { organizationSlug: organization.slug, principal: query.principal }, now)
     : await listAgenda(db, { organizationId: organization.id }, query)
   if (input.locationId && !agenda.locations.some(location => location.id === input.locationId)) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
+  const zone = (await queryFirst<{ timezone: string }>(db, 'SELECT timezone FROM organization WHERE id = ?', [organization.id]))?.timezone
+  if (!zone) throw new Error(`Organization ${organization.id} has no timezone`)
+  const today = localDateAt(now, zone)
   const schedule = agenda.items.filter(item => (!input.locationId || item.locationId === input.locationId)
     && (!input.assignedMemberId || item.assignedMemberId === input.assignedMemberId)
     && (!input.kinds?.length || item.kind !== 'post' && input.kinds.includes(item.kind))
@@ -200,24 +214,69 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
   const scheduleCards = schedule.map(item => agendaToTodayCard(item, { resolvedAt, vertical: organization.vertical, assigned: !organizationWide }))
   const availableKinds = agenda.availableKinds.filter((kind): kind is 'reservation' | 'booking' | 'stay' => kind === 'reservation' || kind === 'booking' || kind === 'stay')
   const locations = agenda.locations
-  if (input.range === 'upcoming') {
-    return todayFeedSchema.parse({ cards: scheduleCards.sort((a,b) => (a.occurrenceAt ?? '').localeCompare(b.occurrenceAt ?? '') || a.id.localeCompare(b.id)), availableKinds, locations, resolvedAt })
-  }
 
-  const ownerScope = organizationWide && !input.assignedMemberId && !input.kinds?.length
-  const [threads, failures, performance, ads, opportunities, offer] = await Promise.all([
-    organization.vertical !== 'lodging' || organizationWide ? attentionThreads(db, organization, principal, input) : [],
-    ownerScope && await roleAllows({ ...organization, permissions: { content: ['publish'] } }) ? publicationCards(db, organization, input.locationId) : [],
-    ownerScope && !input.locationId && await roleAllows({ ...organization, permissions: { analytics: ['read'] } }) ? performanceCard(db, organization, now) : null,
-    ownerScope && !input.locationId && await roleAllows({ ...organization, permissions: { analytics: ['read'] } }) ? googleAdsCard(db, env, organization, now) : null,
-    ownerScope && await roleAllows({ ...organization, permissions: { content: ['update'] } }) ? contentOpportunities(db, organization, env, input.locationId) : [],
-    ownerScope && !input.locationId && await roleAllows({ ...organization, permissions: { billing: ['update'] } }) ? offerCard(env, organization) : null,
+  const [threads, drafts, failures, inputs] = await Promise.all([
+    (input.range === 'today' || canDecide) && (organization.vertical !== 'lodging' || organizationWide) ? threadWorks(db, organization, principal, input, zone, now) : [],
+    ownerScope && canDecide && await roleAllows({ ...organization, permissions: { content: ['update'] } }) ? draftWorks(db, organization, zone, input.locationId) : [],
+    input.range === 'today' && ownerScope && await roleAllows({ ...organization, permissions: { content: ['publish'] } }) ? publicationCards(db, organization, input.locationId) : [],
+    canDecide ? readRecommendationDecisionInputs(db, principal) : null,
   ])
-  const attention = threads.map(thread => attentionCard(thread, organization))
-  const handledRequests = new Set(threads.map(thread => thread.id))
-  const publicationIds = new Set(failures.map(item => item.id.slice('publication:'.length)))
-  // Two things to do, then the one offer: it never crowds out the day's own work.
-  const selectedOpportunities = [...[...(performance ? [performance] : []), ...(ads ? [ads] : []), ...opportunities.filter(item => !publicationIds.has(item.id.slice(item.id.indexOf(':') + 1)))].slice(0, 2), ...(offer ? [offer] : [])]
-  const cards = [...attention, ...failures, ...scheduleCards.filter(item => !handledRequests.has(item.id.slice(item.id.indexOf(':') + 1))), ...selectedOpportunities]
-  return todayFeedSchema.parse({ cards, availableKinds, locations, resolvedAt })
+  const goals = inputs?.goals.filter(goal => goal.status === 'active') ?? []
+  const works = [...threads, ...drafts].map(work => ({ ...work, match: priorityFor(goals, work.text) }))
+  // Evidence is read only for work that could be shown: due work, work the
+  // owner's priority names, and work the owner has already decided about.
+  // Upcoming shows only work the owner planned for a later day.
+  const considered = (work: typeof works[number]) => Boolean(inputs && work.subject
+    && (inputs.decided(work.subject).length || input.range === 'today' && (work.obligation || work.match)))
+  const decisions = inputs && await readRecommendationDecisions(db, principal, inputs, works.filter(considered).map(work => work.subject!), now)
+
+  const due: TodayCard[] = [], planned: TodayCard[] = [], optional: Array<{ card: TodayCard; rank: number[] }> = []
+  for (const work of works) {
+    const entry = work.subject && decisions ? decisions.get(work.subject) : null
+    // A subject whose evidence can no longer be read is not work anyone can decide about now.
+    if (considered(work) && !entry) continue
+    const feedback = entry?.feedback ?? null
+    const current = feedback?.applicability.current ? feedback : null
+    if (current && (current.decision === 'dismiss' || current.decision === 'correct')) continue
+    const goal = work.match?.goal ?? null
+    const decision: TodayDecision | null = entry && work.subject ? {
+      operation: work.subject.operation, subjectId: work.subject.subjectId, evidenceRevision: entry.reference.evidenceRevision,
+      goalId: goal?.id ?? null, goalRevision: goal?.revision ?? null,
+      revision: entry.saved.find(saved => saved.evidenceRevision === entry.reference.evidenceRevision && saved.goalId === (goal?.id ?? null) && saved.goalRevision === (goal?.revision ?? null))?.revision ?? null,
+      current: current && { decision: current.decision, note: current.note, deferUntil: current.deferUntil },
+    } : null
+    const reason = [
+      feedback && !current ? resurfacedBecause(feedback, work.subject, zone) : null,
+      current?.decision === 'accept' ? 'You chose to do this.' : null,
+      current?.decision === 'defer' ? `You set this aside until ${formatTimestamp(current.deferUntil!, 'en', zone, { dateStyle: 'medium', timeStyle: 'short' })}.` : null,
+      work.obligation ?? work.fact,
+      goal ? `It supports your priority “${goal.intent}”${goal.targetAt ? `, due ${formatTimestamp(goal.targetAt, 'en', zone, { dateStyle: 'medium' })}` : ''}.` : null,
+      feedback?.note ? `Your note: “${feedback.note}”` : null,
+    ].filter(Boolean).join(' ')
+    const shown = { ...work.card, reason, decision }
+    if (current?.decision === 'defer') {
+      const day = localDateAt(new Date(current.deferUntil!), zone)
+      const inWindow = input.range === 'today' ? day <= today : day > today && day >= input.from! && day <= input.to!
+      if (inWindow) planned.push({ ...shown, actionAt: current.deferUntil, eyebrow: `${day === today ? 'Later today' : 'Planned for'} ${formatTimestamp(current.deferUntil!, 'en', zone, day === today ? { hour: 'numeric', minute: '2-digit' } : { weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` })
+      continue
+    }
+    if (input.range !== 'today') continue
+    if (work.obligation) { due.push(shown); continue }
+    const elapsed = feedback?.applicability.reasons.includes('defer_elapsed') ?? false
+    if (!ownerScope || !(current?.decision === 'accept' || goal || elapsed)) continue
+    optional.push({ card: shown, rank: [current?.decision === 'accept' ? 1 : 0, elapsed ? 1 : 0, work.match?.score ?? 0, Date.parse(work.recency)] })
+  }
+  const priorities = inputs ? goals.map(goal => ({ id: goal.id, intent: goal.intent, constraints: goal.constraints, targetAt: goal.targetAt, revision: goal.revision })) : null
+  if (input.range === 'upcoming') {
+    const when = (item: TodayCard) => item.actionAt ?? item.occurrenceAt ?? ''
+    return todayFeedSchema.parse({ cards: [...scheduleCards, ...planned].sort((a, b) => when(a).localeCompare(when(b)) || a.id.localeCompare(b.id)), availableKinds, locations, resolvedAt, priorities })
+  }
+  const handledRequests = new Set(due.map(item => item.id.slice(item.id.indexOf(':') + 1)))
+  const byRank = (a: typeof optional[number], b: typeof optional[number]) => {
+    const index = a.rank.findIndex((value, position) => value !== b.rank[position])
+    return index === -1 ? a.card.id.localeCompare(b.card.id) : b.rank[index]! - a.rank[index]!
+  }
+  const chosen = optional.sort(byRank).slice(0, OPTIONAL_LIMIT).map(item => item.card)
+  const cards = [...due, ...failures, ...scheduleCards.filter(item => !handledRequests.has(item.id.slice(item.id.indexOf(':') + 1))), ...planned.sort((a, b) => a.actionAt!.localeCompare(b.actionAt!)), ...chosen]
+  return todayFeedSchema.parse({ cards, availableKinds, locations, resolvedAt, priorities })
 }

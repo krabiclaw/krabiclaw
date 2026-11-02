@@ -1,8 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { openTenantPage, waitForNuxtHydration } from '../e2e/helpers'
 import { testBaseUrl } from '../e2e/test-env'
-import { loginAs } from '../e2e/helpers/auth'
-import { mcpData, mcpRequest } from '../e2e/helpers/mcp'
 import { environmentTenantAliasHostname } from '../../server/utils/tenant-hosts'
 import { blawbyBaseURL, blawbyExtraHeaders, potteryHouseBaseURL, potteryHouseExtraHeaders } from './real-tenants'
 
@@ -447,25 +445,15 @@ test.describe('NCLS representative journeys', () => {
     expect(shell.locations.length).toBeGreaterThan(0)
     const office = shell.locations[0]!
     const officePath = `/locations/${office.slug}`
-    const pageview = page.waitForResponse(response => new URL(response.url()).pathname === '/api/analytics/track'
-      && response.request().postDataJSON()?.eventType === 'pageview'
-      && response.request().postDataJSON()?.pagePath === officePath)
+    // An automated browser is not a visitor: the deployed site renders the office
+    // page for it and records no pageview in the business's analytics.
+    const tracked: string[] = []
+    page.on('request', (outgoing) => { if (new URL(outgoing.url()).pathname === '/api/analytics/track') tracked.push(outgoing.url()) })
     const response = await openTenantPage(page, `${blawbyBaseURL}${officePath}`, blawbyExtraHeaders)
     expect(response?.status()).toBe(200)
     await expect(page.locator('main')).toContainText(office.title)
-    const tracked = await pageview
-    expect(tracked.status(), await tracked.text()).toBe(200)
-    expect(await tracked.json()).toMatchObject({ ok: true })
-    await loginAs(request, testBaseUrl())
-    const analytics = await mcpRequest(request, testBaseUrl(), { method: 'tools/call', toolName: 'query_organization_analytics', args: {
-      organization_id: 'org-ncls-blawby', mode: 'events',
-      sort: 'occurred_at_desc', limit: 200, filters: { kind: 'pageview', page_path: officePath, location_id: office.id },
-    } })
-    expect(analytics.status()).toBe(200)
-    const recorded = mcpData<{ rows: Array<{ event_id: string; kind: string; location_id: string; page: { path: string } }> }>(await analytics.json())
-    expect(recorded.rows).toContainEqual(expect.objectContaining({
-      event_id: tracked.request().postDataJSON().eventId, kind: 'pageview', location_id: office.id,
-      page: expect.objectContaining({ path: officePath }),
-    }))
+    await waitForNuxtHydration(page)
+    await page.waitForLoadState('networkidle')
+    expect(tracked).toEqual([])
   })
 })

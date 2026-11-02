@@ -72,7 +72,7 @@ const recordPath = computed(() => `${qaPath.value}/${qaId.value}`)
 const sectionUrl = (section: SectionKey) => router.resolve({ path: `${recordPath.value}/${section}`, query: route.query }).fullPath
 const level = useRouteLevel()
 
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const isNew = computed(() => qaId.value === 'new')
 const qaEndpoint = computed(() => locationScope.value
   ? `/api/editor/organizations/${organizationId}/locations/${locationScope.value}/qa`

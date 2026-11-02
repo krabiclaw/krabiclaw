@@ -63,6 +63,7 @@ export async function getNotificationAccess(event: H3Event) {
   return {
     ...context,
     organization,
+    platformAdmin,
     ...filter,
   }
 }

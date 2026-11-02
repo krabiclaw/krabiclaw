@@ -17,6 +17,8 @@ import {
   type BookingStatus,
   type ProductSessionStatus,
 } from '~/shared/bookings'
+import { formQuestionsRevision, parseStoredFormQuestions, type FormQuestion } from '~/shared/form-questions'
+import { prepareFormQuestionsWrite } from '~/server/domain/form-questions'
 import { addLocalDays, assertCalendarDate, isValidTimezone, localDateAt, localDateTimeToInstant, localNow, MINUTE_TIME_PATTERN, unresolvableLocalTime } from '~/utils/timezone'
 
 /**
@@ -58,6 +60,9 @@ export interface ProductBookingConfigRecord {
   scheduling_mode: 'legacy' | 'provider'
   assigned_member_id: string | null
   assigned_team_id: string | null
+  /** The tenant's own questions asked with each booking, and the revision a form built from them carries. */
+  questions: FormQuestion[]
+  questions_revision: string
 }
 
 export interface ProductAvailabilityRule {
@@ -108,16 +113,17 @@ export async function requireBookingConfig(
   organizationId: string,
   productId: string,
 ): Promise<ProductBookingConfigRecord> {
-  const row = await queryFirst<Omit<ProductBookingConfigRecord, 'online_payment_required' | 'held_online'> & { online_payment_required: number; held_online: number; product_kind: string }>(db, `
-    SELECT c.product_id, c.organization_id, c.duration_minutes, c.default_capacity, c.confirmation_mode, c.online_payment_required, c.held_online, c.scheduling_mode, c.assigned_member_id, c.assigned_team_id, p.kind product_kind
+  const row = await queryFirst<Omit<ProductBookingConfigRecord, 'online_payment_required' | 'held_online' | 'questions' | 'questions_revision'> & { online_payment_required: number; held_online: number; product_kind: string; questions: string }>(db, `
+    SELECT c.product_id, c.organization_id, c.duration_minutes, c.default_capacity, c.confirmation_mode, c.online_payment_required, c.held_online, c.scheduling_mode, c.assigned_member_id, c.assigned_team_id, c.questions, p.kind product_kind
     FROM product_booking_configs c JOIN products p ON p.id=c.product_id AND p.organization_id=c.organization_id WHERE c.organization_id = ? AND c.product_id = ?
   `, [organizationId, productId])
   // The absence of a config row means the product does not take bookings. It
   // is not a product with unknown booking settings.
   if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'This product does not take bookings' })
-  const { product_kind: kind, ...config } = row
+  const { product_kind: kind, questions: storedQuestions, ...config } = row
   requireConsultationAttorney(kind, config)
-  return { ...config, online_payment_required: config.online_payment_required === 1, held_online: config.held_online === 1 }
+  const questions = parseStoredFormQuestions(storedQuestions)
+  return { ...config, online_payment_required: config.online_payment_required === 1, held_online: config.held_online === 1, questions, questions_revision: formQuestionsRevision(questions) }
 }
 
 /** Shared capability writer: omissions retain saved defaults; null clears and capacity zero closes seats. */
@@ -125,7 +131,7 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   organizationId: string; productId: string; actorId: string; env?: import('~/server/utils/auth').CloudflareEnv
   productInSameBatch?: boolean
   productKind?: string
-  patch: { duration_minutes?: unknown; default_capacity?: unknown; confirmation_mode?: unknown; online_payment_required?: unknown; held_online?: unknown; scheduling_mode?: unknown; assigned_member_id?: unknown; assigned_team_id?: unknown }
+  patch: { duration_minutes?: unknown; default_capacity?: unknown; confirmation_mode?: unknown; online_payment_required?: unknown; held_online?: unknown; scheduling_mode?: unknown; assigned_member_id?: unknown; assigned_team_id?: unknown; questions?: unknown; expected_questions_revision?: unknown }
 }): Promise<{ query: BatchQuery; config: ProductBookingConfigRecord }> {
   const product = input.productInSameBatch ? null : await requireOrganizationProduct(db, input)
   if (input.productInSameBatch && !['experience', 'service'].includes(input.productKind ?? '')) badRequest('The scheduled product kind is required before preparing booking setup')
@@ -133,7 +139,8 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   const patch = input.patch
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) badRequest('Invalid request body')
   const fields = ['duration_minutes', 'default_capacity', 'confirmation_mode', 'online_payment_required', 'held_online', 'scheduling_mode', 'assigned_member_id', 'assigned_team_id'] as const
-  if (Object.keys(patch).some(key => !fields.includes(key as typeof fields[number]))) badRequest('Unknown booking configuration field')
+  if (Object.keys(patch).some(key => !fields.includes(key as typeof fields[number]) && key !== 'questions' && key !== 'expected_questions_revision')) badRequest('Unknown booking configuration field')
+  if (patch.expected_questions_revision !== undefined && patch.questions === undefined) badRequest('expected_questions_revision is only sent with questions')
   for (const field of ['duration_minutes', 'default_capacity'] as const) {
     const value = patch[field]
     if (value !== undefined && value !== null && (!Number.isSafeInteger(value) || (value as number) < 0)) badRequest(`${field} must be a non-negative integer or null`)
@@ -148,7 +155,9 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
     await requireStripeCheckoutAcceptance(db, input.env, input.organizationId)
   }
   if (patch.held_online !== undefined && typeof patch.held_online !== 'boolean') badRequest('held_online must be boolean')
-  const current = await queryFirst<Omit<ProductBookingConfigRecord, 'online_payment_required' | 'held_online'> & { online_payment_required: number; held_online: number; updated_at: string }>(db, 'SELECT product_id,organization_id,duration_minutes,default_capacity,confirmation_mode,online_payment_required,held_online,scheduling_mode,assigned_member_id,assigned_team_id,updated_at FROM product_booking_configs WHERE organization_id = ? AND product_id = ?', [input.organizationId, input.productId])
+  const current = await queryFirst<Omit<ProductBookingConfigRecord, 'online_payment_required' | 'held_online' | 'questions' | 'questions_revision'> & { online_payment_required: number; held_online: number; updated_at: string; questions: string }>(db, 'SELECT product_id,organization_id,duration_minutes,default_capacity,confirmation_mode,online_payment_required,held_online,scheduling_mode,assigned_member_id,assigned_team_id,questions,updated_at FROM product_booking_configs WHERE organization_id = ? AND product_id = ?', [input.organizationId, input.productId])
+  const currentQuestions = current ? parseStoredFormQuestions(current.questions) : []
+  const questions = patch.questions === undefined ? currentQuestions : prepareFormQuestionsWrite(currentQuestions, { questions: patch.questions, expectedRevision: patch.expected_questions_revision })
   const heldOnline = patch.held_online === undefined ? current?.held_online === 1 : patch.held_online === true
   if (patch.scheduling_mode !== undefined && !['legacy', 'provider'].includes(String(patch.scheduling_mode))) badRequest('Invalid scheduling mode')
   const target = await assertResponsibilityTarget(db, input.organizationId, patch, current)
@@ -183,19 +192,20 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
     online_payment_required: patch.online_payment_required === undefined ? current?.online_payment_required === 1 : patch.online_payment_required === true,
     held_online: heldOnline,
     scheduling_mode: mode, assigned_member_id: assignedMember, assigned_team_id: assignedTeam,
+    questions, questions_revision: formQuestionsRevision(questions),
   }
   if (config.duration_minutes === null && product?.kind === 'experience' && !product.order_url && product.publications.some(publication => publication.published)) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Keep a session duration for a published experience. Withhold the experience before clearing its booking setup.' })
   }
   const unchanged: BatchQuery = current
-    ? { query: `EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.product_id=? AND c.organization_id=? AND c.updated_at=? AND ${fields.map(field => `c.${field} IS ?`).join(' AND ')})`, params: [input.productId, input.organizationId, current.updated_at, ...fields.map(field => current[field])] }
+    ? { query: `EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.product_id=? AND c.organization_id=? AND c.updated_at=? AND c.questions IS ? AND ${fields.map(field => `c.${field} IS ?`).join(' AND ')})`, params: [input.productId, input.organizationId, current.updated_at, current.questions, ...fields.map(field => current[field])] }
     : { query: 'NOT EXISTS (SELECT 1 FROM product_booking_configs WHERE product_id=?)', params: [input.productId] }
   // A rejected configuration must abort the entire native D1 batch, including
   // its sessions and publication. An INSERT ... SELECT that selects no row
   // would instead let those other writes commit.
   return { config, query: {
-    query: `INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, assigned_team_id, created_at, updated_at, created_by, updated_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN (${unchanged.query})
+    query: `INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, assigned_team_id, questions, created_at, updated_at, created_by, updated_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN (${unchanged.query})
         AND (? IS NOT NULL OR NOT EXISTS (SELECT 1 FROM products p JOIN product_publications pub ON pub.product_id=p.id AND pub.organization_id=p.organization_id WHERE p.id=? AND p.organization_id=? AND p.kind='experience' AND NULLIF(p.order_url,'') IS NULL AND pub.published=1))
         AND (? IS NULL OR EXISTS (SELECT 1 FROM team t WHERE t.id=? AND t.organizationId=? AND (?<>'provider' OR EXISTS (
           SELECT 1 FROM teamMember tm JOIN member m ON m.userId=tm.userId AND m.organizationId=t.organizationId
@@ -206,10 +216,10 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
           AND NOT EXISTS (SELECT 1 FROM payment_checkout_holds h WHERE h.organization_id=? AND h.product_id=? AND h.assigned_member_id IS NULL AND h.status='active' AND h.expires_at>?)
         )) THEN ? ELSE NULL END, ?, ?)
       ON CONFLICT (product_id) DO UPDATE SET
-        ${fields.map(field => `${field}=excluded.${field}`).join(', ')},
+        ${fields.map(field => `${field}=excluded.${field}`).join(', ')}, questions=excluded.questions,
         updated_at=excluded.updated_at, updated_by=excluded.updated_by`,
     params: [input.productId, input.organizationId, config.duration_minutes, config.default_capacity,
-      config.confirmation_mode, config.online_payment_required ? 1 : 0, config.held_online ? 1 : 0, config.scheduling_mode, config.assigned_member_id, config.assigned_team_id, now,
+      config.confirmation_mode, config.online_payment_required ? 1 : 0, config.held_online ? 1 : 0, config.scheduling_mode, config.assigned_member_id, config.assigned_team_id, JSON.stringify(questions), now,
       ...unchanged.params!, config.duration_minutes, input.productId, input.organizationId, config.assigned_team_id, config.assigned_team_id, input.organizationId, config.scheduling_mode, config.scheduling_mode, config.assigned_member_id, config.assigned_member_id, input.organizationId, config.scheduling_mode, input.organizationId, input.productId, now, input.organizationId, input.productId, now,
       now, input.actorId, input.actorId],
   } }
@@ -221,7 +231,19 @@ export function bookingConfigurationWriteError(error: unknown): unknown {
 }
 
 export async function setProductBookingConfig(db: DbClient, input: Omit<Parameters<typeof prepareProductBookingConfig>[1], 'productInSameBatch'>): Promise<ProductBookingConfigRecord> {
+  const named = Object.entries(input.patch).filter(([, value]) => value !== undefined).map(([key]) => key)
+  const questionsOnly = named.length > 0 && named.every(key => key === 'questions' || key === 'expected_questions_revision')
+  // Questions belong to an existing booking setup; they never create one.
+  if (questionsOnly && !await queryFirst(db, 'SELECT 1 FROM product_booking_configs WHERE organization_id = ? AND product_id = ?', [input.organizationId, input.productId])) {
+    throw new HTTPError({ statusCode: 404, statusMessage: 'This product does not take bookings. Set up its booking before adding questions.', data: { code: 'BOOKING_CONFIG_NOT_FOUND', field: 'product_id' } })
+  }
   const { query, config } = await prepareProductBookingConfig(db, input)
+  // Questions are not scheduling: a question-only edit writes the questions and
+  // leaves every session, rule and provider-hours occurrence where it was.
+  if (questionsOnly) {
+    await executeBatch(db, [query, publicResourceCacheInvalidationQuery(input.organizationId, 'product-booking-questions')], { operation: 'Set product booking questions' }).catch(error => { throw bookingConfigurationWriteError(error) })
+    return requireBookingConfig(db, input.organizationId, input.productId)
+  }
   const rules = await listAvailabilityRules(db, input.organizationId, input.productId)
   const locations = await queryAll<SessionLocation>(db, 'SELECT id,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id IN (SELECT value FROM json_each(?))', [input.organizationId, JSON.stringify([...new Set(rules.map(rule => rule.location_id))])])
   const throughDate = rules.map(rule => addLocalDays(localNow(rule.timezone).date, PUBLIC_BOOKING_WINDOW_DAYS)).sort().at(-1)

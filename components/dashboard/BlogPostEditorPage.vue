@@ -47,7 +47,7 @@ import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 // own panel and navbar because it is the outermost level on screen.
 const route = useRoute()
 const orgSlug = route.params.orgSlug as string
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const postId = String(route.params.postId || '')
 if (!postId) throw createError({ statusCode: 400, statusMessage: 'Post ID is required' })
 

@@ -885,6 +885,12 @@ onMounted(() => {
     ? { product_id: props.product.id, name: props.product.name, currency: offer.value.currency, price: ga4Major(offer.value.unit_amount, offer.value.currency) }
     : null)
   if (props.booking && canBook.value) void loadSessions()
+  // A page that places this offering's booking (?book=1) arrives with its booking open.
+  if (useRoute().query.book === '1' && canBook.value && !enquiryOnly.value && !canOrderExternally.value) {
+    if (isStay.value) stayBooking.bookingOpen.value = true
+    else bookingOpen.value = true
+    openBooking()
+  }
 })
 
 /** What guests say, in one number: the mean rating to one decimal, or none. */

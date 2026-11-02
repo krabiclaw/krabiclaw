@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { HTTPError } from 'nitro'
 import { z } from 'zod'
+import { formatFormAnswer, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { formatCalendarDate, formatTime, formatTimestamp, localPartsAt } from '~/utils/timezone'
 import { getGuestRequest, requestSummary, type cancelBookingRequest } from '~/server/domain/requests'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
@@ -14,6 +15,7 @@ import { assignedResponsibilitySql, listOrganizationNotificationMembers } from '
 import { wantsNotification } from '~/server/domain/notification-preferences'
 import { listUserDevices, retireDevice, type UserDevice } from '~/server/domain/devices'
 import { sendApnsAlert, type ApnsAlert, type ApnsEnv } from '~/server/utils/apns'
+import { unreadBadge } from '~/server/domain/unread'
 import { sendWebPush, type WebPushEnv } from '~/server/utils/web-push'
 import { isRecord } from '~/server/utils/type-guards'
 import { buildUnsubscribeUrls } from '~/server/utils/unsubscribe'
@@ -127,8 +129,11 @@ interface ContactNotificationInput extends OrganizationContext {
   contactId: string
   guestName: string
   email: string
+  phone?: string | null
   subject?: string | null
   message: string
+  /** Answers to the organization's inquiry questions, as the guest read them. */
+  answers?: FormAnswerSnapshot[]
   consentAcknowledged?: boolean
   /** The site's vertical decides what the subject the guest chose is called. */
   vertical: string
@@ -490,17 +495,18 @@ async function sendWhatsAppThreadNotification(
  * built only for a browser and inside its send, so a link that cannot be built
  * is that browser's recorded failure and never stops a phone's alert.
  */
-type PushAlert = ApnsAlert & { url: () => Promise<string> }
+type PushAlert = Omit<ApnsAlert, 'badge'> & { url: () => Promise<string> }
 
 type PushDispatch =
   | { status: 'sent'; providerMessageId: string | null }
   | { status: 'failed'; error: string; deviceGone: boolean }
 
 /** The device's own push service: Apple for the app, the browser's push service for a subscription. */
-async function dispatchPush(env: NotificationEnv, device: UserDevice, alert: PushAlert): Promise<PushDispatch> {
+async function dispatchPush(env: NotificationEnv, db: DbClient, userId: string, device: UserDevice, alert: PushAlert): Promise<PushDispatch> {
   if (device.kind === 'apns') {
     const apnsId = crypto.randomUUID()
-    const result = await sendApnsAlert(env, { deviceToken: device.token, environment: device.environment, apnsId, alert })
+    // Read when it is sent, after the notification it announces was recorded, so the icon counts it.
+    const result = await sendApnsAlert(env, { deviceToken: device.token, environment: device.environment, apnsId, alert: { ...alert, badge: await unreadBadge(env, db, userId) } })
     return result.status === 'sent' ? { status: 'sent', providerMessageId: apnsId } : { status: 'failed', error: result.error, deviceGone: result.tokenRetired }
   }
   const result = await sendWebPush(env, {
@@ -538,7 +544,7 @@ async function sendPushThreadNotification(
   }
   let result: PushDispatch
   try {
-    result = await dispatchPush(env, opts.device, opts.alert)
+    result = await dispatchPush(env, db, opts.userId, opts.device, opts.alert)
   } catch (error) {
     const code = HTTPError.isError(error) && isRecord(error.data) && typeof error.data.code === 'string' ? `${error.data.code}: ` : ''
     await record({ status: 'failed', error: `${code}${error instanceof Error ? error.message : String(error)}` })
@@ -626,12 +632,13 @@ async function getOpeningThreadContext(
   db: DbClient,
   submissionType: 'contact' | 'reservation' | 'booking' | 'stay',
   submissionId: string,
-): Promise<{ guestThreadId: string; sourceEntryId: string }> {
+): Promise<{ guestThreadId: string; sourceEntryId: string; answers: FormAnswerSnapshot[] }> {
   const thread = await getGuestRequest(db, submissionId, undefined, submissionType)
   if (!thread) throw new Error('Submission notification has no canonical request')
   const entry = await findEntryByDedupeKey(db, `request:${submissionId}:submission`)
   if (!entry) throw new Error('Submission notification has no opening activity entry')
-  return { guestThreadId: thread.id, sourceEntryId: entry.id }
+  // A stay's answers are on the stay, not its conversation; its sender reads them there.
+  return { guestThreadId: thread.id, sourceEntryId: entry.id, answers: 'answers' in thread.payload ? thread.payload.answers : [] }
 }
 
 type DeliveryAnchor = { guestThreadId: string | null; sourceEntryId: string }
@@ -977,6 +984,7 @@ export async function notifyReservationCreated(
     locationName: opts.locationName ?? null, organizationName: restaurant,
     notes: opts.requests ?? null, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
     paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, 'en-US') : null,
+    answers: threadContext.answers,
   })
   const guest = await guestPresentation(db, opts)
   const guestMessage = guestReservationReceivedMessage({
@@ -1121,12 +1129,15 @@ export async function notifyContactSubmitted(
     submissionId: opts.contactId,
   })
   const threadContext = await getOpeningThreadContext(db, 'contact', opts.contactId)
+  // An inquiry's answers are part of what the guest said: they travel with the message on every channel.
+  const answerLines = (words: { yes: string; no: string }) => (opts.answers ?? []).map(answer => `${answer.label}: ${formatFormAnswer(answer, words)}`)
+  const ownerText = [opts.message, ...answerLines({ yes: 'Yes', no: 'No' }), opts.phone ? `Phone: ${opts.phone}` : ''].filter(Boolean).join('\n')
   const payload = {
     contact_id: opts.contactId,
     guest_name: opts.guestName,
     email: opts.email,
     subject: opts.subject ?? '',
-    message_preview: opts.message.slice(0, 200),
+    message_preview: ownerText.slice(0, 200),
     organization_name: restaurant,
     experience_title: opts.productTitle ?? '',
     consent_acknowledged: opts.consentAcknowledged === true ? 'true' : 'false',
@@ -1136,7 +1147,7 @@ export async function notifyContactSubmitted(
   const ownerMessage = contactReceivedMessage({
     guestName: opts.guestName, guestEmail: opts.email,
     subject: contactSubjectLabel(opts.subject ?? 'general', opts.vertical, 'en'),
-    message: opts.message, productTitle: opts.productTitle ?? null,
+    message: ownerText, productTitle: opts.productTitle ?? null,
     organizationName: restaurant, consentAcknowledged: Boolean(opts.consentAcknowledged), replyUrl: inboxUrl,
   })
   const guest = await guestPresentation(db, opts)
@@ -1145,7 +1156,7 @@ export async function notifyContactSubmitted(
     ...guest,
     guestName: opts.guestName, organizationLogoUrl: await organizationLogo(db, opts.organizationId),
     subject: subjectLabel,
-    productTitle: guest.productTitle, message: opts.message,
+    productTitle: guest.productTitle, message: opts.message, answers: opts.answers ?? [],
     consentAcknowledged: Boolean(opts.consentAcknowledged),
   })
   const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain })
@@ -1318,6 +1329,7 @@ export async function notifyBookingCreated(
     presentation,
     notes: opts.notes ?? null, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
     paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, 'en-US') : null,
+    answers: threadContext.answers,
   })
   const guest = await guestPresentation(db, opts)
   const copy = getVerticalCopy(opts.vertical, guest.locale)
@@ -1510,7 +1522,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
   const ownerInput = {
     guestName: stay.guest_name, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name, channel: null,
     checkIn: when(stay.check_in_date, home.check_in_time, 'en-US'), checkOut: when(stay.check_out_date, home.check_out_time, 'en-US'), arrival: audience.arrival,
-    nights: String(nights), guests: party, notes: stay.notes, overlap: false,
+    nights: String(nights), guests: party, notes: stay.notes, answers: stay.answers, overlap: false,
     total: formatMinorAmount(stay.total_minor, stay.currency, 'en-US'), paid: formatMinorAmount(paid.amount, paid.currency, 'en-US'),
     balance: stay.total_minor > paid.amount ? formatMinorAmount(stay.total_minor - paid.amount, stay.currency, 'en-US') : null,
     organizationName: studio, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,

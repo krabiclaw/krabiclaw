@@ -26,6 +26,7 @@ import { parseOpeningHours, parseSpecialHours, type OpeningHours, type SpecialHo
 
 import type { Ref } from 'vue'
 import type { LocationReservationConfig, LocationReservationConfigPatch } from '~/server/utils/reservations'
+import type { FormQuestionWrite } from '~/utils/form-question-editing'
 import { getErrorMessage } from '~/utils/errors'
 import { coordinatesFailure } from '~/utils/location-map'
 import { parsePostalAddress, postalAddressFromAnswers, type PostalAddress } from '~/utils/postal-address'
@@ -201,7 +202,8 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
 
   function reservationPatchFrom(config: LocationReservationConfig | null): LocationReservationConfigPatch {
     if (!config) return {}
-    const { location_id: _locationId, organization_id: _organizationId, created_at: _createdAt, updated_at: _updatedAt, ...patch } = config
+    // Questions are written by their own editor, against their own revision.
+    const { location_id: _locationId, organization_id: _organizationId, created_at: _createdAt, updated_at: _updatedAt, questions: _questions, questions_revision: _questionsRevision, ...patch } = config
     return patch
   }
 
@@ -430,6 +432,20 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     }
   }
 
+  /** Replaces the reservation form's questions over the revision last read, then re-reads the location. Throws what the writer refused. */
+  async function saveReservationQuestions(questions: readonly FormQuestionWrite[]) {
+    const requestedLocationId = locationId.value
+    const config = reservationConfig.value
+    if (!config) throw new Error('This location does not take reservations.')
+    await dashboardApi<{ success: true; config: LocationReservationConfig | null }>(
+      `/api/editor/organizations/${organizationId}/locations/${requestedLocationId}/reservation-config`,
+      { method: 'PUT', body: { questions, expected_questions_revision: config.questions_revision, expected_updated_at: config.updated_at }, validate: isReservationConfigResponse },
+    )
+    if (locationId.value !== requestedLocationId) return
+    await refreshLocationWorkspace()
+    await refreshNuxtData(`dashboard-location-overview:${organizationId}:${requestedLocationId}`)
+  }
+
   async function closeReservations() {
     const requestedLocationId = locationId.value
     closingReservations.value = true
@@ -561,12 +577,13 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   else bind()
 
   return {
-    error, location, saving, saveDisabled, validationMessage, dirty,
+    organizationId, error, location, saving, saveDisabled, validationMessage, dirty,
     editorError: computed(() => isNew.value ? newLocation.createError.value : editorError.value),
     saveLabel: newLocation.saveLabel,
     detailsForm, hoursForm, reservationForm, reservationConfigExists, closingReservations,
     navigationGroups, locationLocalizationFields, organizationLocalizationSettingsPath,
     revert: resetDraft, save: () => isNew.value ? newLocation.save() : saveCurrentEditor(), closeReservations,
+    reservationQuestions: computed(() => reservationConfig.value?.questions ?? null), saveReservationQuestions,
   }
 }
 </script>
@@ -577,7 +594,7 @@ import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vu
 
 const level = useRouteLevel()
 const dashboardLocation = useDashboardLocation()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const editor = await useLocationEditor(organizationId, dashboardLocation.currentLocationId, null, level.path)
 
 useSeoMeta({ title: 'Settings | KrabiClaw', robots: 'noindex, nofollow' })

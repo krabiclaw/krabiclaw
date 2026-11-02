@@ -396,6 +396,12 @@ const STRIPE_CONNECT_ACCOUNT_INCLUDE: Stripe.V2.Core.AccountRetrieveParams.Inclu
   'requirements',
 ]
 
+// "Your business location: Supported" in https://docs.stripe.com/tax/supported-countries
+const STRIPE_TAX_BUSINESS_COUNTRIES: ReadonlySet<string> = new Set([
+  'AE', 'AT', 'AU', 'BE', 'BG', 'CA', 'CH', 'CY', 'CZ', 'DE', 'DK', 'EE', 'ES', 'FI', 'FR', 'GB', 'GR', 'HK', 'HR', 'HU', 'IE',
+  'IT', 'JP', 'LI', 'LT', 'LU', 'LV', 'MT', 'MX', 'NL', 'NO', 'NZ', 'PL', 'PR', 'PT', 'RO', 'SE', 'SG', 'SI', 'SK', 'US',
+])
+
 /** The business's one active Stripe payment method configuration, inheriting the platform's Payments parent. */
 // Stripe's own failures propagate; only a configuration the business must fix is returned as a problem.
 async function connectedMethodConfiguration(stripe: Stripe, stripeAccountId: string, parent: string): Promise<{ configuration: Stripe.PaymentMethodConfiguration } | { problem: string }> {
@@ -430,12 +436,12 @@ async function checkoutReadiness(db: DbClient, env: CloudflareEnv, organizationI
   const account = await stripe.v2.core.accounts.retrieve(saved.stripeAccountId!, { include: STRIPE_CONNECT_ACCOUNT_INCLUDE })
   const connected = await projectStripeConnectedAccount(db, accountProjection(saved, account))
   if (connected.status !== 'ready' || account.livemode !== saved.livemode) return { ready: false as const, statusCode: 409, statusMessage: 'Complete the business’s Stripe account setup before requiring online collection', handoff }
-  // Thailand is a supported tax destination, but not a seller origin. Its Tax
-  // endpoints reject the request: https://docs.stripe.com/tax/supported-countries
-  // Elsewhere, preserve the registered-Tax guard for on-site payments and let
-  // provider errors propagate rather than treating a failed read as no tax.
+  // Stripe Tax answers a seller outside its business locations with a 400 that
+  // carries no error code, so the seller country is read against Stripe's own
+  // published list. Elsewhere an active registration means checkout calculates
+  // tax through Stripe; a failed read propagates rather than reading as no tax.
   let automaticTax = false
-  if (connected.country !== 'TH') {
+  if (connected.country && STRIPE_TAX_BUSINESS_COUNTRIES.has(connected.country)) {
     const [taxSettings, registrations] = await Promise.all([
       stripe.tax.settings.retrieve({}, { stripeAccount: account.id }),
       stripe.tax.registrations.list({ status: 'active', limit: 1 }, { stripeAccount: account.id }),
@@ -452,8 +458,7 @@ async function checkoutReadiness(db: DbClient, env: CloudflareEnv, organizationI
  */
 export async function acceptedPaymentMethods(db: DbClient, env: CloudflareEnv, organizationId: string): Promise<{ types: string[]; country: string | null }> {
   const readiness = await checkoutReadiness(db, env, organizationId)
-  // Not ready, or registered for Stripe Tax which checkout refuses: it takes no payment on the site.
-  if (!readiness.ready || readiness.automaticTax) return { types: [], country: null }
+  if (!readiness.ready) return { types: [], country: null }
   const methods = await connectedMethodConfiguration(readiness.stripe, readiness.account.id, readiness.parent)
   // A configuration the business must still fix takes no payment, as checkout refuses it.
   if ('problem' in methods) return { types: [], country: null }

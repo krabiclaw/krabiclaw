@@ -110,7 +110,9 @@ export default defineConfig({
     stderr: captureServerLogs ? 'pipe' : 'ignore'
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    // The local suite measures the site's own analytics, so its browser is a visitor:
+    // without the automation flag, which the collector reads as not one (automatedBrowser()).
+    { name: 'chromium', use: { ...devices['Desktop Chrome'], launchOptions: { args: ['--disable-blink-features=AutomationControlled'] } } },
     { name: 'webkit-mobile-layout', use: { ...devices['Desktop Safari'], viewport: { width: 390, height: 844 } }, testMatch: '**/dashboard-layout.spec.ts', grep: /mobile scroll/ },
   ]
 })

@@ -216,7 +216,7 @@ test('the iPhone app starts Stripe payouts onboarding on the dashboard Connect r
   }
 })
 
-test('checkout uses Stripe seller country for Tax availability and preserves supported-country errors', async t => {
+test('checkout reads Stripe Tax only for a seller in a Stripe Tax business location and preserves its errors', async t => {
   await withD1(async db => {
     await db.prepare("UPDATE organization SET subdomain='demo' WHERE id='org'").run()
     await db.prepare("INSERT INTO subscription(id,plan,referenceId,status,seats) VALUES('sub','business','org','active',1)").run()
@@ -233,17 +233,22 @@ test('checkout uses Stripe seller country for Tax availability and preserves sup
       paths.push(url.pathname)
       if (url.pathname === '/v2/core/accounts/acct_test') return Response.json({ id: 'acct_test', livemode: false, dashboard: 'express', identity: { country }, defaults: { responsibilities: { fees_collector: 'application', losses_collector: 'stripe' } }, configuration: { merchant: { capabilities: { card_payments: { status: 'active', status_details: [] } } } }, requirements: { entries: [] } })
       if (url.pathname === '/v1/payment_method_configurations') return Response.json({ data: [{ id: 'pmc_child', parent: 'pmc_parent', active: true }], has_more: false })
-      assert.equal(country, 'US', 'Thai checkout must not query unsupported Tax endpoints')
+      assert.equal(country, 'US', 'a seller outside Stripe Tax business locations must not query Tax endpoints')
       if (taxFails) return Response.json({ error: { type: 'invalid_request_error', message: 'Tax read rejected' } }, { status: 400 })
       if (url.pathname === '/v1/tax/settings') return Response.json({ status: 'active' })
       assert.equal(url.pathname, '/v1/tax/registrations')
       return Response.json({ data: [{ id: 'taxreg_test' }] })
     })
     try {
-      const thai = await requireStripeCheckoutAcceptance(db, env, 'org')
-      assert.equal(thai.connected.country, 'TH')
-      assert.equal(thai.automaticTax, false)
-      assert.deepEqual(paths, ['/v2/core/accounts/acct_test', '/v1/payment_method_configurations'])
+      // Stripe Tax answers these sellers with a 400 that carries no code; they collect no tax through it.
+      for (const outside of ['TH', 'MY', 'ID', 'PH', 'VN', 'IN']) {
+        country = outside
+        paths.length = 0
+        const seller = await requireStripeCheckoutAcceptance(db, env, 'org')
+        assert.equal(seller.connected.country, outside)
+        assert.equal(seller.automaticTax, false)
+        assert.deepEqual(paths, ['/v2/core/accounts/acct_test', '/v1/payment_method_configurations'])
+      }
       country = 'US'
       assert.equal((await requireStripeCheckoutAcceptance(db, env, 'org')).automaticTax, true)
       taxFails = true

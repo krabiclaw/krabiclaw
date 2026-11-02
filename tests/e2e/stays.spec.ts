@@ -10,6 +10,7 @@ import type { GuestStay, PublicStayCalendar, StayDetail, StayQuote } from '../..
 import { createReplayableReservationCancelToken } from '../../server/utils/reservation-cancel-token'
 import type { PostalAddress } from '../../utils/postal-address'
 import { STAY_SAFETY_DETAIL_KEYS } from '../../shared/stay-safety'
+import { formQuestionsRevision } from '../../shared/form-questions'
 import { devLoginHeaders } from './test-env'
 import type { PublicLocationDisclosure } from '../../types/public-location'
 import type { StayPhotoRoom } from '../../shared/stay-photos'
@@ -1105,6 +1106,8 @@ test('a host saves cancellation policies, guests, minimum nights and arrival tim
       ...propertyFacts, bedrooms: null, beds: null, bathrooms: null, amenities: ['dryer', 'wireless_internet'], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
       amenity_answers: [{ code: 'dryer', available: true }, { code: 'wireless_internet', available: true }],
       carbon_monoxide_detector_details: null, smoke_detector_details: null,
+      // The home asks no questions of its own until the host adds some.
+      questions: [], questions_revision: formQuestionsRevision([]),
       accessibility: [
         { feature: 'disabled_parking_spot', available: null, photo_ids: [] },
         { feature: 'path_to_entrance_lit_at_night', available: null, photo_ids: [] },

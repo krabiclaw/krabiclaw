@@ -20,6 +20,6 @@ import ResponsibilityPicker from '~/components/dashboard/ResponsibilityPicker.vu
 definePageMeta({ layout: 'dashboard' })
 
 const dashboardLocation = useDashboardLocation()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const editor = await useLocationEditor(organizationId, dashboardLocation.currentLocationId, 'assignment')
 </script>

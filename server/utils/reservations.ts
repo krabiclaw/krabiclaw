@@ -8,6 +8,8 @@ import { requireStripeCheckoutAcceptance } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
+import { formQuestionsRevision, parseStoredFormQuestions, type FormQuestion } from '~/shared/form-questions'
+import { prepareFormQuestionsWrite } from '~/server/domain/form-questions'
 export { formatBookingPolicySummary as renderBookingPolicySummary } from './booking-policy-summary.ts'
 export type {
   FormattedBookingPolicySummary as RenderedBookingPolicySummary,
@@ -45,12 +47,17 @@ export interface LocationReservationConfig {
   reschedule_cutoff_minutes: number | null
   accessibility_contact_required: boolean
   additional_notes_html: string | null
+  /** The tenant's own questions asked with each reservation, and the revision a form built from them carries. */
+  questions: FormQuestion[]
+  questions_revision: string
   created_at: string
   updated_at: string
 }
 
 export type LocationReservationConfigPatch = Partial<Omit<LocationReservationConfig,
-  'location_id' | 'organization_id' | 'created_at' | 'updated_at' | 'duration_minutes'>> & { duration_minutes?: number | null }
+  'location_id' | 'organization_id' | 'created_at' | 'updated_at' | 'duration_minutes' | 'questions' | 'questions_revision'>> & { duration_minutes?: number | null
+    /** The complete replacement question list and the revision it replaces; checked by the writer against the saved list. */
+    questions?: unknown; expected_questions_revision?: unknown }
 
 // Ordinary table reservations used two hours before duration became configurable.
 export const DEFAULT_RESERVATION_DURATION_MINUTES = 120
@@ -80,6 +87,7 @@ function mapRow(row: Record<string, unknown>): LocationReservationConfig {
     reschedule_cutoff_minutes: row.reschedule_cutoff_minutes === null ? null : Number(row.reschedule_cutoff_minutes),
     accessibility_contact_required: Number(row.accessibility_contact_required) === 1,
     additional_notes_html: row.additional_notes_html === null ? null : String(row.additional_notes_html),
+    ...(() => { const questions = parseStoredFormQuestions(String(row.questions)); return { questions, questions_revision: formQuestionsRevision(questions) } })(),
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
   }
@@ -164,7 +172,7 @@ export async function sanitizeAdditionalNotesHtml(value: string | null): Promise
 
 export async function validateLocationReservationConfigPatch(input: Record<string, unknown>): Promise<LocationReservationConfigPatch> {
   const patch: LocationReservationConfigPatch = {}
-  const unknown = Object.keys(input).filter(key => !([...NUMERIC_FIELDS, ...BOOLEAN_FIELDS, 'deposit_currency', 'deposit_tax_behavior', 'additional_notes_html'] as readonly string[]).includes(key))
+  const unknown = Object.keys(input).filter(key => !([...NUMERIC_FIELDS, ...BOOLEAN_FIELDS, 'deposit_currency', 'deposit_tax_behavior', 'additional_notes_html', 'questions', 'expected_questions_revision'] as readonly string[]).includes(key))
   if (unknown.length) throw new HTTPError({ statusCode: 400, statusMessage: `Unsupported field${unknown.length > 1 ? 's' : ''}: ${unknown.sort().join(', ')}` })
 
   for (const field of NUMERIC_FIELDS) {
@@ -203,6 +211,11 @@ export async function validateLocationReservationConfigPatch(input: Record<strin
     if (value !== null && !isCurrencyCode(value)) throw new HTTPError({ statusCode: 400, message: 'deposit_currency must be a supported currency or null' })
     patch.deposit_currency = value
   }
+  if (Object.hasOwn(input, 'expected_questions_revision') && !Object.hasOwn(input, 'questions')) throw new HTTPError({ statusCode: 400, message: 'expected_questions_revision is only sent with questions' })
+  if (Object.hasOwn(input, 'questions')) {
+    patch.questions = input.questions
+    patch.expected_questions_revision = input.expected_questions_revision
+  }
   return patch
 }
 
@@ -224,7 +237,10 @@ export async function upsertLocationReservationConfig(db: DbClient, input: {
   const now = new Date().toISOString()
   const existing = await getLocationReservationConfig(db, input)
   if (existing && existing.updated_at !== input.expectedUpdatedAt) throw new HTTPError({ statusCode: 409, message: 'The reservation policy changed. Read its current updated_at before saving.' })
-  const merged: LocationReservationConfigPatch = { advance_notice_minutes: 0, ...(existing ?? {}), ...input.patch }
+  const { questions: questionsInput, expected_questions_revision: expectedQuestionsRevision, ...fieldPatch } = input.patch
+  const questions = questionsInput === undefined ? existing?.questions ?? [] : prepareFormQuestionsWrite(existing?.questions ?? [], { questions: questionsInput, expectedRevision: expectedQuestionsRevision })
+  const { questions: _savedQuestions, questions_revision: _savedRevision, ...existingFields } = existing ?? { questions: [], questions_revision: '' }
+  const merged: LocationReservationConfigPatch = { advance_notice_minutes: 0, ...existingFields, ...fieldPatch }
   merged.duration_minutes ??= DEFAULT_RESERVATION_DURATION_MINUTES
   const missing = [
     ...(merged.deposit_required && !merged.deposit_amount ? ['deposit_amount'] : []),
@@ -242,8 +258,8 @@ export async function upsertLocationReservationConfig(db: DbClient, input: {
         location_id, organization_id, duration_minutes, slot_capacity, advance_notice_minutes, minimum_guest_age,
         deposit_required, deposit_amount, deposit_currency, deposit_tax_behavior, deposit_trigger_party_size, free_cancellation_until_minutes,
         reschedule_allowed, reschedule_cutoff_minutes, accessibility_contact_required,
-        additional_notes_html, created_at, updated_at, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        additional_notes_html, questions, created_at, updated_at, created_by, updated_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (location_id) DO UPDATE SET
         duration_minutes = excluded.duration_minutes, slot_capacity = excluded.slot_capacity, advance_notice_minutes = excluded.advance_notice_minutes,
         minimum_guest_age = excluded.minimum_guest_age, deposit_required = excluded.deposit_required,
@@ -252,7 +268,7 @@ export async function upsertLocationReservationConfig(db: DbClient, input: {
         free_cancellation_until_minutes = excluded.free_cancellation_until_minutes,
         reschedule_allowed = excluded.reschedule_allowed, reschedule_cutoff_minutes = excluded.reschedule_cutoff_minutes,
         accessibility_contact_required = excluded.accessibility_contact_required,
-        additional_notes_html = excluded.additional_notes_html,
+        additional_notes_html = excluded.additional_notes_html, questions = excluded.questions,
         updated_at = excluded.updated_at, updated_by = excluded.updated_by
       WHERE location_reservation_configs.organization_id = excluded.organization_id AND location_reservation_configs.updated_at = ?
     `,
@@ -262,7 +278,7 @@ export async function upsertLocationReservationConfig(db: DbClient, input: {
       (merged.deposit_required ?? false) ? 1 : 0, merged.deposit_amount ?? null, merged.deposit_currency ?? null, merged.deposit_tax_behavior ?? null, merged.deposit_trigger_party_size ?? null,
       merged.free_cancellation_until_minutes ?? null, (merged.reschedule_allowed ?? true) ? 1 : 0,
       merged.reschedule_cutoff_minutes ?? null, (merged.accessibility_contact_required ?? false) ? 1 : 0,
-      merged.additional_notes_html ?? null, now, now, input.actorId, input.actorId, existing?.updated_at ?? null,
+      merged.additional_notes_html ?? null, JSON.stringify(questions), now, now, input.actorId, input.actorId, existing?.updated_at ?? null,
     ],
   }, publicResourceCacheInvalidationQuery(input.organizationId, 'reservation-policy-updated')], { operation: 'Upsert location reservation config' })
   if (results[0]?.meta.changes !== 1) throw new HTTPError({ statusCode: 409, message: 'The reservation policy changed before saving. Read it again.' })

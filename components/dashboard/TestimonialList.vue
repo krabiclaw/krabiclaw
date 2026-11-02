@@ -41,7 +41,7 @@ const STATUS_COLORS: Record<TestimonialStatus, 'warning' | 'success' | 'neutral'
 
 const dashboardApi = useDashboardApi()
 const level = useRouteLevel()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 
 const { data, error } = await useAsyncData(
   () => locationScope.value ? `dashboard-location-reviews-${organizationId}-${locationScope.value}` : `dashboard-organization-reviews-${organizationId}`,

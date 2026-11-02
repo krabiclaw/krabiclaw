@@ -52,7 +52,7 @@ import { getErrorMessage } from '~/utils/errors'
 const dashboardApi = useDashboardApi()
 const route = useRoute()
 const router = useRouter()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 
 const props = defineProps<{
   /** The location these sections belong to, or null for the ones every location shares. */

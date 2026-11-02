@@ -2,11 +2,14 @@ import { localizationError } from './localization-errors.ts'
 import { validateProductDetails, assertProductKind, ProductDetailError, productDetailsSchema, type ProductKind } from '../../shared/product-details.ts'
 
 import { LOCALIZED_RESOURCE_TYPES, type LocalizedResourceType } from '../../shared/content-registries.ts'
+import { formQuestionLocalizationSchema } from '../../shared/form-questions.ts'
 export { LOCALIZED_RESOURCE_TYPES, type LocalizedResourceType } from '../../shared/content-registries.ts'
 
 export type LocalizedValues = Record<string, unknown>
 
-type ValueShape = 'text' | 'string_array' | 'details' | { readonly [field: string]: ValueShape }
+// `form_questions` is a question collection's wording, keyed by question and
+// choice ID (shared/form-questions.ts); the collection itself is its owner's.
+type ValueShape = 'text' | 'string_array' | 'details' | 'form_questions' | { readonly [field: string]: ValueShape }
 
 /**
  * How a localized resource is addressed publicly.
@@ -53,15 +56,15 @@ const ADDRESS_FIELDS = { addressLines: 'string_array', locality: 'text',
 
 export const RESOURCE_LOCALIZATION_REGISTRY: Readonly<Record<LocalizedResourceType, ResourceLocalizationDefinition>> = Object.freeze({
   organization: { table: 'organization', tenantScope: 'self', fields: { name: 'text', brand_description: 'text', seo_title: 'text', seo_description: 'text',
-    compliance: { service_area: 'text', disclaimer: 'text', footer_disclaimer: 'text' }, consultation: { cta_label: 'text' } }, route: 'none',
+    compliance: { service_area: 'text', disclaimer: 'text', footer_disclaimer: 'text' }, consultation: { cta_label: 'text' }, inquiry_questions: 'form_questions' }, route: 'none',
     publishedLegalPracticeFields: ['name', 'consultation.cta_label'] },
   business_location: { table: 'business_locations', tenantScope: 'organization_column', fields: { title: 'text', address: ADDRESS_FIELDS,
     description: 'text', short_description: 'text', seo_title: 'text', seo_description: 'text',
-    reservation: { policy: POLICY_FIELDS } }, route: 'stored' },
+    reservation: { policy: POLICY_FIELDS }, reservation_questions: 'form_questions' }, route: 'stored' },
   // Product SEO is owned by the canonical content document, so it is not
   // localized here: a second SEO source would be a second thing to keep true.
   product: { table: 'products', tenantScope: 'organization_column', fields: { name: 'text', description: 'text',
-    marketing_features: 'string_array', unit_label: 'text', details: 'details' }, route: 'derived' },
+    marketing_features: 'string_array', unit_label: 'text', details: 'details', questions: 'form_questions' }, route: 'derived' },
   collection: { table: 'collections', tenantScope: 'organization_column', fields: { name: 'text', description: 'text' }, route: 'none' },
   // A category's page is at its collection's path under the site's locale prefix; its slug is not translated.
   article_category: { table: 'article_categories', tenantScope: 'organization_column', fields: { name: 'text', description: 'text' }, route: 'none' },
@@ -72,6 +75,10 @@ function localizedShapeSchema(shape: ValueShape): Record<string, unknown> {
   if (shape === 'text') return { type: 'string' }
   if (shape === 'string_array') return { type: 'array', items: { type: 'string', pattern: '^[\\s\\S]*\\S[\\s\\S]*$' } }
   if (shape === 'details') return productDetailsSchema(undefined, true)
+  if (shape === 'form_questions') return {
+    type: 'object', description: 'Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.',
+    additionalProperties: { type: 'object', properties: { label: { type: 'string' }, help_text: { type: 'string' }, choices: { type: 'object', additionalProperties: { type: 'string' } } }, additionalProperties: false },
+  }
   return { type: 'object', properties: Object.fromEntries(Object.entries(shape).map(([key, nested]) => [key, localizedShapeSchema(nested)])), additionalProperties: false }
 }
 
@@ -103,6 +110,11 @@ function validateShape(field: string, value: unknown, shape: ValueShape, kind?: 
     return
   }
   if (shape === 'details') { validateDetails(field, value, kind); return }
+  if (shape === 'form_questions') {
+    const parsed = formQuestionLocalizationSchema.safeParse(value)
+    if (parsed.success) return
+    localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', `${field}: ${parsed.error.issues[0]!.message}`, { field })
+  }
   if (shape === 'string_array') {
     if (Array.isArray(value) && value.every(isNonBlankText)) return
   }

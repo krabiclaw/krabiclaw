@@ -817,6 +817,9 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	scheduling_mode: text().default("legacy").notNull(),
 	assigned_member_id: text(),
 	assigned_team_id: text().references(() => team.id, { onDelete: "set null" }),
+	// The tenant's own questions asked with each booking (shared/form-questions.ts):
+	// a JSON array validated by its one writer. Question-only edits leave sessions alone.
+	questions: text().default("[]").notNull(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	created_by: text().notNull(),
@@ -1090,6 +1093,8 @@ export const location_reservation_configs = sqliteTable("location_reservation_co
 	reschedule_cutoff_minutes: integer(),
 	accessibility_contact_required: integer({ mode: "boolean" }).default(false).notNull(),
 	additional_notes_html: text(),
+	// The tenant's own questions asked with each reservation (shared/form-questions.ts).
+	questions: text().default("[]").notNull(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	created_by: text().notNull(),
@@ -1218,6 +1223,8 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	house_manual: text(),
 	// [{ task, details }] in the order guests read them; each task once.
 	checkout_instructions: text().default("[]").notNull(),
+	// The host's own questions asked with each direct stay (shared/form-questions.ts).
+	questions: text().default("[]").notNull(),
 	assigned_member_id: text(),
 	assigned_team_id: text().references(() => team.id, { onDelete: "set null" }),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
@@ -1485,6 +1492,9 @@ export const stays = sqliteTable("stays", {
 	// (shared/stay-cancellation.ts): it decides what the guest's own
 	// cancellation refunds. NULL for a stay not paid on the site.
 	cancellation_policy: text(),
+	// The guest's answers to the home's questions, with the wording they answered
+	// (shared/form-questions.ts). The stay owns them: its conversation may be deleted.
+	answers: text().default("[]").notNull(),
 }, (table) => [
 	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "stays_home_scope_fk" }).onDelete("no action"),
 	unique("stays_org_product_id_unique").on(table.organization_id, table.product_id, table.id),

@@ -1133,6 +1133,8 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
   const createdAt = '2026-10-23T11:13:46.511Z', importedAt = '2026-10-23T11:13:47.428Z'
   const preservedTables = ['user', 'member', 'account', 'session', 'jwks', 'stays', 'stay_nights', 'stay_payments', 'activity_entries', 'channex_connections', 'requests', 'team_threads', 'team_messages', 'media_assets', 'media_placements']
   const recorded: Record<string, unknown[]> = {}
+  // A column added after v22, such as a stay's answers, holds its default; every value v22 recorded is kept.
+  const recordedColumns = (table: string) => recorded[table]!.length ? Object.keys(recorded[table]![0] as Record<string, unknown>).map(column => `"${column}"`).join(', ') : '*'
   const pushProjection = 'product_id,date,state,detail,sent_json,attempts,retry_at'
   const nightProjection = 'organization_id,product_id,date,closed,price_minor,min_stay_arrival,max_stay,closed_to_arrival,closed_to_departure,source,updated_at,updated_by'
   const demoOrganization = '5mbJj0T09tvDCSfhOlUTEt4idxKt82tc', demoHome = '2521e20c-6857-448a-a3a9-7cd389be29e0'
@@ -1315,7 +1317,7 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
       const initialJobs = target.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all()
       target.exec(readFileSync(deltaPayload, 'utf8'))
       assert.deepEqual(target.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all(), initialJobs, 'the final delta applies without duplicate listing jobs or resetting their state')
-      for (const table of preservedTables) assert.deepEqual(target.prepare(`SELECT * FROM ${table} ORDER BY 1,2`).all(), recorded[table], `${table} keeps every recorded value`)
+      for (const table of preservedTables) assert.deepEqual(target.prepare(`SELECT ${recordedColumns(table)} FROM ${table} ORDER BY 1,2`).all(), recorded[table], `${table} keeps every recorded value`)
       assert.deepEqual(target.pragma('foreign_key_check'), [])
 
       // The next copy is an ordinary current-epoch refresh, after delivery has made retry progress.
@@ -1335,7 +1337,7 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
       assert.equal(refreshed.prepare("SELECT consultation_settings_json FROM organization WHERE id='host'").get()!.consultation_settings_json, recordedConsultationSettings, 'current-epoch refreshes preserve the original consultation JSON too')
       assert.equal(refreshed.prepare("SELECT calendar_rules FROM product_stay_configs WHERE product_id='derived'").get()!.calendar_rules, recordedCalendarRules, 'current-epoch copies retain recorded calendar rules')
       assert.deepEqual(refreshed.prepare(`SELECT ${pushProjection} FROM channel_night_pushes ORDER BY product_id,date`).all(), originalPushes)
-      for (const table of preservedTables) assert.deepEqual(refreshed.prepare(`SELECT * FROM ${table} ORDER BY 1,2`).all(), recorded[table])
+      for (const table of preservedTables) assert.deepEqual(refreshed.prepare(`SELECT ${recordedColumns(table)} FROM ${table} ORDER BY 1,2`).all(), recorded[table])
       assert.deepEqual(refreshed.pragma('foreign_key_check'), [])
     } finally { refreshed.close() }
   } finally { rmSync(directory, { recursive: true, force: true }) }

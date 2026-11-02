@@ -212,6 +212,7 @@
 
 <script setup lang="ts">
 import { formatPhone } from '~/utils/phone'
+import { formatFormAnswer } from '~/shared/form-questions'
 import { formatCalendarDate, formatTime, isValidInstant } from '~/utils/timezone'
 import { useIntervalFn, useDocumentVisibility } from '@vueuse/core'
 import type { AvatarProps } from '@nuxt/ui'
@@ -515,8 +516,12 @@ const recordNoun = computed(() => thread.value
 */
 const announcement = computed(() => {
   const current = thread.value
-  if (!current?.operationalRecord) return null
+  if (!current) return null
   const fields = current.source.fields
+  // The guest's answers are rows of the form they sent, after what the record states.
+  const answered = fields.answers.map(answer => ({ label: answer.label, value: formatFormAnswer(answer, { yes: 'Yes', no: 'No' }) }))
+  // An inquiry is its message; it is announced only for the answers it carries.
+  if (!current.operationalRecord) return answered.length ? { title: 'New message', rows: answered } : null
   // `guests` is the party size alone ("6", or "6+" when it is a minimum).
   const isConsultation = recordNoun.value === 'consultation'
   const noun = isConsultation ? (fields.guests === '1' ? 'client' : 'clients') : (fields.guests === '1' ? 'guest' : 'guests')
@@ -529,7 +534,7 @@ const announcement = computed(() => {
     { label: 'Email', value: current.guestEmail },
     { label: 'Phone', value: current.guestPhone && formatPhone(current.guestPhone) },
   ].filter((row): row is { label: string; value: string } => typeof row.value === 'string' && row.value.trim().length > 0)
-  return { title: `New ${recordNoun.value}`, rows }
+  return { title: `New ${recordNoun.value}`, rows: [...rows, ...answered] }
 })
 
 // A contact thread's words are its `message`; a reservation or booking carries

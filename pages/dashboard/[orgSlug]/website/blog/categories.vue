@@ -66,7 +66,7 @@ useSeoMeta({ title: 'Categories | KrabiClaw Dashboard', robots: 'noindex, nofoll
 const dashboardApi = useDashboardApi()
 const route = useRoute()
 const router = useRouter()
-const organizationId = await useDashboardOrganizationId()
+const organizationId = useDashboardOrganizationId()
 const level = useRouteLevel()
 
 const collectionTabs = ARTICLE_COLLECTION_SLUGS.map(slug => ({ value: slug, label: ARTICLE_COLLECTIONS[slug].label }))
