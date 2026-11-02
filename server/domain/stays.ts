@@ -1,7 +1,6 @@
 import { HTTPError } from 'nitro'
 import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevision, parseStoredFormQuestions, type FormAnswerSnapshot, type FormQuestion } from '~/shared/form-questions'
 import { acceptFormAnswers } from '~/server/domain/form-questions'
-import { getSourceLocale } from '~/server/utils/organization-locales'
 import { MAX_STAY_NIGHTS, STAY_CALENDAR_DAYS, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNEL_LABELS, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -1578,7 +1577,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
   if (earlier) return pushed(earlier)
   // A stay the host takes asks the home's questions as its direct booking does; the host's words are in the site's own language.
   const answers = await acceptFormAnswers(db, { kind: 'stay', organizationId: access.organizationId, productId: home.product_id }, {
-    locale: await getSourceLocale(db, access.organizationId), answers: input.answers, questionsRevision: input.questions_revision, revisionRequired: false })
+    locale: null, answers: input.answers, questionsRevision: input.questions_revision, revisionRequired: false })
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
   try {

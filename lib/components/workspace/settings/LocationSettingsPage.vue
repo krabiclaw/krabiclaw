@@ -201,7 +201,8 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
 
   function reservationPatchFrom(config: LocationReservationConfig | null): LocationReservationConfigPatch {
     if (!config) return {}
-    const { location_id: _locationId, organization_id: _organizationId, created_at: _createdAt, updated_at: _updatedAt, ...patch } = config
+    // Questions are written by their own editor, against their own revision.
+    const { location_id: _locationId, organization_id: _organizationId, created_at: _createdAt, updated_at: _updatedAt, questions: _questions, questions_revision: _questionsRevision, ...patch } = config
     return patch
   }
 

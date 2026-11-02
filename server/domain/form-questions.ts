@@ -51,11 +51,15 @@ export async function readFormQuestions(db: DbClient, owner: FormQuestionOwner):
   return parseStoredFormQuestions(row.questions)
 }
 
-/** The collection worded in `locale`: the owner's translation where one exists, its source wording otherwise. */
-export async function readLocalizedFormQuestions(db: DbClient, owner: FormQuestionOwner, locale: string): Promise<{ questions: FormQuestion[]; questions_revision: string }> {
+/**
+ * The collection worded in `locale`: the owner's translation where one exists,
+ * its source wording otherwise. A null locale is the business's own language,
+ * as a host entering a booking writes it.
+ */
+export async function readLocalizedFormQuestions(db: DbClient, owner: FormQuestionOwner, locale: string | null): Promise<{ questions: FormQuestion[]; questions_revision: string }> {
   const questions = await readFormQuestions(db, owner)
   const questions_revision = formQuestionsRevision(questions)
-  if (!questions.length || locale === await getSourceLocale(db, owner.organizationId)) return { questions, questions_revision }
+  if (!questions.length || locale === null || locale === await getSourceLocale(db, owner.organizationId)) return { questions, questions_revision }
   const { resourceType, resourceId, field } = formQuestionLocalizationField(owner)
   const row = await queryFirst<{ wording: string | null }>(db, `SELECT json_extract(values_json, '$.' || ?) AS wording FROM resource_localizations
     WHERE organization_id = ? AND resource_type = ? AND resource_id = ? AND locale = ?`, [field, owner.organizationId, resourceType, resourceId, locale])
@@ -71,7 +75,7 @@ export async function readLocalizedFormQuestions(db: DbClient, owner: FormQuesti
  * the visitor reviews what they entered against them. Answers are validated
  * against the wording in the submission's language, which is what is stored.
  */
-export async function acceptFormAnswers(db: DbClient, owner: FormQuestionOwner, input: { locale: string; answers: unknown; questionsRevision: unknown; revisionRequired: boolean }): Promise<FormAnswerSnapshot[]> {
+export async function acceptFormAnswers(db: DbClient, owner: FormQuestionOwner, input: { locale: string | null; answers: unknown; questionsRevision: unknown; revisionRequired: boolean }): Promise<FormAnswerSnapshot[]> {
   const current = await readLocalizedFormQuestions(db, owner, input.locale)
   const supplied = typeof input.questionsRevision === 'string' && input.questionsRevision.trim() ? input.questionsRevision.trim() : null
   const answered = Array.isArray(input.answers) && input.answers.length > 0
@@ -94,19 +98,23 @@ export async function acceptFormAnswers(db: DbClient, owner: FormQuestionOwner, 
  * revision means someone else changed the questions first.
  */
 export function prepareFormQuestionsWrite(current: readonly FormQuestion[], input: { questions: unknown; expectedRevision: unknown }): FormQuestion[] {
-  if (typeof input.expectedRevision !== 'string' || !input.expectedRevision.trim()) {
-    throw new HTTPError({ statusCode: 422, statusMessage: 'expected_questions_revision is required with questions: read the current questions first.', data: { code: 'QUESTIONS_REVISION_REQUIRED', field: 'expected_questions_revision' } })
-  }
-  const revision = formQuestionsRevision(current)
-  if (input.expectedRevision.trim() !== revision) {
-    throw new HTTPError({ statusCode: 409, statusMessage: 'The questions changed since they were read. Read them again before saving.', data: { code: 'questions_changed', field: 'expected_questions_revision', questions: current, questions_revision: revision } })
-  }
+  let next: FormQuestion[]
   try {
-    return normalizeFormQuestionsInput(input.questions)
+    next = normalizeFormQuestionsInput(input.questions)
   } catch (error) {
     if (!(error instanceof FormQuestionDefinitionError)) throw error
     throw new HTTPError({ statusCode: 422, statusMessage: error.message, data: { code: 'INVALID_QUESTIONS', field: error.field } })
   }
+  const revision = formQuestionsRevision(current)
+  // A save that restates the saved questions, as a whole-record editor does, changes nothing to guard.
+  if (formQuestionsRevision(next) === revision) return [...current]
+  if (typeof input.expectedRevision !== 'string' || !input.expectedRevision.trim()) {
+    throw new HTTPError({ statusCode: 422, statusMessage: 'expected_questions_revision is required with questions: read the current questions first.', data: { code: 'QUESTIONS_REVISION_REQUIRED', field: 'expected_questions_revision' } })
+  }
+  if (input.expectedRevision.trim() !== revision) {
+    throw new HTTPError({ statusCode: 409, statusMessage: 'The questions changed since they were read. Read them again before saving.', data: { code: 'questions_changed', field: 'expected_questions_revision', questions: current, questions_revision: revision } })
+  }
+  return next
 }
 
 /** The site's inquiry form as a visitor reads it: its questions in their language, and whether the legal practice notice applies. */

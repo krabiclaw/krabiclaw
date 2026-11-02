@@ -427,7 +427,7 @@ export async function createStayBooking(event: H3Event, context: { organizationI
   // A new checkout checks and freezes the answers with the purchase; a retry is
   // held to the purchase it froze, answers included, and does not read the
   // questions again (createPaymentCheckout reads `guest` only for a new checkout).
-  const answers = retrying ? [] : await acceptFormAnswers(db, { kind: 'stay', organizationId, productId: home.product_id }, { locale: typeof body.locale === 'string' ? body.locale : await getSourceLocale(db, organizationId), answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })
+  const answers = retrying ? [] : await acceptFormAnswers(db, { kind: 'stay', organizationId, productId: home.product_id }, { locale: typeof body.locale === 'string' ? body.locale : null, answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })
   const guest = { name: guestName, email: guestEmail, phone, notes, answers }
   // The quote's refusals name the rule a guest's choice breaks; they come before rate limits and payment setup.
   const quoted: StayQuote | null = retrying ? null : await quoteStay(db, organizationId, home, request)

@@ -1,4 +1,5 @@
 import { createReplayableReservationCancelToken } from '~/server/utils/reservation-cancel-token'
+import { formQuestionsRevision } from '../../shared/form-questions.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { listAgenda, listTodayAgenda } from '../../server/utils/dashboard-agenda.ts'
@@ -286,7 +287,8 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     assert.deepEqual(cabin.stay, { location_id: 'cabin-site', check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 4, min_nights: 2, calendar_rules: null,
       property_type_group: null, property_type: null, listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null,
       bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', assigned_member_id: null, assigned_team_id: 'cleaning', live: false, photo_rooms: [],
-      accessibility: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(feature => ({ feature, available: null, photo_ids: [] })) })
+      accessibility: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(feature => ({ feature, available: null, photo_ids: [] })),
+      questions: [], questions_revision: formQuestionsRevision([]) })
     // Property classification is either one authored pair or fully unknown.
     // A partial SQL write must refuse the whole edit before canonical readers
     // can encounter a contradictory property classification.
