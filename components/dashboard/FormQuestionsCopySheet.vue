@@ -74,7 +74,9 @@ async function copy() {
   saving.value = true
   error.value = null
   try {
-    await props.owner.write([...props.owner.questions.value ?? [], ...chosen.value.questions.map(formQuestionCopy)])
+    const existing = props.owner.questions.value
+    if (!existing) throw new Error('Read this form’s questions before copying into it.')
+    await props.owner.write([...existing, ...chosen.value.questions.map(formQuestionCopy)])
     open.value = false
   } catch (failure) {
     error.value = getErrorMessage(failure, 'The questions could not be copied')

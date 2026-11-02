@@ -32,6 +32,7 @@ export default {
     "send": "Send message",
     "sending": "Sending…",
     "send_failed": "Unable to send right now.",
+    "message_too_short": "Write at least 10 characters.",
     "default_title": "Send a message",
     "legal_consent": "I understand that submitting this form does not create an attorney-client relationship and agree to be contacted about this message.",
     "book_instead": "Prefer a scheduled visit?",

@@ -68,6 +68,7 @@
   "forms.send": "メッセージを送る",
   "forms.sending": "送信中…",
   "forms.send_failed": "現在送信できません。",
+  "forms.message_too_short": "10文字以上で入力してください。",
   "forms.default_title": "メッセージを送る",
   "forms.legal_consent": "このフォームの送信によって弁護士と依頼者の関係が成立しないことを理解し、このメッセージについて連絡を受けることに同意します。",
   "forms.book_instead": "訪問の予約をご希望ですか？",

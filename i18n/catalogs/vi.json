@@ -68,6 +68,7 @@
   "forms.send": "Gửi tin nhắn",
   "forms.sending": "Đang gửi…",
   "forms.send_failed": "Hiện không thể gửi.",
+  "forms.message_too_short": "Vui lòng viết ít nhất 10 ký tự.",
   "forms.default_title": "Gửi tin nhắn",
   "forms.legal_consent": "Tôi hiểu rằng việc gửi biểu mẫu này không tạo ra quan hệ luật sư - khách hàng và đồng ý được liên hệ về tin nhắn này.",
   "forms.book_instead": "Bạn muốn đặt lịch hẹn?",

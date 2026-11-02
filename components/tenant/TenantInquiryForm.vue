@@ -105,11 +105,20 @@ let requestKey: string | null = null
 let requestFingerprint: string | null = null
 const { mirrorSubmission, pageEventId } = useOrganizationConversionTracking()
 
+const SERVER_FIELD_MESSAGES: Record<string, () => string> = {
+  NAME_REQUIRED: () => t('site.contact_page.enter_name'),
+  EMAIL_INVALID: () => t('site.contact_page.invalid_email'),
+  PHONE_INVALID: () => t('booking.invalid_phone'),
+  MESSAGE_REQUIRED: () => t('forms.message_too_short'),
+  CONSENT_REQUIRED: () => t('forms.answer_required'),
+}
+
 function validate(): boolean {
   fieldErrors.name = contact.name ? undefined : t('site.contact_page.enter_name')
   fieldErrors.email = !contact.email ? t('site.contact_page.enter_email') : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email) ? undefined : t('site.contact_page.invalid_email')
   const written = props.initialMessage && contact.message.startsWith(props.initialMessage) ? contact.message.slice(props.initialMessage.length) : contact.message
-  fieldErrors.message = !questions.value.length && !written.trim() ? t('site.contact_page.enter_message') : undefined
+  // Without questions the message is the inquiry, and the server needs a sentence of it.
+  fieldErrors.message = questions.value.length ? undefined : !written.trim() ? t('site.contact_page.enter_message') : written.trim().length < 10 ? t('forms.message_too_short') : undefined
   fieldErrors.consent = consentRequired.value && !contact.consent ? t('forms.answer_required') : undefined
   answerErrors.value = unansweredRequired(questions.value, answers.value, t('forms.answer_required'))
   return !Object.values(fieldErrors).some(Boolean) && !Object.keys(answerErrors.value).length
@@ -149,7 +158,11 @@ async function submit() {
       answerErrors.value = {}
     } else {
       answerErrors.value = formAnswerErrors(failure)
-      submitError.value = failure.message
+      // A field the server refused is marked on that field, in the visitor's language.
+      const field = typeof failure.data.field === 'string' ? failure.data.field : null
+      const fieldMessage = field ? SERVER_FIELD_MESSAGES[failure.code]?.() : undefined
+      if (field && fieldMessage && field in fieldErrors) fieldErrors[field as keyof typeof fieldErrors] = fieldMessage
+      else if (!Object.keys(answerErrors.value).length) submitError.value = failure.message
     }
   } finally {
     submitting.value = false
