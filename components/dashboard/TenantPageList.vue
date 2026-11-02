@@ -77,6 +77,7 @@ const deleteError = ref<string | null>(null)
  * keeping a second copy of the rule that would drift from it.
  */
 async function remove(item: { id: string; updatedAt: string }) {
+  if (removingId.value) return
   removingId.value = item.id
   deleteError.value = null
   const previousPages = data.value?.pages ? [...data.value.pages] : []

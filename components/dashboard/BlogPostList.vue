@@ -258,6 +258,7 @@ watch(activeTab, () => { moreError.value = null; void commitOrder() })
 
 /** Removal lives in the list's edit state, the way every other list does it. */
 async function removePost(item: { id: string }) {
+  if (removingId.value) return
   removingId.value = item.id
   listError.value = null
   const base = data.value

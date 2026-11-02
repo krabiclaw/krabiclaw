@@ -922,10 +922,7 @@ function isFormDirty(): boolean {
 // The draft is seeded from every read of the row, the first and each writer's re-read.
 watch(product, (row) => {
   if (row) {
-    if (editVersion.value !== null && isFormDirty()) {
-      editVersion.value = row.updated_at
-      return
-    }
+    if (editVersion.value !== null && isFormDirty()) return
     loadForm(row)
   }
 }, { immediate: true })

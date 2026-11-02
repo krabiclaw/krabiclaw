@@ -185,6 +185,7 @@ function openNew() {
 
 /** Removal lives in the list's edit state, the way the menu does it. */
 async function removePost(item: { id: string }) {
+  if (removingId.value) return
   removingId.value = item.id
   const base = data.value
   const targetKey = postsKey.value
