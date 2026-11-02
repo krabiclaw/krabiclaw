@@ -103,6 +103,14 @@ leave old and new paths operating in parallel.
 Prefer fewer concepts, fewer names, fewer state representations, and fewer
 execution paths.
 
+An issue, plan or change that adds a table, column, event family, versioned
+contract, reconciliation or backfill job, or release gate must state the
+user-visible defect it fixes and the existing mechanism it checked first — a
+recorded event, the canonical record, Stripe, Better Auth or another configured
+provider — and why that mechanism cannot do the job. "Reconstructibility",
+"auditability" or "rigor" without a defect someone hits is not a reason to add
+one. An endpoint, store or path nothing calls is deleted, not repaired.
+
 ## Database and releases
 
 Every Cloudflare D1 database must use Western North America (`wnam`).
