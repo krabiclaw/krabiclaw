@@ -62,6 +62,57 @@ export function alterationRequest(event: Resource): AlterationRequest {
   }
 }
 
+/**
+ * An Airbnb guest asking about dates before booking: a live feed `inquiry`
+ * event whose `payload.booking_details` states the dates, party, listing and
+ * the time Airbnb counts as the host's response deadline. Read as Channex
+ * served it on 2026-11-01 (docs.channex.io Webhook Collection lists the event
+ * and its payload; the field formats are not documented).
+ */
+export interface AirbnbInquiry {
+  id: string
+  propertyId: string
+  messageThreadId: string
+  guestName: string
+  checkInDate: string
+  checkOutDate: string
+  nights: number
+  adults: number
+  children: number
+  infants: number
+  pets: number
+  /** When Airbnb stops counting the host's reply as on time. */
+  respondBy: string
+}
+
+export function airbnbInquiry(event: Resource): AirbnbInquiry {
+  const attributes = event.attributes
+  if (attributes.event !== 'inquiry') throw new ChannexDataError(`live feed event ${event.id} is ${String(attributes.event)}, not an inquiry`)
+  const payload = object(attributes.payload, 'inquiry.payload')
+  const details = object(payload.booking_details, 'inquiry.payload.booking_details')
+  const respondBy = string(details.non_response_at, 'booking_details.non_response_at')
+  if (Number.isNaN(Date.parse(respondBy))) throw new ChannexDataError(`inquiry ${event.id} has an unreadable non_response_at`)
+  return {
+    id: event.id,
+    propertyId: string(attributes.property_id, 'inquiry.property_id'),
+    messageThreadId: string(payload.message_thread_id, 'inquiry.payload.message_thread_id'),
+    guestName: string(details.guest_name, 'booking_details.guest_name'),
+    checkInDate: string(details.checkin_date, 'booking_details.checkin_date'),
+    checkOutDate: string(details.checkout_date, 'booking_details.checkout_date'),
+    nights: integer(details.nights, 'booking_details.nights', 1),
+    adults: integer(details.number_of_adults, 'booking_details.number_of_adults'),
+    children: integer(details.number_of_children, 'booking_details.number_of_children'),
+    infants: integer(details.number_of_infants, 'booking_details.number_of_infants'),
+    pets: integer(details.number_of_pets, 'booking_details.number_of_pets'),
+    respondBy: new Date(respondBy).toISOString(),
+  }
+}
+
+export async function readAirbnbInquiry(env: ChannexEnv, id: string): Promise<AirbnbInquiry> {
+  const body = await channexRequest(env, `/live_feed/${encodeURIComponent(id)}`)
+  return airbnbInquiry(resource(body.data, 'live_feed_event'))
+}
+
 export async function readAlterationRequest(env: ChannexEnv, id: string): Promise<AlterationRequest> {
   const body = await channexRequest(env, `/live_feed/${encodeURIComponent(id)}`)
   return alterationRequest(resource(body.data, 'live_feed_event'))

@@ -43,6 +43,7 @@ import {
   memberGuestName,
   stayChangeDifferences,
   contactReceivedMessage,
+  inquiryReceivedMessage,
   messageReceived,
   reservationCancelledMessage,
   reservationCreatedMessage,
@@ -70,6 +71,7 @@ import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { STAY_CHANNEL_LABELS } from '~/shared/bookings'
+import type { AirbnbInquiry } from '~/server/integrations/channex/live-feed'
 import type { ChannelStayTerms } from '~/server/domain/stays'
 
 // The guest chose a label, not a key: on a studio the option keyed `catering`
@@ -1898,6 +1900,34 @@ export async function notifyGuestThreadReply(
     target: { kind: 'guest', threadId: opts.threadId },
   })))
   raiseUnrecordedOwnerAlertFailures('notifyGuestThreadReply', `thread ${opts.threadId}`, results.map(result => ({ result, task: 'ownerAlert' })))
+}
+
+/** An Airbnb guest asked about dates: the owners, and the members who look after the home, are told the request and Airbnb's deadline. */
+export async function notifyAirbnbInquiry(env: NotificationEnv, db: DbClient, input: { threadId: string; entryId: string; inquiry: AirbnbInquiry }) {
+  const thread = await getGuestRequest(db, input.threadId)
+  if (!thread) throw new Error(`Inquiry conversation ${input.threadId} does not exist`)
+  if (thread.blocked_at !== null) return
+  const home = await queryFirst<{ name: string; timezone: string; organization_name: string | null }>(db, `SELECT p.name, l.timezone, o.name AS organization_name
+    FROM channel_threads t JOIN products p ON p.id = t.product_id AND p.organization_id = t.organization_id
+    JOIN product_stay_configs c ON c.product_id = t.product_id AND c.organization_id = t.organization_id
+    JOIN business_locations l ON l.id = c.location_id AND l.organization_id = c.organization_id
+    JOIN organization o ON o.id = t.organization_id WHERE t.request_id = ? AND t.organization_id = ?`, [thread.id, thread.organization_id])
+  if (!home) throw new HTTPError({ statusCode: 500, message: 'The inquiry conversation has no home', data: { code: 'CHANNEL_THREAD_MISSING', field: 'request_id', request_id: thread.id } })
+  const { inquiry } = input
+  const day = (date: string) => formatCalendarDate(date, 'en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  const party = [stayParty(inquiry), ...(inquiry.pets ? [`${inquiry.pets} pet${inquiry.pets === 1 ? '' : 's'}`] : [])].join(', ')
+  const replyUrl = await buildOwnerThreadInboxUrl(env, db, { organizationId: thread.organization_id, threadId: thread.id })
+  const message = inquiryReceivedMessage({
+    guestName: inquiry.guestName, homeName: home.name, replyUrl,
+    request: `${day(inquiry.checkInDate)} – ${day(inquiry.checkOutDate)} · ${inquiry.nights} night${inquiry.nights === 1 ? '' : 's'} · ${party}`,
+    respondBy: formatTimestamp(inquiry.respondBy, 'en-US', home.timezone, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }),
+    organizationName: organizationName({ organizationId: thread.organization_id, organizationName: home.organization_name }),
+  })
+  await notifyOwner(env, db, {
+    organizationId: thread.organization_id, organizationName: message.organizationName, locationId: thread.location_id,
+    template: 'channel_inquiry', title: message.title, payload: { request_id: thread.id, live_feed_event_id: inquiry.id, deep_link: replyUrl },
+    notificationSource: { threadId: thread.id, entryId: input.entryId }, message, whatsappTemplate: 'guest_thread_reply_whatsapp',
+  })
 }
 
 export interface TeamMessageNotificationInput {

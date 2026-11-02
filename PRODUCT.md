@@ -90,10 +90,9 @@ again. Provider messages are shown with their recorded time and exact source
 timestamp when that timestamp has no established timezone.
 
 A workspace sends automatic guest messages, each scheduled for named homes:
-five minutes after a new direct reservation is received, or at a local time a number of days before or after check-in or
-check-out in the home's own timezone. Airbnb stays receive check-in and
-check-out messages only, because KrabiClaw cannot tell an imported historical
-reservation from a new one. A scheduled message goes through the
+five minutes after a new reservation is received, direct or from Airbnb, or at a local time a number of days before or after check-in or
+check-out in the home's own timezone. Reservations an Airbnb import loads are
+history and receive no new-reservation message; Channex marks them imported. A scheduled message goes through the
 conversation's own address and records the same delivery receipt as a reply;
 one that fails or whose outcome is unknown stays visible with its reason and is
 never resent automatically. Each home holds a private arrival guide — check-in

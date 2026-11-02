@@ -19,6 +19,14 @@ export default defineHandler(async (event) => {
   const validation = await validateInternalRequest(event, env, CHANNEX_WEBHOOK_CALLER)
   if (!validation.ok) return jsonResponse({ error: validation.error }, { status: validation.status })
   const body = await readBody<{ event?: unknown; property_id?: unknown; payload?: { revision_id?: unknown } }>(event)
+  // The event and the identities it names, so a delivery can be traced to what
+  // it triggered. Guest names, messages and contact details are never logged.
+  const ids = body?.payload && typeof body.payload === 'object' ? body.payload as Record<string, unknown> : {}
+  console.info('channex_webhook', {
+    ...(typeof body?.event === 'string' ? { event: body.event } : {}),
+    ...(typeof body?.property_id === 'string' ? { property_id: body.property_id } : {}),
+    ...Object.fromEntries(['id', 'revision_id', 'booking_id', 'message_thread_id', 'live_feed_event_id'].filter(key => typeof ids[key] === 'string').map(key => [key, ids[key]])),
+  })
   // The events registered for this webhook (CHANNEX_WEBHOOK_EVENTS); anything else is ignored.
   if (!CHANNEX_WEBHOOK_EVENTS.some(name => name === body?.event)) return jsonResponse({ status: 'ignored', reason: 'unsupported_event' })
   if (body?.event === 'alteration_request') {

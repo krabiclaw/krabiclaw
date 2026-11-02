@@ -18,6 +18,7 @@ import {
   domainUpdateMessage,
   onboardingCompletedMessage,
   contentReportedMessage,
+  inquiryReceivedMessage,
   messageReceived,
   reservationCancelledMessage,
   reservationCreatedMessage,
@@ -263,6 +264,16 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
       senderName: 'Jordan Lee', senderEmail: 'jordan@example.com', conversationLabel: 'Website reply', about: 'Main Dining Room',
       messagePreview: 'Thanks! See you tomorrow.',
       organizationName: restaurant, replyUrl: inbox,
+    })),
+  },
+  {
+    id: 'airbnb-inquiry',
+    audience: 'owner',
+    title: 'Owner — Airbnb guest asked about dates',
+    whatsappTemplate: 'guest_thread_reply_whatsapp',
+    message: ownerAlert(inquiryReceivedMessage({
+      guestName: 'Jamie Rivera', homeName: 'Cedar Loft', request: 'Nov 15, 2026 – Feb 15, 2027 · 92 nights · 1 adult, 1 pet',
+      respondBy: 'Oct 31, 4:53 PM MDT', organizationName: 'Pinecone Stays', replyUrl: stay.replyUrl,
     })),
   },
   {
