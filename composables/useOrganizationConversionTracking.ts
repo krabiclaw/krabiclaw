@@ -1,5 +1,5 @@
 import { projectConversionToGa4 } from '~/utils/ga4-projection'
-import { pageEventIdFor, whenLeaving } from '~/utils/pageview-tracking-runtime.client'
+import { automatedBrowser, pageEventIdFor, whenLeaving } from '~/utils/pageview-tracking-runtime.client'
 import type { ConversionValue, OrganizationConversionEventName } from '~/utils/organization-conversion-events'
 
 interface ConversionPayload {
@@ -68,7 +68,7 @@ export function useOrganizationConversionTracking() {
    * native event, so every GA send waits on this result. The visitor's own action never does.
    */
   function recordNative(payload: ConversionPayload, variantId?: string | null): Promise<string | null> {
-    if (!import.meta.client || previewAuthorized) return Promise.resolve(null)
+    if (!import.meta.client || previewAuthorized || automatedBrowser()) return Promise.resolve(null)
     // The interaction is captured now: its identity, moment and page are fixed here. Only its delivery
     // waits for the pageview it happened on to be recorded, so the server can attach that visit's
     // page, language and attribution.
