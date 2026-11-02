@@ -2,6 +2,7 @@ import { contentBlockDataSchema, contentBlockSchemaDefinitions, CONTENT_BLOCK_TY
 import { timezoneSchema } from '~/utils/timezone'
 import { POSTAL_REGION_CODE_PATTERN } from '~/utils/postal-address'
 import { openingHoursSchema, specialHoursSchema } from '~/shared/reservation-hours'
+import { formQuestionsJsonSchema } from '~/shared/form-questions'
 import type { McpToolRole } from '~/server/utils/mcp-auth'
 import { SUPPORTED_CURRENCIES } from '~/shared/currencies'
 import { RESERVATION_STATUSES } from '~/shared/bookings'
@@ -612,10 +613,12 @@ export const locationReservationConfigObject = {
     minimum_guest_age: { type: ['number', 'null'] },
     accessibility_contact_required: { type: 'boolean' },
     additional_notes_html: { type: ['string', 'null'] },
+    questions: { ...formQuestionsJsonSchema('read'), description: 'The tenant\'s own questions asked beside the required reservation fields; create_table_reservation answers them by ID.' },
+    questions_revision: { type: 'string', description: 'Send as expected_questions_revision when replacing questions, and as questions_revision when submitting answers.' },
     created_at: { type: 'string' },
     updated_at: { type: 'string' },
   },
-  required: ['location_id', 'duration_minutes', 'reschedule_allowed', 'deposit_required', 'accessibility_contact_required', 'created_at', 'updated_at'],
+  required: ['location_id', 'duration_minutes', 'reschedule_allowed', 'deposit_required', 'accessibility_contact_required', 'questions', 'questions_revision', 'created_at', 'updated_at'],
 } as const
 
 export const locationReservationConfigWriteSchema = {
@@ -633,6 +636,8 @@ export const locationReservationConfigWriteSchema = {
   minimum_guest_age: { type: ['number', 'null'], minimum: 0 },
   accessibility_contact_required: { type: 'boolean' },
   additional_notes_html: { type: ['string', 'null'], description: 'Guest-facing notes. Sanitized on the way in; only basic formatting and links survive.' },
+  questions: { ...formQuestionsJsonSchema('write'), description: 'Replace the questions asked with each reservation. Read get_reservation_policy first and keep existing question IDs.' },
+  expected_questions_revision: { type: 'string', description: 'policy.questions_revision from get_reservation_policy; required with questions.' },
 } as const
 
 export const qaItemObject = {
@@ -855,6 +860,7 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   replace_product_weekly_schedule: { ...D, openWorldHint: true },
   create_product_session: { ...D, openWorldHint: true, idempotentHint: true },
   create_table_reservation: { ...D, openWorldHint: true, idempotentHint: true },
+  create_inquiry: { ...D, openWorldHint: true, idempotentHint: true },
   update_product_session: { ...D, openWorldHint: true },
   create_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
   get_product_booking: R,

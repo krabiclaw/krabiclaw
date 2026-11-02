@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:6e1861aa738c6163aaecbc73d00e4fe8b513703d7e8839493018d46b975e1168",
-  "documentationFingerprint": "sha256:12edee538751b274028cde9b7f08f91d2d50263190b494fe2e56189bee3c004e",
+  "fingerprint": "sha256:628daac169f79550aa178521eaf69e31e4616de4e4339ae4c8aa3d902274506d",
+  "documentationFingerprint": "sha256:00b53e36b3a88605c4a395f887ff32018d758c4a45a82de62b305fdd71897beb",
   "tools": [
     {
       "name": "add_organization_language",
@@ -700,7 +700,32 @@
           },
           "content_contact_form": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "booking_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "booking_product_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "required": [],
             "type": "object"
           },
@@ -4128,7 +4153,32 @@
           },
           "content_contact_form": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "booking_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "booking_product_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "required": [],
             "type": "object"
           },
@@ -9587,6 +9637,85 @@
                     "product_id": {
                       "type": "string"
                     },
+                    "questions": {
+                      "description": "The tenant's own questions asked beside the required booking fields; create_product_booking answers them by ID.",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "choices": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "id": {
+                                  "description": "Stable choice ID.",
+                                  "maxLength": 64,
+                                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "label"
+                              ],
+                              "type": "object"
+                            },
+                            "maxItems": 20,
+                            "type": "array"
+                          },
+                          "help_text": {
+                            "maxLength": 500,
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "id": {
+                            "description": "Stable question ID; submissions answer by this ID.",
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                            "type": "string"
+                          },
+                          "label": {
+                            "maxLength": 200,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "required": {
+                            "type": "boolean"
+                          },
+                          "type": {
+                            "enum": [
+                              "short_text",
+                              "long_text",
+                              "single_choice",
+                              "multiple_choice",
+                              "yes_no"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label",
+                          "type",
+                          "required",
+                          "help_text",
+                          "choices"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 20,
+                      "type": "array"
+                    },
+                    "questions_revision": {
+                      "description": "Send as expected_questions_revision when replacing questions, and as questions_revision when submitting answers.",
+                      "type": "string"
+                    },
                     "scheduling_mode": {
                       "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. Experiences may use legacy business scheduling without one named provider. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                       "enum": [
@@ -9601,7 +9730,9 @@
                     "default_capacity",
                     "confirmation_mode",
                     "online_payment_required",
-                    "held_online"
+                    "held_online",
+                    "questions",
+                    "questions_revision"
                   ],
                   "type": [
                     "object",
@@ -11456,6 +11587,85 @@
                         "null"
                       ]
                     },
+                    "questions": {
+                      "description": "The host's own questions asked with each direct stay booking.",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "choices": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "id": {
+                                  "description": "Stable choice ID.",
+                                  "maxLength": 64,
+                                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "label"
+                              ],
+                              "type": "object"
+                            },
+                            "maxItems": 20,
+                            "type": "array"
+                          },
+                          "help_text": {
+                            "maxLength": 500,
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "id": {
+                            "description": "Stable question ID; submissions answer by this ID.",
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                            "type": "string"
+                          },
+                          "label": {
+                            "maxLength": 200,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "required": {
+                            "type": "boolean"
+                          },
+                          "type": {
+                            "enum": [
+                              "short_text",
+                              "long_text",
+                              "single_choice",
+                              "multiple_choice",
+                              "yes_no"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label",
+                          "type",
+                          "required",
+                          "help_text",
+                          "choices"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 20,
+                      "type": "array"
+                    },
+                    "questions_revision": {
+                      "description": "Send as expected_questions_revision when replacing questions, and as questions_revision when submitting answers.",
+                      "type": "string"
+                    },
                     "total_floors": {
                       "description": "Total floors in the property; null when not said.",
                       "maximum": 9007199254740991,
@@ -11487,6 +11697,8 @@
                     "assigned_team_id",
                     "photo_rooms",
                     "accessibility",
+                    "questions",
+                    "questions_revision",
                     "property_type_group",
                     "property_type",
                     "listing_type",
@@ -15621,7 +15833,32 @@
           },
           "content_contact_form": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "booking_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "booking_product_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "required": [],
             "type": "object"
           },
@@ -19458,6 +19695,227 @@
       "uiResourceUri": null
     },
     {
+      "name": "create_inquiry",
+      "title": "Create inquiry",
+      "description": "Record an inquiry, quote request or lead in the inbox for a named person, as the website's inquiry form does: their contact details, an optional message, and answers to the organization's inquiry questions (get_organization_settings → inquiry_questions). No appointment, capacity or payment is involved; to book a time use create_product_booking. Legal practices also require the person's consent acknowledgement. Reuse the same idempotency key for an identical retry; read the saved answers with get_guest_conversation.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "answers": {
+            "description": "Answers to the configured questions by question ID: text for short_text/long_text, a choice ID for single_choice, choice IDs for multiple_choice, true or false for yes_no. Required questions must be answered.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "question_id": {
+                  "type": "string"
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "question_id",
+                "value"
+              ],
+              "type": "object"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "consent": {
+            "description": "Legal practices only: the person acknowledged the contact and privacy notice.",
+            "type": "boolean"
+          },
+          "email": {
+            "maxLength": 200,
+            "minLength": 3,
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "locale": {
+            "description": "The language the person wrote in; defaults to the website language. Answers are matched to the questions as worded in it.",
+            "type": "string"
+          },
+          "location_id": {
+            "description": "Optional location the inquiry is about.",
+            "type": "string"
+          },
+          "message": {
+            "description": "What they wrote. Required (10+ characters) when the organization has no inquiry questions; optional otherwise.",
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "phone": {
+            "description": "Optional. International number with its country calling code, e.g. +66812345678.",
+            "type": "string"
+          },
+          "questions_revision": {
+            "description": "inquiry_questions_revision the answers were collected against; required with answers.",
+            "type": "string"
+          },
+          "source": {
+            "description": "Where the inquiry came from, such as phone call or event.",
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "source",
+          "idempotency_key"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "answers": {
+            "description": "Answers to the tenant's own questions, with the wording the guest answered. Later edits to the questions do not change them.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "help_text": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "question_id": {
+                  "type": "string"
+                },
+                "selected_choices": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "label"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "enum": [
+                    "short_text",
+                    "long_text",
+                    "single_choice",
+                    "multiple_choice",
+                    "yes_no"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ],
+                  "description": "Text, the selected choice ID, the selected choice IDs, or true/false for yes/no."
+                }
+              },
+              "required": [
+                "question_id",
+                "label",
+                "type",
+                "help_text",
+                "value",
+                "selected_choices"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "success": {
+            "const": true
+          }
+        },
+        "required": [
+          "success",
+          "request_id",
+          "replayed",
+          "answers"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Create inquiry"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "submissions",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "create_location",
       "title": "Create location",
       "description": "Add an active business branch or office. Locations are not billed. It becomes public unless the website has published homes and this location has no published offering. Set hours with update_location; create homes with create_product.",
@@ -20976,7 +21434,32 @@
           },
           "content_contact_form": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "booking_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "booking_product_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "required": [],
             "type": "object"
           },
@@ -25722,6 +26205,85 @@
                   "product_id": {
                     "type": "string"
                   },
+                  "questions": {
+                    "description": "The tenant's own questions asked beside the required booking fields; create_product_booking answers them by ID.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "choices": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "description": "Stable choice ID.",
+                                "maxLength": 64,
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                "type": "string"
+                              },
+                              "label": {
+                                "maxLength": 120,
+                                "minLength": 1,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "label"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 20,
+                          "type": "array"
+                        },
+                        "help_text": {
+                          "maxLength": 500,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "id": {
+                          "description": "Stable question ID; submissions answer by this ID.",
+                          "maxLength": 64,
+                          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                          "type": "string"
+                        },
+                        "label": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "required": {
+                          "type": "boolean"
+                        },
+                        "type": {
+                          "enum": [
+                            "short_text",
+                            "long_text",
+                            "single_choice",
+                            "multiple_choice",
+                            "yes_no"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "label",
+                        "type",
+                        "required",
+                        "help_text",
+                        "choices"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "questions_revision": {
+                    "description": "Send as expected_questions_revision when replacing questions, and as questions_revision when submitting answers.",
+                    "type": "string"
+                  },
                   "scheduling_mode": {
                     "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. Experiences may use legacy business scheduling without one named provider. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                     "enum": [
@@ -25736,7 +26298,9 @@
                   "default_capacity",
                   "confirmation_mode",
                   "online_payment_required",
-                  "held_online"
+                  "held_online",
+                  "questions",
+                  "questions_revision"
                 ],
                 "type": [
                   "object",
@@ -27591,6 +28155,85 @@
                       "null"
                     ]
                   },
+                  "questions": {
+                    "description": "The host's own questions asked with each direct stay booking.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "choices": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "description": "Stable choice ID.",
+                                "maxLength": 64,
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                "type": "string"
+                              },
+                              "label": {
+                                "maxLength": 120,
+                                "minLength": 1,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "label"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 20,
+                          "type": "array"
+                        },
+                        "help_text": {
+                          "maxLength": 500,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "id": {
+                          "description": "Stable question ID; submissions answer by this ID.",
+                          "maxLength": 64,
+                          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                          "type": "string"
+                        },
+                        "label": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "required": {
+                          "type": "boolean"
+                        },
+                        "type": {
+                          "enum": [
+                            "short_text",
+                            "long_text",
+                            "single_choice",
+                            "multiple_choice",
+                            "yes_no"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "label",
+                        "type",
+                        "required",
+                        "help_text",
+                        "choices"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "questions_revision": {
+                    "description": "Send as expected_questions_revision when replacing questions, and as questions_revision when submitting answers.",
+                    "type": "string"
+                  },
                   "total_floors": {
                     "description": "Total floors in the property; null when not said.",
                     "maximum": 9007199254740991,
@@ -27622,6 +28265,8 @@
                   "assigned_team_id",
                   "photo_rooms",
                   "accessibility",
+                  "questions",
+                  "questions_revision",
                   "property_type_group",
                   "property_type",
                   "listing_type",
@@ -27848,6 +28493,40 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "answers": {
+            "description": "Answers to the configured questions by question ID: text for short_text/long_text, a choice ID for single_choice, choice IDs for multiple_choice, true or false for yes_no. Required questions must be answered. Questions are get_product → booking.questions.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "question_id": {
+                  "type": "string"
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "question_id",
+                "value"
+              ],
+              "type": "object"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
           "external_reference": {
             "maxLength": 200,
             "type": "string"
@@ -27894,6 +28573,10 @@
           },
           "product_slug": {
             "description": "Offering slug from list_products or get_product, not its product ID.",
+            "type": "string"
+          },
+          "questions_revision": {
+            "description": "The questions_revision the answers were collected against. Required with answers; a changed revision returns questions_changed with the current questions.",
             "type": "string"
           },
           "session_id": {
@@ -28859,7 +29542,32 @@
           },
           "content_contact_form": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "booking_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "booking_product_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "required": [],
             "type": "object"
           },
@@ -32652,7 +33360,32 @@
           },
           "content_contact_form": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "booking_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "booking_product_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "required": [],
             "type": "object"
           },
@@ -35899,6 +36632,40 @@
             "minimum": 1,
             "type": "integer"
           },
+          "answers": {
+            "description": "Answers to the home's questions (get_product → stay.questions), as the guest gave them to the host.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "question_id": {
+                  "type": "string"
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "question_id",
+                "value"
+              ],
+              "type": "object"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
           "arrival_time": {
             "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
             "type": [
@@ -35972,6 +36739,10 @@
           "product_id": {
             "description": "The place to stay: a product of kind stay, from list_products.",
             "minLength": 1,
+            "type": "string"
+          },
+          "questions_revision": {
+            "description": "stay.questions_revision the answers were collected against; required with answers.",
             "type": "string"
           },
           "total_minor": {
@@ -36127,6 +36898,40 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "answers": {
+            "description": "Answers to the configured questions by question ID: text for short_text/long_text, a choice ID for single_choice, choice IDs for multiple_choice, true or false for yes_no. Required questions must be answered. Questions come from get_reservation_policy.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "question_id": {
+                  "type": "string"
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "question_id",
+                "value"
+              ],
+              "type": "object"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
           "date": {
             "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
             "type": "string"
@@ -36176,6 +36981,10 @@
             "maximum": 99,
             "minimum": 1,
             "type": "integer"
+          },
+          "questions_revision": {
+            "description": "The questions_revision the answers were collected against. Required with answers; a changed revision returns questions_changed with the current questions.",
+            "type": "string"
           },
           "source": {
             "minLength": 1,
@@ -37222,7 +38031,32 @@
           },
           "content_contact_form": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "booking_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "booking_product_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "required": [],
             "type": "object"
           },
@@ -42015,7 +42849,32 @@
           },
           "content_contact_form": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "booking_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "booking_product_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "required": [],
             "type": "object"
           },
@@ -46067,7 +46926,7 @@
     {
       "name": "get_guest_conversation",
       "title": "Get guest conversation",
-      "description": "Read the entire guest conversation, including messages, booking/reservation, proposals, attachments and delivery receipts. Requires request_id from the inbox or booking read.",
+      "description": "Read the entire guest conversation, including the guest's answers to the tenant's questions, messages, booking/reservation, proposals, attachments and delivery receipts. Requires request_id from the inbox or booking read.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -46092,6 +46951,82 @@
         "properties": {
           "conversation": {
             "properties": {
+              "answers": {
+                "description": "Answers to the tenant's own questions, with the wording the guest answered. Later edits to the questions do not change them.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "help_text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "question_id": {
+                      "type": "string"
+                    },
+                    "selected_choices": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "type": {
+                      "enum": [
+                        "short_text",
+                        "long_text",
+                        "single_choice",
+                        "multiple_choice",
+                        "yes_no"
+                      ],
+                      "type": "string"
+                    },
+                    "value": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        {
+                          "type": "boolean"
+                        }
+                      ],
+                      "description": "Text, the selected choice ID, the selected choice IDs, or true/false for yes/no."
+                    }
+                  },
+                  "required": [
+                    "question_id",
+                    "label",
+                    "type",
+                    "help_text",
+                    "value",
+                    "selected_choices"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "archived": {
                 "type": "boolean"
               },
@@ -46447,6 +47382,7 @@
               "participant_label",
               "reply_channel",
               "guest",
+              "answers",
               "operational_record",
               "entries"
             ],
@@ -49333,6 +50269,85 @@
               "id": {
                 "type": "string"
               },
+              "inquiry_questions": {
+                "description": "The inquiry form's own questions, asked beside name, email, phone and message on every contact form the site places.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "choices": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "description": "Stable choice ID.",
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                            "type": "string"
+                          },
+                          "label": {
+                            "maxLength": 120,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 20,
+                      "type": "array"
+                    },
+                    "help_text": {
+                      "maxLength": 500,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "description": "Stable question ID; submissions answer by this ID.",
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                      "type": "string"
+                    },
+                    "label": {
+                      "maxLength": 200,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "type": {
+                      "enum": [
+                        "short_text",
+                        "long_text",
+                        "single_choice",
+                        "multiple_choice",
+                        "yes_no"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label",
+                    "type",
+                    "required",
+                    "help_text",
+                    "choices"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              "inquiry_questions_revision": {
+                "description": "Send as expected_inquiry_questions_revision when replacing inquiry_questions, and as questions_revision with an inquiry.",
+                "type": "string"
+              },
               "integrations": {
                 "description": "Saved connections and the provider account, property or site each acts on. A saved connection does not prove a report will pass; query_google_analytics, query_search_console and query_google_ads_report report their own failures.",
                 "properties": {
@@ -50807,6 +51822,85 @@
                   "product_id": {
                     "type": "string"
                   },
+                  "questions": {
+                    "description": "The tenant's own questions asked beside the required booking fields; create_product_booking answers them by ID.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "choices": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "description": "Stable choice ID.",
+                                "maxLength": 64,
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                "type": "string"
+                              },
+                              "label": {
+                                "maxLength": 120,
+                                "minLength": 1,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "label"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 20,
+                          "type": "array"
+                        },
+                        "help_text": {
+                          "maxLength": 500,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "id": {
+                          "description": "Stable question ID; submissions answer by this ID.",
+                          "maxLength": 64,
+                          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                          "type": "string"
+                        },
+                        "label": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "required": {
+                          "type": "boolean"
+                        },
+                        "type": {
+                          "enum": [
+                            "short_text",
+                            "long_text",
+                            "single_choice",
+                            "multiple_choice",
+                            "yes_no"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "label",
+                        "type",
+                        "required",
+                        "help_text",
+                        "choices"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "questions_revision": {
+                    "description": "Send as expected_questions_revision when replacing questions, and as questions_revision when submitting answers.",
+                    "type": "string"
+                  },
                   "scheduling_mode": {
                     "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. Experiences may use legacy business scheduling without one named provider. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                     "enum": [
@@ -50821,7 +51915,9 @@
                   "default_capacity",
                   "confirmation_mode",
                   "online_payment_required",
-                  "held_online"
+                  "held_online",
+                  "questions",
+                  "questions_revision"
                 ],
                 "type": [
                   "object",
@@ -52676,6 +53772,85 @@
                       "null"
                     ]
                   },
+                  "questions": {
+                    "description": "The host's own questions asked with each direct stay booking.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "choices": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "description": "Stable choice ID.",
+                                "maxLength": 64,
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                "type": "string"
+                              },
+                              "label": {
+                                "maxLength": 120,
+                                "minLength": 1,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "label"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 20,
+                          "type": "array"
+                        },
+                        "help_text": {
+                          "maxLength": 500,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "id": {
+                          "description": "Stable question ID; submissions answer by this ID.",
+                          "maxLength": 64,
+                          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                          "type": "string"
+                        },
+                        "label": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "required": {
+                          "type": "boolean"
+                        },
+                        "type": {
+                          "enum": [
+                            "short_text",
+                            "long_text",
+                            "single_choice",
+                            "multiple_choice",
+                            "yes_no"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "label",
+                        "type",
+                        "required",
+                        "help_text",
+                        "choices"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "questions_revision": {
+                    "description": "Send as expected_questions_revision when replacing questions, and as questions_revision when submitting answers.",
+                    "type": "string"
+                  },
                   "total_floors": {
                     "description": "Total floors in the property; null when not said.",
                     "maximum": 9007199254740991,
@@ -52707,6 +53882,8 @@
                   "assigned_team_id",
                   "photo_rooms",
                   "accessibility",
+                  "questions",
+                  "questions_revision",
                   "property_type_group",
                   "property_type",
                   "listing_type",
@@ -52929,7 +54106,7 @@
     {
       "name": "get_product_booking",
       "title": "Get product booking",
-      "description": "Read one product booking or consultation when the user wants its guest details, status or current session. Use updated_at when proposing a change and operational_updated_at when reassigning its provider.",
+      "description": "Read one product booking or consultation when the user wants its guest details, answers to the offering's questions, status or current session. Use updated_at when proposing a change and operational_updated_at when reassigning its provider.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -52953,6 +54130,82 @@
         "$defs": {},
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
+          "answers": {
+            "description": "Answers to the tenant's own questions, with the wording the guest answered. Later edits to the questions do not change them.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "help_text": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "question_id": {
+                  "type": "string"
+                },
+                "selected_choices": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "label"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "enum": [
+                    "short_text",
+                    "long_text",
+                    "single_choice",
+                    "multiple_choice",
+                    "yes_no"
+                  ],
+                  "type": "string"
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ],
+                  "description": "Text, the selected choice ID, the selected choice IDs, or true/false for yes/no."
+                }
+              },
+              "required": [
+                "question_id",
+                "label",
+                "type",
+                "help_text",
+                "value",
+                "selected_choices"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "guest": {
             "properties": {
               "email": {
@@ -53102,6 +54355,7 @@
           "updated_at",
           "operational_updated_at",
           "guest",
+          "answers",
           "provenance",
           "record"
         ],
@@ -53582,6 +54836,28 @@
                         },
                         "name": {
                           "type": "string"
+                        },
+                        "questions": {
+                          "additionalProperties": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "choices": {
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "type": "object"
+                              },
+                              "help_text": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
+                          "type": "object"
                         },
                         "unit_label": {
                           "type": "string"
@@ -54265,6 +55541,85 @@
                   "null"
                 ]
               },
+              "questions": {
+                "description": "The tenant's own questions asked beside the required reservation fields; create_table_reservation answers them by ID.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "choices": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "description": "Stable choice ID.",
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                            "type": "string"
+                          },
+                          "label": {
+                            "maxLength": 120,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 20,
+                      "type": "array"
+                    },
+                    "help_text": {
+                      "maxLength": 500,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "description": "Stable question ID; submissions answer by this ID.",
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                      "type": "string"
+                    },
+                    "label": {
+                      "maxLength": 200,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "type": {
+                      "enum": [
+                        "short_text",
+                        "long_text",
+                        "single_choice",
+                        "multiple_choice",
+                        "yes_no"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label",
+                    "type",
+                    "required",
+                    "help_text",
+                    "choices"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              "questions_revision": {
+                "description": "Send as expected_questions_revision when replacing questions, and as questions_revision when submitting answers.",
+                "type": "string"
+              },
               "reschedule_allowed": {
                 "type": "boolean"
               },
@@ -54291,6 +55646,8 @@
               "reschedule_allowed",
               "deposit_required",
               "accessibility_contact_required",
+              "questions",
+              "questions_revision",
               "created_at",
               "updated_at"
             ],
@@ -54984,7 +56341,32 @@
           },
           "content_contact_form": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "booking_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "booking_product_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "required": [],
             "type": "object"
           },
@@ -56215,6 +57597,28 @@
                             },
                             "type": "object"
                           },
+                          "inquiry_questions": {
+                            "additionalProperties": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "choices": {
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  },
+                                  "type": "object"
+                                },
+                                "help_text": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
+                            "type": "object"
+                          },
                           "name": {
                             "type": "string"
                           },
@@ -56275,6 +57679,28 @@
                                 "type": "object"
                               }
                             },
+                            "type": "object"
+                          },
+                          "reservation_questions": {
+                            "additionalProperties": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "choices": {
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  },
+                                  "type": "object"
+                                },
+                                "help_text": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
                             "type": "object"
                           },
                           "seo_description": {
@@ -56631,6 +58057,28 @@
                           },
                           "name": {
                             "type": "string"
+                          },
+                          "questions": {
+                            "additionalProperties": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "choices": {
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  },
+                                  "type": "object"
+                                },
+                                "help_text": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
+                            "type": "object"
                           },
                           "unit_label": {
                             "type": "string"
@@ -59395,7 +60843,32 @@
           },
           "content_contact_form": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "booking_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "booking_product_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "required": [],
             "type": "object"
           },
@@ -62832,6 +64305,82 @@
                   "adults": {
                     "type": "integer"
                   },
+                  "answers": {
+                    "description": "The guest's answers to the home's questions, worded as they answered them. The stay keeps them even when its conversation is deleted.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "help_text": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "question_id": {
+                          "type": "string"
+                        },
+                        "selected_choices": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "label"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "type": {
+                          "enum": [
+                            "short_text",
+                            "long_text",
+                            "single_choice",
+                            "multiple_choice",
+                            "yes_no"
+                          ],
+                          "type": "string"
+                        },
+                        "value": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            {
+                              "type": "boolean"
+                            }
+                          ],
+                          "description": "Text, the selected choice ID, the selected choice IDs, or true/false for yes/no."
+                        }
+                      },
+                      "required": [
+                        "question_id",
+                        "label",
+                        "type",
+                        "help_text",
+                        "value",
+                        "selected_choices"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
                   "arrival_time": {
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
                     "type": [
@@ -63241,6 +64790,7 @@
                   "cancellation_reason",
                   "cancellation_policy",
                   "no_show_at",
+                  "answers",
                   "version",
                   "created_at",
                   "updated_at",
@@ -72433,7 +73983,32 @@
           },
           "content_contact_form": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "booking_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "booking_product_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "required": [],
             "type": "object"
           },
@@ -73672,6 +75247,28 @@
                     },
                     "type": "object"
                   },
+                  "inquiry_questions": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "choices": {
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "help_text": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
+                    "type": "object"
+                  },
                   "name": {
                     "type": "string"
                   },
@@ -73746,6 +75343,28 @@
                         "type": "object"
                       }
                     },
+                    "type": "object"
+                  },
+                  "reservation_questions": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "choices": {
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "help_text": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
                     "type": "object"
                   },
                   "seo_description": {
@@ -74116,6 +75735,28 @@
                   },
                   "name": {
                     "type": "string"
+                  },
+                  "questions": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "choices": {
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "help_text": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
+                    "type": "object"
                   },
                   "unit_label": {
                     "type": "string"
@@ -76628,6 +78269,28 @@
                 },
                 "type": "object"
               },
+              "inquiry_questions": {
+                "additionalProperties": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "choices": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "help_text": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
+                "type": "object"
+              },
               "marketing_features": {
                 "items": {
                   "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
@@ -76657,6 +78320,28 @@
               "name": {
                 "type": "string"
               },
+              "questions": {
+                "additionalProperties": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "choices": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "help_text": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
+                "type": "object"
+              },
               "reservation": {
                 "additionalProperties": false,
                 "properties": {
@@ -76670,6 +78355,28 @@
                     "type": "object"
                   }
                 },
+                "type": "object"
+              },
+              "reservation_questions": {
+                "additionalProperties": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "choices": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "help_text": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
                 "type": "object"
               },
               "seo_description": {
@@ -77297,7 +79004,32 @@
           },
           "content_contact_form": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "booking_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "booking_product_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "required": [],
             "type": "object"
           },
@@ -78593,6 +80325,28 @@
                             },
                             "type": "object"
                           },
+                          "inquiry_questions": {
+                            "additionalProperties": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "choices": {
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  },
+                                  "type": "object"
+                                },
+                                "help_text": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
+                            "type": "object"
+                          },
                           "name": {
                             "type": "string"
                           },
@@ -78653,6 +80407,28 @@
                                 "type": "object"
                               }
                             },
+                            "type": "object"
+                          },
+                          "reservation_questions": {
+                            "additionalProperties": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "choices": {
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  },
+                                  "type": "object"
+                                },
+                                "help_text": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
                             "type": "object"
                           },
                           "seo_description": {
@@ -79009,6 +80785,28 @@
                           },
                           "name": {
                             "type": "string"
+                          },
+                          "questions": {
+                            "additionalProperties": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "choices": {
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  },
+                                  "type": "object"
+                                },
+                                "help_text": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
+                            "type": "object"
                           },
                           "unit_label": {
                             "type": "string"
@@ -83892,6 +85690,85 @@
                     "product_id": {
                       "type": "string"
                     },
+                    "questions": {
+                      "description": "The tenant's own questions asked beside the required booking fields; create_product_booking answers them by ID.",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "choices": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "id": {
+                                  "description": "Stable choice ID.",
+                                  "maxLength": 64,
+                                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "label"
+                              ],
+                              "type": "object"
+                            },
+                            "maxItems": 20,
+                            "type": "array"
+                          },
+                          "help_text": {
+                            "maxLength": 500,
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "id": {
+                            "description": "Stable question ID; submissions answer by this ID.",
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                            "type": "string"
+                          },
+                          "label": {
+                            "maxLength": 200,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "required": {
+                            "type": "boolean"
+                          },
+                          "type": {
+                            "enum": [
+                              "short_text",
+                              "long_text",
+                              "single_choice",
+                              "multiple_choice",
+                              "yes_no"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label",
+                          "type",
+                          "required",
+                          "help_text",
+                          "choices"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 20,
+                      "type": "array"
+                    },
+                    "questions_revision": {
+                      "description": "Send as expected_questions_revision when replacing questions, and as questions_revision when submitting answers.",
+                      "type": "string"
+                    },
                     "scheduling_mode": {
                       "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. Experiences may use legacy business scheduling without one named provider. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                       "enum": [
@@ -83906,7 +85783,9 @@
                     "default_capacity",
                     "confirmation_mode",
                     "online_payment_required",
-                    "held_online"
+                    "held_online",
+                    "questions",
+                    "questions_revision"
                   ],
                   "type": [
                     "object",
@@ -85803,6 +87682,85 @@
                         "null"
                       ]
                     },
+                    "questions": {
+                      "description": "The host's own questions asked with each direct stay booking.",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "choices": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "id": {
+                                  "description": "Stable choice ID.",
+                                  "maxLength": 64,
+                                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "maxLength": 120,
+                                  "minLength": 1,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "label"
+                              ],
+                              "type": "object"
+                            },
+                            "maxItems": 20,
+                            "type": "array"
+                          },
+                          "help_text": {
+                            "maxLength": 500,
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "id": {
+                            "description": "Stable question ID; submissions answer by this ID.",
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                            "type": "string"
+                          },
+                          "label": {
+                            "maxLength": 200,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "required": {
+                            "type": "boolean"
+                          },
+                          "type": {
+                            "enum": [
+                              "short_text",
+                              "long_text",
+                              "single_choice",
+                              "multiple_choice",
+                              "yes_no"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label",
+                          "type",
+                          "required",
+                          "help_text",
+                          "choices"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 20,
+                      "type": "array"
+                    },
+                    "questions_revision": {
+                      "description": "Send as expected_questions_revision when replacing questions, and as questions_revision when submitting answers.",
+                      "type": "string"
+                    },
                     "total_floors": {
                       "description": "Total floors in the property; null when not said.",
                       "maximum": 9007199254740991,
@@ -85834,6 +87792,8 @@
                     "assigned_team_id",
                     "photo_rooms",
                     "accessibility",
+                    "questions",
+                    "questions_revision",
                     "property_type_group",
                     "property_type",
                     "listing_type",
@@ -89214,7 +91174,32 @@
           },
           "content_contact_form": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "booking_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "booking_product_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "required": [],
             "type": "object"
           },
@@ -91148,7 +93133,32 @@
           },
           "content_contact_form": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "booking_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "booking_product_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "required": [],
             "type": "object"
           },
@@ -94511,6 +96521,28 @@
                           },
                           "type": "object"
                         },
+                        "inquiry_questions": {
+                          "additionalProperties": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "choices": {
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "type": "object"
+                              },
+                              "help_text": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
+                          "type": "object"
+                        },
                         "name": {
                           "type": "string"
                         },
@@ -94578,6 +96610,28 @@
                               "type": "object"
                             }
                           },
+                          "type": "object"
+                        },
+                        "reservation_questions": {
+                          "additionalProperties": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "choices": {
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "type": "object"
+                              },
+                              "help_text": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
                           "type": "object"
                         },
                         "seo_description": {
@@ -94941,6 +96995,28 @@
                         },
                         "name": {
                           "type": "string"
+                        },
+                        "questions": {
+                          "additionalProperties": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "choices": {
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "type": "object"
+                              },
+                              "help_text": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
+                          "type": "object"
                         },
                         "unit_label": {
                           "type": "string"
@@ -95419,6 +97495,28 @@
                       },
                       "type": "object"
                     },
+                    "inquiry_questions": {
+                      "additionalProperties": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "choices": {
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          "help_text": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
+                      "type": "object"
+                    },
                     "marketing_features": {
                       "items": {
                         "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
@@ -95428,6 +97526,28 @@
                     },
                     "name": {
                       "type": "string"
+                    },
+                    "questions": {
+                      "additionalProperties": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "choices": {
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          "help_text": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
+                      "type": "object"
                     },
                     "reservation": {
                       "additionalProperties": false,
@@ -95442,6 +97562,28 @@
                           "type": "object"
                         }
                       },
+                      "type": "object"
+                    },
+                    "reservation_questions": {
+                      "additionalProperties": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "choices": {
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          "help_text": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
                       "type": "object"
                     },
                     "seo_description": {
@@ -99168,7 +101310,7 @@
     {
       "name": "set_product_booking_config",
       "title": "Set product booking config",
-      "description": "Configure booking duration, capacity and scheduling. New settings default to instant confirmation and no online collection. Omitted fields retain saved settings; existing sessions keep their times and capacity. Read settings with get_product.",
+      "description": "Configure booking duration, capacity, scheduling and the questions asked with each booking (for example an assessment visit's property questions). New settings default to instant confirmation and no online collection. Omitted fields retain saved settings; existing sessions keep their times and capacity. Read settings with get_product.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -99211,6 +101353,10 @@
               "null"
             ]
           },
+          "expected_questions_revision": {
+            "description": "booking.questions_revision (or stay.questions_revision) from get_product; required with questions.",
+            "type": "string"
+          },
           "held_online": {
             "description": "True holds the offering online: its times are its provider's working hours, in the provider's timezone. Requires scheduling_mode provider with an assigned member or team.",
             "type": "boolean"
@@ -99228,6 +101374,77 @@
           },
           "product_id": {
             "type": "string"
+          },
+          "questions": {
+            "description": "Replace the questions asked with each booking. Read get_product first and keep existing question IDs. A question-only change never moves or regenerates sessions.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "choices": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "description": "Existing choice ID to keep. Omit for a new choice; one is assigned from its label.",
+                        "maxLength": 64,
+                        "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                        "type": "string"
+                      },
+                      "label": {
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "label"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 20,
+                  "type": "array"
+                },
+                "help_text": {
+                  "maxLength": 500,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "description": "Existing question ID to keep. Omit for a new question; one is assigned from its label.",
+                  "maxLength": 64,
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                  "type": "string"
+                },
+                "label": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "type": {
+                  "enum": [
+                    "short_text",
+                    "long_text",
+                    "single_choice",
+                    "multiple_choice",
+                    "yes_no"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "type",
+                "required"
+              ],
+              "type": "object"
+            },
+            "maxItems": 20,
+            "type": "array"
           },
           "scheduling_mode": {
             "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. Experiences may use legacy business scheduling without one named provider. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
@@ -99301,6 +101518,85 @@
               "product_id": {
                 "type": "string"
               },
+              "questions": {
+                "description": "The tenant's own questions asked beside the required booking fields; create_product_booking answers them by ID.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "choices": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "description": "Stable choice ID.",
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                            "type": "string"
+                          },
+                          "label": {
+                            "maxLength": 120,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 20,
+                      "type": "array"
+                    },
+                    "help_text": {
+                      "maxLength": 500,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "description": "Stable question ID; submissions answer by this ID.",
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                      "type": "string"
+                    },
+                    "label": {
+                      "maxLength": 200,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "type": {
+                      "enum": [
+                        "short_text",
+                        "long_text",
+                        "single_choice",
+                        "multiple_choice",
+                        "yes_no"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label",
+                    "type",
+                    "required",
+                    "help_text",
+                    "choices"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              "questions_revision": {
+                "description": "Send as expected_questions_revision when replacing questions, and as questions_revision when submitting answers.",
+                "type": "string"
+              },
               "scheduling_mode": {
                 "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. Experiences may use legacy business scheduling without one named provider. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                 "enum": [
@@ -99315,7 +101611,9 @@
               "default_capacity",
               "confirmation_mode",
               "online_payment_required",
-              "held_online"
+              "held_online",
+              "questions",
+              "questions_revision"
             ],
             "type": [
               "object",
@@ -102543,7 +104841,32 @@
           },
           "content_contact_form": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "booking_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "booking_product_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "required": [],
             "type": "object"
           },
@@ -109727,7 +112050,7 @@
     {
       "name": "update_organization_settings",
       "title": "Update organization settings",
-      "description": "Change the selected site’s brand, description, website font, colors, button and heading styling, contact email, default currency, visitor announcement banner/popup or Live/Draft status. Only supplied settings change. An announcement replaces all its fields, and null removes it. Logos and announcement images are separate media placements; this tool does not change them. Returns the updated settings. Published website settings change immediately; this does not create a short post, blog article or social publication.",
+      "description": "Change the selected site’s brand, description, website font, colors, button and heading styling, contact email, default currency, visitor announcement banner/popup, inquiry form questions or Live/Draft status. Only supplied settings change. An announcement replaces all its fields, and null removes it. Logos and announcement images are separate media placements; this tool does not change them. Returns the updated settings. Published website settings change immediately; this does not create a short post, blog article or social publication.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -109854,6 +112177,10 @@
             ],
             "type": "string"
           },
+          "expected_inquiry_questions_revision": {
+            "description": "inquiry_questions_revision from get_organization_settings; required with inquiry_questions.",
+            "type": "string"
+          },
           "font_preset": {
             "description": "Website heading and body fonts, on every template: default (Default), mali (Mali), sarabun (Sarabun), prompt (Prompt), kanit (Kanit with Sarabun), ibm-plex-sans-thai (IBM Plex Sans Thai), noto-serif-thai (Noto Serif Thai with Noto Sans Thai), inter (Inter), dm-sans (DM Sans), montserrat (Montserrat), lora (Lora), playfair-display (Playfair Display with Inter), cormorant-garamond (Cormorant Garamond with Inter), marcellus (Marcellus with Inter). Thai, Vietnamese and Japanese text renders in every choice.",
             "enum": [
@@ -109881,6 +112208,77 @@
               "none"
             ],
             "type": "string"
+          },
+          "inquiry_questions": {
+            "description": "The inquiry (quote or lead) form's own questions, asked beside the shared contact fields wherever the site places its contact form. Replaces the saved list; read get_organization_settings first and keep existing IDs.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "choices": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "description": "Existing choice ID to keep. Omit for a new choice; one is assigned from its label.",
+                        "maxLength": 64,
+                        "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                        "type": "string"
+                      },
+                      "label": {
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "label"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 20,
+                  "type": "array"
+                },
+                "help_text": {
+                  "maxLength": 500,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "description": "Existing question ID to keep. Omit for a new question; one is assigned from its label.",
+                  "maxLength": 64,
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                  "type": "string"
+                },
+                "label": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "type": {
+                  "enum": [
+                    "short_text",
+                    "long_text",
+                    "single_choice",
+                    "multiple_choice",
+                    "yes_no"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "type",
+                "required"
+              ],
+              "type": "object"
+            },
+            "maxItems": 20,
+            "type": "array"
           },
           "name": {
             "type": "string"
@@ -110273,6 +112671,85 @@
                 "type": "string"
               },
               "id": {
+                "type": "string"
+              },
+              "inquiry_questions": {
+                "description": "The inquiry form's own questions, asked beside name, email, phone and message on every contact form the site places.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "choices": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "description": "Stable choice ID.",
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                            "type": "string"
+                          },
+                          "label": {
+                            "maxLength": 120,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 20,
+                      "type": "array"
+                    },
+                    "help_text": {
+                      "maxLength": 500,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "description": "Stable question ID; submissions answer by this ID.",
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                      "type": "string"
+                    },
+                    "label": {
+                      "maxLength": 200,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "type": {
+                      "enum": [
+                        "short_text",
+                        "long_text",
+                        "single_choice",
+                        "multiple_choice",
+                        "yes_no"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label",
+                    "type",
+                    "required",
+                    "help_text",
+                    "choices"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              "inquiry_questions_revision": {
+                "description": "Send as expected_inquiry_questions_revision when replacing inquiry_questions, and as questions_revision with an inquiry.",
                 "type": "string"
               },
               "integrations": {
@@ -112768,6 +115245,10 @@
                 "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
                 "type": "string"
               },
+              "expected_questions_revision": {
+                "description": "stay.questions_revision from get_product; required with questions.",
+                "type": "string"
+              },
               "listing_floor": {
                 "description": "The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.",
                 "maximum": 9007199254740991,
@@ -112904,6 +115385,77 @@
                   "string",
                   "null"
                 ]
+              },
+              "questions": {
+                "description": "Replace the questions asked with each direct stay booking. Read get_product first and keep existing question IDs.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "choices": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "description": "Existing choice ID to keep. Omit for a new choice; one is assigned from its label.",
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                            "type": "string"
+                          },
+                          "label": {
+                            "maxLength": 120,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 20,
+                      "type": "array"
+                    },
+                    "help_text": {
+                      "maxLength": 500,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "description": "Existing question ID to keep. Omit for a new question; one is assigned from its label.",
+                      "maxLength": 64,
+                      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                      "type": "string"
+                    },
+                    "label": {
+                      "maxLength": 200,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "type": {
+                      "enum": [
+                        "short_text",
+                        "long_text",
+                        "single_choice",
+                        "multiple_choice",
+                        "yes_no"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "type",
+                    "required"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 20,
+                "type": "array"
               },
               "total_floors": {
                 "description": "Total floors in the property; null when not said.",
@@ -113181,6 +115733,85 @@
                   "product_id": {
                     "type": "string"
                   },
+                  "questions": {
+                    "description": "The tenant's own questions asked beside the required booking fields; create_product_booking answers them by ID.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "choices": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "description": "Stable choice ID.",
+                                "maxLength": 64,
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                "type": "string"
+                              },
+                              "label": {
+                                "maxLength": 120,
+                                "minLength": 1,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "label"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 20,
+                          "type": "array"
+                        },
+                        "help_text": {
+                          "maxLength": 500,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "id": {
+                          "description": "Stable question ID; submissions answer by this ID.",
+                          "maxLength": 64,
+                          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                          "type": "string"
+                        },
+                        "label": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "required": {
+                          "type": "boolean"
+                        },
+                        "type": {
+                          "enum": [
+                            "short_text",
+                            "long_text",
+                            "single_choice",
+                            "multiple_choice",
+                            "yes_no"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "label",
+                        "type",
+                        "required",
+                        "help_text",
+                        "choices"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "questions_revision": {
+                    "description": "Send as expected_questions_revision when replacing questions, and as questions_revision when submitting answers.",
+                    "type": "string"
+                  },
                   "scheduling_mode": {
                     "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. Experiences may use legacy business scheduling without one named provider. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                     "enum": [
@@ -113195,7 +115826,9 @@
                   "default_capacity",
                   "confirmation_mode",
                   "online_payment_required",
-                  "held_online"
+                  "held_online",
+                  "questions",
+                  "questions_revision"
                 ],
                 "type": [
                   "object",
@@ -115092,6 +117725,85 @@
                       "null"
                     ]
                   },
+                  "questions": {
+                    "description": "The host's own questions asked with each direct stay booking.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "choices": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "description": "Stable choice ID.",
+                                "maxLength": 64,
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                "type": "string"
+                              },
+                              "label": {
+                                "maxLength": 120,
+                                "minLength": 1,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "label"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 20,
+                          "type": "array"
+                        },
+                        "help_text": {
+                          "maxLength": 500,
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "id": {
+                          "description": "Stable question ID; submissions answer by this ID.",
+                          "maxLength": 64,
+                          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                          "type": "string"
+                        },
+                        "label": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "required": {
+                          "type": "boolean"
+                        },
+                        "type": {
+                          "enum": [
+                            "short_text",
+                            "long_text",
+                            "single_choice",
+                            "multiple_choice",
+                            "yes_no"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "label",
+                        "type",
+                        "required",
+                        "help_text",
+                        "choices"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "questions_revision": {
+                    "description": "Send as expected_questions_revision when replacing questions, and as questions_revision when submitting answers.",
+                    "type": "string"
+                  },
                   "total_floors": {
                     "description": "Total floors in the property; null when not said.",
                     "maximum": 9007199254740991,
@@ -115123,6 +117835,8 @@
                   "assigned_team_id",
                   "photo_rooms",
                   "accessibility",
+                  "questions",
+                  "questions_revision",
                   "property_type_group",
                   "property_type",
                   "listing_type",
@@ -115688,7 +118402,7 @@
     {
       "name": "update_reservation_policy",
       "title": "Update reservation policy",
-      "description": "Enable or update table reservations using the location’s saved hours. New setup defaults to two hours, unlimited capacity, no advance notice and no deposit. Use the current updated_at when amending it; omitted fields keep their value. Deposits need an amount, currency, tax treatment and ready Payments.",
+      "description": "Enable or update table reservations using the location’s saved hours, including the questions asked with each reservation. New setup defaults to two hours, unlimited capacity, no advance notice and no deposit. Use the current updated_at when amending it; omitted fields keep their value. Deposits need an amount, currency, tax treatment and ready Payments.",
       "inputSchema": {
         "additionalProperties": false,
         "allOf": [
@@ -115807,6 +118521,10 @@
               "null"
             ]
           },
+          "expected_questions_revision": {
+            "description": "policy.questions_revision from get_reservation_policy; required with questions.",
+            "type": "string"
+          },
           "expected_updated_at": {
             "description": "Current policy updated_at; null when creating.",
             "type": [
@@ -115839,6 +118557,77 @@
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
+          },
+          "questions": {
+            "description": "Replace the questions asked with each reservation. Read get_reservation_policy first and keep existing question IDs.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "choices": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "description": "Existing choice ID to keep. Omit for a new choice; one is assigned from its label.",
+                        "maxLength": 64,
+                        "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                        "type": "string"
+                      },
+                      "label": {
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "label"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 20,
+                  "type": "array"
+                },
+                "help_text": {
+                  "maxLength": 500,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "description": "Existing question ID to keep. Omit for a new question; one is assigned from its label.",
+                  "maxLength": 64,
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                  "type": "string"
+                },
+                "label": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "type": {
+                  "enum": [
+                    "short_text",
+                    "long_text",
+                    "single_choice",
+                    "multiple_choice",
+                    "yes_no"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "type",
+                "required"
+              ],
+              "type": "object"
+            },
+            "maxItems": 20,
+            "type": "array"
           },
           "reschedule_allowed": {
             "type": "boolean"
@@ -116607,7 +119396,32 @@
           },
           "content_contact_form": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "booking_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "booking_product_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "required": [],
             "type": "object"
           },
@@ -120404,7 +123218,32 @@
           },
           "content_contact_form": {
             "additionalProperties": false,
-            "properties": {},
+            "properties": {
+              "booking_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "booking_product_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
             "required": [],
             "type": "object"
           },
@@ -124549,18 +127388,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:6dfc58f171ede47ded519f92fbf99913a5ca7e378329a3a433a74bd89a305aaf",
-        "get_product": "sha256:5350d6b278b02374fe756e6224d9044713a5ef326a9078c33cc3be234d28c798",
+        "create_product": "sha256:7b8b285337b9b0e7985a5483445de564eb68954c0ab0ae580d12f7e04709e024",
+        "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
         "list_location_products": "sha256:3d072da910400920fd6ff0679ad8d99e1fdf2494d6f0d7feb3bee5082ce13d9e",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
-        "reconcile_products": "sha256:178f3118a171167fc5f298daf9cac41f2445bf97cf1b0696dffb4d28a9d4e01b",
+        "reconcile_products": "sha256:0bd589440db2dbec9f1b1969d66c7c5d191afd669d9597d1804338bcecf19209",
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
         "set_collection_products": "sha256:16e3e08ee87d86dcb6735b1d2fc9a43600aca70ea8715af3aadfdce5690b8463",
         "update_menu": "sha256:ed70b2c30b8fa7ff3e2ff83d103e650b762b7214797f62934c45e51dbfd39735",
-        "update_product": "sha256:01d309635202a966dabc59bd1872bc326deb0f489828b2684ea11964be5a78a0"
+        "update_product": "sha256:4983940f2519f4796fafb5adccbd7c902c0f37f98ca3bb94d88e8c70ce3f1aaf"
       }
     },
     {
@@ -124605,8 +127444,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:6dfc58f171ede47ded519f92fbf99913a5ca7e378329a3a433a74bd89a305aaf",
-        "get_product": "sha256:5350d6b278b02374fe756e6224d9044713a5ef326a9078c33cc3be234d28c798",
+        "create_product": "sha256:7b8b285337b9b0e7985a5483445de564eb68954c0ab0ae580d12f7e04709e024",
+        "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
@@ -124626,8 +127465,8 @@
         "cancel_product_booking": "sha256:a90b3075935852ee847849f1774addc7077bac2636dd83439a792db5a98c9ca3",
         "cancel_table_reservation": "sha256:7c17a97a9f730249ce112981850351006406adab44d5230f8306953e4450b165",
         "confirm_product_booking": "sha256:d1269994270301b34621918853c929c1e77f702b21fa336ac4dd23dcbf81e18e",
-        "get_guest_conversation": "sha256:0e458314aacd4ef9b6f948eea9e5b395c0f6cc4fd6e5a9dd9884f99e008fdfa5",
-        "get_product_booking": "sha256:f556f5a1b85a50415d2ec9d1464f44b876afced7651eb51aabd5445eca9ebcaa",
+        "get_guest_conversation": "sha256:d8fb6d75bd38fb53f6bc46dab6207535ffe1c55e57bc1b22b95be6df051aeed8",
+        "get_product_booking": "sha256:1f0d7f20d207a6fb1aecb169e86483ae515c5b6209fbf9fe948a2be26860968d",
         "get_team_conversation": "sha256:68a4390f99121151a6c3dcca2e3cff8675166b27d958e7a1a71dcd3a4c9a81d0",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
@@ -124655,14 +127494,14 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "get_site_page": "sha256:f338d72e6cf0e9a9112655bc5f41602ea60b52ff7f9f3921e9868c0173abf7e0",
+        "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "remove_media": "sha256:70c3ad05014d52e9ce95b1a4363d6ab8b23b0d1ffd37c31b03a3da6684d49943",
         "reorder_media": "sha256:2ba6530e10b65684d8efd9d9543c6e3a62e760a988d7a876abe7962ff0fb7e75",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_site_page": "sha256:77c97d779b70b40a74b6fd07968e03255dad018d149d6094cfdd3bcd246081c4"
+        "update_site_page": "sha256:59cdde1aa4d584134607413f633453123521abe519087d8322525faa96f98bfb"
       }
     },
     {
@@ -124677,8 +127516,8 @@
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
         "get_post": "sha256:1bfb415fc3917a3aad29e1b1ae44db4a092b10dd169974b39c89832c4a69017d",
-        "get_product": "sha256:5350d6b278b02374fe756e6224d9044713a5ef326a9078c33cc3be234d28c798",
-        "get_site_page": "sha256:f338d72e6cf0e9a9112655bc5f41602ea60b52ff7f9f3921e9868c0173abf7e0",
+        "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
+        "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b"
@@ -124693,9 +127532,9 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:6dfc58f171ede47ded519f92fbf99913a5ca7e378329a3a433a74bd89a305aaf",
+        "create_product": "sha256:7b8b285337b9b0e7985a5483445de564eb68954c0ab0ae580d12f7e04709e024",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
-        "get_site_page": "sha256:f338d72e6cf0e9a9112655bc5f41602ea60b52ff7f9f3921e9868c0173abf7e0",
+        "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
@@ -124705,8 +127544,8 @@
         "publish_website": "sha256:939b1ce7c3fd387584cc132ae36ef88ea13eb064617de0ba0764e5a81f572f3f",
         "save_website_draft": "sha256:e65a7a223712c5d820ccd7d2ec84abb8da6602e898a89516f1a1caf4d17d171b",
         "update_menu": "sha256:ed70b2c30b8fa7ff3e2ff83d103e650b762b7214797f62934c45e51dbfd39735",
-        "update_organization_settings": "sha256:b475de5f61ea5b4e5785704e5c0da3ebc1e2eb2f237b0a70cc9fb227d1a4a254",
-        "update_site_page": "sha256:77c97d779b70b40a74b6fd07968e03255dad018d149d6094cfdd3bcd246081c4"
+        "update_organization_settings": "sha256:cd820096d8970fbbbec9f12eb04f90d8cc26c32ab6aaf532a3f4b3fedc2074da",
+        "update_site_page": "sha256:59cdde1aa4d584134607413f633453123521abe519087d8322525faa96f98bfb"
       }
     },
     {
@@ -124719,16 +127558,16 @@
       },
       "toolContracts": {
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
-        "get_product": "sha256:5350d6b278b02374fe756e6224d9044713a5ef326a9078c33cc3be234d28c798",
-        "get_reservation_policy": "sha256:939cd1d0c196d026936d36387ae1f90f236738b40e92ab6341523a0f9320c85a",
+        "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
+        "get_reservation_policy": "sha256:052dfd92abcd07879b59caac65a2b13ea2ffb4fe2fc870681021ac996904fb75",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
         "replace_product_weekly_schedule": "sha256:cc5f48fb054661e70ce26d988fc12a29f4325c7fc59b5b20852fb98d0e0e2451",
-        "set_product_booking_config": "sha256:a7d0d7635d01b5d1c5785a06aac73b1454ff3f5b5ecee0641aa2956bbf30ff40",
-        "update_product": "sha256:01d309635202a966dabc59bd1872bc326deb0f489828b2684ea11964be5a78a0",
-        "update_reservation_policy": "sha256:7dd8f0cb74352e584d3ed4f97fcef2a2265bd75e490c57fdcf076c7398d8b774"
+        "set_product_booking_config": "sha256:325fc0b5cb4d6ab6c21227ea94b6d2c22a1192af199b3286145207bbd58b1379",
+        "update_product": "sha256:4983940f2519f4796fafb5adccbd7c902c0f37f98ca3bb94d88e8c70ce3f1aaf",
+        "update_reservation_policy": "sha256:bc082ba4964d16b782d08f37c04eb5afed1cde19847f15c174b0b3da6ad8f1b5"
       }
     },
     {
@@ -124741,14 +127580,14 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "get_site_page": "sha256:f338d72e6cf0e9a9112655bc5f41602ea60b52ff7f9f3921e9868c0173abf7e0",
+        "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
         "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_product": "sha256:01d309635202a966dabc59bd1872bc326deb0f489828b2684ea11964be5a78a0",
-        "update_site_page": "sha256:77c97d779b70b40a74b6fd07968e03255dad018d149d6094cfdd3bcd246081c4"
+        "update_product": "sha256:4983940f2519f4796fafb5adccbd7c902c0f37f98ca3bb94d88e8c70ce3f1aaf",
+        "update_site_page": "sha256:59cdde1aa4d584134607413f633453123521abe519087d8322525faa96f98bfb"
       }
     },
     {
@@ -124761,16 +127600,16 @@
       },
       "toolContracts": {
         "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
-        "get_guest_conversation": "sha256:0e458314aacd4ef9b6f948eea9e5b395c0f6cc4fd6e5a9dd9884f99e008fdfa5",
+        "get_guest_conversation": "sha256:d8fb6d75bd38fb53f6bc46dab6207535ffe1c55e57bc1b22b95be6df051aeed8",
         "get_organization_analytics": "sha256:ddf37dc2b954d9949313e911828f7b7816c51697308b8f458ca44395df81ec7f",
-        "get_product": "sha256:5350d6b278b02374fe756e6224d9044713a5ef326a9078c33cc3be234d28c798",
+        "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
         "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
         "reply_to_guest": "sha256:28402ef75ec3f1464c60ffbaa91a3781f96f9764994e56b2c7362dbd26eefb80",
-        "update_product": "sha256:01d309635202a966dabc59bd1872bc326deb0f489828b2684ea11964be5a78a0"
+        "update_product": "sha256:4983940f2519f4796fafb5adccbd7c902c0f37f98ca3bb94d88e8c70ce3f1aaf"
       }
     }
   ]

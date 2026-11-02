@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { HTTPError } from 'nitro'
 import { z } from 'zod'
+import { formatFormAnswer, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { formatCalendarDate, formatTime, formatTimestamp, localPartsAt } from '~/utils/timezone'
 import { getGuestRequest, requestSummary, type cancelBookingRequest } from '~/server/domain/requests'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
@@ -127,8 +128,11 @@ interface ContactNotificationInput extends OrganizationContext {
   contactId: string
   guestName: string
   email: string
+  phone?: string | null
   subject?: string | null
   message: string
+  /** Answers to the organization's inquiry questions, as the guest read them. */
+  answers?: FormAnswerSnapshot[]
   consentAcknowledged?: boolean
   /** The site's vertical decides what the subject the guest chose is called. */
   vertical: string
@@ -1121,12 +1125,15 @@ export async function notifyContactSubmitted(
     submissionId: opts.contactId,
   })
   const threadContext = await getOpeningThreadContext(db, 'contact', opts.contactId)
+  // An inquiry's answers are part of what the guest said: they travel with the message on every channel.
+  const answerLines = (words: { yes: string; no: string }) => (opts.answers ?? []).map(answer => `${answer.label}: ${formatFormAnswer(answer, words)}`)
+  const ownerText = [opts.message, ...answerLines({ yes: 'Yes', no: 'No' }), opts.phone ? `Phone: ${opts.phone}` : ''].filter(Boolean).join('\n')
   const payload = {
     contact_id: opts.contactId,
     guest_name: opts.guestName,
     email: opts.email,
     subject: opts.subject ?? '',
-    message_preview: opts.message.slice(0, 200),
+    message_preview: ownerText.slice(0, 200),
     organization_name: restaurant,
     experience_title: opts.productTitle ?? '',
     consent_acknowledged: opts.consentAcknowledged === true ? 'true' : 'false',
@@ -1136,7 +1143,7 @@ export async function notifyContactSubmitted(
   const ownerMessage = contactReceivedMessage({
     guestName: opts.guestName, guestEmail: opts.email,
     subject: contactSubjectLabel(opts.subject ?? 'general', opts.vertical, 'en'),
-    message: opts.message, productTitle: opts.productTitle ?? null,
+    message: ownerText, productTitle: opts.productTitle ?? null,
     organizationName: restaurant, consentAcknowledged: Boolean(opts.consentAcknowledged), replyUrl: inboxUrl,
   })
   const guest = await guestPresentation(db, opts)
@@ -1145,7 +1152,7 @@ export async function notifyContactSubmitted(
     ...guest,
     guestName: opts.guestName, organizationLogoUrl: await organizationLogo(db, opts.organizationId),
     subject: subjectLabel,
-    productTitle: guest.productTitle, message: opts.message,
+    productTitle: guest.productTitle, message: opts.message, answers: opts.answers ?? [],
     consentAcknowledged: Boolean(opts.consentAcknowledged),
   })
   const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain })

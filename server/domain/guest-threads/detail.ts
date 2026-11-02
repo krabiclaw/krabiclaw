@@ -11,6 +11,14 @@ import { HTTPError } from 'nitro'
 import { providerTimestamp } from '~/server/integrations/channex/messages'
 import { guestThreadConversationState } from './booking-change-state'
 import { bookingChangeViews } from './booking-changes'
+import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
+
+/** What the guest answered when they wrote in or booked: on the thread, or on the stay the thread is about. */
+async function threadAnswers(db: DbClient, thread: NonNullable<Awaited<ReturnType<typeof getGuestRequest>>>): Promise<FormAnswerSnapshot[]> {
+  if (thread.kind !== 'stay') return thread.payload.answers
+  const stay = await queryFirst<{ answers: string }>(db, 'SELECT answers FROM stays WHERE organization_id = ? AND request_id = ?', [thread.organization_id, thread.id])
+  return stay ? formAnswerSnapshotsSchema.parse(JSON.parse(stay.answers)) : []
+}
 
 function deliveryRecipient(emailJson: string | null): string | null {
   if (!emailJson) return null
@@ -34,11 +42,12 @@ export async function getGuestThreadDetail(
   if (!organization) throw new Error('Conversation has no organization')
 
 
-  const [entryRows, deliveryRows, channelThread] = await Promise.all([
+  const [entryRows, deliveryRows, channelThread, answers] = await Promise.all([
     listThreadEntries(db, threadId),
     listThreadDeliveries(db, threadId),
     queryFirst(db, `SELECT request_id FROM channel_threads WHERE organization_id = ? AND request_id = ?
       UNION ALL SELECT request_id FROM stays WHERE organization_id = ? AND request_id = ? AND owner = 'channel' LIMIT 1`, [organizationId, threadId, organizationId, threadId]),
+    threadAnswers(db, thread),
   ])
 
   // One read of the deliveries answers both questions the thread asks of them:
@@ -128,6 +137,7 @@ export async function getGuestThreadDetail(
     submissionId: thread.id,
     locationLabel: summary.locationTitle,
     conversationState: audience ? null : await guestThreadConversationState(db, thread.id, now),
+    answers,
     operationalRecord: record ? { id: record.id, kind: record.kind, status: record.status, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, party_size: record.party_size, check_in_date: record.check_in_date, check_out_date: record.check_out_date } : null,
     source: {
       submissionType: thread.kind,

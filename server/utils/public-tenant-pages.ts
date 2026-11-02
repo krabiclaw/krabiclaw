@@ -234,6 +234,8 @@ async function hydrateBlocks(
     if (block.type === 'location_grid' && Array.isArray(block.data.location_ids)) {
       for (const value of block.data.location_ids) if (typeof value === 'string' && value.trim()) locationIds.add(value)
     }
+    // A contact form may name an offering whose booking flow a visitor can enter instead.
+    if (block.type === 'contact_form' && typeof block.data.booking_product_id === 'string' && block.data.booking_product_id.trim()) productIds.add(block.data.booking_product_id)
   }
   // The site this page belongs to. Its template decides where an article
   // lives, its vertical decides where a product lives, and its currency
@@ -421,6 +423,11 @@ async function hydrateBlocks(
   return blocks.map(block => {
     if (block.type === 'showcase' || block.type === 'language_reach' || block.type === 'steps' || block.type === 'how_to') validateContentBlockData(block.type, block.data)
     const data = { ...block.data }
+    if (block.type === 'contact_form') {
+      // The offering's own page, opened on its booking; an offering this site no longer publishes offers no link.
+      const product = typeof data.booking_product_id === 'string' ? productById.get(data.booking_product_id) : undefined
+      data.booking = product?.public_path && product.available ? { url: `${product.public_path}?book=1`, label: typeof data.booking_label === 'string' && data.booking_label.trim() ? data.booking_label : null } : null
+    }
     if (block.type === 'page_grid') {
       data.items = (data.page_ids as string[]).map((id) => {
         const page = pageById.get(id)

@@ -531,11 +531,18 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     } },
   }),
 
-  // The form a visitor writes in. It has no fields of its own — what it asks
-  // for is the site's contact form — but it is a block so that a page says
-  // where on it the form sits, which was fixed in the markup before.
-  contact_form: blockDefinitionWithMetadata('contact_form', 'Contact form', 'i-lucide-mail', 'A form a visitor writes in.', ['contact', 'custom'], {},
-    { accessibility: 'inherited', seo: 'none' }),
+  // The form a visitor writes in. What it asks is the organization's inquiry
+  // form — its contact fields and the organization's own questions, owned by
+  // the organization's inquiry settings, never stored here. The block says where
+  // on a page the form sits, its heading, and optionally an offering whose
+  // booking flow a visitor can enter instead (a quote request beside "book an
+  // assessment").
+  contact_form: blockDefinitionWithMetadata('contact_form', 'Contact form', 'i-lucide-mail', 'A form a visitor writes in.', ['contact', 'custom', 'home', 'services', 'about'], {
+    title: text('Title', { section: 'settings' }),
+    description: prose('Description', { section: 'settings' }),
+    booking_product_id: { kind: 'reference', label: 'Bookable offering', translatable: false, section: 'booking', reference: 'product' },
+    booking_label: text('Booking link label', { section: 'booking' }),
+  }, { accessibility: 'inherited', seo: 'none' }),
 
   team_grid: blockDefinitionWithMetadata('team_grid', 'Team', 'i-lucide-users', 'The people behind the business.', ALL_RECIPES, {
     title: text('Section title', { section: 'settings' }),

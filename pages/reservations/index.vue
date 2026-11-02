@@ -131,7 +131,9 @@
         />
         <BookingContactForm
           v-model="contactForm"
-         
+          :questions="formQuestions.questions.value"
+          :answer-errors="formQuestions.answerErrors.value"
+          :questions-notice="formQuestions.notice.value"
           :default-country="defaultPhoneCountry"
           :loading="submitting"
           :submit-text="resCopy.reservationRequestButton"
@@ -175,7 +177,7 @@ const { organization } = useTenantOrganization()
 const { id: organizationId } = organization
 const { locale, localePath, t } = useI18n()
 const resCopy = computed(() => getVerticalCopy((organization as ApiValue)?.vertical, locale.value))
-const { locations, config, getField, reservationPolicyByLocation } = await usePublicPageData()
+const { locations, config, getField, reservationPolicyByLocation, reservationQuestionsByLocation } = await usePublicPageData()
 // A site whose locations take no reservations has no reservations page, the
 // same fact the header uses to offer one.
 if (!Object.values(reservationPolicyByLocation.value).some(policy => policy !== null)) {
@@ -199,7 +201,9 @@ const activeReservationPolicySummary = computed(() => {
 
 // ── Form state ────────────────────────────────────────────────────────────
 const reservationForm = ref({ location_id: '', date: '', time: '', guests: '' })
-const contactForm = ref<ContactFormState>({ name: '', email: '', phone: '', notes: '' })
+const contactForm = ref<ContactFormState>({ name: '', email: '', phone: '', notes: '', answers: {} })
+// The chosen location's own reservation questions, asked beside the guest's details.
+const formQuestions = useFormQuestionState(() => reservationQuestionsByLocation.value[reservationForm.value.location_id] ?? null, computed({ get: () => contactForm.value.answers, set: (answers) => { contactForm.value.answers = answers } }))
 
 // ── Contact & Locations ───────────────────────────────────────────────────
 const hasMultipleLocations = computed(() => locations.value.length > 1)
@@ -380,9 +384,10 @@ async function handleReservation(contact: ContactFormState) {
 
   submitting.value = true
   submitError.value = null
+  formQuestions.clear()
   try {
     const details = { ...reservationForm.value, name: contact.name.trim(), email: contact.email.trim(), phone: contact.phone.trim(), requests: contact.notes.trim() }
-    const fingerprint = JSON.stringify(details)
+    const fingerprint = JSON.stringify({ details, questions: formQuestions.submission() })
     if (fingerprint !== reservationFingerprint) {
       reservationRequestKey = crypto.randomUUID()
       reservationFingerprint = fingerprint
@@ -392,7 +397,7 @@ async function handleReservation(contact: ContactFormState) {
       | { success: true; status: 'checkout'; payment_id: string; pay_path: string; purchase_claim: string; expires_at: string }
     const res = await publicApiMutation(`/api/public/reservations`, {
       method: 'POST',
-      body: { ...details, idempotency_key: reservationRequestKey, locale: locale.value, page_event_id: await pageEventId() },
+      body: { ...details, ...formQuestions.submission(), idempotency_key: reservationRequestKey, locale: locale.value, page_event_id: await pageEventId() },
       validate: (value): value is ReservationReceipt => isRecord(value) && value.success === true && (
         value.status === 'checkout' ? typeof value.payment_id === 'string' && typeof value.pay_path === 'string' && value.pay_path.startsWith('/pay/') && typeof value.purchase_claim === 'string' && isValidInstant(value.expires_at)
         : value.status === 'confirmed' && typeof value.id === 'string' && typeof value.request_id === 'string' && typeof value.operational_reservation_id === 'string' && typeof value.cancellationToken === 'string'
@@ -437,7 +442,8 @@ async function handleReservation(contact: ContactFormState) {
       submitError.value = error.message
       await loadAvailability()
     } else {
-      submitError.value = error.message
+      // Changed questions are a review of what was entered, not a failure to retype.
+      submitError.value = formQuestions.handleRefusal(error) && formQuestions.notice.value ? null : error.message
     }
   } finally {
     submitting.value = false

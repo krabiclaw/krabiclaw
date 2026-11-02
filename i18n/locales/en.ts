@@ -16,6 +16,27 @@ export default {
     "deposit_label": "Reservation deposit",
     "confirmed": "Reservation confirmed"
   },
+  "forms": {
+    "yes": "Yes",
+    "no": "No",
+    "optional": "optional",
+    "your_answers": "Your answers",
+    "select_one": "Select one",
+    "questions_changed": "This form changed while you were filling it in. Check your answers below, then send it again.",
+    "answer_required": "This question needs an answer.",
+    "name": "Name",
+    "email": "Email",
+    "phone": "Phone",
+    "message": "Message",
+    "anything_else": "Anything else we should know?",
+    "send": "Send",
+    "sending": "Sending…",
+    "send_failed": "Unable to send right now.",
+    "default_title": "Send a message",
+    "legal_consent": "I understand that submitting this form does not create an attorney-client relationship and agree to be contacted about this message.",
+    "book_instead": "Prefer a scheduled visit?",
+    "book_time": "Book a time"
+  },
   "payment": {
     "title": "Confirm and pay",
     "unavailable": "This payment is not available.",

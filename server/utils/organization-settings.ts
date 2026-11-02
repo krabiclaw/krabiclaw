@@ -19,6 +19,8 @@ import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation } from '~
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { organizationAdapter } from '~/server/utils/member-access'
 import { linkedAccountOwner, type CloudflareEnv } from '~/server/utils/auth'
+import { prepareFormQuestionsWrite, readFormQuestions } from '~/server/domain/form-questions'
+import { formQuestionsRevision, type FormQuestion } from '~/shared/form-questions'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
 type SetupEnv = Parameters<typeof createSystemSubdomain>[0]
@@ -199,6 +201,8 @@ export async function loadSettingsPayload(
     catering_email: siteConfig.catering_email || '',
     careers_email: siteConfig.careers_email || '',
     google_analytics_measurement_id: siteConfig.google_analytics_measurement_id || '',
+    // The inquiry form's own questions, and the revision a write or a form names.
+    ...await (async () => { const questions = await readFormQuestions(db, { kind: 'inquiry', organizationId }); return { inquiry_questions: questions, inquiry_questions_revision: formQuestionsRevision(questions) } })(),
     integrations: await integrationsSummary(db, env, organizationId, await listIntegrations(db, organizationId), JSON.parse(updatedOrganization.locations_json) as IntegrationLocation[]),
     created_at: updatedOrganization.created_at,
     updated_at: updatedOrganization.updated_at,
@@ -298,6 +302,7 @@ async function attemptOrganizationUpdate(
   const params: Array<string | null> = []
   // Extra WHERE terms the UPDATE must still satisfy at the moment it runs.
   const guards: string[] = []
+  const guardParams: string[] = []
   const organizationMedia = updates.media
 
   const settingsPatch: Record<string, unknown> = {}
@@ -309,6 +314,15 @@ async function attemptOrganizationUpdate(
   // it (json_patch deletes a key patched with null), returning to the template's.
   if (updates.palette !== undefined) settingsPatch.config = { ...(settingsPatch.config as Record<string, unknown> | undefined), palette: updates.palette }
   if (updates.address_visibility !== undefined) settingsPatch.compliance = { address_visibility: updates.address_visibility }
+  // The inquiry questions are replaced whole, and only over the list the caller read.
+  let inquiryQuestions: FormQuestion[] | null = null
+  if (updates.inquiry_questions !== undefined) {
+    const current = await readFormQuestions(db, { kind: 'inquiry', organizationId })
+    inquiryQuestions = prepareFormQuestionsWrite(current, { questions: updates.inquiry_questions, expectedRevision: updates.expected_inquiry_questions_revision })
+    settingsPatch.inquiry = { questions: inquiryQuestions }
+    guards.push("COALESCE(json_extract(settings_json, '$.inquiry.questions'), '[]') = json(?)")
+    guardParams.push(JSON.stringify(current))
+  }
   if (updates.name !== undefined) {
     setParts.push('name = ?', 'subdomain = ?')
     params.push(updates.name, subdomain)
@@ -427,7 +441,7 @@ async function attemptOrganizationUpdate(
     SET ${setParts.join(', ')}
     WHERE id = ?${guards.map(guard => ` AND ${guard}`).join('')}
   `,
-    values: [...params, organizationId],
+    values: [...params, organizationId, ...guardParams],
   }
 
   // A guard that matched nothing means the row no longer answers to this
@@ -451,9 +465,16 @@ async function attemptOrganizationUpdate(
     }
   }
 
+  // A guarded question write that lost the race changed nothing; saying it saved would hide that.
+  if (inquiryQuestions !== null) {
+    const saved = await readFormQuestions(db, { kind: 'inquiry', organizationId })
+    if (formQuestionsRevision(saved) !== formQuestionsRevision(inquiryQuestions)) return { status: 409, data: { error: 'The inquiry questions changed before saving. Read them again.', code: 'questions_changed' } }
+  }
+
   // A status change adds or removes this site's indexed content. Typography,
   // colors, recipe tokens and announcements affect only its public resource and HTML caches.
-  if (updates.status !== undefined || updates.address_visibility !== undefined) {
+  // The inquiry form's questions are part of every public form that renders it.
+  if (updates.status !== undefined || updates.address_visibility !== undefined || updates.inquiry_questions !== undefined) {
     await purgePublicResourceCacheNow(env, organizationId)
   } else if (
     updates.font_preset !== undefined ||

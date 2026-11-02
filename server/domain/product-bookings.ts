@@ -27,6 +27,8 @@ import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { isRecord } from '~/server/utils/type-guards'
 import { pushStayHoldNights, quoteStay, readPublicStayHome, type StayQuote } from '~/server/domain/stays'
 import { requireChannelPush } from '~/server/integrations/channex/ari'
+import { acceptFormAnswers } from '~/server/domain/form-questions'
+import { formAnswersFingerprint } from '~/shared/form-questions'
 
 export interface BookingCreationContext {
   organizationId: string
@@ -122,7 +124,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   const idempotencyKey = operator?.idempotencyKey ?? (typeof body.idempotency_key === 'string' ? body.idempotency_key.trim() : '')
   if (!idempotencyKey || idempotencyKey.length > 200) return creationResult({ error: 'A stable booking request key is required' }, { status: 400 })
   const threadId = await hashIdentifier(JSON.stringify(operator ? [organizationId, idempotencyKey] : ['website-booking', organizationId, idempotencyKey]))
-  const fingerprint = await hashIdentifier(JSON.stringify({ slug, sessionId, requestedVariantId, partySize, guestName, guestEmail, phone: normalizedGuestPhone, notes, source: operator?.source ?? 'website', externalReference: operator?.externalReference ?? null, guestAcknowledgement: operator?.guestAcknowledgement ?? true }))
+  const fingerprint = await hashIdentifier(JSON.stringify({ slug, sessionId, requestedVariantId, partySize, guestName, guestEmail, phone: normalizedGuestPhone, notes, answers: formAnswersFingerprint(body.answers), source: operator?.source ?? 'website', externalReference: operator?.externalReference ?? null, guestAcknowledgement: operator?.guestAcknowledgement ?? true }))
   const replay = async () => {
     const existing = await queryFirst<{ id: string; status: string; fingerprint: string | null; completed: number | null; creation_status: string | null; product_session_id: string; product_variant_id: string; party_size: number }>(db, `SELECT b.id, b.status, b.product_session_id, b.product_variant_id, b.party_size, json_extract(r.payload_json, '$.provenance.fingerprint') AS fingerprint, json_extract(r.payload_json, '$.provenance.followups_completed') AS completed, json_extract(r.payload_json, '$.provenance.creation_status') AS creation_status FROM bookings b JOIN requests r ON r.id = b.request_id WHERE b.organization_id = ? AND r.id = ?`, [organizationId, threadId])
     if (!existing) return null
@@ -182,6 +184,9 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   `, [organizationId, slug])
   if (!product) return creationResult({ error: 'Product not found' }, { status: 404 })
   if (!operator && product.order_url) return creationResult({ error: 'Book this product on its configured external website.', external_url: product.order_url }, { status: 409 })
+  // The answers are checked and frozen here, before any seat or payment: a
+  // checkout's thread carries them, and capture uses what was accepted now.
+  const answers = await acceptFormAnswers(db, { kind: 'booking', organizationId, productId: product.id }, { locale, answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })
 
   const session = await queryFirst<{ id: string; location_id: string | null; starts_at: string; ends_at: string; timezone: string }>(db, `
     SELECT s.id, s.location_id, s.starts_at, s.ends_at, s.timezone
@@ -257,7 +262,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   const userId = operator ? null : await ensureInteractionUser(event, env)
 
   const now = new Date().toISOString()
-  const payload = threadPayloadForGuest({ name: guestName, email: guestEmail, phone: normalizedGuestPhone, locale, notes, ipHash })
+  const payload = threadPayloadForGuest({ name: guestName, email: guestEmail, phone: normalizedGuestPhone, locale, notes, ipHash, answers })
   payload.provenance = { source: operator?.source ?? 'website', external_reference: operator?.externalReference ?? null, actor_user_id: operator?.userId ?? null,
     idempotency_key: idempotencyKey, fingerprint, guest_acknowledgement: operator?.guestAcknowledgement ?? true,
     creation_kind: requiresPayment ? 'checkout' : 'ordinary', creation_status: config.confirmation_mode === 'review' ? 'pending' : 'confirmed', followups_completed: false }
@@ -415,11 +420,15 @@ export async function createStayBooking(event: H3Event, context: { organizationI
 
   const home = await readPublicStayHome(db, organizationId, slug)
   const request = { product_id: home.product_id, check_in_date: body.check_in_date, check_out_date: body.check_out_date, adults: body.adults, children: body.children ?? 0, infants: body.infants ?? 0 }
-  const guest = { name: guestName, email: guestEmail, phone, notes }
-  const fingerprint = await hashIdentifier(JSON.stringify({ slug, ...request, guest }))
+  const fingerprint = await hashIdentifier(JSON.stringify({ slug, ...request, guest: { name: guestName, email: guestEmail, phone, notes }, answers: formAnswersFingerprint(body.answers) }))
 
   if (!env.STRIPE_SECRET_KEY || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) stayBookingError(503, 'payments_unavailable', 'Payments provider configuration is incomplete', 'payments')
   const retrying = await queryFirst(db, 'SELECT 1 FROM payment_attempts a JOIN payments p ON p.id = a.payment_id WHERE a.idempotency_key = ? AND p.organization_id = ?', [`checkout:${organizationId}:${idempotencyKey}`, organizationId])
+  // A new checkout checks and freezes the answers with the purchase; a retry is
+  // held to the purchase it froze, answers included, and does not read the
+  // questions again (createPaymentCheckout reads `guest` only for a new checkout).
+  const answers = retrying ? [] : await acceptFormAnswers(db, { kind: 'stay', organizationId, productId: home.product_id }, { locale: typeof body.locale === 'string' ? body.locale : await getSourceLocale(db, organizationId), answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })
+  const guest = { name: guestName, email: guestEmail, phone, notes, answers }
   // The quote's refusals name the rule a guest's choice breaks; they come before rate limits and payment setup.
   const quoted: StayQuote | null = retrying ? null : await quoteStay(db, organizationId, home, request)
   const quote = async () => quoted ?? await quoteStay(db, organizationId, home, request)

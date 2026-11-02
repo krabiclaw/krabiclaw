@@ -2321,7 +2321,7 @@ async function saveProductLocalization(locale: string, submitted: Record<string,
   if (!row) throw new Error(`The ${itemLabel.value.toLowerCase()} is unavailable.`)
   const state = productLocalizationState
   if (!state || state.productId !== row.id || state.locale !== locale) throw new Error('Choose the language again before saving.')
-  const values = Object.fromEntries(['name', 'description', 'marketing_features', 'unit_label', 'details']
+  const values = Object.fromEntries(['name', 'description', 'marketing_features', 'unit_label', 'details', 'questions']
     .filter(key => Object.hasOwn(state.values, key)).map(key => [key, structuredClone(state.values[key])]))
   const details = isRecord(values.details) ? values.details : {}
   // Only the displayed fields are changed. The resource writer replaces the

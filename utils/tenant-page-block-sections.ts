@@ -55,6 +55,7 @@ const SECTION_PRESENTATION: Record<string, { label: string; icon?: string }> = {
   posts: { label: 'Posts', icon: 'i-lucide-megaphone' },
   video: { label: 'Video', icon: 'i-lucide-video' },
   search: { label: 'Search results', icon: 'i-lucide-search' },
+  booking: { label: 'Booking', icon: 'i-lucide-calendar-check' },
 }
 
 const COLLECTIONS = new Set<TenantPageBlockCollection>(['items', 'buttons', 'steps', 'tiers'])

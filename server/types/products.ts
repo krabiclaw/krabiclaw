@@ -64,7 +64,7 @@ export interface Collection {
 }
 
 /** What generating this product's occurrences starts from. Sessions keep their own. */
-export type ProductBookingConfig = Pick<import('~/server/utils/availability').ProductBookingConfigRecord, 'duration_minutes' | 'default_capacity' | 'confirmation_mode' | 'online_payment_required' | 'held_online' | 'scheduling_mode' | 'assigned_member_id' | 'assigned_team_id'>
+export type ProductBookingConfig = Pick<import('~/server/utils/availability').ProductBookingConfigRecord, 'duration_minutes' | 'default_capacity' | 'confirmation_mode' | 'online_payment_required' | 'held_online' | 'scheduling_mode' | 'assigned_member_id' | 'assigned_team_id' | 'questions' | 'questions_revision'>
 
 /**
  * A place to stay: the one location it is at and its stay settings. Times are
@@ -114,11 +114,14 @@ export interface ProductStayConfig {
   assigned_team_id: string | null
   /** Whether the home is live, so billed: active at its active location, and published or syncing with Airbnb. Read only. */
   live: boolean
+  /** The host's own questions asked with each direct stay, and the revision a form built from them carries. */
+  questions: import('~/shared/form-questions').FormQuestion[]
+  questions_revision: string
 }
 
 /** What a home is and offers; unsaid when a home is created without them. */
 export type StayListingField = 'property_type_group' | 'property_type' | 'listing_type' | 'total_floors' | 'listing_floor' | 'year_built' | 'property_size' | 'property_size_unit' | 'bedrooms' | 'beds' | 'bathrooms' | 'amenities' | 'amenity_answers' | 'cancellation_policy' | 'long_term_cancellation_policy'
-export type ProductStayConfigInput = Omit<ProductStayConfig, StayListingField | 'photo_rooms' | 'accessibility' | 'check_in_end_time' | 'calendar_rules' | 'live'> & Partial<Pick<ProductStayConfig, Exclude<StayListingField, 'amenity_answers'> | 'check_in_end_time' | 'calendar_rules'>> & { amenity_answers?: import('~/shared/stay-listing').StayAmenityAnswerPatch[] }
+export type ProductStayConfigInput = Omit<ProductStayConfig, StayListingField | 'photo_rooms' | 'accessibility' | 'check_in_end_time' | 'calendar_rules' | 'live' | 'questions' | 'questions_revision'> & Partial<Pick<ProductStayConfig, Exclude<StayListingField, 'amenity_answers'> | 'check_in_end_time' | 'calendar_rules'>> & { amenity_answers?: import('~/shared/stay-listing').StayAmenityAnswerPatch[] }
 
 /** Who looks after a product: workspace state the public site never carries. */
 export type StaffAssignment = 'assigned_member_id' | 'assigned_team_id'
@@ -240,7 +243,9 @@ export type UpdateProductInput = Partial<Omit<CreateProductInput, 'source' | 'va
   /** The Product updated_at from the caller's read; a stale snapshot refuses the entire edit. */
   expected_updated_at?: string
   /** Stay settings to change. The location a home is at is fixed when it is created. */
-  stay?: Partial<Omit<ProductStayConfig, 'location_id' | 'photo_rooms' | 'amenity_answers' | 'accessibility'>> & { amenity_answers?: import('~/shared/stay-listing').StayAmenityAnswerPatch[] }
+  stay?: Partial<Omit<ProductStayConfig, 'location_id' | 'photo_rooms' | 'amenity_answers' | 'accessibility' | 'questions' | 'questions_revision'>> & { amenity_answers?: import('~/shared/stay-listing').StayAmenityAnswerPatch[]
+    /** The complete replacement question list, sent with the revision it replaces. */
+    questions?: unknown; expected_questions_revision?: string }
   variants?: ProductVariantPatchInput[]
   /** Merge preserves unmentioned variants. Replace removes variants omitted from the supplied list. */
   variants_mode?: 'merge' | 'replace'

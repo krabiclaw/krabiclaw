@@ -122,6 +122,8 @@ export interface PublicPagePayload {
   qaList: ApiRecord[]
   blogPost: ApiRecord | null
   reservationPolicyByLocation: Record<string, RenderedBookingPolicySummary | null>
+  /** Each location's own reservation questions in the page's language, and the revision a reservation names. */
+  reservationQuestionsByLocation: Record<string, { questions: import('~/shared/form-questions').FormQuestion[]; questions_revision: string } | null>
   products: Product[]
   collections: Collection[]
   localeRepresentations: PublicLocaleRepresentation[]
@@ -209,6 +211,8 @@ export const isPublicPagePayload = (
   && (value.blogPost === null || isRecord(value.blogPost))
   && isRecord(value.reservationPolicyByLocation)
   && Object.values(value.reservationPolicyByLocation).every(item => item === null || isRecord(item))
+  && isRecord(value.reservationQuestionsByLocation)
+  && Object.values(value.reservationQuestionsByLocation).every(item => item === null || (isRecord(item) && Array.isArray(item.questions) && typeof item.questions_revision === 'string'))
   && Array.isArray(value.products)
   && value.products.every(isPublicProduct)
   && Array.isArray(value.collections)

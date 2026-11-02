@@ -1,3 +1,4 @@
+import { formQuestionLocalizationSchema, localizeFormQuestions } from '~/shared/form-questions'
 import { publicCacheRevision } from '~/server/utils/edge-cache'
 import { oncePerRequest } from '~/server/utils/request-scope'
 import { publicLocationIsProtected } from '~/shared/location-sharing'
@@ -705,6 +706,16 @@ async function loadPublicPageSource(
     ]),
   );
 
+  // Each location's reservation questions, worded in this page's language; their revision is the source's.
+  const reservationQuestionsByLocation = Object.fromEntries(
+    Array.from(reservationPolicies ?? [], ([locationId, config]) => {
+      if (!config) return [locationId, null]
+      const values = localizedLocale ? publicLocalizations.find(item => item.resourceType === 'business_location' && item.resourceId === locationId)?.values : undefined
+      const wording = values?.reservation_questions === undefined ? null : formQuestionLocalizationSchema.parse(values.reservation_questions)
+      return [locationId, { questions: localizeFormQuestions(config.questions, wording), questions_revision: config.questions_revision }]
+    }),
+  );
+
   // Shape full reviews (type A)
   const locationForAggregate = locationId
     ? ((locRows.results ?? []).find((l) => l.id === locationId) ?? null)
@@ -783,6 +794,7 @@ async function loadPublicPageSource(
     qaList,
     blogPost: requestedDatasets.has("blogPost") ? blogPost : null,
     reservationPolicyByLocation,
+    reservationQuestionsByLocation,
     localeRepresentations,
   };
   const payload = pagePayload;

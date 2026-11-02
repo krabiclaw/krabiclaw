@@ -86,6 +86,10 @@ export interface UpdateOrganizationSettingsRequest {
   canonical_url?: string | null
   robots?: string | null
   media?: Array<{ asset_id: string | null; slot: 'logo' | 'logo_dark' | 'favicon' | 'social_share' | 'announcement'; presentation?: LogoPresentation | null }>
+  /** The complete replacement list of the organization's own inquiry questions (shared/form-questions.ts). */
+  inquiry_questions?: unknown
+  /** The inquiry questions revision the caller read; required with inquiry_questions. */
+  expected_inquiry_questions_revision?: string
 }
 
 export interface LaunchReadiness {

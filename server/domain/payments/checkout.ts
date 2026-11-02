@@ -9,6 +9,7 @@ import { HTTPError } from 'nitro'
 import { execute, executeBatch, queryAll, queryFirst, type DbClient, type BatchQuery } from '~/server/db'
 import { assertPriceShape, PRICE_TAX_BEHAVIORS, selectPrice, type Price } from '~/shared/prices'
 import { isRecord } from '~/server/utils/type-guards'
+import { formAnswerSnapshotsSchema } from '~/shared/form-questions'
 import { sessionAllocationPredicate } from '~/server/utils/availability'
 import { paymentsStripe, requireStripeCheckoutAcceptance, type StripeConnectedAccount } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -59,6 +60,8 @@ export function isStayPurchase(value: unknown): value is StayPurchase {
     && (STAY_BOOKED_POLICIES as readonly unknown[]).includes(value.cancellation_policy)
     && typeof guest.name === 'string' && !!guest.name.trim() && typeof guest.email === 'string'
     && (guest.phone === null || typeof guest.phone === 'string') && (guest.notes === null || typeof guest.notes === 'string')
+    // A purchase frozen before homes asked questions carries no answers, and none were asked.
+    && (guest.answers === undefined || formAnswerSnapshotsSchema.safeParse(guest.answers).success)
 }
 /** The amount the buyer was shown and confirmed on the site, kept on the attempt until Stripe answers. */
 export interface PaymentReview { payment_method_id: string; subtotal: number; surcharge: number; total: number; reviewed_at: string }

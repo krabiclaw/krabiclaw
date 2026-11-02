@@ -8,6 +8,7 @@ import { recordBookingCancelled } from '~/server/domain/booking-analytics'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
+import { formAnswerSnapshotsSchema } from '~/shared/form-questions'
 
 /**
  * The inbox.
@@ -40,6 +41,9 @@ const threadPayload = z.object({
   guest,
   party_size_is_minimum: z.boolean(),
   notes: z.string().nullable(),
+  // Answers to the configured booking or reservation questions, worded as the guest read them.
+  // A thread from before tenants could ask questions answered none.
+  answers: formAnswerSnapshotsSchema.default([]),
   ip_hash: z.string().nullable(),
   cancellation: z.object({ token_hash: z.string().nullable(), expires_at: z.string().nullable(), used_at: z.string().nullable() }),
 })
@@ -58,6 +62,10 @@ export const guestRequestSchema = z.discriminatedUnion('kind', [
     // Where the message came from, when a form or ChatGPT escalation says so.
     source: z.string().nullable().optional(), route_context: z.string().nullable().optional(),
     suggested_summary: z.string().nullable().optional(), agent_metadata: z.unknown().optional(),
+    // Answers to the organization's inquiry questions; a message may be empty when they say it all.
+    answers: formAnswerSnapshotsSchema.default([]),
+    // A keyed submission's replay record: the same key and details return this thread.
+    submission: z.object({ idempotency_key: z.string(), fingerprint: z.string(), actor_user_id: z.string().nullable(), source: z.string(), followups_completed: z.boolean() }).optional(),
   }) }),
   threadScope.extend({ kind: z.literal('reservation'), payload: threadPayload.extend({ guest: guest.extend({ phone: z.string() }) }) }),
   threadScope.extend({ kind: z.literal('booking'), payload: threadPayload }),
@@ -300,7 +308,7 @@ export function stayThreadQueries(input: { organizationId: string; stayId: strin
   }, publicResourceCacheInvalidationQuery(input.organizationId, 'guest-thread-create')]
 }
 
-interface GuestThreadInput { name: string; email: string; phone?: string | null; locale?: string; notes?: string | null; ipHash?: string | null; partySizeIsMinimum?: boolean }
+interface GuestThreadInput { name: string; email: string; phone?: string | null; locale?: string; notes?: string | null; ipHash?: string | null; partySizeIsMinimum?: boolean; answers?: import('~/shared/form-questions').FormAnswerSnapshot[] }
 export function threadPayloadForGuest(input: GuestThreadInput & { phone: string }): ThreadPayload & { guest: { phone: string } }
 export function threadPayloadForGuest(input: GuestThreadInput): ThreadPayload
 export function threadPayloadForGuest(input: GuestThreadInput): ThreadPayload {
@@ -308,6 +316,7 @@ export function threadPayloadForGuest(input: GuestThreadInput): ThreadPayload {
     guest: { name: input.name, email: input.email, phone: input.phone ?? null, ...(input.locale === undefined ? {} : { locale: input.locale }) },
     notes: input.notes ?? null, ip_hash: input.ipHash ?? null,
     party_size_is_minimum: input.partySizeIsMinimum ?? false,
+    answers: input.answers ?? [],
     cancellation: { token_hash: null, expires_at: null, used_at: null },
   }
 }

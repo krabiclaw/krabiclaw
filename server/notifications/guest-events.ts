@@ -1,6 +1,7 @@
 import type { NotificationFact, NotificationMessage } from './messages'
 import { platformLocale } from '~/shared/platform-locales'
 import { formatPhone } from '~/utils/phone'
+import { formatFormAnswer, type FormAnswerSnapshot } from '~/shared/form-questions'
 
 /**
  * Guest-facing and account mail. Email only: a guest has no account, no
@@ -279,10 +280,14 @@ export function guestContactReceivedMessage(input: {
   subject: string | null
   productTitle: string | null
   message: string
+  /** The guest's answers to the inquiry questions, in the wording they answered. */
+  answers?: FormAnswerSnapshot[]
   consentAcknowledged: boolean
 }): NotificationMessage {
   const locale = guestLocale(input)
   const labels = locale.messages
+  const words = { yes: labels['forms.yes']!, no: labels['forms.no']! }
+  const answered = (input.answers ?? []).map(answer => `${answer.label}: ${formatFormAnswer(answer, words)}`).join('\n')
   return {
     locale: locale.locale,
     title: labels['site.contact_page.confirmed_title']!,
@@ -293,7 +298,10 @@ export function guestContactReceivedMessage(input: {
       fact('productTitle', labels['booking.service']!, input.productTitle),
       input.consentAcknowledged ? fact('consent', labels['legal.privacy']!, '✓') : null,
     ),
-    sections: [{ title: labels['site.contact_page.your_message']!, body: input.message }],
+    sections: [
+      ...(input.message ? [{ title: labels['site.contact_page.your_message']!, body: input.message }] : []),
+      ...(answered ? [{ title: labels['forms.your_answers']!, body: answered }] : []),
+    ],
     emailPurpose: 'transactional',
     emailReason: labels['email.reason.contact']!.replace('{organization}', input.organizationName),
     category: 'messages',
