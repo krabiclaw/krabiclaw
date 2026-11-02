@@ -134,6 +134,13 @@ const router = useRouter()
 watch(
   (): [RouteLocationRaw | null | undefined, RouteLevelMode, unknown] => [props.create ?? (pane.value ? props.autoOpen : null), level.mode.value, route.query.editMode],
   ([target, mode, editMode]) => {
+    if (mode === 'index' && !pane.value && import.meta.client) {
+      const heading = document.getElementById(`dashboard-panel-${String(instance?.props.id ?? '')}`)?.querySelector<HTMLElement>('h1')
+      if (heading) {
+        heading.tabIndex = -1
+        heading.focus({ preventScroll: true })
+      }
+    }
     if (!target || mode !== 'index' || editMode) return
     if (router.currentRoute.value.path !== level.path.value) return
     if (router.resolve(target).path === level.path.value) return
