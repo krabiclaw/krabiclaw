@@ -1,7 +1,8 @@
 <template>
   <div class="flex min-h-0 flex-1 flex-col" :data-team-thread-list-hydrated="hydrated ? 'true' : 'false'">
-    <header class="py-3" :class="dashboardGutterClass">
-      <UButton color="neutral" :variant="unreadOnly ? 'solid' : 'outline'" class="h-10 rounded-full px-4 text-sm font-normal" :aria-pressed="unreadOnly" @click="router.replace({ path: route.path, query: { view: 'team', unread: unreadOnly ? undefined : '1' } })">Unread</UButton>
+    <header class="flex shrink-0 items-center gap-2 py-3 flex-wrap" :class="dashboardGutterClass">
+      <slot name="filters" />
+      <UButton color="neutral" :variant="unreadOnly ? 'solid' : 'outline'" class="h-10 rounded-full px-4 text-sm font-normal shrink-0" :aria-pressed="unreadOnly" @click="router.replace({ path: route.path, query: { view: 'team', unread: unreadOnly ? undefined : '1' } })">Unread</UButton>
     </header>
     <div class="min-h-0 flex-1 overflow-y-auto" :class="dashboardGutterClass">
       <UAlert v-if="error" class="mb-4" color="error" title="Team conversations could not be loaded" :description="getErrorMessage(error, 'Team conversation request failed')" />

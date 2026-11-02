@@ -6,11 +6,16 @@
       </UDropdownMenu>
       <UButton v-if="canSendTeam" :to="{ path: `${listPath}/new`, query: { view: 'team' } }" icon="i-lucide-square-pen" color="neutral" variant="ghost" aria-label="New team conversation" />
     </template>
-    <div v-if="!personalScope && canReadTeam && canReadGuests" class="pb-2 pt-3" :class="dashboardGutterClass">
-      <DashboardFilterPills v-model="messageView" id="messages-view" label="Conversations" :items="[{ value: 'guests', label: dashboard.organization.value?.vertical === 'service' ? 'Clients' : 'Guests' }, { value: 'team', label: 'Team' }]" />
-    </div>
-    <TeamThreadList v-if="teamScope && canReadTeam" @first="firstThread = $event" />
-    <GuestThreadList v-else-if="personalScope || canReadGuests" :personal-scope="personalScope" @first="firstThread = $event" />
+    <TeamThreadList v-if="teamScope && canReadTeam" @first="firstThread = $event">
+      <template #filters>
+        <DashboardFilterPills v-if="!personalScope && canReadTeam && canReadGuests" id="messages-view" v-model="messageView" label="Conversations" :items="[{ value: 'guests', label: dashboard.organization.value?.vertical === 'service' ? 'Clients' : 'Guests' }, { value: 'team', label: 'Team' }]" />
+      </template>
+    </TeamThreadList>
+    <GuestThreadList v-else-if="personalScope || canReadGuests" :personal-scope="personalScope" @first="firstThread = $event">
+      <template #filters>
+        <DashboardFilterPills v-if="!personalScope && canReadTeam && canReadGuests" id="messages-view" v-model="messageView" label="Conversations" :items="[{ value: 'guests', label: dashboard.organization.value?.vertical === 'service' ? 'Clients' : 'Guests' }, { value: 'team', label: 'Team' }]" />
+      </template>
+    </GuestThreadList>
     <UAlert v-else class="m-6" color="error" title="Messages are unavailable" description="Your membership does not allow access to conversations." />
     <UAlert v-if="accessError" class="m-6" color="error" title="Conversation access changed" :description="accessError" />
   </DashboardIndexPanel>
@@ -20,7 +25,6 @@
 import type { RouteLocationRaw } from 'vue-router'
 import GuestThreadList from '~/lib/components/workspace/messages/GuestThreadList.vue'
 import TeamThreadList from '~/lib/components/workspace/messages/TeamThreadList.vue'
-import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
 import type { TeamThread } from '~/server/domain/team-messages'

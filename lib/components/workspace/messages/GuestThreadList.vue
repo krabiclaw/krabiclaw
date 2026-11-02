@@ -13,7 +13,8 @@
         Airbnb's own control: the kind is a dropdown labelled by what is
         selected, and Unread sits beside it as a toggle. Both are 40px pills.
       -->
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 flex-wrap">
+        <slot name="filters" />
         <UDropdownMenu
           :items="typeMenuItems"
           :content="{ align: 'start' }"
