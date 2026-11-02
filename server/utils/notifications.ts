@@ -630,12 +630,13 @@ async function getOpeningThreadContext(
   db: DbClient,
   submissionType: 'contact' | 'reservation' | 'booking' | 'stay',
   submissionId: string,
-): Promise<{ guestThreadId: string; sourceEntryId: string }> {
+): Promise<{ guestThreadId: string; sourceEntryId: string; answers: FormAnswerSnapshot[] }> {
   const thread = await getGuestRequest(db, submissionId, undefined, submissionType)
   if (!thread) throw new Error('Submission notification has no canonical request')
   const entry = await findEntryByDedupeKey(db, `request:${submissionId}:submission`)
   if (!entry) throw new Error('Submission notification has no opening activity entry')
-  return { guestThreadId: thread.id, sourceEntryId: entry.id }
+  // A stay's answers are on the stay, not its conversation; its sender reads them there.
+  return { guestThreadId: thread.id, sourceEntryId: entry.id, answers: 'answers' in thread.payload ? thread.payload.answers : [] }
 }
 
 type DeliveryAnchor = { guestThreadId: string | null; sourceEntryId: string }
@@ -981,6 +982,7 @@ export async function notifyReservationCreated(
     locationName: opts.locationName ?? null, organizationName: restaurant,
     notes: opts.requests ?? null, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
     paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, 'en-US') : null,
+    answers: threadContext.answers,
   })
   const guest = await guestPresentation(db, opts)
   const guestMessage = guestReservationReceivedMessage({
@@ -1325,6 +1327,7 @@ export async function notifyBookingCreated(
     presentation,
     notes: opts.notes ?? null, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
     paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, 'en-US') : null,
+    answers: threadContext.answers,
   })
   const guest = await guestPresentation(db, opts)
   const copy = getVerticalCopy(opts.vertical, guest.locale)
@@ -1517,7 +1520,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
   const ownerInput = {
     guestName: stay.guest_name, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name, channel: null,
     checkIn: when(stay.check_in_date, home.check_in_time, 'en-US'), checkOut: when(stay.check_out_date, home.check_out_time, 'en-US'), arrival: audience.arrival,
-    nights: String(nights), guests: party, notes: stay.notes, overlap: false,
+    nights: String(nights), guests: party, notes: stay.notes, answers: stay.answers, overlap: false,
     total: formatMinorAmount(stay.total_minor, stay.currency, 'en-US'), paid: formatMinorAmount(paid.amount, paid.currency, 'en-US'),
     balance: stay.total_minor > paid.amount ? formatMinorAmount(stay.total_minor - paid.amount, stay.currency, 'en-US') : null,
     organizationName: studio, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,

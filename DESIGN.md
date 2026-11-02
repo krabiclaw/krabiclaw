@@ -915,8 +915,11 @@ tree, so where the same levels must render under a second parent, the
 `pages:extend` hook in `nuxt.config.ts` mounts them again: the same files, a
 second set of records with their own names. `build/booking-routes.ts` mounts a
 booking under its calendar day and the account's own record under its calendar
-day and Today. Nothing else is mounted twice: a page a Product owns is edited
-in Pages, and the Product links to it. The generated router, not the
+day and Today. `build/form-question-routes.ts` mounts a form's Questions,
+written once as Website › Inquiry form, beneath a product's Booking, a home and
+a location's reservation Availability, each as `questions`; the `formQuestions`
+meta names the record a mount edits. Nothing else is mounted twice: a page a
+Product owns is edited in Pages, and the Product links to it. The generated router, not the
 filesystem, is the complete tree.
 
 **A level on its way out reads the route it rendered for.** Nuxt keeps an

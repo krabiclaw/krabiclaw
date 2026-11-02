@@ -8,6 +8,7 @@
 import EditorNavigationList, {type EditorNavigationGroup} from '~/components/dashboard/EditorNavigationList.vue'
 import {useCalendarLocationEditor} from '~/composables/useCalendarLocationEditor'
 import {hoursSummary,noticeSummary,seatsSummary} from '~/shared/availability-settings'
+import {formQuestionsSummary} from '~/utils/form-question-editing'
 definePageMeta({layout:'dashboard',key:route=>String(route.query.locationId??'business')})
 const level=useRouteLevel(),route=useRoute(),router=useRouter()
 const organizationId=await useDashboardOrganizationId()
@@ -20,6 +21,8 @@ const groups=computed<EditorNavigationGroup[]>(()=>[
  { id: 'notice', icon: 'i-lucide-alarm-clock', label:'Advance notice',summary:noticeSummary(editor.reservationForm.value.advance_notice_minutes),to:to('notice')},
  { id: 'seats', icon: 'i-lucide-armchair', label:'Seats per time slot',summary:seatsSummary(editor.reservationForm.value.slot_capacity),to:to('seats')},
  { id: 'deposit', icon: 'i-lucide-wallet', label:'Reservation deposit',summary:editor.reservationForm.value.deposit_required ? 'Required' : 'Not required',to:to('deposit')},
+ // Questions belong to the reservation policy, so a location that takes no reservations asks none.
+ ...(editor.reservationQuestions.value?[{ id: 'questions', icon: 'i-lucide-message-square-text', label:'Questions',summary:formQuestionsSummary(editor.reservationQuestions.value),to:to('questions')}]:[]),
  ]}]:[]),
  {id:'personal',items:[{ id: 'your-availability', icon: 'i-lucide-calendar-clock', label:'Profile & availability',to:`/dashboard/account/profile/calendar/${encodeURIComponent(organizationId)}`}]},
  {id:'connect',items:[{id:'google-calendar',label:'Google Calendar',lead:{icon:'i-logos-google-calendar'},to:to('google-calendar')}]},

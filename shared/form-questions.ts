@@ -38,8 +38,11 @@ const labelSchema = (max: number) => z.string().trim().min(1).max(max)
 
 export const formQuestionChoiceSchema = z.object({ id: idSchema, label: labelSchema(FORM_QUESTION_LIMITS.choiceLabel) }).strict()
 
+/** `new` is the segment that opens the editor's creation screen beside a form's questions, so no question is called it. */
+const RESERVED_QUESTION_IDS = ['new']
+
 export const formQuestionSchema = z.object({
-  id: idSchema,
+  id: idSchema.refine(id => !RESERVED_QUESTION_IDS.includes(id), 'new is reserved; choose another question ID'),
   label: labelSchema(FORM_QUESTION_LIMITS.label),
   type: z.enum(FORM_QUESTION_TYPES),
   required: z.boolean(),
@@ -122,7 +125,7 @@ function issueMessage(error: z.ZodError): { message: string; field: string } {
  */
 export function normalizeFormQuestionsInput(input: unknown): FormQuestion[] {
   if (!Array.isArray(input)) throw new FormQuestionDefinitionError('questions must be an array', 'questions')
-  const questionIds = new Set(input.flatMap(item => item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string' ? [(item as { id: string }).id] : []))
+  const questionIds = new Set([...RESERVED_QUESTION_IDS, ...input.flatMap(item => item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string' ? [(item as { id: string }).id] : [])])
   const prepared = input.map((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return item
     const question = { ...(item as Record<string, unknown>) }

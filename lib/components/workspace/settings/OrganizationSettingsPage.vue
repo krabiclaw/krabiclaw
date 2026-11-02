@@ -28,6 +28,8 @@ import type { CurrencyCode } from '~/shared/currencies'
 import type { OrganizationFontPreset } from '~/shared/organization-fonts'
 import type { SitePalette } from '~/shared/site-palette'
 import type { LogoPresentation } from '~/shared/media-placement-contract'
+import type { FormQuestion } from '~/shared/form-questions'
+import type { FormQuestionWrite } from '~/utils/form-question-editing'
 
 export interface OrganizationSettingsForm {
   name: string
@@ -78,6 +80,8 @@ export interface OrganizationSettingsResponse {
   canonical_url: string | null
   /** Null when the organization has no consultation settings, so no website booking to switch. */
   consultation_mode: 'native' | 'external_url' | 'native_disabled' | null
+  inquiry_questions: FormQuestion[]
+  inquiry_questions_revision: string
 }
 
 /**
@@ -105,6 +109,10 @@ export interface OrganizationSettingsEditor {
   logoUrl: (assetId: string | null) => string | null
   revert: () => void
   save: () => Promise<void>
+  /** The inquiry form's saved questions, or null until the settings have loaded. */
+  inquiryQuestions: ComputedRef<FormQuestion[] | null>
+  /** Replaces them over the revision last read, then keeps Website on the saved settings. Throws what the writer refused. */
+  saveInquiryQuestions: (questions: readonly FormQuestionWrite[]) => Promise<void>
 }
 
 export const organizationSettingsEditorKey = Symbol('organization-settings-editor') as InjectionKey<OrganizationSettingsEditor>
@@ -118,6 +126,7 @@ import { ORGANIZATION_FONT_OPTIONS, isOrganizationFontPreset, resolveOrganizatio
 import { parseSitePalette } from '~/shared/site-palette'
 import { getErrorMessage } from '~/utils/errors'
 import { ORIGINAL_LOGO_PRESENTATION } from '~/shared/media-placement-contract'
+import { formQuestionsSummary } from '~/utils/form-question-editing'
 
 const props = withDefaults(defineProps<{ surface?: 'brand' | 'settings' }>(), { surface: 'settings' })
 const surface = computed(() => props.surface)
@@ -148,6 +157,7 @@ const isSettingsResponse = (value: unknown): value is { success: boolean; settin
   && [value.settings.seo_title, value.settings.seo_description, value.settings.canonical_url].every(field => field === null || typeof field === 'string')
   && (value.settings.consultation_mode === null || value.settings.consultation_mode === 'native' || value.settings.consultation_mode === 'external_url' || value.settings.consultation_mode === 'native_disabled')
   && isOrganizationStatus(value.settings.status)
+  && Array.isArray(value.settings.inquiry_questions) && typeof value.settings.inquiry_questions_revision === 'string'
 function isOrganizationStatus(value: unknown): value is OrganizationStatus {
   return value === 'active' || value === 'inactive' || value === 'suspended'
 }
@@ -205,6 +215,7 @@ const settingsItems = computed<EditorNavigationItem[]>(() => [
   { id: 'status', label: 'Status', summary: loadedSettings.value ? STATUS_LABELS[loadedSettings.value.status] : 'Not set', to: `${settingsPath.value}/status` },
   { id: 'domains', label: 'Domains', summary: domainSummary.value, icon: 'i-lucide-globe-2', to: `${settingsPath.value}/domains` },
   { id: 'localization', label: 'Languages', summary: 'Languages the site is published in', icon: 'i-lucide-languages', to: `${settingsPath.value}/localization` },
+  { id: 'inquiry-form', label: 'Inquiry form', summary: loadedSettings.value ? formQuestionsSummary(loadedSettings.value.inquiry_questions) : 'Not set', icon: 'i-lucide-message-square-text', to: `${settingsPath.value}/inquiry-form` },
   { id: 'currency', label: 'Currency', summary: explicitSummary(loadedSettings.value?.default_currency), to: `${settingsPath.value}/currency` },
   ...(loadedSettings.value?.consultation_mode
     ? [{ id: 'booking', label: 'Schedule page', summary: CONSULTATION_MODE_SUMMARIES[loadedSettings.value.consultation_mode], icon: 'i-lucide-calendar-check', to: `${settingsPath.value}/booking` }]
@@ -402,6 +413,10 @@ async function saveCurrentEditor() {
     }
   } catch (error) { editorError.value = getErrorMessage(error, 'Failed to save this setting') } finally { saving.value = false }
 }
+async function saveInquiryQuestions(questions: readonly FormQuestionWrite[]) {
+  if (!loadedSettings.value) throw new Error('Read the website settings before editing the inquiry form.')
+  await patchSettings({ inquiry_questions: questions, expected_inquiry_questions_revision: loadedSettings.value.inquiry_questions_revision })
+}
 provide(organizationSettingsEditorKey, {
   form,
   organizationId,
@@ -420,5 +435,7 @@ provide(organizationSettingsEditorKey, {
   // A cancelled leaf puts the loaded settings back before it closes.
   revert: resetDraft,
   save: saveCurrentEditor,
+  inquiryQuestions: computed(() => loadedSettings.value?.inquiry_questions ?? null),
+  saveInquiryQuestions,
 })
 </script>

@@ -88,6 +88,7 @@
         <a v-if="detail?.guest_email" :href="`mailto:${detail.guest_email}`" class="mt-2 block w-fit break-all text-base text-highlighted underline underline-offset-4">{{ detail.guest_email }}</a>
       </UCard>
       <template v-if="detail">
+      <FormAnswersCard :answers="detail.answers" :title="personalScope ? 'Your answers' : undefined" />
       <UCard v-if="detail.notes" variant="record">
         <h3 class="text-base font-semibold text-highlighted">{{ personalScope ? 'Your requests' : 'Guest requests' }}</h3>
         <p class="mt-3 whitespace-pre-wrap text-base text-muted">{{ detail.notes }}</p>
@@ -219,6 +220,7 @@
 </template>
 
 <script setup lang="ts">
+import FormAnswersCard from '~/components/forms/FormAnswersCard.vue'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import { formatPhone } from '~/utils/phone'
 import StayArrivalGuideView from '~/components/booking/StayArrivalGuide.vue'

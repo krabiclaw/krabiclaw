@@ -26,6 +26,7 @@ import { parseOpeningHours, parseSpecialHours, type OpeningHours, type SpecialHo
 
 import type { Ref } from 'vue'
 import type { LocationReservationConfig, LocationReservationConfigPatch } from '~/server/utils/reservations'
+import type { FormQuestionWrite } from '~/utils/form-question-editing'
 import { getErrorMessage } from '~/utils/errors'
 import { coordinatesFailure } from '~/utils/location-map'
 import { parsePostalAddress, postalAddressFromAnswers, type PostalAddress } from '~/utils/postal-address'
@@ -431,6 +432,20 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     }
   }
 
+  /** Replaces the reservation form's questions over the revision last read, then re-reads the location. Throws what the writer refused. */
+  async function saveReservationQuestions(questions: readonly FormQuestionWrite[]) {
+    const requestedLocationId = locationId.value
+    const config = reservationConfig.value
+    if (!config) throw new Error('This location does not take reservations.')
+    await dashboardApi<{ success: true; config: LocationReservationConfig | null }>(
+      `/api/editor/organizations/${organizationId}/locations/${requestedLocationId}/reservation-config`,
+      { method: 'PUT', body: { questions, expected_questions_revision: config.questions_revision, expected_updated_at: config.updated_at }, validate: isReservationConfigResponse },
+    )
+    if (locationId.value !== requestedLocationId) return
+    await refreshLocationWorkspace()
+    await refreshNuxtData(`dashboard-location-overview:${organizationId}:${requestedLocationId}`)
+  }
+
   async function closeReservations() {
     const requestedLocationId = locationId.value
     closingReservations.value = true
@@ -568,6 +583,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     detailsForm, hoursForm, reservationForm, reservationConfigExists, closingReservations,
     navigationGroups, locationLocalizationFields, organizationLocalizationSettingsPath,
     revert: resetDraft, save: () => isNew.value ? newLocation.save() : saveCurrentEditor(), closeReservations,
+    reservationQuestions: computed(() => reservationConfig.value?.questions ?? null), saveReservationQuestions,
   }
 }
 </script>
