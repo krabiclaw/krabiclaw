@@ -95,7 +95,8 @@
         v-for="item in primaryNavItems"
         :key="item.key"
         :to="item.to"
-        class="flex flex-1 flex-col items-center justify-center gap-1 px-1 py-2 no-underline transition-colors"
+        prefetch
+        class="flex flex-1 flex-col items-center justify-center gap-1 px-1 py-2 no-underline transition active:scale-95 duration-150"
         :class="item.active ? 'text-primary' : 'text-dimmed hover:text-highlighted'"
         :aria-current="item.active ? 'page' : undefined"
       >
@@ -104,7 +105,8 @@
       </NuxtLink>
       <NuxtLink
         :to="menuPageTo"
-        class="flex flex-1 flex-col items-center justify-center gap-1 px-1 py-2 no-underline transition-colors"
+        prefetch
+        class="flex flex-1 flex-col items-center justify-center gap-1 px-1 py-2 no-underline transition active:scale-95 duration-150"
         :class="isMenuPageActive ? 'text-primary' : 'text-dimmed hover:text-highlighted'"
         :aria-current="isMenuPageActive ? 'page' : undefined"
         data-testid="dashboard-mobile-nav-menu-link"

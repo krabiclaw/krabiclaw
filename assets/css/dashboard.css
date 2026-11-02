@@ -9,7 +9,7 @@
    utility happened to be emitted from some other file. */
 @source "../../app.config.ts";
 @import "@nuxt/ui";
-@import "./font-presets.css";
+@import "./dashboard-fonts.css";
 
 /*
  * Dashboard responsive contract. Device categories follow Tailwind's own
@@ -73,4 +73,6 @@
     display: none;
   }
 }
+
+
 

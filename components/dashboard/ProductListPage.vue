@@ -41,8 +41,10 @@ const organizationId = await useDashboardOrganizationId()
 // One authorized organization read. Location narrows this projection by its
 // explicit product relationships, without dropping membership needed by editors.
 const catalog = useProductCatalog(organizationId, ref(null))
-await catalog.load
-const { locations, error: locationsError } = await useOrganizationLocations({ includeInactive: true })
+const [, { locations, error: locationsError }] = await Promise.all([
+  catalog.load,
+  useOrganizationLocations({ includeInactive: true }),
+])
 const { priceLabel } = useCatalogPrice(ref(null), locations)
 const loadError = computed(() => {
   const cause = catalog.error.value ?? locationsError.value
