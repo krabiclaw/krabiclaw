@@ -12,6 +12,7 @@
       content: 'h-[calc(100dvh-6rem)] max-h-[calc(100dvh-6rem)] rounded-t-2xl overflow-hidden',
     }"
     @update:open="(open) => { if (!open) cancel() }"
+    @animation-end="(open) => { if (!open) parent?.focus?.() }"
   >
     <template #content>
       <div ref="drawerTarget" class="flex min-h-0 flex-1 flex-col" />
@@ -137,13 +138,6 @@ function cancel() {
       void navigateTo(exitTo, { replace: true })
     }
   }
-  parent?.focus?.()
+  if (pane.value) parent?.focus?.()
 }
-
-// Discard unsaved changes when navigating away without an explicit dismissal (e.g. Android back gesture).
-onBeforeUnmount(() => {
-  if (!props.saving && !cancelled) {
-    emit('cancel')
-  }
-})
 </script>
