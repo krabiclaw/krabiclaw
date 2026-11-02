@@ -29,3 +29,38 @@ const currencyNames = new Intl.DisplayNames(['en'], { type: 'currency' })
 export const CURRENCY_OPTIONS: Array<{ label: string; value: CurrencyCode }> = [...ISO_CURRENCIES]
   .map(code => ({ label: `${currencyNames.of(code)} (${code})`, value: code }))
   .sort((a, b) => a.label.localeCompare(b.label, 'en'))
+
+/**
+ * The currency a country's businesses price in, used to propose an initial
+ * answer during onboarding from the country the owner entered. The owner
+ * confirms or changes it on the currency step.
+ */
+const COUNTRY_CURRENCIES: Readonly<Record<string, CurrencyCode>> = Object.freeze({
+  TH: 'THB',
+  US: 'USD',
+  GB: 'GBP',
+  JP: 'JPY',
+  AU: 'AUD',
+  CA: 'CAD',
+  SG: 'SGD',
+  HK: 'HKD',
+  MY: 'MYR',
+  ID: 'IDR',
+  PH: 'PHP',
+  VN: 'VND',
+  IN: 'INR',
+  NZ: 'NZD',
+  CH: 'CHF',
+  // The euro area, plus the microstates and territories that use the euro under
+  // monetary agreement.
+  AD: 'EUR', AT: 'EUR', BE: 'EUR', CY: 'EUR', DE: 'EUR', EE: 'EUR', ES: 'EUR',
+  FI: 'EUR', FR: 'EUR', GR: 'EUR', HR: 'EUR', IE: 'EUR', IT: 'EUR', LT: 'EUR',
+  LU: 'EUR', LV: 'EUR', MC: 'EUR', ME: 'EUR', MT: 'EUR', NL: 'EUR', PT: 'EUR',
+  SI: 'EUR', SK: 'EUR', SM: 'EUR', VA: 'EUR', XK: 'EUR',
+})
+
+/** The currency to propose for an ISO 3166-1 alpha-2 country, or null when there is none. */
+export function currencyForCountry(country: string | null | undefined): CurrencyCode | null {
+  if (typeof country !== 'string') return null
+  return COUNTRY_CURRENCIES[country.trim().toUpperCase()] ?? null
+}

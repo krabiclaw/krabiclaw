@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { currencyFractionDigits, isCurrencyCode } from '../../shared/currencies.ts'
+import { currencyForCountry, currencyFractionDigits, isCurrencyCode } from '../../shared/currencies.ts'
 import { ONBOARDING_STEPS, type OnboardingFlowState } from '../../composables/useOnboardingFlow.ts'
 
 const step = (id: string) => {
@@ -29,6 +29,16 @@ test('minor units follow Stripe’s API representation', () => {
   // Zero-decimal currencies Stripe still represents with two decimals.
   for (const code of ['ISK', 'UGX', 'HUF', 'TWD', 'USD', 'THB', 'IDR']) assert.equal(currencyFractionDigits(code), 2, code)
   assert.throws(() => currencyFractionDigits('XYZ'), /not an ISO 4217/)
+})
+
+test('proposes a default currency for known countries without restricting options', () => {
+  assert.equal(currencyForCountry('TH'), 'THB')
+  assert.equal(currencyForCountry('US'), 'USD')
+  assert.equal(currencyForCountry('GB'), 'GBP')
+  assert.equal(currencyForCountry('DE'), 'EUR')
+  assert.equal(currencyForCountry('JP'), 'JPY')
+  assert.equal(currencyForCountry('unknown'), null)
+  assert.equal(currencyForCountry(null), null)
 })
 
 test('the optional location step accepts authored partial addresses', () => {
