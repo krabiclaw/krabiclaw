@@ -1315,7 +1315,11 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
       const initialJobs = target.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all()
       target.exec(readFileSync(deltaPayload, 'utf8'))
       assert.deepEqual(target.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all(), initialJobs, 'the final delta applies without duplicate listing jobs or resetting their state')
-      for (const table of preservedTables) assert.deepEqual(target.prepare(`SELECT * FROM ${table} ORDER BY 1,2`).all(), recorded[table], `${table} keeps every recorded value`)
+      // A column added after v22 has its default; every value v22 recorded is kept.
+      for (const table of preservedTables) {
+        const columns = recorded[table]!.length ? Object.keys(recorded[table]![0] as Record<string, unknown>).map(column => `"${column}"`).join(', ') : '*'
+        assert.deepEqual(target.prepare(`SELECT ${columns} FROM ${table} ORDER BY 1,2`).all(), recorded[table], `${table} keeps every recorded value`)
+      }
       assert.deepEqual(target.pragma('foreign_key_check'), [])
 
       // The next copy is an ordinary current-epoch refresh, after delivery has made retry progress.
