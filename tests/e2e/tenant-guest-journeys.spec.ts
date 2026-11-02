@@ -320,17 +320,22 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
       params: { org: wheel.slug },
     })
     expect(persisted.status(), await persisted.text()).toBe(200)
-    expect((await persisted.json()).booking).toMatchObject({ guestName: 'Cancel Once', guestPhone: null })
+    const persistedBooking = (await persisted.json()).booking as { guestName: string; guestPhone: string | null; bookingDate: string }
+    expect(persistedBooking).toMatchObject({ guestName: 'Cancel Once', guestPhone: null })
     const threadURL = `${baseURL}/api/dashboard/organizations/${wheel.organizationId}/guest-threads/${body.booking_id}`
     const pendingThread = await request.get(threadURL)
     expect(pendingThread.status(), await pendingThread.text()).toBe(200)
     expect((await pendingThread.json() as { thread: GuestThreadDetailViewModel }).thread).toMatchObject({ id: body.booking_id, conversationState: 'needs_attention', resolvedAt: null })
     const todayBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
     expect(todayBefore.status(), await todayBefore.text()).toBe(200)
-    expect((await todayBefore.json() as TodayFeedPayload).cards.some(card => card.id === `attention:${body.booking_id}`)).toBe(false)
-    const upcomingBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug, range: 'upcoming' } })
-    expect(upcomingBefore.status(), await upcomingBefore.text()).toBe(200)
-    expect((await upcomingBefore.json() as TodayFeedPayload).cards.map(card => card.id)).toContain(`booking:${body.booking_id}`)
+    const todayBeforePayload = await todayBefore.json() as TodayFeedPayload
+    expect(todayBeforePayload.cards.some(card => card.id === `attention:${body.booking_id}`)).toBe(false)
+    const day = persistedBooking.bookingDate
+    const isUpcoming = day > todayBeforePayload.resolvedAt.slice(0, 10)
+    const scheduleParams = isUpcoming ? { org: wheel.slug, range: 'upcoming', from: day, to: day } : { org: wheel.slug }
+    const scheduleBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: scheduleParams })
+    expect(scheduleBefore.status(), await scheduleBefore.text()).toBe(200)
+    expect((await scheduleBefore.json() as TodayFeedPayload).cards.map(card => card.id)).toContain(`booking:${body.booking_id}`)
     const cancelURL = `${baseURL}/api/public/booking-requests/${body.booking_id}/cancel`
     const authHeaders = { ...headers, Authorization: `Bearer ${body.cancellation_token}` }
     const receiptURL = cancelURL.replace(/\/cancel$/, '')
@@ -351,9 +356,9 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect(thread).toMatchObject({ id: body.booking_id, conversationState: 'resolved', source: { operationalStatus: 'cancelled' } })
     expect(thread.resolvedAt).toEqual(expect.any(String))
     expect(thread.entries.filter(entry => entry.eventName === 'booking.cancel')).toHaveLength(1)
-    const upcomingAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug, range: 'upcoming' } })
-    expect(upcomingAfter.status(), await upcomingAfter.text()).toBe(200)
-    expect((await upcomingAfter.json() as TodayFeedPayload).cards.some(card => card.id === `booking:${body.booking_id}`)).toBe(false)
+    const scheduleAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: scheduleParams })
+    expect(scheduleAfter.status(), await scheduleAfter.text()).toBe(200)
+    expect((await scheduleAfter.json() as TodayFeedPayload).cards.some(card => card.id === `booking:${body.booking_id}`)).toBe(false)
     expect((await request.post(cancelURL, {
       headers: { ...headers, Authorization: 'Bearer invalid-cancellation-token' },
     })).status()).toBe(404)
