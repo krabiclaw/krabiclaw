@@ -19,7 +19,7 @@
   </UDrawer>
 
   <!-- Moving the panel preserves its fields, form state and draft across lg. -->
-  <Teleport :to="drawerTarget!" :disabled="pane || !drawerTarget">
+  <Teleport :to="drawerTarget ?? pendingDrawerTarget" :disabled="pane">
   <UDashboardPanel :id="id" :class="!pane && !drawerTarget ? 'invisible' : undefined" :ui="{ root: 'min-h-0 lg:min-h-full pb-[env(safe-area-inset-bottom)] lg:pb-0' }">
     <template #header>
       <!--
@@ -112,20 +112,30 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{ save: []; cancel: [] }>()
 
+const router = useRouter()
 const level = useRouteLevel()
 const pane = useDashboardPane()
 const overlayOpen = inject(dashboardOverlayOpenKey, null)
 const drawerOpen = ref(true)
 const drawerTarget = useTemplateRef<HTMLDivElement>('drawerTarget')
+const pendingDrawerTarget = import.meta.client ? document.createElement('div') : 'body'
 const parent = inject(dashboardLeafParentKey, null)
+let cancelled = false
 
 function cancel() {
-  if (props.saving) return
+  if (props.saving || cancelled) return
+  cancelled = true
   emit('cancel')
   drawerOpen.value = false
   const exitTo = parent?.exit()
   if (exitTo) {
-    void navigateTo(exitTo, { replace: true })
+    const historyBack = import.meta.client ? window.history.state?.back : null
+    const target = router.resolve(exitTo).fullPath
+    if (typeof historyBack === 'string' && router.resolve(historyBack).fullPath === target) {
+      router.back()
+    } else {
+      void navigateTo(exitTo, { replace: true })
+    }
   } else {
     level.close()
   }
@@ -133,7 +143,7 @@ function cancel() {
 
 // Discard unsaved changes when navigating away without an explicit dismissal (e.g. Android back gesture).
 onBeforeUnmount(() => {
-  if (!props.saving) {
+  if (!props.saving && !cancelled) {
     emit('cancel')
   }
 })

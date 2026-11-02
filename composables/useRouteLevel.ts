@@ -137,15 +137,18 @@ export function useRouteLevel() {
 
   /**
    * Dismissing a child — a sheet's Close, a drawer that shuts:
-   * When history exists from the parent in the same session, pops history (iOS/Android native back behavior).
-   * Otherwise replaces the current leaf URL with this parent, avoiding history stack inflation.
+   * If the previous history entry matches this level's parent, pops history.
+   * Otherwise replaces the current leaf URL with the parent URL, avoiding history stack inflation.
    */
   function close() {
-    if (import.meta.client && window.history.state?.back) {
+    const target = to.value
+    if (!target) return
+    const historyBack = import.meta.client ? window.history.state?.back : null
+    if (typeof historyBack === 'string' && router.resolve(historyBack).fullPath === target) {
       router.back()
       return
     }
-    return navigateTo({ path: path.value, query: route.query }, { replace: true })
+    return navigateTo(target, { replace: true })
   }
 
   return { mode, to, path, child, close }

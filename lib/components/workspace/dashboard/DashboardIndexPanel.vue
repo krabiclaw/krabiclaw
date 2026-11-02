@@ -123,12 +123,15 @@ const pane = useDashboardPane()
 const route = useRoute()
 const router = useRouter()
 
-// A record being made opens its first step; on wide screens, a bare index opens its default child on initial mount.
-onMounted(() => {
-  const target = props.create ?? (pane.value ? props.autoOpen : null)
-  if (!target || level.mode.value !== 'index' || route.query.editMode) return
-  if (router.currentRoute.value.path !== level.path.value) return
-  if (router.resolve(target).path === level.path.value) return
-  void navigateTo(target, { replace: true })
-})
+// A record being made opens its first step at every width; on wide screens, a bare index opens its default child.
+watch(
+  (): [RouteLocationRaw | null | undefined, RouteLevelMode, unknown] => [props.create ?? (pane.value ? props.autoOpen : null), level.mode.value, route.query.editMode],
+  ([target, mode, editMode]) => {
+    if (!target || mode !== 'index' || editMode) return
+    if (router.currentRoute.value.path !== level.path.value) return
+    if (router.resolve(target).path === level.path.value) return
+    void navigateTo(target, { replace: true })
+  },
+  { immediate: true, flush: 'post' }
+)
 </script>
