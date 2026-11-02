@@ -114,6 +114,8 @@ const booking = {
   organizationName: studio,
   productTitle: 'Pottery Wheel Class',
   presentation: resolveBookingPresentation('booking', 'experience'),
+  // The studio's own question, answered as the guest read it.
+  answers: [{ question_id: 'experience_level', label: 'Have you thrown on a wheel before?', type: 'yes_no' as const, help_text: null, value: false, selected_choices: [] }],
   date: 'Mon, Jul 20, 2026',
   time: '10:00 AM',
   locationName: 'Main Studio',

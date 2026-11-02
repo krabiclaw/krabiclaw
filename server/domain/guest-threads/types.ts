@@ -85,6 +85,8 @@ export interface ThreadDetailSourceFields {
   notes?: string | null
   locationTitle?: string | null
   productTitle?: string | null
+  /** The guest's answers to the business's own questions, in the wording they answered: part of the form like its notes. */
+  answers: import('~/shared/form-questions').FormAnswerSnapshot[]
 }
 
 export interface ThreadDetailSourceModel {
@@ -214,8 +216,6 @@ export interface GuestThreadDetailViewModel {
   locationLabel: string | null
   conversationState: ConversationState | null
   source: ThreadDetailSourceModel
-  /** The guest's answers to the tenant's own questions, as they read them when they submitted. */
-  answers: import('~/shared/form-questions').FormAnswerSnapshot[]
   operationalRecord: Pick<ThreadOperationalRecord, 'id' | 'kind' | 'status' | 'starts_at' | 'ends_at' | 'timezone' | 'party_size' | 'check_in_date' | 'check_out_date'> | null
   entries: GuestThreadEntryViewModel[]
   /** What can be done to the booking. Where the conversation lives is below, separately. */
