@@ -151,6 +151,7 @@ export async function createTableReservation(event: H3Event, input: {
       subjectType: 'reservation', organizationId, buyerUserId: operator ? null : await ensureInteractionUser(event, env), locationId: resolvedLocationId,
       startsAt: snapshot.reservation.starts_at, endsAt: snapshot.reservation.ends_at, timezone: snapshot.reservation.timezone,
       requestId: id, requestFingerprint: fingerprint, quantity: partySize, idempotencyKey, following: () => [],
+      origin: operator ? null : { request: event.req, pageEventId: readPageEventId(body.page_event_id) },
     })
     return creationResult({ success: true, status: 'checkout', replayed: true, ...checkout }, { status: 200 })
   }
@@ -225,6 +226,7 @@ export async function createTableReservation(event: H3Event, input: {
       subjectType: 'reservation', organizationId, buyerUserId: userId, locationId: resolvedLocationId, startsAt: slot.starts_at,
       endsAt: new Date(Date.parse(slot.starts_at) + policy.duration_minutes! * 60_000).toISOString(), timezone: availability.timezone,
       requestId: id, requestFingerprint: fingerprint, quantity: partySize, idempotencyKey,
+      origin: operator ? null : { request: event.req, pageEventId: readPageEventId(body.page_event_id) },
       following: paymentId => requestInsertQueries({ id, kind: 'reservation', organization_id: organizationId, location_id: resolvedLocationId,
         user_id: userId, review_id: null, conversation_state: 'waiting_on_guest', resolved_at: null, payload, created_at: now, updated_at: now,
       }, { query: "SELECT 1 FROM payment_checkout_holds WHERE payment_id = ? AND status = 'active'", params: [paymentId] }),

@@ -168,7 +168,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     const checkout = await createPaymentCheckout(db, env, {
       subjectType: 'booking', organizationId, buyerUserId: operator ? null : await ensureInteractionUser(event, env), productId: snapshot.product_id, variantId: snapshot.variant_id,
       sessionId, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize,
-      idempotencyKey, following: () => [],
+      idempotencyKey, following: () => [], origin: operator ? null : { request: event.req, pageEventId },
     })
     return creationResult({ success: true, status: 'checkout', replayed: true, ...checkout }, { status: 200 })
   }
@@ -271,7 +271,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     const checkout = await createPaymentCheckout(db, env, {
       subjectType: 'booking', organizationId, buyerUserId: userId, productId: product.id, variantId: productVariantId,
       sessionId: session.id, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize, idempotencyKey: checkoutKey,
-     
+      origin: operator ? null : { request: event.req, pageEventId },
       following: paymentId => requestInsertQueries({
         kind: 'booking', id: threadId, organization_id: organizationId, location_id: session.location_id,
         user_id: userId, review_id: null, conversation_state: 'waiting_on_guest', resolved_at: null,
@@ -439,6 +439,7 @@ export async function createStayBooking(event: H3Event, context: { organizationI
   const checkout = await createPaymentCheckout(db, env, {
     subjectType: 'stay', organizationId, buyerUserId: await ensureInteractionUser(event, env), requestId: null, requestFingerprint: fingerprint,
     quantity: stay.adults + stay.children, idempotencyKey, following: () => [],
+    origin: { request: event.req, pageEventId: readPageEventId(body.page_event_id) },
     stay, guest, quote,
   })
   // The held nights close on the home's channel now, not when the payment lands.
