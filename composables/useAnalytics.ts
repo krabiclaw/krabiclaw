@@ -5,7 +5,7 @@
 import { parseGaClientId, parseGaSessionId } from '~/utils/ga-cookies'
 import { ZARAZ_ANALYTICS_PURPOSE_ID } from '~/utils/zaraz-consent'
 import { CONVERSION_EVENT_CATALOG, type ConversionEventDefinition, type OrganizationConversionEventName } from '~/utils/organization-conversion-events'
-import { pageEventIdFor, whenLeaving } from '~/utils/pageview-tracking-runtime.client'
+import { automatedBrowser, pageEventIdFor, whenLeaving } from '~/utils/pageview-tracking-runtime.client'
 
 declare global {
   interface Window {
@@ -96,7 +96,7 @@ export const useAnalytics = () => {
   const nuxtApp = useNuxtApp()
 
   const trackEvent = (eventName: AnalyticsEventName, input: AnalyticsEventInput = {}) => {
-    if (!import.meta.client || !isPlatform) return
+    if (!import.meta.client || !isPlatform || automatedBrowser()) return
     const { organization_id: organizationId, ...properties } = input
     const eventId = crypto.randomUUID()
     const definition: ConversionEventDefinition = CONVERSION_EVENT_CATALOG[eventName]

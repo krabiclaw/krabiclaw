@@ -8,7 +8,8 @@ import { SEED_SUBDOMAINS } from './manifest.ts'
 // through the public contact form. Insights
 // and the Today feed read these as they read any guest's.
 export async function seedTraffic(baseURL: string, manifest: SeedManifest) {
-  const browser = await chromium.launch()
+  // Seeded visits are counted: the browser runs without the automation flag the collector skips.
+  const browser = await chromium.launch({ args: ['--disable-blink-features=AutomationControlled'] })
   try {
     for (const [key, tenant] of Object.entries(manifest.tenants) as Array<[keyof SeedManifest['tenants'], SeedManifest['tenants'][keyof SeedManifest['tenants']]]>) {
       const headers = { 'x-preview-tenant': SEED_SUBDOMAINS[key] }

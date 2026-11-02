@@ -67,9 +67,19 @@ export function whenLeaving(): Promise<null> {
   })
 }
 
+/**
+ * A browser driven by automation, which says so itself: KrabiClaw's own
+ * deployed checks after every release, and crawlers that run a real browser.
+ * Its visits are not visitors. A test that means to be counted launches its
+ * browser without the automation flag, as the local E2E suite does.
+ */
+export function automatedBrowser(): boolean {
+  return navigator.webdriver === true
+}
+
 export function registerPageviewTracking() {
   const win = window as Window & { __kc_pageview_tracking_registered?: boolean; zaraz?: ZarazPageviewApi }
-  if (win.__kc_pageview_tracking_registered) { settleRegistration(); return }
+  if (win.__kc_pageview_tracking_registered || automatedBrowser()) { settleRegistration(); return }
 
   const nuxtApp = useNuxtApp()
   if (nuxtApp.payload.error) { settleRegistration(); return }
