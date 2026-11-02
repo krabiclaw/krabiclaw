@@ -656,8 +656,9 @@ test('a guest-cancelled stay alerts owners with the whole stay and the team look
     // The member's phone opens the stay, not the guest's conversation.
     assert.equal(pushes.length, 1)
     assert.equal(pushes[0]!.url, `https://api.sandbox.push.apple.com/3/device/${deviceToken}`)
+    // The icon counts what the member can read: an organization's stay notification is not in their bell.
     assert.deepEqual(pushes[0]!.body, {
-      aps: { alert: { title: 'Stay cancelled by Ana', body: 'Turnover Cabin · Wed, Oct 1, 2098 · 4:00 PM – Fri, Oct 3, 2098 · 10:00 AM' }, sound: 'default' },
+      aps: { alert: { title: 'Stay cancelled by Ana', body: 'Turnover Cabin · Wed, Oct 1, 2098 · 4:00 PM – Fri, Oct 3, 2098 · 10:00 AM' }, sound: 'default', badge: 0 },
       organizationId: access.organizationId, userId: 'cleaner-turnover', kind: 'stay', stayId: stay.id,
     })
   } finally {
