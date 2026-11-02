@@ -52,7 +52,12 @@ const props = defineProps<{
 
 const telemetry = useDashboardTelemetry()
 const isOffer = computed(() => props.item.id.startsWith('offer:'))
-const avatarSrc = computed(() => cfImageVariant(props.item.imageUrl, { width: 160, height: 160, fit: 'cover', format: 'auto' }) || props.item.imageUrl || undefined)
+const avatarSrc = computed(() => cfImageVariant(props.item.imageUrl, {
+  width: 160,
+  height: 160,
+  fit: props.item.imageFit === 'contain' || isOffer.value ? 'scale-down' : 'cover',
+  format: 'auto',
+}) || props.item.imageUrl || undefined)
 
 function onCardClick() {
   telemetry.track({
