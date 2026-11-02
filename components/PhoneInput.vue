@@ -65,7 +65,8 @@
   A form that remounts the field binds `v-model:country` to keep that choice.
 */
 import { parseIncompletePhoneNumber } from 'libphonenumber-js/min'
-import { examplePhone, exceedsPhoneLength, formatPhoneAsTyped, listPhoneCountries, parsePhone, type CountryCode } from '~/utils/phone'
+import { examplePhone } from '~/utils/phone-examples'
+import { exceedsPhoneLength, formatPhoneAsTyped, listPhoneCountries, parsePhone, type CountryCode } from '~/utils/phone'
 
 const props = withDefaults(defineProps<{
   id: string
