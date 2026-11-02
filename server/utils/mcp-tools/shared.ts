@@ -3,7 +3,6 @@ import { timezoneSchema } from '~/utils/timezone'
 import { POSTAL_REGION_CODE_PATTERN } from '~/utils/postal-address'
 import { openingHoursSchema, specialHoursSchema } from '~/shared/reservation-hours'
 import type { McpToolRole } from '~/server/utils/mcp-auth'
-import { SUPPORTED_CURRENCIES } from '~/shared/currencies'
 import { RESERVATION_STATUSES } from '~/shared/bookings'
 import { STAY_MAP_SHARING_MODES } from '~/shared/stay-listing'
 import { INDEXED_MEDIA_PLACEMENT_SLOTS, MEDIA_PLACEMENT_SLOTS, isEditableMediaPlacement, isSingleMediaPlacement, type EditableMediaPlacementOwnerType } from '~/shared/media-placement-contract'
@@ -37,6 +36,9 @@ export interface McpToolSecurityScheme {
 }
 
 /** Every phone a tool takes: stored as E.164, so a number without its calling code is refused. */
+/** An ISO 4217 code; whether the business can charge in it is Stripe's answer. */
+export const currencyCodeSchema = { type: 'string', pattern: '^[A-Z]{3}$', description: 'ISO 4217 currency code.' } as const
+
 export const PHONE_FORMAT = 'International number with its country calling code, e.g. +66812345678.'
 
 export const MCP_TOOL_SECURITY_SCHEMES: McpToolSecurityScheme[] = [
@@ -606,7 +608,7 @@ export const locationReservationConfigObject = {
     reschedule_cutoff_minutes: { type: ['number', 'null'] },
     deposit_required: { type: 'boolean' },
     deposit_amount: { type: ['integer', 'null'], minimum: 1, description: 'Total deposit per reservation, in deposit_currency minor units.' },
-    deposit_currency: { type: ['string', 'null'], enum: [...SUPPORTED_CURRENCIES, null] },
+    deposit_currency: { ...currencyCodeSchema, type: ['string', 'null'] },
     deposit_tax_behavior: { type: ['string', 'null'], enum: ['inclusive', 'exclusive', null] },
     deposit_trigger_party_size: { type: ['number', 'null'] },
     minimum_guest_age: { type: ['number', 'null'] },
@@ -627,7 +629,7 @@ export const locationReservationConfigWriteSchema = {
   reschedule_cutoff_minutes: { type: ['number', 'null'], minimum: 0 },
   deposit_required: { type: 'boolean' },
   deposit_amount: { type: ['integer', 'null'], minimum: 1, description: 'Total deposit per reservation, in deposit_currency minor units.' },
-    deposit_currency: { type: ['string', 'null'], enum: [...SUPPORTED_CURRENCIES, null] },
+    deposit_currency: { ...currencyCodeSchema, type: ['string', 'null'] },
   deposit_tax_behavior: { type: ['string', 'null'], enum: ['inclusive', 'exclusive', null] },
   deposit_trigger_party_size: { type: ['number', 'null'], minimum: 1 },
   minimum_guest_age: { type: ['number', 'null'], minimum: 0 },
@@ -1066,5 +1068,3 @@ export function withToolAnnotations(definition: RawMcpToolDefinition): McpToolDe
   }
 }
 
-
-export { SUPPORTED_CURRENCIES }

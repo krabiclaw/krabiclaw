@@ -219,7 +219,7 @@ export function selectPrice<T extends Pick<Price, 'id' | 'active' | 'currency' |
 
 export function majorAmountToMinor(value: string, currency: CurrencyCode): number {
   const digits = currencyFractionDigits(currency)
-  const pattern = digits === 0 ? /^(?:0|[1-9]\d*)$/ : /^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/
+  const pattern = new RegExp(digits === 0 ? '^(?:0|[1-9]\\d*)$' : `^(?:0|[1-9]\\d*)(?:\\.\\d{1,${digits}})?$`)
   if (!pattern.test(value)) throw new Error(`${currency} amounts must use at most ${digits} fraction digits`)
   const [whole, fraction = ''] = value.split('.')
   const minor = Number(whole) * (10 ** digits) + Number(fraction.padEnd(digits, '0') || 0)

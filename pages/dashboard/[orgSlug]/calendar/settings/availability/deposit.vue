@@ -2,7 +2,7 @@
   <DashboardLeafPanel id="reservation-deposit" title="Reservation deposit" :saving="editor.saving.value" :disabled="editor.saveDisabled.value || editor.reservationForm.value.deposit_required && !currency" :error="editor.editorError.value ?? (!currency ? 'Set the business currency before configuring deposits' : '')" @cancel="editor.revert" @save="editor.save">
     <USwitch v-model="editor.reservationForm.value.deposit_required" label="Require a deposit" />
     <template v-if="editor.reservationForm.value.deposit_required && currency">
-      <UFormField label="Currency"><USelect :model-value="currency" :items="CURRENCY_OPTIONS" @update:model-value="editor.reservationForm.value.deposit_currency = $event; editor.reservationForm.value.deposit_amount = null" /></UFormField>
+      <UFormField label="Currency"><USelectMenu :model-value="currency" :items="CURRENCY_OPTIONS" value-key="value" label-key="label" @update:model-value="editor.reservationForm.value.deposit_currency = $event; editor.reservationForm.value.deposit_amount = null" /></UFormField>
       <UFormField :label="`Total per reservation (${currency})`">
         <UInputNumber v-model="amount" :min="0" :step="10 ** -currencyFractionDigits(currency)" />
       </UFormField>

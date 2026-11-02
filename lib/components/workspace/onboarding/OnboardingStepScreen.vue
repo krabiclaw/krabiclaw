@@ -80,7 +80,6 @@ import OnboardingProductsCard from '~/lib/components/workspace/onboarding/Onboar
 import OnboardingReviewCard from '~/lib/components/workspace/onboarding/OnboardingReviewCard.vue'
 import { selectOnboardingVertical, useOnboardingState, type OnboardingPlacePreview, type OnboardingStep } from '~/composables/useOnboardingFlow'
 import { useOnboardingDraft } from '~/composables/useOnboardingDraft'
-import { currencyForCountry } from '~/shared/currencies'
 import { singleTimezoneForCountry } from '~/utils/timezone'
 import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
 
@@ -159,13 +158,5 @@ watch(() => props.step.id, (id) => {
   if (id !== 'hours' || state.value.hours.timezone) return
   const zone = singleTimezoneForCountry(state.value.details.country)
   if (zone) state.value.hours.timezone = zone
-}, { immediate: true })
-
-// Same shape for the currency: the country proposes it, the owner confirms it on
-// this step, and an answer already given is never overwritten. A country this
-// platform has no supported currency for proposes nothing and the owner picks.
-watch(() => props.step.id, (id) => {
-  if (id !== 'currency' || state.value.details.currency) return
-  state.value.details.currency = currencyForCountry(state.value.details.country)
 }, { immediate: true })
 </script>
