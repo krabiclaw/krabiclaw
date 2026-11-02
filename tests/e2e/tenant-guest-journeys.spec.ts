@@ -325,9 +325,12 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const pendingThread = await request.get(threadURL)
     expect(pendingThread.status(), await pendingThread.text()).toBe(200)
     expect((await pendingThread.json() as { thread: GuestThreadDetailViewModel }).thread).toMatchObject({ id: body.booking_id, conversationState: 'needs_attention', resolvedAt: null })
-    const attentionBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
-    expect(attentionBefore.status(), await attentionBefore.text()).toBe(200)
-    expect((await attentionBefore.json() as TodayFeedPayload).cards.map(card => card.id)).toContain(`attention:${body.booking_id}`)
+    const todayBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
+    expect(todayBefore.status(), await todayBefore.text()).toBe(200)
+    expect((await todayBefore.json() as TodayFeedPayload).cards.some(card => card.id === `attention:${body.booking_id}`)).toBe(false)
+    const upcomingBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug, range: 'upcoming' } })
+    expect(upcomingBefore.status(), await upcomingBefore.text()).toBe(200)
+    expect((await upcomingBefore.json() as TodayFeedPayload).cards.map(card => card.id)).toContain(`booking:${body.booking_id}`)
     const cancelURL = `${baseURL}/api/public/booking-requests/${body.booking_id}/cancel`
     const authHeaders = { ...headers, Authorization: `Bearer ${body.cancellation_token}` }
     const receiptURL = cancelURL.replace(/\/cancel$/, '')
@@ -348,9 +351,9 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect(thread).toMatchObject({ id: body.booking_id, conversationState: 'resolved', source: { operationalStatus: 'cancelled' } })
     expect(thread.resolvedAt).toEqual(expect.any(String))
     expect(thread.entries.filter(entry => entry.eventName === 'booking.cancel')).toHaveLength(1)
-    const attentionAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
-    expect(attentionAfter.status(), await attentionAfter.text()).toBe(200)
-    expect((await attentionAfter.json() as TodayFeedPayload).cards.some(card => card.id === `attention:${body.booking_id}`)).toBe(false)
+    const upcomingAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug, range: 'upcoming' } })
+    expect(upcomingAfter.status(), await upcomingAfter.text()).toBe(200)
+    expect((await upcomingAfter.json() as TodayFeedPayload).cards.some(card => card.id === `booking:${body.booking_id}`)).toBe(false)
     expect((await request.post(cancelURL, {
       headers: { ...headers, Authorization: 'Bearer invalid-cancellation-token' },
     })).status()).toBe(404)
