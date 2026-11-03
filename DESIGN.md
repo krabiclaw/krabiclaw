@@ -436,6 +436,16 @@ control selects separate nights; Select nights chooses a contiguous run. All
 views read the same home calendar, and all selected-night writes use the existing
 night operation with its visible channel result.
 
+The organization Calendar adds two grid views on one component, `CalendarGrid`:
+Homes (every home as a row, nights as columns, where the business has homes)
+and Places (every restaurant location, experience and consultation as a row,
+days as columns, where it has any). Both select the same days across rows and
+edit them in the night inspector; nights take prices and stay rules through the
+night operation, places take only open or block through the one places dates
+write (`PUT /api/dashboard/places/{kind}/{id}/dates`), which Select dates on the
+month and the day leaf's Block also use. A day a location's hours close, or an
+attorney's hours leave empty, names the reason and leads to the hours.
+
 What the home is and offers — its property type, bedrooms, beds and baths, its
 amenities from the fixed catalog in `shared/stay-listing.ts`, and its short- and
 long-term cancellation policies — are stay settings on the product, shown on
