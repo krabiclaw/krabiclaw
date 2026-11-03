@@ -150,7 +150,7 @@ import { formatMinorAmount, minorAmountToMajor } from '~/shared/prices'
 import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
 import { STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES } from '~/shared/stay-listing'
 import { addLocalDays, formatCalendarDate, isValidCalendarDate, isValidTimezone } from '~/utils/timezone'
-import { CHANNEL_MARKS, channelNote, isStayNight, useStayNightEditor } from '~/composables/useStayNightEditor'
+import { CHANNEL_MARKS, channelNote, isStayNight, stayNightSource, useStayNightEditor } from '~/composables/useStayNightEditor'
 import { getErrorMessage } from '~/utils/errors'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'cancellation_policy' | 'long_term_cancellation_policy'>
@@ -302,6 +302,7 @@ const dateDraft = reactive({ start: '', end: '' })
 const dateError = ref('')
 const weekdays = ref<number[] | null>(null)
 const editor = useStayNightEditor({
+  source: stayNightSource,
   orgSlug,
   targets: computed(() => data.value && selectedNights.value.length === selectedCount.value ? [{ home: data.value.home, nights: selectedNights.value }] : []),
   weekdays,

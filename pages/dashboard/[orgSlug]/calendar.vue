@@ -14,7 +14,7 @@
     :offering-items="offeringItems"
     :offerings-error="offeringsError"
   />
-  <CalendarPage v-else :key="productId ?? 'agenda'" :session-product="scoped?.product" :session-locations="scoped?.locations ?? []" :offering-items="offeringItems" :offerings-error="offeringsError" :can-create-stay="Boolean(homes?.manage && homes.homes.length)" :has-homes="Boolean(homes?.homes.length)" />
+  <CalendarPage v-else :key="productId ?? 'agenda'" :session-product="scoped?.product" :session-locations="scoped?.locations ?? []" :offering-items="offeringItems" :offerings-error="offeringsError" :can-create-stay="Boolean(homes?.manage && homes.homes.length)" :has-homes="Boolean(homes?.homes.length)" :has-places="Boolean(places?.places.length)" />
 </template>
 
 <script setup lang="ts">
@@ -27,6 +27,7 @@ import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
 import { getErrorMessage } from '~/utils/errors'
 import { isValidTimezone } from '~/utils/timezone'
+import { getLocalTimeZone, parseDate, today } from '@internationalized/date'
 
 definePageMeta({ layout: 'dashboard', tab: 'calendar' })
 
@@ -47,6 +48,12 @@ const isHomes = (value: unknown): value is Homes => isRecord(value) && typeof va
 const { data: homes, error: homesError } = await useAsyncData(
   () => `calendar-homes:${String(route.params.orgSlug)}`,
   () => api('/api/dashboard/stay-homes', { validate: isHomes }),
+)
+// Whether the Places view has rows: one day of the places calendar names every restaurant location, experience and consultation.
+const todayKey = today(getLocalTimeZone()).toString()
+const { data: places, error: placesError } = await useAsyncData(
+  () => `calendar-places:${String(route.params.orgSlug)}`,
+  () => api('/api/dashboard/places/calendar', { query: { from: todayKey, to: parseDate(todayKey).add({ days: 1 }).toString() }, validate: (value): value is { places: unknown[] } => isRecord(value) && Array.isArray(value.places) }),
 )
 const { data: products, error: productsError } = await useAsyncData(
   () => `calendar-offerings:${organizationId}:${dashboard.organization.value?.role ?? ''}`,
@@ -80,5 +87,5 @@ const offeringItems = computed(() => [
   ...(homes.value?.homes ?? []).map(home => ({ label: `Availability: ${home.name}`, value: home.product_id })),
   ...(products.value?.products ?? []).filter(product => ['experience', 'service'].includes(product.kind) && product.booking).map(product => ({ label: `Availability: ${product.name}${product.active ? '' : ' · Paused'}`, value: product.id })),
 ])
-const offeringsError = computed(() => homesError.value ? getErrorMessage(homesError.value, 'The places to stay could not be loaded') : productsError.value ? getErrorMessage(productsError.value, 'The offerings could not be loaded') : '')
+const offeringsError = computed(() => homesError.value ? getErrorMessage(homesError.value, 'The places to stay could not be loaded') : productsError.value ? getErrorMessage(productsError.value, 'The offerings could not be loaded') : placesError.value ? getErrorMessage(placesError.value, 'The places could not be loaded') : '')
 </script>
