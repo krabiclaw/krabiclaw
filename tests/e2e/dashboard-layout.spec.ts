@@ -1710,7 +1710,7 @@ test.describe('dashboard pane hierarchy', () => {
   test('five organization destinations keep tenant management in Menu', async ({ page }) => {
     await page.setViewportSize(WIDE)
     await open(page, `${ORG}/menu`)
-    await expect(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages'])
+    await expect(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }).getByTestId('dashboard-nav-label')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages'])
     await page.getByTestId('dashboard-top-nav-menu-button').click()
     // Earnings is a card on Menu, as Airbnb's is; it shows the month and leads to payouts, transactions and refunds.
     const earnings = page.getByRole('dialog', { name: 'Menu', exact: true }).getByTestId('dashboard-menu-earnings')
@@ -1736,7 +1736,7 @@ test.describe('dashboard pane hierarchy', () => {
 
     await open(page, `${ORG}/earnings`)
     const mobileNav = page.getByTestId('dashboard-mobile-nav')
-    await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
+    await expect(mobileNav.getByTestId('dashboard-nav-label')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
     await expect(page.getByTestId('dashboard-mobile-nav-menu-link')).toHaveAttribute('aria-current', 'page')
     await page.locator('#dashboard-panel-earnings [data-testid="dashboard-navbar-back"]').click()
     await expect(page).toHaveURL(`${ORG}/menu`)
@@ -1747,7 +1747,7 @@ test.describe('dashboard pane hierarchy', () => {
     // in Catalog, a root with no Back, and Menu carries no second entry for them.
     const services = '/dashboard/harbor-legal-aid'
     await open(page, `${services}/menu`)
-    await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
+    await expect(mobileNav.getByTestId('dashboard-nav-label')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
     await expect(page.locator('#dashboard-panel-organization-settings').getByRole('link', { name: 'Website', exact: true })).toBeVisible()
     await expect(page.locator('#dashboard-panel-organization-settings').getByRole('link', { name: 'Services', exact: true })).toHaveCount(0)
     await mobileNav.getByRole('link', { name: 'Catalog', exact: true }).click()
@@ -1766,7 +1766,7 @@ test.describe('dashboard pane hierarchy', () => {
       expect(personal.status(), await personal.text()).toBe(200)
       await open(page, '/account')
       await expect(page).toHaveURL('/dashboard/account')
-      await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages', 'Menu'])
+      await expect(mobileNav.getByTestId('dashboard-nav-label')).toHaveText(['Today', 'Calendar', 'Messages', 'Menu'])
       // Past activity is a card in the account's Menu, as Past trips is on Airbnb's profile; Today owns what is ahead.
       const account = page.waitForResponse(response => new URL(response.url()).pathname === '/api/account' && response.request().method() === 'GET')
       await mobileNav.getByRole('link', { name: 'Menu', exact: true }).click()
@@ -1881,9 +1881,9 @@ test.describe('dashboard pane hierarchy', () => {
       } else {
         await expect(page.getByText('No notifications yet.', { exact: true })).toBeVisible()
       }
-      await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages', 'Menu'])
+      await expect(mobileNav.getByTestId('dashboard-nav-label')).toHaveText(['Today', 'Calendar', 'Messages', 'Menu'])
       await page.setViewportSize(WIDE)
-      await expect(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages'])
+      await expect(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }).getByTestId('dashboard-nav-label')).toHaveText(['Today', 'Calendar', 'Messages'])
     } finally {
       const restored = await page.request.post('/api/auth/organization/set-active', { headers: authRequestHeaders(baseURL!), data: { organizationId: seededTenant('restaurant').organizationId } })
       expect(restored.status(), await restored.text()).toBe(200)
@@ -2660,7 +2660,7 @@ test.describe('dashboard pane hierarchy', () => {
     // A lawyer in their firm is still in it on their own settings: the firm's
     // tabs, its Menu lit, and Back to its Menu. Personal is a switch, not a URL.
     const mobileNav = page.getByTestId('dashboard-mobile-nav')
-    await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
+    await expect(mobileNav.getByTestId('dashboard-nav-label')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
     await expect(mobileNav.getByRole('link', { name: 'Calendar', exact: true })).toHaveAttribute('href', `${services}/calendar`)
     await expect(page.getByTestId('dashboard-mobile-nav-menu-link')).toHaveAttribute('href', `${services}/menu`)
     await expect(page.getByTestId('dashboard-mobile-nav-menu-link')).toHaveAttribute('aria-current', 'page')
