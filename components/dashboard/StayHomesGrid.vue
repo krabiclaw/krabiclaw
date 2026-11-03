@@ -173,6 +173,8 @@ const to = computed(() => parseDate(from.value).add({ days: SPAN }).toString())
 const dates = computed(() => Array.from({ length: SPAN }, (_, index) => parseDate(from.value).add({ days: index }).toString()))
 const search = computed(() => typeof route.query.q === 'string' ? route.query.q : '')
 const freeOnly = computed(() => route.query.free === '1')
+// The page's search narrows the rows, but not under a save that is reading back the homes it wrote.
+const appliedSearch = ref(search.value)
 // A city from the homes' addresses; NO_CITY is the homes without one.
 const ALL_CITIES = '*'
 const NO_CITY = '-'
@@ -192,7 +194,7 @@ const weekdays = computed<number[] | null>(() => {
   if (value === undefined) return null
   const days = typeof value === 'string' ? value.split(',').map(Number) : []
   if (!days.length || days.some(day => !Number.isInteger(day) || day < 0 || day > 6)) throw createError({ statusCode: 400, statusMessage: 'Choose valid weekdays.' })
-  return days
+  return [...new Set(days)].sort()
 })
 
 const isText = (value: unknown) => value === null || typeof value === 'string'
@@ -251,7 +253,7 @@ const cityItems = computed(() => {
 // A linked calendar's nights are a bar of their own, named for the channel.
 const rows = computed(() => {
   const stays = new Map((data.value?.stays ?? []).map(stay => [stay.id, stay]))
-  const query = search.value.toLowerCase()
+  const query = appliedSearch.value.toLowerCase()
   return (data.value?.homes ?? [])
     .filter(entry => (city.value === ALL_CITIES || (cityOf(entry.home) ?? NO_CITY) === city.value)
       && (!query || `${entry.home.name} ${addressOf(entry.home)}`.toLowerCase().includes(query))
@@ -315,7 +317,9 @@ function nightTitle(home: Home, night: StayNight, gap?: string) {
 function homeTo(productId: string, date?: string) {
   return { path: `/dashboard/${orgSlug}/calendar`, query: { product_id: productId, ...(date ? { month: date.slice(0, 7), date } : {}) } }
 }
+// Nothing moves the selection or the rows while a save runs: its read-back compares the homes it wrote.
 function setQuery(changes: LocationQueryRaw) {
+  if (editor.busy.value) return
   void router.replace({ query: { ...route.query, ...changes } })
 }
 function moveTo(day: string) {
@@ -362,7 +366,7 @@ function choose(row: number, day: number) {
 }
 function startDrag(event: PointerEvent, row: number, day: number) {
   suppressClick = false
-  if (event.button !== 0 || event.pointerType === 'touch') return
+  if (event.button !== 0 || event.pointerType === 'touch' || editor.busy.value) return
   drag.value = { row, day, moved: false }
 }
 function cellAt(event: PointerEvent) {
@@ -486,6 +490,7 @@ function pills(row: number) {
   if (pieces[0]) pieces[0].label = weekdays.value ? `${chosen} of ${nightsLabel(free.length)}` : nightsLabel(free.length)
   return pieces
 }
+watch([search, () => editor.busy.value], ([value, busy]) => { if (!busy) appliedSearch.value = value })
 watch(() => route.query.homes === undefined ? null : `${String(route.query.homes)}|${String(route.query.nights)}`, () => editor.edit('summary'))
 
 const realtime = useDashboardInvalidations()

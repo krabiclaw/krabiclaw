@@ -156,17 +156,20 @@ export function useStayNightEditor(options: {
     try {
       await options.refresh()
       const after = new Map(options.targets.value.map(target => [target.home.product_id, new Map(target.nights.map(night => [night.date, night]))]))
-      const mismatch = saved.find(({ home, nights: previous }) => previous.some((night) => {
-        const read = after.get(home.product_id)?.get(night.date)
-        return !read || Object.entries(expected(home, night, patch)).some(([field, value]) => read[field as keyof StayNight] !== value)
-      }))
-      if (mismatch) failures.push({ home: mismatch.home, message: 'The saved calendar does not match the selected night settings. Review the calendar before making another change.' })
+      for (const { home, nights: previous } of saved) {
+        const mismatch = previous.some((night) => {
+          const read = after.get(home.product_id)?.get(night.date)
+          return !read || Object.entries(expected(home, night, patch)).some(([field, value]) => read[field as keyof StayNight] !== value)
+        })
+        if (mismatch) failures.push({ home, message: 'The saved calendar does not match the selected night settings. Review the calendar before making another change.' })
+      }
     } catch (readError) {
-      failures.push({ home: attempted[0]!.target.home, message: getErrorMessage(readError, 'The saved calendar could not be read back') })
+      const message = getErrorMessage(readError, 'The saved calendar could not be read back')
+      for (const { home } of saved) failures.push({ home, message })
     }
     const homes = attempted.length
     if (!failures.length) edit('summary')
-    const synced = nights.value.filter(night => night.channel)
+    const synced = failures.length ? [] : nights.value.filter(night => night.channel)
     if (synced.length) {
       const count = (state: 'pending' | 'needs_review') => synced.filter(night => night.channel!.state === state).length
       result.value = [`Airbnb: ${synced.filter(night => night.channel!.state === 'pushed').length} received`, ...(count('pending') ? [`${count('pending')} sending`] : []), ...(count('needs_review') ? [`${count('needs_review')} needs review`] : [])].join(' · ')

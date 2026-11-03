@@ -4532,7 +4532,9 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toContainText('Mixed prices')
   expect((await nightsAt(bay, 9, 18)).map(entry => entry.price_minor)).toEqual([320_000, ...Array(7).fill(288_000), 320_000])
   expect((await nightsAt(sea, 9, 18)).map(entry => entry.price_minor)).toEqual([200_000, ...Array(7).fill(180_000), 200_000])
-  expect((await nightsAt(productId, 10, 17)).every(entry => entry.source === null)).toBe(true)
+  const unchecked = await nightsAt(productId, 10, 17)
+  expect(unchecked).toHaveLength(7)
+  expect(unchecked.every(entry => entry.source === null)).toBe(true)
   await expect(night(bay, 12)).toHaveText(gridPrice(288_000))
   await expect(night(sea, 12)).toHaveText(gridPrice(180_000))
 

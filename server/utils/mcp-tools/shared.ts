@@ -887,7 +887,8 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   cancel_stay: { ...D, openWorldHint: true },
   record_stay_payment: { ...W, idempotentHint: true },
   delete_stay_payment: D,
-  set_stay_nights: { ...D, openWorldHint: true, idempotentHint: true },
+  // A percent price change compounds when repeated, so the tool is not idempotent.
+  set_stay_nights: { ...D, openWorldHint: true, idempotentHint: false },
   list_message_templates: R,
   create_message_template: { ...W, openWorldHint: true },
   update_message_template: { ...D, openWorldHint: true },
