@@ -2,6 +2,7 @@ import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { buildNotificationVisibilityFilter, type NotificationVisibilityPrincipal } from '~/server/utils/notification-access'
 import { hasPlatformUserPermission } from '~/server/utils/platform-admin-users'
 import type { CloudflareEnv } from '~/server/utils/auth'
+import { BUYER_UNREAD_THREAD_SQL, buyerUnreadThreadParams } from '~/server/domain/guest-threads/entries'
 
 /**
  * What a person has not read in one scope: the notifications they can see, and
@@ -44,6 +45,17 @@ export async function unreadTeamConversations(db: DbClient, userId: string, orga
 }
 
 /**
+ * A person's own conversations as a guest that have a business reply they have
+ * not read. These keep the guest's read state on the business's entries, not
+ * notifications, so they are counted apart from them.
+ */
+export async function unreadBuyerConversations(db: DbClient, userId: string): Promise<number> {
+  const row = await queryFirst<{ count: number }>(db, `SELECT COUNT(*) AS count FROM requests gt WHERE gt.user_id = ? AND ${BUYER_UNREAD_THREAD_SQL}`, [userId, ...buyerUnreadThreadParams(userId)])
+  if (!row) throw new Error('Unread conversations as a guest could not be counted')
+  return Number(row.count)
+}
+
+/**
  * The app icon's number: everything a person has not read in every workspace
  * they belong to, and their own account's notifications.
  */
@@ -54,9 +66,10 @@ export async function unreadBadge(env: CloudflareEnv, db: DbClient, userId: stri
     hasPlatformUserPermission(env, userId, { platform: ['access'] }),
   ])
   const scopes = [null, ...memberships.map(membership => ({ id: membership.organizationId, role: membership.role }))]
-  const [notifications, team] = await Promise.all([
+  const [notifications, team, asGuest] = await Promise.all([
     Promise.all(scopes.map(organization => unreadNotifications(db, { userId, platformAdmin: organization === null && platformAdmin, organization }))),
     unreadTeamConversations(db, userId, null),
+    unreadBuyerConversations(db, userId),
   ])
-  return notifications.reduce((sum, scope) => sum + scope.notifications, 0) + team
+  return notifications.reduce((sum, scope) => sum + scope.notifications, 0) + team + asGuest
 }
