@@ -4511,7 +4511,8 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(homeInspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('Home default: 2 nights')
 
   // Dragging down over all three homes selects the same week on each; unchecking one leaves it out.
-  await page.goto(gridPath)
+  // The window opens on night 8, so the whole week sits inside the grid's scroll area for the pointer.
+  await page.goto(`/dashboard/${slug}/calendar?view=homes&from=${localDay(8)}`)
   await drag(night(bay, 10), night(sea, 16))
   await expect(inspector.getByRole('button', { name: 'Select nights' })).toHaveCount(0)
   await expect(inspector.getByText(/3 homes · 7 nights/).first()).toBeVisible()
