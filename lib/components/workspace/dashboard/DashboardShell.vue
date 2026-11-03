@@ -425,7 +425,7 @@ const navTargets = computed<DashboardMobileNavItem[]>(() => {
 const menuOpen = ref(false)
 
 // What is unread: conversations on Messages, and the notifications the Menu's bell lists as a dot on Menu.
-const { unreadCount, unreadConversations, unavailable: unreadUnavailable } = useNotificationUnreadCount()
+const { unreadCount, unreadConversations, unavailable: unreadUnavailable } = useNotificationUnreadCount(realtime)
 const primaryNavItems = computed(() => navTargets.value.map(item => ({ ...item, active: item.key === activeTab.value, ...(item.key === 'messages' ? { badge: unreadConversations.value, badgeUnavailable: unreadUnavailable.value } : {}) })))
 // A count that could not be read is marked as such on Messages, never shown stale.
 const menuUnread = computed(() => !unreadUnavailable.value && unreadCount.value > 0)
