@@ -4538,6 +4538,20 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(inspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('7 nights')
   for (const offset of [4, 5, 6]) await expect(night(productId, offset)).toHaveAttribute('aria-label', /· 3 free nights; minimum is 7$/)
   await expect(night(productId, 1)).not.toHaveAttribute('aria-label', /minimum is/)
+  // Selecting a night in that gap explains it and offers the fix: its run selected, with Minimum nights open.
+  await night(productId, 5).click()
+  await expect(inspector.getByTestId('stay-night-blocker')).toContainText('3 free nights; minimum is 7')
+  await inspector.getByRole('button', { name: 'Change minimum nights', exact: true }).click()
+  await expect(page).toHaveURL(url => url.searchParams.get('homes') === productId && url.searchParams.get('nights') === `${localDay(4)}..${localDay(7)}`)
+  await inspector.getByRole('button', { name: '3 nights', exact: true }).click()
+  await inspector.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(inspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('3 nights')
+  await expect(night(productId, 5)).not.toHaveAttribute('aria-label', /minimum is/)
+  // A selection of booked nights alone says what holds them and offers no edit.
+  await night(productId, 2).click({ position: { x: 20, y: 50 } })
+  await expect(inspector.getByTestId('stay-night-held')).toHaveText('Booked nights belong to their reservations. Open the stay to manage it.')
+  await expect(inspector.getByRole('link', { name: 'View stay', exact: true })).toHaveAttribute('href', new RegExp(`/calendar/stay/${stayIds[0]}`))
+  await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toBeDisabled()
 
   // From the keyboard: a night, then Shift with the arrow keys, selects two weeks; only Fridays and Saturdays are blocked.
   await night(bay, 17).click()
@@ -4556,6 +4570,14 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   const blocked = await nightsAt(bay, 17, 31)
   expect(blocked.map(entry => [entry.date, entry.closed])).toEqual(blocked.map(entry => [entry.date, [5, 6].includes(new Date(`${entry.date}T00:00:00Z`).getUTCDay())]))
   expect(blocked.filter(entry => entry.closed)).toHaveLength(4)
+  // Back to every weekday, the selection is partly blocked: one state for all is applied only once confirmed.
+  for (const day of ['Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Sundays']) await weekdays.getByRole('button', { name: day, exact: true }).click()
+  await expect(page).toHaveURL(url => !url.searchParams.has('weekdays'))
+  await inspector.getByRole('button', { name: 'Open dates', exact: true }).click()
+  await expect(inspector.getByTestId('stay-night-confirm')).toContainText('Open all 14 nights?')
+  await inspector.getByRole('button', { name: 'Open all', exact: true }).click()
+  await expect(openNights).toBeChecked()
+  expect((await nightsAt(bay, 17, 31)).every(entry => !entry.closed)).toBe(true)
   await night(bay, 18).focus()
   await page.keyboard.press('Escape')
   await expect(inspector).toHaveCount(0)

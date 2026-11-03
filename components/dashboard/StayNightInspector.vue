@@ -30,16 +30,26 @@
     <UAlert v-if="error" color="error" variant="soft" :description="error" />
     <UAlert v-if="notice" color="warning" variant="soft" :description="notice" />
     <p v-if="result && concern === 'summary'" class="text-sm text-highlighted" data-testid="stay-night-result">{{ result }}</p>
+    <UAlert v-if="blocker && concern === 'summary'" color="neutral" variant="soft" :description="blocker" data-testid="stay-night-blocker" :actions="manage ? [{ label: 'Change minimum nights', color: 'neutral', variant: 'solid', onClick: () => $emit('blocker') }] : undefined" />
     <template v-if="concern === 'summary'">
       <UCard class="rounded-3xl bg-inverted text-inverted" :ui="{ body: 'p-5' }">
         <div class="flex items-center justify-between gap-4">
           <p class="text-sm">{{ availabilityLabel }}</p>
           <USwitch v-if="nights.length && closed !== 'mixed'" :model-value="!closed" aria-label="Open selected nights" color="neutral" :disabled="busy || !manage" @update:model-value="$emit('patch', { closed: !$event })" />
         </div>
-        <div v-if="nights.length && closed === 'mixed' && manage" class="mt-4 flex gap-2">
-          <UButton label="Open selected nights" color="neutral" variant="outline" :disabled="busy" @click="$emit('patch', { closed: false })" />
-          <UButton label="Block selected nights" color="neutral" variant="outline" :disabled="busy" @click="$emit('patch', { closed: true })" />
+        <div v-if="nights.length && closed === 'mixed' && manage && pendingClosed === null" class="mt-4 flex gap-2">
+          <UButton label="Open dates" color="neutral" variant="outline" :disabled="busy" @click="pendingClosed = false" />
+          <UButton label="Block dates" color="neutral" variant="outline" :disabled="busy" @click="pendingClosed = true" />
         </div>
+        <div v-if="pendingClosed !== null" class="mt-4 space-y-3" data-testid="stay-night-confirm">
+          <p class="text-sm">Some selected nights are open and some are blocked. {{ pendingClosed ? 'Block' : 'Open' }} all {{ nights.length }} {{ nights.length === 1 ? 'night' : 'nights' }}?</p>
+          <div class="flex gap-2">
+            <UButton :label="pendingClosed ? 'Block all' : 'Open all'" color="neutral" variant="solid" class="bg-default text-highlighted" :disabled="busy" @click="confirmClosed" />
+            <UButton label="Cancel" color="neutral" variant="link" class="text-inverted" :disabled="busy" @click="pendingClosed = null" />
+          </div>
+        </div>
+        <UButton v-if="nights.length && closed === true && manage" label="Open dates" color="neutral" variant="outline" class="mt-4" :disabled="busy" @click="$emit('patch', { closed: false })" />
+        <p v-if="!nights.length" class="mt-3 text-sm" data-testid="stay-night-held">{{ heldExplanation }}</p>
         <p v-if="booked.length && nights.length" class="mt-3 text-sm" data-testid="stay-night-booked">{{ booked.length }} booked {{ booked.length === 1 ? 'night is' : 'nights are' }} left out. Reservations, checkout holds and linked-calendar nights keep their settings.</p>
         <p v-for="expiry in holdExpiries" :key="expiry.at" class="mt-3 text-sm">Checkout hold expires {{ formatTimestamp(expiry.at, 'en', expiry.timezone) }} ({{ expiry.timezone }}).</p>
         <UButton v-for="id in stayIds" :key="id" :to="{ path: `/dashboard/${orgSlug}/calendar/stay/${encodeURIComponent(id)}`, query: route.query }" label="View stay" color="neutral" variant="outline" class="mt-3" />
@@ -83,6 +93,7 @@
           <p class="text-sm text-muted">{{ currency ? percentLabel : `Homes use different currencies. Use Change by %. ${percentLabel}` }}</p>
         </template>
         <UButton label="Restore listing price" color="neutral" variant="link" class="px-0" :disabled="busy" @click="$emit('patch', { price_minor: null })" />
+        <p v-if="booked.length" class="text-sm text-muted">Existing bookings keep the price they were booked at.</p>
       </template>
       <template v-else-if="concern === 'minimum'">
         <div class="flex flex-wrap gap-1.5" role="group" aria-label="Minimum nights presets">
@@ -91,6 +102,7 @@
         <UFormField label="Minimum nights on arrival">
           <UInput :model-value="draft.min_stay_arrival" type="number" min="1" :max="MAX_STAY_NIGHTS" step="1" :placeholder="common('min_stay_arrival') === 'mixed' ? 'Mixed settings' : 'Use home default'" class="w-full" :disabled="busy" @update:model-value="$emit('field', 'min_stay_arrival', $event == null ? '' : String($event))" />
         </UFormField>
+        <p v-if="booked.length" class="text-sm text-muted">Existing bookings keep the stay rules they were booked with.</p>
         <p class="text-sm text-muted">Applies to arrivals on the selected nights. {{ homes.length > 1 ? 'Each home’s default stays on every other night.' : `The home default of ${homes[0]?.min_nights} ${homes[0]?.min_nights === 1 ? 'night' : 'nights'} stays on every other night.` }}</p>
       </template>
       <template v-else-if="concern === 'maximum'">
@@ -134,6 +146,8 @@ const props = defineProps<{
   dates: string[]
   /** The line under the dates: the homes and nights, or the one home's own details. */
   scope: string
+  /** Why the selected free nights cannot be booked, when a minimum blocks them. */
+  blocker?: string | null
   /** The weekdays the selected range covers, 0 Sunday to 6 Saturday. */
   rangeWeekdays: number[]
   /** The weekdays chosen; null is every weekday. */
@@ -156,6 +170,7 @@ const route = useRoute()
 const emit = defineEmits<{
   clear: []
   dates: []
+  blocker: []
   weekdays: [weekdays: number[] | null]
   edit: [concern: NightConcern]
   cancel: []
@@ -182,6 +197,19 @@ function common<K extends keyof StayNight>(field: K): StayNight[K] | 'mixed' {
 }
 const money = (value: number) => props.currency ? formatMinorAmount(value, props.currency) : String(value)
 const closed = computed(() => common('closed'))
+/** A confirmed choice of one state for a selection that is partly open and partly blocked. */
+const pendingClosed = ref<boolean | null>(null)
+function confirmClosed() {
+  emit('patch', { closed: pendingClosed.value! })
+  pendingClosed.value = null
+}
+watch(() => props.nights, () => { pendingClosed.value = null })
+// What holds nights a selection cannot change: a reservation is managed from its stay, a linked calendar from its channel, a hold by its guest's checkout.
+const heldExplanation = computed(() => props.booked.some(night => night.stay_id)
+  ? 'Booked nights belong to their reservations. Open the stay to manage it.'
+  : props.booked.some(night => night.calendar)
+    ? `${STAY_CHANNEL_LABELS[props.booked.find(night => night.calendar)!.calendar!]}'s calendar holds these nights. Change them there.`
+    : 'A guest is checking out these nights. The hold ends on its own if they do not pay.')
 const stayIds = computed(() => [...new Set(props.booked.flatMap(night => night.stay_id ? [night.stay_id] : []))])
 const holdExpiries = computed(() => props.homes.length === 1
   ? [...new Set(props.booked.flatMap(night => night.held_until ? [night.held_until] : []))].sort().map(at => ({ at, timezone: props.homes[0]!.timezone }))

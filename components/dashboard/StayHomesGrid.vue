@@ -68,12 +68,12 @@
                   type="button"
                   role="gridcell"
                   :aria-selected="inSelection(rowIndex, index)"
-                  :aria-label="nightTitle(row.home, night, row.gaps.get(index))"
+                  :aria-label="nightTitle(row.home, night, row.gaps.get(index)?.text)"
                   :tabindex="cursor.row === rowIndex && cursor.day === index ? 0 : -1"
                   class="relative flex h-14 flex-col justify-end border-r border-default px-1.5 py-1 text-left text-xs tabular-nums outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-inverted"
                   :class="[night.available ? 'bg-default text-highlighted' : 'bg-elevated/60 text-muted', inSelection(rowIndex, index) && !chosenWeekday(night.date) ? 'text-dimmed' : '']"
                   :style="{ gridRow: 1, gridColumn: index + 1 }"
-                  :title="nightTitle(row.home, night, row.gaps.get(index))"
+                  :title="nightTitle(row.home, night, row.gaps.get(index)?.text)"
                   :data-night="night.date"
                   @pointerdown="startDrag($event, rowIndex, index)"
                   @click="choose(rowIndex, index)"
@@ -114,7 +114,7 @@
         </div>
       </div>
       <aside v-if="selection && pane && targets.length" class="sticky top-4 rounded-2xl p-5 ring ring-default">
-        <StayNightInspector v-bind="inspectorProps" v-on="editor.listeners" @clear="clearSelection" @weekdays="setWeekdays" />
+        <StayNightInspector v-bind="inspectorProps" v-on="editor.listeners" @clear="clearSelection" @weekdays="setWeekdays" @blocker="fixBlocker" />
       </aside>
     </div>
     <div v-if="selection && !pane && !drawerOpen" class="fixed inset-x-3 bottom-20 z-30 flex items-center justify-between gap-3 rounded-xl bg-inverted px-4 py-3 text-sm font-medium text-inverted shadow-lg" data-testid="stay-homes-hint">
@@ -136,7 +136,7 @@
       @update:open="closeDrawer"
     >
       <template #body>
-        <StayNightInspector v-bind="inspectorProps" v-on="editor.listeners" @clear="clearSelection" @weekdays="setWeekdays" />
+        <StayNightInspector v-bind="inspectorProps" v-on="editor.listeners" @clear="clearSelection" @weekdays="setWeekdays" @blocker="fixBlocker" />
       </template>
     </UDrawer>
   </div>
@@ -284,13 +284,13 @@ const rows = computed(() => {
  * Airbnb's calendar blocker, explained the way its shortExplanation does.
  */
 function unbookableGaps(nights: StayNight[]) {
-  const gaps = new Map<number, string>()
+  const gaps = new Map<number, { text: string; start: number; end: number }>()
   let start = -1
   nights.forEach((night, index) => {
     if (!isBookedNight(night)) { if (start === -1) start = index; return }
     if (start > 0 && isBookedNight(nights[start - 1]!) && nights.slice(start, index).every((free, offset) => free.min_stay_arrival > index - start - offset)) {
       const text = `${index - start} free ${index - start === 1 ? 'night' : 'nights'}; minimum is ${nights[start]!.min_stay_arrival}`
-      for (let gap = start; gap < index; gap++) gaps.set(gap, text)
+      for (let gap = start; gap < index; gap++) gaps.set(gap, { text, start, end: index })
     }
     start = -1
   })
@@ -449,7 +449,23 @@ const selectionLabel = computed(() => {
 })
 const nightsLabel = (count: number) => `${count} ${count === 1 ? 'night' : 'nights'}`
 const scopeLabel = computed(() => `${targets.value.length === 1 ? targets.value[0]!.home.name : `${targets.value.length} homes`} · ${nightsLabel(nightCount.value)}`)
+/** The gap a minimum blocks, when the selection sits inside one: its explanation, and the run its action selects. */
+const blocker = computed(() => {
+  if (!span.value || targets.value.length !== 1) return null
+  const row = rows.value.findIndex(entry => entry.home.product_id === targets.value[0]!.home.product_id)
+  const gap = rows.value[row]?.gaps.get(span.value.start)
+  return gap && span.value.end <= gap.end ? { row, ...gap } : null
+})
+async function fixBlocker() {
+  const gap = blocker.value
+  if (!gap) return
+  // The run's own nights, then its minimum: the selection change resets the inspector, so the leaf opens after it lands.
+  await router.replace({ query: { ...route.query, homes: rows.value[gap.row]!.home.product_id, nights: `${dates.value[gap.start]}..${addLocalDays(dates.value[gap.end - 1]!, 1)}`, weekdays: undefined } })
+  await nextTick()
+  editor.edit('minimum')
+}
 const inspectorProps = computed(() => ({
+  blocker: blocker.value?.text ?? null,
   ...editor.inspector.value,
   dateLabel: selectionLabel.value,
   scope: scopeLabel.value,
