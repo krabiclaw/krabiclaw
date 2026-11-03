@@ -1579,8 +1579,10 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(last).toContainText(feed.cards.at(-1)!.headline)
     await expect(last).toBeInViewport({ ratio: 1 })
     const finalBody = (await body.boundingBox())!
-    const finalCard = (await last.boundingBox())!
-    expect(finalBody.y + finalBody.height - finalCard.y - finalCard.height, 'Today has the canonical 16px panel padding after its last card').toBeCloseTo(16, 0)
+    // Due work carries its decisions (I'll do this, Later, Dismiss, Correct) beneath the card; they end the item.
+    const decisions = last.locator('xpath=following-sibling::*[1][@data-testid="today-card-decisions"]')
+    const finalItem = (await (await decisions.count() ? decisions : last).boundingBox())!
+    expect(finalBody.y + finalBody.height - finalItem.y - finalItem.height, 'Today has the canonical 16px panel padding after its last item').toBeCloseTo(16, 0)
     const nav = (await page.getByTestId('dashboard-mobile-nav').boundingBox())!
     expect(finalBody.y + finalBody.height).toBeCloseTo(nav.y, 0)
     expect(await page.evaluate(() => document.scrollingElement!.scrollTop)).toBe(0)
