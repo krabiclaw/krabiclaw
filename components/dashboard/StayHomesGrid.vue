@@ -76,7 +76,7 @@ import { getLocalTimeZone, parseDate, today } from '@internationalized/date'
 import type { Stay, StayHome, StayNight, StayTurnover } from '~/server/domain/stays'
 import { STAY_CHANNEL_LABELS } from '~/shared/bookings'
 import { isCurrencyCode } from '~/shared/currencies'
-import { minorAmountToMajor } from '~/shared/prices'
+import { formatMinorAmount } from '~/shared/prices'
 import { formatCalendarDate, isValidCalendarDate } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 
@@ -149,7 +149,9 @@ const rows = computed(() => {
 
 const windowLabel = computed(() => `${formatCalendarDate(from.value, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(dates.value.at(-1)!, 'en', { month: 'short', day: 'numeric', year: 'numeric' })}`)
 const addressOf = (home: Home) => home.address ? [home.address.address, home.address.city].filter(Boolean).join(', ') : 'No address'
-const price = (home: Home, night: Night) => night.price_minor === null ? 'No price' : minorAmountToMajor(night.price_minor, home.currency).replace(/\.0+$/, '')
+// Each home's own currency, as the night inspector shows it: a Krabi villa and a
+// Santa Monica studio sit in the same grid, so a bare number would mislead.
+const price = (home: Home, night: Night) => night.price_minor === null ? 'No price' : formatMinorAmount(night.price_minor, home.currency).replace(/\.00$/, '')
 function freeLabel(home: Home, night: Night) {
   if (night.held_until) return 'Hold'
   if (night.calendar) return STAY_CHANNEL_LABELS[night.calendar]
