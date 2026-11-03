@@ -30,10 +30,12 @@
           ? 'text-highlighted underline decoration-2 underline-offset-8'
           : 'text-muted hover:text-highlighted'"
         :aria-current="item.active ? 'page' : undefined"
+        :aria-describedby="item.badgeUnavailable || item.badge ? `top-nav-unread-${item.key}` : undefined"
       >
-        {{ item.label }}
-        <UIcon v-if="item.badgeUnavailable" name="i-lucide-circle-alert" class="ms-1.5 size-3.5 align-[-2px] text-warning" aria-label="Unread messages could not be loaded" data-testid="dashboard-nav-unread-unavailable" />
-        <span v-else-if="item.badge" class="ms-1.5 inline-block h-4 min-w-4 rounded-full bg-error px-1 text-center text-xs font-semibold leading-4 text-white no-underline" :aria-label="`${item.badge} unread`" data-testid="dashboard-nav-unread">{{ item.badge > 99 ? '99+' : item.badge }}</span>
+        <!-- The label is the link's name; the count describes it, so Messages stays "Messages". -->
+        <span data-testid="dashboard-nav-label">{{ item.label }}</span>
+        <UIcon v-if="item.badgeUnavailable" :id="`top-nav-unread-${item.key}`" name="i-lucide-circle-alert" class="ms-1.5 size-3.5 align-[-2px] text-warning" aria-hidden="true" aria-label="Unread messages could not be loaded" data-testid="dashboard-nav-unread-unavailable" />
+        <span v-else-if="item.badge" :id="`top-nav-unread-${item.key}`" class="ms-1.5 inline-block h-4 min-w-4 rounded-full bg-error px-1 text-center text-xs font-semibold leading-4 text-white no-underline" aria-hidden="true" :aria-label="`${item.badge} unread`" data-testid="dashboard-nav-unread">{{ item.badge > 99 ? '99+' : item.badge }}</span>
       </NuxtLink>
     </nav>
 
