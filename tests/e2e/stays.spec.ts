@@ -4568,6 +4568,9 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toBeDisabled()
 
   // From the keyboard: a night, then Shift with the arrow keys, selects two weeks; only Fridays and Saturdays are blocked.
+  // Clearing first, since a pending first click would make this click end a range from it.
+  await inspector.getByRole('button', { name: 'Clear selected nights', exact: true }).click()
+  await expect(inspector).toHaveCount(0)
   await night(bay, 17).click()
   await expect(inspector.getByText('Bay House · 1 night', { exact: true })).toBeVisible()
   for (let index = 0; index < 13; index++) await page.keyboard.press('Shift+ArrowRight')
