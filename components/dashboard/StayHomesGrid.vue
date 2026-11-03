@@ -7,6 +7,7 @@
   -->
   <div>
     <div class="mb-4 flex flex-wrap items-center gap-3">
+      <USelect :model-value="city" :items="cityItems" icon="i-lucide-building-2" aria-label="City" class="min-w-44" :ui="{ base: 'rounded-full' }" @update:model-value="setQuery({ city: $event === ALL_CITIES ? undefined : String($event) })" />
       <UInput :model-value="search" icon="i-lucide-search" placeholder="Search homes" aria-label="Search homes" class="w-full sm:w-72" :ui="{ base: 'rounded-full' }" @update:model-value="setQuery({ q: String($event ?? '').trim() || undefined })" />
       <UButton label="No upcoming stays" :aria-pressed="freeOnly" color="neutral" :variant="freeOnly ? 'solid' : 'outline'" class="rounded-full" @click="setQuery({ free: freeOnly ? undefined : '1' })" />
     </div>
@@ -34,7 +35,7 @@
             </div>
           </div>
         </div>
-        <p v-else-if="data && !rows.length" class="py-10 text-center text-sm text-muted">{{ search || freeOnly ? 'No homes match these filters.' : 'No homes at this location.' }}</p>
+        <p v-else-if="data && !rows.length" class="py-10 text-center text-sm text-muted">{{ search || freeOnly || city !== ALL_CITIES ? 'No homes match these filters.' : 'No homes yet.' }}</p>
         <div v-else-if="data" class="overflow-x-auto rounded-xl shadow-sm ring ring-default" :aria-busy="status === 'pending'" data-testid="stay-homes-grid">
           <div
             ref="gridElement"
@@ -79,27 +80,32 @@
                   @keydown="keydown($event, rowIndex, index)"
                   @focus="cursor = { row: rowIndex, day: index }"
                 >
-                  <span v-if="channelState(night)" class="absolute right-1 top-1 size-1.5 rounded-full" :class="channelState(night) === 'pending' ? 'bg-warning' : 'bg-error'" :data-testid="`stay-homes-channel-${channelState(night)}`" aria-hidden="true" />
-                  <span v-if="night.stay_id === null" class="truncate" :class="night.closed ? 'line-through' : ''">{{ freeLabel(row.home, night) }}</span>
+                  <UIcon v-if="channelState(night)" :name="CHANNEL_MARKS[channelState(night)!]" class="absolute right-1 top-1 size-3" :class="channelState(night) === 'pending' ? 'text-muted' : 'text-warning'" :data-testid="`stay-homes-channel-${channelState(night)}`" aria-hidden="true" />
+                  <span v-if="!isBookedNight(night) || night.held_until" class="truncate" :class="night.closed ? 'line-through' : ''">{{ freeLabel(row.home, night) }}</span>
                 </button>
                 <div
-                  v-if="pill(rowIndex)"
+                  v-for="(piece, pieceIndex) in pills(rowIndex)"
+                  :key="piece.column"
                   class="pointer-events-none z-[5] mx-0.5 mt-1.5 flex h-7 min-w-0 items-center self-start rounded-full bg-accented px-2.5 text-xs font-semibold text-highlighted ring-2 ring-inset ring-inverted"
-                  :style="{ gridRow: 1, gridColumn: `${pill(rowIndex)!.column} / span ${pill(rowIndex)!.span}` }"
+                  :style="{ gridRow: 1, gridColumn: `${piece.column} / span ${piece.span}` }"
                   data-testid="stay-homes-selection"
                   aria-hidden="true"
                 >
-                  <span class="truncate">{{ pill(rowIndex)!.label }}</span>
+                  <span v-if="pieceIndex === 0" class="truncate">{{ piece.label }}</span>
                 </div>
                 <NuxtLink
                   v-for="bar in row.bars"
                   :key="bar.key"
-                  :to="homeTo(row.home.product_id, bar.date)"
-                  class="z-10 mx-0.5 mt-1.5 flex h-7 min-w-0 items-center self-start rounded-full bg-inverted px-2.5 text-xs font-medium text-inverted"
-                  :style="{ gridRow: 1, gridColumn: `${bar.column} / span ${bar.span}` }"
+                  :to="bar.to"
+                  class="z-10 mx-0.5 mt-1.5 flex h-7 min-w-0 items-center gap-1.5 self-start rounded-full px-2.5 text-xs font-medium text-white"
+                  :style="{ gridRow: 1, gridColumn: `${bar.column} / span ${bar.span}`, backgroundColor: CHANNEL_BARS[bar.channel ?? 'direct'].color }"
                   :title="bar.title"
                   :data-stay="bar.stayId"
+                  :data-channel="bar.channel"
                 >
+                  <img v-if="bar.channel === 'direct'" src="/platform/krabiclaw-symbol.svg" alt="" class="size-3.5 shrink-0">
+                  <UIcon v-else-if="bar.channel === 'airbnb'" name="i-simple-icons-airbnb" class="size-3.5 shrink-0" />
+                  <span v-else-if="bar.channel" class="shrink-0 font-bold" aria-hidden="true">{{ CHANNEL_BARS[bar.channel].mark }}</span>
                   <span class="truncate">{{ bar.label }}</span>
                 </NuxtLink>
               </div>
@@ -107,22 +113,22 @@
           </div>
         </div>
       </div>
-      <aside v-if="selection && pane && editor.nights.value.length" class="sticky top-4 rounded-2xl p-5 ring ring-default">
+      <aside v-if="selection && pane && targets.length" class="sticky top-4 rounded-2xl p-5 ring ring-default">
         <StayNightInspector v-bind="inspectorProps" v-on="editor.listeners" @clear="clearSelection" @weekdays="setWeekdays" />
       </aside>
     </div>
     <div v-if="selection && !pane && !drawerOpen" class="fixed inset-x-3 bottom-20 z-30 flex items-center justify-between gap-3 rounded-xl bg-inverted px-4 py-3 text-sm font-medium text-inverted shadow-lg" data-testid="stay-homes-hint">
-      <span class="min-w-0 truncate">{{ awaitingEnd ? `${formatCalendarDate(selection.from, 'en', { weekday: 'short', month: 'short', day: 'numeric' })} · tap the last night` : selectionLabel }}</span>
+      <span class="min-w-0 truncate">{{ awaitingEnd ? `${formatCalendarDate(selection.from, 'en', { weekday: 'short', month: 'short', day: 'numeric' })} · tap the last night` : `${selectionLabel} · ${scopeLabel}` }}</span>
       <div class="flex shrink-0 items-center gap-1">
         <UButton label="Edit" color="neutral" variant="solid" class="bg-default text-highlighted hover:bg-elevated" @click="drawerOpen = true" />
         <UButton label="Cancel" color="neutral" variant="link" class="text-inverted" @click="clearSelection" />
       </div>
     </div>
     <UDrawer
-      v-if="selection && !pane && editor.nights.value.length"
+      v-if="selection && !pane && targets.length"
       :open="drawerOpen"
       title="Selected nights"
-      :description="selectionLabel"
+      :description="`${selectionLabel} · ${scopeLabel}`"
       :dismissible="!editor.busy.value"
       no-body-styles
       handle-only
@@ -141,19 +147,17 @@ import { getLocalTimeZone, parseDate, today } from '@internationalized/date'
 import { useEventListener } from '@vueuse/core'
 import type { LocationQueryRaw } from 'vue-router'
 import type { Stay, StayHome, StayNight, StayTurnover } from '~/server/domain/stays'
-import { MAX_STAY_NIGHTS, STAY_CHANNEL_LABELS, parseStayCalendarRules } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, STAY_CHANNEL_LABELS, parseStayCalendarRules, type StayChannel } from '~/shared/bookings'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount } from '~/shared/prices'
 import { addLocalDays, formatCalendarDate, isValidCalendarDate, isValidTimezone } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
-import { channelNote, isStayNight, nightWeekday, useStayNightEditor } from '~/composables/useStayNightEditor'
+import { CHANNEL_MARKS, channelNote, isBookedNight, isStayNight, nightWeekday, useStayNightEditor } from '~/composables/useStayNightEditor'
 import StayNightInspector from './StayNightInspector.vue'
 
-const props = defineProps<{ locationId: string | null }>()
-
-type Home = Pick<StayHome, 'product_id' | 'name' | 'location_id' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'address'>
+type Home = Pick<StayHome, 'product_id' | 'name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'address'>
 // A manager reads each stay's surname and channel; a member's turnover has neither.
-type GridStay = Pick<StayTurnover, 'id' | 'product_id' | 'guest_name' | 'check_in_date' | 'check_out_date'> & Partial<Pick<Stay, 'guest_surname' | 'channel'>>
+type GridStay = Pick<StayTurnover, 'id' | 'product_id' | 'guest_name' | 'adults' | 'children' | 'check_in_date' | 'check_out_date'> & Partial<Pick<Stay, 'guest_surname' | 'channel'>>
 interface Payload { from: string; to: string; homes: { home: Home; nights: StayNight[] }[]; stays: GridStay[]; manage: boolean }
 
 // Today and thirty nights after it, paged by a week or a month; the URL keeps where you were and what is selected.
@@ -170,6 +174,10 @@ const to = computed(() => parseDate(from.value).add({ days: SPAN }).toString())
 const dates = computed(() => Array.from({ length: SPAN }, (_, index) => parseDate(from.value).add({ days: index }).toString()))
 const search = computed(() => typeof route.query.q === 'string' ? route.query.q : '')
 const freeOnly = computed(() => route.query.free === '1')
+// A city from the homes' addresses; NO_CITY is the homes without one.
+const ALL_CITIES = '*'
+const NO_CITY = '-'
+const city = computed(() => typeof route.query.city === 'string' && route.query.city ? route.query.city : ALL_CITIES)
 
 /** The selection: the same nights, [from, to), at each named home, narrowed to weekdays when any are named. */
 const selection = computed(() => {
@@ -189,9 +197,10 @@ const weekdays = computed<number[] | null>(() => {
 })
 
 const isText = (value: unknown) => value === null || typeof value === 'string'
+const isCount = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= 0
 const isAmount = (value: unknown) => value === null || typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 function isHome(value: unknown): value is Home {
-  if (!isRecord(value) || typeof value.product_id !== 'string' || typeof value.name !== 'string' || typeof value.location_id !== 'string' || typeof value.timezone !== 'string' || !isValidTimezone(value.timezone)
+  if (!isRecord(value) || typeof value.product_id !== 'string' || typeof value.name !== 'string' || typeof value.timezone !== 'string' || !isValidTimezone(value.timezone)
     || !isCurrencyCode(value.currency) || !isAmount(value.base_price_minor) || typeof value.min_nights !== 'number' || !Number.isInteger(value.min_nights) || value.min_nights < 1 || value.min_nights > MAX_STAY_NIGHTS
     || !(value.address === null || isRecord(value.address))) return false
   parseStayCalendarRules(value.calendar_rules)
@@ -200,7 +209,7 @@ function isHome(value: unknown): value is Home {
 const isPayload = (value: unknown): value is Payload => isRecord(value) && value.from === from.value && value.to === to.value && Array.isArray(value.homes) && Array.isArray(value.stays) && typeof value.manage === 'boolean'
   && value.homes.every(entry => isRecord(entry) && isHome(entry.home) && Array.isArray(entry.nights) && entry.nights.length === SPAN
     && entry.nights.every((night, index) => isStayNight(night) && night.date === dates.value[index]))
-  && value.stays.every(stay => isRecord(stay) && typeof stay.id === 'string' && typeof stay.product_id === 'string' && isText(stay.guest_name)
+  && value.stays.every(stay => isRecord(stay) && typeof stay.id === 'string' && typeof stay.product_id === 'string' && isText(stay.guest_name) && isCount(stay.adults) && isCount(stay.children)
     && (value.manage ? isText(stay.guest_surname) && Object.hasOwn(STAY_CHANNEL_LABELS, String(stay.channel)) : !('guest_surname' in stay) && !('channel' in stay)) && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date))
 
 const { data, error, status, refresh } = await useAsyncData(
@@ -220,25 +229,50 @@ if (import.meta.client) {
   })
 }
 
+/** Each channel's bar colour and, where the build has no official mark, the mark it reads. */
+const CHANNEL_BARS: Record<StayChannel, { color: string; mark: string }> = {
+  airbnb: { color: '#FF385C', mark: '' }, vrbo: { color: '#245ABC', mark: 'V' }, booking_com: { color: '#003580', mark: 'B.' }, direct: { color: 'var(--kc-navy)', mark: '' },
+}
 const guestName = (stay: GridStay) => [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest name not provided'
+// Adults and children count as guests; infants do not, as Airbnb counts them.
+const guestCount = (stay: GridStay) => `${stay.adults + stay.children} ${stay.adults + stay.children === 1 ? 'guest' : 'guests'}`
 const addressOf = (home: Home) => home.address ? [home.address.address, home.address.city].filter(Boolean).join(', ') : 'No address'
+const cityOf = (home: Home) => home.address?.city?.trim() || null
+const cityItems = computed(() => {
+  const homes = data.value?.homes ?? []
+  const counts = new Map<string, number>()
+  for (const { home } of homes) counts.set(cityOf(home) ?? NO_CITY, (counts.get(cityOf(home) ?? NO_CITY) ?? 0) + 1)
+  return [
+    { label: `All cities (${homes.length})`, value: ALL_CITIES },
+    ...[...counts].filter(([name]) => name !== NO_CITY).sort(([a], [b]) => a.localeCompare(b)).map(([name, count]) => ({ label: `${name} (${count})`, value: name })),
+    ...(counts.has(NO_CITY) ? [{ label: `No city (${counts.get(NO_CITY)})`, value: NO_CITY }] : []),
+  ]
+})
 // A stay's bar spans the run of nights it holds on screen; a run cut by the window's edge still names its guest.
+// A linked calendar's nights are a bar of their own, named for the channel.
 const rows = computed(() => {
   const stays = new Map((data.value?.stays ?? []).map(stay => [stay.id, stay]))
   const query = search.value.toLowerCase()
   return (data.value?.homes ?? [])
-    .filter(entry => (!props.locationId || entry.home.location_id === props.locationId)
+    .filter(entry => (city.value === ALL_CITIES || (cityOf(entry.home) ?? NO_CITY) === city.value)
       && (!query || `${entry.home.name} ${addressOf(entry.home)}`.toLowerCase().includes(query))
-      && (!freeOnly.value || entry.nights.every(night => night.stay_id === null)))
+      && (!freeOnly.value || !entry.nights.some(isBookedNight)))
     .map(({ home, nights }) => {
-      const bars: { key: string; stayId: string; column: number; span: number; date: string; label: string; title: string }[] = []
+      const bars: { key: string; stayId: string | null; channel: StayChannel | null; column: number; span: number; label: string; title: string; to: { path: string; query: LocationQueryRaw } }[] = []
       nights.forEach((night, index) => {
-        if (!night.stay_id) return
+        const holder = night.stay_id ?? (night.calendar ? `calendar:${night.calendar}` : null)
+        if (!holder) return
         const last = bars.at(-1)
-        if (last?.stayId === night.stay_id && last.column + last.span === index + 1) { last.span += 1; return }
+        if (last?.key.startsWith(`${holder}:`) && last.column + last.span === index + 1) { last.span += 1; return }
+        if (!night.stay_id) {
+          const label = STAY_CHANNEL_LABELS[night.calendar!]
+          bars.push({ key: `${holder}:${night.date}`, stayId: null, channel: night.calendar, column: index + 1, span: 1, label, title: `Unavailable from ${label}`, to: homeTo(home.product_id, night.date) })
+          return
+        }
         const stay = stays.get(night.stay_id)
-        const label = stay ? guestName(stay) : 'Reserved'
-        bars.push({ key: `${night.stay_id}:${night.date}`, stayId: night.stay_id, column: index + 1, span: 1, date: night.date, label,
+        const label = stay ? `${guestName(stay)} · ${guestCount(stay)}` : 'Reserved'
+        bars.push({ key: `${holder}:${night.date}`, stayId: night.stay_id, channel: stay?.channel ?? null, column: index + 1, span: 1, label,
+          to: { path: `/dashboard/${orgSlug}/calendar/stay/${encodeURIComponent(night.stay_id)}`, query: route.query },
           title: stay ? `${[label, ...(stay.channel ? [STAY_CHANNEL_LABELS[stay.channel]] : [])].join(' · ')} · ${formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric' })}` : label })
       })
       return { home, nights, bars }
@@ -373,8 +407,7 @@ function closeDrawer(open: boolean) {
 
 const targets = computed(() => {
   if (!span.value) return []
-  const range = { from: dates.value[span.value.start]!, to: span.value.end === SPAN ? to.value : dates.value[span.value.end]! }
-  return rows.value.filter(row => selectedHome(row.home.product_id)).map(row => ({ home: row.home, ranges: [range], nights: row.nights.slice(span.value!.start, span.value!.end) }))
+  return rows.value.filter(row => selectedHome(row.home.product_id)).map(row => ({ home: row.home, nights: row.nights.slice(span.value!.start, span.value!.end) }))
 })
 const editor = useStayNightEditor({
   orgSlug,
@@ -393,18 +426,31 @@ const selectionLabel = computed(() => {
   const first = dates.value[span.value.start]!
   const last = dates.value[span.value.end - 1]!
   const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' }
-  const nights = `${nightCount.value} ${nightCount.value === 1 ? 'night' : 'nights'}`
-  return `${formatCalendarDate(first, 'en', options)}${first === last ? '' : ` – ${formatCalendarDate(last, 'en', options)}`} · ${targets.value.length > 1 ? `${targets.value.length} homes · ` : ''}${nights}`
+  return `${formatCalendarDate(first, 'en', options)}${first === last ? '' : ` – ${formatCalendarDate(last, 'en', options)}`}`
 })
+const nightsLabel = (count: number) => `${count} ${count === 1 ? 'night' : 'nights'}`
+const scopeLabel = computed(() => `${targets.value.length === 1 ? targets.value[0]!.home.name : `${targets.value.length} homes`} · ${nightsLabel(nightCount.value)}`)
 const inspectorProps = computed(() => ({
   ...editor.inspector.value,
   dateLabel: selectionLabel.value,
+  scope: scopeLabel.value,
   calendarTo: targets.value.length === 1 && span.value ? homeTo(targets.value[0]!.home.product_id, dates.value[span.value.start]) : undefined,
 }))
-function pill(row: number) {
-  if (!span.value || !selectedHome(rows.value[row]!.home.product_id)) return null
-  const chosen = rows.value[row]!.nights.slice(span.value.start, span.value.end).filter(night => chosenWeekday(night.date)).length
-  return { column: span.value.start + 1, span: span.value.end - span.value.start, label: weekdays.value ? `${chosen} of ${nightCount.value} nights` : `${nightCount.value} ${nightCount.value === 1 ? 'night' : 'nights'}` }
+/** The selection on one row: a pill over each run of free nights, broken around booked ones, the first piece counting what a save writes. */
+function pills(row: number) {
+  if (!span.value || !selectedHome(rows.value[row]!.home.product_id)) return []
+  const pieces: { column: number; span: number; label: string }[] = []
+  const nights = rows.value[row]!.nights
+  for (let index = span.value.start; index < span.value.end; index++) {
+    if (isBookedNight(nights[index]!)) continue
+    const last = pieces.at(-1)
+    if (last && last.column + last.span === index + 1) last.span += 1
+    else pieces.push({ column: index + 1, span: 1, label: '' })
+  }
+  const free = nights.slice(span.value.start, span.value.end).filter(night => !isBookedNight(night))
+  const chosen = free.filter(night => chosenWeekday(night.date)).length
+  if (pieces[0]) pieces[0].label = weekdays.value ? `${chosen} of ${nightsLabel(free.length)}` : nightsLabel(free.length)
+  return pieces
 }
 watch(() => route.query.homes === undefined ? null : `${String(route.query.homes)}|${String(route.query.nights)}`, () => editor.edit('summary'))
 

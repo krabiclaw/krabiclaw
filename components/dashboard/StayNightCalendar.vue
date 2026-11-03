@@ -49,7 +49,7 @@
             >
               <span class="flex items-center justify-between gap-1">
                 <span class="block text-sm sm:text-base" :class="night(day)?.available === false ? 'line-through' : ''">{{ day.day }}</span>
-                <span v-if="channelState(day)" class="size-2 shrink-0 rounded-full" :class="channelState(day) === 'pending' ? 'bg-warning' : 'bg-error'" :data-testid="`stay-night-channel-${channelState(day)}`" aria-hidden="true" />
+                <UIcon v-if="channelState(day)" :name="CHANNEL_MARKS[channelState(day)!]" class="size-3.5 shrink-0" :class="channelState(day) === 'pending' ? 'text-muted' : 'text-warning'" :data-testid="`stay-night-channel-${channelState(day)}`" aria-hidden="true" />
               </span>
               <span v-if="night(day)?.stay_id || night(day)?.held_until || night(day)?.calendar" class="hidden truncate text-xs sm:block">{{ stayLabel(day) }}</span>
               <span class="block break-all text-[10px] leading-tight tabular-nums sm:hidden">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : compactMoney(night(day)!.price_minor!) : '…' }}</span>
@@ -82,7 +82,7 @@
               <template #heading><UButton :label="formatCalendarDate(month.toString(), 'en', { month: 'long' })" color="neutral" variant="link" @click="openYearDate(month)" /></template>
               <template #day="{ day }">
                 <span :class="night(day)?.available === false ? 'font-semibold underline decoration-2 underline-offset-4' : ''" :title="nightTitle(day)">{{ day.day }}</span>
-                <span v-if="channelState(day)" class="absolute right-0 top-0 size-1.5 rounded-full" :class="channelState(day) === 'pending' ? 'bg-warning' : 'bg-error'" />
+                <UIcon v-if="channelState(day)" :name="CHANNEL_MARKS[channelState(day)!]" class="absolute -right-1 -top-1 size-3" :class="channelState(day) === 'pending' ? 'text-muted' : 'text-warning'" aria-hidden="true" />
               </template>
             </UCalendar>
           </div>
@@ -100,7 +100,7 @@
         <p v-if="view === 'month' && selectedCount" class="mt-4 text-sm text-muted">{{ selectedCount }} {{ selectedCount === 1 ? 'night selected' : 'nights selected' }}. Select more dates individually, or use Select nights for a date range.</p>
       </div>
       <aside v-if="pane && level.mode.value === 'index'" class="min-w-0 overflow-y-auto border-l border-default p-6 xl:p-8">
-        <StayNightInspector v-if="editor.nights.value.length && data" v-bind="inspectorProps" v-on="editor.listeners" @dates="openDates" @clear="clearSelection" @weekdays="weekdays = $event" />
+        <StayNightInspector v-if="(editor.nights.value.length || editor.booked.value.length) && data" v-bind="inspectorProps" v-on="editor.listeners" @dates="openDates" @clear="clearSelection" @weekdays="weekdays = $event" />
         <EditorNavigationList v-else-if="data" :groups="overviewGroups" />
       </aside>
     </div>
@@ -150,7 +150,7 @@ import { formatMinorAmount, minorAmountToMajor } from '~/shared/prices'
 import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
 import { STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES } from '~/shared/stay-listing'
 import { addLocalDays, formatCalendarDate, isValidCalendarDate, isValidTimezone } from '~/utils/timezone'
-import { channelNote, isStayNight, useStayNightEditor } from '~/composables/useStayNightEditor'
+import { CHANNEL_MARKS, channelNote, isStayNight, useStayNightEditor } from '~/composables/useStayNightEditor'
 import { getErrorMessage } from '~/utils/errors'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'cancellation_policy' | 'long_term_cancellation_policy'>
@@ -303,7 +303,7 @@ const dateError = ref('')
 const weekdays = ref<number[] | null>(null)
 const editor = useStayNightEditor({
   orgSlug,
-  targets: computed(() => data.value && selectedNights.value.length === selectedCount.value ? [{ home: data.value.home, ranges: selectedRanges.value, nights: selectedNights.value }] : []),
+  targets: computed(() => data.value && selectedNights.value.length === selectedCount.value ? [{ home: data.value.home, nights: selectedNights.value }] : []),
   weekdays,
   manage: () => props.manage,
   loading: () => status.value === 'pending',
@@ -313,7 +313,7 @@ const editor = useStayNightEditor({
   },
 })
 const { busy, error: writeError } = editor
-const inspectorProps = computed(() => ({ ...editor.inspector.value, dateLabel: dateLabel.value, selectDates: true }))
+const inspectorProps = computed(() => ({ ...editor.inspector.value, dateLabel: dateLabel.value, scope: data.value ? `${data.value.home.timezone} · ${data.value.home.currency}` : '', selectDates: true }))
 const overviewGroups = computed(() => [{ id: 'home', items: [
   { id: 'price', label: 'Pricing', summary: data.value?.home.base_price_minor == null ? 'No base nightly price set' : `${money(data.value.home.base_price_minor)} per night`, to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/price` },
   { id: 'availability', label: 'Availability', summary: data.value ? `${data.value.home.min_nights} night minimum` : 'Loading availability…', to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/availability` },

@@ -45,7 +45,8 @@
       <!-- Calendar chooses bookings or one offering's availability; Location narrows that scope. -->
       <div v-if="!personalScope" class="mb-8 flex flex-wrap items-center gap-3">
         <CalendarOfferingFilter :items="offeringItems ?? []" :disabled="Boolean(level.child.value)" />
-        <DashboardLocationFilter v-model="filters.locationId" :items="locationItems" :disabled="Boolean(level.child.value)" />
+        <!-- Every home is its own location, so the Homes view narrows by city instead. -->
+        <DashboardLocationFilter v-if="view !== 'homes'" v-model="filters.locationId" :items="locationItems" :disabled="Boolean(level.child.value)" />
         <UTooltip v-if="sessionProduct && physicalLocation" text="Repeating times">
           <UButton icon="i-lucide-settings" color="neutral" variant="soft" square class="size-10 justify-center rounded-full" aria-label="Schedule settings" :to="{ path: `/dashboard/${route.params.orgSlug}/products/${sessionProduct.id}/booking/schedule`, query: { location_id: physicalLocation.id } }" />
         </UTooltip>
@@ -75,7 +76,7 @@
         </div>
       </header>
 
-      <StayHomesGrid v-if="view === 'homes'" :location-id="scope" />
+      <StayHomesGrid v-if="view === 'homes'" />
       <template v-else-if="view !== 'year'">
         <USkeleton v-if="month.status === 'loading'" class="h-96 w-full" />
         <UAlert
