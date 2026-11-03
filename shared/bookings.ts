@@ -57,6 +57,12 @@ export function resolveStayNightPolicy(home: { min_nights: number; base_price_mi
     price_minor: override?.price_minor ?? ((weekday === 4 || weekday === 5) && rules?.weekend_price_minor !== undefined ? rules.weekend_price_minor : home.base_price_minor),
   }
 }
+/** The percent a nights write may move each selected night's price by, either way. */
+export const NIGHT_PRICE_CHANGE_PERCENT = 50
+/** A night's price moved by a whole percent, rounded to its minor unit: the nights write and its read-back agree on this. */
+export function changeNightPrice(priceMinor: number, percent: number): number {
+  return Math.round(priceMinor * (100 + percent) / 100)
+}
 export const STAY_CHANNELS = ['airbnb', 'vrbo', 'booking_com', 'direct'] as const
 export type StayChannel = typeof STAY_CHANNELS[number]
 export const STAY_CHANNEL_LABELS: Record<StayChannel, string> = { airbnb: 'Airbnb', vrbo: 'Vrbo', booking_com: 'Booking.com', direct: 'Direct' }
