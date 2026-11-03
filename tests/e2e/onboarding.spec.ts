@@ -220,8 +220,12 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   await expect(step('contact')).toBeVisible()
   await expect(phone).toHaveValue('082 123 4567')
   await phone.fill('0812345678')
+  // Exit goes through post-login, which lands on the draft's organization.
+  // Wait for that landing so the next navigation doesn't race the redirect.
+  const draftOrganization = (await (await page.request.get('/api/auth/organization/list')).json() as Array<{ id: string; slug: string }>)
+    .find(organization => organization.id === initialDraft.organizationId)
   await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
-  await expect(page).not.toHaveURL(/\/dashboard\/onboarding/)
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${draftOrganization!.slug}$`))
   const exitedDraft = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(exitedDraft.status(), await exitedDraft.text()).toBe(200)
   expect((await exitedDraft.json() as { draft: unknown }).draft).toMatchObject({

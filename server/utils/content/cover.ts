@@ -20,7 +20,8 @@ export interface CoverMedia {
 }
 
 /** Columns for `attachCoverMedia`; pair with `coverJoinSql` on the same document alias. */
-export const COVER_SELECT = `cover_placement.asset_id AS cover_asset_id, cover_asset.public_url AS cover_public_url, cover_asset.thumbnail_url AS cover_thumbnail_url,
+export const COVER_SELECT =
+  `cover_placement.asset_id AS cover_asset_id, cover_asset.public_url AS cover_public_url, cover_asset.thumbnail_url AS cover_thumbnail_url,
       cover_asset.kind AS cover_kind, cover_asset.alt_text AS cover_alt_text, cover_asset.width AS cover_width, cover_asset.height AS cover_height`
 
 /**
