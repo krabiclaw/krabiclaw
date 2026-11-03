@@ -141,6 +141,7 @@ export default {
     "sleeps": "1 guest | {count} guests",
     "max_guests": "This place has a maximum of {count} guests, not including infants.",
     "min_nights": "{count}-night minimum",
+    "minimum_stay_note": "Minimum stay: {count} nights · Earliest checkout {date}",
     "no_dates": "No open dates on this calendar. | No {count}-night stay fits the open dates on this calendar.",
     "ask_host": "Ask the host about other dates",
     "check_in_after": "Check-in after {time}",
