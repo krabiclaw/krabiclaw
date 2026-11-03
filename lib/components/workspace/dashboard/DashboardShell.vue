@@ -100,13 +100,14 @@
         class="flex flex-1 flex-col items-center justify-center gap-1 px-1 py-2 no-underline transition active:scale-95 duration-150"
         :class="item.active ? 'text-primary' : 'text-dimmed hover:text-highlighted'"
         :aria-current="item.active ? 'page' : undefined"
+        :aria-describedby="item.badgeUnavailable || item.badge ? `mobile-nav-unread-${item.key}` : undefined"
       >
         <span class="relative">
           <UIcon :name="item.icon" class="size-6 shrink-0" />
-          <UIcon v-if="item.badgeUnavailable" name="i-lucide-circle-alert" class="absolute -right-1.5 -top-1 size-3.5 text-warning" aria-label="Unread messages could not be loaded" />
-          <span v-else-if="item.badge" class="absolute -right-2.5 -top-1.5 h-4 min-w-4 rounded-full bg-error px-1 text-center text-xs font-semibold leading-4 text-white" :aria-label="`${item.badge} unread`">{{ item.badge > 99 ? '99+' : item.badge }}</span>
+          <UIcon v-if="item.badgeUnavailable" :id="`mobile-nav-unread-${item.key}`" name="i-lucide-circle-alert" class="absolute -right-1.5 -top-1 size-3.5 text-warning" aria-hidden="true" aria-label="Unread messages could not be loaded" />
+          <span v-else-if="item.badge" :id="`mobile-nav-unread-${item.key}`" class="absolute -right-2.5 -top-1.5 h-4 min-w-4 rounded-full bg-error px-1 text-center text-xs font-semibold leading-4 text-white" aria-hidden="true" :aria-label="`${item.badge} unread`">{{ item.badge > 99 ? '99+' : item.badge }}</span>
         </span>
-        <span class="text-xs leading-tight font-medium">{{ item.label }}</span>
+        <span class="text-xs leading-tight font-medium" data-testid="dashboard-nav-label">{{ item.label }}</span>
       </NuxtLink>
       <NuxtLink
         :to="menuPageTo"
@@ -115,12 +116,13 @@
         :class="isMenuPageActive ? 'text-primary' : 'text-dimmed hover:text-highlighted'"
         :aria-current="isMenuPageActive ? 'page' : undefined"
         data-testid="dashboard-mobile-nav-menu-link"
+        :aria-describedby="menuUnread ? 'mobile-nav-unread-menu' : undefined"
       >
         <span class="relative">
           <UIcon name="i-lucide-menu" class="size-6 shrink-0" />
-          <span v-if="menuUnread" class="absolute -right-1 -top-0.5 size-2.5 rounded-full bg-error" aria-label="Unread notifications" data-testid="dashboard-menu-unread" />
+          <span v-if="menuUnread" id="mobile-nav-unread-menu" class="absolute -right-1 -top-0.5 size-2.5 rounded-full bg-error" aria-hidden="true" aria-label="Unread notifications" data-testid="dashboard-menu-unread" />
         </span>
-        <span class="text-xs leading-tight font-medium">Menu</span>
+        <span class="text-xs leading-tight font-medium" data-testid="dashboard-nav-label">Menu</span>
       </NuxtLink>
     </nav>
     </div>

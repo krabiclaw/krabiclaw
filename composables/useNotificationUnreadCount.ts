@@ -1,4 +1,13 @@
 import type { DashboardInvalidationConnection } from '~/composables/useDashboardInvalidations'
+
+/**
+ * Re-read every unread count on the page. A read raises no live event of its
+ * own (a team thread's change event reloads the open conversation), so the
+ * screen that recorded a read asks for the counts again.
+ */
+export function refreshNotificationUnreadCounts() {
+  useState('dashboard-unread-refresh', () => 0).value += 1
+}
 /**
  * The dashboard shell provides the live connection and reads the count itself,
  * so it passes its own connection: a component cannot inject what it provides.
@@ -47,6 +56,7 @@ export function useNotificationUnreadCount(connection?: DashboardInvalidationCon
   watch(realtime.connectionEpoch, (epoch) => {
     if (epoch > 0) void refresh()
   })
+  watch(useState('dashboard-unread-refresh', () => 0), () => void refresh())
 
   const unavailable = computed(() => Boolean(error.value) || Boolean(orgSlug.value && realtime.status.value === 'failed'))
   return { unreadCount, unreadConversations, refresh, error, unavailable }
