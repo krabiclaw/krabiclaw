@@ -4529,6 +4529,16 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(night(bay, 12)).toHaveText(gridPrice(288_000))
   await expect(night(sea, 12)).toHaveText(gridPrice(180_000))
 
+  // A gap no arrival can fill says so, as Airbnb's calendar blocker does: three free nights under a week's minimum.
+  await expect(night(productId, 5)).not.toHaveAttribute('aria-label', /minimum is/)
+  await drag(night(productId, 4), night(productId, 6))
+  await inspector.getByRole('button', { name: /^Minimum nights/ }).click()
+  await inspector.getByRole('button', { name: '1 week', exact: true }).click()
+  await inspector.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(inspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('7 nights')
+  for (const offset of [4, 5, 6]) await expect(night(productId, offset)).toHaveAttribute('aria-label', /· 3 free nights; minimum is 7$/)
+  await expect(night(productId, 1)).not.toHaveAttribute('aria-label', /minimum is/)
+
   // From the keyboard: a night, then Shift with the arrow keys, selects two weeks; only Fridays and Saturdays are blocked.
   await night(bay, 17).click()
   await expect(inspector.getByText('Bay House · 1 night', { exact: true })).toBeVisible()

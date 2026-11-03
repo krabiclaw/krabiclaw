@@ -68,12 +68,12 @@
                   type="button"
                   role="gridcell"
                   :aria-selected="inSelection(rowIndex, index)"
-                  :aria-label="nightTitle(row.home, night)"
+                  :aria-label="nightTitle(row.home, night, row.gaps.get(index))"
                   :tabindex="cursor.row === rowIndex && cursor.day === index ? 0 : -1"
                   class="relative flex h-14 flex-col justify-end border-r border-default px-1.5 py-1 text-left text-xs tabular-nums outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-inverted"
                   :class="[night.available ? 'bg-default text-highlighted' : 'bg-elevated/60 text-muted', inSelection(rowIndex, index) && !chosenWeekday(night.date) ? 'text-dimmed' : '']"
                   :style="{ gridRow: 1, gridColumn: index + 1 }"
-                  :title="nightTitle(row.home, night)"
+                  :title="nightTitle(row.home, night, row.gaps.get(index))"
                   :data-night="night.date"
                   @pointerdown="startDrag($event, rowIndex, index)"
                   @click="choose(rowIndex, index)"
@@ -275,9 +275,27 @@ const rows = computed(() => {
           to: { path: `/dashboard/${orgSlug}/calendar/stay/${encodeURIComponent(night.stay_id)}`, query: route.query },
           title: stay ? `${[label, ...(stay.channel ? [STAY_CHANNEL_LABELS[stay.channel]] : [])].join(' · ')} · ${formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric' })}` : label })
       })
-      return { home, nights, bars }
+      return { home, nights, bars, gaps: unbookableGaps(nights) }
     })
 })
+/**
+ * Free nights between two booked ones that no arrival can fill, because every
+ * night's minimum stay is longer than the nights left before the next booking:
+ * Airbnb's calendar blocker, explained the way its shortExplanation does.
+ */
+function unbookableGaps(nights: StayNight[]) {
+  const gaps = new Map<number, string>()
+  let start = -1
+  nights.forEach((night, index) => {
+    if (!isBookedNight(night)) { if (start === -1) start = index; return }
+    if (start > 0 && isBookedNight(nights[start - 1]!) && nights.slice(start, index).every((free, offset) => free.min_stay_arrival > index - start - offset)) {
+      const text = `${index - start} free ${index - start === 1 ? 'night' : 'nights'}; minimum is ${nights[start]!.min_stay_arrival}`
+      for (let gap = start; gap < index; gap++) gaps.set(gap, text)
+    }
+    start = -1
+  })
+  return gaps
+}
 
 const windowLabel = computed(() => `${formatCalendarDate(from.value, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(dates.value.at(-1)!, 'en', { month: 'short', day: 'numeric', year: 'numeric' })}`)
 // Each home's own currency, as the night inspector shows it: a Krabi villa and a
@@ -290,10 +308,10 @@ function freeLabel(home: Home, night: StayNight) {
 }
 /** A night the channel has not confirmed: still queued for it, or refused and needing review. */
 const channelState = (night: StayNight) => night.channel?.state === 'pending' || night.channel?.state === 'needs_review' ? night.channel.state : null
-function nightTitle(home: Home, night: StayNight) {
+function nightTitle(home: Home, night: StayNight, gap?: string) {
   const state = night.stay_id ? 'Booked' : night.held_until ? 'Checkout hold' : night.calendar ? `Unavailable from ${STAY_CHANNEL_LABELS[night.calendar]}` : night.closed ? 'Blocked' : 'Available'
   const note = channelNote(night)
-  return `${home.name} · ${formatCalendarDate(night.date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })} · ${state} · ${price(home, night)}${note ? ` · ${note}` : night.channel?.state === 'pushed' ? ' · On Airbnb' : ''}`
+  return `${home.name} · ${formatCalendarDate(night.date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })} · ${state} · ${price(home, night)}${gap ? ` · ${gap}` : ''}${note ? ` · ${note}` : night.channel?.state === 'pushed' ? ' · On Airbnb' : ''}`
 }
 function homeTo(productId: string, date?: string) {
   return { path: `/dashboard/${orgSlug}/calendar`, query: { product_id: productId, ...(date ? { month: date.slice(0, 7), date } : {}) } }
