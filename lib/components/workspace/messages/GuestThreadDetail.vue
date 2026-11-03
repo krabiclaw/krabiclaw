@@ -480,6 +480,8 @@ async function acknowledgeVisibleEntries() {
         validate:(value):value is {acknowledged:number}=>!!value&&typeof value==='object'&&'acknowledged' in value&&typeof value.acknowledged==='number'&&Number.isSafeInteger(value.acknowledged)&&value.acknowledged>=0,
       })
       if (readScope.value === scope) for (const id of batch) acknowledgedEntryIds.add(id)
+      // A guest's read is not a notification; their Messages count is asked again here.
+      refreshNotificationUnreadCounts()
     }
   } catch(error) { readError.value=getErrorMessage(error,'Message read state could not be saved') }
   finally { markingRead = false }

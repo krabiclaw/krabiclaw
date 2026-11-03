@@ -175,6 +175,7 @@ async function markRead() {
     readThrough = latest
     readError.value = ''
     await refreshNuxtData(`team-threads:${dashboard.organizationId.value}`)
+    refreshNotificationUnreadCounts()
   } catch (error) { readError.value = getErrorMessage(error, 'Read state could not be saved') }
   finally {
     markingRead = false
