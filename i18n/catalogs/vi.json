@@ -564,6 +564,7 @@
   "stay.sleeps": "Tối đa {count} khách",
   "stay.max_guests": "Chỗ ở này cho phép tối đa {count} khách, không tính em bé.",
   "stay.min_nights": "Tối thiểu {count} đêm",
+  "stay.minimum_stay_note": "Thời gian lưu trú tối thiểu: {count} đêm · Trả phòng sớm nhất {date}",
   "stay.no_dates": "Lịch này không còn ngày trống. | Các ngày trống trên lịch này không đủ cho kỳ lưu trú {count} đêm.",
   "stay.ask_host": "Hỏi chủ nhà về ngày khác",
   "stay.check_in_after": "Nhận phòng sau {time}",

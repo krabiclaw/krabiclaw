@@ -3302,7 +3302,16 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
       const nextMonth = calendar.getByRole('application', { name: monthLabel(after(21)), exact: true })
       const followingDay = calendar.locator(`button[data-value="${after(1)}"]`).filter({ visible: true })
       await expect(followingDay).toBeDisabled()
-      await expect(followingDay).toHaveAttribute('title', 'Stays on these dates are at least 21 nights.')
+      await expect(followingDay).toHaveAttribute('title', '21-night minimum')
+      await expect(followingDay).toHaveClass(/line-through/)
+      // Before a checkout is chosen, the shortest allowed stay is drawn as the range and named under the calendar.
+      await expect(calendar.locator('[data-stay-range="minimum"]:visible')).toHaveCount(22)
+      await expect(calendar.locator('[data-stay-range="minimum"]:visible').last().locator('button')).toHaveAttribute('data-value', after(21))
+      await expect(nextMonth.locator(`button[data-value="${after(21)}"]`)).toHaveClass(/border-inverted/)
+      await expect(nextMonth.locator(`button[data-value="${after(20)}"]`)).toHaveClass(/line-through/)
+      const minimumNote = `Minimum stay: 21 nights · Earliest checkout ${dayLabel(after(21))}`
+      await expect(guestDialog.locator('[data-stay-minimum]')).toHaveText(minimumNote)
+      await expect(firstMonth.locator(`button[data-value="${arrival}"]`)).toHaveAccessibleDescription(minimumNote)
       const checkoutDay = nextMonth.locator(`button[data-value="${after(21)}"]`)
       await checkoutDay.hover()
       await expect(calendar.locator('[data-stay-range="preview"]:visible')).toHaveCount(22)
