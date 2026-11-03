@@ -1,8 +1,13 @@
-export function useNotificationUnreadCount() {
+import type { DashboardInvalidationConnection } from '~/composables/useDashboardInvalidations'
+/**
+ * The dashboard shell provides the live connection and reads the count itself,
+ * so it passes its own connection: a component cannot inject what it provides.
+ */
+export function useNotificationUnreadCount(connection?: DashboardInvalidationConnection) {
   const { organization } = useDashboardMenu()
   const orgSlug = computed(() => organization.value?.slug ?? null)
   const dashboardApi = useDashboardApi(computed(() => orgSlug.value ? { orgSlug: orgSlug.value } : null))
-  const realtime = useDashboardInvalidations()
+  const realtime = connection ?? useDashboardInvalidations()
   const unreadCount = ref(0)
   // Guest and team conversations with something unread, for the Messages tab.
   const unreadConversations = ref(0)
