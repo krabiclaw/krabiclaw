@@ -47,6 +47,8 @@ zone_name = "krabiclaw.com"
 # Sign in with Apple audience: the native app's bundle id.
 APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
 APPLE_SERVICES_ID = "com.krabiclaw.web"
+# Google Sign-In audience for the iPhone app: its iOS OAuth client (public, not a secret).
+GOOGLE_IOS_CLIENT_ID = "799728932262-q966lhbncjn84gt85fgbscki6t9ruvpg.apps.googleusercontent.com"
 # APNs token authentication (APNS_PRIVATE_KEY is a secret: yarn wrangler secret put APNS_PRIVATE_KEY).
 APNS_KEY_ID = "M6MMSR6BM3"
 APNS_TEAM_ID = "WDXU8XZ7J6"
@@ -166,6 +168,8 @@ enabled = true
 # Sign in with Apple audience: the native app's bundle id.
 APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
 APPLE_SERVICES_ID = "com.krabiclaw.web"
+# Google Sign-In audience for the iPhone app: its iOS OAuth client (public, not a secret).
+GOOGLE_IOS_CLIENT_ID = "799728932262-q966lhbncjn84gt85fgbscki6t9ruvpg.apps.googleusercontent.com"
 # APNs token authentication (APNS_PRIVATE_KEY is a secret: yarn wrangler secret put APNS_PRIVATE_KEY).
 APNS_KEY_ID = "M6MMSR6BM3"
 APNS_TEAM_ID = "WDXU8XZ7J6"
@@ -236,6 +240,8 @@ CHANNEX_BASE_URL = "https://staging.channex.io/api/v1"
 # Sign in with Apple audience: the native app's bundle id.
 APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
 APPLE_SERVICES_ID = "com.krabiclaw.web"
+# Google Sign-In audience for the iPhone app: its iOS OAuth client (public, not a secret).
+GOOGLE_IOS_CLIENT_ID = "799728932262-q966lhbncjn84gt85fgbscki6t9ruvpg.apps.googleusercontent.com"
 # APNs token authentication (APNS_PRIVATE_KEY is a secret: yarn wrangler secret put APNS_PRIVATE_KEY).
 APNS_KEY_ID = "M6MMSR6BM3"
 APNS_TEAM_ID = "WDXU8XZ7J6"
@@ -315,6 +321,8 @@ crons = []
 # Sign in with Apple audience: the native app's bundle id.
 APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
 APPLE_SERVICES_ID = "com.krabiclaw.web"
+# Google Sign-In audience for the iPhone app: its iOS OAuth client (public, not a secret).
+GOOGLE_IOS_CLIENT_ID = "799728932262-q966lhbncjn84gt85fgbscki6t9ruvpg.apps.googleusercontent.com"
 # APNs token authentication (APNS_PRIVATE_KEY is a secret: yarn wrangler secret put APNS_PRIVATE_KEY).
 APNS_KEY_ID = "M6MMSR6BM3"
 APNS_TEAM_ID = "WDXU8XZ7J6"
