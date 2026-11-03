@@ -45,13 +45,16 @@
       <!-- Calendar chooses bookings or one offering's availability; Location narrows that scope. -->
       <div v-if="!personalScope" class="mb-8 flex flex-wrap items-center gap-3">
         <CalendarOfferingFilter :items="offeringItems ?? []" :disabled="Boolean(level.child.value)" />
-        <DashboardLocationFilter v-model="filters.locationId" :items="locationItems" :disabled="Boolean(level.child.value)" />
+        <!-- Every home is its own location, so the Homes view narrows by city instead. -->
+        <DashboardLocationFilter v-if="view !== 'homes'" v-model="filters.locationId" :items="locationItems" :disabled="Boolean(level.child.value)" />
+        <!-- One search for every calendar: homes by name or address, bookings by who, what and where. -->
+        <UInput :model-value="search" icon="i-lucide-search" :placeholder="view === 'homes' ? 'Search homes' : 'Search bookings'" :aria-label="view === 'homes' ? 'Search homes' : 'Search bookings'" class="w-full sm:w-72" :ui="{ base: 'rounded-full' }" @update:model-value="setSearch" />
         <UTooltip v-if="sessionProduct && physicalLocation" text="Repeating times">
           <UButton icon="i-lucide-settings" color="neutral" variant="soft" square class="size-10 justify-center rounded-full" aria-label="Schedule settings" :to="{ path: `/dashboard/${route.params.orgSlug}/products/${sessionProduct.id}/booking/schedule`, query: { location_id: physicalLocation.id } }" />
         </UTooltip>
       </div>
       <UAlert
-        v-if="locationError"
+        v-if="locationError && view !== 'homes'"
         class="mb-6"
         color="error"
         variant="soft"
@@ -75,7 +78,7 @@
         </div>
       </header>
 
-      <StayHomesGrid v-if="view === 'homes'" :location-id="scope" />
+      <StayHomesGrid v-if="view === 'homes'" />
       <template v-else-if="view !== 'year'">
         <USkeleton v-if="month.status === 'loading'" class="h-96 w-full" />
         <UAlert
@@ -543,8 +546,14 @@ const itemsByDay = computed(() => {
   }
   return groups
 })
+const search = computed(() => typeof route.query.q === 'string' ? route.query.q : '')
+function setSearch(value: string | number) {
+  void router.replace({ query: { ...route.query, q: String(value ?? '').trim() || undefined } })
+}
 function itemsOn(dayKey: string): CalendarItem[] {
-  return itemsByDay.value.get(dayKey) ?? []
+  const items = itemsByDay.value.get(dayKey) ?? []
+  const query = search.value.toLowerCase()
+  return query ? items.filter(item => [item.title, item.subtitle, item.locationTitle].some(text => text?.toLowerCase().includes(query))) : items
 }
 // A tile counts what is still happening; a cancelled booking is listed on its
 // day, marked, and not counted.

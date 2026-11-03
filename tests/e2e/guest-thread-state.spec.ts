@@ -936,6 +936,13 @@ test('buyer conversation approves and declines canonical changes without moving 
       if (time) slot = { date, time }
     }
     expect(slot, 'The existing restaurant fixture has a future reservable time').not.toBeNull()
+    // The guest's own Messages count: their conversations with a business reply they have not read.
+    const guestUnread = async () => {
+      const response = await page.request.get('/api/dashboard/notifications/unread-count', { params: { scope: 'personal' } })
+      await expectStatus(response, 200)
+      return (await response.json() as { unread_conversations: number }).unread_conversations
+    }
+    const unreadBefore = await guestUnread()
     const created = await page.request.post('/api/public/reservations', {
       headers: seededSiteHeaders('restaurant'),
       data: { name: 'E2E Buyer', email: 'buyer@playwright.example', phone: '+12025550123', ...slot!, guests: '1', location_id: demoLocationId(), idempotency_key: crypto.randomUUID() },
@@ -962,8 +969,12 @@ test('buyer conversation approves and declines canonical changes without moving 
     }
     const first = await requestChange(2)
     expect(await read()).toMatchObject({ partySize: 1, bookingDate: original.bookingDate, bookingTime: original.bookingTime })
+    expect(await guestUnread(), 'The business’s change request is unread in the guest’s Messages').toBe(unreadBefore + 1)
     await dismissPreviewToolbar(page)
+    const guestRead = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/account/messages/${threadId}/read`)
     await page.goto(`${baseURL}/dashboard/account/messages/${threadId}`)
+    await expectStatus(await guestRead, 200)
+    expect(await guestUnread(), 'Opening the conversation reads it').toBe(unreadBefore)
     const card = page.getByTestId('booking-change-request')
     await expect(card).toHaveCount(1)
     await expect(card.getByRole('heading', { name: 'Review changes', exact: true })).toBeVisible()

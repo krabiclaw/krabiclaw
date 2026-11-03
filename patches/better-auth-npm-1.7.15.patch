@@ -1,0 +1,13 @@
+diff --git a/dist/api/index.d.mts b/dist/api/index.d.mts
+index 46b15f8..b11bb1b 100644
+--- a/dist/api/index.d.mts
++++ b/dist/api/index.d.mts
+@@ -30,7 +30,7 @@ import { Middleware } from "better-call";
+ import { AuthEndpoint, AuthMiddleware, NO_STORE_HEADERS, createAuthEndpoint, createAuthMiddleware, optionsMiddleware } from "@better-auth/core/api";
+ //#region src/api/index.d.ts
+ export declare function checkEndpointConflicts(options: BetterAuthOptions, logger: InternalLogger): void;
+-export declare function getEndpoints<Option extends BetterAuthOptions>(ctx: Awaitable<AuthContext>, options: Option): {
++export declare function getEndpoints<Option extends BetterAuthOptions>(ctx: Awaitable<AuthContext<Option>>, options: Option): {
+   api: OverrideMerge<{
+     readonly ok: import("better-call").StrictEndpoint<"/ok", {
+       method: "GET";
