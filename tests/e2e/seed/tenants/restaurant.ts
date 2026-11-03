@@ -34,7 +34,12 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
       { time: '18:00', party_size: 2, guest_name: 'Alex Rivera', guest_email: 'alex.rivera@playwright.example', guest_phone: '+12025550173', key: 'seed-restaurant-today-3' },
       { time: '19:30', party_size: 5, guest_name: 'Morgan Smith', guest_email: 'morgan.smith@playwright.example', guest_phone: '+12025550174', key: 'seed-restaurant-today-4' },
     ]
-    for (const p of todaySeatings) {
+    // A seating can only be booked while its time is ahead: a run in the evening
+    // seeds the dinner times still to come, and one after closing seeds none.
+    const { days } = await owner.json<{ days: Array<{ slots: Array<{ time_slot: string; starts_at: string; is_closed: boolean; is_full: boolean }> }> }>(
+      'GET', `/api/editor/organizations/${tenant.organizationId}/locations/${brooklyn.id}/reservation-availability?from=${today}&to=${today}`)
+    const bookable = new Set(days[0]!.slots.filter(slot => !slot.is_closed && !slot.is_full && Date.parse(slot.starts_at) > Date.now() + 10 * 60_000).map(slot => slot.time_slot))
+    for (const p of todaySeatings.filter(seating => bookable.has(seating.time))) {
       await tool('create_table_reservation', {
         location_id: brooklyn.id, date: today, time: p.time, party_size: p.party_size, guest_name: p.guest_name, guest_email: p.guest_email,
         guest_phone: p.guest_phone, idempotency_key: p.key, source: 'phone', guest_acknowledgement: false,
