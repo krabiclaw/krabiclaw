@@ -46,9 +46,9 @@
       <div v-if="!personalScope" class="mb-8 flex flex-wrap items-center gap-3">
         <CalendarOfferingFilter :items="offeringItems ?? []" :disabled="Boolean(level.child.value)" />
         <!-- Every home is its own location, so the Homes view narrows by city instead. -->
-        <DashboardLocationFilter v-if="view !== 'homes'" v-model="filters.locationId" :items="locationItems" :disabled="Boolean(level.child.value)" />
-        <!-- One search for every calendar: homes by name or address, bookings by who, what and where. -->
-        <UInput :model-value="search" icon="i-lucide-search" :placeholder="view === 'homes' ? 'Search homes' : 'Search bookings'" :aria-label="view === 'homes' ? 'Search homes' : 'Search bookings'" class="w-full sm:w-72" :ui="{ base: 'rounded-full' }" @update:model-value="setSearch" />
+        <DashboardLocationFilter v-if="!gridView" v-model="filters.locationId" :items="locationItems" :disabled="Boolean(level.child.value)" />
+        <!-- One search for every calendar: homes by name or address, places by name and where, bookings by who, what and where. -->
+        <UInput :model-value="search" icon="i-lucide-search" :placeholder="searchLabel" :aria-label="searchLabel" class="w-full sm:w-72" :ui="{ base: 'rounded-full' }" @update:model-value="setSearch" />
         <UTooltip v-if="sessionProduct && physicalLocation" text="Repeating times">
           <UButton icon="i-lucide-settings" color="neutral" variant="soft" square class="size-10 justify-center rounded-full" aria-label="Schedule settings" :to="{ path: `/dashboard/${route.params.orgSlug}/products/${sessionProduct.id}/booking/schedule`, query: { location_id: physicalLocation.id } }" />
         </UTooltip>
@@ -67,7 +67,7 @@
       </p>
 
       <!-- The period and its date navigation share one quiet toolbar. -->
-      <header v-if="view !== 'homes'" class="flex items-center justify-between py-2">
+      <header v-if="!gridView" class="flex items-center justify-between py-2">
         <h2 class="text-base font-semibold text-highlighted">
           <time :datetime="view === 'year' ? String(shownYear) : monthKey">{{ periodLabel }}</time>
         </h2>
@@ -78,7 +78,7 @@
         </div>
       </header>
 
-      <StayHomesGrid v-if="view === 'homes'" />
+      <CalendarGrid v-if="view === 'homes' || view === 'places'" :key="view" :view="view" />
       <template v-else-if="view !== 'year'">
         <USkeleton v-if="month.status === 'loading'" class="h-96 w-full" />
         <UAlert
@@ -279,10 +279,10 @@ import { NuxtLink } from '#components'
 import { CalendarDate, getDayOfWeek, getLocalTimeZone, parseDate, today } from '@internationalized/date'
 import AgendaRow from '~/lib/components/workspace/dashboard/AgendaRow.vue'
 import AgendaFilters from './AgendaFilters.vue'
-import StayHomesGrid from './StayHomesGrid.vue'
+import CalendarGrid from './CalendarGrid.vue'
 import CalendarOfferingFilter from './CalendarOfferingFilter.vue'
-import { closeDates, closureOnDate, getDateIntervals, openDates, parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
-import { formatCalendarDate, formatTimestamp, isValidCalendarDate, localNow } from '~/utils/timezone'
+import { closureOnDate, getDateIntervals, parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
+import { addLocalDays, formatCalendarDate, formatTimestamp, isValidCalendarDate, localNow } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 import { isSessionsResponse } from '~/utils/session-contract'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
@@ -299,6 +299,8 @@ const props = defineProps<{
   offeringsError?: string
   canCreateStay?: boolean
   hasHomes?: boolean
+  /** The organization has restaurant locations, experiences or consultations: the Places grid's rows. */
+  hasPlaces?: boolean
 }>()
 
 // Named here rather than imported: the agenda module is the server's, and a value import would bundle it.
@@ -323,17 +325,22 @@ const todayDate = today(timeZone)
 const todayKey = todayDate.toString()
 
 // The three views of Airbnb's calendar, and its multi-calendar of every home
-// where the organization has homes; the URL carries which, and which month, so
-// a reload lands where you were.
-type CalendarView = 'list' | 'month' | 'year' | 'homes'
+// where the organization has homes, or of every place where it has restaurant
+// locations, experiences or consultations; the URL carries which, and which
+// month, so a reload lands where you were.
+type CalendarView = 'list' | 'month' | 'year' | 'homes' | 'places'
 const VIEWS: Record<CalendarView, { label: string; icon: string }> = {
   list: { label: 'List', icon: 'i-lucide-list' },
   month: { label: 'Month', icon: 'i-lucide-layout-grid' },
   year: { label: 'Year', icon: 'i-lucide-grid-3x3' },
   homes: { label: 'Homes', icon: 'i-lucide-rows-3' },
+  places: { label: 'Places', icon: 'i-lucide-rows-4' },
 }
 const homesView = !props.personalScope && !props.sessionProduct && props.hasHomes
-const view = ref<CalendarView>(route.query.view === 'list' || route.query.view === 'year' || (homesView && route.query.view === 'homes') ? route.query.view : 'month')
+const placesView = !props.personalScope && !props.sessionProduct && props.hasPlaces
+const view = ref<CalendarView>(route.query.view === 'list' || route.query.view === 'year' || (homesView && route.query.view === 'homes') || (placesView && route.query.view === 'places') ? route.query.view : 'month')
+const gridView = computed(() => view.value === 'homes' || view.value === 'places')
+const searchLabel = computed(() => view.value === 'homes' ? 'Search homes' : view.value === 'places' ? 'Search places' : 'Search bookings')
 const routeMonth = typeof route.query.month === 'string' && /^\d{4}-\d{2}$/.test(route.query.month) ? route.query.month : null
 const routeDay = typeof route.params.day === 'string' ? route.params.day : null
 const routeDate = props.sessionProduct && typeof route.query.date === 'string' ? route.query.date : null
@@ -342,7 +349,7 @@ const shownYear = ref(shownMonth.value.year)
 const monthKey = computed(() => monthKeyOf(shownMonth.value))
 
 const viewItems = computed(() => [
-  (Object.keys(VIEWS) as CalendarView[]).filter(key => key !== 'homes' || homesView).map(key => ({
+  (Object.keys(VIEWS) as CalendarView[]).filter(key => (key !== 'homes' || homesView) && (key !== 'places' || placesView)).map(key => ({
     label: VIEWS[key].label,
     icon: VIEWS[key].icon,
     type: 'checkbox' as const,
@@ -370,6 +377,7 @@ const month = computed<MonthBlock>(() => monthData.value.get(monthKey.value) ?? 
 const isLocationHours = (value: unknown): value is { location: CalendarLocation } =>
   isRecord(value) && isRecord(value.location) && typeof value.location.id === 'string' && typeof value.location.status === 'string'
   && typeof value.location.updated_at === 'string' && 'opening_hours' in value.location && 'special_hours' in value.location
+const isPlaceDates = (value: unknown): value is { place: { id: string } } => isRecord(value) && isRecord(value.place) && typeof value.place.id === 'string' && Array.isArray(value.days)
 const organizationId = props.personalScope ? null : useDashboardOrganizationId()
 
 const sessionProduct = computed(() => props.sessionProduct)
@@ -521,7 +529,7 @@ async function ensureLoaded(keys: string[]): Promise<void> {
   await Promise.all(keys.filter(key => monthData.value.get(key)?.status !== 'ready' && monthData.value.get(key)?.status !== 'loading').map(key => loadMonth(key)))
 }
 function neededKeys(): string[] {
-  return view.value === 'year' ? yearKeys.value : view.value === 'homes' ? [] : [monthKey.value]
+  return view.value === 'year' ? yearKeys.value : gridView.value ? [] : [monthKey.value]
 }
 async function resetMonths(): Promise<void> {
   generation.value += 1
@@ -658,14 +666,14 @@ async function writeSelection(action: 'block' | 'open'): Promise<void> {
   const record = chosenLocation.value
   const range = selectionRange.value
   if (!record || !range) return
-  const special = parseSpecialHours(record.special_hours)
   writing.value = action
   writeError.value = null
   try {
-    await dashboardApi(`/api/organizations/${organizationId}/locations/${record.id}`, {
-      method: 'PATCH',
-      body: { special_hours: action === 'block' ? closeDates(special, range.from, range.to) : openDates(special, range.from, range.to), expected_updated_at: record.updated_at },
-      validate: isLocationHours,
+    // The one dates write every calendar uses: the place's closures, read back.
+    await dashboardApi(`/api/dashboard/places/location/${record.id}/dates`, {
+      method: 'PUT',
+      body: { from: range.from, to: addLocalDays(range.to, 1), closed: action === 'block', expected_updated_at: record.updated_at },
+      validate: isPlaceDates,
     })
     await refreshLocation()
     stopSelecting()
@@ -715,7 +723,7 @@ await ensureLoaded(neededKeys())
 // The URL says which view and which month; the data follows the period.
 watch([view, monthKey, shownYear], () => {
   if (selecting.value) stopSelecting()
-  void router.replace({ query: { ...route.query, view: view.value === 'month' ? undefined : view.value, month: monthKey.value === monthKeyOf(todayDate) ? undefined : monthKey.value, from: view.value === 'homes' ? route.query.from : undefined } })
+  void router.replace({ query: { ...route.query, view: view.value === 'month' ? undefined : view.value, month: monthKey.value === monthKeyOf(todayDate) ? undefined : monthKey.value, from: gridView.value ? route.query.from : undefined } })
   void ensureLoaded(neededKeys())
 })
 

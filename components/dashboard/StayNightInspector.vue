@@ -3,7 +3,7 @@
     <div class="flex items-center justify-between gap-3">
       <UButton v-if="selectDates" color="neutral" class="rounded-full px-4 py-2" :label="dateLabel" aria-label="Select nights" :disabled="busy" @click="$emit('dates')" />
       <span v-else class="rounded-full bg-inverted px-4 py-2 text-sm font-medium text-inverted">{{ dateLabel }}</span>
-      <UButton icon="i-lucide-x" aria-label="Clear selected nights" color="neutral" variant="soft" square class="rounded-full" :disabled="busy" @click="$emit('clear')" />
+      <UButton icon="i-lucide-x" :aria-label="`Clear selected ${nouns.units}`" color="neutral" variant="soft" square class="rounded-full" :disabled="busy" @click="$emit('clear')" />
     </div>
     <div class="flex items-center justify-between gap-3">
       <p class="text-xs text-muted">{{ scope }}</p>
@@ -31,42 +31,42 @@
     <UAlert v-if="error" color="error" variant="soft" :description="error" />
     <UAlert v-if="notice" color="warning" variant="soft" :description="notice" />
     <p v-if="result && concern === 'summary'" class="text-sm text-highlighted" data-testid="stay-night-result">{{ result }}</p>
-    <UAlert v-if="blocker && concern === 'summary'" color="neutral" variant="soft" :description="blocker" data-testid="stay-night-blocker" :actions="manage ? [{ label: 'Change minimum nights', color: 'neutral', variant: 'solid', onClick: () => $emit('blocker') }] : undefined" />
+    <UAlert v-if="blocker && concern === 'summary'" color="neutral" variant="soft" :description="blocker" data-testid="stay-night-blocker" :actions="manage ? [{ label: blockerAction?.label ?? 'Change minimum nights', color: 'neutral', variant: 'solid', ...(blockerAction?.to ? { to: blockerAction.to } : { onClick: () => $emit('blocker') }) }] : undefined" />
     <template v-if="concern === 'summary'">
       <UCard class="rounded-3xl bg-inverted text-inverted" :ui="{ body: 'p-5' }">
         <div class="flex items-center justify-between gap-4">
           <p class="text-sm">{{ availabilityLabel }}</p>
-          <USwitch v-if="nights.length && closed !== 'mixed'" :model-value="!closed" aria-label="Open selected nights" color="neutral" :disabled="busy || !manage" @update:model-value="$emit('patch', { closed: !$event })" />
+          <USwitch v-if="nights.length && closed !== 'mixed'" :model-value="!closed" :aria-label="`Open selected ${nouns.units}`" color="neutral" :disabled="busy || !manage" @update:model-value="$emit('patch', { closed: !$event })" />
         </div>
         <div v-if="nights.length && closed === 'mixed' && manage && pendingClosed === null" class="mt-4 flex gap-2">
           <UButton label="Open dates" color="neutral" variant="outline" :disabled="busy" @click="pendingClosed = false" />
-          <UButton label="Block nights" color="neutral" variant="outline" :disabled="busy" @click="pendingClosed = true" />
+          <UButton :label="`Block ${nouns.units}`" color="neutral" variant="outline" :disabled="busy" @click="pendingClosed = true" />
         </div>
         <div v-if="pendingClosed !== null" class="mt-4 space-y-3" data-testid="stay-night-confirm">
-          <p class="text-sm">Some selected nights are open and some are blocked. {{ pendingClosed ? 'Block' : 'Open' }} all {{ nights.length }} {{ nights.length === 1 ? 'night' : 'nights' }}?</p>
+          <p class="text-sm">Some selected {{ nouns.units }} are open and some are blocked. {{ pendingClosed ? 'Block' : 'Open' }} all {{ nights.length }} {{ nights.length === 1 ? nouns.unit : nouns.units }}?</p>
           <div class="flex gap-2">
-            <UButton :label="pendingClosed ? 'Block all nights' : 'Open all nights'" color="neutral" variant="solid" class="bg-default text-highlighted" :disabled="busy" @click="confirmClosed" />
+            <UButton :label="pendingClosed ? `Block all ${nouns.units}` : `Open all ${nouns.units}`" color="neutral" variant="solid" class="bg-default text-highlighted" :disabled="busy" @click="confirmClosed" />
             <UButton :label="pendingClosed ? 'Keep dates open' : 'Keep dates blocked'" color="neutral" variant="link" class="text-inverted" :disabled="busy" @click="pendingClosed = null" />
           </div>
         </div>
         <UButton v-if="nights.length && closed === true && manage" label="Open dates" color="neutral" variant="outline" class="mt-4" :disabled="busy" @click="$emit('patch', { closed: false })" />
         <p v-if="!nights.length && booked.length" class="mt-3 text-sm" data-testid="stay-night-held">{{ heldExplanation }}</p>
-        <p v-else-if="!nights.length" class="mt-3 text-sm">No selected night falls on the chosen weekdays.</p>
-        <p v-if="booked.length && nights.length" class="mt-3 text-sm" data-testid="stay-night-booked">{{ booked.length }} booked {{ booked.length === 1 ? 'night is' : 'nights are' }} left out. Reservations, checkout holds and linked-calendar nights keep their settings.</p>
+        <p v-else-if="!nights.length" class="mt-3 text-sm">No selected {{ nouns.unit }} falls on the chosen weekdays.</p>
+        <p v-if="heldLine" class="mt-3 text-sm" data-testid="stay-night-booked">{{ heldLine }}</p>
         <p v-for="expiry in holdExpiries" :key="expiry.at" class="mt-3 text-sm">Checkout hold expires {{ formatTimestamp(expiry.at, 'en', expiry.timezone) }} ({{ expiry.timezone }}).</p>
         <UButton v-for="id in stayIds" :key="id" :to="{ path: `/dashboard/${orgSlug}/calendar/stay/${encodeURIComponent(id)}`, query: route.query }" label="View stay" color="neutral" variant="outline" class="mt-3" />
       </UCard>
-      <UButton label="Nightly price" color="neutral" class="w-full flex-col items-start rounded-3xl p-6 text-left" :disabled="busy || !manage || !nights.length" @click="$emit('edit', 'price')">
+      <UButton v-if="pricing" label="Nightly price" color="neutral" class="w-full flex-col items-start rounded-3xl p-6 text-left" :disabled="busy || !manage || !nights.length" @click="$emit('edit', 'price')">
         <span class="block text-sm font-normal">Nightly price</span>
         <span class="mt-4 block text-3xl font-semibold">{{ priceLabel }}</span>
       </UButton>
-      <UButton label="Minimum nights" color="neutral" variant="soft" class="w-full flex-col items-start rounded-3xl p-6 text-left" :disabled="busy || !manage || !nights.length" @click="$emit('edit', 'minimum')">
+      <UButton v-if="pricing" label="Minimum nights" color="neutral" variant="soft" class="w-full flex-col items-start rounded-3xl p-6 text-left" :disabled="busy || !manage || !nights.length" @click="$emit('edit', 'minimum')">
         <span class="block text-sm font-normal">Minimum nights</span>
         <span class="mt-4 block text-3xl font-semibold">{{ minimumLabel }}</span>
         <span class="mt-1 block text-sm font-normal text-muted">{{ defaultMinimumLabel }}</span>
       </UButton>
-      <UButton v-if="manage" label="Custom settings" trailing-icon="i-lucide-plus" color="neutral" class="w-full justify-between rounded-3xl p-6" :disabled="busy || !nights.length" @click="$emit('edit', 'custom')" />
-      <p v-else class="text-sm text-muted">Only owners and admins can change these nights.</p>
+      <UButton v-if="manage && pricing" label="Custom settings" trailing-icon="i-lucide-plus" color="neutral" class="w-full justify-between rounded-3xl p-6" :disabled="busy || !nights.length" @click="$emit('edit', 'custom')" />
+      <p v-else-if="!manage" class="text-sm text-muted">Only owners and admins can change these {{ nouns.units }}.</p>
     </template>
     <template v-else-if="concern === 'custom'">
       <h2 class="text-xl font-semibold text-highlighted">Custom settings</h2>
@@ -131,25 +131,38 @@
 import type { StayNight } from '~/server/domain/stays'
 import type { CurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount } from '~/shared/prices'
-import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CHANNEL_LABELS, changeNightPrice } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, changeNightPrice } from '~/shared/bookings'
 import { formatTimestamp } from '~/utils/timezone'
-import type { NightConcern, NightDraft, NightEditField, NightEditorHome, NightPriceMode } from '~/composables/useStayNightEditor'
+import { isStayNight, type CalendarSlot, type EditorNouns, type NightConcern, type NightDraft, type NightEditField, type NightEditorHome, type NightPriceMode } from '~/composables/useStayNightEditor'
 
 const props = defineProps<{
   orgSlug: string
+  /** The selected homes, when the rows are homes; a place's days carry no home. */
   homes: NightEditorHome[]
   /** The homes' one currency; null when they differ. */
   currency: CurrencyCode | null
-  /** The selected nights a save writes: the weekdays' nights, without booked ones, at every home. */
-  nights: StayNight[]
-  /** The selected nights that are booked: shown, never written. */
-  booked: StayNight[]
-  /** Every selected date, at any home. */
+  /** The selected slots a save writes: the weekdays' nights or dates, without held ones, at every row. */
+  nights: CalendarSlot[]
+  /** The selected slots that are held: shown, never written. */
+  booked: CalendarSlot[]
+  /** Every selected date, at any row. */
   dates: string[]
-  /** The line under the dates: the homes and nights, or the one home's own details. */
+  /** The line under the dates: the rows and slots, or the one home's own details. */
   scope: string
-  /** Why the selected free nights cannot be booked, when a minimum blocks them. */
+  /** Why the selected free slots cannot be booked: a minimum blocks the nights, or the hours close the dates. */
   blocker?: string | null
+  /** Where the blocker leads; without one the action asks for the minimum. */
+  blockerAction?: { label: string; to?: string } | null
+  /** The rows' words: nights at homes, dates at places. */
+  nouns: EditorNouns
+  /** Nights take prices and stay rules; dates take only open or block. */
+  pricing: boolean
+  /** What each selected slot reads as, the writable ones or else the held ones. */
+  labels: string[]
+  /** Why the held slots cannot change, when nothing writable is selected. */
+  heldExplanation: string
+  /** What the held slots keep, when writable ones are selected beside them. */
+  heldLine: string
   /** The weekdays the selected range covers, 0 Sunday to 6 Saturday. */
   rangeWeekdays: number[]
   /** The weekdays chosen; null is every weekday. */
@@ -192,13 +205,15 @@ function toggleWeekday(day: number) {
   emit('weekdays', props.rangeWeekdays.every(value => next.includes(value)) ? null : next)
 }
 const list = (words: string[]) => words.length < 3 ? words.join(' and ') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`
-const weekdaySummary = computed(() => `${list(WEEK.filter(applies).map(day => WEEKDAY_NAMES[day]!))} · ${props.dates.filter(date => applies(new Date(`${date}T00:00:00Z`).getUTCDay())).length} of ${props.dates.length} nights`)
+const weekdaySummary = computed(() => `${list(WEEK.filter(applies).map(day => WEEKDAY_NAMES[day]!))} · ${props.dates.filter(date => applies(new Date(`${date}T00:00:00Z`).getUTCDay())).length} of ${props.dates.length} ${props.nouns.units}`)
+const stayNights = computed(() => props.nights.filter(isStayNight))
+const stayBooked = computed(() => props.booked.filter(isStayNight))
 function common<K extends keyof StayNight>(field: K): StayNight[K] | 'mixed' {
-  const first = props.nights[0]?.[field]
-  return props.nights.length && props.nights.every(night => night[field] === first) ? first as StayNight[K] : 'mixed'
+  const first = stayNights.value[0]?.[field]
+  return stayNights.value.length === props.nights.length && stayNights.value.length && stayNights.value.every(night => night[field] === first) ? first as StayNight[K] : 'mixed'
 }
 const money = (value: number) => props.currency ? formatMinorAmount(value, props.currency) : String(value)
-const closed = computed(() => common('closed'))
+const closed = computed(() => { const first = props.nights[0]?.closed; return props.nights.length && props.nights.every(night => night.closed === first) ? first : 'mixed' })
 /** A confirmed choice of one state for a selection that is partly open and partly blocked. */
 const pendingClosed = ref<boolean | null>(null)
 function confirmClosed() {
@@ -206,19 +221,13 @@ function confirmClosed() {
   pendingClosed.value = null
 }
 watch(() => props.nights, () => { pendingClosed.value = null })
-// What holds nights a selection cannot change: a reservation is managed from its stay, a linked calendar from its channel, a hold by its guest's checkout.
-const heldExplanation = computed(() => props.booked.some(night => night.stay_id)
-  ? 'Booked nights belong to their reservations. Open the stay to manage it.'
-  : props.booked.some(night => night.calendar)
-    ? `${STAY_CHANNEL_LABELS[props.booked.find(night => night.calendar)!.calendar!]}'s calendar holds these nights. Change them there.`
-    : 'A guest is checking out these nights. The hold ends on its own if they do not pay.')
-const stayIds = computed(() => [...new Set(props.booked.flatMap(night => night.stay_id ? [night.stay_id] : []))])
+const stayIds = computed(() => [...new Set(stayBooked.value.flatMap(night => night.stay_id ? [night.stay_id] : []))])
 const holdExpiries = computed(() => props.homes.length === 1
-  ? [...new Set(props.booked.flatMap(night => night.held_until ? [night.held_until] : []))].sort().map(at => ({ at, timezone: props.homes[0]!.timezone }))
+  ? [...new Set(stayBooked.value.flatMap(night => night.held_until ? [night.held_until] : []))].sort().map(at => ({ at, timezone: props.homes[0]!.timezone }))
   : [])
-// The nights a save changes decide the label; a selection of booked nights alone says what holds them.
+// The slots a save changes decide the label; a selection of held slots alone says what holds them.
 const availabilityLabel = computed(() => {
-  const states = new Set((props.nights.length ? props.nights : props.booked).map(night => night.stay_id ? 'Reserved' : night.held_until ? 'Checkout hold' : night.calendar ? `Unavailable from ${STAY_CHANNEL_LABELS[night.calendar]}` : night.closed ? 'Blocked by you' : 'Available'))
+  const states = new Set(props.labels)
   return states.size === 1 ? [...states][0] : 'Mixed availability'
 })
 const price = computed(() => props.currency ? common('price_minor') : 'mixed')
@@ -229,8 +238,8 @@ const basePriceLabel = computed(() => props.homes.length === 1
 const percentLabel = computed(() => {
   const percent = Number(props.draft.price_change_percent)
   if (!Number.isInteger(percent) || percent === 0) return `Each night’s own price changes by this percent, from −${NIGHT_PRICE_CHANGE_PERCENT}% to +${NIGHT_PRICE_CHANGE_PERCENT}%.`
-  const first = props.nights[0]?.price_minor
-  if (props.currency && typeof first === 'number' && props.nights.every(night => night.price_minor === first)) return `${money(first)} → ${money(changeNightPrice(first, percent))} on ${props.nights.length} ${props.nights.length === 1 ? 'night' : 'nights'}`
+  const first = stayNights.value[0]?.price_minor
+  if (props.currency && typeof first === 'number' && stayNights.value.every(night => night.price_minor === first)) return `${money(first)} → ${money(changeNightPrice(first, percent))} on ${props.nights.length} ${props.nights.length === 1 ? 'night' : 'nights'}`
   return `Each night’s price ${percent > 0 ? '+' : '−'}${Math.abs(percent)}%`
 })
 const minimum = computed(() => common('min_stay_arrival'))
