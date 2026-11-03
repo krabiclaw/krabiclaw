@@ -4,8 +4,8 @@ import { SEED_SUBDOMAINS } from './manifest.ts'
 
 // Each business gets the visits a guest makes: its home and an offering page,
 // opened in a real browser so the site itself records the pageviews and
-// offering views, then starts a booking or consultation and sends one message
-// through the public contact form. Insights
+// offering views, then starts a booking or consultation and writes in through the public
+// contact form. Insights
 // and the Today feed read these as they read any guest's.
 export async function seedTraffic(baseURL: string, manifest: SeedManifest) {
   // Seeded visits are counted: the browser runs without the automation flag the collector skips.
@@ -32,10 +32,18 @@ export async function seedTraffic(baseURL: string, manifest: SeedManifest) {
             : { event_name: 'consultation_cta_click', stage: 'schedule_navigation', page_path: '/services/family' }
         const started = await context.request.post('/api/public/conversion-events', { data: { ...intent, event_id: crypto.randomUUID() } })
         if (started.status() !== 201) throw new Error(`Recording ${tenant.name}'s ${intent.event_name} answered ${started.status()} ${await started.text()}`)
-        const sent = await context.request.post('/api/public/contact', {
-          data: { name: 'Seed Guest', email: `seed-guest+${key}@playwright.example`, message: `A question for ${tenant.name} about visiting.`, consent: true },
-        })
-        if (sent.status() !== 201) throw new Error(`The ${tenant.name} contact form answered ${sent.status()} ${await sent.text()}`)
+        // Guests write in. The restaurant's guests ask about Brooklyn, so its
+        // Today has unanswered messages at that location whatever the hour.
+        const questions = key === 'restaurant'
+          ? ['Can we bring a birthday cake?', 'Is the patio heated in the evening?', 'Do you have a gluten-free crust?', 'Can a party of eight sit together?']
+              .map((question, index) => ({ name: `Seed Guest ${index + 1}`, message: question, location_id: tenant.locations.brooklyn!.id }))
+          : [{ name: 'Seed Guest', message: `A question for ${tenant.name} about visiting.` }]
+        for (const [index, question] of questions.entries()) {
+          const sent = await context.request.post('/api/public/contact', {
+            data: { ...question, email: `seed-guest-${index + 1}+${key}@playwright.example`, consent: true },
+          })
+          if (sent.status() !== 201) throw new Error(`The ${tenant.name} contact form answered ${sent.status()} ${await sent.text()}`)
+        }
         // Two guests book the studio's wheel class.
         if (key === 'experience') {
           const slug = tenant.products['wheel-class']!.slug
