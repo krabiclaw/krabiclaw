@@ -85,7 +85,7 @@ async function listPlaces(db: DbClient, principal: MemberAccessPrincipal, only?:
     SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address, l.opening_hours, l.special_hours, l.updated_at
     FROM business_locations l
     WHERE l.organization_id = ? AND (? IS NULL OR l.id = ?)
-      AND EXISTS (SELECT 1 FROM location_reservation_configs c WHERE c.organization_id = l.organization_id AND c.location_id = l.id)
+      ${only ? '' : 'AND EXISTS (SELECT 1 FROM location_reservation_configs c WHERE c.organization_id = l.organization_id AND c.location_id = l.id)'}
       ${everyLocation ? '' : `AND ${assignedResponsibilitySql('l')}`}
     ORDER BY l.title, l.id`, [organizationId, only?.id ?? null, only?.id ?? null, ...(everyLocation ? [] : [userId, userId])])
   const offerings = only && only.kind !== 'offering' ? [] : await queryAll<OfferingRow>(db, `
@@ -128,7 +128,7 @@ function locationDays(row: LocationRow, window: string[], reservations: Map<stri
 function offeringDays(row: OfferingRow, window: string[], sessions: Map<string, SessionRow[]>): PlaceDay[] {
   const provider = row.scheduling_mode === 'provider'
   const first = stayGuestFirstName(row.provider_name)
-  const hoursText = provider ? `Outside ${row.assigned_member_id ? `${first}'s` : 'the team\'s'} hours` : 'No session on this day'
+  const hoursText = provider ? `Outside ${row.assigned_member_id && first ? `${first}'s` : 'the team\'s'} hours` : 'No session on this day'
   return window.map((date) => {
     const onDay = sessions.get(date) ?? []
     const booked = onDay.filter(session => session.claimed > 0).length

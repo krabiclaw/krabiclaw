@@ -204,7 +204,7 @@ function toggleWeekday(day: number) {
   emit('weekdays', props.rangeWeekdays.every(value => next.includes(value)) ? null : next)
 }
 const list = (words: string[]) => words.length < 3 ? words.join(' and ') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`
-const weekdaySummary = computed(() => `${list(WEEK.filter(applies).map(day => WEEKDAY_NAMES[day]!))} · ${props.dates.filter(date => applies(new Date(`${date}T00:00:00Z`).getUTCDay())).length} of ${props.dates.length} nights`)
+const weekdaySummary = computed(() => `${list(WEEK.filter(applies).map(day => WEEKDAY_NAMES[day]!))} · ${props.dates.filter(date => applies(new Date(`${date}T00:00:00Z`).getUTCDay())).length} of ${props.dates.length} ${props.nouns.units}`)
 const stayNights = computed(() => props.nights.filter(isStayNight))
 const stayBooked = computed(() => props.booked.filter(isStayNight))
 function common<K extends keyof StayNight>(field: K): StayNight[K] | 'mixed' {

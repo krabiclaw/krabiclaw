@@ -136,7 +136,12 @@ test('blocking and opening a place’s days writes a location’s closures and a
       await assert.rejects(write('location', 'brooklyn', body), code('INVALID_PLACE_DATES'), JSON.stringify(body))
     }
     await assert.rejects(write('room', 'brooklyn', { from: FROM, to: TO, closed: true }), code('PLACE_NOT_FOUND'))
-    await assert.rejects(write('location', 'studio', { from: FROM, to: TO, closed: true }), code('PLACE_NOT_FOUND'))
+    // The studio takes no reservations, so it is no row of the grid; the day leaf and Select dates still block it through this write, and read it back.
+    const studio = await write('location', 'studio', { from: '2026-11-10', to: '2026-11-11', closed: true })
+    assert.deepEqual(state(studio.days), ['10:blocked::0:'])
+    assert.deepEqual(parseSpecialHours(JSON.parse((await db.prepare('SELECT special_hours FROM business_locations WHERE id = ?').bind('studio').first<{ special_hours: string }>())!.special_hours)), [{ kind: 'closure', starts_on: '2026-11-10', ends_on: '2026-11-10', note: null }])
+    assert.deepEqual((await readPlacesCalendar(db, owner, { from: FROM, to: TO })).places.map(entry => entry.place.id), ['brooklyn', 'williamsburg', 'family', 'class'])
+    await assert.rejects(write('location', 'missing', { from: FROM, to: TO, closed: true }), (error: unknown) => (error as { status?: number }).status === 404)
     await assert.rejects(write('location', 'brooklyn', { from: FROM, to: TO, closed: true }, staff), (error: unknown) => (error as { statusCode?: number; status?: number }).statusCode === 404 || (error as { status?: number }).status === 404)
 
     // Wednesdays and Fridays blocked at Brooklyn: one closure each, read back from the location and from the calendar.

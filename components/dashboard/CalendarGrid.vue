@@ -208,8 +208,8 @@ const selection = computed(() => {
 const weekdays = computed<number[] | null>(() => {
   const value = route.query.weekdays
   if (value === undefined) return null
-  const days = typeof value === 'string' ? value.split(',').map(Number) : []
-  if (!days.length || days.some(day => !Number.isInteger(day) || day < 0 || day > 6)) throw createError({ statusCode: 400, statusMessage: 'Choose valid weekdays.' })
+  const days = typeof value === 'string' ? value.split(',').map(part => part ? Number(part) : NaN) : []
+  if (!days.length || days.some(day => !Number.isInteger(day) || day < 0 || day > 6) || new Set(days).size !== days.length) throw createError({ statusCode: 400, statusMessage: 'Choose valid weekdays.' })
   return days
 })
 
