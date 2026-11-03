@@ -225,6 +225,20 @@ export default defineNuxtConfig({
       const clientComposables = nuxt.options.optimization.treeShake.composables.client
       if (clientComposables.vue) clientComposables.vue = clientComposables.vue.filter(name => name !== 'onServerPrefetch')
     },
+    'build:manifest'(manifest) {
+      // usePublicSiteBrand imports assets/css/japanese-fonts.css by URL, so Vite
+      // lists the stylesheet's ~990 Noto JP slices as assets of the entry chunk.
+      // The stylesheet loads them and fonts are never hinted, but every chunk that
+      // imports the entry would copy them into the precomputed dependency map
+      // Workers parse per isolate.
+      let removed = 0
+      for (const chunk of Object.values(manifest)) {
+        const assets = chunk.assets?.filter(asset => !/(^|\/)noto-(?:sans|serif)-jp-/.test(asset))
+        removed += (chunk.assets?.length ?? 0) - (assets?.length ?? 0)
+        chunk.assets = assets
+      }
+      if (!removed) throw new Error('Japanese font slices are no longer chunk assets; remove this build:manifest hook')
+    },
     'pages:extend'(pages) {
       pages.push(...localizedPublicRouteAliases(pages))
       mountBookingRoutes(pages)
