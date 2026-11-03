@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type BrowserContext, type Page, type Request } from '@playwright/test'
+import { expect, test, type APIRequestContext, type BrowserContext, type Locator, type Page, type Request } from '@playwright/test'
 import sharp from 'sharp'
 import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
@@ -42,6 +42,34 @@ async function visiblePanes(page: Page): Promise<string[]> {
 
 async function expectPanes(page: Page, panes: string[]) {
   await expect.poll(() => visiblePanes(page)).toEqual(panes)
+}
+
+/**
+ * The tabs in order, by the name a screen reader gives each link. What is
+ * unread is drawn as Messages' badge and Menu's dot, outside the name, and the
+ * name says it once — read from the endpoint the shell itself reads.
+ */
+async function expectTabs(nav: Locator, labels: string[], scope: { org: string } | { scope: 'personal' }) {
+  const links = nav.getByRole('link')
+  await expect(links).toHaveCount(labels.length)
+  await expect(async () => {
+    const response = await nav.page().request.get('/api/dashboard/notifications/unread-count', { params: scope })
+    expect(response.status(), await response.text()).toBe(200)
+    const unread = await response.json() as { unread_count: number; unread_conversations: number }
+    for (const [index, label] of labels.entries()) {
+      const link = links.nth(index)
+      if (label === 'Messages') {
+        await expect(link).toHaveAccessibleName(unread.unread_conversations ? `Messages, ${unread.unread_conversations} unread` : 'Messages', { timeout: 1_000 })
+        if (unread.unread_conversations) await expect(link.getByTestId('dashboard-nav-unread')).toHaveText(unread.unread_conversations > 99 ? '99+' : String(unread.unread_conversations), { timeout: 1_000 })
+        else await expect(link.getByTestId('dashboard-nav-unread')).toHaveCount(0, { timeout: 1_000 })
+      } else if (label === 'Menu') {
+        await expect(link).toHaveAccessibleName(unread.unread_count ? 'Menu, unread notifications' : 'Menu', { timeout: 1_000 })
+        await expect(link.getByTestId('dashboard-menu-unread')).toHaveCount(unread.unread_count ? 1 : 0, { timeout: 1_000 })
+      } else {
+        await expect(link).toHaveAccessibleName(label, { timeout: 1_000 })
+      }
+    }
+  }).toPass()
 }
 
 async function open(page: Page, path: string) {
@@ -1710,7 +1738,7 @@ test.describe('dashboard pane hierarchy', () => {
   test('five organization destinations keep tenant management in Menu', async ({ page }) => {
     await page.setViewportSize(WIDE)
     await open(page, `${ORG}/menu`)
-    await expect(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages'])
+    await expectTabs(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }), ['Today', 'Calendar', 'Catalog', 'Messages'], { org: 'ember-slice-demo' })
     await page.getByTestId('dashboard-top-nav-menu-button').click()
     // Earnings is a card on Menu, as Airbnb's is; it shows the month and leads to payouts, transactions and refunds.
     const earnings = page.getByRole('dialog', { name: 'Menu', exact: true }).getByTestId('dashboard-menu-earnings')
@@ -1736,7 +1764,7 @@ test.describe('dashboard pane hierarchy', () => {
 
     await open(page, `${ORG}/earnings`)
     const mobileNav = page.getByTestId('dashboard-mobile-nav')
-    await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
+    await expectTabs(mobileNav, ['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'], { org: 'ember-slice-demo' })
     await expect(page.getByTestId('dashboard-mobile-nav-menu-link')).toHaveAttribute('aria-current', 'page')
     await page.locator('#dashboard-panel-earnings [data-testid="dashboard-navbar-back"]').click()
     await expect(page).toHaveURL(`${ORG}/menu`)
@@ -1747,7 +1775,7 @@ test.describe('dashboard pane hierarchy', () => {
     // in Catalog, a root with no Back, and Menu carries no second entry for them.
     const services = '/dashboard/harbor-legal-aid'
     await open(page, `${services}/menu`)
-    await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
+    await expectTabs(mobileNav, ['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'], { org: 'harbor-legal-aid' })
     await expect(page.locator('#dashboard-panel-organization-settings').getByRole('link', { name: 'Website', exact: true })).toBeVisible()
     await expect(page.locator('#dashboard-panel-organization-settings').getByRole('link', { name: 'Services', exact: true })).toHaveCount(0)
     await mobileNav.getByRole('link', { name: 'Catalog', exact: true }).click()
@@ -1766,10 +1794,10 @@ test.describe('dashboard pane hierarchy', () => {
       expect(personal.status(), await personal.text()).toBe(200)
       await open(page, '/account')
       await expect(page).toHaveURL('/dashboard/account')
-      await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages', 'Menu'])
+      await expectTabs(mobileNav, ['Today', 'Calendar', 'Messages', 'Menu'], { scope: 'personal' })
       // Past activity is a card in the account's Menu, as Past trips is on Airbnb's profile; Today owns what is ahead.
       const account = page.waitForResponse(response => new URL(response.url()).pathname === '/api/account' && response.request().method() === 'GET')
-      await mobileNav.getByRole('link', { name: 'Menu', exact: true }).click()
+      await page.getByTestId('dashboard-mobile-nav-menu-link').click()
       await page.getByTestId('dashboard-menu-past-activity').click()
       await expect(page).toHaveURL('/dashboard/account/activity')
       const response = await account
@@ -1818,7 +1846,7 @@ test.describe('dashboard pane hierarchy', () => {
       } else if (!cancelled.length) {
         await expect(page.getByText('No past activity yet', { exact: true })).toBeVisible()
       }
-      await mobileNav.getByRole('link', { name: 'Menu', exact: true }).click()
+      await page.getByTestId('dashboard-mobile-nav-menu-link').click()
       await page.getByTestId('dashboard-menu-payments').click()
       await expect(page).toHaveURL('/dashboard/account/profile/payments')
       const payments = page.locator('#dashboard-panel-account-payments')
@@ -1857,7 +1885,7 @@ test.describe('dashboard pane hierarchy', () => {
         && new URL(response.url()).searchParams.get('scope') === 'personal')
       const personalNotifications = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/notifications'
         && new URL(response.url()).searchParams.get('scope') === 'personal')
-      await mobileNav.getByRole('link', { name: 'Menu', exact: true }).click()
+      await page.getByTestId('dashboard-mobile-nav-menu-link').click()
       const notificationBell = page.locator('#dashboard-panel-account-menu').getByTestId('dashboard-notification-bell')
       await expect(notificationBell).toHaveAttribute('href', '/dashboard/account/notifications')
       await notificationBell.click()
@@ -1881,9 +1909,9 @@ test.describe('dashboard pane hierarchy', () => {
       } else {
         await expect(page.getByText('No notifications yet.', { exact: true })).toBeVisible()
       }
-      await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages', 'Menu'])
+      await expectTabs(mobileNav, ['Today', 'Calendar', 'Messages', 'Menu'], { scope: 'personal' })
       await page.setViewportSize(WIDE)
-      await expect(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages'])
+      await expectTabs(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }), ['Today', 'Calendar', 'Messages'], { scope: 'personal' })
     } finally {
       const restored = await page.request.post('/api/auth/organization/set-active', { headers: authRequestHeaders(baseURL!), data: { organizationId: seededTenant('restaurant').organizationId } })
       expect(restored.status(), await restored.text()).toBe(200)
@@ -2660,7 +2688,7 @@ test.describe('dashboard pane hierarchy', () => {
     // A lawyer in their firm is still in it on their own settings: the firm's
     // tabs, its Menu lit, and Back to its Menu. Personal is a switch, not a URL.
     const mobileNav = page.getByTestId('dashboard-mobile-nav')
-    await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
+    await expectTabs(mobileNav, ['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'], { org: 'harbor-legal-aid' })
     await expect(mobileNav.getByRole('link', { name: 'Calendar', exact: true })).toHaveAttribute('href', `${services}/calendar`)
     await expect(page.getByTestId('dashboard-mobile-nav-menu-link')).toHaveAttribute('href', `${services}/menu`)
     await expect(page.getByTestId('dashboard-mobile-nav-menu-link')).toHaveAttribute('aria-current', 'page')

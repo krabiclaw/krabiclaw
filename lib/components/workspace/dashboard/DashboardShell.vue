@@ -100,11 +100,12 @@
         class="flex flex-1 flex-col items-center justify-center gap-1 px-1 py-2 no-underline transition active:scale-95 duration-150"
         :class="item.active ? 'text-primary' : 'text-dimmed hover:text-highlighted'"
         :aria-current="item.active ? 'page' : undefined"
+        :aria-label="item.ariaLabel"
       >
         <span class="relative">
           <UIcon :name="item.icon" class="size-6 shrink-0" />
-          <UIcon v-if="item.badgeUnavailable" name="i-lucide-circle-alert" class="absolute -right-1.5 -top-1 size-3.5 text-warning" aria-label="Unread messages could not be loaded" />
-          <span v-else-if="item.badge" class="absolute -right-2.5 -top-1.5 h-4 min-w-4 rounded-full bg-error px-1 text-center text-xs font-semibold leading-4 text-white" :aria-label="`${item.badge} unread`">{{ item.badge > 99 ? '99+' : item.badge }}</span>
+          <UIcon v-if="item.badgeUnavailable" name="i-lucide-circle-alert" class="absolute -right-1.5 -top-1 size-3.5 text-warning" aria-hidden="true" />
+          <span v-else-if="item.badge" class="absolute -right-2.5 -top-1.5 h-4 min-w-4 rounded-full bg-error px-1 text-center text-xs font-semibold leading-4 text-white" aria-hidden="true" data-testid="dashboard-nav-unread">{{ item.badge > 99 ? '99+' : item.badge }}</span>
         </span>
         <span class="text-xs leading-tight font-medium">{{ item.label }}</span>
       </NuxtLink>
@@ -114,11 +115,12 @@
         class="flex flex-1 flex-col items-center justify-center gap-1 px-1 py-2 no-underline transition active:scale-95 duration-150"
         :class="isMenuPageActive ? 'text-primary' : 'text-dimmed hover:text-highlighted'"
         :aria-current="isMenuPageActive ? 'page' : undefined"
+        :aria-label="menuUnread ? 'Menu, unread notifications' : undefined"
         data-testid="dashboard-mobile-nav-menu-link"
       >
         <span class="relative">
           <UIcon name="i-lucide-menu" class="size-6 shrink-0" />
-          <span v-if="menuUnread" class="absolute -right-1 -top-0.5 size-2.5 rounded-full bg-error" aria-label="Unread notifications" data-testid="dashboard-menu-unread" />
+          <span v-if="menuUnread" class="absolute -right-1 -top-0.5 size-2.5 rounded-full bg-error" aria-hidden="true" data-testid="dashboard-menu-unread" />
         </span>
         <span class="text-xs leading-tight font-medium">Menu</span>
       </NuxtLink>
@@ -385,6 +387,8 @@ interface DashboardMobileNavItem {
   badge?: number
   /** The unread counts could not be read. */
   badgeUnavailable?: boolean
+  /** The link's name when the badge says something: the label and what is unread. */
+  ariaLabel?: string
 }
 
 /**
@@ -426,7 +430,15 @@ const menuOpen = ref(false)
 
 // What is unread: conversations on Messages, and the notifications the Menu's bell lists as a dot on Menu.
 const { unreadCount, unreadConversations, unavailable: unreadUnavailable } = useNotificationUnreadCount(realtime)
-const primaryNavItems = computed(() => navTargets.value.map(item => ({ ...item, active: item.key === activeTab.value, ...(item.key === 'messages' ? { badge: unreadConversations.value, badgeUnavailable: unreadUnavailable.value } : {}) })))
+// The count is drawn as a badge and spoken once, in the link's own name.
+const messagesNav = (label: string) => ({
+  badge: unreadConversations.value,
+  badgeUnavailable: unreadUnavailable.value,
+  ariaLabel: unreadUnavailable.value
+    ? `${label}, unread messages could not be loaded`
+    : unreadConversations.value ? `${label}, ${unreadConversations.value} unread` : undefined,
+})
+const primaryNavItems = computed(() => navTargets.value.map(item => ({ ...item, active: item.key === activeTab.value, ...(item.key === 'messages' ? messagesNav(item.label) : {}) })))
 // A count that could not be read is marked as such on Messages, never shown stale.
 const menuUnread = computed(() => !unreadUnavailable.value && unreadCount.value > 0)
 // A signed-in owner always gets the header: the wordmark and the account menu

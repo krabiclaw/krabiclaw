@@ -4,7 +4,7 @@ import { SEED_SUBDOMAINS } from './manifest.ts'
 
 // Each business gets the visits a guest makes: its home and an offering page,
 // opened in a real browser so the site itself records the pageviews and
-// offering views, then starts a booking or consultation and sends one message
+// offering views, then starts a booking or consultation and writes in
 // through the public contact form. Insights
 // and the Today feed read these as they read any guest's.
 export async function seedTraffic(baseURL: string, manifest: SeedManifest) {
@@ -32,10 +32,20 @@ export async function seedTraffic(baseURL: string, manifest: SeedManifest) {
             : { event_name: 'consultation_cta_click', stage: 'schedule_navigation', page_path: '/services/family' }
         const started = await context.request.post('/api/public/conversion-events', { data: { ...intent, event_id: crypto.randomUUID() } })
         if (started.status() !== 201) throw new Error(`Recording ${tenant.name}'s ${intent.event_name} answered ${started.status()} ${await started.text()}`)
-        const sent = await context.request.post('/api/public/contact', {
-          data: { name: 'Seed Guest', email: `seed-guest+${key}@playwright.example`, message: `A question for ${tenant.name} about visiting.`, consent: true },
-        })
-        if (sent.status() !== 201) throw new Error(`The ${tenant.name} contact form answered ${sent.status()} ${await sent.text()}`)
+        // Ember & Slice's guests write from Brooklyn's pages, so the Brooklyn
+        // dining room has unanswered messages on Today at any hour, after its
+        // last seating as well as before it.
+        const messages = key === 'restaurant'
+          ? [
+              { name: 'Priya Shah', email: 'priya.shah@playwright.example', message: 'Do you have a gluten-free crust? My sister and I would like to come in on Friday.', location_id: tenant.locations.brooklyn!.id },
+              { name: 'Daniel Okafor', email: 'daniel.okafor@playwright.example', message: 'Could we book the back room for a birthday dinner for fourteen next Saturday?', location_id: tenant.locations.brooklyn!.id },
+              { name: 'Elena Russo', email: 'elena.russo@playwright.example', message: 'Is the Brooklyn Clam Pie on the menu this week?', location_id: tenant.locations.brooklyn!.id },
+            ]
+          : [{ name: 'Seed Guest', email: `seed-guest+${key}@playwright.example`, message: `A question for ${tenant.name} about visiting.` }]
+        for (const message of messages) {
+          const sent = await context.request.post('/api/public/contact', { data: { ...message, consent: true } })
+          if (sent.status() !== 201) throw new Error(`The ${tenant.name} contact form answered ${sent.status()} ${await sent.text()}`)
+        }
         // Two guests book the studio's wheel class.
         if (key === 'experience') {
           const slug = tenant.products['wheel-class']!.slug
