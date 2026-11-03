@@ -4540,6 +4540,7 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(night(sea, 12)).toHaveText(gridPrice(180_000))
 
   // A gap no arrival can fill says so, as Airbnb's calendar blocker does: three free nights under a week's minimum.
+  await page.goto(gridPath)
   await expect(night(productId, 5)).not.toHaveAttribute('aria-label', /minimum is/)
   await drag(night(productId, 4), night(productId, 6))
   await inspector.getByRole('button', { name: /^Minimum nights/ }).click()
