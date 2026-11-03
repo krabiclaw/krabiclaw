@@ -49,7 +49,7 @@
             >
               <span class="flex items-center justify-between gap-1">
                 <span class="block text-sm sm:text-base" :class="night(day)?.available === false ? 'line-through' : ''">{{ day.day }}</span>
-                <span v-if="channelState(day)" class="size-2 shrink-0 rounded-full" :class="channelState(day) === 'pending' ? 'bg-warning' : 'bg-error'" :data-testid="`stay-night-channel-${channelState(day)}`" aria-hidden="true" />
+                <UIcon v-if="channelState(day)" :name="CHANNEL_MARKS[channelState(day)!]" class="size-3.5 shrink-0" :class="channelState(day) === 'pending' ? 'text-muted' : 'text-warning'" :data-testid="`stay-night-channel-${channelState(day)}`" aria-hidden="true" />
               </span>
               <span v-if="night(day)?.stay_id || night(day)?.held_until || night(day)?.calendar" class="hidden truncate text-xs sm:block">{{ stayLabel(day) }}</span>
               <span class="block break-all text-[10px] leading-tight tabular-nums sm:hidden">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : compactMoney(night(day)!.price_minor!) : '…' }}</span>
@@ -82,7 +82,7 @@
               <template #heading><UButton :label="formatCalendarDate(month.toString(), 'en', { month: 'long' })" color="neutral" variant="link" @click="openYearDate(month)" /></template>
               <template #day="{ day }">
                 <span :class="night(day)?.available === false ? 'font-semibold underline decoration-2 underline-offset-4' : ''" :title="nightTitle(day)">{{ day.day }}</span>
-                <span v-if="channelState(day)" class="absolute right-0 top-0 size-1.5 rounded-full" :class="channelState(day) === 'pending' ? 'bg-warning' : 'bg-error'" />
+                <UIcon v-if="channelState(day)" :name="CHANNEL_MARKS[channelState(day)!]" class="absolute -right-1 -top-1 size-3" :class="channelState(day) === 'pending' ? 'text-muted' : 'text-warning'" aria-hidden="true" />
               </template>
             </UCalendar>
           </div>
@@ -100,7 +100,7 @@
         <p v-if="view === 'month' && selectedCount" class="mt-4 text-sm text-muted">{{ selectedCount }} {{ selectedCount === 1 ? 'night selected' : 'nights selected' }}. Select more dates individually, or use Select nights for a date range.</p>
       </div>
       <aside v-if="pane && level.mode.value === 'index'" class="min-w-0 overflow-y-auto border-l border-default p-6 xl:p-8">
-        <StayNightInspector v-if="selectedNights.length && data" v-bind="inspectorProps" @dates="openDates" @clear="clearSelection" @edit="edit" @cancel="cancelConcern" @field="setField" @patch="write" @save="save" />
+        <StayNightInspector v-if="(editor.nights.value.length || editor.booked.value.length) && data" v-bind="inspectorProps" v-on="editor.listeners" @dates="openDates" @clear="clearSelection" @weekdays="weekdays = $event" />
         <EditorNavigationList v-else-if="data" :groups="overviewGroups" />
       </aside>
     </div>
@@ -120,7 +120,7 @@
     @update:open="closeDrawer"
   >
     <template #body>
-      <StayNightInspector v-bind="inspectorProps" @dates="openDates" @clear="clearSelection" @edit="edit" @cancel="cancelConcern" @field="setField" @patch="write" @save="save" />
+      <StayNightInspector v-bind="inspectorProps" v-on="editor.listeners" @dates="openDates" @clear="clearSelection" @weekdays="weekdays = $event" />
     </template>
   </UDrawer>
   <UModal v-model:open="datesOpen" title="Select nights">
@@ -141,15 +141,16 @@
 <script setup lang="ts">
 import { parseDate, today, type DateValue } from '@internationalized/date'
 import type { Stay, StayHome, StayNight, StayTurnover } from '~/server/domain/stays'
-import { MAX_STAY_NIGHTS, STAY_CHANNEL_LABELS, parseStayCalendarRules, resolveStayNightPolicy } from '~/shared/bookings'
-import StayNightInspector, { type NightConcern, type NightDraft, type NightEditField } from './StayNightInspector.vue'
+import { MAX_STAY_NIGHTS, STAY_CHANNEL_LABELS, parseStayCalendarRules } from '~/shared/bookings'
+import StayNightInspector from './StayNightInspector.vue'
 import EditorNavigationList from './EditorNavigationList.vue'
 import CalendarOfferingFilter from './CalendarOfferingFilter.vue'
 import { isCurrencyCode } from '~/shared/currencies'
-import { formatMinorAmount, majorAmountToMinor, minorAmountToMajor } from '~/shared/prices'
+import { formatMinorAmount, minorAmountToMajor } from '~/shared/prices'
 import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
 import { STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES } from '~/shared/stay-listing'
-import { addLocalDays, formatCalendarDate, isValidCalendarDate, isValidInstant, isValidTimezone } from '~/utils/timezone'
+import { addLocalDays, formatCalendarDate, isValidCalendarDate, isValidTimezone } from '~/utils/timezone'
+import { CHANNEL_MARKS, channelNote, isStayNight, useStayNightEditor } from '~/composables/useStayNightEditor'
 import { getErrorMessage } from '~/utils/errors'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'cancellation_policy' | 'long_term_cancellation_policy'>
@@ -162,8 +163,6 @@ const level = useRouteLevel()
 const router = useRouter()
 const orgSlug = String(route.params.orgSlug)
 const api = useDashboardApi(computed(() => ({ orgSlug })))
-const mutation = new AbortController()
-onScopeDispose(() => mutation.abort())
 const pane = useDashboardPane()
 const homeOption = computed(() => props.homes.find(home => home.product_id === props.productId))
 const initialError = computed(() => props.homeError || (!homeOption.value ? 'That place to stay is not available in this organization.' : ''))
@@ -212,9 +211,8 @@ const readRanges = computed(() => {
   }
   return merged
 })
-const safeAmount = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
-const nullableAmount = (value: unknown) => value === null || safeAmount(value)
-const nullableRule = (value: unknown, maximum = Number.MAX_SAFE_INTEGER) => value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= maximum)
+const nullableAmount = (value: unknown) => value === null || typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+const nullableRule = (value: unknown, maximum: number) => value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= maximum)
 const nullableText = (value: unknown) => value === null || typeof value === 'string'
 function isCalendar(value: unknown): value is CalendarPayload {
   if (!isRecord(value) || !isRecord(value.home) || !Array.isArray(value.nights) || !Array.isArray(value.stays)) return false
@@ -228,13 +226,7 @@ function isCalendar(value: unknown): value is CalendarPayload {
   if (!value.stays.every(stay => isRecord(stay) && typeof stay.id === 'string' && stay.product_id === props.productId
     && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date) && stay.check_out_date > stay.check_in_date
     && nullableText(stay.guest_name) && (props.manage ? nullableText(stay.guest_surname) && Object.hasOwn(channels, String(stay.channel)) : !('guest_surname' in stay) && !('channel' in stay)) && typeof stay.status === 'string')) return false
-  return (value.channel_push === undefined || isSuccessfulChannelPush(value.channel_push)) && value.nights.every(item => isRecord(item) && isValidCalendarDate(item.date)
-    && typeof item.available === 'boolean' && typeof item.closed === 'boolean' && nullableText(item.stay_id) && nullableAmount(item.price_minor)
-    && (item.calendar === null || item.calendar === 'vrbo')
-    && typeof item.min_stay_arrival === 'number' && nullableRule(item.min_stay_arrival) && nullableRule(item.max_stay)
-    && typeof item.closed_to_arrival === 'boolean' && typeof item.closed_to_departure === 'boolean'
-    && [null, 'host', 'import'].includes(item.source as string | null) && (item.held_until === null || isValidInstant(item.held_until))
-    && (item.channel === null || isRecord(item.channel) && ['pending', 'pushed', 'needs_review'].includes(String(item.channel.state)) && nullableText(item.channel.detail)))
+  return (value.channel_push === undefined || isSuccessfulChannelPush(value.channel_push)) && value.nights.every(isStayNight)
 }
 const { data, error, status, refresh } = await useAsyncData(
   () => `stay-night-calendar:${String(route.params.orgSlug)}:${props.productId}:${readRanges.value.map(range => `${range.from}:${range.to}`).join('|')}`,
@@ -291,8 +283,6 @@ const channelState = (day: DateValue) => {
   const state = night(day)?.channel?.state
   return state === 'pending' || state === 'needs_review' ? state : null
 }
-const channelNote = (value: StayNight) => value.channel?.state === 'needs_review' ? value.channel.detail
-  : value.channel?.state === 'pending' ? `Not on the channel yet. ${value.channel.detail ?? 'Waiting to be sent.'}` : null
 function nightTitle(day: DateValue) {
   const value = night(day)
   const note = value ? channelNote(value) : null
@@ -306,47 +296,38 @@ const dateLabel = computed(() => {
   if (range.from.slice(0, 4) !== String(placeholder.value?.year) || end.slice(0, 4) !== range.from.slice(0, 4)) options.year = 'numeric'
   return `${formatCalendarDate(range.from, 'en', options)}${selectedCount.value > 1 ? ` – ${formatCalendarDate(end, 'en', options)}` : ''}`
 })
-const concern = ref<NightConcern>('summary')
 const drawerOpen = ref(Boolean(requestedDate))
-const busy = ref(false)
-const writeError = ref('')
 const datesOpen = ref(false)
 const dateDraft = reactive({ start: '', end: '' })
 const dateError = ref('')
-const draft = reactive<NightDraft>({ price_minor: '', min_stay_arrival: '', max_stay: '', closed_to_arrival: 'keep', closed_to_departure: 'keep' })
-const dirtyFields = ref<NightEditField[]>([])
-const inspectorProps = computed(() => ({ orgSlug: String(route.params.orgSlug), home: data.value!.home, nights: selectedNights.value, dateLabel: dateLabel.value, manage: props.manage, busy: busy.value || status.value === 'pending', error: writeError.value, notice: [...new Set(selectedNights.value.flatMap(night => channelNote(night) ?? []))].join(' '), concern: concern.value, draft, dirty: dirtyFields.value.length > 0 }))
+const weekdays = ref<number[] | null>(null)
+const editor = useStayNightEditor({
+  orgSlug,
+  targets: computed(() => data.value && selectedNights.value.length === selectedCount.value ? [{ home: data.value.home, nights: selectedNights.value }] : []),
+  weekdays,
+  manage: () => props.manage,
+  loading: () => status.value === 'pending',
+  refresh: async () => {
+    await refresh()
+    if (error.value) throw error.value
+  },
+})
+const { busy, error: writeError } = editor
+const inspectorProps = computed(() => ({ ...editor.inspector.value, dateLabel: dateLabel.value, scope: data.value ? `${data.value.home.timezone} · ${data.value.home.currency}` : '', selectDates: true }))
 const overviewGroups = computed(() => [{ id: 'home', items: [
   { id: 'price', label: 'Pricing', summary: data.value?.home.base_price_minor == null ? 'No base nightly price set' : `${money(data.value.home.base_price_minor)} per night`, to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/price` },
   { id: 'availability', label: 'Availability', summary: data.value ? `${data.value.home.min_nights} night minimum` : 'Loading availability…', to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/availability` },
   { id: 'cancellation', label: 'Cancellations', summary: [data.value?.home.cancellation_policy ? STAY_CANCELLATION_POLICIES[data.value.home.cancellation_policy].label : 'Short-term policy not set', data.value?.home.long_term_cancellation_policy ? STAY_LONG_TERM_CANCELLATION_POLICIES[data.value.home.long_term_cancellation_policy].label : 'Long-term policy not set'].join(' · '), to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/cancellation` },
 ] }])
-function edit(value: NightConcern) {
-  concern.value = value
-  dirtyFields.value = []
-  for (const field of Object.keys(draft) as NightEditField[]) {
-    const first = selectedNights.value[0]?.[field]
-    const same = selectedNights.value.every(night => night[field] === first)
-    draft[field] = field === 'closed_to_arrival' || field === 'closed_to_departure' ? 'keep'
-      : same && typeof first === 'number' ? field === 'price_minor' ? minorAmountToMajor(first, data.value!.home.currency) : String(first) : ''
-  }
-  writeError.value = ''
-}
-function setField(field: NightEditField, value: string) {
-  draft[field] = value
-  if (!dirtyFields.value.includes(field)) dirtyFields.value.push(field)
-}
-function cancelConcern() { edit('summary') }
 function clearSelection() {
   if (busy.value) return
   selectedDates.value = []
   drawerOpen.value = false
-  edit('summary')
 }
 function closeDrawer(open: boolean) {
   if (busy.value) return
   drawerOpen.value = open
-  if (!open) cancelConcern()
+  if (!open) editor.edit('summary')
 }
 function openDates() {
   if (!currentDay.value) return
@@ -393,59 +374,9 @@ async function openYearDate(value: unknown) {
   await changeView('month')
 }
 function stepYear(direction: number) { if (placeholder.value) void changeMonth(placeholder.value.add({ years: direction })) }
-async function write(patch: Record<string, boolean | number | null>) {
-  if (busy.value || !props.manage || !selectedCount.value) return
-  if (selectedCount.value > 500 || selectedNights.value.length !== selectedCount.value) { writeError.value = 'Choose at most 500 loaded nights.'; return }
-  busy.value = true
-  writeError.value = ''
-  let saved = 0
-  try {
-    for (const range of selectedRanges.value) {
-      const response = await api(`/api/dashboard/stay-homes/${encodeURIComponent(props.productId)}/nights`, { method: 'PUT', body: { ...range, ...patch }, validate: isCalendar, signal: mutation.signal })
-      if (mutation.signal.aborted) return
-      if (!Object.hasOwn(response, 'channel_push')) throw new Error('The saved nights did not report their channel outcome.')
-      saved += parseDate(range.to).compare(parseDate(range.from))
-    }
-    await refresh()
-    if (error.value) throw error.value
-    if (selectedNights.value.length !== selectedCount.value || selectedNights.value.some((night) => {
-      const listing = resolveStayNightPolicy(data.value!.home, night.date)
-      const expected = patch.reset ? { source: null, closed: false, ...listing, max_stay: null, closed_to_arrival: false, closed_to_departure: false }
-        : { ...patch, ...(patch.price_minor === null ? { price_minor: listing.price_minor } : {}), ...(patch.min_stay_arrival === null ? { min_stay_arrival: listing.min_stay_arrival } : {}) }
-      return Object.entries(expected).some(([field, value]) => night[field as keyof StayNight] !== value)
-    })) throw new Error('The saved calendar does not match the selected night settings. Review the calendar before making another change.')
-    edit('summary')
-  } catch (cause) {
-    if (mutation.signal.aborted) return
-    writeError.value = `${saved ? `${saved} of ${selectedCount.value} nights saved. ` : ''}${getErrorMessage(cause, 'The nights could not be saved')}`
-    try {
-      await refresh()
-      if (error.value) throw error.value
-    } catch (readError) { writeError.value += ` ${getErrorMessage(readError, 'The saved calendar could not be read back')}` }
-  } finally { busy.value = false }
-}
-async function save() {
-  if (concern.value === 'reset') { await write({ reset: true }); return }
-  const patch: Record<string, boolean | number | null> = {}
-  try {
-    for (const field of dirtyFields.value) {
-      const value = draft[field].trim()
-      if (field === 'closed_to_arrival' || field === 'closed_to_departure') {
-        if (value !== 'keep') patch[field] = value === 'block'
-      } else if (!value) patch[field] = null
-      else if (field === 'price_minor') patch[field] = majorAmountToMinor(value, data.value!.home.currency)
-      else {
-        const count = Number(value)
-        if (!Number.isInteger(count) || count < 1 || count > MAX_STAY_NIGHTS) throw new Error(`Nightly stay overrides must be whole numbers from 1 to ${MAX_STAY_NIGHTS}.`)
-        patch[field] = count
-      }
-    }
-    if (!Object.keys(patch).length) { writeError.value = 'Choose a setting to change.'; return }
-    await write(patch)
-  } catch (cause) { writeError.value = getErrorMessage(cause, 'Check the night settings') }
-}
 watch(selectedDates, () => {
-  edit('summary')
+  weekdays.value = null
+  editor.edit('summary')
 })
 watch(() => route.query.month, value => {
   if (value === undefined) { placeholder.value = currentDay.value ?? undefined; return }

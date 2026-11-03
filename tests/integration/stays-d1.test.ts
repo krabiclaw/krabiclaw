@@ -1199,6 +1199,57 @@ test('the host sets nights apart from the defaults and resets them', { timeout: 
   }
 })
 
+test('the host changes only the chosen weekdays and moves each night’s own price by a percent', { timeout: 120_000 }, async context => {
+  context.mock.timers.enable({ apis: ['Date'], now: Date.parse(NOW) })
+  const { runtime, db, env } = await boot()
+  try {
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
+    // 2026-11-01 is a Sunday: the week runs Sunday to Saturday.
+    const week = { productId: cabin.id, from: '2026-11-01', to: '2026-11-08' }
+    const write = (patch: Record<string, unknown>, from = week.from, to = week.to) => setStayNights(db, env, manager, { product_id: cabin.id, from, to, ...patch })
+    const before = await readStayCalendar(db, manager, week)
+    for (const patch of [{ closed: true, weekdays: [] }, { closed: true, weekdays: [7] }, { closed: true, weekdays: [5, 5] }, { closed: true, weekdays: 'fri' }, { weekdays: [5] },
+      { price_change_percent: 51 }, { price_change_percent: -51 }, { price_change_percent: 0 }, { price_change_percent: 1.5 }, { price_change_percent: 10, price_minor: 100 }, { reset: true, price_change_percent: 10 }]) {
+      await assert.rejects(write(patch), code('INVALID_STAY_FIELD'), JSON.stringify(patch))
+    }
+    // A Monday alone has no Friday to change.
+    await assert.rejects(write({ closed: true, weekdays: [5] }, '2026-11-02', '2026-11-03'), code('INVALID_STAY_FIELD'))
+    assert.deepEqual(await readStayCalendar(db, manager, week), before)
+
+    await write({ price_minor: 20_000 }, '2026-11-04', '2026-11-05')
+    await write({ price_minor: 9_999 }, '2026-11-05', '2026-11-06')
+    const weekend = await write({ closed: true, min_stay_arrival: 1, weekdays: [5, 6] })
+    assert.deepEqual(weekend.nights.map(night => [night.date, night.closed, night.min_stay_arrival, night.source]), [
+      ['2026-11-01', false, 2, null], ['2026-11-02', false, 2, null], ['2026-11-03', false, 2, null], ['2026-11-04', false, 2, 'host'],
+      ['2026-11-05', false, 2, 'host'], ['2026-11-06', true, 1, 'host'], ['2026-11-07', true, 1, 'host'],
+    ])
+    // Each chosen night moves from its own price: a set price, or the listing's; a fraction of a minor unit rounds.
+    await write({ price_change_percent: -10, weekdays: [3] })
+    await write({ price_change_percent: 5, weekdays: [4, 0] })
+    const priced = await readStayCalendar(db, manager, week)
+    assert.deepEqual(priced.nights.map(night => [night.date, night.price_minor]), [
+      ['2026-11-01', 15_750], ['2026-11-02', 15_000], ['2026-11-03', 15_000], ['2026-11-04', 18_000], ['2026-11-05', 10_499], ['2026-11-06', 15_000], ['2026-11-07', 15_000],
+    ])
+    assert.deepEqual((await db.prepare('SELECT date, closed, price_minor, min_stay_arrival FROM product_nights WHERE product_id = ? ORDER BY date').bind(cabin.id).all()).results, [
+      { date: '2026-11-01', closed: 0, price_minor: 15_750, min_stay_arrival: null },
+      { date: '2026-11-04', closed: 0, price_minor: 18_000, min_stay_arrival: null },
+      { date: '2026-11-05', closed: 0, price_minor: 10_499, min_stay_arrival: null },
+      { date: '2026-11-06', closed: 1, price_minor: null, min_stay_arrival: 1 },
+      { date: '2026-11-07', closed: 1, price_minor: null, min_stay_arrival: 1 },
+    ])
+    const events = (await db.prepare("SELECT payload_json FROM activity_entries WHERE event_name = 'stay.nights_changed' AND json_extract(payload_json, '$.entityId') = ? ORDER BY rowid DESC LIMIT 1").bind(cabin.id).all<{ payload_json: string }>()).results
+    assert.deepEqual(JSON.parse(events[0]!.payload_json).metadata, { from: '2026-11-01', to: '2026-11-08', reset: false, fields: 'price_minor', weekdays: '4,0', price_change_percent: 5 })
+
+    // Reset clears only the chosen weekday; the rest of the week keeps its settings.
+    await write({ reset: true, weekdays: [3] })
+    assert.deepEqual((await readStayCalendar(db, manager, week)).nights.map(night => [night.date, night.price_minor, night.source]), [
+      ['2026-11-01', 15_750, 'host'], ['2026-11-02', 15_000, null], ['2026-11-03', 15_000, null], ['2026-11-04', 15_000, null], ['2026-11-05', 10_499, 'host'], ['2026-11-06', 15_000, 'host'], ['2026-11-07', 15_000, 'host'],
+    ])
+  } finally {
+    await runtime.dispose()
+  }
+})
+
 test('the multi-calendar reads every home the caller looks after, each night as its own home calendar reads it', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
   try {
