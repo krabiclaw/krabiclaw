@@ -4465,6 +4465,9 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(agenda.locator('[data-day]').first()).toBeVisible()
   await page.getByRole('textbox', { name: 'Search bookings' }).fill('no booking is called this')
   await expect(agenda.getByText(/^Nothing scheduled in /)).toBeVisible()
+  await page.getByRole('textbox', { name: 'Search bookings' }).fill('grid')
+  await expect(agenda.locator('[data-day]').first()).toBeVisible()
+  await expect(agenda.getByText(/Grid/).first()).toBeVisible()
   await page.goto(gridPath)
   await page.getByRole('button', { name: 'No upcoming stays', exact: true }).click()
   await expect(grid.locator('[data-home]')).toHaveCount(2)
@@ -4511,7 +4514,8 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(homeInspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('Home default: 2 nights')
 
   // Dragging down over all three homes selects the same week on each; unchecking one leaves it out.
-  await page.goto(gridPath)
+  // The window opens on night 8, so the whole week sits inside the grid's scroll area for the pointer.
+  await page.goto(`/dashboard/${slug}/calendar?view=homes&from=${localDay(8)}`)
   await drag(night(bay, 10), night(sea, 16))
   await expect(inspector.getByRole('button', { name: 'Select nights' })).toHaveCount(0)
   await expect(inspector.getByText(/3 homes · 7 nights/).first()).toBeVisible()
@@ -4532,11 +4536,14 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toContainText('Mixed prices')
   expect((await nightsAt(bay, 9, 18)).map(entry => entry.price_minor)).toEqual([320_000, ...Array(7).fill(288_000), 320_000])
   expect((await nightsAt(sea, 9, 18)).map(entry => entry.price_minor)).toEqual([200_000, ...Array(7).fill(180_000), 200_000])
-  expect((await nightsAt(productId, 10, 17)).every(entry => entry.source === null)).toBe(true)
+  const unchecked = await nightsAt(productId, 10, 17)
+  expect(unchecked).toHaveLength(7)
+  expect(unchecked.every(entry => entry.source === null)).toBe(true)
   await expect(night(bay, 12)).toHaveText(gridPrice(288_000))
   await expect(night(sea, 12)).toHaveText(gridPrice(180_000))
 
   // A gap no arrival can fill says so, as Airbnb's calendar blocker does: three free nights under a week's minimum.
+  await page.goto(gridPath)
   await expect(night(productId, 5)).not.toHaveAttribute('aria-label', /minimum is/)
   await drag(night(productId, 4), night(productId, 6))
   await inspector.getByRole('button', { name: /^Minimum nights/ }).click()
@@ -4561,6 +4568,9 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toBeDisabled()
 
   // From the keyboard: a night, then Shift with the arrow keys, selects two weeks; only Fridays and Saturdays are blocked.
+  // Clearing first, since a pending first click would make this click end a range from it.
+  await inspector.getByRole('button', { name: 'Clear selected nights', exact: true }).click()
+  await expect(inspector).toHaveCount(0)
   await night(bay, 17).click()
   await expect(inspector.getByText('Bay House · 1 night', { exact: true })).toBeVisible()
   for (let index = 0; index < 13; index++) await page.keyboard.press('Shift+ArrowRight')

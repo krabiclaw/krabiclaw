@@ -250,20 +250,28 @@ export function useStayNightEditor<R extends { name: string }, S extends Calenda
     try {
       await options.refresh()
       const after = new Map(options.targets.value.map(target => [source.id(target.home), new Map(target.nights.map(slot => [slot.date, slot]))]))
-      const mismatch = saved.find(({ home, nights: previous }) => previous.some((slot) => {
-        const read = after.get(source.id(home))?.get(slot.date)
-        return !read || Object.entries(expected(home, slot, patch)).some(([field, value]) => read[field as keyof S] !== value)
-      }))
-      if (mismatch) failures.push({ home: mismatch.home, message: `The saved calendar does not match the selected ${source.nouns.unit} settings. Review the calendar before making another change.` })
+      for (const { home, nights: previous } of saved) {
+        const mismatch = previous.some((slot) => {
+          const read = after.get(source.id(home))?.get(slot.date)
+          return !read || Object.entries(expected(home, slot, patch)).some(([field, value]) => read[field as keyof S] !== value)
+        })
+        if (mismatch) failures.push({ home, message: `The saved calendar does not match the selected ${source.nouns.unit} settings. Review the calendar before making another change.` })
+      }
     } catch (readError) {
-      failures.push({ home: attempted[0]!.target.home, message: getErrorMessage(readError, 'The saved calendar could not be read back') })
+      const message = getErrorMessage(readError, 'The saved calendar could not be read back')
+      for (const { home } of saved) failures.push({ home, message })
     }
     const rows = attempted.length
     if (!failures.length) edit('summary')
-    const synced = stayNights.value.filter(night => night.channel)
+    const synced = failures.length ? [] : stayNights.value.filter(night => night.channel)
     if (synced.length) {
       const state = (value: 'pending' | 'needs_review') => synced.filter(night => night.channel!.state === value).length
       result.value = [`Airbnb: ${synced.filter(night => night.channel!.state === 'pushed').length} received`, ...(state('pending') ? [`${state('pending')} sending`] : []), ...(state('needs_review') ? [`${state('needs_review')} needs review`] : [])].join(' · ')
+    }
+    if (failures.length && 'price_change_percent' in patch) {
+      // A failed home may still have committed its nights (a refused channel push), so the percent is not offered again.
+      dirtyFields.value = dirtyFields.value.filter(field => field !== 'price_change_percent')
+      draft.price_change_percent = ''
     }
     if (failures.length) {
       error.value = rows > 1

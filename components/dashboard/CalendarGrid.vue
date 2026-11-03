@@ -190,6 +190,8 @@ const to = computed(() => parseDate(from.value).add({ days: SPAN }).toString())
 const dates = computed(() => Array.from({ length: SPAN }, (_, index) => parseDate(from.value).add({ days: index }).toString()))
 const search = computed(() => typeof route.query.q === 'string' ? route.query.q : '')
 const freeOnly = computed(() => route.query.free === '1')
+// The page's search narrows the rows, but not under a save that is reading back the homes it wrote.
+const appliedSearch = ref(search.value)
 // A city from the homes' addresses; NO_CITY is the homes without one.
 const ALL_CITIES = '*'
 const NO_CITY = '-'
@@ -210,7 +212,7 @@ const weekdays = computed<number[] | null>(() => {
   if (value === undefined) return null
   const days = typeof value === 'string' ? value.split(',').map(part => part ? Number(part) : NaN) : []
   if (!days.length || days.some(day => !Number.isInteger(day) || day < 0 || day > 6) || new Set(days).size !== days.length) throw createError({ statusCode: 400, statusMessage: 'Choose valid weekdays.' })
-  return days
+  return [...days].sort()
 })
 
 const isText = (value: unknown) => value === null || typeof value === 'string'
@@ -276,7 +278,7 @@ const cityItems = computed(() => {
     ...(counts.has(NO_CITY) ? [{ label: `No city (${counts.get(NO_CITY)})`, value: NO_CITY }] : []),
   ]
 })
-const matches = (name: string, detail: string) => !search.value || `${name} ${detail}`.toLowerCase().includes(search.value.toLowerCase())
+const matches = (name: string, detail: string) => !appliedSearch.value || `${name} ${detail}`.toLowerCase().includes(appliedSearch.value.toLowerCase())
 // A stay's bar spans the run of nights it holds on screen; a run cut by the window's edge still names its guest.
 // A linked calendar's nights are a bar of their own, named for the channel.
 const homeRows = computed<GridRow[]>(() => {
@@ -366,7 +368,9 @@ function homeTo(productId: string, date?: string) {
 function placeTo(place: Place, date: string) {
   return { path: `/dashboard/${orgSlug}/calendar`, query: { ...(place.kind === 'location' ? { locationId: place.id } : { product_id: place.id, date }), month: date.slice(0, 7) } }
 }
+// Nothing moves the selection or the rows while a save runs: its read-back compares the rows it wrote.
 function setQuery(changes: LocationQueryRaw) {
+  if (editor.busy.value) return
   void router.replace({ query: { ...route.query, ...changes } })
 }
 function moveTo(day: string) {
@@ -413,7 +417,7 @@ function choose(row: number, day: number) {
 }
 function startDrag(event: PointerEvent, row: number, day: number) {
   suppressClick = false
-  if (event.button !== 0 || event.pointerType === 'touch') return
+  if (event.button !== 0 || event.pointerType === 'touch' || editor.busy.value) return
   drag.value = { row, day, moved: false }
 }
 function cellAt(event: PointerEvent) {
@@ -552,6 +556,9 @@ function pills(row: number) {
   if (pieces[0]) pieces[0].label = weekdays.value ? `${chosen} of ${countLabel(free.length)}` : countLabel(free.length)
   return pieces
 }
+// Filters can remove the row the keyboard cursor was on; keep one day in the tab order.
+watch(() => rows.value.length, length => { if (cursor.value.row >= length) cursor.value = { row: Math.max(0, length - 1), day: cursor.value.day } })
+watch([search, () => editor.busy.value], ([value, busy]) => { if (!busy) appliedSearch.value = value })
 watch(() => route.query[words.rows] === undefined ? null : `${String(route.query[words.rows])}|${String(route.query[words.span])}`, () => editor.edit('summary'))
 
 const realtime = useDashboardInvalidations()

@@ -61,7 +61,9 @@ export function resolveStayNightPolicy(home: { min_nights: number; base_price_mi
 export const NIGHT_PRICE_CHANGE_PERCENT = 50
 /** A night's price moved by a whole percent, rounded to its minor unit: the nights write and its read-back agree on this. */
 export function changeNightPrice(priceMinor: number, percent: number): number {
-  return Math.round(priceMinor * (100 + percent) / 100)
+  // Exact integers, half up: floating point loses minor units on large amounts.
+  const scaled = BigInt(priceMinor) * BigInt(100 + percent)
+  return Number(scaled / 100n + (scaled % 100n >= 50n ? 1n : 0n))
 }
 export const STAY_CHANNELS = ['airbnb', 'vrbo', 'booking_com', 'direct'] as const
 export type StayChannel = typeof STAY_CHANNELS[number]

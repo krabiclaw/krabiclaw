@@ -54,7 +54,7 @@
         </UTooltip>
       </div>
       <UAlert
-        v-if="locationError"
+        v-if="locationError && view !== 'homes'"
         class="mb-6"
         color="error"
         variant="soft"

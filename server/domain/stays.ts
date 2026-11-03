@@ -1969,6 +1969,7 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, access: 
     for (const night of await homeNights(db, access.organizationId, home, from, to)) {
       if (!dates.includes(night.date)) continue
       if (night.price_minor === null) fail(422, 'STAY_PRICE_MISSING', `${night.date} has no price to change; set a nightly price instead`, 'price_change_percent')
+      if (changeNightPrice(night.price_minor, percent) > Number.MAX_SAFE_INTEGER) fail(422, 'INVALID_AMOUNT', `${night.date}'s price would be too large`, 'price_change_percent')
       const listed = resolveStayNightPolicy(home, night.date).price_minor
       if (listed !== null) listing.set(night.date, changeNightPrice(listed, percent))
     }
@@ -1978,19 +1979,29 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, access: 
   const columns = Object.keys(patch)
   const nights = JSON.stringify(dates.map(night => ({ date: night, price_minor: listing.get(night) ?? null })))
   const written = [...columns, ...(percent === null ? [] : ['price_minor'])]
+  // A night with no price of its own moves from the listing's price as read above; the batch refuses if the listing changed since.
+  const listingGuard = { query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM products WHERE organization_id = ? AND id = ? AND updated_at = ?) THEN NULL ELSE json('Stay listing changed') END", params: [access.organizationId, home.product_id, home.product_updated_at] }
   await executeBatch(db, [
+    ...(percent === null ? [] : [listingGuard]),
     reset
       ? { query: 'DELETE FROM product_nights WHERE organization_id = ? AND product_id = ? AND date IN (SELECT json_extract(value, \'$.date\') FROM json_each(?))', params: [access.organizationId, home.product_id, nights] }
       : {
           query: `INSERT INTO product_nights (organization_id, product_id, date, source, updated_at, updated_by, ${written.join(', ')})
                   SELECT ?, ?, json_extract(value, '$.date'), 'host', ?, ?, ${columns.map(() => '?').join(', ')}${percent === null ? '' : `${columns.length ? ', ' : ''}json_extract(value, '$.price_minor')`} FROM json_each(?) WHERE true
                   ON CONFLICT (product_id, date) DO UPDATE SET source = 'host', updated_at = excluded.updated_at, updated_by = excluded.updated_by,
-                    ${[...columns.map(column => `${column} = excluded.${column}`), ...(percent === null ? [] : ['price_minor = CASE WHEN product_nights.price_minor IS NULL THEN excluded.price_minor ELSE CAST(ROUND(product_nights.price_minor * (100 + ?) / 100.0) AS INTEGER) END'])].join(', ')}`,
+                    ${[...columns.map(column => `${column} = excluded.${column}`), ...(percent === null ? [] : ['price_minor = CASE WHEN product_nights.price_minor IS NULL THEN excluded.price_minor ELSE (product_nights.price_minor * (100 + CAST(? AS INTEGER)) + 50) / 100 END'])].join(', ')}`,
           params: [access.organizationId, home.product_id, now, access.actorId, ...columns.map(column => patch[column]), nights, ...(percent === null ? [] : [percent])],
         },
+    ...(percent === null ? [] : [{ query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM product_nights WHERE organization_id = ? AND product_id = ? AND price_minor > 9007199254740991) THEN json('Night price too large') ELSE NULL END", params: [access.organizationId, home.product_id] }]),
     organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.nights_changed', entityType: 'product', entityId: home.product_id,
       metadata: { from, to, reset, fields: written.join(','), ...(weekdays ? { weekdays: weekdays.join(',') } : {}), ...(percent === null ? {} : { price_change_percent: percent }) } }),
-  ], { operation: 'Set stay nights' })
+  ], { operation: 'Set stay nights' }).catch(async (cause: unknown) => {
+    if (percent !== null && String(cause).includes('Night price too large')) fail(422, 'INVALID_AMOUNT', 'A night’s price would be too large', 'price_change_percent')
+    if (percent !== null && (await readStayHome(db, access, home.product_id)).product_updated_at !== home.product_updated_at) {
+      fail(409, 'STAY_HOME_CHANGED', 'The listing changed while its nights were being priced. Reload the calendar and try again.', 'price_change_percent')
+    }
+    throw cause
+  })
   // The channel hears the runs of nights that changed.
   const ranges: Array<[string, string]> = []
   for (const night of dates) {
