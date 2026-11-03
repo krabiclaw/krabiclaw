@@ -194,10 +194,11 @@ export function useStayNightEditor(options: {
           patch[field] = percent
         } else if (!value) patch[field] = null
         else if (field === 'price_minor') {
-          if (!currency.value) throw new Error('These homes use different currencies. Change their prices by a percent instead.')
+          if (!currency.value) throw new Error('Homes use different currencies. Use Adjust by percentage.')
           patch[field] = majorAmountToMinor(value, currency.value)
         } else {
           const count = Number(value)
+          if (field === 'min_stay_arrival' && (!Number.isInteger(count) || count < 1)) throw new Error('Minimum nights must be at least 1.')
           if (!Number.isInteger(count) || count < 1 || count > MAX_STAY_NIGHTS) throw new Error(`Nightly stay overrides must be whole numbers from 1 to ${MAX_STAY_NIGHTS}.`)
           patch[field] = count
         }

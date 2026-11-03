@@ -25,7 +25,8 @@
           @click="toggleWeekday(day)"
         />
       </div>
-      <p v-if="weekdays" class="mt-2 text-sm text-muted" data-testid="stay-night-weekdays">{{ weekdaySummary }}</p>
+      <p class="mt-2 text-sm text-muted">The change applies only to the chosen weekdays within these dates.</p>
+      <p v-if="weekdays" class="mt-1 text-sm text-muted" data-testid="stay-night-weekdays">{{ weekdaySummary }}</p>
     </div>
     <UAlert v-if="error" color="error" variant="soft" :description="error" />
     <UAlert v-if="notice" color="warning" variant="soft" :description="notice" />
@@ -39,13 +40,13 @@
         </div>
         <div v-if="nights.length && closed === 'mixed' && manage && pendingClosed === null" class="mt-4 flex gap-2">
           <UButton label="Open dates" color="neutral" variant="outline" :disabled="busy" @click="pendingClosed = false" />
-          <UButton label="Block dates" color="neutral" variant="outline" :disabled="busy" @click="pendingClosed = true" />
+          <UButton label="Block nights" color="neutral" variant="outline" :disabled="busy" @click="pendingClosed = true" />
         </div>
         <div v-if="pendingClosed !== null" class="mt-4 space-y-3" data-testid="stay-night-confirm">
           <p class="text-sm">Some selected nights are open and some are blocked. {{ pendingClosed ? 'Block' : 'Open' }} all {{ nights.length }} {{ nights.length === 1 ? 'night' : 'nights' }}?</p>
           <div class="flex gap-2">
-            <UButton :label="pendingClosed ? 'Block all' : 'Open all'" color="neutral" variant="solid" class="bg-default text-highlighted" :disabled="busy" @click="confirmClosed" />
-            <UButton label="Cancel" color="neutral" variant="link" class="text-inverted" :disabled="busy" @click="pendingClosed = null" />
+            <UButton :label="pendingClosed ? 'Block all nights' : 'Open all nights'" color="neutral" variant="solid" class="bg-default text-highlighted" :disabled="busy" @click="confirmClosed" />
+            <UButton :label="pendingClosed ? 'Keep dates open' : 'Keep dates blocked'" color="neutral" variant="link" class="text-inverted" :disabled="busy" @click="pendingClosed = null" />
           </div>
         </div>
         <UButton v-if="nights.length && closed === true && manage" label="Open dates" color="neutral" variant="outline" class="mt-4" :disabled="busy" @click="$emit('patch', { closed: false })" />
@@ -85,12 +86,12 @@
           <p class="text-sm text-muted">{{ basePriceLabel }}</p>
         </template>
         <template v-else>
-          <UFormField label="Change by percent">
+          <UFormField label="Adjust by percentage">
             <UInput :model-value="draft.price_change_percent" type="number" :min="-NIGHT_PRICE_CHANGE_PERCENT" :max="NIGHT_PRICE_CHANGE_PERCENT" step="1" placeholder="0" class="w-full" :ui="{ base: 'py-6 text-center text-3xl font-semibold', trailing: 'pe-6' }" :disabled="busy" @update:model-value="$emit('field', 'price_change_percent', $event == null ? '' : String($event))">
               <template #trailing><span class="text-2xl text-muted">%</span></template>
             </UInput>
           </UFormField>
-          <p class="text-sm text-muted">{{ currency ? percentLabel : `Homes use different currencies. Use Change by %. ${percentLabel}` }}</p>
+          <p class="text-sm text-muted">{{ currency ? percentLabel : `Homes use different currencies. Use Adjust by percentage. ${percentLabel}` }}</p>
         </template>
         <UButton label="Restore listing price" color="neutral" variant="link" class="px-0" :disabled="busy" @click="$emit('patch', { price_minor: null })" />
         <p v-if="booked.length" class="text-sm text-muted">Existing bookings keep the price they were booked at.</p>
@@ -103,7 +104,7 @@
           <UInput :model-value="draft.min_stay_arrival" type="number" min="1" :max="MAX_STAY_NIGHTS" step="1" :placeholder="common('min_stay_arrival') === 'mixed' ? 'Mixed settings' : 'Use home default'" class="w-full" :disabled="busy" @update:model-value="$emit('field', 'min_stay_arrival', $event == null ? '' : String($event))" />
         </UFormField>
         <p v-if="booked.length" class="text-sm text-muted">Existing bookings keep the stay rules they were booked with.</p>
-        <p class="text-sm text-muted">Applies to arrivals on the selected nights. {{ homes.length > 1 ? 'Each home’s default stays on every other night.' : `The home default of ${homes[0]?.min_nights} ${homes[0]?.min_nights === 1 ? 'night' : 'nights'} stays on every other night.` }}</p>
+        <p class="text-sm text-muted">Set a minimum stay for specific dates. It applies to arrivals on the selected nights. {{ homes.length > 1 ? 'Each home’s default stays on every other night.' : `The home default of ${homes[0]?.min_nights} ${homes[0]?.min_nights === 1 ? 'night' : 'nights'} stays on every other night.` }}</p>
       </template>
       <template v-else-if="concern === 'maximum'">
         <p class="text-sm text-muted">Clear this override to remove the night’s maximum.</p>
@@ -182,7 +183,7 @@ const emit = defineEmits<{
 const WEEK = [1, 2, 3, 4, 5, 6, 0]
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const WEEKDAY_NAMES = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays']
-const PRICE_MODES = [{ value: 'set', label: 'Set price' }, { value: 'percent', label: 'Change by %' }] as const
+const PRICE_MODES = [{ value: 'set', label: 'Set price' }, { value: 'percent', label: 'Adjust by percentage' }] as const
 const chosenDays = computed<number[]>(() => props.weekdays ?? props.rangeWeekdays)
 const applies = (day: number) => chosenDays.value.includes(day)
 function toggleWeekday(day: number) {
