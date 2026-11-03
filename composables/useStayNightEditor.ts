@@ -174,6 +174,11 @@ export function useStayNightEditor(options: {
       const count = (state: 'pending' | 'needs_review') => synced.filter(night => night.channel!.state === state).length
       result.value = [`Airbnb: ${synced.filter(night => night.channel!.state === 'pushed').length} received`, ...(count('pending') ? [`${count('pending')} sending`] : []), ...(count('needs_review') ? [`${count('needs_review')} needs review`] : [])].join(' · ')
     }
+    if (failures.length && 'price_change_percent' in patch) {
+      // A failed home may still have committed its nights (a refused channel push), so the percent is not offered again.
+      dirtyFields.value = dirtyFields.value.filter(field => field !== 'price_change_percent')
+      draft.price_change_percent = ''
+    }
     if (failures.length) {
       error.value = homes > 1
         ? `${homes - new Set(failures.map(failure => failure.home.product_id)).size} of ${homes} homes saved. ${failures.map(failure => `${failure.home.name}: ${failure.message}`).join(' ')}`

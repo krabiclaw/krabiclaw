@@ -490,6 +490,8 @@ function pills(row: number) {
   if (pieces[0]) pieces[0].label = weekdays.value ? `${chosen} of ${nightsLabel(free.length)}` : nightsLabel(free.length)
   return pieces
 }
+// Filters can remove the row the keyboard cursor was on; keep one night in the tab order.
+watch(() => rows.value.length, length => { if (cursor.value.row >= length) cursor.value = { row: Math.max(0, length - 1), day: cursor.value.day } })
 watch([search, () => editor.busy.value], ([value, busy]) => { if (!busy) appliedSearch.value = value })
 watch(() => route.query.homes === undefined ? null : `${String(route.query.homes)}|${String(route.query.nights)}`, () => editor.edit('summary'))
 

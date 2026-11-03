@@ -50,7 +50,8 @@
           </div>
         </div>
         <UButton v-if="nights.length && closed === true && manage" label="Open dates" color="neutral" variant="outline" class="mt-4" :disabled="busy" @click="$emit('patch', { closed: false })" />
-        <p v-if="!nights.length" class="mt-3 text-sm" data-testid="stay-night-held">{{ heldExplanation }}</p>
+        <p v-if="!nights.length && booked.length" class="mt-3 text-sm" data-testid="stay-night-held">{{ heldExplanation }}</p>
+        <p v-else-if="!nights.length" class="mt-3 text-sm">No selected night falls on the chosen weekdays.</p>
         <p v-if="booked.length && nights.length" class="mt-3 text-sm" data-testid="stay-night-booked">{{ booked.length }} booked {{ booked.length === 1 ? 'night is' : 'nights are' }} left out. Reservations, checkout holds and linked-calendar nights keep their settings.</p>
         <p v-for="expiry in holdExpiries" :key="expiry.at" class="mt-3 text-sm">Checkout hold expires {{ formatTimestamp(expiry.at, 'en', expiry.timezone) }} ({{ expiry.timezone }}).</p>
         <UButton v-for="id in stayIds" :key="id" :to="{ path: `/dashboard/${orgSlug}/calendar/stay/${encodeURIComponent(id)}`, query: route.query }" label="View stay" color="neutral" variant="outline" class="mt-3" />

@@ -1992,9 +1992,11 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, access: 
                     ${[...columns.map(column => `${column} = excluded.${column}`), ...(percent === null ? [] : ['price_minor = CASE WHEN product_nights.price_minor IS NULL THEN excluded.price_minor ELSE (product_nights.price_minor * (100 + CAST(? AS INTEGER)) + 50) / 100 END'])].join(', ')}`,
           params: [access.organizationId, home.product_id, now, access.actorId, ...columns.map(column => patch[column]), nights, ...(percent === null ? [] : [percent])],
         },
+    ...(percent === null ? [] : [{ query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM product_nights WHERE organization_id = ? AND product_id = ? AND price_minor > 9007199254740991) THEN json('Night price too large') ELSE NULL END", params: [access.organizationId, home.product_id] }]),
     organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.nights_changed', entityType: 'product', entityId: home.product_id,
       metadata: { from, to, reset, fields: written.join(','), ...(weekdays ? { weekdays: weekdays.join(',') } : {}), ...(percent === null ? {} : { price_change_percent: percent }) } }),
   ], { operation: 'Set stay nights' }).catch(async (cause: unknown) => {
+    if (percent !== null && String(cause).includes('Night price too large')) fail(422, 'INVALID_AMOUNT', 'A night’s price would be too large', 'price_change_percent')
     if (percent !== null && (await readStayHome(db, access, home.product_id)).product_updated_at !== home.product_updated_at) {
       fail(409, 'STAY_HOME_CHANGED', 'The listing changed while its nights were being priced. Reload the calendar and try again.', 'price_change_percent')
     }
