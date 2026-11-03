@@ -4459,6 +4459,13 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(grid.locator('[data-home]')).toHaveCount(1)
   await expect(grid.locator(`[data-home="${sea}"]`)).toBeVisible()
   await page.getByRole('textbox', { name: 'Search homes' }).fill('')
+  // The same search narrows the agenda's bookings for any business.
+  await page.goto(`/dashboard/${slug}/calendar?view=list&month=${localDay(2).slice(0, 7)}`)
+  const agenda = page.locator('#dashboard-panel-org-calendar')
+  await expect(agenda.locator('[data-day]').first()).toBeVisible()
+  await page.getByRole('textbox', { name: 'Search bookings' }).fill('no booking is called this')
+  await expect(agenda.getByText(/^Nothing scheduled in /)).toBeVisible()
+  await page.goto(gridPath)
   await page.getByRole('button', { name: 'No upcoming stays', exact: true }).click()
   await expect(grid.locator('[data-home]')).toHaveCount(2)
   await expect(grid.locator(`[data-home="${productId}"]`)).toHaveCount(0)

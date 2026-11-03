@@ -8,7 +8,6 @@
   <div>
     <div class="mb-4 flex flex-wrap items-center gap-3">
       <USelect :model-value="city" :items="cityItems" icon="i-lucide-building-2" aria-label="City" class="min-w-44" :ui="{ base: 'rounded-full' }" @update:model-value="setQuery({ city: $event === ALL_CITIES ? undefined : String($event) })" />
-      <UInput :model-value="search" icon="i-lucide-search" placeholder="Search homes" aria-label="Search homes" class="w-full sm:w-72" :ui="{ base: 'rounded-full' }" @update:model-value="setQuery({ q: String($event ?? '').trim() || undefined })" />
       <UButton label="No upcoming stays" :aria-pressed="freeOnly" color="neutral" :variant="freeOnly ? 'solid' : 'outline'" class="rounded-full" @click="setQuery({ free: freeOnly ? undefined : '1' })" />
     </div>
     <div :class="selection && pane ? 'grid grid-cols-[minmax(0,1fr)_24rem] items-start gap-6' : undefined">
