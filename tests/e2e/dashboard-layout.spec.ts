@@ -1607,7 +1607,9 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(last).toContainText(feed.cards.at(-1)!.headline)
     await expect(last).toBeInViewport({ ratio: 1 })
     const finalBody = (await body.boundingBox())!
-    const finalCard = (await last.boundingBox())!
+    // A card the owner can decide about carries its decision row beneath it; the item ends after that row.
+    if (feed.cards.at(-1)!.decision) await expect(last.locator('xpath=..').getByTestId('today-card-decisions')).toBeVisible()
+    const finalCard = (await last.locator('xpath=..').boundingBox())!
     expect(finalBody.y + finalBody.height - finalCard.y - finalCard.height, 'Today has the canonical 16px panel padding after its last card').toBeCloseTo(16, 0)
     const nav = (await page.getByTestId('dashboard-mobile-nav').boundingBox())!
     expect(finalBody.y + finalBody.height).toBeCloseTo(nav.y, 0)
