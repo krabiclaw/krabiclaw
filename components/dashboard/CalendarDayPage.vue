@@ -68,8 +68,8 @@
 </template>
 
 <script setup lang="ts">
-import { closeDates, closureOnDate, datedHours, getDateIntervals, openDates, parseOpeningHours, parseSpecialHours, type SpecialHours } from '~/shared/reservation-hours'
-import { formatCalendarDate } from '~/utils/timezone'
+import { closureOnDate, datedHours, getDateIntervals, parseOpeningHours, parseSpecialHours, type SpecialHours } from '~/shared/reservation-hours'
+import { addLocalDays, formatCalendarDate } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 import type { AgendaItem, AgendaPayload } from '~/server/utils/dashboard-agenda'
 import { calendarLocationKey, calendarSessionsKey, type CalendarItem } from './CalendarPage.vue'
@@ -95,8 +95,8 @@ const isAgendaItem = (value: unknown): value is AgendaItem =>
   && typeof value.status === 'string' && typeof value.to === 'string'
 const isAgendaPayload = (value: unknown): value is AgendaPayload =>
   isRecord(value) && Array.isArray(value.items) && value.items.every(isAgendaItem)
-const isLocationResponse = (value: unknown): value is { location: { id: string } } =>
-  isRecord(value) && isRecord(value.location) && typeof value.location.id === 'string'
+const isPlaceDates = (value: unknown): value is { place: { id: string } } =>
+  isRecord(value) && isRecord(value.place) && typeof value.place.id === 'string' && Array.isArray(value.days)
 // The index owns the location; this leaf reads it and asks for it again after a write.
 const calendarLocation = inject(calendarLocationKey)!
 const location = computed(() => calendarLocation.location.value ?? null)
@@ -161,16 +161,14 @@ const saving = ref(false)
 async function toggleClosure(): Promise<void> {
   const record = location.value
   if (!record || !availability.value.action || availability.value.action === 'hours') return
-  const next: SpecialHours = availability.value.action === 'block'
-    ? closeDates(specialHours.value, day.value, day.value)
-    : openDates(specialHours.value, day.value, day.value)
   saving.value = true
   saveError.value = null
   try {
-    await dashboardApi(`/api/organizations/${organizationId}/locations/${record.id}`, {
-      method: 'PATCH',
-      body: { special_hours: next, expected_updated_at: record.updated_at },
-      validate: isLocationResponse,
+    // The one dates write every calendar uses: the place's closures, read back.
+    await dashboardApi(`/api/dashboard/places/location/${record.id}/dates`, {
+      method: 'PUT',
+      body: { from: day.value, to: addLocalDays(day.value, 1), closed: availability.value.action === 'block', expected_updated_at: record.updated_at },
+      validate: isPlaceDates,
     })
     await refreshLocation()
   } catch (cause) {

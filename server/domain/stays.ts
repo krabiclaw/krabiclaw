@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevision, parseStoredFormQuestions, type FormAnswerSnapshot, type FormQuestion } from '~/shared/form-questions'
 import { acceptFormAnswers } from '~/server/domain/form-questions'
-import { MAX_STAY_NIGHTS, STAY_CALENDAR_DAYS, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNEL_LABELS, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CALENDAR_DAYS, changeNightPrice, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNEL_LABELS, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedResponsibilitySql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
@@ -1931,13 +1931,29 @@ export async function deleteStayPayment(db: DbClient, env: GuestInboxPublication
  */
 export async function setStayNights(db: DbClient, env: StayMutationEnv, access: StayAccess, input: Record<string, unknown> & { product_id: string; from: unknown; to: unknown }): Promise<{ home: StayHome; nights: StayNight[]; stays: Stay[]; channel_push: SuccessfulChannelPush | null }> {
   requireManager(access)
-  const unknown = Object.keys(input).find(key => !['organization_id', 'product_id', 'from', 'to', 'reset', 'closed', 'price_minor', 'min_stay_arrival', 'max_stay', 'closed_to_arrival', 'closed_to_departure'].includes(key))
+  const unknown = Object.keys(input).find(key => !['organization_id', 'product_id', 'from', 'to', 'weekdays', 'reset', 'closed', 'price_minor', 'price_change_percent', 'min_stay_arrival', 'max_stay', 'closed_to_arrival', 'closed_to_departure'].includes(key))
   if (unknown) fail(422, 'INVALID_STAY_FIELD', `${unknown} is not a night setting`, unknown)
   const { from, to } = range(input, STAY_CALENDAR_DAYS)
+  // Weekdays narrow [from, to) to the nights falling on them, 0 Sunday to 6 Saturday.
+  let weekdays: number[] | null = null
+  if (input.weekdays !== undefined) {
+    if (!Array.isArray(input.weekdays) || !input.weekdays.length || input.weekdays.some(day => typeof day !== 'number' || !Number.isInteger(day) || day < 0 || day > 6) || new Set(input.weekdays).size !== input.weekdays.length) {
+      fail(422, 'INVALID_STAY_FIELD', 'weekdays must list distinct whole numbers from 0 (Sunday) to 6 (Saturday)', 'weekdays')
+    }
+    weekdays = input.weekdays as number[]
+  }
+  const dates = Array.from({ length: days(from, to) }, (_, offset) => addDays(from, offset)).filter(night => !weekdays || weekdays.includes(new Date(`${night}T00:00:00Z`).getUTCDay()))
+  if (!dates.length) fail(422, 'INVALID_STAY_FIELD', 'No night in this range falls on the chosen weekdays', 'weekdays')
   const home = await readStayHome(db, access, input.product_id)
   const patch: Record<string, number | null> = {}
   if (input.closed !== undefined) { if (typeof input.closed !== 'boolean') fail(422, 'INVALID_STAY_FIELD', 'closed must be true or false', 'closed'); patch.closed = input.closed ? 1 : 0 }
   if (input.price_minor !== undefined) patch.price_minor = input.price_minor === null ? null : amount(input.price_minor, 'price_minor')
+  let percent: number | null = null
+  if (input.price_change_percent !== undefined) {
+    if (input.price_minor !== undefined) fail(422, 'INVALID_STAY_FIELD', 'Set a nightly price or change it by a percent, not both', 'price_change_percent')
+    percent = count(input.price_change_percent, 'price_change_percent', -NIGHT_PRICE_CHANGE_PERCENT, NIGHT_PRICE_CHANGE_PERCENT)
+    if (percent === 0) fail(422, 'INVALID_STAY_FIELD', 'price_change_percent must change the price', 'price_change_percent')
+  }
   for (const field of ['min_stay_arrival', 'max_stay'] as const) {
     if (input[field] !== undefined) patch[field] = input[field] === null ? null : count(input[field], field, 1, MAX_STAY_NIGHTS)
   }
@@ -1945,25 +1961,56 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, access: 
     if (input[field] !== undefined) { if (typeof input[field] !== 'boolean') fail(422, 'INVALID_STAY_FIELD', `${field} must be true or false`, field); patch[field] = input[field] ? 1 : 0 }
   }
   const reset = input.reset === true
-  if (reset === (Object.keys(patch).length > 0)) fail(422, 'INVALID_STAY_FIELD', reset ? 'reset cannot be combined with night settings' : 'Name at least one night setting to change, or reset')
+  if (reset === (Object.keys(patch).length > 0 || percent !== null)) fail(422, 'INVALID_STAY_FIELD', reset ? 'reset cannot be combined with night settings' : 'Name at least one night setting to change, or reset')
+  // A percent moves each night's own current price: its set price, read and changed in the one
+  // statement so two changes at once both land, or the listing's for that date when it has none.
+  const listing = new Map<string, number>()
+  if (percent !== null) {
+    for (const night of await homeNights(db, access.organizationId, home, from, to)) {
+      if (!dates.includes(night.date)) continue
+      if (night.price_minor === null) fail(422, 'STAY_PRICE_MISSING', `${night.date} has no price to change; set a nightly price instead`, 'price_change_percent')
+      if (changeNightPrice(night.price_minor, percent) > Number.MAX_SAFE_INTEGER) fail(422, 'INVALID_AMOUNT', `${night.date}'s price would be too large`, 'price_change_percent')
+      const listed = resolveStayNightPolicy(home, night.date).price_minor
+      if (listed !== null) listing.set(night.date, changeNightPrice(listed, percent))
+    }
+  }
   await requireChannelPush(db, env, access.organizationId, home.product_id)
   const now = new Date().toISOString()
   const columns = Object.keys(patch)
-  const nights = `WITH RECURSIVE night(d) AS (SELECT ? UNION ALL SELECT date(d, '+1 day') FROM night WHERE date(d, '+1 day') < ?)`
+  const nights = JSON.stringify(dates.map(night => ({ date: night, price_minor: listing.get(night) ?? null })))
+  const written = [...columns, ...(percent === null ? [] : ['price_minor'])]
+  // A night with no price of its own moves from the listing's price as read above; the batch refuses if the listing changed since.
+  const listingGuard = { query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM products WHERE organization_id = ? AND id = ? AND updated_at = ?) THEN NULL ELSE json('Stay listing changed') END", params: [access.organizationId, home.product_id, home.product_updated_at] }
   await executeBatch(db, [
+    ...(percent === null ? [] : [listingGuard]),
     reset
-      ? { query: 'DELETE FROM product_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ?', params: [access.organizationId, home.product_id, from, to] }
+      ? { query: 'DELETE FROM product_nights WHERE organization_id = ? AND product_id = ? AND date IN (SELECT json_extract(value, \'$.date\') FROM json_each(?))', params: [access.organizationId, home.product_id, nights] }
       : {
-          query: `${nights} INSERT INTO product_nights (organization_id, product_id, date, source, updated_at, updated_by, ${columns.join(', ')})
-                  SELECT ?, ?, d, 'host', ?, ?, ${columns.map(() => '?').join(', ')} FROM night WHERE true
+          query: `INSERT INTO product_nights (organization_id, product_id, date, source, updated_at, updated_by, ${written.join(', ')})
+                  SELECT ?, ?, json_extract(value, '$.date'), 'host', ?, ?, ${columns.map(() => '?').join(', ')}${percent === null ? '' : `${columns.length ? ', ' : ''}json_extract(value, '$.price_minor')`} FROM json_each(?) WHERE true
                   ON CONFLICT (product_id, date) DO UPDATE SET source = 'host', updated_at = excluded.updated_at, updated_by = excluded.updated_by,
-                    ${columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
-          params: [from, to, access.organizationId, home.product_id, now, access.actorId, ...columns.map(column => patch[column])],
+                    ${[...columns.map(column => `${column} = excluded.${column}`), ...(percent === null ? [] : ['price_minor = CASE WHEN product_nights.price_minor IS NULL THEN excluded.price_minor ELSE (product_nights.price_minor * (100 + CAST(? AS INTEGER)) + 50) / 100 END'])].join(', ')}`,
+          params: [access.organizationId, home.product_id, now, access.actorId, ...columns.map(column => patch[column]), nights, ...(percent === null ? [] : [percent])],
         },
-    organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.nights_changed', entityType: 'product', entityId: home.product_id, metadata: { from, to, reset, fields: columns.join(',') } }),
-  ], { operation: 'Set stay nights' })
-  const channelPush = await pushNights(db, env, access, home.product_id, [[from, to]])
-  return completeChannelPush(channelPush, { product_id: home.product_id, updated_at: now, ranges: [[from, to]] }, async () => {
+    ...(percent === null ? [] : [{ query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM product_nights WHERE organization_id = ? AND product_id = ? AND price_minor > 9007199254740991) THEN json('Night price too large') ELSE NULL END", params: [access.organizationId, home.product_id] }]),
+    organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.nights_changed', entityType: 'product', entityId: home.product_id,
+      metadata: { from, to, reset, fields: written.join(','), ...(weekdays ? { weekdays: weekdays.join(',') } : {}), ...(percent === null ? {} : { price_change_percent: percent }) } }),
+  ], { operation: 'Set stay nights' }).catch(async (cause: unknown) => {
+    if (percent !== null && String(cause).includes('Night price too large')) fail(422, 'INVALID_AMOUNT', 'A night’s price would be too large', 'price_change_percent')
+    if (percent !== null && (await readStayHome(db, access, home.product_id)).product_updated_at !== home.product_updated_at) {
+      fail(409, 'STAY_HOME_CHANGED', 'The listing changed while its nights were being priced. Reload the calendar and try again.', 'price_change_percent')
+    }
+    throw cause
+  })
+  // The channel hears the runs of nights that changed.
+  const ranges: Array<[string, string]> = []
+  for (const night of dates) {
+    const last = ranges.at(-1)
+    if (last?.[1] === night) last[1] = addDays(night, 1)
+    else ranges.push([night, addDays(night, 1)])
+  }
+  const channelPush = await pushNights(db, env, access, home.product_id, ranges)
+  return completeChannelPush(channelPush, { product_id: home.product_id, updated_at: now, ranges }, async () => {
     await publishStayInvalidation(env, { type: 'nights.changed', organizationId: access.organizationId, locationId: home.location_id, productId: home.product_id, stayId: null }, { updated_at: now })
     return readStayCalendar(db, access, { productId: home.product_id, from, to })
   })

@@ -66,4 +66,18 @@ test('closing dates adds one closure and opening them cuts every covering closur
   const untouched = parseSpecialHours([{ kind: 'hours', date: '2099-03-11', periods: [{ open_time: '18:00', close_time: '22:00', close_day_offset: 0 }], note: null }, { kind: 'closure', starts_on: '2099-04-01', ends_on: '2099-04-02', note: null }])
   assert.deepEqual(openDates(untouched, '2099-03-10', '2099-03-12'), untouched)
   assert.throws(() => closeDates(null, '2099-03-12', '2099-03-10'))
+
+  // 2099-03-01 is a Sunday. Weekdays narrow the range: the Mondays and Tuesdays of two weeks are two closures, and opening the Mondays cuts each out of a month-long closure.
+  assert.deepEqual(closeDates(null, '2099-03-01', '2099-03-14', [1, 2]), [
+    { kind: 'closure', starts_on: '2099-03-02', ends_on: '2099-03-03', note: null },
+    { kind: 'closure', starts_on: '2099-03-09', ends_on: '2099-03-10', note: null },
+  ])
+  assert.deepEqual(openDates(noted, '2099-03-01', '2099-03-14', [1]), [
+    { kind: 'closure', starts_on: '2099-03-01', ends_on: '2099-03-01', note: 'Renovation' },
+    { kind: 'closure', starts_on: '2099-03-03', ends_on: '2099-03-08', note: 'Renovation' },
+    { kind: 'closure', starts_on: '2099-03-10', ends_on: '2099-03-31', note: 'Renovation' },
+  ])
+  assert.throws(() => closeDates(null, '2099-03-02', '2099-03-02', [5]))
+  assert.throws(() => openDates(noted, '2099-03-01', '2099-03-14', []))
+  assert.throws(() => openDates(noted, '2099-03-01', '2099-03-14', [7]))
 })

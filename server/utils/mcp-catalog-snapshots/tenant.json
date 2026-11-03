@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:1daa91533b54dd2980df09384ff8f4b3af1d84030bc4fd6b5728e4ddcd433a70",
-  "documentationFingerprint": "sha256:3fcb32851576e686a9fe85c5786e05f32c5150a4b3d8731c003a03b6b742ebe6",
+  "fingerprint": "sha256:764d03d3a0d5194258109d0d43ab6487db17f8b5388275c11d1b147538a1c6a2",
+  "documentationFingerprint": "sha256:7c8586e58379957341f98b862da3eefb4df8d1b91f48076c66a3d2d408d32e65",
   "tools": [
     {
       "name": "add_organization_language",
@@ -101550,9 +101550,32 @@
     {
       "name": "set_stay_nights",
       "title": "Set stay nights",
-      "description": "Close or open nights, set a nightly price, or set stay rules for a date range at one place to stay. Fields left out keep each night’s value; price_minor null inherits the weekend price on Friday/Saturday when configured, otherwise the base price; reset removes the range’s overrides. Updates the website’s bookable nights and, when connected, pushes prices, availability and stay rules to the home’s Airbnb listing through Channex. Returns channel_push on success. A failed channel update raises CHANNEL_PUSH_FAILED with committed:true; read the calendar before retrying.",
+      "description": "Close or open nights, set a nightly price, or set stay rules for a date range at one place to stay. Fields left out keep each night’s value; weekdays narrows the range to nights on those weekdays; price_change_percent moves each chosen night’s own current price by a whole percent instead of setting one, and compounds if sent again; price_minor null inherits the weekend price on Friday/Saturday when configured, otherwise the base price; reset removes the range’s overrides. Updates the website’s bookable nights and, when connected, pushes prices, availability and stay rules to the home’s Airbnb listing through Channex. Returns channel_push on success. A failed channel update raises CHANNEL_PUSH_FAILED with committed:true; read the calendar before retrying.",
       "inputSchema": {
         "additionalProperties": false,
+        "allOf": [
+          {
+            "not": {
+              "required": [
+                "price_minor",
+                "price_change_percent"
+              ]
+            }
+          },
+          {
+            "not": {
+              "properties": {
+                "reset": {
+                  "const": true
+                }
+              },
+              "required": [
+                "reset",
+                "price_change_percent"
+              ]
+            }
+          }
+        ],
         "properties": {
           "closed": {
             "type": "boolean"
@@ -101587,6 +101610,15 @@
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
           },
+          "price_change_percent": {
+            "description": "Moves each chosen night’s own current price by this percent, rounded to the minor unit. Not with price_minor or reset; 0 is refused.",
+            "maximum": 50,
+            "minimum": -50,
+            "not": {
+              "const": 0
+            },
+            "type": "integer"
+          },
           "price_minor": {
             "minimum": 0,
             "type": [
@@ -101607,6 +101639,18 @@
             "description": "Exclusive; at most 500 days after from.",
             "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
             "type": "string"
+          },
+          "weekdays": {
+            "description": "Only nights on these weekdays, 0 Sunday to 6 Saturday. Omitted means every night in the range.",
+            "items": {
+              "maximum": 6,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxItems": 7,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
           }
         },
         "required": [
@@ -102113,7 +102157,7 @@
       },
       "annotations": {
         "destructiveHint": true,
-        "idempotentHint": true,
+        "idempotentHint": false,
         "openWorldHint": true,
         "readOnlyHint": false,
         "title": "Set stay nights"

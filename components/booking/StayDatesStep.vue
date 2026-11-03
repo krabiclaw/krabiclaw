@@ -74,7 +74,7 @@
               </CalendarGridHead>
               <CalendarGridBody>
                 <CalendarGridRow v-for="(week, weekIndex) in month.rows" :key="weekIndex">
-                  <CalendarCell v-for="day in week" :key="day.toString()" :date="day" class="relative h-11 p-0 text-center" :class="day.month !== month.value.month ? 'invisible' : undefined" :data-stay-range="rangePosition(day.toString()) ? previewEnd ? 'preview' : 'selected' : undefined" @pointerenter="hoveredDate = day.toString()" @pointerdown="hoveredDate = day.toString()">
+                  <CalendarCell v-for="day in week" :key="day.toString()" :date="day" class="relative h-11 p-0 text-center" :class="day.month !== month.value.month ? 'invisible' : undefined" :data-stay-range="rangePosition(day.toString()) ? previewEnd ? 'preview' : checkOut ? 'selected' : 'minimum' : undefined" @pointerenter="hoveredDate = day.toString()" @pointerdown="hoveredDate = day.toString()">
                     <span
                       v-if="rangePosition(day.toString())"
                       aria-hidden="true"
@@ -89,6 +89,7 @@
                         :disabled="isDateDisabled(day) || day.month !== month.value.month"
                         :aria-pressed="day.toString() === checkIn || day.toString() === checkOut"
                         :aria-label="dayLabel(day.toString())"
+                        :aria-describedby="day.toString() === checkIn && minimumNote ? minimumNoteId : undefined"
                         :title="dayHint(day.toString()) || undefined"
                         @mouseenter="hoveredDate = day.toString()"
                         @focus="hoveredDate = day.toString()"
@@ -103,6 +104,7 @@
             </CalendarGrid>
           </div>
         </CalendarRoot>
+        <p v-if="minimumNote" :id="minimumNoteId" data-stay-minimum class="mt-3 text-sm text-default">{{ minimumNote }}</p>
         <p v-if="hoveredDate && dayHint(hoveredDate)" role="status" class="mt-3 text-sm text-muted">{{ dayHint(hoveredDate) }}</p>
       </template>
 
@@ -216,8 +218,10 @@ function typeCheckOut(event: Event) {
 
 const hoveredDate = ref<string | null>(null)
 const previewEnd = computed(() => dateField.value === 'checkOut' && hoveredDate.value && hoveredDate.value !== checkOut.value && canCheckOut(hoveredDate.value) ? hoveredDate.value : null)
+// Before a checkout is chosen, the shortest stay the arrival allows is drawn as the range, ending on the earliest checkout.
+const minimumEnd = computed(() => dateField.value === 'checkOut' && !checkOut.value && minNights.value > 1 ? earliestCheckOut.value : null)
 function rangePosition(date: string): 'start' | 'end' | 'between' | null {
-  const end = previewEnd.value ?? checkOut.value
+  const end = previewEnd.value ?? checkOut.value ?? minimumEnd.value
   if (!checkIn.value || !end || date < checkIn.value || date > end) return null
   return date === checkIn.value ? 'start' : date === end ? 'end' : 'between'
 }
@@ -241,18 +245,21 @@ function dayLabel(date: string): string {
 
 function dayClasses(date: string): string[] {
   if (date === checkIn.value || (date === checkOut.value && !previewEnd.value)) return ['bg-inverted text-inverted']
-  if (date === previewEnd.value) return ['border border-inverted bg-muted text-default']
+  if (date === previewEnd.value || (date === minimumEnd.value && !previewEnd.value)) return ['border border-inverted bg-muted text-default']
   if (!isDateDisabled(parseDate(date))) return ['cursor-pointer text-default hover:ring-1 hover:ring-inset hover:ring-inverted']
-  return !night(date)?.available ? ['cursor-default text-muted/50 line-through'] : ['cursor-default text-muted']
+  // Nights too soon after the arrival to end the stay are struck, like nights that cannot be booked.
+  const tooSoon = dateField.value === 'checkOut' && checkIn.value !== null && earliestCheckOut.value !== null && date > checkIn.value && date < earliestCheckOut.value
+  return !night(date)?.available || tooSoon ? ['cursor-default text-muted/50 line-through'] : ['cursor-default text-muted']
 }
 
-const minNights = computed(() => checkIn.value ? night(checkIn.value)?.min_stay_arrival : null)
+const minNights = computed(() => checkIn.value ? night(checkIn.value)?.min_stay_arrival ?? 1 : 1)
+const minimumNoteId = useId()
+const minimumNote = computed(() => minNights.value > 1 && earliestCheckOut.value ? t('stay.minimum_stay_note', { count: minNights.value, date: dateLabel(earliestCheckOut.value) }) : '')
 
-// A dated minimum is shown only for the arrival the guest actually selected.
 const heading = computed(() => checkIn.value && checkOut.value ? (props.inline && props.place ? t('stay.nights_in', { nights: nightsLabel(nightCount.value), place: props.place }) : nightsLabel(nightCount.value)) : checkIn.value ? t('stay.select_check_out') : t('stay.select_check_in'))
 const subheading = computed(() => checkIn.value && checkOut.value
   ? rangeLabel.value
-  : [checkIn.value ? `${t('stay.check_in')}: ${dateLabel(checkIn.value)}` : t('stay.add_dates'), minNights.value !== null && minNights.value !== undefined && minNights.value > 1 ? t('stay.min_nights', { count: minNights.value }) : ''].filter(Boolean).join(' · '))
+  : checkIn.value ? `${t('stay.check_in')}: ${dateLabel(checkIn.value)}` : t('stay.add_dates'))
 
 const guestRows = computed(() => [
   { key: 'adults', label: t('stay.adults'), hint: t('stay.adults_hint'), value: adults, min: 1, max: maxGuests.value - children.value },

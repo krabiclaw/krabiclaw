@@ -204,7 +204,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
       if (!stayed?.available) return t('stay.error_unavailable')
       nights++
     }
-    if (nights < minimum) return t('stay.error_min_nights', { count: minimum })
+    if (nights < minimum) return t('stay.min_nights', { count: minimum })
     if (arrival.max_stay !== null && nights > arrival.max_stay) return t('stay.error_max_nights', { count: arrival.max_stay })
     if (nights > MAX_STAY_NIGHTS) return t('stay.error_max_nights', { count: MAX_STAY_NIGHTS })
     if (departure.closed_to_departure) return t('stay.error_no_check_out')

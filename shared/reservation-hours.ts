@@ -102,24 +102,39 @@ export function parseSpecialHours(value: unknown): SpecialHours {
 }
 /**
  * The tenant's special hours with the dates from `from` to `to` closed: one
- * closure for the range, beside whatever was there.
+ * closure for the range, beside whatever was there. Weekdays narrow the range
+ * to the days falling on them, one closure per run of them.
  */
-export function closeDates(special: SpecialHours, from: string, to: string): SpecialHours {
+export function closeDates(special: SpecialHours, from: string, to: string, weekdays: number[] | null = null): SpecialHours {
+  const closures = dateRuns(from, to, weekdays).map((run): Closure => ({ kind: 'closure', starts_on: run.from, ends_on: run.to, note: null }))
+  return [...(special ?? []), ...closures]
+}
+/** The dates from `from` to `to` on the given weekdays (0 Sunday to 6 Saturday; null is every day), as runs of consecutive dates. */
+export function dateRuns(from: string, to: string, weekdays: number[] | null): Array<{ from: string; to: string }> {
   assertCalendarDate(from)
   assertCalendarDate(to)
-  if (to < from) throw new Error('A closure ends on or after the day it starts')
-  return [...(special ?? []), { kind: 'closure', starts_on: from, ends_on: to, note: null }]
+  if (to < from) throw new Error('A range ends on or after the day it starts')
+  if (weekdays && (!weekdays.length || weekdays.some(day => !Number.isInteger(day) || day < 0 || day > 6))) throw new Error('Weekdays run from 0 (Sunday) to 6 (Saturday)')
+  const runs: Array<{ from: string; to: string }> = []
+  for (let date = from; date <= to; date = addLocalDays(date, 1)) {
+    if (weekdays && !weekdays.includes(new Date(`${date}T00:00:00Z`).getUTCDay())) continue
+    const last = runs.at(-1)
+    if (last && addLocalDays(last.to, 1) === date) last.to = date
+    else runs.push({ from: date, to: date })
+  }
+  if (!runs.length) throw new Error('No date in this range falls on the chosen weekdays')
+  return runs
 }
 /**
  * The tenant's special hours with the dates from `from` to `to` open again:
  * every closure covering any of them is cut around the range, so the days
- * outside it stay closed with their note.
+ * outside it stay closed with their note. Weekdays narrow the range to the
+ * days falling on them, each run cut out on its own.
  */
-export function openDates(special: SpecialHours, from: string, to: string): SpecialHours {
-  assertCalendarDate(from)
-  assertCalendarDate(to)
-  if (to < from) throw new Error('A range ends on or after the day it starts')
+export function openDates(special: SpecialHours, from: string, to: string, weekdays: number[] | null = null): SpecialHours {
+  const runs = dateRuns(from, to, weekdays)
   if (!special) return null
+  if (runs.length > 1 || runs[0]!.from !== from || runs[0]!.to !== to) return runs.reduce<SpecialHours>((hours, run) => openDates(hours, run.from, run.to), special)
   const next = special.flatMap((entry): NonNullable<SpecialHours> => {
     // Dated hours with no periods close that date as surely as a closure does.
     if (entry.kind === 'hours') return entry.periods.length === 0 && entry.date >= from && entry.date <= to ? [] : [entry]
