@@ -1962,19 +1962,21 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, access: 
   }
   const reset = input.reset === true
   if (reset === (Object.keys(patch).length > 0 || percent !== null)) fail(422, 'INVALID_STAY_FIELD', reset ? 'reset cannot be combined with night settings' : 'Name at least one night setting to change, or reset')
-  // A percent moves each night's own current price: its set price, or the listing's for that date.
-  const prices = new Map<string, number>()
+  // A percent moves each night's own current price: its set price, read and changed in the one
+  // statement so two changes at once both land, or the listing's for that date when it has none.
+  const listing = new Map<string, number>()
   if (percent !== null) {
     for (const night of await homeNights(db, access.organizationId, home, from, to)) {
       if (!dates.includes(night.date)) continue
       if (night.price_minor === null) fail(422, 'STAY_PRICE_MISSING', `${night.date} has no price to change; set a nightly price instead`, 'price_change_percent')
-      prices.set(night.date, changeNightPrice(night.price_minor, percent))
+      const listed = resolveStayNightPolicy(home, night.date).price_minor
+      if (listed !== null) listing.set(night.date, changeNightPrice(listed, percent))
     }
   }
   await requireChannelPush(db, env, access.organizationId, home.product_id)
   const now = new Date().toISOString()
   const columns = Object.keys(patch)
-  const nights = JSON.stringify(dates.map(night => ({ date: night, price_minor: prices.get(night) ?? null })))
+  const nights = JSON.stringify(dates.map(night => ({ date: night, price_minor: listing.get(night) ?? null })))
   const written = [...columns, ...(percent === null ? [] : ['price_minor'])]
   await executeBatch(db, [
     reset
@@ -1983,8 +1985,8 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, access: 
           query: `INSERT INTO product_nights (organization_id, product_id, date, source, updated_at, updated_by, ${written.join(', ')})
                   SELECT ?, ?, json_extract(value, '$.date'), 'host', ?, ?, ${columns.map(() => '?').join(', ')}${percent === null ? '' : `${columns.length ? ', ' : ''}json_extract(value, '$.price_minor')`} FROM json_each(?) WHERE true
                   ON CONFLICT (product_id, date) DO UPDATE SET source = 'host', updated_at = excluded.updated_at, updated_by = excluded.updated_by,
-                    ${written.map(column => `${column} = excluded.${column}`).join(', ')}`,
-          params: [access.organizationId, home.product_id, now, access.actorId, ...columns.map(column => patch[column]), nights],
+                    ${[...columns.map(column => `${column} = excluded.${column}`), ...(percent === null ? [] : ['price_minor = CASE WHEN product_nights.price_minor IS NULL THEN excluded.price_minor ELSE CAST(ROUND(product_nights.price_minor * (100 + ?) / 100.0) AS INTEGER) END'])].join(', ')}`,
+          params: [access.organizationId, home.product_id, now, access.actorId, ...columns.map(column => patch[column]), nights, ...(percent === null ? [] : [percent])],
         },
     organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.nights_changed', entityType: 'product', entityId: home.product_id,
       metadata: { from, to, reset, fields: written.join(','), ...(weekdays ? { weekdays: weekdays.join(',') } : {}), ...(percent === null ? {} : { price_change_percent: percent }) } }),

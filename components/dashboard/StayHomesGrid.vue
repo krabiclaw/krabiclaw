@@ -317,7 +317,8 @@ let suppressClick = false
 const selectedHome = (productId: string) => Boolean(selection.value?.homes.includes(productId))
 const span = computed(() => {
   const value = selection.value
-  if (!value) return null
+  // A selection outside the window on screen (a link kept past its dates) selects nothing here.
+  if (!value || value.to <= from.value || value.from >= to.value) return null
   const start = Math.max(0, dates.value.indexOf(value.from) === -1 ? (value.from < from.value ? 0 : SPAN) : dates.value.indexOf(value.from))
   const end = value.to > to.value ? SPAN : dates.value.indexOf(value.to) === -1 ? SPAN : dates.value.indexOf(value.to)
   return end > start ? { start, end } : null

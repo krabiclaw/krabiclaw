@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:0f5c2670733df7ea25d404318da04a95d5b674fc2aa8b2f8dfc9f0ad4496c8a4",
-  "documentationFingerprint": "sha256:97ee28189576ae2a679afbc41584c1cfeed141505b8fefd28e42e15a74db7518",
+  "fingerprint": "sha256:0a45c0557fcfdf0aa839a7a7ed9daa6f1b5b0c852c70601d248309376e29f6fe",
+  "documentationFingerprint": "sha256:44d5341239de6da9cdb5575ac0f577d56b4db25e96634a1e1fb42c819de4ecd7",
   "tools": [
     {
       "name": "add_organization_language",
@@ -101553,6 +101553,16 @@
       "description": "Close or open nights, set a nightly price, or set stay rules for a date range at one place to stay. Fields left out keep each night’s value; weekdays narrows the range to nights on those weekdays; price_change_percent moves each chosen night’s own current price by a whole percent instead of setting one; price_minor null inherits the weekend price on Friday/Saturday when configured, otherwise the base price; reset removes the range’s overrides. Updates the website’s bookable nights and, when connected, pushes prices, availability and stay rules to the home’s Airbnb listing through Channex. Returns channel_push on success. A failed channel update raises CHANNEL_PUSH_FAILED with committed:true; read the calendar before retrying.",
       "inputSchema": {
         "additionalProperties": false,
+        "allOf": [
+          {
+            "not": {
+              "required": [
+                "price_minor",
+                "price_change_percent"
+              ]
+            }
+          }
+        ],
         "properties": {
           "closed": {
             "type": "boolean"
@@ -101588,9 +101598,12 @@
             "type": "string"
           },
           "price_change_percent": {
-            "description": "Moves each chosen night’s own current price by this percent, rounded to the minor unit. Not with price_minor; 0 is refused.",
+            "description": "Moves each chosen night’s own current price by this percent, rounded to the minor unit. Not with price_minor or reset; 0 is refused.",
             "maximum": 50,
             "minimum": -50,
+            "not": {
+              "const": 0
+            },
             "type": "integer"
           },
           "price_minor": {
