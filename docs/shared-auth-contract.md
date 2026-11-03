@@ -23,8 +23,9 @@ Decisions D3–D9 were recorded by the owner on 2026-10-14 (krabiclaw#1370); D1,
 | Native action | Endpoint | Notes |
 |---|---|---|
 | Sign in with Apple | `POST /api/auth/sign-in/social` `{provider:"apple", idToken:{token, nonce}}` | `set-auth-token` is the bearer. |
+| Sign in with Google | `POST /api/auth/sign-in/social` `{provider:"google", idToken:{token, nonce}}` | The ID token from Google Sign-In for iOS, issued to the iOS OAuth client `GOOGLE_IOS_CLIENT_ID`; the Google provider accepts it and the web client as audience. `set-auth-token` is the bearer. |
 | Existing account entry (and Debug builds) | `POST /api/auth/sign-in/email` | D3, D9. |
-| Link Apple to an existing account | `POST /api/auth/link-social` `{provider:"apple", idToken}` | `apple` stays out of `trustedProviders` (D3). The website links Apple and Google from Account → Login & security through the same endpoint's redirect flow. |
+| Link Apple or Google to an existing account | `POST /api/auth/link-social` `{provider:"apple" \| "google", idToken}` | `apple` stays out of `trustedProviders` (D3). The website links Apple and Google from Account → Login & security through the same endpoint's redirect flow. |
 | Sign in with an emailed code | `POST /api/auth/email-otp/send-verification-otp` `{email, type:"sign-in"}`, then `POST /api/auth/sign-in/email-otp` `{email, otp}` | Better Auth's email OTP plugin; six digits, five minutes, three attempts. Creates the account when the address has none. Only `sign-in` codes are sent; the plugin's verification, password-reset and email-change paths are disabled. `set-auth-token` is the bearer. Used to answer an email invitation (D4). |
 | Profile | `GET /api/auth/get-session`, `POST /api/auth/update-user`, `POST /api/user/avatar` | D7. |
 | Sessions | `POST /api/auth/revoke-other-sessions`, `POST /api/auth/sign-out` | Sign-out order: `DELETE /api/dashboard/devices` → sign-out → clear Keychain. |
