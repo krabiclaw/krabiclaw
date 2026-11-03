@@ -15,6 +15,7 @@ import { devLoginHeaders } from './test-env'
 import type { PublicLocationDisclosure } from '../../types/public-location'
 import type { StayPhotoRoom } from '../../shared/stay-photos'
 import type { StayHomeAccessibility } from '../../shared/stay-accessibility'
+import { formatMinorAmount } from '../../shared/prices'
 
 // A host's place to stay, end to end through the surfaces that own it: the
 // one Product editor creates the home, Today adds a stay, and the stay's
@@ -4025,8 +4026,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const priced = await call<{ nights: import('../../server/domain/stays').StayNight[] }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(5), to: localDay(8) })
       expect(priced.error).toBeNull()
       expect(priced.data!.nights).toEqual([5, 6, 7].map(offset => expect.objectContaining({ date: localDay(offset), closed: false, available: true, price_minor: 420_000 })))
-      await inspector.getByRole('button', { name: 'Custom settings', exact: true }).click()
-      await inspector.getByRole('button', { name: 'Minimum nights', exact: true }).click()
+      await inspector.getByRole('button', { name: /^Minimum nights/ }).click()
       await inspector.getByRole('spinbutton', { name: 'Minimum nights on arrival', exact: true }).fill('2')
       await inspector.getByRole('button', { name: 'Save', exact: true }).click()
       await inspector.getByRole('button', { name: 'Custom settings', exact: true }).click()
@@ -4137,22 +4137,20 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       expect(reset.data!.nights).toEqual([6, 7, 8].map(offset => expect.objectContaining({ date: localDay(offset), price_minor: 320_000, closed: false,
         min_stay_arrival: defaultMinimum, max_stay: null, closed_to_arrival: false, closed_to_departure: false })))
 
-      // Opening occupied nights changes only the host closure. The reservation
-      // remains the canonical reason those nights cannot be booked again.
+      // Booked nights are never written: a selection of reserved nights alone
+      // shows what holds them and offers nothing to change.
       await inspector.getByRole('button', { name: 'Select nights', exact: true }).click()
       await dates.getByLabel('Start night', { exact: true }).fill(localDay(0))
       await dates.getByLabel('End night (optional)', { exact: true }).fill(localDay(1))
       await dates.getByRole('button', { name: 'Edit selected nights', exact: true }).click()
       await expect(dates).not.toBeVisible()
       await expect(inspector.getByText('Reserved', { exact: true })).toBeVisible()
-      await expect(openNights).toBeChecked()
-      await openNights.click()
-      await expect(openNights).not.toBeChecked()
-      await openNights.click()
-      await expect(openNights).toBeChecked()
+      await expect(openNights).toHaveCount(0)
+      await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toBeDisabled()
+      await expect(inspector.getByRole('button', { name: /^Minimum nights/ })).toBeDisabled()
       const occupied = await call<{ nights: import('../../server/domain/stays').StayNight[] }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
       expect(occupied.error).toBeNull()
-      expect(occupied.data!.nights).toEqual([0, 1].map(offset => expect.objectContaining({ date: localDay(offset), stay_id: stays[0]!.id, available: false, closed: false })))
+      expect(occupied.data!.nights).toEqual([0, 1].map(offset => expect.objectContaining({ date: localDay(offset), stay_id: stays[0]!.id, available: false, closed: false, source: null })))
       const calendarStay = inspector.getByRole('link', { name: 'View stay', exact: true })
       const calendarStayURL = new URL((await calendarStay.getAttribute('href'))!, baseURL!)
       expect(calendarStayURL.pathname).toBe(`/dashboard/${slug}/calendar/stay/${stays[0]!.id}`)
@@ -4381,41 +4379,214 @@ test('a stay socket in a service organization closes when Better Auth removes it
   }
 })
 
-test('a host reads every home on the multi-calendar and opens a night on that home’s own calendar', async ({ page, baseURL }) => {
+test('a host selects nights across homes on the multi-calendar and edits them in place', async ({ page, baseURL }) => {
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, headers, slug, api, productId } = await createStayHome(page, baseURL!)
-  const madeHome = await request.post(api('stay-homes'), { headers, data: { name: 'Bay House', timezone: TIME_ZONE, address: '1 Bay Road', city: 'Krabi', country: 'TH',
-    state: null, zip_code: null, phone: null, email: null, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1,
-    base_price_minor: 320_000, idempotency_key: crypto.randomUUID() } })
-  await expectStatus(madeHome, 201)
-  const bay = (await madeHome.json() as { home: { product_id: string } }).home
-  const made = await request.post(api('stays'), { headers, data: { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 1,
-    guest_name: 'Grid', guest_surname: 'Guest', total_minor: 0, idempotency_key: crypto.randomUUID() } })
-  await expectStatus(made, 201)
-  const stay = (await made.json() as { stay: { id: string } }).stay
+  const makeHome = async (name: string, address: string, city: string, minNights: number, price: number) => {
+    const made = await request.post(api('stay-homes'), { headers, data: { name, timezone: TIME_ZONE, address, city, country: 'TH',
+      state: null, zip_code: null, phone: null, email: null, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: minNights,
+      base_price_minor: price, idempotency_key: crypto.randomUUID() } })
+    await expectStatus(made, 201)
+    return (await made.json() as { home: { product_id: string } }).home.product_id
+  }
+  const bay = await makeHome('Bay House', '1 Bay Road', 'Krabi', 1, 320_000)
+  const sea = await makeHome('Sea Loft', '9 Sea Road', 'Ao Nang', 21, 200_000)
+  const stayIds: string[] = []
+  for (const [checkIn, checkOut] of [[2, 4], [7, 9]] as const) {
+    const made = await request.post(api('stays'), { headers, data: { product_id: productId, check_in_date: localDay(checkIn), check_out_date: localDay(checkOut), adults: 1,
+      guest_name: 'Grid', guest_surname: 'Guest', total_minor: 0, idempotency_key: crypto.randomUUID() } })
+    await expectStatus(made, 201)
+    stayIds.push((await made.json() as { stay: { id: string } }).stay.id)
+  }
+  type Night = import('../../server/domain/stays').StayNight
+  const nightsAt = async (home: string, first: number, end: number) => {
+    const response = await request.get(`${api(`stay-homes/${home}/calendar`)}&from=${localDay(first)}&to=${localDay(end)}`)
+    await expectStatus(response, 200)
+    return (await response.json() as { nights: Night[] }).nights
+  }
 
   // The read the grid draws, and the native app reads: every home, its nights, and the stays on them.
-  const window = await request.get(api(`stay-homes/calendar?from=${localDay(0)}&to=${localDay(7)}`))
+  const window = await request.get(api(`stay-homes/calendar?from=${localDay(1)}&to=${localDay(8)}`))
   await expectStatus(window, 200)
   const read = await window.json() as { homes: Array<{ home: { product_id: string; name: string }; nights: Array<{ date: string; stay_id: string | null; price_minor: number | null }> }>; stays: Array<{ id: string; guest_name: string }> }
-  expect(read.homes.map(entry => entry.home.name)).toEqual(['Bay House', 'Cliff Cabin'])
-  expect(read.homes[1]!.nights.map(night => night.stay_id)).toEqual([null, stay.id, stay.id, null, null, null, null])
+  expect(read.homes.map(entry => entry.home.name)).toEqual(['Bay House', 'Cliff Cabin', 'Sea Loft'])
+  expect(read.homes[1]!.nights.map(night => night.stay_id)).toEqual([null, stayIds[0], stayIds[0], null, null, null, stayIds[1]])
   expect(read.homes[0]!.nights.map(night => night.price_minor)).toEqual(Array(7).fill(320_000))
-  expect(read.stays.map(entry => [entry.id, entry.guest_name])).toEqual([[stay.id, 'Grid']])
 
-  await page.setViewportSize({ width: 390, height: 844 })
-  await page.goto(`/dashboard/${slug}/calendar?view=homes`)
+  const gridPath = `/dashboard/${slug}/calendar?view=homes&from=${localDay(1)}`
+  // A free night reads its home's price as the grid formats it: the shared formatter, whole amounts without .00.
+  const gridPrice = (minor: number) => formatMinorAmount(minor, 'THB').replace(/\.00$/, '')
   const grid = page.getByTestId('stay-homes-grid')
-  await expect(grid.locator(`[data-home="${bay.product_id}"] span`)).toHaveText(['Bay House', '1 Bay Road, Krabi'])
-  await expect(grid.locator(`[data-stay="${stay.id}"]`)).toHaveText('Grid Guest')
-  await expect(grid.locator(`[data-home="${bay.product_id}"] + div [data-night="${localDay(2)}"]`)).toHaveText('THB 3,200')
+  const night = (home: string, offset: number) => grid.locator(`div[role="rowheader"]:has([data-home="${home}"]) + div [data-night="${localDay(offset)}"]`)
+  const inspector = page.getByTestId('stay-night-inspector')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(gridPath)
+  await expect(grid.locator(`[data-home="${bay}"] span`)).toHaveText(['Bay House', '1 Bay Road, Krabi'])
+  // A bar leads with its channel's mark and counts adults and children as guests.
+  await expect(grid.locator(`[data-stay="${stayIds[0]}"]`)).toHaveText('Grid Guest · 1 guest')
+  await expect(grid.locator(`[data-stay="${stayIds[0]}"]`)).toHaveAttribute('data-channel', 'direct')
+  await expect(night(bay, 3)).toHaveText(gridPrice(320_000))
   // The grid scrolls inside itself; the phone page does not scroll sideways.
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  // On a phone the first tap marks a night and the second ends the range; the inspector then rises as a drawer.
+  await night(bay, 3).click()
+  await expect(page.getByTestId('stay-homes-hint')).toContainText('tap the last night')
+  await night(bay, 4).click()
+  await expect(page.getByRole('dialog', { name: 'Selected nights' }).getByTestId('stay-night-inspector')).toBeVisible()
+  await page.keyboard.press('Escape')
 
-  await page.setViewportSize({ width: 1280, height: 900 })
-  await grid.locator(`[data-home="${bay.product_id}"] + div [data-night="${localDay(2)}"]`).click()
-  await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/calendar\\?.*product_id=${bay.product_id}`))
-  expect(new URL(page.url()).searchParams.get('date')).toBe(localDay(2))
-  const calendar = page.locator('#dashboard-panel-stay-night-calendar')
-  await expect(calendar.locator(`[data-reka-calendar-cell-trigger][data-value="${localDay(2)}"]:not([data-outside-view])`)).toHaveAttribute('data-selected')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(gridPath)
+  // The home's name still opens its own calendar.
+  await grid.locator(`[data-home="${sea}"]`).click()
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/calendar\\?.*product_id=${sea}`))
+  await page.goto(gridPath)
+
+  // A bar opens its stay.
+  await grid.locator(`[data-stay="${stayIds[1]}"]`).click()
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/calendar/stay/${stayIds[1]}`))
+  await page.goto(gridPath)
+
+  // City narrows rows to the homes' address city; Search by name or address; No upcoming stays keeps homes with no booked night on screen.
+  await page.getByRole('combobox', { name: 'City' }).click()
+  await page.getByRole('option', { name: 'Ao Nang (1)', exact: true }).click()
+  await expect(grid.locator('[data-home]')).toHaveCount(1)
+  await expect(grid.locator(`[data-home="${sea}"]`)).toBeVisible()
+  await page.getByRole('combobox', { name: 'City' }).click()
+  await page.getByRole('option', { name: 'All cities (3)', exact: true }).click()
+  await expect(grid.locator('[data-home]')).toHaveCount(3)
+  await page.getByRole('textbox', { name: 'Search homes' }).fill('sea road')
+  await expect(grid.locator('[data-home]')).toHaveCount(1)
+  await expect(grid.locator(`[data-home="${sea}"]`)).toBeVisible()
+  await page.getByRole('textbox', { name: 'Search homes' }).fill('')
+  // The same search narrows the agenda's bookings for any business.
+  await page.goto(`/dashboard/${slug}/calendar?view=list&month=${localDay(2).slice(0, 7)}`)
+  const agenda = page.locator('#dashboard-panel-org-calendar')
+  await expect(agenda.locator('[data-day]').first()).toBeVisible()
+  await page.getByRole('textbox', { name: 'Search bookings' }).fill('no booking is called this')
+  await expect(agenda.getByText(/^Nothing scheduled in /)).toBeVisible()
+  await page.goto(gridPath)
+  await page.getByRole('button', { name: 'No upcoming stays', exact: true }).click()
+  await expect(grid.locator('[data-home]')).toHaveCount(2)
+  await expect(grid.locator(`[data-home="${productId}"]`)).toHaveCount(0)
+  await page.getByRole('button', { name: 'No upcoming stays', exact: true }).click()
+  await expect(grid.locator('[data-home]')).toHaveCount(3)
+
+  // Dragging across the three gap nights between two stays sets a 3-night minimum on them alone.
+  const drag = async (start: import('@playwright/test').Locator, end: import('@playwright/test').Locator) => {
+    const from = (await start.boundingBox())!
+    const to = (await end.boundingBox())!
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height - 8)
+    await page.mouse.down()
+    await page.mouse.move(to.x + to.width / 2, to.y + to.height - 8, { steps: 8 })
+    await page.mouse.up()
+  }
+  // Booked nights inside a selection are left out: the pill breaks around them and they keep their settings.
+  await drag(night(productId, 1), night(productId, 5))
+  await expect(grid.getByTestId('stay-homes-selection')).toHaveCount(2)
+  await expect(grid.getByTestId('stay-homes-selection').first()).toHaveText('3 nights')
+  await expect(inspector.getByTestId('stay-night-booked')).toHaveText(/^2 booked nights are left out/)
+  await inspector.getByRole('button', { name: /^Minimum nights/ }).click()
+  await inspector.getByRole('button', { name: '1 night', exact: true }).click()
+  await inspector.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(inspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('1 night')
+  expect((await nightsAt(productId, 1, 6)).map(entry => [entry.date, entry.min_stay_arrival, entry.source])).toEqual([1, 2, 3, 4, 5].map(offset => [localDay(offset), offset === 2 || offset === 3 ? 2 : 1, offset === 2 || offset === 3 ? null : 'host']))
+
+  await drag(night(productId, 4), night(productId, 6))
+  await expect(inspector).toBeVisible()
+  await expect(inspector.getByText(/3 nights/).first()).toBeVisible()
+  await expect(grid.getByTestId('stay-homes-selection')).toHaveText('3 nights')
+  await expect(inspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('Mixed')
+  await inspector.getByRole('button', { name: /^Minimum nights/ }).click()
+  await inspector.getByRole('button', { name: '3 nights', exact: true }).click()
+  await expect(inspector.getByRole('spinbutton', { name: 'Minimum nights on arrival', exact: true })).toHaveValue('3')
+  await inspector.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(inspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('3 nights')
+  expect((await nightsAt(productId, 3, 10)).map(entry => [entry.date, entry.min_stay_arrival])).toEqual([3, 4, 5, 6, 7, 8, 9].map(offset => [localDay(offset), offset >= 4 && offset <= 6 ? 3 : 2]))
+  // The home's own calendar reads the same three nights back.
+  await inspector.getByRole('link', { name: 'Open calendar', exact: true }).click()
+  await expect(page).toHaveURL(url => url.searchParams.get('product_id') === productId && url.searchParams.get('date') === localDay(4))
+  const homeInspector = page.locator('#dashboard-panel-stay-night-calendar').getByTestId('stay-night-inspector')
+  await expect(homeInspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('3 nights')
+  await expect(homeInspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('Home default: 2 nights')
+
+  // Dragging down over all three homes selects the same week on each; unchecking one leaves it out.
+  await page.goto(gridPath)
+  await drag(night(bay, 10), night(sea, 16))
+  await expect(inspector.getByRole('button', { name: 'Select nights' })).toHaveCount(0)
+  await expect(inspector.getByText(/3 homes · 7 nights/).first()).toBeVisible()
+  await expect(grid.getByTestId('stay-homes-selection')).toHaveCount(3)
+  await grid.getByRole('checkbox', { name: 'Include Cliff Cabin', exact: true }).click()
+  await expect(inspector.getByText(/2 homes · 7 nights/).first()).toBeVisible()
+  await expect(page).toHaveURL(url => url.searchParams.get('homes') === `${bay},${sea}` && url.searchParams.get('nights') === `${localDay(10)}..${localDay(17)}`)
+  // The selection is the URL's: a reload keeps it.
+  await page.reload()
+  await expect(inspector.getByText(/2 homes · 7 nights/).first()).toBeVisible()
+  await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toContainText('Mixed prices')
+  await expect(inspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('Mixed')
+  await inspector.getByRole('button', { name: /^Nightly price/ }).click()
+  await inspector.getByRole('button', { name: 'Adjust by percentage', exact: true }).click()
+  await inspector.getByRole('spinbutton', { name: 'Adjust by percentage', exact: true }).fill('-10')
+  await expect(inspector.getByText('Each night’s price −10%', { exact: true })).toBeVisible()
+  await inspector.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toContainText('Mixed prices')
+  expect((await nightsAt(bay, 9, 18)).map(entry => entry.price_minor)).toEqual([320_000, ...Array(7).fill(288_000), 320_000])
+  expect((await nightsAt(sea, 9, 18)).map(entry => entry.price_minor)).toEqual([200_000, ...Array(7).fill(180_000), 200_000])
+  expect((await nightsAt(productId, 10, 17)).every(entry => entry.source === null)).toBe(true)
+  await expect(night(bay, 12)).toHaveText(gridPrice(288_000))
+  await expect(night(sea, 12)).toHaveText(gridPrice(180_000))
+
+  // A gap no arrival can fill says so, as Airbnb's calendar blocker does: three free nights under a week's minimum.
+  await expect(night(productId, 5)).not.toHaveAttribute('aria-label', /minimum is/)
+  await drag(night(productId, 4), night(productId, 6))
+  await inspector.getByRole('button', { name: /^Minimum nights/ }).click()
+  await inspector.getByRole('button', { name: '1 week', exact: true }).click()
+  await inspector.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(inspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('7 nights')
+  for (const offset of [4, 5, 6]) await expect(night(productId, offset)).toHaveAttribute('aria-label', /· 3 free nights; minimum is 7$/)
+  await expect(night(productId, 1)).not.toHaveAttribute('aria-label', /minimum is/)
+  // Selecting a night in that gap explains it and offers the fix: its run selected, with Minimum nights open.
+  await night(productId, 5).click()
+  await expect(inspector.getByTestId('stay-night-blocker')).toContainText('3 free nights; minimum is 7')
+  await inspector.getByRole('button', { name: 'Change minimum nights', exact: true }).click()
+  await expect(page).toHaveURL(url => url.searchParams.get('homes') === productId && url.searchParams.get('nights') === `${localDay(4)}..${localDay(7)}`)
+  await inspector.getByRole('button', { name: '3 nights', exact: true }).click()
+  await inspector.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(inspector.getByRole('button', { name: /^Minimum nights/ })).toContainText('3 nights')
+  await expect(night(productId, 5)).not.toHaveAttribute('aria-label', /minimum is/)
+  // A selection of booked nights alone says what holds them and offers no edit.
+  await night(productId, 2).click({ position: { x: 20, y: 50 } })
+  await expect(inspector.getByTestId('stay-night-held')).toHaveText('Booked nights belong to their reservations. Open the stay to manage it.')
+  await expect(inspector.getByRole('link', { name: 'View stay', exact: true })).toHaveAttribute('href', new RegExp(`/calendar/stay/${stayIds[0]}`))
+  await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toBeDisabled()
+
+  // From the keyboard: a night, then Shift with the arrow keys, selects two weeks; only Fridays and Saturdays are blocked.
+  await night(bay, 17).click()
+  await expect(inspector.getByText('Bay House · 1 night', { exact: true })).toBeVisible()
+  for (let index = 0; index < 13; index++) await page.keyboard.press('Shift+ArrowRight')
+  await expect(page).toHaveURL(url => url.searchParams.get('homes') === bay && url.searchParams.get('nights') === `${localDay(17)}..${localDay(31)}`)
+  const weekdays = inspector.getByRole('group', { name: 'Apply to weekdays' })
+  for (const day of ['Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Sundays']) await weekdays.getByRole('button', { name: day, exact: true }).click()
+  await expect(weekdays.getByRole('button', { name: 'Fridays', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(inspector.getByTestId('stay-night-weekdays')).toHaveText('Fridays and Saturdays · 4 of 14 nights')
+  await expect(page).toHaveURL(url => url.searchParams.get('weekdays') === '5,6')
+  const openNights = inspector.getByRole('switch', { name: 'Open selected nights', exact: true })
+  await expect(openNights).toBeChecked()
+  await openNights.click()
+  await expect(openNights).not.toBeChecked()
+  const blocked = await nightsAt(bay, 17, 31)
+  expect(blocked.map(entry => [entry.date, entry.closed])).toEqual(blocked.map(entry => [entry.date, [5, 6].includes(new Date(`${entry.date}T00:00:00Z`).getUTCDay())]))
+  expect(blocked.filter(entry => entry.closed)).toHaveLength(4)
+  // Back to every weekday, the selection is partly blocked: one state for all is applied only once confirmed.
+  for (const day of ['Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Sundays']) await weekdays.getByRole('button', { name: day, exact: true }).click()
+  await expect(page).toHaveURL(url => !url.searchParams.has('weekdays'))
+  await inspector.getByRole('button', { name: 'Open dates', exact: true }).click()
+  await expect(inspector.getByTestId('stay-night-confirm')).toContainText('Open all 14 nights?')
+  await inspector.getByRole('button', { name: 'Open all nights', exact: true }).click()
+  await expect(openNights).toBeChecked()
+  expect((await nightsAt(bay, 17, 31)).every(entry => !entry.closed)).toBe(true)
+  await night(bay, 18).focus()
+  await page.keyboard.press('Escape')
+  await expect(inspector).toHaveCount(0)
+  await expect(page).toHaveURL(url => !url.searchParams.has('homes') && !url.searchParams.has('nights'))
 })
