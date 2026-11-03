@@ -4408,7 +4408,6 @@ test('a host reads every home on the multi-calendar and opens a night on that ho
   const grid = page.getByTestId('stay-homes-grid')
   await expect(grid.locator(`[data-home="${bay.product_id}"] span`)).toHaveText(['Bay House', '1 Bay Road, Krabi'])
   await expect(grid.locator(`[data-stay="${stay.id}"]`)).toHaveText('Grid Guest')
-  // Each night states its home's currency, so baht and dollars never sit side by side unnamed.
   await expect(grid.locator(`[data-home="${bay.product_id}"] + div [data-night="${localDay(2)}"]`)).toHaveText('THB 3,200')
   // The grid scrolls inside itself; the phone page does not scroll sideways.
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
