@@ -36,7 +36,7 @@ const coordinatePair = (location: LocationInput): { latitude: number; longitude:
 }
 
 /** Call after localization, before constructing a map or serializing any public location. */
-export function projectPublicLocation<T extends LocationInput>(location: T, source: PublicLocationPrivacySource): T & PublicLocationDisclosure {
+export function projectPublicLocation<T extends LocationInput>(location: T, source: PublicLocationPrivacySource): Omit<T, keyof PublicLocationDisclosure> & PublicLocationDisclosure {
   const privacy = publicLocationPrivacy(source)
   const pin = coordinatePair(location)
   if (!privacy.protected) return {

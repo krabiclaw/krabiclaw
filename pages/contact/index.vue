@@ -31,7 +31,7 @@
             <p class="mt-4 text-sm leading-relaxed text-muted">{{ formSubtitle }}</p>
 
             <div class="mt-10">
-              <TenantInquiryForm :subjects="subjectOptions" :initial-message="aboutPrefix" :disabled="isDraftPreview" />
+              <TenantInquiryForm :key="aboutProduct" :subjects="subjectOptions" :initial-message="aboutPrefix" :disabled="isDraftPreview" />
             </div>
           </section>
 
@@ -111,29 +111,24 @@ const hasAnyBrandContact = computed(() =>
 // them: the first line of their message is what they clicked, in the site's
 // language, and the rest is theirs to write.
 const route = useRoute()
-const aboutProduct = typeof route.query.about === 'string' ? route.query.about.trim().slice(0, 120) : ''
-const aboutPrefix = aboutProduct ? `${t('site.contact_page.about_product', { product: aboutProduct })}\n\n` : ''
+const aboutProduct = computed(() => (typeof route.query.about === 'string' ? route.query.about.trim().slice(0, 120) : ''))
+const aboutPrefix = computed(() => (aboutProduct.value ? `${t('site.contact_page.about_product', { product: aboutProduct.value })}\n\n` : ''))
 
 const formHeading = computed(() => {
-  if (aboutProduct) {
-    return t('site.contact_page.about_product', { product: aboutProduct })
+  if (aboutProduct.value) {
+    return t('site.contact_page.about_product', { product: aboutProduct.value })
   }
   return t('site.contact_page.headline')
 })
 
-const formSubtitle = computed(() => {
-  if (aboutProduct) {
-    return t('site.contact_page.inquire_about_note', 'Ask a question or request details for this property.')
-  }
-  return vertCopy.value.contactSubtitle || t('site.contact_page.send_message_note', 'Send us a message and we will get back to you shortly.')
-})
+const formSubtitle = computed(() => vertCopy.value.contactSubtitle)
 
 // ── Tenant form ──────────────────────────────────────────
 const subjectOptions = computed(() => {
   if (organization.vertical === 'lodging') {
     return [
       { key: 'general', label: t('site.contact_page.general') },
-      { key: 'long_stays', label: vertCopy.value.contactSubjectCatering },
+      { key: 'catering', label: vertCopy.value.contactSubjectCatering },
       { key: 'partnerships', label: t('site.contact_page.partnerships') },
       { key: 'press', label: t('site.contact_page.press') },
     ]
