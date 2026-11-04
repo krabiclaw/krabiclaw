@@ -8,21 +8,22 @@
     crossed, and the night inspector edits them in place: nights take prices
     and stay rules, places take open or block.
   -->
-  <div>
-    <div class="mb-4 flex flex-wrap items-center gap-3">
-      <USelect v-if="homesView" :model-value="city" :items="cityItems" icon="i-lucide-building-2" aria-label="City" class="min-w-44" :ui="{ base: 'rounded-full' }" @update:model-value="setQuery({ city: $event === ALL_CITIES ? undefined : String($event) })" />
-      <UButton :label="words.free" :aria-pressed="freeOnly" color="neutral" :variant="freeOnly ? 'solid' : 'outline'" class="rounded-full" @click="setQuery({ free: freeOnly ? undefined : '1' })" />
+  <div class="flex min-h-0 flex-1 flex-col">
+    <!-- On a phone the filters and the window share one row each, so the rows start higher. -->
+    <div class="mb-4 flex items-center gap-3 sm:flex-wrap">
+      <USelect v-if="homesView" :model-value="city" :items="cityItems" icon="i-lucide-building-2" aria-label="City" class="min-w-0 flex-1 sm:min-w-44 sm:flex-none" :ui="{ base: 'rounded-full' }" @update:model-value="setQuery({ city: $event === ALL_CITIES ? undefined : String($event) })" />
+      <UButton :label="words.free" :aria-pressed="freeOnly" color="neutral" :variant="freeOnly ? 'solid' : 'outline'" class="shrink-0 rounded-full" @click="setQuery({ free: freeOnly ? undefined : '1' })" />
     </div>
-    <div :class="selection && pane ? 'grid grid-cols-[minmax(0,1fr)_24rem] items-start gap-6' : undefined">
-      <div class="min-w-0">
-        <header class="flex items-center justify-between py-2">
-          <h2 class="text-base font-semibold text-highlighted">{{ windowLabel }}</h2>
+    <div class="min-h-0 flex-1" :class="selection && pane ? 'grid grid-cols-[minmax(0,1fr)_24rem] grid-rows-[minmax(0,1fr)] gap-6' : 'flex flex-col'">
+      <div class="flex min-h-0 min-w-0 flex-col">
+        <header class="flex items-center justify-between gap-3 py-2">
+          <h2 class="min-w-0 truncate text-base font-semibold text-highlighted">{{ windowLabel }}</h2>
           <div class="flex items-center gap-1">
-            <UButton icon="i-lucide-chevrons-left" color="neutral" variant="ghost" square class="size-10 justify-center rounded-full" aria-label="Previous month" @click="step(-30)" />
+            <UButton icon="i-lucide-chevrons-left" color="neutral" variant="ghost" square class="hidden size-10 justify-center rounded-full sm:inline-flex" aria-label="Previous month" @click="step(-30)" />
             <UButton icon="i-lucide-chevron-left" color="neutral" variant="ghost" square class="size-10 justify-center rounded-full" aria-label="Previous week" @click="step(-7)" />
             <UButton label="Today" color="neutral" variant="ghost" class="h-10 rounded-full px-4" @click="goToToday" />
             <UButton icon="i-lucide-chevron-right" color="neutral" variant="ghost" square class="size-10 justify-center rounded-full" aria-label="Next week" @click="step(7)" />
-            <UButton icon="i-lucide-chevrons-right" color="neutral" variant="ghost" square class="size-10 justify-center rounded-full" aria-label="Next month" @click="step(30)" />
+            <UButton icon="i-lucide-chevrons-right" color="neutral" variant="ghost" square class="hidden size-10 justify-center rounded-full sm:inline-flex" aria-label="Next month" @click="step(30)" />
           </div>
         </header>
         <UAlert v-if="error" color="error" variant="soft" :title="words.loadError" :description="getErrorMessage(error, 'Calendar request failed')" :actions="[{ label: 'Try again', color: 'neutral', variant: 'soft', onClick: () => refresh() }]" />
@@ -38,7 +39,8 @@
           </div>
         </div>
         <p v-else-if="data && !rows.length" class="py-10 text-center text-sm text-muted">{{ search || freeOnly || city !== ALL_CITIES ? words.noMatch : words.none }}</p>
-        <div v-else-if="data" class="overflow-x-auto rounded-xl shadow-sm ring ring-default" :aria-busy="status === 'pending'" :data-testid="`${words.testId}-grid`">
+        <!-- The grid is its own scroller on both axes: the day header pins to its top and the home column to its left, the corner over both. -->
+        <div v-else-if="data" class="min-h-0 overflow-auto rounded-xl shadow-sm ring ring-default" :aria-busy="status === 'pending'" :data-testid="`${words.testId}-grid`">
           <div
             ref="gridElement"
             class="grid w-max select-none [--home-column:8rem] sm:[--home-column:14rem]"
@@ -49,18 +51,18 @@
             @pointermove="dragTo"
           >
             <div role="row" class="contents">
-              <div role="columnheader" class="sticky left-0 z-20 border-b border-r border-default bg-default" />
-              <div v-for="day in dates" :key="day" role="columnheader" class="border-b border-default px-1 py-2 text-center text-xs" :class="day === todayKey ? 'bg-primary/10' : 'bg-default'">
+              <div role="columnheader" class="sticky left-0 top-0 z-30 border-b border-r border-default bg-default" />
+              <div v-for="day in dates" :key="day" role="columnheader" class="sticky top-0 z-20 border-b border-default px-1 py-1 text-center text-xs sm:py-2" :class="day === todayKey ? 'bg-primary/10' : 'bg-default'">
                 <span class="block text-muted">{{ day.endsWith('-01') || day === dates[0] ? formatCalendarDate(day, 'en', { month: 'short' }) : formatCalendarDate(day, 'en', { weekday: 'short' }) }}</span>
                 <span class="block font-semibold" :class="day === todayKey ? 'text-primary' : 'text-highlighted'">{{ Number(day.slice(-2)) }}</span>
               </div>
             </div>
             <div v-for="(row, rowIndex) in rows" :key="row.id" role="row" class="contents">
-              <div role="rowheader" class="sticky left-0 z-20 flex min-w-0 items-center gap-2 border-b border-r border-default bg-default px-3 py-2" :class="selectedRow(row.id) ? 'shadow-[inset_3px_0_0_var(--ui-primary)]' : undefined">
+              <div role="rowheader" class="sticky left-0 z-20 flex min-w-0 items-center gap-2 border-b border-r border-default bg-default px-2 py-1 sm:px-3 sm:py-2" :class="selectedRow(row.id) ? 'shadow-[inset_3px_0_0_var(--ui-primary)]' : undefined">
                 <UCheckbox v-if="selection" :model-value="selectedRow(row.id)" :aria-label="`Include ${row.name}`" :disabled="editor.busy.value" @update:model-value="includeRow(row.id, Boolean($event))" />
                 <NuxtLink :to="row.to" class="flex min-w-0 flex-col hover:underline" :data-home="row.home?.product_id" :data-place="row.place ? `${row.place.kind}:${row.place.id}` : undefined">
                   <span class="truncate text-sm font-medium text-highlighted">{{ row.name }}</span>
-                  <span class="truncate text-xs text-muted">{{ row.detail }}</span>
+                  <span class="hidden truncate text-xs text-muted sm:block">{{ row.detail }}</span>
                 </NuxtLink>
               </div>
               <div class="relative grid border-b border-default" :data-row-index="rowIndex" :style="{ gridColumn: `2 / span ${dates.length}`, gridTemplateColumns: `repeat(${dates.length}, 4rem)` }">
@@ -72,7 +74,7 @@
                   :aria-selected="inSelection(rowIndex, index)"
                   :aria-label="cell.title"
                   :tabindex="cursor.row === rowIndex && cursor.day === index ? 0 : -1"
-                  class="relative flex h-14 flex-col justify-end border-r border-default px-1.5 py-1 text-left text-xs tabular-nums outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-inverted"
+                  class="relative flex h-7 flex-col justify-end border-r border-default px-1.5 py-1 text-left text-xs leading-4 tabular-nums sm:h-14 outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-inverted"
                   :class="[cell.open ? 'bg-default text-highlighted' : 'bg-elevated/60 text-muted', inSelection(rowIndex, index) && !chosenWeekday(cell.date) ? 'text-dimmed' : '']"
                   :style="{ gridRow: 1, gridColumn: index + 1 }"
                   :title="cell.title"
@@ -88,7 +90,7 @@
                 <div
                   v-for="(piece, pieceIndex) in pills(rowIndex)"
                   :key="piece.column"
-                  class="pointer-events-none z-[5] mx-0.5 mt-1.5 flex h-7 min-w-0 items-center self-start rounded-full bg-accented px-2.5 text-xs font-semibold text-highlighted ring-2 ring-inset ring-inverted"
+                  class="pointer-events-none z-[5] mx-0.5 mt-1 flex h-5 min-w-0 items-center self-start rounded-full sm:mt-1.5 sm:h-7 bg-accented px-2.5 text-xs font-semibold text-highlighted ring-2 ring-inset ring-inverted"
                   :style="{ gridRow: 1, gridColumn: `${piece.column} / span ${piece.span}` }"
                   :data-testid="`${words.testId}-selection`"
                   aria-hidden="true"
@@ -99,7 +101,7 @@
                   v-for="bar in row.bars"
                   :key="bar.key"
                   :to="bar.to"
-                  class="z-10 mx-0.5 mt-1.5 flex h-7 min-w-0 items-center gap-1.5 self-start rounded-full px-2.5 text-xs font-medium text-white"
+                  class="z-10 mx-0.5 mt-1 flex h-5 min-w-0 items-center gap-1.5 self-start rounded-full px-2.5 text-xs font-medium text-white sm:mt-1.5 sm:h-7"
                   :style="{ gridRow: 1, gridColumn: `${bar.column} / span ${bar.span}`, backgroundColor: CHANNEL_BARS[bar.channel ?? 'direct'].color }"
                   :title="bar.title"
                   :data-stay="bar.stayId"
@@ -116,7 +118,7 @@
           </div>
         </div>
       </div>
-      <aside v-if="selection && pane && targets.length" class="sticky top-4 rounded-2xl p-5 ring ring-default">
+      <aside v-if="selection && pane && targets.length" class="max-h-full self-start overflow-y-auto rounded-2xl p-5 ring ring-default">
         <StayNightInspector v-bind="inspectorProps" v-on="editor.listeners" @clear="clearSelection" @weekdays="setWeekdays" @blocker="fixBlocker" />
       </aside>
     </div>
@@ -539,7 +541,15 @@ const inspectorProps = computed(() => ({
   dateLabel: selectionLabel.value,
   scope: scopeLabel.value,
   calendarTo: selectedRows.value.length === 1 && span.value ? selectedRows.value[0]!.home ? homeTo(selectedRows.value[0]!.home!.product_id, dates.value[span.value.start]) : placeTo(selectedRows.value[0]!.place!, dates.value[span.value.start]!) : undefined,
+  addStayTo: addStayTo.value,
 }))
+/** One home's selected nights as a stay to record: the creation page, with the home, check-in and checkout filled in. A stay is every night in the span, so a weekday narrowing or a held night in it offers none. */
+const addStayTo = computed(() => {
+  const row = selectedRows.value.length === 1 && span.value && !weekdays.value && data.value?.manage ? selectedRows.value[0]! : undefined
+  const home = row?.home
+  if (!home || slice(row!.cells).some(cell => cell.held)) return undefined
+  return { path: `/dashboard/${orgSlug}/bookings/stay/new`, query: { product_id: home.product_id, check_in_date: dates.value[span.value!.start]!, check_out_date: addLocalDays(dates.value[span.value!.end - 1]!, 1) } }
+})
 /** The selection on one row: a pill over each run of writable days, broken around held ones, the first piece counting what a save writes. */
 function pills(row: number) {
   if (!span.value || !selectedRow(rows.value[row]!.id)) return []
