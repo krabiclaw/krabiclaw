@@ -4437,6 +4437,22 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(night(bay, 3)).toHaveText(gridPrice(320_000))
   // The grid scrolls inside itself; the phone page does not scroll sideways.
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  // Scrolled to its last row, the grid keeps the day header pinned at its top and the home column at its left, so the dates stay readable.
+  await page.setViewportSize({ width: 390, height: 420 })
+  const scrolled = await grid.evaluate(element => { element.scrollTop = element.scrollHeight; element.scrollLeft = 200; return { top: element.scrollTop, left: element.scrollLeft } })
+  expect(scrolled.top).toBeGreaterThan(0)
+  expect(scrolled.left).toBe(200)
+  const gridBox = (await grid.boundingBox())!
+  const dayHeader = (await grid.getByRole('columnheader').nth(1).boundingBox())!
+  const corner = (await grid.getByRole('columnheader').first().boundingBox())!
+  const rowHeader = (await grid.getByRole('rowheader').first().boundingBox())!
+  expect(Math.round(dayHeader.y)).toBe(Math.round(gridBox.y))
+  expect(Math.round(corner.y)).toBe(Math.round(gridBox.y))
+  expect(Math.round(corner.x)).toBe(Math.round(gridBox.x))
+  expect(Math.round(rowHeader.x)).toBe(Math.round(gridBox.x))
+  await expect(grid.getByRole('columnheader').nth(1)).toBeInViewport()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(gridPath)
   // On a phone the first tap marks a night and the second ends the range; the inspector then rises as a drawer.
   await night(bay, 3).click()
   await expect(page.getByTestId('stay-homes-hint')).toContainText('tap the last night')
@@ -4529,6 +4545,8 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(inspector.getByRole('button', { name: 'Select nights' })).toHaveCount(0)
   await expect(inspector.getByText(/3 homes · 7 nights/).first()).toBeVisible()
   await expect(grid.getByTestId('stay-homes-selection')).toHaveCount(3)
+  // Three homes make no one stay: Add stay is absent.
+  await expect(inspector.getByRole('link', { name: 'Add stay', exact: true })).toHaveCount(0)
   await grid.getByRole('checkbox', { name: 'Include Cliff Cabin', exact: true }).click()
   await expect(inspector.getByText(/2 homes · 7 nights/).first()).toBeVisible()
   await expect(page).toHaveURL(url => url.searchParams.get('homes') === `${bay},${sea}` && url.searchParams.get('nights') === `${localDay(10)}..${localDay(17)}`)
@@ -4563,6 +4581,15 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(night(productId, 1)).not.toHaveAttribute('aria-label', /minimum is/)
   // Selecting a night in that gap explains it and offers the fix: its run selected, with Minimum nights open.
   await night(productId, 5).click()
+  await expect(inspector.getByTestId('stay-night-blocker')).toContainText('3 free nights; minimum is 7')
+  // One home's selected nights can become a stay: Add stay opens the creation page with the home, check-in and checkout filled in.
+  await expect(inspector.getByRole('link', { name: 'Add stay', exact: true })).toHaveAttribute('href', `/dashboard/${slug}/bookings/stay/new?product_id=${productId}&check_in_date=${localDay(5)}&check_out_date=${localDay(6)}`)
+  await inspector.getByRole('link', { name: 'Add stay', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/bookings/stay/new\\?`))
+  await expect(page.getByText('Cliff Cabin · ', { exact: false }).first()).toBeVisible()
+  await expect(page.getByLabel('Check-in', { exact: true })).toHaveValue(localDay(5))
+  await expect(page.getByLabel('Checkout', { exact: true })).toHaveValue(localDay(6))
+  await page.goBack()
   await expect(inspector.getByTestId('stay-night-blocker')).toContainText('3 free nights; minimum is 7')
   await inspector.getByRole('button', { name: 'Change minimum nights', exact: true }).click()
   await expect(page).toHaveURL(url => url.searchParams.get('homes') === productId && url.searchParams.get('nights') === `${localDay(4)}..${localDay(7)}`)
