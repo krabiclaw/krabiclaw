@@ -9,6 +9,7 @@ import type { AgendaPayload } from '../../server/utils/dashboard-agenda'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 import type { GuestThreadDetailViewModel, GuestThreadListPage } from '../../server/domain/guest-threads/types'
 import { isDashboardInvalidation } from '../../shared/dashboard-invalidations'
+import { localNow } from '../../utils/timezone'
 
 const ORG = '/dashboard/ember-slice-demo'
 
@@ -375,6 +376,10 @@ test('an owner’s priority selects a draft on Today, and Dismiss and Later pers
     await item.getByRole('button', { name: 'Later', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Come back to this later', exact: true })
     await expect(dialog).toBeVisible()
+    // Browser-tomorrow can still be today for this business. Choose a future
+    // day explicitly: this assertion exercises Upcoming, not Later today.
+    const future = localNow(Intl.DateTimeFormat().resolvedOptions().timeZone, new Date(Date.now() + 2 * 86_400_000))
+    await dialog.locator('input[type="datetime-local"]').fill(`${future.date}T${future.time}`)
     const deferred = page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname.endsWith('/recommendation-feedback'))
     await dialog.getByRole('button', { name: 'Set aside', exact: true }).click()
     expect((await deferred).status()).toBe(200)

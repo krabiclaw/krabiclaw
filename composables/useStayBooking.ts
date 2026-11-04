@@ -4,7 +4,6 @@ import type { PublicProductLocation } from '~/server/utils/public-products'
 import type { PublicStayCalendar, PublicStayNight, StayQuote } from '~/server/domain/stays'
 import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode } from '~/shared/currencies'
-import { stayNightlyGroups } from '~/shared/stay-listing'
 import { MAX_STAY_NIGHTS, STAY_CALENDAR_DAYS } from '~/shared/bookings'
 import { addLocalDays, formatCalendarDate, isValidCalendarDate, isValidInstant, localDateAt } from '~/utils/timezone'
 import { getPhoneCountry } from '~/utils/phone'
@@ -93,6 +92,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     const query = route.query
     const party = ['adults', 'children', 'infants'].map(key => typeof query[key] === 'string' && /^(0|[1-9]\d*)$/u.test(query[key]) ? Number(query[key]) : NaN)
     if (!isValidCalendarDate(query.check_in_date) || !isValidCalendarDate(query.check_out_date) || query.check_out_date <= query.check_in_date
+      || !nightsByDate.value.has(query.check_in_date) || !nightsByDate.value.has(query.check_out_date)
       || party.some(value => !Number.isSafeInteger(value)) || party[0]! < 1) {
       bookingError.value = t('stay.error_booking_link')
       return
@@ -155,8 +155,10 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
 
   /** Calendar clicks edit the field the guest chose, including a completed range. */
   function selectDay(date: string) {
-    if (dateField.value === 'checkOut') setCheckOut(date)
-    else setCheckIn(date)
+    if (dateField.value === 'checkOut') {
+      setCheckOut(date)
+      if (checkOut.value === date) dateField.value = 'checkIn'
+    } else setCheckIn(date)
   }
 
   /** A typed or pressed check-in; one that cannot start a stay says why and changes nothing. */
@@ -253,7 +255,9 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     try {
       const response = await publicApiRequest<{ quote: StayQuote }>(`/api/public/products/${encodeURIComponent(context.value.product.slug)}/quote`, {
         query: { check_in_date: checkIn.value, check_out_date: checkOut.value, adults: adults.value, children: children.value, infants: infants.value },
-        validate: (value): value is { quote: StayQuote } => isRecord(value) && isRecord(value.quote) && Number.isSafeInteger(value.quote.total_minor) && Array.isArray(value.quote.nightly),
+        validate: (value): value is { quote: StayQuote } => isRecord(value) && isRecord(value.quote) && Number.isSafeInteger(value.quote.total_minor) && Array.isArray(value.quote.nightly)
+          && Array.isArray(value.quote.nightly_groups) && isRecord(value.quote.price_summary) && ['stay', 'month'].includes(String(value.quote.price_summary.basis))
+          && Number.isSafeInteger(value.quote.price_summary.amount_minor) && Number.isSafeInteger(value.quote.price_summary.display_amount_minor),
       })
       // A later choice replaced this one while it was in flight.
       if (run === quoteRun) quote.value = response.quote
@@ -265,28 +269,32 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   }
   watch([checkIn, checkOut, adults, children, infants], () => { void refreshQuote() })
 
-  function money(minor: number): string {
+  function money(minor: number, whole = false): string {
     if (!currency.value) throw new Error('The home has no currency')
-    return formatMinorAmount(minor, currency.value, locale.value)
+    return formatMinorAmount(minor, currency.value, locale.value, whole ? 0 : undefined)
   }
   const nightsLabel = (count: number) => count === 1 ? t('stay.one_night') : t('stay.nights_count', { count })
   const dateLabel = (date: string) => formatCalendarDate(date, locale.value, { weekday: 'short', month: 'short', day: 'numeric' })
-  const rangeLabel = computed(() => checkIn.value && checkOut.value ? `${dateLabel(checkIn.value)} – ${dateLabel(checkOut.value)}` : '')
+  const rangeLabel = computed(() => checkIn.value && checkOut.value ? [checkIn.value, checkOut.value].map(date => formatCalendarDate(date, locale.value, { month: 'short', day: 'numeric', year: 'numeric' })).join(' - ') : '')
   const guestsLabel = computed(() => {
     const guests = adults.value + children.value
     return `${guests} ${t(guests === 1 ? 'site.experience_detail.guest' : 'site.experience_detail.guests')}`
   })
   const breakdown = computed(() => quote.value
-    ? stayNightlyGroups(quote.value.nightly.map(entry => entry.price_minor)).map(({ price, nights }) => ({ label: t('stay.nightly_line', { price: money(price), nights: nightsLabel(nights) }), amount: money(price * nights) }))
+    ? quote.value.nightly_groups.map(group => ({ label: t('stay.nightly_line', { price: money(group.price_minor), nights: nightsLabel(group.nights) }), amount: money(group.total_minor) }))
     : [])
+  const priceSummary = computed(() => {
+    const current = quote.value
+    if (!current) return null
+    const summary = current.price_summary
+    const monthly = summary.basis === 'month'
+    return { headline: money(summary.display_amount_minor, true), amount: money(summary.amount_minor), period: monthly ? t('stay.monthly') : t('stay.for_nights', { nights: nightsLabel(current.nights) }), monthly }
+  })
 
-  /**
-   * Choose where the dialog opens. Opening is the modal checkbox's job: the
-   * controls are labels for it, and setting `bookingOpen` here as well raced the
-   * label's own activation and flipped the checkbox shut again.
-   */
   function openBooking(step: 1 | 2 = quote.value && checkout.value ? 2 : 1) {
     bookingStep.value = step
+    if (step === 1) dateField.value = checkIn.value && !checkOut.value ? 'checkOut' : 'checkIn'
+    bookingOpen.value = true
   }
 
 
@@ -344,7 +352,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   return {
     checkout, enquiryPath,
     bookingOpen, bookingStep, contactForm, formQuestions, defaultPhoneCountry, calendar, calendarPending, calendarError, checkIn, checkOut, dateField, adults, children, infants, maxGuests,
-    quote, quotePending, bookingError, submitting, breakdown, rangeLabel, guestsLabel, nightCount,
+    quote, quotePending, bookingError, submitting, breakdown, priceSummary, rangeLabel, guestsLabel, nightCount,
     loadCalendar, night, canCheckIn, canCheckOut, checkInHint, checkOutHint, firstCheckIn, earliestCheckOut, selectDay, setCheckIn, setCheckOut, clearDates, clearCheckOut, openBooking, submitBooking, money, nightsLabel, dateLabel,
   }
 }

@@ -9,18 +9,21 @@
          resolve the same booking, so the page never shows two of them. -->
     <div
       v-if="canBook || canOrderExternally || canEnquire"
-      class="fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-4 border-t border-default bg-default/95 px-5 py-4 shadow-lg backdrop-blur-sm lg:hidden"
+      class="fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-4 border-t border-default bg-default/95 px-5 py-4 shadow-lg backdrop-blur-sm" :class="isStay ? 'md:hidden' : 'lg:hidden'"
     >
-      <div v-if="priceLabel" class="min-w-0">
-        <p v-if="compareAtLabel && !stayQuoteTotalLabel" class="text-xs text-muted line-through">{{ compareAtLabel }}</p>
-        <p class="font-semibold leading-tight text-default" :role="isStay && stayBooking.quotePending.value ? 'status' : undefined">{{ stayQuoteTotalLabel ?? (isStay ? t('stay.price_per_night', { price: priceLabel }) : priceLabel) }}</p>
-        <p v-if="isStay && stayBooking.quote.value" class="text-xs text-muted">{{ stayBooking.rangeLabel.value }}</p>
+      <div v-if="priceLabel" class="min-w-0 text-left">
+        <StayPriceSummary v-if="isStay && (stayBooking.quote.value || stayBooking.quotePending.value)" :controller="stayBooking" />
+        <template v-else>
+          <p v-if="!isStay && compareAtLabel" class="text-xs text-muted line-through">{{ compareAtLabel }}</p>
+          <p class="font-semibold leading-tight text-default">{{ isStay ? t('stay.price_per_night', { price: priceLabel }) : priceLabel }}</p>
+        </template>
+        <button v-if="isStay" type="button" :disabled="!bookingInteractive" :aria-label="t('stay.select_dates')" class="block text-xs text-muted underline underline-offset-4" @click="stayBooking.openBooking(1)">{{ stayBooking.rangeLabel.value || t('stay.add_dates') }}</button>
       </div>
       <TenantButton v-if="canOrderExternally" class="shrink-0" :href="product.order_url!" target="_blank" rel="noopener noreferrer" @click="recordExternalOrderClick">{{ externalActionLabel }}</TenantButton>
       <TenantButton v-else-if="canEnquire" class="shrink-0" :to="enquiryPath">
         {{ t('site.experience_detail.enquire') }}
       </TenantButton>
-      <TenantButton v-else class="shrink-0" control-id="product-booking-toggle" @click="openBooking">
+      <TenantButton v-else class="shrink-0" :disabled="isStay && (!bookingInteractive || (!!stayBooking.checkIn.value && !!stayBooking.checkOut.value && !stayBooking.quote.value))" :to="stayEnquiryTo" :control-id="isStay ? undefined : 'product-booking-toggle'" @click="openBooking">
         {{ bookingLabel }}
       </TenantButton>
     </div>
@@ -96,7 +99,7 @@
         </header>
         </div>
 
-        <div id="consultations" class="grid scroll-mt-32 gap-10 lg:grid-cols-[1fr_380px] lg:items-start" :class="isStay ? 'mt-8' : 'mt-14'">
+        <div id="consultations" class="grid scroll-mt-32 gap-10 items-start" :class="isStay ? 'mt-8 md:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[minmax(0,1fr)_360px]' : 'mt-14 lg:grid-cols-[1fr_380px]'">
         <div class="min-w-0">
           <p v-if="!canBook && !canEnquire && !canOrderExternally" role="status" class="rounded-xl border border-default bg-elevated p-5 text-muted lg:hidden">{{ scopeRequired ? t('booking.choose_location') : vertical === 'service' && !offer ? t('booking.price_unavailable_contact') : t('site.common.temporarily_unavailable') }}</p>
 
@@ -191,7 +194,7 @@
 
           <!-- Inline Availability Calendar for stays (Airbnb style) -->
           <section v-if="isStay && canBook" class="mt-10 border-t border-default pt-8">
-            <StayDatesStep inline :place="stayPlaceName" :controller="stayBooking" @next="stayBooking.openBooking(2)" />
+            <StayDatesStep inline :place="stayPlaceName" :controller="stayBooking" />
           </section>
 
           <!-- The next few sessions, on the page: a guest sees when it runs
@@ -288,14 +291,16 @@
 
         <!-- The decision, travelling with the reader: what it costs, when it
              next runs, and the one action. -->
-        <div class="hidden lg:sticky lg:top-28 lg:block">
+        <div class="hidden" :class="isStay ? 'md:sticky md:top-28 md:block' : 'lg:sticky lg:top-28 lg:block'">
           <div class="space-y-5 rounded-2xl border border-default bg-elevated p-6 shadow-xl">
             <div v-if="priceLabel" class="flex items-center justify-between gap-4">
               <div>
-                <span class="tenant-display text-2xl font-bold tabular-nums text-default" :role="isStay && stayBooking.quotePending.value ? 'status' : undefined">
-                  <span v-if="compareAtLabel && !stayQuoteTotalLabel" class="mr-2 text-base text-muted line-through">{{ compareAtLabel }}</span>{{ stayQuoteTotalLabel ?? (isStay || enquiryOnly || (product.kind !== 'experience' && sellableVariants.length === 1) ? priceLabel : t('site.experience_detail.from_price', { price: priceLabel })) }}
-                </span>
-                <span v-if="isStay && !stayQuoteTotalLabel" class="text-sm font-normal text-muted"> / night</span>
+                <StayPriceSummary v-if="isStay && (stayBooking.quote.value || stayBooking.quotePending.value)" :controller="stayBooking" large />
+                <template v-else>
+                  <span class="tenant-display text-2xl font-bold tabular-nums text-default">
+                    <span v-if="!isStay && compareAtLabel" class="mr-2 text-base text-muted line-through">{{ compareAtLabel }}</span>{{ isStay ? t('stay.price_per_night', { price: priceLabel }) : enquiryOnly || (product.kind !== 'experience' && sellableVariants.length === 1) ? priceLabel : t('site.experience_detail.from_price', { price: priceLabel }) }}
+                  </span>
+                </template>
                 <p v-if="!enquiryOnly && product.kind === 'experience'" class="mt-1 text-sm text-muted">{{ t('site.experience_detail.per_person') }}</p>
               </div>
               <div v-if="isStay && averageRating" class="flex items-center gap-1 text-xs font-semibold text-default">
@@ -310,21 +315,25 @@
 
             <!-- The stay a guest has chosen so far, read back from the server's quote. -->
             <div v-if="isStay && canBook" class="overflow-hidden rounded-xl border border-default">
-              <!-- Labels for the dialog's checkbox, like every booking control: they open it before hydration too. -->
-              <label for="product-booking-toggle" role="button" tabindex="0" class="grid w-full cursor-pointer grid-cols-2 text-left" @click="stayBooking.openBooking(1)" @keydown.enter.prevent="pressLabel" @keydown.space.prevent="pressLabel">
-                <span class="border-r border-default px-3 py-2.5">
-                  <span class="block text-[10px] font-bold uppercase tracking-wider text-default">{{ t('stay.check_in') }}</span>
-                  <span class="block text-xs font-medium text-muted mt-0.5">{{ stayBooking.checkIn.value ? stayBooking.dateLabel(stayBooking.checkIn.value) : t('stay.add_dates') }}</span>
-                </span>
-                <span class="px-3 py-2.5">
-                  <span class="block text-[10px] font-bold uppercase tracking-wider text-default">{{ t('stay.check_out') }}</span>
-                  <span class="block text-xs font-medium text-muted mt-0.5">{{ stayBooking.checkOut.value ? stayBooking.dateLabel(stayBooking.checkOut.value) : t('stay.add_dates') }}</span>
-                </span>
-              </label>
-              <label for="product-booking-toggle" role="button" tabindex="0" class="block w-full cursor-pointer border-t border-default px-3 py-2.5 text-left" @click="stayBooking.openBooking(1)" @keydown.enter.prevent="pressLabel" @keydown.space.prevent="pressLabel">
-                <span class="block text-[10px] font-bold uppercase tracking-wider text-default">{{ t('stay.guests') }}</span>
-                <span class="block text-xs font-medium text-muted mt-0.5">{{ stayBooking.guestsLabel.value }}</span>
-              </label>
+              <StayDatePicker :controller="stayBooking">
+                <button type="button" :disabled="!bookingInteractive" class="grid w-full cursor-pointer grid-cols-2 text-left">
+                  <span class="border-r border-default px-3 py-2.5">
+                    <span class="block text-[10px] font-bold uppercase tracking-wider">{{ t('stay.check_in') }}</span>
+                    <span class="mt-0.5 block text-xs text-muted">{{ stayBooking.checkIn.value ? stayBooking.dateLabel(stayBooking.checkIn.value) : t('stay.add_date') }}</span>
+                  </span>
+                  <span class="px-3 py-2.5">
+                    <span class="block text-[10px] font-bold uppercase tracking-wider">{{ t('stay.check_out') }}</span>
+                    <span class="mt-0.5 block text-xs text-muted">{{ stayBooking.checkOut.value ? stayBooking.dateLabel(stayBooking.checkOut.value) : t('stay.add_date') }}</span>
+                  </span>
+                </button>
+              </StayDatePicker>
+              <UPopover portal="#tenant-portal-root" :content="{ align: 'end' }">
+                <button type="button" :disabled="!bookingInteractive" class="block w-full cursor-pointer border-t border-default px-3 py-2.5 text-left">
+                  <span class="block text-[10px] font-bold uppercase tracking-wider">{{ t('stay.guests') }}</span>
+                  <span class="mt-0.5 block text-xs text-muted">{{ stayBooking.guestsLabel.value }}</span>
+                </button>
+                <template #content><StayGuestFields :controller="stayBooking" class="w-80 p-4 text-default" /></template>
+              </UPopover>
             </div>
 
             <div v-if="!cardListsSessions" class="pt-1">
@@ -332,23 +341,12 @@
               <TenantButton v-else-if="canEnquire" block :to="enquiryPath">
                 {{ t('site.experience_detail.enquire') }}
               </TenantButton>
-              <TenantButton v-else-if="canBook" block size="lg" control-id="product-booking-toggle" class="w-full font-semibold" @click="openBooking">
+              <TenantButton v-else-if="canBook" block size="lg" :disabled="isStay && (!bookingInteractive || (!!stayBooking.checkIn.value && !!stayBooking.checkOut.value && !stayBooking.quote.value))" :to="stayEnquiryTo" :control-id="isStay ? undefined : 'product-booking-toggle'" class="w-full font-semibold" @click="openBooking">
                 {{ bookingLabel }}
               </TenantButton>
             </div>
 
             <p v-if="isStay && canBook" class="text-center text-xs text-muted">{{ stayCheckoutAvailable ? 'You won\'t be charged yet' : t('stay.enquiry_note') }}</p>
-
-            <dl v-if="isStay && stayBooking.quote.value" class="space-y-3 border-t border-default pt-4 text-sm">
-              <div v-for="line in stayBooking.breakdown.value" :key="line.label" class="flex justify-between gap-4">
-                <dt class="text-muted underline decoration-dotted underline-offset-4">{{ line.label }}</dt>
-                <dd class="tabular-nums text-default">{{ line.amount }}</dd>
-              </div>
-              <div class="flex justify-between gap-4 border-t border-default pt-3 font-semibold text-base text-default">
-                <dt>{{ t('stay.total') }}</dt>
-                <dd class="tabular-nums">{{ stayBooking.money(stayBooking.quote.value.total_minor) }}</dd>
-              </div>
-            </dl>
 
             <!-- Airbnb's dates under the price: the next sessions, each one press from booking. -->
             <template v-if="cardListsSessions">
@@ -357,7 +355,7 @@
               <UpcomingSessions v-else-if="upcomingSessions.length" :sessions="upcomingSessions" :day-label="sessionDayLabel" :time-label="sessionTimeLabel" :pick-label="sessionPickLabel" control-id="product-booking-toggle" :show-remaining="vertical !== 'service'" @pick="openBookingAt" />
               <p v-else-if="sessionsPending" class="text-sm text-muted">{{ t('site.experience_detail.processing') }}</p>
               <p v-else class="text-sm text-muted">{{ t('site.experience_detail.no_availability', { count: PUBLIC_BOOKING_WINDOW_DAYS }) }}</p>
-              <TenantButton v-if="upcomingSessions.length" variant="ghost" block control-id="product-booking-toggle" @click="openBooking">
+              <TenantButton v-if="upcomingSessions.length" variant="ghost" block :to="stayEnquiryTo" :control-id="isStay ? undefined : 'product-booking-toggle'" @click="openBooking">
                 {{ t('site.experience_detail.see_all_dates') }}
               </TenantButton>
             </template>
@@ -466,12 +464,11 @@
         <ProductBookingSteps :controller="bookingController" :confirmation-mode="booking.confirmation_mode" :payment-required="booking.online_payment_required && (bookingController.selectedPrice.value?.unit_amount ?? 0) > 0" />
       </BookingModal>
       <BookingModal
-        v-else-if="isStay && canBook"
+        v-else-if="isStay && canBook && stayBooking.bookingStep.value === 2"
         v-model="stayBooking.bookingOpen.value"
         target-id="product-booking"
         :title="displayTitle"
         :can-go-back="stayBooking.bookingStep.value > 1 && !stayBooking.submitting.value"
-        :wide="stayBooking.bookingStep.value === 1"
         @back="stayBooking.bookingStep.value = 1"
       >
         <StayBookingSteps :controller="stayBooking" />
@@ -495,6 +492,7 @@
 </template>
 
 <script setup lang="ts">
+import { useMounted } from '@vueuse/core'
 import { formatPhone } from '~/utils/phone'
 import WhoYouMeet from '~/components/booking/WhoYouMeet.vue'
 import HostedBy from '~/components/booking/HostedBy.vue'
@@ -524,6 +522,9 @@ import TenantReviewCard from '~/components/tenant/TenantReviewCard.vue'
 import BookingModal from '~/components/booking/BookingModal.vue'
 import ProductBookingSteps from '~/components/booking/ProductBookingSteps.vue'
 import StayBookingSteps from '~/components/booking/StayBookingSteps.vue'
+import StayDatePicker from '~/components/booking/StayDatePicker.vue'
+import StayGuestFields from '~/components/booking/StayGuestFields.vue'
+import StayPriceSummary from '~/components/booking/StayPriceSummary.vue'
 import StayDatesStep from '~/components/booking/StayDatesStep.vue'
 import { useStayBooking } from '~/composables/useStayBooking'
 import BookingTimezoneSelect from '~/components/booking/BookingTimezoneSelect.vue'
@@ -568,17 +569,15 @@ const props = defineProps<{
 const displayTitle = computed(() => props.product.name)
 /** A place to stay is booked by its nights, paid in full; its booking is not a session's. */
 const isStay = computed(() => props.product.kind === 'stay')
+const bookingInteractive = useMounted()
 const stayBooking = useStayBooking(() => ({ product: props.product, location: props.location, checkout: props.stayCheckoutAvailable }))
-const stayQuoteTotalLabel = computed(() => {
-  if (!isStay.value) return null
-  if (stayBooking.quotePending.value) return t('stay.updating_price')
-  return stayBooking.quote.value ? `${stayBooking.money(stayBooking.quote.value.total_minor)} ${t('stay.total')}` : null
-})
 const bookingLabel = computed(() => isStay.value
-  ? stayBooking.quote.value ? props.stayCheckoutAvailable ? t('stay.reserve') : t('stay.send_enquiry') : t('stay.check_availability')
+  ? stayBooking.checkIn.value && stayBooking.checkOut.value ? props.stayCheckoutAvailable ? t('stay.reserve') : t('stay.send_enquiry') : t('stay.check_availability')
   : props.vertical === 'service'
     ? props.booking?.confirmation_mode === 'review' ? t('booking.request_appointment') : t('booking.book_appointment')
     : t('site.experience_detail.book_now'))
+
+const stayEnquiryTo = computed(() => isStay.value && stayBooking.quote.value && !props.stayCheckoutAvailable ? stayBooking.enquiryPath.value : undefined)
 
 const staySpecsSummary = computed(() => props.product.stay ? staySpecLabels(props.product.stay, t).join(' · ') : '')
 
@@ -864,17 +863,14 @@ const { bookingOpen, bookingStep, submitting, sessions: bookingSessions, session
   upcomingSessions, sessionDayLabel, sessionTimeLabel, bookingError, allowTimezoneSelection, bookingTimezone, timezoneOptions, guestTimezone } = bookingController
 
 function openBooking() {
+  if (stayEnquiryTo.value) return
   if (isStay.value) stayBooking.openBooking()
   else openSessionBooking()
 }
-/** A label pressed from the keyboard activates the checkbox it names, as a click does. */
 /** A wide product page with dated sessions carries them in its booking card, as Airbnb's experience and service pages do. */
 const cardListsSessions = computed(() => !isStay.value && canBook.value && !enquiryOnly.value && !canOrderExternally.value && !canEnquire.value && Boolean(priceLabel.value))
 const sessionPickLabel = computed(() => props.vertical === 'service' ? t('site.experience_detail.select_time') : t('site.experience_detail.book'))
 
-function pressLabel(event: KeyboardEvent) {
-  (event.currentTarget as HTMLElement).click()
-}
 
 // The page is served with its sessions; this re-reads them once the browser
 // has it, so a tab left open does not offer a seat that has since gone. Only
