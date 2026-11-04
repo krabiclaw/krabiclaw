@@ -4450,7 +4450,8 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   expect(Math.round(corner.y)).toBe(Math.round(gridBox.y))
   expect(Math.round(corner.x)).toBe(Math.round(gridBox.x))
   expect(Math.round(rowHeader.x)).toBe(Math.round(gridBox.x))
-  await expect(grid.getByRole('columnheader').nth(1)).toBeInViewport()
+  // The first days scrolled off to the left; a day inside the window reads in the pinned header.
+  await expect(grid.getByRole('columnheader').nth(5)).toBeInViewport()
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(gridPath)
   // On a phone the first tap marks a night and the second ends the range; the inspector then rises as a drawer.
