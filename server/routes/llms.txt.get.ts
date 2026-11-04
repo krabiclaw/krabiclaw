@@ -80,7 +80,7 @@ export default defineHandler(async (event) => {
           { title: 'Pricing & Plans', path: '/pricing', description: 'Published plans, included features, and payment pricing.' },
           { title: 'Law firms (Blawby)', path: '/legal', description: 'Law firm websites, practice areas, and legal consultation requests.' },
           { title: 'Restaurants (Saya)', path: '/restaurants', description: 'Restaurant websites, menus, and table reservations.' },
-          { title: 'Lodging & Stays', path: '/lodging', description: 'Lodging websites, home listings, nightly availability, and direct stay booking.' },
+          { title: 'Lodging & Stays (PMS)', path: '/lodging', description: 'Property management system (PMS) for mid-term and furnished rentals (21+ day stays), two-way Airbnb and Vrbo sync, and zero-commission direct booking.' },
           { title: 'Experiences', path: '/experiences', description: 'Experience websites, dated sessions, and ticketed bookings.' },
         ],
       },

@@ -212,13 +212,13 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
   },
   {
     id: 'lodging-page',
-    title: 'Lodging Websites and Direct Stay Booking',
+    title: 'Mid-Term Rental & Host PMS Software',
     path: '/lodging',
-    snippet: 'Websites for vacation rentals and lodging businesses, with home listings and direct stay booking.',
-    body: 'Present homes, photos, amenities and stay details on your own website. Manage nightly availability, direct stay bookings, arrivals, departures and guest conversations through KrabiClaw. Online payments require Business and Stripe setup.',
+    snippet: 'Mobile PMS for mid-term and furnished rentals (21+ day stays), two-way Airbnb and Vrbo calendar sync, and zero-commission direct bookings.',
+    body: 'Present furnished homes, photos, amenities, and extended stay rate plans on your own website. Manage 21+ day stays, two-way Airbnb and Vrbo calendar sync, zero OTA fee direct bookings with Stripe, turnovers, and guest conversations through KrabiClaw.',
     icon: 'calendar',
     section: 'Solutions',
-    keywords: ['lodging', 'vacation rental', 'holiday rental', 'homes', 'stays', 'direct booking', 'nightly availability', 'check-in', 'check-out'],
+    keywords: ['lodging', 'mid term rental', 'furnished rental', 'mtr', 'pms', 'extended stay', 'airbnb host', 'vrbo', 'direct booking', 'turnover', 'calendar sync'],
     surfaces: ['public', 'docs', 'blog', 'help', 'chowbot'],
   },
   {
