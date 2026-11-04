@@ -1,12 +1,12 @@
 <template>
-  <StayDatesStep v-if="bookingStep === 1" :controller="controller" @next="bookingStep = 2" />
-  <div v-else class="flex-1 min-h-0">
+  <div class="flex-1 min-h-0">
     <BookingRecap
       :main-line="rangeLabel"
       :meta-line="quote ? `${nightsLabel(quote.nights)} · ${guestsLabel} · ${money(quote.total_minor)}` : ''"
       :edit-label="t('site.experience_detail.change')"
-      @edit="bookingStep = 1"
+      @edit="controller.openBooking(1)"
     />
+    <StayGuestFields :controller="controller" class="mb-4" />
     <p class="mb-4 text-sm text-muted">{{ t('stay.charged_in_full') }}</p>
     <section v-if="policy" class="mb-4 rounded-xl border border-default p-4 text-sm">
       <h3 class="font-semibold text-default">{{ t('stay.cancellation_policy') }}</h3>
@@ -25,12 +25,12 @@
 <script setup lang="ts">
 import BookingRecap from '~/components/booking/BookingRecap.vue'
 import BookingContactForm from '~/components/booking/BookingContactForm.vue'
-import StayDatesStep from '~/components/booking/StayDatesStep.vue'
+import StayGuestFields from '~/components/booking/StayGuestFields.vue'
 import type { StayBookingController } from '~/composables/useStayBooking'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 
 const props = defineProps<{ controller: StayBookingController }>()
-const { bookingStep, contactForm, formQuestions, defaultPhoneCountry, rangeLabel, quote, guestsLabel, bookingError, submitting, submitBooking, money, nightsLabel } = props.controller
+const { contactForm, formQuestions, defaultPhoneCountry, rangeLabel, quote, guestsLabel, bookingError, submitting, submitBooking, money, nightsLabel } = props.controller
 const { t } = useI18n()
 const policy = computed(() => quote.value ? bookedPolicyTerms(quote.value.cancellation_policy) : null)
 </script>

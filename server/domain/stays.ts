@@ -16,14 +16,14 @@ import { executeRefund, requirePayment, type Payment } from '~/server/domain/pay
 import { paymentsStripe } from '~/server/utils/stripe-connect'
 import { isRecord } from '~/server/utils/type-guards'
 import { isStayCheckInMethod, STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LIMIT, type StayArrivalGuide } from '~/shared/stay-arrival'
-import { AIRBNB_CANCELLATION_CATEGORIES, AIRBNB_LONG_TERM_CANCELLATION_IDS, isStayAmenity, parseStayAmenityAnswers, parseStayMapSharing, STAY_ALARM_DETAIL_KEYS, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, type StayAmenityAnswer, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
+import { stayNightlyGroups, AIRBNB_CANCELLATION_CATEGORIES, AIRBNB_LONG_TERM_CANCELLATION_IDS, isStayAmenity, parseStayAmenityAnswers, parseStayMapSharing, STAY_ALARM_DETAIL_KEYS, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, type StayAmenityAnswer, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
 import { validateProductDetails, validateStayAlarmDetails, stayHouseRuleLines } from '~/shared/product-details'
 import { staySafetyLines, stayAlarmLines } from '~/shared/stay-safety'
 import { formatTime, isValidTimezone, localDateTimeToInstant } from '~/utils/timezone'
 import { createProduct, getProduct, setProductPublication, stayImportWrittenQuery, updateProduct, type StayImportWrite } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
+import { currencyFractionDigits, isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
 import { completeChannelPush, configureStayCalendar, deliverStayNights, pushAirbnbListingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type AirbnbListingSettings, type ChannelPushCompletion, type ChannexMapping, type DeliveryLease } from '~/server/integrations/channex/ari'
@@ -2365,6 +2365,9 @@ export interface StayQuote {
   infants: number
   nightly: Array<{ date: string; price_minor: number }>
   total_minor: number
+  nightly_groups: Array<{ price_minor: number; nights: number; total_minor: number }>
+  /** Guest comparison amounts derived from this quote; total_minor remains the booking amount. */
+  price_summary: { basis: 'stay' | 'month'; amount_minor: number; display_amount_minor: number }
   /** The home's policy for a stay this long; the guest books under it. */
   cancellation_policy: StayBookedPolicy
 }
@@ -2408,12 +2411,22 @@ export async function quoteStay(db: DbClient, organizationId: string, home: Stay
   const nightly = stayed.map(night => ({ date: night.date, price_minor: night.price_minor! }))
   const total = nightly.reduce((sum, night) => sum + night.price_minor, 0)
   if (!Number.isSafeInteger(total) || total < 1) fail(409, 'STAY_TOTAL_INVALID', 'These nights have no amount to pay', 'check_in_date')
+  const monthly = count_ >= LONG_TERM_STAY_NIGHTS
+  // Airbnb's average monthly comparison is a 30-night equivalent, independent of payment timing.
+  const denominator = BigInt(monthly ? count_ : 1)
+  const numerator = BigInt(total) * (monthly ? 30n : 1n)
+  const amount = Number((numerator + denominator / 2n) / denominator)
+  const unit = 10 ** currencyFractionDigits(home.currency)
+  const displayAmount = Number((BigInt(amount) + BigInt(unit) - 1n) / BigInt(unit) * BigInt(unit))
+  if (!Number.isSafeInteger(amount) || !Number.isSafeInteger(displayAmount)) fail(409, 'STAY_TOTAL_INVALID', 'These nights have no valid comparison amount', 'check_in_date')
   const cancellationPolicy = bookedPolicyFor(count_, home)
   if (!cancellationPolicy) fail(409, 'STAY_CANCELLATION_POLICY_REQUIRED', `This home has no cancellation policy for stays of ${count_ >= LONG_TERM_STAY_NIGHTS ? `${LONG_TERM_STAY_NIGHTS} nights or more` : `under ${LONG_TERM_STAY_NIGHTS} nights`}`, count_ >= LONG_TERM_STAY_NIGHTS ? 'long_term_cancellation_policy' : 'cancellation_policy')
   return {
     product_id: home.product_id, name: home.name, location_id: home.location_id, timezone: home.timezone, currency: home.currency, tax_behavior: home.base_price_tax_behavior,
     check_in_date: checkIn, check_out_date: checkOut, check_in_time: home.check_in_time, check_out_time: home.check_out_time,
     nights: count_, adults, children, infants, nightly, total_minor: total, cancellation_policy: cancellationPolicy,
+    nightly_groups: stayNightlyGroups(nightly.map(night => night.price_minor)).map(group => ({ price_minor: group.price, nights: group.nights, total_minor: group.price * group.nights })),
+    price_summary: { basis: monthly ? 'month' : 'stay', amount_minor: amount, display_amount_minor: displayAmount },
   }
 }
 

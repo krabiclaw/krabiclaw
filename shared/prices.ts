@@ -227,11 +227,11 @@ export function majorAmountToMinor(value: string, currency: CurrencyCode): numbe
   return minor
 }
 
-export function formatMinorAmount(unitAmount: number, currency: CurrencyCode, locale = 'en-US'): string {
+export function formatMinorAmount(unitAmount: number, currency: CurrencyCode, locale = 'en-US', fractionDigits = currencyFractionDigits(currency)): string {
   if (!Number.isSafeInteger(unitAmount) || unitAmount < 0) throw new Error('unit_amount must be a non-negative safe integer')
   const digits = currencyFractionDigits(currency)
   return new Intl.NumberFormat(locale, {
-    style: 'currency', currency, minimumFractionDigits: digits, maximumFractionDigits: digits,
+    style: 'currency', currency, minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits,
   }).format(unitAmount / (10 ** digits))
 }
 
