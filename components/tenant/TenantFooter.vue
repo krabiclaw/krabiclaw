@@ -90,8 +90,9 @@ const description = computed(() => props.compliance?.footer_disclaimer || (props
 const documents = computed(() => props.compliance?.media.filter(item => item.slot === 'document' && item.public_url) ?? [])
 
 const legalPractice = computed(() => isLegalPractice(props.organization?.vertical as string | undefined))
-// A legal practice shows its office addresses only when it chose to; a venue always shows them.
-const showAddresses = computed(() => !legalPractice.value || props.compliance?.address_visibility === 'visible')
+const isLodging = computed(() => props.organization?.vertical === 'lodging')
+// A legal practice shows its office addresses only when it chose to; stay locations are private homes; other venues show them.
+const showAddresses = computed(() => !isLodging.value && (!legalPractice.value || props.compliance?.address_visibility === 'visible'))
 
 const catalogLinks = computed(() => (props.organization?.vertical
   ? catalogNavigation(props.organization.vertical as string, props.sections)

@@ -27,8 +27,8 @@
           <!-- MESSAGE FORM -->
           <section class="border border-default bg-default p-10 lg:p-11">
             <p class="tenant-eyebrow mb-4 text-muted">{{ t('site.contact_page.send_message') }}</p>
-            <h2 class="tenant-display tenant-italic text-3xl text-default">{{ t('site.contact_page.anything_not_location_specific') }}</h2>
-            <p class="mt-4 text-sm leading-relaxed text-muted">{{ t('site.contact_page.specific_questions') }}</p>
+            <h2 class="tenant-display tenant-italic text-3xl text-default">{{ formHeading }}</h2>
+            <p class="mt-4 text-sm leading-relaxed text-muted">{{ formSubtitle }}</p>
 
             <div class="mt-10">
               <TenantInquiryForm :subjects="subjectOptions" :initial-message="aboutPrefix" :disabled="isDraftPreview" />
@@ -62,105 +62,6 @@
           </aside>
         </div>
 
-        <!-- Per-location stack -->
-        <section class="mt-24 bg-elevated">
-          <div class="tenant-container py-24">
-            <div class="mb-12 max-w-2xl">
-              <p class="tenant-kicker mb-6">{{ t('site.contact_page.by_location') }}</p>
-              <h2 class="tenant-display-md text-default">
-                {{ vertCopy.contactLocationsByHeading }}
-              </h2>
-              <p class="mt-5 text-sm leading-relaxed text-muted">
-                {{ vertCopy.contactLocationsByNote }}
-              </p>
-            </div>
-
-            <div class="flex flex-col gap-6">
-              <article
-                v-for="loc in locations"
-                :key="loc.id"
-                class="grid overflow-hidden border border-default bg-default lg:grid-cols-[minmax(280px,360px)_1fr]"
-              >
-                <!-- Mini map -->
-                <div class="aspect-4/3 bg-muted lg:aspect-auto lg:min-h-64">
-                  <iframe
-                    v-if="safeUrl(loc.map_embed_url)"
-                    :src="safeUrl(loc.map_embed_url)"
-                    :title="`${loc.title} on Google Maps`"
-                    class="h-full w-full border-0"
-                    style="filter:grayscale(0.12)"
-                    loading="lazy"
-                    referrerpolicy="strict-origin-when-cross-origin"
-                    sandbox="allow-scripts allow-same-origin"
-                  />
-                  <div v-else class="flex h-full w-full items-center justify-center">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="size-8 text-muted">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
-                    </svg>
-                  </div>
-                </div>
-
-                <!-- Details -->
-                <div class="flex flex-col gap-6 p-9">
-                  <div class="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                      <p v-if="addressPlaceName(loc.address ?? null)" class="tenant-eyebrow mb-2 text-muted">{{ addressPlaceName(loc.address ?? null) }}</p>
-                      <h3 class="tenant-display tenant-italic text-4xl text-default leading-none">{{ loc.title }}</h3>
-                    </div>
-                    <div class="flex items-center gap-2 text-xs uppercase tracking-widest text-default">
-                      <span class="size-1.5 rounded-full" :class="loc.is_open ? 'bg-green-400' : 'bg-zinc-400'" />
-                      {{ loc.hours_today || '—' }}
-                    </div>
-                  </div>
-
-                  <div class="grid grid-cols-2 gap-5 border-t border-default pt-6 sm:grid-cols-4">
-                    <div>
-                      <p class="tenant-eyebrow mb-2 text-muted">{{ t('site.contact_page.address') }}</p>
-                      <p class="text-sm leading-relaxed text-default">{{ formatLocAddress(loc) }}</p>
-                    </div>
-                    <div v-if="loc.phone">
-                      <p class="tenant-eyebrow mb-2 text-muted">{{ t('site.contact_page.phone') }}</p>
-                      <a :href="`tel:${loc.phone}`" class="border-b border-default pb-px text-sm text-default no-underline hover:opacity-70">{{ formatPhone(loc.phone) }}</a>
-                    </div>
-                    <div v-if="loc.email">
-                      <p class="tenant-eyebrow mb-2 text-muted">{{ t('site.contact_page.email') }}</p>
-                      <a :href="`mailto:${loc.email}`" class="border-b border-default pb-px text-sm text-default no-underline hover:opacity-70 break-all">{{ loc.email }}</a>
-                    </div>
-                    <div v-if="loc.hours_today">
-                      <p class="tenant-eyebrow mb-2 text-muted">{{ t('site.contact_page.today') }}</p>
-                      <p class="text-sm text-default">{{ loc.hours_today }}</p>
-                    </div>
-                  </div>
-
-                  <div class="flex flex-wrap items-center gap-3">
-                    <NuxtLink
-                      v-if="!loc.home_slug"
-                      :to="localePath(`/locations/${loc.slug}/contact`)"
-                      class="inline-flex items-center rounded-full bg-inverted px-5 py-2.5 text-[11px] font-medium uppercase tracking-widest text-inverted no-underline transition hover:opacity-80"
-                    >
-                      {{ t('site.contact_page.plan_visit') }}
-                    </NuxtLink>
-                    <NuxtLink
-                      :to="localePath(publicLocationPath(loc))"
-                      class="inline-flex items-center rounded-full border border-default px-5 py-2.5 text-[11px] font-medium uppercase tracking-widest text-default no-underline transition hover:bg-muted"
-                    >
-                      {{ t('site.contact_page.directions') }}
-                    </NuxtLink>
-                    <NuxtLink
-                      v-if="vertCopy.ctaRoute && vertCopy.reservationExploreLabel"
-                      :to="localePath(vertCopy.ctaRoute)"
-                      class="inline-flex items-center rounded-full border border-default px-5 py-2.5 text-[11px] font-medium uppercase tracking-widest text-default no-underline transition hover:bg-muted"
-                    >
-                      {{ vertCopy.reservationExploreLabel }}
-                    </NuxtLink>
-                  </div>
-                </div>
-              </article>
-            </div>
-          </div>
-        </section>
-
         <TenantPageRenderer
           v-if="contactAdditionalPage?.blocks.length"
           :page="contactAdditionalPage"
@@ -172,7 +73,6 @@
 </template>
 
 <script setup lang="ts">
-import { formatPhone } from '~/utils/phone'
 import TenantInquiryForm from '~/components/tenant/TenantInquiryForm.vue'
 
 definePageMeta({ layout: false })
@@ -184,19 +84,16 @@ if (isPlatform) throw createError({ statusCode: 404 })
 // A legal practice's contact page is its authored page; a venue's is this form and its branches.
 const legalPractice = isLegalPractice(organization.vertical)
 
-const { locale, localePath, t } = useI18n()
+const { locale, t } = useI18n()
 const vertCopy = computed(() => getVerticalCopy(organization.vertical, locale.value))
-
-import { addressPlaceName, formatPostalAddress, type PostalAddress } from '~/utils/postal-address'
-import { publicLocationPath } from '~/utils/product-presentation'
 
 const businessName = organization.name
 // A preview is the real site, so the form is real too — but an owner looking
 // at an unlaunched site should not be able to file a guest thread against it.
 const isDraftPreview = computed(() => previewAuthorized)
 
-// ── Bootstrap: locations + config in one call ─────────────
-const { locations, config: siteConfig, tenantPage } = await usePublicPageData()
+// ── Bootstrap: config + tenant page in one call ───────────
+const { config: siteConfig, tenantPage } = await usePublicPageData()
 const contactHero = computed(() => tenantPage.value?.blocks.find(block => block.type === 'hero') ?? null)
 const contactHeroEyebrow = computed(() => String(contactHero.value?.data.eyebrow || ''))
 const contactHeroTitle = computed(() => String(contactHero.value?.data.title || tenantPage.value?.title || t('site.contact_page.headline') || ''))
@@ -205,35 +102,10 @@ const contactAdditionalPage = computed(() => tenantPage.value
   ? { ...tenantPage.value, blocks: tenantPage.value.blocks.filter(block => block.type !== 'hero') }
   : null)
 
-interface ContactLocation {
-  address?: PostalAddress | null
-}
-
-function formatLocAddress(loc: ContactLocation) {
-  return formatPostalAddress(loc.address ?? null)
-}
-
-function safeUrl(val: unknown): string | undefined {
-  if (!val || typeof val !== 'string') return undefined
-  try {
-    const u = new URL(val.trim())
-    return ['http:', 'https:'].includes(u.protocol) ? u.toString() : undefined
-  } catch { return undefined }
-}
-
 const hasAnyBrandContact = computed(() =>
   siteConfig.value.press_email || siteConfig.value.partnerships_email ||
   siteConfig.value.catering_email || siteConfig.value.careers_email
 )
-
-// ── Tenant form ──────────────────────────────────────────
-const subjectOptions = computed(() => [
-  { key: 'general', label: t('site.contact_page.general') },
-  { key: 'press', label: t('site.contact_page.press') },
-  { key: 'partnerships', label: t('site.contact_page.partnerships') },
-  { key: 'catering', label: vertCopy.value.contactSubjectCatering },
-  { key: 'careers', label: t('site.contact_page.careers') }
-])
 
 // A guest arriving from a product priced in words has the product named for
 // them: the first line of their message is what they clicked, in the site's
@@ -241,6 +113,39 @@ const subjectOptions = computed(() => [
 const route = useRoute()
 const aboutProduct = typeof route.query.about === 'string' ? route.query.about.trim().slice(0, 120) : ''
 const aboutPrefix = aboutProduct ? `${t('site.contact_page.about_product', { product: aboutProduct })}\n\n` : ''
+
+const formHeading = computed(() => {
+  if (aboutProduct) {
+    return t('site.contact_page.about_product', { product: aboutProduct })
+  }
+  return t('site.contact_page.headline')
+})
+
+const formSubtitle = computed(() => {
+  if (aboutProduct) {
+    return t('site.contact_page.inquire_about_note', 'Ask a question or request details for this property.')
+  }
+  return vertCopy.value.contactSubtitle || t('site.contact_page.send_message_note', 'Send us a message and we will get back to you shortly.')
+})
+
+// ── Tenant form ──────────────────────────────────────────
+const subjectOptions = computed(() => {
+  if (organization.vertical === 'lodging') {
+    return [
+      { key: 'general', label: t('site.contact_page.general') },
+      { key: 'long_stays', label: vertCopy.value.contactSubjectCatering },
+      { key: 'partnerships', label: t('site.contact_page.partnerships') },
+      { key: 'press', label: t('site.contact_page.press') },
+    ]
+  }
+  return [
+    { key: 'general', label: t('site.contact_page.general') },
+    { key: 'press', label: t('site.contact_page.press') },
+    { key: 'partnerships', label: t('site.contact_page.partnerships') },
+    { key: 'catering', label: vertCopy.value.contactSubjectCatering },
+    { key: 'careers', label: t('site.contact_page.careers') },
+  ]
+})
 // ── SEO ──────────────────────────────────────────────────
 // A page about the business: its image is the organization's.
 useSocialMetadata(() => ({
