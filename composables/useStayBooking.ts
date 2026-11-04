@@ -92,6 +92,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     const query = route.query
     const party = ['adults', 'children', 'infants'].map(key => typeof query[key] === 'string' && /^(0|[1-9]\d*)$/u.test(query[key]) ? Number(query[key]) : NaN)
     if (!isValidCalendarDate(query.check_in_date) || !isValidCalendarDate(query.check_out_date) || query.check_out_date <= query.check_in_date
+      || !nightsByDate.value.has(query.check_in_date) || !nightsByDate.value.has(query.check_out_date)
       || party.some(value => !Number.isSafeInteger(value)) || party[0]! < 1) {
       bookingError.value = t('stay.error_booking_link')
       return

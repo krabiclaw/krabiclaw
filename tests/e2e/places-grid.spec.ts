@@ -45,7 +45,10 @@ test('a restaurant blocks the same weekdays at two locations from the places gri
     // The read the grid draws, and the native app reads: both locations with reservations, then the class; the day with the seeded table is booked.
     const calendar = await readCalendar(page.request, restaurant.slug, from, to)
     expect(calendar.manage).toBe(true)
-    expect(calendar.places.map(entry => [entry.place.kind, entry.place.id, entry.place.name, entry.place.detail])).toEqual([
+    // Other owner journeys retain offerings with booking history. These three
+    // seeded places are this test's contract; the UI must also show every real row.
+    const seededPlaces = new Set([brooklyn.id, williamsburg.id, pizza!.id])
+    expect(calendar.places.filter(entry => seededPlaces.has(entry.place.id)).map(entry => [entry.place.kind, entry.place.id, entry.place.name, entry.place.detail])).toEqual([
       ['location', brooklyn.id, 'Ember & Slice Brooklyn', '120 Atlantic Avenue, Brooklyn'],
       ['location', williamsburg.id, 'Ember & Slice Williamsburg', '88 Bedford Avenue, Brooklyn'],
       ['offering', pizza!.id, 'Pizza-Making Class', 'Experience · Ember & Slice Brooklyn'],
@@ -61,6 +64,7 @@ test('a restaurant blocks the same weekdays at two locations from the places gri
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto(`/dashboard/${restaurant.slug}/calendar?view=places&from=${from}`)
     const grid = page.getByTestId('places-grid')
+    await expect(grid.locator('[data-place]')).toHaveCount(calendar.places.length)
     await expect(grid.locator(`[data-place="location:${brooklyn.id}"] span`)).toHaveText(['Ember & Slice Brooklyn', '120 Atlantic Avenue, Brooklyn'])
     await expect(grid.locator(`[data-place="offering:${pizza!.id}"] span`)).toHaveText(['Pizza-Making Class', 'Experience · Ember & Slice Brooklyn'])
     // The booked day is a bar counting its reservations; it opens that day, narrowed to the location.
@@ -75,12 +79,12 @@ test('a restaurant blocks the same weekdays at two locations from the places gri
     await expect(grid.locator('[data-place]')).toHaveCount(1)
     await expect(grid.locator(`[data-place="location:${williamsburg.id}"]`)).toBeVisible()
     await page.getByRole('textbox', { name: 'Search places' }).fill('')
-    await expect(grid.locator('[data-place]')).toHaveCount(3)
+    await expect(grid.locator('[data-place]')).toHaveCount(calendar.places.length)
     await page.getByRole('button', { name: 'No upcoming bookings' }).click()
     await expect(grid.locator(`[data-place="location:${brooklyn.id}"]`)).toHaveCount(0)
     await expect(grid.locator(`[data-place="location:${williamsburg.id}"]`)).toBeVisible()
     await page.getByRole('button', { name: 'No upcoming bookings' }).click()
-    await expect(grid.locator('[data-place]')).toHaveCount(3)
+    await expect(grid.locator('[data-place]')).toHaveCount(calendar.places.length)
 
     // A first day at Brooklyn and a last at Williamsburg select both rows; the panel offers open or block and the weekdays, and no price.
     await cell(page, `location:${brooklyn.id}`, first).click()

@@ -3249,6 +3249,21 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
     const checkIn = calendar.nights[0]!.date
     const checkOut = calendar.nights[2]!.date
     const guestDialog = guest.getByRole('dialog').filter({ has: guest.locator('[data-stay-calendar]') })
+    await test.step('restored booking links reject dates outside the actual calendar', async () => {
+      await guest.setViewportSize({ width: 390, height: 844 })
+      for (const arrival of ['1900-01-01', '2200-01-01']) {
+        const invalid = new URL(previewURL)
+        invalid.search = new URLSearchParams({ stay_edit: 'dates', check_in_date: arrival, check_out_date: `${arrival.slice(0, 8)}03`, adults: '1', children: '0', infants: '0' }).toString()
+        await guest.goto(invalid.href)
+        await expect(guestDialog.getByRole('alert')).toHaveText('This booking link has invalid dates or guests. Choose your dates and guests again.')
+        await expect(guestDialog.getByRole('heading', { name: 'Select check-in date', exact: true })).toBeVisible()
+        const end = new Date(`${localDay(500)}T00:00:00Z`)
+        const start = new Date(`${localDay(0)}T00:00:00Z`)
+        await expect(guestDialog.getByRole('application')).toHaveCount((end.getUTCFullYear() - start.getUTCFullYear()) * 12 + end.getUTCMonth() - start.getUTCMonth() + 1)
+      }
+      await guest.setViewportSize({ width: 1440, height: 900 })
+      await guest.goto(previewURL.href)
+    })
     await guest.getByRole('button', { name: 'Check availability', exact: true }).last().click()
     await expect(guestDialog).toBeVisible()
     await guestDialog.locator('input[type="date"]').nth(0).fill(checkIn)
@@ -3297,6 +3312,34 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
     await expect.poll(async () => { const box = (await priceDetails.boundingBox())!; return box.y + box.height }).toBe(844)
     await expect(priceDetails.getByRole('heading', { name: 'Dates', exact: true })).toBeVisible()
     await expect(priceDetails.getByRole('link', { name: 'Send enquiry', exact: true })).toBeVisible()
+    await test.step('mobile enquiries keep their sheet open while guest changes are quoted', async () => {
+      let releaseQuote!: () => void
+      const heldQuote = new Promise<void>(resolve => { releaseQuote = resolve })
+      const quoteForTwo = (url: URL) => url.pathname.endsWith('/quote') && url.searchParams.get('adults') === '2'
+      await guest.route(quoteForTwo, async route => {
+        const upstream = await route.fetch()
+        await heldQuote
+        await route.fulfill({ response: upstream })
+      })
+      try {
+        const updated = guest.waitForResponse(response => quoteForTwo(new URL(response.url())))
+        await priceDetails.getByRole('button', { name: 'Adults +', exact: true }).click()
+        await expect(priceDetails.getByRole('status')).toHaveText('Updating price…')
+        await expect(priceDetails.getByRole('link', { name: 'Send enquiry', exact: true })).toHaveAttribute('aria-disabled', 'true')
+        releaseQuote()
+        const response = await updated
+        await expectStatus(response, 200)
+        expect((await response.json() as { quote: StayQuote }).quote).toMatchObject({ adults: 2, total_minor: 300_00 })
+        await expect(priceDetails.getByRole('link', { name: 'Send enquiry', exact: true })).toHaveAttribute('href', /2%20guests/)
+      } finally {
+        releaseQuote()
+        await guest.unroute(quoteForTwo)
+      }
+      const restored = guest.waitForResponse(response => new URL(response.url()).pathname.endsWith('/quote') && new URL(response.url()).searchParams.get('adults') === '1')
+      await priceDetails.getByRole('button', { name: 'Adults −', exact: true }).click()
+      await expectStatus(await restored, 200)
+      await expect(priceDetails.getByRole('link', { name: 'Send enquiry', exact: true })).toHaveAttribute('href', /1%20guest/)
+    })
     await priceDetails.getByRole('button', { name: 'Change', exact: true }).click()
     await expect(guestDialog).toBeVisible()
     await expect(guestDialog.getByRole('heading', { name: '2 nights', exact: true })).toBeVisible()
@@ -3335,6 +3378,12 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
     await test.step('the calendar keeps its month and edits the chosen endpoint across short and long stays', async () => {
       const inheritedNight = await call('set_stay_nights', { product_id: productId, from: localDay(1), to: localDay(2), price_minor: null })
       expect(inheritedNight.error).toBeNull()
+      const inheritedQuote = await anonymousListing.request.get(new URL(`/api/public/products/${pricedProduct.data!.product.slug}/quote`, previewURL).href, {
+        params: { check_in_date: localDay(1), check_out_date: localDay(2), adults: 1 },
+      })
+      await expectStatus(inheritedQuote, 200)
+      expect((await inheritedQuote.json() as { quote: StayQuote }).quote).toMatchObject({ total_minor: 150_00,
+        nightly: [{ date: localDay(1), price_minor: 150_00 }], nightly_groups: [{ price_minor: 150_00, nights: 1, total_minor: 150_00 }] })
       const minimumSaved = await call<{ product: Product }>('update_product', { product_id: productId, stay: { min_nights: 21, long_term_cancellation_policy: 'firm' } })
       expect(minimumSaved.error).toBeNull()
       const changedNight = await call('set_stay_nights', { product_id: productId, from: localDay(30), to: localDay(31), price_minor: 175_25 })

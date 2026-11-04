@@ -18,7 +18,7 @@
       </details>
     </section>
     <p v-if="bookingError" role="alert" class="mb-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-error">{{ bookingError }}</p>
-    <BookingContactForm v-model="contactForm" :questions="formQuestions.questions.value" :answer-errors="formQuestions.answerErrors.value" :questions-notice="formQuestions.notice.value" :default-country="defaultPhoneCountry" :loading="submitting" :submit-text="t('payment.continue_to_pay')" @submit="submitBooking" />
+    <BookingContactForm v-model="contactForm" :questions="formQuestions.questions.value" :answer-errors="formQuestions.answerErrors.value" :questions-notice="formQuestions.notice.value" :default-country="defaultPhoneCountry" :loading="submitting || quotePending" :submit-text="t('payment.continue_to_pay')" @submit="submitBooking" />
   </div>
 </template>
 
@@ -30,7 +30,7 @@ import type { StayBookingController } from '~/composables/useStayBooking'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 
 const props = defineProps<{ controller: StayBookingController }>()
-const { contactForm, formQuestions, defaultPhoneCountry, rangeLabel, quote, guestsLabel, bookingError, submitting, submitBooking, money, nightsLabel } = props.controller
+const { contactForm, formQuestions, defaultPhoneCountry, rangeLabel, quote, quotePending, guestsLabel, bookingError, submitting, submitBooking, money, nightsLabel } = props.controller
 const { t } = useI18n()
 const policy = computed(() => quote.value ? bookedPolicyTerms(quote.value.cancellation_policy) : null)
 </script>
