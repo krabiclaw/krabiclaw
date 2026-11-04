@@ -21,6 +21,8 @@ export function publicLocationPrivacy(source: PublicLocationPrivacySource): { pr
 type LocationInput = {
   title: string
   address: PostalAddress | null
+  phone?: unknown
+  email?: unknown
   maps_url?: string | null
   latitude: number | null
   longitude: number | null
@@ -34,11 +36,13 @@ const coordinatePair = (location: LocationInput): { latitude: number; longitude:
 }
 
 /** Call after localization, before constructing a map or serializing any public location. */
-export function projectPublicLocation<T extends LocationInput>(location: T, source: PublicLocationPrivacySource): T & PublicLocationDisclosure {
+export function projectPublicLocation<T extends LocationInput>(location: T, source: PublicLocationPrivacySource): Omit<T, keyof PublicLocationDisclosure> & PublicLocationDisclosure {
   const privacy = publicLocationPrivacy(source)
   const pin = coordinatePair(location)
   if (!privacy.protected) return {
     ...location,
+    phone: typeof location.phone === 'string' ? location.phone : null,
+    email: typeof location.email === 'string' ? location.email : null,
     address: location.address,
     maps_url: location.maps_url ?? null,
     latitude: pin?.latitude ?? null,
@@ -74,6 +78,8 @@ export function projectPublicLocation<T extends LocationInput>(location: T, sour
     : calculateMapEmbedUrl({ title: '', area_label: label })
   return {
     ...location,
+    phone: null,
+    email: null,
     address: null,
     maps_url: null,
     google_place_id: null,

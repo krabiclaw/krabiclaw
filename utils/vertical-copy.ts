@@ -34,8 +34,6 @@ export type VerticalCopy = {
   experiencesPageSubtitle: string
   locationGroupLine: (_count: number) => string
   bookingNotesPlaceholder: string
-  contactLocationsByHeading: string
-  contactLocationsByNote: string
   otherLocationsHeading: string
   seoReservationDescription: (_name: string) => string
   seoExperiencesDescription: (_name: string) => string
@@ -140,9 +138,6 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
       },
       bookingNotesPlaceholder:
         "Dietary needs, accessibility requests, preferred seating, or celebration notes.",
-      contactLocationsByHeading: "Hours, address, phone, for each room.",
-      contactLocationsByNote:
-        'For full parking, accessibility and policy details, follow the "Plan a visit" link on each card.',
       otherLocationsHeading: "Sister rooms",
       seoReservationDescription: (_name: string) => `Reserve a table at ${_name}.`,
       seoExperiencesDescription: (_name: string) =>
@@ -244,9 +239,6 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
       },
       bookingNotesPlaceholder:
         "Accessibility requests, group details, or other notes.",
-      contactLocationsByHeading: "Hours, address, phone, for each studio.",
-      contactLocationsByNote:
-        'For full parking, accessibility and booking policies, follow the "Plan a visit" link on each card.',
       otherLocationsHeading: "Other spaces",
       seoReservationDescription: (_name: string) => `Book a class at ${_name}.`,
       seoExperiencesDescription: (_name: string) =>
@@ -350,9 +342,6 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
       },
       bookingNotesPlaceholder:
         "ความต้องการด้านอาหาร คำขอเรื่องการเข้าถึง ที่นั่งที่ชอบ หรือบันทึกสำหรับการฉลอง",
-      contactLocationsByHeading: "เวลาทำการ ที่อยู่ โทรศัพท์ สำหรับแต่ละพื้นที่",
-      contactLocationsByNote:
-        'สำหรับรายละเอียดที่จอดรถ การเข้าถึง และนโยบายต่าง ๆ ให้กดลิงก์ "วางแผนการมาเยือน" ในแต่ละการ์ด',
       otherLocationsHeading: "ห้องพี่น้อง",
       seoReservationDescription: (_name: string) => `จองโต๊ะที่ ${_name}`,
       seoExperiencesDescription: (_name: string) =>
@@ -454,9 +443,6 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
       },
       bookingNotesPlaceholder:
         "คำขอเรื่องการเข้าถึง รายละเอียดกลุ่ม หรือหมายเหตุอื่น ๆ",
-      contactLocationsByHeading: "เวลาทำการ ที่อยู่ โทรศัพท์ สำหรับแต่ละสตูดิโอ",
-      contactLocationsByNote:
-        'สำหรับรายละเอียดที่จอดรถ การเข้าถึง และนโยบายการจอง ให้กดลิงก์ "วางแผนการมาเยือน" ในแต่ละการ์ด',
       otherLocationsHeading: "พื้นที่อื่น ๆ",
       seoReservationDescription: (_name: string) => `จองคลาสที่ ${_name}`,
       seoExperiencesDescription: (_name: string) =>
@@ -559,9 +545,6 @@ registry.en.service = {
   locationGroupLine: (_count: number) => "Our offices",
   bookingNotesPlaceholder:
     "Briefly describe your legal matter, preferred contact times, or accessibility notes.",
-  contactLocationsByHeading: "Office details and practice locations.",
-  contactLocationsByNote:
-    "Some practice locations may represent a service area or remote consultation option rather than a public walk-in office.",
   otherLocationsHeading: "Other office locations",
   seoReservationDescription: (_name: string) => `Request a consultation with ${_name}.`,
   seoExperiencesDescription: (_name: string) =>
@@ -639,8 +622,6 @@ registry.th.service = {
   experiencesPageSubtitle: "บริการและความเชี่ยวชาญที่คุณดูได้ก่อนติดต่อเรา",
   locationGroupLine: (_count: number) => `${_count} จุดให้บริการ ทีมเดียวกัน`,
   bookingNotesPlaceholder: "บอกเราว่าคุณต้องการความช่วยเหลือแบบใด ช่วงเวลาที่สะดวกให้ติดต่อ หรือความต้องการด้านการเข้าถึง",
-  contactLocationsByHeading: "ข้อมูลติดต่อและพื้นที่ให้บริการ",
-  contactLocationsByNote: "บางสถานที่อาจเป็นพื้นที่ให้บริการหรือช่องทางติดต่อออนไลน์ ไม่ใช่สำนักงานที่เปิดให้เข้าพบ",
   otherLocationsHeading: "พื้นที่ให้บริการอื่น ๆ",
   seoReservationDescription: (_name: string) => `ขอรับคำปรึกษากับ ${_name}`,
   seoExperiencesDescription: (_name: string) => `ดูบริการมืออาชีพจาก ${_name}`,
@@ -703,8 +684,6 @@ registry.ja.restaurant = {
   experiencesPageSubtitle: "通常のお席のご予約に加え、料理教室や特別なディナーなどをお楽しみいただけます。",
   locationGroupLine: (_count: number) => `${_count}店舗で、料理への同じ想いを。`,
   bookingNotesPlaceholder: "食事制限、バリアフリー対応、ご希望のお席、お祝いなどについてお知らせください。",
-  contactLocationsByHeading: "各店舗の営業時間・住所・電話番号。",
-  contactLocationsByNote: "駐車場、バリアフリー対応、各種方針の詳細は、各店舗の「来店情報」からご確認ください。",
   otherLocationsHeading: "姉妹店",
   seoReservationDescription: (_name: string) => `${_name}のお席をご予約いただけます。`,
   seoExperiencesDescription: (_name: string) => `${_name}の料理教室、テイスティング、各種体験をご覧ください。`,
@@ -794,8 +773,6 @@ registry.ja.experience = {
   experiencesPageSubtitle: "ご予約可能なクラス、ワークショップ、特別なセッションをご覧ください。",
   locationGroupLine: (_count: number) => `${_count}か所で、同じ体験を。`,
   bookingNotesPlaceholder: "バリアフリー対応、グループの詳細、その他のご要望をお知らせください。",
-  contactLocationsByHeading: "各スタジオの営業時間・住所・電話番号。",
-  contactLocationsByNote: "駐車場、バリアフリー対応、ご予約の詳細は、各スタジオの「来店情報」からご確認ください。",
   otherLocationsHeading: "その他のスタジオ",
   seoReservationDescription: (_name: string) => `${_name}のクラスをご予約いただけます。`,
   seoExperiencesDescription: (_name: string) => `${_name}のクラスや各種体験をご覧ください。`,
@@ -834,8 +811,6 @@ registry.ja.service = {
   experiencesPageSubtitle: "お問い合わせの前に、専門サービスや対応分野をご覧ください。",
   locationGroupLine: (_count: number) => `${_count}の拠点で、ひとつのチームが対応します。`,
   bookingNotesPlaceholder: "ご相談内容、ご希望の連絡時間、バリアフリー対応などについてお知らせください。",
-  contactLocationsByHeading: "連絡先と対応地域。",
-  contactLocationsByNote: "拠点には、ご来訪いただける事務所以外に、対応地域やオンライン窓口が含まれる場合があります。",
   otherLocationsHeading: "その他の対応地域",
   seoReservationDescription: (_name: string) => `${_name}へのご相談をお申し込みいただけます。`,
   seoExperiencesDescription: (_name: string) => `${_name}の専門サービスをご覧ください。`,
@@ -892,8 +867,6 @@ registry.vi.restaurant = {
   experiencesPageSubtitle: "Ngoài đặt bàn thông thường, bạn có thể tham gia lớp nấu ăn, bữa tối đặc biệt và nhiều trải nghiệm khác.",
   locationGroupLine: (_count: number) => `${_count} chi nhánh, cùng một tâm huyết với ẩm thực.`,
   bookingNotesPlaceholder: "Cho chúng tôi biết về chế độ ăn kiêng, nhu cầu tiếp cận, chỗ ngồi mong muốn hoặc dịp kỷ niệm.",
-  contactLocationsByHeading: "Giờ mở cửa, địa chỉ và số điện thoại của từng chi nhánh.",
-  contactLocationsByNote: "Thông tin chỗ đỗ xe, lối đi tiếp cận và chính sách có trong mục Ghé thăm của từng chi nhánh.",
   otherLocationsHeading: "Các chi nhánh khác",
   seoReservationDescription: (_name: string) => `Đặt bàn tại ${_name}.`,
   seoExperiencesDescription: (_name: string) => `Khám phá lớp nấu ăn, buổi thưởng thức và các trải nghiệm tại ${_name}.`,
@@ -985,8 +958,6 @@ registry.vi.experience = {
   experiencesPageSubtitle: "Xem các lớp học, workshop và buổi trải nghiệm đặc biệt đang mở đặt chỗ.",
   locationGroupLine: (_count: number) => `${_count} địa điểm, cùng một trải nghiệm.`,
   bookingNotesPlaceholder: "Cho chúng tôi biết về nhu cầu tiếp cận, thông tin nhóm hoặc yêu cầu khác.",
-  contactLocationsByHeading: "Giờ mở cửa, địa chỉ và số điện thoại của từng studio.",
-  contactLocationsByNote: "Thông tin chỗ đỗ xe, lối đi tiếp cận và đặt chỗ có trong mục Ghé thăm của từng studio.",
   otherLocationsHeading: "Các studio khác",
   seoReservationDescription: (_name: string) => `Đặt lớp học tại ${_name}.`,
   seoExperiencesDescription: (_name: string) => `Khám phá các lớp học và trải nghiệm tại ${_name}.`,
@@ -1026,8 +997,6 @@ registry.vi.service = {
   experiencesPageSubtitle: "Xem các dịch vụ chuyên môn và lĩnh vực chúng tôi hỗ trợ trước khi liên hệ.",
   locationGroupLine: (_count: number) => `${_count} địa điểm, một đội ngũ hỗ trợ.`,
   bookingNotesPlaceholder: "Cho chúng tôi biết nội dung cần tư vấn, thời gian liên hệ phù hợp hoặc nhu cầu tiếp cận.",
-  contactLocationsByHeading: "Thông tin liên hệ và khu vực phục vụ.",
-  contactLocationsByNote: "Địa điểm có thể bao gồm khu vực phục vụ hoặc kênh trực tuyến, không chỉ văn phòng bạn có thể ghé thăm.",
   otherLocationsHeading: "Các khu vực phục vụ khác",
   seoReservationDescription: (_name: string) => `Đăng ký tư vấn với ${_name}.`,
   seoExperiencesDescription: (_name: string) => `Khám phá các dịch vụ chuyên môn của ${_name}.`,
@@ -1086,8 +1055,6 @@ registry.en.lodging = {
   reservationExploreRoute: "",
   locationGroupLine: (_count: number) => `${_count} location${_count === 1 ? "" : "s"}`,
   bookingNotesPlaceholder: "Arrival time, number of guests, or anything we should prepare.",
-  contactLocationsByHeading: "Address, check-in details and contact, for each property.",
-  contactLocationsByNote: 'For parking, access and house rules, follow the "Plan a visit" link on each card.',
   otherLocationsHeading: "Other properties",
   seoReservationDescription: (_name: string) => `Request a stay at ${_name}.`,
   viewMenuCta: "View Properties",
@@ -1122,8 +1089,6 @@ registry.th.lodging = {
   reservationExploreRoute: "",
   locationGroupLine: (_count: number) => `${_count} สถานที่`,
   bookingNotesPlaceholder: "เวลาที่จะมาถึง จำนวนผู้เข้าพัก หรือสิ่งที่อยากให้เราเตรียมไว้",
-  contactLocationsByHeading: "ที่อยู่ รายละเอียดการเช็กอิน และช่องทางติดต่อของที่พักแต่ละแห่ง",
-  contactLocationsByNote: 'สำหรับรายละเอียดที่จอดรถ การเดินทาง และกฎของบ้าน ให้กดลิงก์ "วางแผนการมาเยือน" ในแต่ละการ์ด',
   otherLocationsHeading: "ที่พักอื่น ๆ",
   seoReservationDescription: (_name: string) => `ขอจองที่พักที่ ${_name}`,
   viewMenuCta: "ดูที่พัก",
@@ -1158,8 +1123,6 @@ registry.ja.lodging = {
   reservationExploreRoute: "",
   locationGroupLine: (_count: number) => `${_count}か所`,
   bookingNotesPlaceholder: "到着時刻、人数、ご準備しておくことなどをお知らせください。",
-  contactLocationsByHeading: "各施設の住所・チェックイン情報・連絡先。",
-  contactLocationsByNote: "駐車場、アクセス、ハウスルールは、各施設の「来店情報」からご確認ください。",
   otherLocationsHeading: "その他の施設",
   seoReservationDescription: (_name: string) => `${_name}のご宿泊をリクエストいただけます。`,
   viewMenuCta: "施設を見る",
@@ -1194,8 +1157,6 @@ registry.vi.lodging = {
   reservationExploreRoute: "",
   locationGroupLine: (_count: number) => `${_count} địa điểm`,
   bookingNotesPlaceholder: "Giờ đến, số khách hoặc bất cứ điều gì chúng tôi nên chuẩn bị.",
-  contactLocationsByHeading: "Địa chỉ, thông tin nhận phòng và liên hệ của từng chỗ nghỉ.",
-  contactLocationsByNote: "Thông tin chỗ đỗ xe, đường đến và nội quy có trong mục Ghé thăm của từng chỗ nghỉ.",
   otherLocationsHeading: "Chỗ nghỉ khác",
   seoReservationDescription: (_name: string) => `Gửi yêu cầu lưu trú tại ${_name}.`,
   viewMenuCta: "Xem chỗ nghỉ",

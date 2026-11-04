@@ -13,6 +13,8 @@ export type PublicLocationArea = {
 }
 
 export interface PublicLocationDisclosure {
+  phone: string | null
+  email: string | null
   address: PostalAddress | null
   maps_url: string | null
   map_embed_url: string | null
