@@ -4603,6 +4603,8 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   await expect(inspector.getByTestId('stay-night-held')).toHaveText('Booked nights belong to their reservations. Open the stay to manage it.')
   await expect(inspector.getByRole('link', { name: 'View stay', exact: true })).toHaveAttribute('href', new RegExp(`/calendar/stay/${stayIds[0]}`))
   await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toBeDisabled()
+  // A booked night in the selection leaves no stay to add.
+  await expect(inspector.getByRole('link', { name: 'Add stay', exact: true })).toHaveCount(0)
 
   // From the keyboard: a night, then Shift with the arrow keys, selects two weeks; only Fridays and Saturdays are blocked.
   // Clearing first, since a pending first click would make this click end a range from it.
