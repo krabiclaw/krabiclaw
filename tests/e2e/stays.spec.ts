@@ -4615,6 +4615,8 @@ test('a host selects nights across homes on the multi-calendar and edits them in
   for (const day of ['Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Sundays']) await weekdays.getByRole('button', { name: day, exact: true }).click()
   await expect(weekdays.getByRole('button', { name: 'Fridays', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await expect(inspector.getByTestId('stay-night-weekdays')).toHaveText('Fridays and Saturdays · 4 of 14 nights')
+  // Fridays and Saturdays alone are no contiguous stay: Add stay is absent while weekdays narrow the selection.
+  await expect(inspector.getByRole('link', { name: 'Add stay', exact: true })).toHaveCount(0)
   await expect(page).toHaveURL(url => url.searchParams.get('weekdays') === '5,6')
   const openNights = inspector.getByRole('switch', { name: 'Open selected nights', exact: true })
   await expect(openNights).toBeChecked()

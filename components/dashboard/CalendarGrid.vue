@@ -543,9 +543,9 @@ const inspectorProps = computed(() => ({
   calendarTo: selectedRows.value.length === 1 && span.value ? selectedRows.value[0]!.home ? homeTo(selectedRows.value[0]!.home!.product_id, dates.value[span.value.start]) : placeTo(selectedRows.value[0]!.place!, dates.value[span.value.start]!) : undefined,
   addStayTo: addStayTo.value,
 }))
-/** One home's selected nights as a stay to record: the creation page, with the home, check-in and checkout filled in. */
+/** One home's selected nights as a stay to record: the creation page, with the home, check-in and checkout filled in. A stay is every night in the span, so a weekday narrowing offers none. */
 const addStayTo = computed(() => {
-  const home = selectedRows.value.length === 1 && span.value && data.value?.manage ? selectedRows.value[0]!.home : undefined
+  const home = selectedRows.value.length === 1 && span.value && !weekdays.value && data.value?.manage ? selectedRows.value[0]!.home : undefined
   if (!home) return undefined
   return { path: `/dashboard/${orgSlug}/bookings/stay/new`, query: { product_id: home.product_id, check_in_date: dates.value[span.value!.start]!, check_out_date: addLocalDays(dates.value[span.value!.end - 1]!, 1) } }
 })
