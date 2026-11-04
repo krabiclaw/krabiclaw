@@ -8,6 +8,7 @@
   <DashboardIndexPanel
     :id="personalScope ? 'account-calendar' : 'org-calendar'"
     title="Calendar"
+    :fill="gridView"
   >
     <template #right>
       <div class="flex items-center gap-1">
@@ -40,15 +41,16 @@
       </div>
     </template>
 
-    <div>
+    <!-- A grid scrolls inside itself, so its day header and home column stay in view; the level fills the panel and pads its own rows. -->
+    <div :class="gridView ? ['flex min-h-0 flex-1 flex-col py-4 sm:py-6', dashboardGutterClass] : undefined">
       <UAlert v-if="offeringsError" class="mb-6" color="error" variant="soft" title="Offerings could not be loaded" :description="offeringsError" />
       <!-- Calendar chooses bookings or one offering's availability; Location narrows that scope. -->
-      <div v-if="!personalScope" class="mb-8 flex flex-wrap items-center gap-3">
+      <div v-if="!personalScope" class="flex flex-wrap items-center gap-3" :class="gridView ? 'mb-4 sm:mb-8' : 'mb-8'">
         <CalendarOfferingFilter :items="offeringItems ?? []" :disabled="Boolean(level.child.value)" />
         <!-- Every home is its own location, so the Homes view narrows by city instead. -->
         <DashboardLocationFilter v-if="!gridView" v-model="filters.locationId" :items="locationItems" :disabled="Boolean(level.child.value)" />
         <!-- One search for every calendar: homes by name or address, places by name and where, bookings by who, what and where. -->
-        <UInput :model-value="search" icon="i-lucide-search" :placeholder="searchLabel" :aria-label="searchLabel" class="w-full sm:w-72" :ui="{ base: 'rounded-full' }" @update:model-value="setSearch" />
+        <UInput :model-value="search" icon="i-lucide-search" :placeholder="searchLabel" :aria-label="searchLabel" :class="gridView ? 'min-w-0 flex-1 sm:w-72 sm:flex-none' : 'w-full sm:w-72'" :ui="{ base: 'rounded-full' }" @update:model-value="setSearch" />
         <UTooltip v-if="sessionProduct && physicalLocation" text="Repeating times">
           <UButton icon="i-lucide-settings" color="neutral" variant="soft" square class="size-10 justify-center rounded-full" aria-label="Schedule settings" :to="{ path: `/dashboard/${route.params.orgSlug}/products/${sessionProduct.id}/booking/schedule`, query: { location_id: physicalLocation.id } }" />
         </UTooltip>
@@ -278,6 +280,7 @@ export const calendarSessionsKey = Symbol('calendar-sessions') as InjectionKey<{
 import { NuxtLink } from '#components'
 import { CalendarDate, getDayOfWeek, getLocalTimeZone, parseDate, today } from '@internationalized/date'
 import AgendaRow from '~/lib/components/workspace/dashboard/AgendaRow.vue'
+import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import AgendaFilters from './AgendaFilters.vue'
 import CalendarGrid from './CalendarGrid.vue'
 import CalendarOfferingFilter from './CalendarOfferingFilter.vue'
