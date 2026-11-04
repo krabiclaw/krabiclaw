@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import type { StayQuote } from '../../server/domain/stays'
 import { openTenantPage, waitForNuxtHydration } from '../e2e/helpers'
 import { testBaseUrl } from '../e2e/test-env'
 import { environmentTenantAliasHostname } from '../../server/utils/tenant-hosts'
@@ -249,44 +250,85 @@ test('a guest opens a stay\'s booking dialog, picks nights the calendar allows a
   const card = page.locator('article')
   // A stay is a reservation: none of an appointment's words.
   await expect(card).not.toContainText(/appointment/i)
-  const dialog = page.locator('#product-booking')
-  await expect(dialog).toBeHidden()
+  const datePicker = page.getByRole('dialog').filter({ has: page.locator('[data-stay-calendar]') })
+  const contact = page.locator('#product-booking')
   await card.getByRole('button', { name: 'Check availability', exact: true }).click()
-  await expect(dialog).toBeVisible()
-  await expect(dialog).toContainText('Select check-in date')
+  await expect(datePicker).toBeVisible()
+  await expect(datePicker.getByRole('heading', { name: 'Select dates', exact: true })).toBeVisible()
 
   const { checkIn, checkOut, stayed, minimum } = chosen!
   const [todayYear, todayMonth] = home.today.split('-').map(Number) as [number, number]
   const [year, month] = checkIn.date.split('-').map(Number) as [number, number]
-  for (let step = 0; step < (year - todayYear) * 12 + month - todayMonth; step++) await dialog.getByRole('button', { name: 'Next month' }).click()
-  await dialog.locator(`[data-reka-calendar-cell-trigger][data-value="${checkIn.date}"]:not([data-outside-view])`).click()
-  await expect(dialog).toContainText('Select checkout date')
-  // A checkout short of the minimum is not offered.
-  if (minimum > 1) {
-    await expect(dialog.locator(`[data-reka-calendar-cell-trigger][data-value="${stayed[1]!.date}"]:not([data-outside-view])`)).toBeDisabled()
-  }
-  await dialog.locator(`[data-reka-calendar-cell-trigger][data-value="${checkOut}"]:not([data-outside-view])`).click()
-  const total = money(stayed.reduce((sum, night) => sum + night.price_minor!, 0))
-  const totalRow = dialog.locator('dl > div').last()
-  await expect(totalRow.locator('dt')).toHaveText('Total')
-  await expect(totalRow.locator('dd')).toHaveText(total)
-  await dialog.getByRole('button', { name: 'Reserve', exact: true }).click()
-  await expect(dialog.getByRole('textbox', { name: 'Full name' })).toBeVisible()
-  await expect(dialog.getByRole('button', { name: 'Continue to pay', exact: true })).toBeEnabled()
+  for (let step = 0; step < (year - todayYear) * 12 + month - todayMonth; step++) await datePicker.getByRole('button', { name: 'Next month' }).click()
+  await datePicker.locator(`button[data-value="${checkIn.date}"]`).filter({ visible: true }).click()
+  await expect(datePicker.getByRole('textbox', { name: 'Checkout', exact: true })).toHaveValue('')
+  await expect(datePicker.locator('[data-stay-range]:visible')).toHaveCount(0)
+  if (minimum > 1) await expect(datePicker.locator(`button[data-value="${stayed[1]!.date}"]`).filter({ visible: true })).toBeDisabled()
+  const quoted = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/quote') && new URL(response.url()).searchParams.get('check_out_date') === checkOut)
+  await datePicker.locator(`button[data-value="${checkOut}"]`).filter({ visible: true }).click()
+  const quotedResponse = await quoted
+  expect(quotedResponse.status()).toBe(200)
+  const { quote } = await quotedResponse.json() as { quote: StayQuote }
+  expect(quote).toMatchObject({ adults: 1, nights: stayed.length, check_in_date: checkIn.date, check_out_date: checkOut, total_minor: stayed.reduce((sum, night) => sum + night.price_minor!, 0) })
+  const totalMinor = stayed.reduce((sum, night) => sum + night.price_minor!, 0)
+  const monthly = stayed.length >= 28
+  const comparisonMinor = monthly ? Math.round(totalMinor * 30 / stayed.length) : totalMinor
+  const displayMinor = Math.ceil(comparisonMinor / 100) * 100
+  expect(quote.price_summary).toEqual({ basis: monthly ? 'month' : 'stay', amount_minor: comparisonMinor, display_amount_minor: displayMinor })
+  const headline = new Intl.NumberFormat('en-US', { style: 'currency', currency: home.currency, maximumFractionDigits: 0, minimumFractionDigits: 0 }).format(displayMinor / 100)
+  const priceLabel = `${headline} ${monthly ? 'monthly' : `for ${stayed.length} ${stayed.length === 1 ? 'night' : 'nights'}`}`
+  await datePicker.getByRole('button', { name: 'Close', exact: true }).click()
+  await card.getByRole('button', { name: priceLabel, exact: true }).click()
+  const priceDetails = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Price details', exact: true }) })
+  await expect(priceDetails.getByText('Total', { exact: true }).locator('..')).toContainText(money(quote.total_minor))
+  await priceDetails.getByRole('button', { name: 'Close', exact: true }).click()
+  await card.getByRole('button', { name: 'Reserve', exact: true }).click()
+  await expect(contact.getByRole('textbox', { name: 'Full name' })).toBeVisible()
+  const submit = contact.locator('button[type="submit"]')
+  await expect(submit).toBeEnabled()
 
-  // Closed, the card reads the stay back; its dates reopen the calendar.
+  // Only GETs: hold the real replacement quote while the existing form stays open.
+  let releaseQuote!: () => void
+  const heldQuote = new Promise<void>(resolve => { releaseQuote = resolve })
+  const quoteForTwo = (url: URL) => url.pathname.endsWith('/quote') && url.searchParams.get('adults') === '2'
+  await page.route(quoteForTwo, async route => {
+    const upstream = await route.fetch()
+    await heldQuote
+    await route.fulfill({ response: upstream })
+  })
+  try {
+    const repriced = page.waitForResponse(response => quoteForTwo(new URL(response.url())))
+    await contact.getByRole('button', { name: 'Adults +', exact: true }).click()
+    await expect(submit).toBeDisabled()
+    await expect(contact.getByRole('textbox', { name: 'Full name' })).toBeVisible()
+    releaseQuote()
+    const response = await repriced
+    expect(response.status()).toBe(200)
+    expect((await response.json() as { quote: StayQuote }).quote).toMatchObject({ adults: 2, check_in_date: checkIn.date, check_out_date: checkOut, total_minor: quote.total_minor })
+    await expect(submit).toBeEnabled()
+  } finally {
+    releaseQuote()
+    await page.unroute(quoteForTwo)
+  }
+  const resetParty = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/quote') && new URL(response.url()).searchParams.get('adults') === '1')
+  await contact.getByRole('button', { name: 'Adults −', exact: true }).click()
+  const resetPartyResponse = await resetParty
+  expect(resetPartyResponse.status()).toBe(200)
+  expect((await resetPartyResponse.json() as { quote: StayQuote }).quote).toMatchObject({ adults: 1, check_in_date: checkIn.date, check_out_date: checkOut, total_minor: quote.total_minor })
+  await expect(submit).toBeEnabled()
   await page.keyboard.press('Escape')
-  await expect(dialog).toBeHidden()
-  await expect(card.getByText(`${total} Total`, { exact: true })).toBeVisible()
+  await expect(contact).toBeHidden()
+  await expect(card.getByRole('button', { name: priceLabel, exact: true })).toHaveText(priceLabel)
   await expect(card.getByText(dayLabel(checkIn.date), { exact: true })).toBeVisible()
   await page.setViewportSize({ width: 390, height: 844 })
-  const mobileQuoteTotal = page.getByText(`${total} Total`, { exact: true }).filter({ visible: true })
-  await expect(mobileQuoteTotal).toBeVisible()
-  await expect(mobileQuoteTotal.locator('..').getByText(`${dayLabel(checkIn.date)} – ${dayLabel(checkOut)}`, { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: priceLabel, exact: true })).toHaveText(priceLabel)
+  const range = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+  const dateRange = [checkIn.date, checkOut].map(date => range.format(new Date(`${date}T00:00:00Z`))).join(' - ')
+  await expect(page.getByRole('button', { name: 'Select dates', exact: true })).toHaveText(dateRange)
   await page.setViewportSize({ width: 1440, height: 900 })
-  await card.getByRole('button', { name: new RegExp(`Check-in\\s*${dayLabel(checkIn.date)}`) }).click()
-  await expect(dialog).toBeVisible()
-  await expect(dialog.locator(`[data-reka-calendar-cell-trigger][data-value="${checkIn.date}"]:not([data-outside-view])`)).toHaveAttribute('aria-pressed', 'true')
+  await card.getByRole('button', { name: /^Check-in / }).click()
+  await expect(datePicker).toBeVisible()
+  await expect(datePicker.locator(`button[data-value="${checkIn.date}"]`).filter({ visible: true })).toHaveAttribute('aria-pressed', 'true')
 })
 
 test('Pottery House enforces its published languages and localized catalog', async ({ page }) => {
