@@ -742,7 +742,7 @@ export default {
       "anything_not_location_specific": "Anything not location-specific.",
       "specific_questions": "For specific questions about hours, parking, or a reservation, the individual location pages will get you a faster answer.",
       "got_it": "Got it. Thank you.",
-      "reply_within": "We'll reply within a working day. For anything urgent, call the room directly.",
+      "reply_within": "We'll reply within a working day.",
       "send_another": "Send another →",
       "back_home": "Back to home",
       "confirmed_title": "Message sent",

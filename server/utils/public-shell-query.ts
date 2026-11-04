@@ -229,8 +229,9 @@ export async function buildPublicShellPayload(
   )
   if (!isCurrencyCode(organization.default_currency)) throw new Error(`Unsupported organization currency: ${organization.default_currency}`)
   config.default_currency = organization.default_currency
-  if (organization.contact_email) config.contact_email = organization.contact_email
-  if (organization.contact_phone) config.contact_phone = organization.contact_phone
+  const isLodging = organization.vertical === 'lodging'
+  if (organization.contact_email && !isLodging) config.contact_email = organization.contact_email
+  if (organization.contact_phone && !isLodging) config.contact_phone = organization.contact_phone
   if (organization.name) config.name = organization.name
   if (organization.brand_description) config.brand_description = organization.brand_description
   if (organization.seo_title) config.seo_title = organization.seo_title
@@ -246,7 +247,7 @@ export async function buildPublicShellPayload(
       vertical: organization.vertical,
       media: organizationSocialMedia.media,
       social_image: organizationSocialMedia.social_image,
-      config: { phone: organization.contact_phone },
+      config: { phone: isLodging ? null : organization.contact_phone },
     },
     locations,
     config,
