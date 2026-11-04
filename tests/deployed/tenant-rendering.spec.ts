@@ -270,8 +270,13 @@ test('a guest opens a stay\'s booking dialog, picks nights the calendar allows a
   expect(quotedResponse.status()).toBe(200)
   const { quote } = await quotedResponse.json() as { quote: StayQuote }
   expect(quote).toMatchObject({ adults: 1, nights: stayed.length, check_in_date: checkIn.date, check_out_date: checkOut, total_minor: stayed.reduce((sum, night) => sum + night.price_minor!, 0) })
-  const headline = new Intl.NumberFormat('en-US', { style: 'currency', currency: home.currency, maximumFractionDigits: 0, minimumFractionDigits: 0 }).format(quote.price_summary.display_amount_minor / 100)
-  const priceLabel = `${headline} ${quote.price_summary.basis === 'month' ? 'monthly' : `for ${stayed.length} ${stayed.length === 1 ? 'night' : 'nights'}`}`
+  const totalMinor = stayed.reduce((sum, night) => sum + night.price_minor!, 0)
+  const monthly = stayed.length >= 28
+  const comparisonMinor = monthly ? Math.round(totalMinor * 30 / stayed.length) : totalMinor
+  const displayMinor = Math.ceil(comparisonMinor / 100) * 100
+  expect(quote.price_summary).toEqual({ basis: monthly ? 'month' : 'stay', amount_minor: comparisonMinor, display_amount_minor: displayMinor })
+  const headline = new Intl.NumberFormat('en-US', { style: 'currency', currency: home.currency, maximumFractionDigits: 0, minimumFractionDigits: 0 }).format(displayMinor / 100)
+  const priceLabel = `${headline} ${monthly ? 'monthly' : `for ${stayed.length} ${stayed.length === 1 ? 'night' : 'nights'}`}`
   await datePicker.getByRole('button', { name: 'Close', exact: true }).click()
   await card.getByRole('button', { name: priceLabel, exact: true }).click()
   const priceDetails = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Price details', exact: true }) })

@@ -65,6 +65,7 @@ test('a restaurant blocks the same weekdays at two locations from the places gri
     await page.goto(`/dashboard/${restaurant.slug}/calendar?view=places&from=${from}`)
     const grid = page.getByTestId('places-grid')
     await expect(grid.locator('[data-place]')).toHaveCount(calendar.places.length)
+    await expect.poll(() => grid.locator('[data-place]').evaluateAll(rows => rows.map(row => row.getAttribute('data-place')).sort())).toEqual(calendar.places.map(entry => `${entry.place.kind}:${entry.place.id}`).sort())
     await expect(grid.locator(`[data-place="location:${brooklyn.id}"] span`)).toHaveText(['Ember & Slice Brooklyn', '120 Atlantic Avenue, Brooklyn'])
     await expect(grid.locator(`[data-place="offering:${pizza!.id}"] span`)).toHaveText(['Pizza-Making Class', 'Experience · Ember & Slice Brooklyn'])
     // The booked day is a bar counting its reservations; it opens that day, narrowed to the location.
