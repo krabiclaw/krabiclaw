@@ -1904,12 +1904,6 @@ async function commit(concern?: ProductConcern) {
       creationSubmitted.value = false
       createKey.value = crypto.randomUUID()
     }
-    if (ordinaryDraft || bookingDraft || scheduleDraft || locationDraft || safetyDraft || arrivalTimeDraft || houseRulesDraft || propertyDraft || publicationDraft !== null || error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
-      try {
-        await reload()
-        if (scheduleDraft) await reloadSchedule()
-      } catch (readError) { saveError.value += ` ${getErrorMessage(readError, 'The saved listing could not be read again')}` }
-    }
     if (ordinaryDraft) {
       const draft = ordinaryDraft.values
       if (editorKey.value === 'attributes' || editorKey.value === 'price') form.details = draft.details
@@ -1943,6 +1937,20 @@ async function commit(concern?: ProductConcern) {
       }
     }
     restoreHouseRules(concern === 'additional-rules')
+    // The draft is back in the form and stays unsaved until a save succeeds, so
+    // the lock is released before the summaries are read again: a re-read that
+    // is slow or never answers must not keep Save from being pressed again.
+    saving.value = false
+    if (ordinaryDraft || bookingDraft || scheduleDraft || locationDraft || safetyDraft || arrivalTimeDraft || houseRulesDraft || propertyDraft || publicationDraft !== null || error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
+      try {
+        await reload()
+        if (scheduleDraft) await reloadSchedule()
+        // The draft keeps the version it was edited from, so a write that was
+        // committed after all is caught as a conflict rather than overwritten.
+        if (ordinaryDraft) editVersion.value = ordinaryDraft.version
+        if (bookingDraft || scheduleDraft) editVersion.value = bookingVersion
+      } catch (readError) { saveError.value += ` ${getErrorMessage(readError, 'The saved listing could not be read again')}` }
+    }
   } finally {
     saving.value = false
   }
