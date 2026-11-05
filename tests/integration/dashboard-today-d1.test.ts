@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import test, { type TestContext } from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
-import { H3 } from 'h3'
+import { H3, H3Event } from 'h3'
 import { hashPassword } from 'better-auth/crypto'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
@@ -21,9 +21,38 @@ import goalUpdateRoute from '../../server/api/organizations/[organizationId]/goa
 import feedbackRoute from '../../server/api/organizations/[organizationId]/recommendation-feedback.put.ts'
 import type { TodayCard, TodayFeedPayload } from '../../shared/dashboard-today.ts'
 import { localDateAt } from '../../utils/timezone.ts'
+import { cancelScheduledGuestMessage, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
+import { cancelSendLaterMessage, createSendLaterMessage, sendDueSendLaterMessages } from '../../server/domain/send-later.ts'
+import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
+import { sendReviewRequestForBooking } from '../../server/utils/review-request-delivery.ts'
+import { claimGuestThreadInvite, createGuestThreadInvite } from '../../server/domain/guest-threads/invites.ts'
+import { createTableReservation } from '../../server/domain/table-reservations.ts'
+import { upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
+import { applyResendEmailEvent, deliverReceiptEmail } from '../../server/domain/guest-threads/deliveries.ts'
+import type { GuestThreadDeliveryRow } from '../../server/domain/guest-threads/types.ts'
 
 const ORG = 'org', OWNER = 'owner', ZONE = 'America/Denver'
 const DAY = 86_400_000
+
+/** Only the provider HTTP boundary is controlled; domain writes, receipts, authorization and reads stay real. */
+function providerTransport(t: TestContext) {
+  const sent = new Map<string, { to: string[]; subject: string }>()
+  let reject = false
+  t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+    if (init.method === 'GET') {
+      const id = url.split('/').at(-1)!, message = sent.get(id)
+      assert.ok(message, `unexpected provider read: ${url}`)
+      return Response.json({ id, message_id: `<${id}@provider.example>`, to: message.to, subject: message.subject })
+    }
+    assert.equal(url, 'https://api.resend.com/emails')
+    if (reject) return Response.json({ name: 'validation_error', message: 'controlled recipient rejection' }, { status: 422 })
+    const id = new Headers(init.headers).get('idempotency-key')!
+    assert.ok(id)
+    sent.set(id, JSON.parse(String(init.body)))
+    return Response.json({ id })
+  })
+  return { sent, reject(value: boolean) { reject = value }, configuration: { EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-today-provider', EMAIL_FROM: 'Proof <hello@krabiclaw.com>' } }
+}
 
 async function boot() {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -75,11 +104,11 @@ async function boot() {
 
 async function contactThread(db: D1Database, id: string, message: string, createdAt: string) {
   await db.batch(requestInsertQueries({ id, kind: 'contact', organization_id: ORG, location_id: null, user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null,
-    payload: { guest: { name: id === 'old-inquiry' ? 'Olive' : 'Rhea', email: `${id}@guest.example`, phone: null }, subject: null, message, consent_at: null, ip_hash: null },
+    payload: { guest: { name: id === 'old-inquiry' ? 'Olive' : 'Rhea', email: `${id}@provider-proof.com`, phone: null }, subject: null, message, consent_at: null, ip_hash: null },
     created_at: createdAt, updated_at: createdAt }).map(write => db.prepare(write.query).bind(...write.params)))
 }
 
-test('Today and Upcoming select work from obligations, the owner’s priority and their decisions, and stop once the canonical operation completes', async () => {
+test('Today and Upcoming select work from obligations, the owner’s priority and their decisions, and stop once the canonical operation completes', async t => {
   const { runtime, db, env, homeId, call } = await boot()
   try {
     const now = Date.now()
@@ -95,7 +124,7 @@ test('Today and Upcoming select work from obligations, the owner’s priority an
     const checkIn = localDateAt(new Date(now + 10 * DAY), ZONE), checkOut = localDateAt(new Date(now + 12 * DAY), ZONE)
     const manager: StayAccess = { organizationId: ORG, actorId: OWNER, manage: true }
     const stay = await createStay(db, env, manager, { product_id: homeId, idempotency_key: 'upcoming-stay', check_in_date: checkIn, check_out_date: checkOut, adults: 2,
-      guest_name: 'Stella', guest_email: 'stella@guest.example', total_minor: 30_000 })
+      guest_name: 'Stella', guest_email: 'stella@provider-proof.com', total_minor: 30_000 })
     const stayThread = (await db.prepare("SELECT id FROM requests WHERE kind = 'stay'").first<{ id: string }>())!.id
     // The guest-message pipeline's own writes, dated when the guest wrote.
     const question = await appendEntry(db, { threadId: stayThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'What time can we check in?', dedupeKey: 'stay-question', occurredAt: new Date(now - 20 * DAY).toISOString() })
@@ -167,12 +196,168 @@ test('Today and Upcoming select work from obligations, the owner’s priority an
 
     // Completing the work through its own operation removes it on the next read.
     await updateBlogLifecycle(db as unknown as D1Database, sourdough.id, { expected_updated_at: edited.post.updated_at }, ORG, OWNER)
-    await executeGuestThreadOperation(db, { threadId: stayThread, organizationId: ORG, action: 'reply', body: 'Check-in opens at 4pm.', actorUserId: OWNER, idempotencyKey: 'stay-reply', env })
+    const provider = providerTransport(t)
+    const response = await executeGuestThreadOperation(db, { threadId: stayThread, organizationId: ORG, action: 'reply', body: 'Check-in opens at 4pm.', actorUserId: OWNER, idempotencyKey: 'stay-reply', env: { ...env, ...provider.configuration } })
+    assert.equal(response.ok, true, JSON.stringify(response))
     feed = await today()
     assert.equal(ids(feed).includes(`draft:${sourdough.id}`), false)
     assert.equal(ids(feed).includes(`attention:${stayThread}`), false)
+    assert.equal(feed.cards.filter(card => card.id === `completed:reply:${stayThread}`).length, 1)
     assert.equal(feed.cards.filter(card => card.priority === 'opportunity').length, 0, 'with nothing worth doing, no optional work is invented')
   } finally {
     await runtime.dispose()
+  }
+})
+
+test('Today reads actual scheduled work and review outcomes: cancellation clears it, successful work moves to completed once, and an unsent failure stays actionable', async t => {
+  const reference = new Date()
+  reference.setUTCHours(18, 0, 0, 0)
+  t.mock.timers.enable({ apis: ['Date'], now: reference })
+  const { runtime, db, env, homeId, call } = await boot()
+  try {
+    const now = Date.now(), access: StayAccess = { organizationId: ORG, actorId: OWNER, manage: true }
+    const principal = memberAccessPrincipal((await resolveMembership(env, { organizationId: ORG, userId: OWNER }))!, { env })
+    const read = (range = 'today') => call<TodayFeedPayload>('GET', `/api/dashboard/today?org=${ORG}&range=${range}${range === 'upcoming' ? `&from=${localDateAt(new Date(now + DAY), ZONE)}&to=${localDateAt(new Date(now + 7 * DAY), ZONE)}` : ''}`)
+    const stay = await createStay(db, env, access, { product_id: homeId, idempotency_key: 'scheduled-stay', check_in_date: localDateAt(new Date(now + 3 * DAY), ZONE),
+      check_out_date: localDateAt(new Date(now + 5 * DAY), ZONE), adults: 2, guest_name: 'Stella', guest_email: 'stella@provider-proof.com', total_minor: 30_000 })
+    const template = await saveMessageTemplate(db, env, access, null, { title: 'Arrival reminder', body: 'Your cabin will be ready after 4pm.',
+      schedule: { trigger: 'check_in', offsetDays: -1, localTime: '09:00', productIds: [homeId] } })
+    const planned = await db.prepare('SELECT id,status,due_at FROM scheduled_guest_messages WHERE template_id=? AND stay_id=?').bind(template.id, stay.id).first<{ id: string; status: string; due_at: string }>()
+    assert.ok(planned)
+    let feed = await read('upcoming')
+    const automatic = feed.cards.find(card => card.id === `automatic-message:${planned.id}`)
+    assert.ok(automatic)
+    assert.equal(automatic.actionAt, planned.due_at)
+    assert.match(automatic.reason!, /^Automatic · /)
+    assert.equal(automatic.completedAt, null)
+    await cancelScheduledGuestMessage(db, env, access, planned.id)
+    assert.equal(await db.prepare('SELECT status FROM scheduled_guest_messages WHERE id=?').bind(planned.id).first('status'), 'cancelled')
+    assert.equal((await read('upcoming')).cards.some(card => card.id === automatic.id), false)
+
+    const abandoned = await createSendLaterMessage(db, principal, stay.request_id!, { body: 'An unnecessary follow-up.', sendAt: new Date(now + DAY).toISOString() })
+    assert.equal((await read('upcoming')).cards.filter(card => card.id === `send-later:${abandoned.id}`).length, 1)
+    await cancelSendLaterMessage(db, principal, abandoned.id)
+    assert.equal((await read('upcoming')).cards.some(card => card.id === `send-later:${abandoned.id}`), false)
+
+    const provider = providerTransport(t), providerEnv = { ...env, ...provider.configuration }
+    const later = await createSendLaterMessage(db, principal, stay.request_id!, { body: 'Your cabin is ready.', sendAt: new Date(now + 60_000).toISOString() })
+    assert.equal((await read()).cards.find(card => card.id === `send-later:${later.id}`)?.completedAt, null)
+    t.mock.timers.tick(120_000)
+    const sentResult = await sendDueSendLaterMessages(db, providerEnv)
+    assert.deepEqual(sentResult, { sent: 1, failed: 0, needs_review: 0 }, JSON.stringify(await db.prepare('SELECT status,reason,error_code FROM send_later_messages WHERE id=?').bind(later.id).first()))
+    const sent = await db.prepare('SELECT status,sent_at,entry_id FROM send_later_messages WHERE id=?').bind(later.id).first<{ status: string; sent_at: string; entry_id: string }>()
+    assert.equal(sent?.status, 'sent')
+    feed = await read()
+    assert.equal(feed.cards.filter(card => card.id === `send-later:${later.id}` && card.completedAt === sent!.sent_at).length, 1)
+    assert.equal(feed.cards.some(card => card.id === `completed:reply:${stay.request_id}`), false, 'one scheduled send never creates a second manual reply completion')
+    const receipt = (await db.prepare('SELECT * FROM guest_thread_deliveries WHERE entry_id=? AND purpose=?').bind(sent!.entry_id, 'member_reply').first<GuestThreadDeliveryRow>())!
+    // A later completion/metadata error is visible even though dispatch itself already succeeded.
+    await db.prepare(`CREATE TRIGGER reject_delivery_completion BEFORE UPDATE OF error ON guest_thread_deliveries
+      WHEN OLD.id='${receipt.id.replaceAll("'", "''")}' AND NEW.error IS NULL BEGIN SELECT RAISE(ABORT,'controlled completion failure'); END`).run()
+    const snapshot = JSON.parse(receipt.email_json!) as { message: Parameters<typeof deliverReceiptEmail>[1]['email'] }
+    await assert.rejects(deliverReceiptEmail(db, { delivery: receipt, env: providerEnv, threadId: stay.request_id!, email: snapshot.message }), (error: Error) => {
+      assert.ok(error.cause instanceof Error)
+      assert.match(error.cause.message, /controlled completion failure/)
+      return true
+    })
+    await db.prepare('DROP TRIGGER reject_delivery_completion').run()
+    let attention = (await read()).cards.find(card => card.id === `send-later:${later.id}`)
+    assert.equal(attention?.priority, 'attention')
+    assert.equal(attention?.completedAt, null)
+    assert.equal(attention!.reason, await db.prepare('SELECT error FROM guest_thread_deliveries WHERE id=?').bind(receipt.id).first('error'))
+    const deliveredEvent = { type: 'email.delivered', created_at: new Date().toISOString(), data: { email_id: receipt.provider_message_id!,
+      created_at: new Date().toISOString(), from: 'hello@krabiclaw.com', to: ['stella@provider-proof.com'], subject: 'Proof', message_id: receipt.email_message_id! } } as Parameters<typeof applyResendEmailEvent>[2]
+    assert.equal(await applyResendEmailEvent(db, env, deliveredEvent), 'advanced')
+    attention = (await read()).cards.find(card => card.id === `send-later:${later.id}`)
+    assert.equal(attention?.priority, 'schedule')
+    assert.equal(attention?.completedAt, sent!.sent_at)
+    assert.equal(provider.sent.size, 1, 'receipt recovery never sends another email')
+
+    const failure = await createSendLaterMessage(db, principal, stay.request_id!, { body: 'Please call about arrival.', sendAt: new Date(Date.now() + 60_000).toISOString() })
+    provider.reject(true)
+    t.mock.timers.tick(120_000)
+    assert.deepEqual(await sendDueSendLaterMessages(db, providerEnv), { sent: 0, failed: 1, needs_review: 0 })
+    const failedCard = (await read()).cards.find(card => card.id === `send-later:${failure.id}`)
+    assert.equal(failedCard?.priority, 'attention')
+    assert.equal(failedCard?.completedAt, null)
+    assert.match(failedCard!.reason!, /controlled recipient rejection/)
+    provider.reject(false)
+    const willBounce = await createSendLaterMessage(db, principal, stay.request_id!, { body: 'Please review your arrival details.', sendAt: new Date(Date.now() + 60_000).toISOString() })
+    t.mock.timers.tick(120_000)
+    assert.deepEqual(await sendDueSendLaterMessages(db, providerEnv), { sent: 1, failed: 0, needs_review: 0 })
+    const bounceReceipt = (await db.prepare('SELECT d.* FROM guest_thread_deliveries d JOIN send_later_messages m ON m.entry_id=d.entry_id WHERE m.id=? AND d.purpose=?').bind(willBounce.id, 'member_reply').first<GuestThreadDeliveryRow>())!
+    assert.equal(await applyResendEmailEvent(db, env, { ...deliveredEvent, type: 'email.bounced', data: { ...deliveredEvent.data, email_id: bounceReceipt.provider_message_id!, message_id: bounceReceipt.email_message_id!,
+      bounce: { type: 'Permanent', subType: 'General', message: 'mailbox unavailable' } } } as Parameters<typeof applyResendEmailEvent>[2]), 'advanced')
+    const bounced = (await read()).cards.find(card => card.id === `send-later:${willBounce.id}`)
+    assert.equal(bounced?.priority, 'attention')
+    assert.equal(bounced?.completedAt, null)
+    assert.match(bounced!.reason!, /mailbox unavailable/)
+    assert.equal((await read('upcoming')).cards.some(card => card.id === bounced!.id), false)
+    const ordered = (await read()).cards
+    const firstScheduled = ordered.findIndex(card => card.priority === 'schedule')
+    assert.ok(firstScheduled > 0)
+    assert.equal(ordered.slice(firstScheduled).some(card => card.priority === 'attention'), false, 'attention cannot be pushed behind scheduled or completed work by pagination')
+
+    // The existing review dispatch owns the automatic work and marks its real success.
+    await db.prepare("INSERT INTO organization_domains (id,organization_id,domain,role,status,type) VALUES ('review-domain',?,'cabin.example','canonical','active','custom')").bind(ORG).run()
+    await db.prepare("INSERT INTO subscription (id,plan,referenceId,status,periodEnd) VALUES ('review-plan','growth',?,'active',4102444800)").bind(ORG).run()
+    await db.prepare('UPDATE business_locations SET max_capacity=8,opening_hours=? WHERE id=?').bind(JSON.stringify({ periods: Array.from({ length: 7 }, (_, day) => ({ open: { day, hour: 9, minute: 0 }, close: { day, hour: 21, minute: 0 } })) }), 'location').run()
+    await upsertLocationReservationConfig(db, { organizationId: ORG, locationId: 'location', patch: { duration_minutes: 60, slot_capacity: 8 }, actorId: OWNER })
+    const reservationRequest = Object.assign(new Request('https://proof.example/api/mcp'), { runtime: { cloudflare: { env } } })
+    const reservation = await createTableReservation(new H3Event(reservationRequest), { organizationId: ORG, financialWritesAllowed: false,
+      operator: { userId: OWNER, idempotencyKey: 'today-confirmed-reservation', source: 'operator', externalReference: null, guestAcknowledgement: false },
+      body: { name: 'Ravi', email: 'ravi@provider-proof.com', phone: '+66812345678', date: localDateAt(new Date(Date.now() + DAY), ZONE), time: '12:00', guests: '2', location_id: 'location' } })
+    assert.equal(reservation.status, 201, JSON.stringify(reservation.body))
+    const reservationId = String(reservation.body.request_id)
+    assert.equal(await db.prepare('SELECT status FROM reservations WHERE request_id=?').bind(reservationId).first('status'), 'confirmed')
+    assert.equal((await read()).cards.filter(card => card.id === `completed:booking:${reservationId}`).length, 1)
+    const ended = await createStay(db, env, access, { product_id: homeId, idempotency_key: 'ended-stay', check_in_date: localDateAt(new Date(now - 5 * DAY), ZONE),
+      check_out_date: localDateAt(new Date(now - 2 * DAY), ZONE), adults: 1, guest_name: 'Rhea', guest_email: 'rhea@provider-proof.com', total_minor: 45_000 })
+    const guest = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
+    const invite = await createGuestThreadInvite(db, env, { organizationId: ORG, threadId: ended.request_id!, actorUserId: OWNER })
+    await claimGuestThreadInvite(db, { token: new URL(invite.url).pathname.split('/').at(-1)!, userId: guest.response!.user.id })
+    const justEnded = await createStay(db, env, access, { product_id: homeId, idempotency_key: 'just-ended-stay', check_in_date: localDateAt(new Date(now - DAY), ZONE),
+      check_out_date: localDateAt(new Date(now), ZONE), adults: 1, guest_name: 'Rhea', guest_email: 'rhea@provider-proof.com', total_minor: 15_000 })
+    const freshInvite = await createGuestThreadInvite(db, env, { organizationId: ORG, threadId: justEnded.request_id!, actorUserId: OWNER })
+    await claimGuestThreadInvite(db, { token: new URL(freshInvite.url).pathname.split('/').at(-1)!, userId: guest.response!.user.id })
+    const futureReview = (await read('upcoming')).cards.find(card => card.id === `review-invitation:${justEnded.request_id}`)
+    assert.ok(futureReview)
+    assert.equal(futureReview.priority, 'schedule')
+    assert.equal(localDateAt(new Date(futureReview.actionAt!), ZONE), localDateAt(new Date(now + DAY), ZONE))
+    assert.equal((await read()).cards.some(card => card.id === futureReview.id), false)
+    const dueReview = (await read()).cards.find(card => card.id === `review-invitation:${ended.request_id}`)
+    assert.ok(dueReview)
+    assert.equal(dueReview.priority, 'schedule', 'automatic work with no failure is not an invented owner action')
+    const delivered = await sendReviewRequestForBooking(providerEnv, db, 'stay', ended.request_id!)
+    assert.equal(delivered.sent, true)
+    const visit = await db.prepare('SELECT first_sent_at,send_count FROM review_requests WHERE booking_id=?').bind(ended.request_id).first<{ first_sent_at: string; send_count: number }>()
+    assert.equal(visit?.send_count, 1)
+    feed = await read()
+    assert.equal(feed.cards.some(card => card.id === dueReview.id), false)
+    assert.deepEqual(feed.cards.filter(card => card.id === `completed:review:${ended.request_id}`).map(card => card.completedAt), [visit!.first_sent_at])
+    await assert.rejects(sendReviewRequestForBooking(providerEnv, db, 'stay', ended.request_id!), /not due a review invitation/)
+    assert.equal((await read()).cards.filter(card => card.id === `completed:review:${ended.request_id}`).length, 1)
+    assert.equal(provider.sent.size, 3, 'two scheduled sends and one invitation reached the controlled provider')
+    assert.equal(feed.cards.some(card => /paid sale|gems|coins|recipe points/i.test(card.headline)), false)
+    const other = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
+    await createAuth(env).api.addMember({ body: { organizationId: ORG, userId: other.response!.user.id, role: 'admin' } })
+    const teammate = memberAccessPrincipal((await resolveMembership(env, { organizationId: ORG, userId: other.response!.user.id }))!, { env })
+    const teamReply = await createSendLaterMessage(db, teammate, stay.request_id!, { body: 'The office can help with directions.', sendAt: new Date(Date.now() + 60_000).toISOString() })
+    assert.equal((await read()).cards.some(card => card.id === `send-later:${teamReply.id}`), false, 'another member’s unsent reply remains private')
+    t.mock.timers.tick(120_000)
+    assert.deepEqual(await sendDueSendLaterMessages(db, providerEnv), { sent: 1, failed: 0, needs_review: 0 })
+    const teamCompletion = (await read()).cards.find(card => card.id === `send-later:${teamReply.id}`)
+    assert.ok(teamCompletion?.completedAt)
+    assert.equal(teamCompletion.eyebrow, 'Sent · Scheduled reply')
+    const teamPrivate = await createSendLaterMessage(db, teammate, stay.request_id!, { body: 'Private draft for tomorrow.', sendAt: new Date(Date.now() + DAY).toISOString() })
+    assert.equal((await read('upcoming')).cards.some(card => card.id === `send-later:${teamPrivate.id}`), false)
+    assert.equal(provider.sent.size, 4)
+    t.mock.timers.tick(DAY)
+    const tomorrow = await read()
+    assert.equal(tomorrow.cards.find(card => card.id === `send-later:${failure.id}`)?.priority, 'attention', 'an unresolved send failure survives midnight')
+    assert.equal(tomorrow.cards.some(card => card.id === `completed:review:${ended.request_id}`), false, 'yesterday’s completed work is not presented as completed today')
+  } finally {
+    await runtime.dispose()
+    t.mock.timers.reset()
   }
 })

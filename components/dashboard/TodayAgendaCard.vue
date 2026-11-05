@@ -8,7 +8,7 @@
     :data-card-id="item.id"
     :data-card-priority="item.priority"
     class="group block transition hover:bg-elevated active:scale-[0.98] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-    :ui="{ body: 'flex min-h-36 items-center justify-between gap-4 sm:min-h-40 sm:gap-6' }"
+    :ui="{ body: compact ? 'flex items-center justify-between gap-3 py-3' : 'flex min-h-36 items-center justify-between gap-4 sm:min-h-40 sm:gap-6' }"
     @click="onCardClick"
   >
     <div class="min-w-0 flex-1">
@@ -18,7 +18,7 @@
       <p class="mt-1 text-base font-semibold leading-snug text-highlighted">
         {{ item.headline }}
       </p>
-      <p v-if="item.description" class="mt-5 line-clamp-2 text-base leading-normal text-muted">
+      <p v-if="item.description" class="line-clamp-2 leading-normal text-muted" :class="compact ? 'mt-1 text-sm' : 'mt-5 text-base'">
         {{ item.description }}
       </p>
       <p v-if="item.reason" class="mt-3 text-sm leading-normal text-muted" data-testid="today-card-reason">
@@ -26,16 +26,16 @@
       </p>
     </div>
 
-    <div class="relative h-14 w-18 shrink-0 self-start sm:h-20 sm:w-26" aria-hidden="true">
+    <div class="relative shrink-0 self-start" :class="compact ? 'h-10 w-12' : 'h-14 w-18 sm:h-20 sm:w-26'" aria-hidden="true">
       <UAvatar
         :src="avatarSrc"
         alt=""
         :icon="item.imageIcon"
-        class="size-14 sm:size-20"
+        :class="compact ? 'size-10' : 'size-14 sm:size-20'"
         :ui="{ root: isOffer ? 'rounded-none bg-transparent' : undefined, icon: 'size-7 sm:size-10', image: isOffer ? 'object-contain' : item.imageFit === 'contain' ? 'object-contain p-1.5 sm:p-2' : undefined }"
       />
 
-      <div v-if="item.badgeImageUrl || item.badgeIcon" class="absolute bottom-0 right-0 flex size-8 items-center justify-center overflow-hidden rounded-xl border-2 border-default bg-default shadow-sm sm:size-11">
+      <div v-if="!compact && (item.badgeImageUrl || item.badgeIcon)" class="absolute bottom-0 right-0 flex size-8 items-center justify-center overflow-hidden rounded-xl border-2 border-default bg-default shadow-sm sm:size-11">
         <img v-if="item.badgeImageUrl" :src="item.badgeImageUrl" alt="" class="size-full object-cover">
         <UIcon v-else-if="item.badgeIcon" :name="item.badgeIcon" class="size-4 text-muted sm:size-5" />
       </div>
@@ -80,6 +80,7 @@ import { cfImageVariant } from '~/utils/cf-image'
 const props = defineProps<{
   item: TodayCard
   surface?: string
+  compact?: boolean
   /** Saves one decision about this card and reads Today again; false when the save failed and the page shows why. */
   onDecide?: (item: TodayCard, input: TodayDecisionInput) => Promise<boolean>
 }>()
