@@ -70,14 +70,6 @@
             <TodayAgendaCard v-for="item in hostingItems" :key="item.id" :item="item" :surface="activeRange" compact />
           </div>
         </details>
-
-        <section v-if="completedItems.length" aria-labelledby="today-completed-heading" data-testid="today-completed">
-          <h2 id="today-completed-heading" class="text-base font-semibold text-highlighted">Completed today</h2>
-          <p class="mt-1 text-sm text-muted">Confirmed work by your team and automations.</p>
-          <div class="mt-4 space-y-3">
-            <TodayAgendaCard v-for="item in completedItems" :key="item.id" :item="item" :surface="activeRange" compact />
-          </div>
-        </section>
       </div>
 
       <div v-if="!visibleItems.length && !hostingItems.length && !activeLoading && !activeError && !hasMore && (personalScope || activeRange === 'upcoming')" class="py-24 text-center">
@@ -211,12 +203,11 @@ const decisionError = ref<unknown>(null)
 const allRangeItems = computed(() => activeRange.value === 'today' ? todayCards.value : upcomingItems.value)
 // Only a current stay has no occurrence/action instant in the canonical agenda.
 const isHosting = (card: TodayCard) => !card.completedAt && card.priority === 'schedule' && card.bookingKind === 'stay' && card.occurrenceAt === null && card.actionAt === null
-const dayItems = computed(() => todayCards.value.filter(card => props.personalScope || !isHosting(card)))
+const dayItems = computed(() => todayCards.value.filter(card => props.personalScope || (!card.completedAt && !isHosting(card))))
 const visibleItems = computed(() => (activeRange.value === 'today' ? dayItems.value.slice(0, todayVisibleCount.value) : upcomingItems.value).map(cardWithContext))
 const hostingItems = computed(() => props.personalScope || activeRange.value !== 'today' ? [] : todayCards.value.filter(isHosting).map(cardWithContext))
 const attentionItems = computed(() => visibleItems.value.filter(card => card.priority === 'attention'))
-const scheduledItems = computed(() => visibleItems.value.filter(card => card.priority === 'schedule' && !card.completedAt))
-const completedItems = computed(() => visibleItems.value.filter(card => card.completedAt !== null))
+const scheduledItems = computed(() => visibleItems.value.filter(card => card.priority === 'schedule'))
 const optionalItems = computed(() => visibleItems.value.filter(card => card.priority === 'opportunity'))
 const hasMore = computed(() => activeRange.value === 'today'
   ? todayVisibleCount.value < dayItems.value.length
