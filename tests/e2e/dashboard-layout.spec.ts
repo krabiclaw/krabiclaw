@@ -1551,7 +1551,7 @@ test.describe('dashboard pane hierarchy', () => {
     expect(pageErrors).toEqual([])
   })
 
-  test('mobile scroll ends Today after its real final card and one panel padding', async ({ page }) => {
+  test('mobile scroll ends Today after its real final content and one panel padding', async ({ page }) => {
     const feedRead = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo', locationId: seededTenant('restaurant').locations.brooklyn.id } })
     expect(feedRead.status(), await feedRead.text()).toBe(200)
     const feed = await feedRead.json() as TodayFeedPayload
@@ -1577,11 +1577,11 @@ test.describe('dashboard pane hierarchy', () => {
     await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
     const last = cards.last()
     await expect(last).toContainText(feed.cards.at(-1)!.headline)
-    await expect(last).toBeInViewport({ ratio: 1 })
     const finalBody = (await body.boundingBox())!
-    // Due work carries its decisions (I'll do this, Later, Dismiss, Correct) beneath the card; they end the item.
-    const decisions = last.locator('xpath=following-sibling::*[1][@data-testid="today-card-decisions"]')
-    const finalItem = (await (await decisions.count() ? decisions : last).boundingBox())!
+    // Optional suggestions and the owner's priority form follow operational work.
+    const priorityForm = panel.getByTestId('today-priorities').locator('form')
+    await expect(priorityForm).toBeInViewport({ ratio: 1 })
+    const finalItem = (await priorityForm.boundingBox())!
     expect(finalBody.y + finalBody.height - finalItem.y - finalItem.height, 'Today has the canonical 16px panel padding after its last item').toBeCloseTo(16, 0)
     const nav = (await page.getByTestId('dashboard-mobile-nav').boundingBox())!
     expect(finalBody.y + finalBody.height).toBeCloseTo(nav.y, 0)
@@ -1852,9 +1852,11 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(page.getByRole('heading', { name: 'Calendar', exact: true })).toBeVisible()
       await mobileNav.getByRole('link', { name: 'Messages', exact: true }).click()
       await expect(page).toHaveURL('/dashboard/account/messages')
-      await page.getByRole('button', { name: 'All, filter by message type' }).click()
+      // A guest's own Messages lists their conversations and nothing else: no kind
+      // menu at all, so no Updates in it; updates are the bell's.
+      await expect(page.locator('[data-guest-thread-list-hydrated="true"]')).toBeVisible()
+      await expect(page.getByRole('button', { name: /filter by (conversation|message) type$/ })).toHaveCount(0)
       await expect(page.getByRole('menuitemcheckbox', { name: 'Updates', exact: true })).toHaveCount(0)
-      await page.keyboard.press('Escape')
       const personalUnread = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/notifications/unread-count'
         && new URL(response.url()).searchParams.get('scope') === 'personal')
       const personalNotifications = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/notifications'

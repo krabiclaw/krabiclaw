@@ -42,7 +42,7 @@ import type {
 // member to reach for. Archive and unarchive say where the conversation is
 // filed, not what state it is in, and touch neither the booking nor
 // conversation_state.
-export const GUEST_THREAD_ACTIONS = new Set(['confirm', 'reject', 'cancel', 'no_show', 'reply', 'archive', 'unarchive', 'report', 'block', 'unblock', 'accept_change', 'decline_change'])
+export const GUEST_THREAD_ACTIONS = new Set(['confirm', 'reject', 'cancel', 'no_show', 'reply', 'archive', 'unarchive', 'report', 'block', 'unblock', 'accept_change', 'decline_change', 'retry'])
 
 type SuccessfulOperationOutcome = { ok: true; status: 200; thread: GuestThreadRow; availableActions: string[] }
 

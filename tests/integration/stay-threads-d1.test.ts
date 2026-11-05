@@ -117,19 +117,8 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.ok(cyThread)
     assert.deepEqual(await db.prepare('SELECT guest_email, request_id FROM stays WHERE id = ?').bind(cy.id).first(), { guest_email: 'cy@example.test', request_id: cyThread })
 
-    // The inbox lists them with their nights for owners and admins. A stay's guest conversation is not a member's,
-    // even the member who looks after the home: they read its stays as turnovers.
-    const principal = (userId: string, role: string) => memberAccessPrincipal({ userId, role, organizationId: ORG }, { env })
-    const listed = await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay' })
-    assert.deepEqual(listed.map(row => row.id).sort(), [ana.request_id, boWithEmail.request_id, cyThread, dee.request_id].sort())
-    const anaRow = listed.find(row => row.id === ana.request_id)!
-    assert.equal(anaRow.productId, cabin.id)
-    assert.equal(anaRow.stayChannel, 'direct')
-    const nights = (from: string, to: string) => [from, to].map(date => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(new Date(`${date}T00:00:00Z`)))
-    const [anaIn, anaOut] = nights(day(3), day(6))
-    assert.deepEqual([anaRow.submissionType, anaRow.whenLabel, anaRow.operationalStatusLabel, anaRow.mailbox], ['stay', `${anaIn} – ${anaOut} · 2 guests`, 'Confirmed', 'current'])
-    assert.deepEqual(await listGuestThreads(db, ORG, { userId: CLEANER, principal: principal(CLEANER, 'member') }), [])
-    assert.deepEqual(await listGuestThreads(db, ORG, { userId: OUTSIDER, principal: principal(OUTSIDER, 'member') }), [])
+    // A booking lands as a stay, not as a conversation: until someone writes, the inbox does not list it.
+    assert.deepEqual(await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay' }), [])
 
     // The thread is answered like any other; a stay is changed from its own screen, not its thread.
     const detail = (await getGuestThreadDetail(db, ana.request_id, ORG))!
@@ -138,6 +127,20 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.deepEqual([reply.ok, reply.status], [true, 200])
     assert.deepEqual(await db.prepare(`SELECT d.channel, d.status FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
       WHERE e.request_id = ? AND d.purpose = 'member_reply'`).bind(ana.request_id).first(), { channel: 'email', status: 'sent' })
+
+    // Once written to, the inbox lists it for owners and admins with the guest, the home and when the stay is, in the home's own clock.
+    // A stay's guest conversation is not a member's, even the member who looks after the home: they read its stays as turnovers.
+    const principal = (userId: string, role: string) => memberAccessPrincipal({ userId, role, organizationId: ORG }, { env })
+    const listed = await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay' })
+    assert.deepEqual(listed.map(row => row.id), [ana.request_id])
+    const homeToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
+    const arrivalIn = Math.round((Date.parse(`${day(3)}T00:00:00Z`) - Date.parse(`${homeToday}T00:00:00Z`)) / 86_400_000)
+    assert.deepEqual({ ...listed[0]!, time: undefined }, { id: ana.request_id, kind: 'guest', guestName: 'Ana Silva', avatarInitial: 'A', channel: 'direct', home: 'Cabin',
+      when: `In ${arrivalIn} days`, preview: 'The gate code is in your confirmation.', previewFrom: 'You', time: undefined, unread: false })
+    assert.deepEqual(await db.prepare('SELECT product_id, channel, request_id FROM stays WHERE id = ?').bind(ana.id).first(), { product_id: cabin.id, channel: 'direct', request_id: ana.request_id })
+    assert.equal((await getGuestThreadDetail(db, ana.request_id, ORG))?.mailbox, 'current')
+    assert.deepEqual(await listGuestThreads(db, ORG, { userId: CLEANER, principal: principal(CLEANER, 'member') }), [])
+    assert.deepEqual(await listGuestThreads(db, ORG, { userId: OUTSIDER, principal: principal(OUTSIDER, 'member') }), [])
     const cancel = await executeGuestThreadOperation(db, { threadId: ana.request_id, organizationId: ORG, action: 'cancel', actorUserId: OWNER, idempotencyKey: 'cancel-1', env })
     assert.deepEqual(cancel, { ok: false, status: 409, reason: 'invalid_transition', message: '"cancel" is not a valid action for the current state' })
     assert.equal(await db.prepare('SELECT status FROM stays WHERE id = ?').bind(ana.id).first('status'), 'confirmed')

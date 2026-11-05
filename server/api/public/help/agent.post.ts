@@ -103,7 +103,7 @@ export default defineHandler(async (event) => {
             role: 'user', content: [
               topic ? `Selected topic: ${topic}` : 'Selected topic: none', history.length ? `Recent conversation:\n${history.map(item => `${item.role}: ${item.content}`).join('\n')}` : 'Recent conversation: none', `User question: ${message}`, `Search results:\n${promptResults || 'No relevant results found.'}`, ].join('\n\n'), }, ], { maxTokens: 700, temperature: 0.2 })
 
-        const parsedOutput = parseAgentEnvelope(aiOutput)
+        const parsedOutput = parseAgentEnvelope(aiOutput.text)
         parsed = {
           ...parsedOutput, answer: parsedOutput.answer, }
       } catch (error) {

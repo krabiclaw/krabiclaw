@@ -84,7 +84,7 @@ export default defineScheduledTask({
 
     const { sent, failures } = await sendDue(db, env)
 
-    if (failures.length) throw new Error(`${failures.length} review requests were not sent: ${failures.join('; ')}`)
+    if (failures.length) throw new Error(`${failures.length} review invitation operations failed: ${failures.join('; ')}`)
     return { result: { sent, failed: 0 } }
   },
 })

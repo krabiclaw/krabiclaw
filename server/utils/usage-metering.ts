@@ -5,6 +5,7 @@ export type UsageResource =
   | 'scheduled_task'
   | 'maps_api'
   | 'messaging'
+  | 'suggested_replies'
 
 export interface UsageEventInput {
   organizationId: string

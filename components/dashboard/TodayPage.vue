@@ -32,28 +32,13 @@
         </template>
       </UAlert>
 
-      <section v-if="priorities" class="mb-8" aria-labelledby="today-priorities-heading" data-testid="today-priorities">
-        <h2 id="today-priorities-heading" class="text-base font-semibold text-highlighted">Your priority</h2>
-        <p class="mt-1 text-sm text-muted">Today suggests optional work that serves what you say matters now.</p>
-        <ul v-if="priorities.length" class="mt-4 space-y-2">
-          <li v-for="goal in priorities" :key="goal.id" class="flex items-start justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2" data-testid="today-priority">
-            <span class="min-w-0 text-sm text-highlighted">{{ goal.intent }}</span>
-            <UButton size="xs" color="neutral" variant="ghost" icon="i-lucide-x" :aria-label="`Remove priority: ${goal.intent}`" :loading="priorityBusy === goal.id" :disabled="priorityBusy !== null" @click="removePriority(goal)" />
-          </li>
-        </ul>
-        <form class="mt-4 flex gap-2" @submit.prevent="addPriority">
-          <UInput v-model="priorityDraft" class="flex-1" :maxlength="2000" required placeholder="What should the business focus on now?" aria-label="New priority" />
-          <UButton type="submit" color="neutral" variant="soft" label="Add" :loading="priorityBusy === 'new'" :disabled="priorityBusy !== null || !priorityDraft.trim()" />
-        </form>
-      </section>
-
       <UAlert v-if="decisionError" class="mb-6" color="error" variant="soft" title="Your choice was not saved" :description="getErrorMessage(decisionError, 'The request failed')" />
 
-      <h2 v-if="!personalScope || visibleItems.length" class="text-base font-semibold text-highlighted">
+      <h2 v-if="(personalScope && visibleItems.length) || activeRange === 'upcoming'" class="text-base font-semibold text-highlighted">
         {{ heading }}
       </h2>
 
-      <div v-if="visibleItems.length" class="mt-6 space-y-4">
+      <div v-if="(personalScope || activeRange === 'upcoming') && visibleItems.length" class="mt-6 space-y-4">
         <TodayAgendaCard
           v-for="item in visibleItems"
           :key="item.id"
@@ -63,7 +48,39 @@
         />
       </div>
 
-      <div v-else-if="!activeLoading && !activeError && !hasMore" class="py-24 text-center">
+      <div v-else-if="!personalScope && activeRange === 'today' && !activeError" class="space-y-8">
+        <section aria-labelledby="today-attention-heading" data-testid="today-attention">
+          <h2 id="today-attention-heading" class="text-base font-semibold text-highlighted">Needs your attention<span v-if="attentionCount"> · {{ attentionCount }}</span></h2>
+          <div v-if="attentionItems.length" class="mt-4 space-y-4">
+            <TodayAgendaCard v-for="item in attentionItems" :key="item.id" :item="item" :surface="activeRange" :on-decide="decide" />
+          </div>
+          <p v-else-if="!activeLoading && !attentionCount" class="mt-2 text-sm text-muted">Nothing needs your attention today</p>
+        </section>
+
+        <section v-if="scheduledItems.length" aria-labelledby="today-schedule-heading" data-testid="today-schedule">
+          <h2 id="today-schedule-heading" class="text-base font-semibold text-highlighted">Happening today</h2>
+          <div class="mt-4 space-y-4">
+            <TodayAgendaCard v-for="item in scheduledItems" :key="item.id" :item="item" :surface="activeRange" :on-decide="decide" />
+          </div>
+        </section>
+
+        <details v-if="hostingItems.length" class="rounded-xl border border-default p-4" data-testid="today-hosting">
+          <summary class="cursor-pointer text-base font-semibold text-highlighted">Currently hosting · {{ hostingItems.length }} {{ hostingItems.length === 1 ? 'stay' : 'stays' }}</summary>
+          <div class="mt-4 grid gap-3 sm:grid-cols-2">
+            <TodayAgendaCard v-for="item in hostingItems" :key="item.id" :item="item" :surface="activeRange" compact />
+          </div>
+        </details>
+
+        <section v-if="completedItems.length" aria-labelledby="today-completed-heading" data-testid="today-completed">
+          <h2 id="today-completed-heading" class="text-base font-semibold text-highlighted">Completed today</h2>
+          <p class="mt-1 text-sm text-muted">Confirmed work by your team and automations.</p>
+          <div class="mt-4 space-y-3">
+            <TodayAgendaCard v-for="item in completedItems" :key="item.id" :item="item" :surface="activeRange" compact />
+          </div>
+        </section>
+      </div>
+
+      <div v-if="!visibleItems.length && !hostingItems.length && !activeLoading && !activeError && !hasMore && (personalScope || activeRange === 'upcoming')" class="py-24 text-center">
         <img
           src="https://imagedelivery.net/Frxyb2_d_vGyiaXhS5xqCg/0b7e08d0-6b7d-471b-2957-9845392cc200/w=224"
           alt=""
@@ -75,6 +92,27 @@
         <p class="mt-6 text-base font-semibold text-highlighted">{{ emptyTitle }}</p>
         <p class="mt-1 text-sm text-muted">{{ emptyDescription }}</p>
       </div>
+
+      <section v-if="!personalScope && activeRange === 'today' && !activeError && (optionalItems.length || priorities)" class="mt-10 border-t border-default pt-8" aria-labelledby="today-optional-heading" data-testid="today-optional">
+        <h2 id="today-optional-heading" class="text-base font-semibold text-highlighted">Optional work</h2>
+        <div v-if="optionalItems.length" class="mt-4 space-y-4">
+          <TodayAgendaCard v-for="item in optionalItems" :key="item.id" :item="item" :surface="activeRange" :on-decide="decide" />
+        </div>
+        <div v-if="priorities" class="mt-6" aria-labelledby="today-priorities-heading" data-testid="today-priorities">
+          <h3 id="today-priorities-heading" class="text-sm font-semibold text-highlighted">Your priority</h3>
+          <p class="mt-1 text-sm text-muted">Choose a focus for optional suggestions.</p>
+          <ul v-if="priorities.length" class="mt-4 space-y-2">
+            <li v-for="goal in priorities" :key="goal.id" class="flex items-start justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2" data-testid="today-priority">
+              <span class="min-w-0 text-sm text-highlighted">{{ goal.intent }}</span>
+              <UButton size="xs" color="neutral" variant="ghost" icon="i-lucide-x" :aria-label="`Remove priority: ${goal.intent}`" :loading="priorityBusy === goal.id" :disabled="priorityBusy !== null" @click="removePriority(goal)" />
+            </li>
+          </ul>
+          <form class="mt-4 flex gap-2" @submit.prevent="addPriority">
+            <UInput v-model="priorityDraft" class="flex-1" :maxlength="2000" required placeholder="What should the business focus on now?" aria-label="New priority" />
+            <UButton type="submit" color="neutral" variant="soft" label="Add" :loading="priorityBusy === 'new'" :disabled="priorityBusy !== null || !priorityDraft.trim()" />
+          </form>
+        </div>
+      </section>
 
       <div
         v-if="hasMore"
@@ -171,9 +209,17 @@ const priorityDraft = ref('')
 const priorityBusy = ref<string | null>(null)
 const decisionError = ref<unknown>(null)
 const allRangeItems = computed(() => activeRange.value === 'today' ? todayCards.value : upcomingItems.value)
-const visibleItems = computed(() => (activeRange.value === 'today' ? todayCards.value.slice(0, todayVisibleCount.value) : upcomingItems.value).map(cardWithContext))
+// Only a current stay has no occurrence/action instant in the canonical agenda.
+const isHosting = (card: TodayCard) => !card.completedAt && card.priority === 'schedule' && card.bookingKind === 'stay' && card.occurrenceAt === null && card.actionAt === null
+const dayItems = computed(() => todayCards.value.filter(card => props.personalScope || !isHosting(card)))
+const visibleItems = computed(() => (activeRange.value === 'today' ? dayItems.value.slice(0, todayVisibleCount.value) : upcomingItems.value).map(cardWithContext))
+const hostingItems = computed(() => props.personalScope || activeRange.value !== 'today' ? [] : todayCards.value.filter(isHosting).map(cardWithContext))
+const attentionItems = computed(() => visibleItems.value.filter(card => card.priority === 'attention'))
+const scheduledItems = computed(() => visibleItems.value.filter(card => card.priority === 'schedule' && !card.completedAt))
+const completedItems = computed(() => visibleItems.value.filter(card => card.completedAt !== null))
+const optionalItems = computed(() => visibleItems.value.filter(card => card.priority === 'opportunity'))
 const hasMore = computed(() => activeRange.value === 'today'
-  ? todayVisibleCount.value < todayCards.value.length
+  ? todayVisibleCount.value < dayItems.value.length
   : upcomingCursor.value !== null && upcomingHorizon.value !== null && upcomingCursor.value <= upcomingHorizon.value)
 const activeLoading = computed(() => activeRange.value === 'today' ? pending.value : upcomingLoading.value)
 const activeError = computed(() => navigationError.value ?? todayError.value ?? (activeRange.value === 'upcoming' ? upcomingError.value : null))
@@ -350,8 +396,13 @@ watch(filterSignature, (newSig, oldSig) => {
   }
 }, { flush: 'sync' })
 watch(todayData, async (data) => {
+  const loadedThrough = upcomingItems.value.length ? upcomingCursor.value : null
   resetUpcoming()
-  if (activeRange.value === 'upcoming') await loadUpcoming()
+  if (activeRange.value === 'upcoming') {
+    const epoch = upcomingEpoch
+    do { await loadUpcoming() }
+    while (epoch === upcomingEpoch && loadedThrough && upcomingCursor.value && upcomingCursor.value < loadedThrough && hasMore.value && !upcomingError.value)
+  }
   if (!props.personalScope && data) {
     telemetry.track({
       action: 'today_view',
@@ -368,13 +419,37 @@ watch(todayData, async (data) => {
 }, { flush: 'post' })
 watch(realtime.event, event => {
   if (event?.type === 'thread.created' || event?.type === 'thread.changed' || event?.type === 'notification.created'
+    || event?.type === 'entry.appended' || event?.type === 'delivery.changed' || event?.type === 'access.changed'
     || event?.type === 'stay.changed' || event?.type === 'nights.changed') void refreshAgenda()
 })
 watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refreshAgenda() })
 
 const loadMoreSentinel = ref<HTMLElement | null>(null)
 let loadMoreObserver: IntersectionObserver | null = null
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleRefresh() {
+  if (refreshTimer) clearTimeout(refreshTimer)
+  if (document.visibilityState !== 'visible') return
+  // Re-read at the next known due instant, including later today, and at least
+  // once a minute for midnight/eligibility changes that have no write event.
+  const now = Date.now()
+  const next = [...todayCards.value, ...upcomingItems.value]
+    .flatMap(card => [card.actionAt, card.occurrenceAt])
+    .filter((at): at is string => at !== null && Date.parse(at) > now)
+    .reduce((soonest, at) => Math.min(soonest, Date.parse(at)), now + 60_000)
+  refreshTimer = setTimeout(() => { void refreshAgenda() }, Math.max(1000, next - now + 100))
+}
+function resumeAgenda() {
+  if (document.visibilityState === 'visible') void refreshAgenda()
+  else if (refreshTimer) clearTimeout(refreshTimer)
+}
+watch([todayData, upcomingItems], () => {
+  if (import.meta.client) scheduleRefresh()
+}, { flush: 'post', deep: true })
 onMounted(() => {
+  window.addEventListener('focus', resumeAgenda)
+  document.addEventListener('visibilitychange', resumeAgenda)
+  scheduleRefresh()
   if (activeRange.value === 'upcoming') void loadUpcoming()
   if (!('IntersectionObserver' in window)) return
   loadMoreObserver = new IntersectionObserver(entries => {
@@ -388,6 +463,9 @@ watch(loadMoreSentinel, (element, previous) => {
 }, { flush: 'post' })
 onBeforeUnmount(() => {
   upcomingEpoch += 1
+  if (refreshTimer) clearTimeout(refreshTimer)
+  window.removeEventListener('focus', resumeAgenda)
+  document.removeEventListener('visibilitychange', resumeAgenda)
   loadMoreObserver?.disconnect()
 })
 </script>

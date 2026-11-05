@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
+import { H3 } from 'h3'
+import { hashPassword } from 'better-auth/crypto'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { applyBookingRevision } from '../../server/integrations/channex/booking-revisions.ts'
@@ -9,7 +11,9 @@ import { mirrorChannexThread } from '../../server/domain/guest-threads/channel-m
 import { runAlterationRequestFeed } from '../../server/domain/guest-threads/stay-change-requests.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
-import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
+import todayRoute from '../../server/api/dashboard/today.get.ts'
+import type { TodayFeedPayload } from '../../shared/dashboard-today.ts'
 
 // An Airbnb guest's change request, from Channex's live feed to the stay's
 // conversation and back: recorded once and alerted, answered through
@@ -121,7 +125,23 @@ async function boot() {
     } })
     await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
       VALUES (?, ?, 'channex', 'listing', 'channel', ?, 'room', 'rate', 'complete', 1)`).bind(ORG, home.id, PROPERTY).run()
-    return { runtime, db, env }
+    const password = 'AlterationTodayProof123!'
+    await db.prepare("INSERT INTO account (id,accountId,providerId,userId,password,createdAt,updatedAt) VALUES ('owner-credential',?,'credential',?,?,0,0)").bind(OWNER, OWNER, await hashPassword(password)).run()
+    const login = await createAuth(env).api.signInEmail({ body: { email: 'owner@example.test', password }, asResponse: true })
+    assert.equal(login.status, 200)
+    const token = login.headers.get('set-auth-token')
+    assert.ok(token)
+    const app = new H3()
+    app.get('/api/dashboard/today', todayRoute)
+    const today = async (): Promise<TodayFeedPayload> => {
+      const response = await app.request(Object.assign(new Request(`https://proof.example/api/dashboard/today?org=${ORG}`, {
+        headers: { authorization: `Bearer ${token}` },
+      }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+      const body = await response.text()
+      assert.equal(response.status, 200, body)
+      return JSON.parse(body) as TodayFeedPayload
+    }
+    return { runtime, db, env, today }
   } catch (error) { await runtime.dispose(); throw error }
 }
 
@@ -142,7 +162,7 @@ const answer = (db: D1Database, env: CloudflareEnv, threadId: string, requestId:
   executeGuestThreadOperation(db, { threadId, organizationId: ORG, action, requestId, stayManager, actorUserId: OWNER, idempotencyKey: `${requestId}:${action}`, env })
 
 test('a guest change request lands once in the stay conversation, survives a reload, and accepting resolves it on Channex and lands Airbnb’s revision', { timeout: 120_000 }, async () => {
-  const { runtime, db, env } = await boot()
+  const { runtime, db, env, today } = await boot()
   const channex = new FakeChannex(), realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
   try {
@@ -167,6 +187,7 @@ test('a guest change request lands once in the stay conversation, survives a rel
       after: { whenLabel: 'Jan 10, 2027 – Jan 14, 2027', partySize: 3, totalLabel: '$600.00', assignedMemberId: null, assignedMemberName: null },
     })
     assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-13', adults: 2, total_minor: 45_000, version: 1 })
+    assert.equal((await today()).cards.some(card => card.id === `completed:change:${request!.id}`), false, 'a proposal is not a completed change')
 
     // A member who cannot change stays is refused before Channex hears anything.
     await assert.rejects(answer(db, env, stay.request_id, request!.id, 'accept_change', false), (error: unknown) => (error as { data?: { code?: string } }).data?.code === 'STAY_ROLE_REQUIRED')
@@ -181,11 +202,16 @@ test('a guest change request lands once in the stay conversation, survives a rel
     assert.deepEqual(channex.acked, ['rev-1', 'rev-2'])
     const answered = (await getGuestThreadDetail(db, stay.request_id, ORG))!.entries.find(entry => entry.id === request!.id)!.bookingChange!
     assert.equal(answered.status, 'accepted')
+    const completed = (await today()).cards.filter(card => card.id === `completed:change:${request!.id}`)
+    assert.equal(completed.length, 1, 'the actual landed, acknowledged change appears once in Today')
+    assert.ok(completed[0]!.completedAt)
+    assert.match(completed[0]!.reason!, /agreed Airbnb terms are stored and the provider revision was acknowledged/)
 
     // Answering again, or the feed seeing it resolved, changes nothing and sends nothing to Channex.
     assert.equal((await answer(db, env, stay.request_id, request!.id, 'accept_change')).ok, true)
     assert.deepEqual(await runAlterationRequestFeed(db, env), { recorded: 0, reconciled: 0 })
     assert.equal(channex.resolutions.length, 1)
+    assert.equal((await today()).cards.filter(card => card.id === `completed:change:${request!.id}`).length, 1)
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

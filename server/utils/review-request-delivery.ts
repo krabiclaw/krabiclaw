@@ -1,9 +1,11 @@
+import { HTTPError } from 'nitro'
 import type { DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { formatTimestamp } from '~/utils/timezone'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { notifyReviewRequest } from '~/server/utils/notifications'
 import { appendEntry } from '~/server/domain/guest-threads/entries'
+import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import {
   createReviewRequest,
   getReviewBookingContext,
@@ -62,7 +64,6 @@ export async function sendReviewRequestForBooking(
       delivery: { guestThreadId: bookingId, sourceEntryId: entry.id },
     })
     await markReviewRequestSendSuccess(db, request.id)
-    return { sent: true, requestId: request.id }
   } catch (error) {
     await markReviewRequestSendFailure(db, request.id, error)
     return {
@@ -71,4 +72,13 @@ export async function sendReviewRequestForBooking(
       error: error instanceof Error ? error.message : String(error),
     }
   }
+  // Delivery publishes before the invitation's success marker is written.
+  // Open apps must read again after that write to clear its outstanding card.
+  try {
+    await publishGuestInboxThreadEvent(env, db, { threadId: bookingId, type: 'thread.changed' })
+  } catch (cause) {
+    throw new HTTPError({ statusCode: 503, message: 'The review invitation was sent, but open apps could not be updated. Reload to see its saved status.',
+      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, request_id: request.id }, cause })
+  }
+  return { sent: true, requestId: request.id }
 }

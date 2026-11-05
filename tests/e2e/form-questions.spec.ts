@@ -69,14 +69,19 @@ test('an owner adds an inquiry question in Website, a visitor answers it, and th
     const requestId = (await submitted.json() as { request_id: string }).request_id
     await expect(guest).toHaveURL(/\/contact\/confirmed/)
 
-    const thread = await owner.get(`/api/dashboard/organizations/${restaurant.organizationId}/guest-threads/${requestId}`)
-    expect(thread.status(), await thread.text()).toBe(200)
-    const answers = (await thread.json() as { thread: { source: { fields: { answers: FormAnswerSnapshot[] } } } }).thread.source.fields.answers
+    // The answers are the submission's, kept with the conversation; MCP reads them out (the inbox view does not carry them).
+    const savedAnswers = async () => {
+      const response = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_guest_conversation', args: { organization_id: restaurant.organizationId, request_id: requestId } })
+      expect(response.status(), await response.text()).toBe(200)
+      return mcpData<{ conversation: { answers: FormAnswerSnapshot[] } }>(await response.json()).conversation.answers
+    }
+    const answers = await savedAnswers()
     expect(answers).toEqual([{ question_id: question.id, label: 'How did you hear about us?', type: 'single_choice', help_text: null, value: 'instagram', selected_choices: [{ id: 'instagram', label: 'Instagram' }] }])
     await openTenantPage(cms, `${baseURL}/dashboard/${restaurant.slug}/messages/${requestId}`, {})
-    const answered = cms.getByText('How did you hear about us?', { exact: true })
+    // The answers are part of the visitor's opening message, as they wrote them.
+    const answered = cms.locator('[data-message]').first()
     await expect(answered).toBeVisible({ timeout: 30_000 })
-    await expect(answered.locator('..')).toContainText('Instagram')
+    await expect(answered).toContainText('How did you hear about us? Instagram')
 
     // Removing the question keeps the answer the visitor gave.
     await openTenantPage(cms, `${baseURL}/dashboard/${restaurant.slug}/website/inquiry-form/${question.id}`, {})
@@ -86,8 +91,7 @@ test('an owner adds an inquiry question in Website, a visitor answers it, and th
     ]).then(([response]) => response)
     expect(removed.status(), await removed.text()).toBe(200)
     expect((await read()).inquiry_questions).toEqual(original.inquiry_questions)
-    const kept = await owner.get(`/api/dashboard/organizations/${restaurant.organizationId}/guest-threads/${requestId}`)
-    expect((await kept.json() as { thread: { source: { fields: { answers: FormAnswerSnapshot[] } } } }).thread.source.fields.answers).toEqual(answers)
+    expect(await savedAnswers()).toEqual(answers)
   } finally {
     const current = await read()
     if (current.inquiry_questions_revision !== original.inquiry_questions_revision) {

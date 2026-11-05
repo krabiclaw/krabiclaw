@@ -70,6 +70,7 @@ const reservation = {
   guestEmail: 'alex@example.com',
   guestPhone: '+1 555 123 4567',
   date: 'Tue, Jul 14, 2026',
+  day: 'Jul 14',
   time: '7:00 PM',
   partySize: '2 guests',
   locationName: 'Main Dining Room',
@@ -92,7 +93,8 @@ const ownerAlert = (message: NotificationMessage): NotificationMessage => ({ ...
 
 const stay = {
   guestName: 'Mina', guestEmail: 'mina@example.com', guestPhone: '+1 415 555 0134', homeName: 'Cedar Loft',
-  checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', arrival: '6:00 PM', nights: '3', guests: '2 adults',
+  checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', stayDates: { checkIn: '2026-11-06', checkOut: '2026-11-09' },
+  arrival: '6:00 PM', nights: '3', guests: '2 adults',
   organizationName: 'Pinecone Stays', heroImageUrl: null, replyUrl: 'https://demo.krabiclaw.com/dashboard/pinecone-stays/messages/preview-1',
   channel: null,
 }
@@ -117,6 +119,7 @@ const booking = {
   // The studio's own question, answered as the guest read it.
   answers: [{ question_id: 'experience_level', label: 'Have you thrown on a wheel before?', type: 'yes_no' as const, help_text: null, value: false, selected_choices: [] }],
   date: 'Mon, Jul 20, 2026',
+  day: 'Jul 20',
   time: '10:00 AM',
   locationName: 'Main Studio',
   notes: null,
@@ -171,14 +174,14 @@ const guestPayments: GuestPaymentNotificationEvent[] = [
 ]
 
 export const NOTIFICATION_CATALOG: CatalogEntry[] = [
-  { id: 'team-message', audience: 'owner', title: 'Team — new message', whatsappTemplate: 'guest_thread_reply_whatsapp', message: ownerAlert(messageReceived({ senderName: 'Alex Carter', senderEmail: null, conversationLabel: 'Team', about: null, messagePreview: 'The home is ready for check-in.', organizationName: studio, replyUrl: inbox })) },
+  { id: 'team-message', audience: 'owner', title: 'Team — new message', whatsappTemplate: 'guest_thread_reply_whatsapp', message: ownerAlert(messageReceived({ sender: { kind: 'person', name: 'Alex Carter', email: null }, conversationLabel: 'Team', about: null, messagePreview: 'The home is ready for check-in.', translation: null, record: null, organizationName: studio, replyUrl: inbox })) },
   // Owner alerts — both channels.
   { id: 'reservation-created', audience: 'owner', title: 'Owner — new reservation', whatsappTemplate: 'new_reservation', message: ownerAlert(reservationCreatedMessage(reservation)) },
   { id: 'reservation-cancelled', audience: 'owner', title: 'Owner — reservation cancelled', whatsappTemplate: 'reservation_cancelled', message: ownerAlert(reservationCancelledMessage({ ...reservation, wasConfirmed: true })) },
   { id: 'booking-created', audience: 'owner', title: 'Owner — new experience booking', whatsappTemplate: 'new_reservation', message: ownerAlert(bookingCreatedMessage(booking)) },
   { id: 'booking-cancelled', audience: 'owner', title: 'Owner — booking cancelled', whatsappTemplate: 'reservation_cancelled', message: ownerAlert(bookingCancelledMessage({ ...booking, wasConfirmed: false })) },
-  { id: 'calendar-event-deleted', audience: 'owner', title: 'Owner — booking event deleted in Google Calendar', message: ownerAlert(calendarSyncMessage({ kind: 'event_deleted', recordKind: 'consultation', guestName: 'Mina Park', whenLabel: 'Mon, Jul 20, 2026, 10:00 AM', reason: null, replyUrl: 'https://demo.krabiclaw.com/dashboard/demo/bookings/booking/preview-1', organizationName: studio })) },
-  { id: 'calendar-move-refused', audience: 'owner', title: 'Owner — booking could not follow its Google Calendar event', message: ownerAlert(calendarSyncMessage({ kind: 'move_refused', recordKind: 'consultation', guestName: 'Mina Park', whenLabel: 'Mon, Jul 20, 2026, 10:00 AM', reason: 'That time is outside Elena’s working hours', replyUrl: 'https://demo.krabiclaw.com/dashboard/demo/bookings/booking/preview-1', organizationName: studio })) },
+  { id: 'calendar-event-deleted', audience: 'owner', title: 'Owner — booking event deleted in Google Calendar', message: ownerAlert(calendarSyncMessage({ kind: 'event_deleted', recordKind: 'consultation', guestName: 'Mina Park', whenLabel: 'Mon, Jul 20, 2026, 10:00 AM', day: 'Jul 20', reason: null, replyUrl: 'https://demo.krabiclaw.com/dashboard/demo/bookings/booking/preview-1', organizationName: studio })) },
+  { id: 'calendar-move-refused', audience: 'owner', title: 'Owner — booking could not follow its Google Calendar event', message: ownerAlert(calendarSyncMessage({ kind: 'move_refused', recordKind: 'consultation', guestName: 'Mina Park', whenLabel: 'Mon, Jul 20, 2026, 10:00 AM', day: 'Jul 20', reason: 'That time is outside Elena’s working hours', replyUrl: 'https://demo.krabiclaw.com/dashboard/demo/bookings/booking/preview-1', organizationName: studio })) },
   {
     id: 'stay-booked',
     audience: 'owner',
@@ -252,8 +255,8 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     title: 'Owner — guest replied',
     whatsappTemplate: 'guest_thread_reply_whatsapp',
     message: ownerAlert(messageReceived({
-      senderName: 'Jordan Lee', senderEmail: 'jordan@example.com', conversationLabel: 'Email reply', about: 'Main Dining Room',
-      messagePreview: 'Thanks! One more thing — is the terrace covered if it rains?',
+      sender: { kind: 'person', name: 'Jordan Lee', email: 'jordan@example.com' }, conversationLabel: 'Email reply', about: 'Main Dining Room',
+      messagePreview: 'Thanks! One more thing — is the terrace covered if it rains?', translation: null, record: null,
       organizationName: restaurant, replyUrl: inbox,
     })),
   },
@@ -263,8 +266,8 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     title: 'Owner — guest replied in Messages',
     whatsappTemplate: 'guest_thread_reply_whatsapp',
     message: ownerAlert(messageReceived({
-      senderName: 'Jordan Lee', senderEmail: 'jordan@example.com', conversationLabel: 'Website reply', about: 'Main Dining Room',
-      messagePreview: 'Thanks! See you tomorrow.',
+      sender: { kind: 'person', name: 'Jordan Lee', email: 'jordan@example.com' }, conversationLabel: 'Website reply', about: 'Main Dining Room',
+      messagePreview: 'Thanks! See you tomorrow.', translation: null, record: null,
       organizationName: restaurant, replyUrl: inbox,
     })),
   },
@@ -274,8 +277,10 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     title: 'Owner — Airbnb guest asked about dates',
     whatsappTemplate: 'guest_thread_reply_whatsapp',
     message: ownerAlert(inquiryReceivedMessage({
-      guestName: 'Jamie Rivera', homeName: 'Cedar Loft', request: 'Nov 15, 2026 – Feb 15, 2027 · 92 nights · 1 adult, 1 pet',
-      respondBy: 'Oct 31, 4:53 PM MDT', organizationName: 'Pinecone Stays', replyUrl: stay.replyUrl,
+      guestName: 'Derek', translation: null,
+      message: 'Hi! I’m interested in your property for a long-term stay beginning November 7. I’ll also be traveling with Sirius, my well-trained black Labrador Retriever.',
+      record: { image: { imageUrl: sampleCover, alt: 'Cedar Loft' }, homeName: 'Cedar Loft', checkIn: '2026-11-07', checkOut: '2026-12-05', guests: '1 adult, 1 pet', replyBy: 'Nov 6, 8:13 AM MST' },
+      organizationName: 'Pinecone Stays', replyUrl: stay.replyUrl,
     })),
   },
   {
@@ -284,8 +289,20 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     title: 'Owner — Airbnb guest sent a message',
     whatsappTemplate: 'guest_thread_reply_whatsapp',
     message: ownerAlert(messageReceived({
-      senderName: 'Jamie Rivera', senderEmail: null, conversationLabel: 'Airbnb message', about: 'Cedar Loft',
-      messagePreview: 'Hi! Is early check-in possible on the 14th? Our flight lands at 9am.',
+      sender: { kind: 'person', name: 'Mililani', email: null }, conversationLabel: 'Airbnb message', about: 'Cedar Loft',
+      messagePreview: 'La lavadora y secadora están compartidas ?', translation: { by: 'Airbnb', text: 'Are the washing machine and dryer shared?' },
+      record: { image: { imageUrl: sampleCover, alt: 'Cedar Loft' }, homeName: 'Cedar Loft', checkIn: '2026-10-30', checkOut: '2026-11-20', guests: '2 adults', replyBy: null },
+      organizationName: 'Pinecone Stays', replyUrl: stay.replyUrl,
+    })),
+  },
+  {
+    id: 'airbnb-support-message',
+    audience: 'owner',
+    title: 'Owner — Airbnb Support wrote about a case',
+    whatsappTemplate: 'guest_thread_reply_whatsapp',
+    message: ownerAlert(messageReceived({
+      sender: { kind: 'support' }, conversationLabel: 'Airbnb message', about: 'Cedar Loft',
+      messagePreview: 'This is a final decision. We’ve issued the refund, and I’m closing this thread for now if there’s nothing else.', translation: null, record: null,
       organizationName: 'Pinecone Stays', replyUrl: stay.replyUrl,
     })),
   },

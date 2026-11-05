@@ -3,10 +3,13 @@ import { localDateAt, localNow, unresolvableLocalTime } from '../../utils/timezo
 import { createHmac } from 'node:crypto'
 import { expect, test, type APIRequestContext, type APIResponse } from '@playwright/test'
 import type {
-  GuestThreadDetailViewModel,
-  GuestThreadListItemViewModel,
+  InboxRow,
+  InboxStreamItem,
+  InboxThread,
+  InboxThreadDetails,
 } from '../../server/domain/guest-threads/types'
 import { authRequestHeaders, loginAs } from './helpers/auth'
+import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTenant } from './seed/manifest'
 import { devLoginHeaders, seededSiteHeaders, testBaseUrl } from './test-env'
@@ -161,7 +164,7 @@ async function loadThreadList(request: APIRequestContext, guestName: string) {
     params: { type: 'contact' },
   })
   await expectStatus(response, 200)
-  const { threads } = await response.json() as { threads: GuestThreadListItemViewModel[] }
+  const { threads } = await response.json() as { threads: InboxRow[] }
   return { threads: threads.filter(thread => thread.guestName === guestName) }
 }
 
@@ -172,7 +175,52 @@ async function loadThreadDetail(
 ) {
   const response = await request.get(`/api/dashboard/organizations/${targetOrganizationId}/guest-threads/${threadId}`)
   await expectStatus(response, 200)
-  return (await response.json() as { thread: GuestThreadDetailViewModel }).thread
+  return (await response.json() as { thread: InboxThread }).thread
+}
+
+/** What "In this conversation" offers for the thread, read as the member it was asked by. */
+async function loadThreadActions(request: APIRequestContext, threadId: string, targetOrganizationId = organizationId()) {
+  const response = await request.get(`/api/dashboard/organizations/${targetOrganizationId}/guest-threads/${threadId}/details`)
+  await expectStatus(response, 200)
+  return (await response.json() as InboxThreadDetails).actions
+}
+
+type StreamMessage = Extract<InboxStreamItem, { type: 'message' }>
+type StreamEvent = Extract<InboxStreamItem, { type: 'event' }>
+type StreamChange = Extract<InboxStreamItem, { type: 'change' }>
+const streamMessages = (thread: InboxThread) => thread.stream.filter((item): item is StreamMessage => item.type === 'message')
+const streamEvents = (thread: InboxThread, text: string) => thread.stream.filter((item): item is StreamEvent => item.type === 'event' && item.text === text)
+const streamChanges = (thread: InboxThread) => thread.stream.filter((item): item is StreamChange => item.type === 'change')
+
+interface LedgerEntry {
+  id: string
+  kind: string
+  channel: string | null
+  body: string | null
+  event: string | null
+  payload: Record<string, unknown> | null
+  occurred_at: string
+}
+
+interface Ledger {
+  state: string
+  archived: boolean
+  updated_at: string
+  guest: { name: string | null; email: string | null; phone: string | null }
+  operational_record: unknown
+  entries: LedgerEntry[]
+}
+
+/**
+ * The conversation's own ledger — state, archive flag, event names and
+ * payloads — which the inbox view model keeps on the server. MCP's
+ * get_guest_conversation is the surface that still reads it out, and reading
+ * it acknowledges nothing.
+ */
+async function loadLedger(request: APIRequestContext, threadId: string, targetOrganizationId = organizationId()) {
+  const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_guest_conversation', args: { organization_id: targetOrganizationId, request_id: threadId } })
+  await expectStatus(response, 200)
+  return mcpData<{ conversation: Ledger }>(await response.json()).conversation
 }
 
 async function loadNotifications(request: APIRequestContext) {
@@ -181,8 +229,9 @@ async function loadNotifications(request: APIRequestContext) {
   return await response.json() as NotificationList
 }
 
+// The alert addresses the guest by first name, which each proof makes unique to its run.
 function contactNotification(state: NotificationList, guestName: string) {
-  const notification = state.notifications.find(row => row.title === `New website message from ${guestName}`)
+  const notification = state.notifications.find(row => row.title === `Message from ${guestName.split(' ')[0]}`)
   expect(notification).toBeDefined()
   if (!notification) throw new Error('Contact notification was not visible to the owner')
   return notification
@@ -203,7 +252,7 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     ])
 
     const nonce = Date.now()
-    const guestName = `Guest thread proof ${nonce}`
+    const guestName = `Thread${nonce} Proof`
     const guestEmail = `guest-thread-${nonce}@playwright.example`
     const subject = 'partnerships'
     const message = `Canonical source detail proof ${nonce}`
@@ -227,21 +276,23 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
       params: { org: organizationSlug(), type: 'contact' },
     })
     await expectStatus(organizationList, 200)
-    expect((await organizationList.json() as { threads: GuestThreadListItemViewModel[] }).threads.filter(thread => thread.guestName === guestName))
+    expect((await organizationList.json() as { threads: InboxRow[] }).threads.filter(thread => thread.guestName === guestName))
       .toMatchObject([{ id: threadId }])
     await expectStatus(await foreignOwner.get('/api/dashboard/guest-threads', {
       params: { org: organizationSlug(), type: 'contact' },
     }), 404)
     expect(secondOwnerListBefore.threads[0]!.id).toBe(threadId)
-    expect(ownerListBefore.threads[0]).toMatchObject({ guestName, submissionType: 'contact', unread: true })
-    expect(secondOwnerListBefore.threads[0]).toMatchObject({ guestName, submissionType: 'contact', unread: true })
+    // The row is the guest's own words, from them, on the business's own channel.
+    const guestFirstName = guestName.split(' ')[0]!
+    expect(ownerListBefore.threads[0]).toMatchObject({ guestName, kind: 'guest', channel: 'direct', preview: message, previewFrom: guestFirstName, unread: true })
+    expect(secondOwnerListBefore.threads[0]).toMatchObject({ guestName, kind: 'guest', channel: 'direct', preview: message, previewFrom: guestFirstName, unread: true })
     expect(contactNotification(ownerNotificationsBefore, guestName).read_at).toBeNull()
     expect(contactNotification(secondOwnerNotificationsBefore, guestName).read_at).toBeNull()
 
     // Two real contacts own the endpoints of this paging proof. Parallel
     // contacts can appear between them; no shared-history row is a premise.
     const firstNotification = contactNotification(ownerNotificationsBefore, guestName)
-    const paginationGuestName = `Guest pagination proof ${nonce}`
+    const paginationGuestName = `Pagination${nonce} Proof`
     await submitContact(owner, paginationGuestName)
     const newerNotification = contactNotification(await loadNotifications(owner), paginationGuestName)
     expect(newerNotification.created_at > firstNotification.created_at || newerNotification.created_at === firstNotification.created_at && newerNotification.id > firstNotification.id).toBe(true)
@@ -266,26 +317,30 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     await expectStatus(await foreignOwner.get('/api/dashboard/notifications', { params: { limit: 1, after: newerNotification.id } }), 404)
 
     const detail = await loadThreadDetail(owner, threadId)
+    // A contact has no record behind it, and a reply goes to the email the guest left.
     expect(detail).toMatchObject({
       id: threadId,
+      kind: 'guest',
       guestName,
-      guestEmail,
-      guestPhone: null,
-      submissionType: 'contact',
-      source: {
-        submissionType: 'contact',
-        operationalStatus: null,
-        operationalStatusLabel: null,
-        fields: { subject, message },
-      },
+      channel: 'direct',
+      when: null,
+      recordId: null,
+      recordKind: null,
+      composer: { channel: 'email', available: true },
     })
-    const openingEntries = detail.entries.filter(entry => entry.kind === 'submission')
+    // The guest's own words open the conversation, once, as their message.
+    expect(streamMessages(detail)).toMatchObject([{ side: 'guest', author: guestName, body: message, photos: [], translated: null }])
+    // The submission's contact details stay in the ledger the opening message was drawn from.
+    // The subject the form asked for is no longer drawn anywhere (inbox-parity.md: the opening submission dump is gone).
+    const openingLedger = await loadLedger(owner, threadId)
+    expect(openingLedger.guest).toEqual({ name: guestName, email: guestEmail, phone: null })
+    const openingEntries = openingLedger.entries.filter(entry => entry.kind === 'submission')
     expect(openingEntries).toHaveLength(1)
     expect(openingEntries[0]).toMatchObject({
-      actorKind: 'guest',
+      id: streamMessages(detail)[0]!.id,
       channel: 'web',
       body: null,
-      eventName: null,
+      event: null,
       payload: { kind: 'contact' },
     })
 
@@ -295,7 +350,7 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
       loadThreadList(secondOwner, guestName),
       loadNotifications(secondOwner),
     ])
-    expect(ownerListAfterRead.threads[0]).toMatchObject({ id: threadId, unread: false, unreadCount: 0 })
+    expect(ownerListAfterRead.threads[0]).toMatchObject({ id: threadId, unread: false })
     expect(contactNotification(ownerNotificationsAfterRead, guestName).read_at).toEqual(expect.any(String))
     expect(secondOwnerListStillUnread.threads[0]).toMatchObject({ id: threadId, unread: true })
     expect(contactNotification(secondOwnerNotificationsStillUnread, guestName).read_at).toBeNull()
@@ -305,7 +360,7 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
       loadThreadList(secondOwner, guestName),
       loadNotifications(secondOwner),
     ])
-    expect(secondOwnerListAfterRead.threads[0]).toMatchObject({ id: threadId, unread: false, unreadCount: 0 })
+    expect(secondOwnerListAfterRead.threads[0]).toMatchObject({ id: threadId, unread: false })
     expect(contactNotification(secondOwnerNotificationsAfterRead, guestName).read_at).toEqual(expect.any(String))
 
     const foreignRead = await foreignOwner.get(`/api/dashboard/organizations/${organizationId()}/guest-threads/${threadId}`)
@@ -328,15 +383,17 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     expect(concurrentReplyStatuses.every(status => status === 200 || status === 202)).toBe(true)
     await expectStatus(await sendReply(), 200)
 
+    // Three sends under one key are one message on the business's side; "You" is the
+    // server's word for a message the reading member wrote, so it is the owner's.
     const afterReplies = await loadThreadDetail(owner, threadId)
-    const replyEntries = afterReplies.entries.filter(entry => entry.kind === 'message' && entry.body === replyBody)
-    expect(replyEntries).toHaveLength(1)
-    expect(replyEntries[0]).toMatchObject({
-      actorKind: 'member',
-      actorUserId: ownerId,
+    const replyEntries = streamMessages(afterReplies).filter(item => item.body === replyBody)
+    expect(replyEntries).toMatchObject([{ side: 'business', author: 'You' }])
+    expect((await loadLedger(owner, threadId)).entries.filter(entry => entry.body === replyBody)).toMatchObject([{
+      id: replyEntries[0]!.id,
+      kind: 'message',
       channel: 'email',
-      eventName: 'thread.member_reply',
-    })
+      event: 'thread.member_reply',
+    }])
 
     const deliveryResponse = await owner.get('/api/dev/notifications', {
       headers: devLoginHeaders(),
@@ -355,10 +412,11 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     ])
     expect(ownerListAfterReply.threads[0]).toMatchObject({
       id: threadId,
-      conversationState: 'waiting_on_guest',
+      preview: replyBody,
+      previewFrom: 'You',
       unread: false,
-      unreadCount: 0,
     })
+    expect((await loadLedger(owner, threadId)).state).toBe('waiting_on_guest')
     expect(contactNotification(ownerNotificationsAfterReply, guestName).read_at).toEqual(expect.any(String))
   } finally {
     await Promise.all([owner.dispose(), secondOwner.dispose(), foreignOwner.dispose()])
@@ -376,9 +434,22 @@ async function loadMailbox(request: APIRequestContext, mailbox: Mailbox) {
   await expectStatus(byId, 200)
   await expectStatus(byOrg, 200)
   return {
-    byId: (await byId.json() as { threads: GuestThreadListItemViewModel[] }).threads,
-    byOrg: (await byOrg.json() as { threads: GuestThreadListItemViewModel[] }).threads,
+    byId: (await byId.json() as { threads: InboxRow[] }).threads,
+    byOrg: (await byOrg.json() as { threads: InboxRow[] }).threads,
   }
+}
+
+/**
+ * A Past conversation nobody archived: its booking ended, so it offers neither
+ * Archive nor Move to Messages. The experience seed has one; a run's own
+ * archived contacts are Past too, and they offer Move to Messages.
+ */
+async function endedConversation(request: APIRequestContext) {
+  for (const thread of (await loadMailbox(request, 'past')).byId) {
+    const actions = await loadThreadActions(request, thread.id)
+    if (!actions.archive && !actions.unarchive) return thread
+  }
+  throw new Error('The experience seed includes a booking that has ended, and no Past conversation is one')
 }
 
 async function submitContact(request: APIRequestContext, guestName: string) {
@@ -410,11 +481,12 @@ test('archive and Move to messages file a conversation without reordering the in
     const current = await loadMailbox(owner, 'current')
     const filed = current.byId.find(thread => thread.guestName === filedName)
     const newer = current.byId.find(thread => thread.guestName === newerName)
-    expect(filed).toMatchObject({ mailbox: 'current', manuallyArchived: false, canArchive: true, canUnarchive: false })
-    expect(current.byOrg.find(thread => thread.id === filed!.id)).toMatchObject({ mailbox: 'current', canArchive: true })
+    expect(filed).toBeDefined()
+    expect(current.byOrg.some(thread => thread.id === filed!.id)).toBe(true)
     const threadId = filed!.id
-    const before = await loadThreadDetail(owner, threadId)
-    expect(before).toMatchObject({ mailbox: 'current', archivedAt: null, archivedByUserId: null, canArchive: true, canUnarchive: false })
+    expect(await loadThreadActions(owner, threadId)).toMatchObject({ archive: true, unarchive: false })
+    const before = await loadLedger(owner, threadId)
+    expect(before.archived).toBe(false)
 
     const operationUrl = (action: 'archive' | 'unarchive') =>
       `/api/dashboard/organizations/${organizationId()}/guest-threads/${threadId}/operations/${action}`
@@ -422,35 +494,38 @@ test('archive and Move to messages file a conversation without reordering the in
     // Another business's owner cannot reach it, and a key is required.
     expect([403, 404]).toContain((await foreignOwner.post(operationUrl('archive'), { data: { idempotencyKey: `foreign-${nonce}` } })).status())
     await expectStatus(await owner.post(operationUrl('archive'), { data: {} }), 400)
-    expect(await loadThreadDetail(owner, threadId)).toMatchObject({ archivedAt: null, mailbox: 'current' })
+    expect((await loadLedger(owner, threadId)).archived).toBe(false)
+    expect((await loadMailbox(owner, 'current')).byId.some(thread => thread.id === threadId)).toBe(true)
 
-    // One key, sent twice at once and once more after: one archive.
+    // One key, sent twice at once and once more after: one archive, said once in the conversation.
     const archive = () => owner.post(operationUrl('archive'), { data: { idempotencyKey: `archive-${nonce}` } })
     for (const response of await Promise.all([archive(), archive()])) await expectStatus(response, 200)
     const archived = await loadThreadDetail(owner, threadId)
-    expect(archived).toMatchObject({
-      mailbox: 'past', manuallyArchived: true, archivedByUserId: ownerId, canArchive: false, canUnarchive: true,
-      conversationState: before.conversationState, updatedAt: before.updatedAt,
-    })
-    expect(archived.archivedAt).toEqual(expect.any(String))
+    const archivedEvents = streamEvents(archived, 'You archived this conversation')
+    expect(archivedEvents).toHaveLength(1)
+    // Filing it away is not conversation activity: its state and last change are the ones it had.
+    expect(await loadLedger(owner, threadId)).toMatchObject({ archived: true, state: before.state, updated_at: before.updated_at })
+    expect(await loadThreadActions(owner, threadId)).toMatchObject({ archive: false, unarchive: true })
     await expectStatus(await archive(), 200)
     const retried = await loadThreadDetail(owner, threadId)
-    expect(retried.archivedAt).toBe(archived.archivedAt)
-    expect(retried.entries.filter(entry => entry.eventName === 'thread.archived')).toMatchObject([{ kind: 'operation', actorUserId: ownerId }])
+    expect(streamEvents(retried, 'You archived this conversation')).toEqual(archivedEvents)
+    expect((await loadLedger(owner, threadId)).entries.filter(entry => entry.event === 'thread.archived')).toMatchObject([{ id: archivedEvents[0]!.id, kind: 'operation' }])
 
     const afterArchiveCurrent = await loadMailbox(owner, 'current')
     const afterArchivePast = await loadMailbox(owner, 'past')
     expect(afterArchiveCurrent.byId.some(thread => thread.id === threadId)).toBe(false)
     expect(afterArchiveCurrent.byOrg.some(thread => thread.id === threadId)).toBe(false)
-    expect(afterArchivePast.byId.find(thread => thread.id === threadId)).toMatchObject({ mailbox: 'past', manuallyArchived: true, canUnarchive: true })
-    expect(afterArchivePast.byOrg.find(thread => thread.id === threadId)).toMatchObject({ mailbox: 'past', canUnarchive: true })
+    expect(afterArchivePast.byId.some(thread => thread.id === threadId)).toBe(true)
+    expect(afterArchivePast.byOrg.some(thread => thread.id === threadId)).toBe(true)
 
     const unarchive = () => owner.post(operationUrl('unarchive'), { data: { idempotencyKey: `unarchive-${nonce}` } })
     for (const response of await Promise.all([unarchive(), unarchive()])) await expectStatus(response, 200)
     await expectStatus(await unarchive(), 200)
     const restored = await loadThreadDetail(owner, threadId)
-    expect(restored).toMatchObject({ mailbox: 'current', archivedAt: null, archivedByUserId: null, updatedAt: before.updatedAt })
-    expect(restored.entries.filter(entry => entry.eventName === 'thread.unarchived')).toHaveLength(1)
+    expect(streamEvents(restored, 'You moved this conversation back to Messages')).toHaveLength(1)
+    expect(streamEvents(restored, 'You archived this conversation')).toEqual(archivedEvents)
+    expect(await loadLedger(owner, threadId)).toMatchObject({ archived: false, updated_at: before.updated_at })
+    expect(await loadThreadActions(owner, threadId)).toMatchObject({ archive: true, unarchive: false })
 
     // Filing it away and back is not conversation activity: the newer thread
     // is still ahead of it.
@@ -459,25 +534,76 @@ test('archive and Move to messages file a conversation without reordering the in
     expect(order.indexOf(newer!.id)).toBeLessThan(order.indexOf(threadId))
 
     // A conversation Past because its booking ended cannot be moved back.
-    const ended = (await loadMailbox(owner, 'past')).byId.find(thread => !thread.manuallyArchived)
-    expect(ended, 'the experience seed includes a booking that has ended').toBeDefined()
-    expect(ended).toMatchObject({ mailbox: 'past', canArchive: false, canUnarchive: false })
-    const refused = await owner.post(`/api/dashboard/organizations/${organizationId()}/guest-threads/${ended!.id}/operations/unarchive`, {
+    const ended = await endedConversation(owner)
+    const refused = await owner.post(`/api/dashboard/organizations/${organizationId()}/guest-threads/${ended.id}/operations/unarchive`, {
       data: { idempotencyKey: `unarchive-ended-${nonce}` },
     })
     await expectStatus(refused, 409)
     expect(await refused.json()).toMatchObject({ error: 'This conversation is past because its booking has ended' })
-    expect(await loadThreadDetail(owner, ended!.id)).toMatchObject({ mailbox: 'past', archivedAt: null })
+    expect((await loadMailbox(owner, 'past')).byId.some(thread => thread.id === ended.id)).toBe(true)
+    expect((await loadLedger(owner, ended.id)).archived).toBe(false)
+    expect(await loadThreadActions(owner, ended.id)).toMatchObject({ archive: false, unarchive: false })
   } finally {
     await Promise.all([owner.dispose(), foreignOwner.dispose()])
   }
+})
+
+test('suggested replies fill the composer, hide while typing or after ×, and come back from +', async ({ page }) => {
+  test.skip(!writable, 'Guest-thread writes require disposable local or preview data')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await loginAs(page.request, baseURL, ownerId)
+  const guestName = `Suggestions ${Date.now()}`
+  await submitContact(page.request, guestName)
+  const threadId = (await loadThreadList(page.request, guestName)).threads[0]!.id
+  // The drafts come from Workers AI, which the E2E server has no binding for; the
+  // composer's behaviour around them is what this covers, so their words are fixed here.
+  const drafts = ['Thanks for writing, we will check and get back to you.', 'Happy to help with that.']
+  await page.route(new RegExp(`/guest-threads/${threadId}/suggested-reply(\\?|$)`), route => route.fulfill({ json: { generationId: 'e2e-generation', suggestions: drafts } }))
+  await dismissPreviewToolbar(page)
+  await page.goto(`${baseURL}/dashboard/${organizationSlug()}/messages/${threadId}`)
+
+  const label = page.getByText('Suggested replies', { exact: true })
+  const rows = drafts.map(draft => page.getByRole('button', { name: draft, exact: true }))
+  const field = page.getByRole('textbox', { name: 'Write a message…', exact: true })
+  const plus = page.getByRole('button', { name: 'Add to message', exact: true })
+  const recall = page.getByRole('menuitem', { name: 'Suggested replies' })
+  await expect(label).toBeVisible()
+  for (const row of rows) await expect(row).toBeVisible()
+  // Nothing is pre-written: the field starts empty.
+  await expect(field).toHaveValue('')
+
+  // While shown, + offers no way to show them.
+  await plus.click()
+  await expect(recall).toHaveCount(0)
+  await page.keyboard.press('Escape')
+
+  // Typing puts them away; + brings them back.
+  await field.fill('Let me check')
+  await expect(label).toHaveCount(0)
+  await plus.click()
+  await recall.click()
+  for (const row of rows) await expect(row).toBeVisible()
+
+  // × puts them away too; + brings them back again.
+  await page.getByRole('button', { name: 'Dismiss suggested replies', exact: true }).click()
+  await expect(label).toHaveCount(0)
+  await plus.click()
+  await recall.click()
+  await expect(label).toBeVisible()
+
+  // A tap fills the field and sends nothing.
+  let replies = 0
+  page.on('request', request => { if (request.method() === 'POST' && request.url().includes(`/guest-threads/${threadId}/operations/reply`)) replies += 1 })
+  await rows[1]!.click()
+  await expect(field).toHaveValue(drafts[1]!)
+  expect(replies).toBe(0)
 })
 
 for (const viewport of [
   { name: 'desktop', width: 1440, height: 900 },
   { name: 'mobile', width: 375, height: 812 },
 ]) {
-  test(`the row menu archives a conversation and moves it back (${viewport.name})`, async ({ page }) => {
+  test(`In this conversation archives a conversation and moves it back (${viewport.name})`, async ({ page }) => {
     test.skip(!writable, 'Guest-thread writes require disposable local or preview data')
     await page.setViewportSize({ width: viewport.width, height: viewport.height })
     await loginAs(page.request, baseURL, ownerId)
@@ -485,7 +611,7 @@ for (const viewport of [
     await submitContact(page.request, guestName)
     await dismissPreviewToolbar(page)
 
-    // The rows are server-rendered, so they are visible before the menu has a
+    // The rows are server-rendered, so they are visible before they have a
     // handler: the list says when it has hydrated, and nothing is pressed
     // before. On desktop the index then opens its newest thread beside the
     // list, and that navigation re-renders the rows, so the screen has settled
@@ -496,20 +622,30 @@ for (const viewport of [
       if (viewport.name === 'desktop') await expect(page).toHaveURL(/\/messages\/[^/?]+(\?|$)/)
     }
     const rowFor = (name: string) => page.locator('[data-thread-row]').filter({ hasText: name })
-    const actionsFor = (name: string) => rowFor(name).getByRole('button', { name: `Conversation actions for ${name}` })
+    // The conversation's actions are in its header's "In this conversation" sheet, not on the row.
+    const thread = page.locator('#dashboard-panel-organization-messages-thread')
+    const sheetButton = thread.getByRole('button', { name: 'In this conversation', exact: true })
+    const sheet = page.getByRole('dialog', { name: 'In this conversation' })
+    const openConversation = async (id: string, query = '') => {
+      await page.locator(`[data-thread-row="${id}"]`).click()
+      await expect(page).toHaveURL(new RegExp(`/messages/${id}${query.replace('?', '\\?')}$`))
+      // The URL changes before the new conversation replaces the old one; its header names which is open.
+      await expect(thread.locator(`[data-thread-id="${id}"]`)).toBeVisible()
+      await expect(sheetButton).toBeVisible()
+    }
 
     await openMessages()
     await expect(rowFor(guestName)).toBeVisible()
-    await rowFor(guestName).hover()
-    await actionsFor(guestName).click()
-    // The menu opened; the conversation did not.
-    await expect(page.getByRole('menuitem', { name: 'Archive' })).toBeVisible()
-    await expect(page.getByRole('menuitem', { name: 'Move to messages' })).toHaveCount(0)
+    await expect(rowFor(guestName).getByRole('button')).toHaveCount(0)
     const threadId = await rowFor(guestName).getAttribute('data-thread-row')
-    if (viewport.name === 'mobile') await expect(page).toHaveURL(new RegExp(`/messages(\\?.*)?$`))
+    await openConversation(threadId!)
+    await sheetButton.click()
+    await expect(sheet.getByRole('button', { name: 'Archive', exact: true })).toBeVisible()
+    await expect(sheet.getByRole('button', { name: 'Move to Messages', exact: true })).toHaveCount(0)
     const archived = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/guest-threads/${threadId}/operations/archive`))
-    await page.getByRole('menuitem', { name: 'Archive' }).click()
+    await sheet.getByRole('button', { name: 'Archive', exact: true }).click()
     expect((await archived).status()).toBe(200)
+    await expect(sheet).toHaveCount(0)
     await expect(rowFor(guestName)).toHaveCount(0)
     // The archived conversation is not left open beside the list.
     await expect(page).not.toHaveURL(new RegExp(`/messages/${threadId}`))
@@ -519,41 +655,38 @@ for (const viewport of [
 
     // A conversation Past because its booking ended offers no way back; its
     // guest can still be reported or blocked.
-    const pastThreads = (await (await page.request.get(`/api/dashboard/organizations/${organizationId()}/guest-threads`, { params: { mailbox: 'past' } })).json() as { threads: GuestThreadListItemViewModel[] }).threads
-    const ended = pastThreads.find(thread => !thread.manuallyArchived)
-    expect(ended, 'the experience seed includes a booking that has ended').toBeDefined()
-    await expect(page.locator(`[data-thread-row="${ended!.id}"]`)).toBeVisible()
-    await page.locator(`[data-thread-row="${ended!.id}"]`).getByRole('button', { name: /^Conversation actions for / }).click()
-    await expect(page.getByRole('menuitem')).toHaveText(['Report', 'Block guest'])
+    const ended = await endedConversation(page.request)
+    await expect(page.locator(`[data-thread-row="${ended.id}"]`)).toBeVisible()
+    await openConversation(ended.id, '?archived=')
+    await sheetButton.click()
+    await expect(sheet.getByRole('button', { name: 'Report', exact: true })).toBeVisible()
+    await expect(sheet.getByRole('button', { name: 'Block', exact: true })).toBeVisible()
+    await expect(sheet.getByRole('button', { name: 'Archive', exact: true })).toHaveCount(0)
+    await expect(sheet.getByRole('button', { name: 'Move to Messages', exact: true })).toHaveCount(0)
     await page.keyboard.press('Escape')
+    await expect(sheet).toHaveCount(0)
 
-    // On desktop the conversation is open beside the list, so moving it back
-    // follows it into Current. Below that width nothing opens on its own, and
-    // the row simply leaves Past where it stands.
-    if (viewport.name === 'desktop') {
-      await rowFor(guestName).getByRole('link').click()
-      await expect(page).toHaveURL(new RegExp(`/messages/${threadId}\\?archived=$`))
-    }
-    await rowFor(guestName).hover()
-    await actionsFor(guestName).click()
-    await expect(page.getByRole('menuitem', { name: 'Archive' })).toHaveCount(0)
+    // Moving it back keeps the conversation open where it is read, and it
+    // leaves Past for Current.
+    if (viewport.name === 'mobile') await openMessages('?archived=')
+    await openConversation(threadId!, '?archived=')
+    await sheetButton.click()
+    await expect(sheet.getByRole('button', { name: 'Archive', exact: true })).toHaveCount(0)
     const moved = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/guest-threads/${threadId}/operations/unarchive`))
-    await page.getByRole('menuitem', { name: 'Move to messages' }).click()
+    await sheet.getByRole('button', { name: 'Move to Messages', exact: true }).click()
     expect((await moved).status()).toBe(200)
-    if (viewport.name === 'desktop') {
-      await expect(page).toHaveURL(new RegExp(`/messages/${threadId}$`))
-      await expect(page.getByRole('heading', { name: 'Messages', level: 1 })).toBeVisible()
-      await expect(rowFor(guestName)).toBeVisible()
-    } else {
-      await expect(rowFor(guestName)).toHaveCount(0)
-    }
+    await expect(sheet).toHaveCount(0)
+    await expect(page).toHaveURL(new RegExp(`/messages/${threadId}\\?archived=$`))
+    await expect(thread.getByText('You moved this conversation back to Messages', { exact: true })).toBeVisible()
+    if (viewport.name === 'desktop') await expect(rowFor(guestName)).toHaveCount(0)
 
     await openMessages()
     await expect(rowFor(guestName)).toBeVisible()
-    // Keyboard: the menu button is reachable and opens with Enter.
-    await actionsFor(guestName).focus()
+    // Keyboard: the header's button is reachable and opens the sheet with Enter.
+    await openConversation(threadId!)
+    await sheetButton.focus()
     await page.keyboard.press('Enter')
-    await expect(page.getByRole('menuitem', { name: 'Archive' })).toBeVisible()
+    await expect(sheet.getByRole('button', { name: 'Archive', exact: true })).toBeVisible()
     await page.keyboard.press('Escape')
   })
 }
@@ -652,7 +785,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   expect(reviewCard?.priority).toBe('schedule')
   expect(reviewCard?.to).toBe(`/dashboard/${demoSlug()}/bookings/reservation/${bookingIds[0]}`)
   const due = todayFeed.cards.filter(card => card.priority === 'attention').length
-  await expect(page.getByRole('heading', { name: due ? `You have ${due} ${due === 1 ? 'thing' : 'things'} to do` : 'Your day at a glance', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: `Needs your attention${due ? ` · ${due}` : ''}`, exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Filter activity', exact: true })).toBeVisible()
@@ -796,10 +929,12 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   expect(noteResponse.request().postDataJSON()).toMatchObject({ note, idempotencyKey: expect.any(String) })
   expect(noteResponse.request().postDataJSON()).not.toHaveProperty('noteId')
   await expect(noteInput).toHaveValue('')
+  // The member's conversation says the note in its own words, once; the ledger keeps it private.
   const notedThread = await loadThreadDetail(page.request, summary.threadId!, demoOrganizationId())
-  const addedNotes = notedThread.entries.filter(entry => entry.eventName === 'internal_note.added' && entry.body === note)
+  const addedNotes = streamEvents(notedThread, note)
   expect(addedNotes).toHaveLength(1)
-  expect(addedNotes[0]).toMatchObject({ kind: 'operation', actorKind: 'member', channel: 'system', body: note, payload: { private: true } })
+  expect((await loadLedger(page.request, summary.threadId!, demoOrganizationId())).entries.filter(entry => entry.id === addedNotes[0]!.id))
+    .toMatchObject([{ kind: 'operation', channel: 'system', event: 'internal_note.added', body: note, payload: { private: true } }])
   const notePath = `${recordPath}/notes/${addedNotes[0]!.id}${noteContext}`
   const editNote = detailPanel.getByRole('link', { name: `Edit note: ${note}`, exact: true })
   await expect(editNote).toHaveAttribute('href', notePath)
@@ -814,9 +949,10 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await expectStatus(secondResponse, 200)
   expect(secondResponse.request().postDataJSON()).toMatchObject({ note: secondNote, idempotencyKey: expect.any(String) })
   const secondThread = await loadThreadDetail(page.request, summary.threadId!, demoOrganizationId())
-  const secondNotes = secondThread.entries.filter(entry => entry.eventName === 'internal_note.added' && entry.body === secondNote)
+  const secondNotes = streamEvents(secondThread, secondNote)
   expect(secondNotes).toHaveLength(1)
-  expect(secondNotes[0]).toMatchObject({ kind: 'operation', actorKind: 'member', channel: 'system', body: secondNote, payload: { private: true } })
+  expect((await loadLedger(page.request, summary.threadId!, demoOrganizationId())).entries.filter(entry => entry.id === secondNotes[0]!.id))
+    .toMatchObject([{ kind: 'operation', channel: 'system', event: 'internal_note.added', body: secondNote, payload: { private: true } }])
   await expect(page).toHaveURL(`${baseURL}${notePath}`)
   await expect(page.getByLabel('Note', { exact: true })).toHaveValue(note)
   await expect(noteInput).toHaveCount(0)
@@ -836,10 +972,11 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await expect(page).toHaveURL(`${baseURL}${recordPath}${noteContext}`)
   await expect(noteInput).toHaveValue('')
   const revisedThread = await loadThreadDetail(page.request, summary.threadId!, demoOrganizationId())
-  const revisedNotes = revisedThread.entries.filter(entry => entry.eventName === 'internal_note.updated' && entry.body === revisedNote)
+  const revisedNotes = streamEvents(revisedThread, revisedNote)
   expect(revisedNotes).toHaveLength(1)
-  expect(revisedNotes[0]).toMatchObject({ kind: 'operation', actorKind: 'member', channel: 'system', body: revisedNote,
-    payload: { private: true, noteId: addedNotes[0]!.id, revisionId: addedNotes[0]!.id } })
+  expect((await loadLedger(page.request, summary.threadId!, demoOrganizationId())).entries.filter(entry => entry.id === revisedNotes[0]!.id))
+    .toMatchObject([{ kind: 'operation', channel: 'system', event: 'internal_note.updated', body: revisedNote,
+      payload: { private: true, noteId: addedNotes[0]!.id, revisionId: addedNotes[0]!.id } }])
   await expect(detailPanel.getByRole('link', { name: `Edit note: ${revisedNote}`, exact: true })).toHaveAttribute('href', notePath)
 
   // Change is a mode of the booking leaf, not a dialog over it: the action is a
@@ -878,11 +1015,9 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await expect(page).toHaveURL(`${baseURL}/dashboard/${demoSlug()}/bookings/reservation/${upcomingBookingId}${changeContext}`)
 
   const detail = await loadThreadDetail(page.request, before.booking.threadId, demoOrganizationId())
-  const requests = detail.entries.filter(entry =>
-    entry.eventName === 'booking_change.requested' && entry.occurredAt >= requestedAt,
-  )
+  const requests = streamChanges(detail).filter(item => item.sentAt >= requestedAt)
   expect(requests).toHaveLength(1)
-  expect(requests[0]!.payload).toMatchObject({ after: { partySize: targetPartySize } })
+  expect(requests[0]!.change).toMatchObject({ requestedBy: 'business', status: 'pending', after: { partySize: targetPartySize } })
   const deliveryResponse = await page.request.get('/api/dev/notifications', {
     headers: devLoginHeaders(),
     params: { organization_id: demoOrganizationId(), since: requestedAt },
@@ -908,11 +1043,10 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
     )
     await expectStatus(afterResponse, 200)
     expect(await afterResponse.json()).toMatchObject({ booking: { partySize: targetPartySize } })
+    // The proposal reads accepted, and the conversation says so once.
     const afterDetail = await loadThreadDetail(page.request, before.booking.threadId, demoOrganizationId())
-    expect(afterDetail.entries.filter(entry =>
-      entry.eventName === 'booking_change.accepted'
-      && entry.payload?.requestId === request.id,
-    )).toHaveLength(1)
+    expect(streamChanges(afterDetail).find(item => item.id === request.id)?.change.status).toBe('accepted')
+    expect(streamEvents(afterDetail, `${afterDetail.guestName}’s change was accepted`)).toHaveLength(1)
   }
 })
 
@@ -963,8 +1097,8 @@ test('buyer conversation approves and declines canonical changes without moving 
       })
       await expectStatus(response, 200)
       const detail = await loadThreadDetail(owner, threadId!, demoOrganizationId())
-      const proposal = detail.entries.findLast(entry => entry.eventName === 'booking_change.requested')
-      expect(proposal?.bookingChange?.status).toBe('pending')
+      const proposal = streamChanges(detail).at(-1)
+      expect(proposal?.change.status).toBe('pending')
       return proposal!
     }
     const first = await requestChange(2)
@@ -990,7 +1124,8 @@ test('buyer conversation approves and declines canonical changes without moving 
     await expect(card.getByRole('button', { name: 'Accept changes', exact: true })).toHaveCount(0)
     expect(await read()).toMatchObject({ partySize: 1, bookingDate: original.bookingDate, bookingTime: original.bookingTime })
     const afterDecline = await loadThreadDetail(owner, threadId, demoOrganizationId())
-    expect(afterDecline.entries.filter(entry => entry.eventName === 'booking_change.declined' && entry.payload?.requestId === first.id)).toHaveLength(1)
+    expect(streamChanges(afterDecline).find(item => item.id === first.id)?.change.status).toBe('declined')
+    expect(streamEvents(afterDecline, 'E2E Buyer’s change was declined')).toHaveLength(1)
 
     const second = await requestChange(2)
     await page.reload()
@@ -1002,12 +1137,17 @@ test('buyer conversation approves and declines canonical changes without moving 
     await expect(card.filter({ hasText: 'Changes accepted' })).toContainText('Your booking has been updated.')
     expect(await read()).toMatchObject({ partySize: 2, bookingDate: original.bookingDate, bookingTime: original.bookingTime })
     const final = await loadThreadDetail(owner, threadId, demoOrganizationId())
-    expect(final.entries.filter(entry => entry.eventName === 'booking_change.accepted' && entry.payload?.requestId === second.id)).toHaveLength(1)
+    expect(streamChanges(final).find(item => item.id === second.id)?.change.status).toBe('accepted')
+    expect(streamEvents(final, 'E2E Buyer’s change was accepted')).toHaveLength(1)
+    const finalRecord = (await loadLedger(owner, threadId, demoOrganizationId())).operational_record
     const replay = await page.request.post('/api/account/bookings/change', {
       headers: authRequestHeaders(baseURL), data: { thread_id: threadId, request_id: second.id, decision: 'accept' },
     })
     await expectStatus(replay, 200)
-    expect((await loadThreadDetail(owner, threadId, demoOrganizationId())).entries.filter(entry => entry.eventName === 'booking_change.accepted' && entry.payload?.requestId === second.id)).toHaveLength(1)
+    // The replayed answer is the same answer: still one acceptance in the conversation.
+    const replayed = await loadThreadDetail(owner, threadId, demoOrganizationId())
+    expect(streamChanges(replayed).find(item => item.id === second.id)?.change.status).toBe('accepted')
+    expect(streamEvents(replayed, 'E2E Buyer’s change was accepted')).toHaveLength(1)
     await page.goto(`${baseURL}/dashboard/account/activity/reservation/${threadId}`)
     await page.getByRole('button', { name: 'Manage reservation', exact: true }).click()
     await page.getByRole('link', { name: 'Send a change request', exact: true }).click()
@@ -1020,11 +1160,13 @@ test('buyer conversation approves and declines canonical changes without moving 
     await page.getByRole('button', { name: 'Send a change request', exact: true }).click()
     await expectStatus(await sentRequest, 200)
     await expect(page.getByText('Your change request was sent to the business. Your booking is unchanged while it is reviewed.', { exact: true })).toBeVisible()
+    // A guest's request is a message for the business to answer; the reservation itself has not moved.
     const requested = await loadThreadDetail(owner, threadId, demoOrganizationId())
-    expect(requested.conversationState).toBe('needs_attention')
-    expect(requested.operationalRecord).toEqual(final.operationalRecord)
-    const customerRequest = requested.entries.filter(entry => entry.kind === 'message' && entry.actorKind === 'guest' && entry.body === changeMessage)
-    expect(customerRequest).toHaveLength(1)
+    const requestedLedger = await loadLedger(owner, threadId, demoOrganizationId())
+    expect(requestedLedger.state).toBe('needs_attention')
+    expect(requestedLedger.operational_record).toEqual(finalRecord)
+    const customerRequest = streamMessages(requested).filter(item => item.side === 'guest' && item.body === changeMessage)
+    expect(customerRequest).toMatchObject([{ author: 'E2E Buyer' }])
     const requestDelivery = await owner.get('/api/dev/notifications', { headers: devLoginHeaders(), params: { organization_id: demoOrganizationId(), since: sentAt } })
     await expectStatus(requestDelivery, 200)
     expect((await requestDelivery.json() as DeliveryList).deliveries.some(delivery => delivery.entry_id === customerRequest[0]!.id && delivery.purpose === 'owner_alert' && delivery.status === 'sent')).toBe(true)

@@ -2,6 +2,7 @@ import { expect, request as playwrightRequest, test, type APIResponse } from '@p
 import sharp from 'sharp'
 import type { BusinessOutcomePage, BusinessProgressReference } from '../../shared/business-outcomes'
 import type { BusinessGoal, RecommendationFeedback, RecommendationFeedbackView } from '../../shared/business-progress'
+import type { InboxRow, InboxThread } from '../../server/domain/guest-threads/types'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { seededTenant } from './seed/manifest'
@@ -142,7 +143,7 @@ test('authored goals and evidence-bound feedback follow persisted work', async (
     await responseBody(await member.post('/api/public/contact', { headers: { 'x-preview-tenant': slug }, data: {
       name: guestName, email: 'buyer@playwright.example', subject: 'general', consent: true, message: 'Which documents should I bring to my legal consultation?',
     } }), 201)
-    const inbox = await responseBody<{ threads: Array<{ id: string; guestName: string }> }>(await request.get(`/api/dashboard/organizations/${organization.id}/guest-threads`, { params: { type: 'contact' } }))
+    const inbox = await responseBody<{ threads: InboxRow[] }>(await request.get(`/api/dashboard/organizations/${organization.id}/guest-threads`, { params: { type: 'contact' } }))
     const contacts = inbox.threads.filter(thread => thread.guestName === guestName)
     expect(contacts).toHaveLength(1)
     const threadId = contacts[0]!.id
@@ -288,9 +289,10 @@ test('authored goals and evidence-bound feedback follow persisted work', async (
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
     expect(progress.feedback.find(item => item.id === deferred.id)?.applicability).toEqual({ current: false, reasons: ['evidence_changed'] })
     expect(progress.outcomes.filter(outcome => outcome.event === 'thread.member_reply' && outcome.subject.id === threadId)).toEqual(replies)
-    const preserved = await responseBody<{ thread: { entries: Array<{ body: string | null }> } }>(await request.get(threadUrl))
-    expect(preserved.thread.entries.filter(entry => entry.body === replyBody)).toHaveLength(1)
-    expect(preserved.thread.entries.filter(entry => entry.body === guestReply)).toHaveLength(1)
+    // The conversation keeps one copy of each side's message: the owner's retried reply and the client's answer.
+    const preserved = await responseBody<{ thread: InboxThread }>(await request.get(threadUrl))
+    expect(preserved.thread.stream.filter(item => item.type === 'message' && item.body === replyBody)).toMatchObject([{ side: 'business' }])
+    expect(preserved.thread.stream.filter(item => item.type === 'message' && item.body === guestReply)).toMatchObject([{ side: 'guest' }])
 
     const archived = await responseBody<{ goal: BusinessGoal }>(await request.patch(`${api}/goals/${goal.id}`, { data: { revision: currentGoal.revision, status: 'archived' } }))
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))

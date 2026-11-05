@@ -1,6 +1,7 @@
-import type { MemberAlertMessage, NotificationFact } from './messages'
+import type { MemberAlertMessage, NotificationFact, NotificationQuote, NotificationSection } from './messages'
 import { formatFormAnswer, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { formatPhone } from '~/utils/phone'
+import { formatCalendarDate, formatCalendarRange } from '~/utils/timezone'
 import type { BookingPresentation } from '~/utils/booking-presentation'
 import { stayGuestFirstName } from '~/shared/bookings'
 
@@ -14,7 +15,21 @@ import { stayGuestFirstName } from '~/shared/bookings'
  * `date` and `time` are separate facts rather than one "when" string because
  * the approved templates have a slot for each — and because showing them as two
  * cells is how a reservation reads at a glance.
+ *
+ * Titles are the email's subject, in Airbnb's form: the event first, then the
+ * person or place after a dash or "for" — "Reservation canceled - Mina Park,
+ * Jul 20", "Message from Jamie" — never a former state before the event.
  */
+
+/** The first name a subject addresses someone by. */
+function firstName(name: string): string {
+  return stayGuestFirstName(name) ?? name
+}
+
+/** A day as a subject names it: "Jul 20". */
+function subjectDay(date: string): string {
+  return formatCalendarDate(date, 'en-US', { month: 'short', day: 'numeric' })
+}
 
 // A fact the event has is stated as it is; one the event genuinely lacks is
 // null and is left out. Nothing here writes in text for a fact that is absent:
@@ -42,6 +57,8 @@ export interface ReservationEventInput {
   guestEmail: string
   guestPhone: string | null
   date: string
+  /** The day as the subject names it, "Jul 20", in the place's own clock. */
+  day: string
   time: string
   partySize: string
   locationName: string | null
@@ -57,7 +74,7 @@ export interface ReservationEventInput {
 
 export function reservationCreatedMessage(input: ReservationEventInput): MemberAlertMessage {
   return {
-    title: `New confirmed reservation from ${input.guestName}`,
+    title: `Reservation confirmed - ${input.guestName}, ${input.day}`,
     preheader: `${input.date} at ${input.time} · ${input.partySize}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: '' } : null,
     facts: facts(
@@ -87,12 +104,12 @@ export function reservationCancelledMessage(input: ReservationEventInput & { was
   const standing = input.wasConfirmed ? 'Confirmed reservation' : 'Reservation request'
   const venue = [standing, input.locationName].filter(Boolean).join(' · ')
   return {
-    title: `${standing} cancelled by ${input.guestName}`,
+    title: `${input.wasConfirmed ? 'Reservation canceled' : 'Reservation request withdrawn'} - ${input.guestName}, ${input.day}`,
     preheader: `${input.date} at ${input.time} · ${input.partySize}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: '' } : null,
     facts: facts(
       fact('guestName', 'Guest', input.guestName, true),
-      fact('context', 'What was cancelled', venue, true),
+      fact('context', 'What was canceled', venue, true),
       fact('date', 'Date', input.date, true),
       fact('time', 'Time', input.time, true),
       fact('partySize', 'Party size', input.partySize, true),
@@ -103,7 +120,7 @@ export function reservationCancelledMessage(input: ReservationEventInput & { was
     primaryAction: { url: input.replyUrl, label: 'Open in dashboard' },
     category: 'reservations_bookings',
     emailPurpose: 'transactional',
-    emailReason: `You received this email because a reservation with ${input.organizationName} was cancelled and you receive its reservation notifications.`,
+    emailReason: `You received this email because a reservation with ${input.organizationName} was canceled and you receive its reservation notifications.`,
     organizationName: input.organizationName,
   }
 }
@@ -118,6 +135,8 @@ export interface StayEventInput {
   channel: string | null
   checkIn: string
   checkOut: string
+  /** The stay's nights as calendar dates, which the subject names. */
+  stayDates: { checkIn: string; checkOut: string }
   /** The guest's own arrival time, when they gave one. */
   arrival: string | null
   nights: string
@@ -139,9 +158,10 @@ export interface StayEventInput {
 }
 
 export function stayBookedMessage(input: StayEventInput): MemberAlertMessage {
-  const what = input.channel ? `${input.channel} stay` : 'stay'
   return {
-    title: input.overlap ? `Double booking: ${input.guestName}'s ${what} overlaps another stay` : `New ${what} booked by ${input.guestName}`,
+    title: input.overlap
+      ? `Double booking - ${input.guestName}, ${formatCalendarRange(input.stayDates.checkIn, input.stayDates.checkOut, 'en-US')}`
+      : `Reservation confirmed - ${input.guestName} arrives ${subjectDay(input.stayDates.checkIn)}`,
     preheader: `${input.homeName} · ${input.checkIn} – ${input.checkOut}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.homeName } : null,
     intro: input.overlap ? `These nights at ${input.homeName} are already held by another stay. Move or cancel one of them before check-in.` : undefined,
@@ -169,13 +189,13 @@ export function stayBookedMessage(input: StayEventInput): MemberAlertMessage {
   }
 }
 
-/** A stay was cancelled: by its guest on the site, with what their booked policy refunded, or on its channel. */
+/** A stay was canceled: by its guest on the site, with what their booked policy refunded, or on its channel. */
 export function stayCancelledMessage(input: Omit<StayEventInput, 'notes' | 'total' | 'paid' | 'balance' | 'overlap'> & { refund: string | null }): MemberAlertMessage {
   return {
-    title: input.channel ? `${input.guestName}'s ${input.channel} stay was cancelled` : `Stay cancelled by ${input.guestName}`,
+    title: `Reservation canceled - ${input.guestName}, ${subjectDay(input.stayDates.checkIn)}`,
     preheader: `${input.homeName} · ${input.checkIn} – ${input.checkOut}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.homeName } : null,
-    intro: input.channel ? `The stay was cancelled on ${input.channel}, and its nights are open again here. Any refund is ${input.channel}'s to make.` : undefined,
+    intro: input.channel ? `The stay was canceled on ${input.channel}, and its nights are open again here. Any refund is ${input.channel}'s to make.` : undefined,
     facts: facts(
       fact('context', 'Place to stay', input.homeName, true),
       fact('guestName', 'Guest', input.guestName, true),
@@ -191,7 +211,7 @@ export function stayCancelledMessage(input: Omit<StayEventInput, 'notes' | 'tota
     primaryAction: { url: input.replyUrl, label: input.channel ? 'Open stay' : 'Open in dashboard' },
     category: 'reservations_bookings',
     emailPurpose: 'transactional',
-    emailReason: `You received this email because a stay with ${input.organizationName} was cancelled and you receive its booking notifications.`,
+    emailReason: `You received this email because a stay with ${input.organizationName} was canceled and you receive its booking notifications.`,
     organizationName: input.organizationName,
   }
 }
@@ -225,7 +245,7 @@ export function bookingCreatedMessage(input: BookingEventInput): MemberAlertMess
   const counterparty = input.counterpartyLabel ?? input.presentation.counterpartyLabel
   const partyLabel = input.partyLabel ?? input.presentation.partyLabel
   return {
-    title: `New ${input.presentation.noun} request from ${input.guestName}`,
+    title: `${input.presentation.label} request from ${input.guestName} for ${input.day}`,
     preheader: `${input.productTitle} · ${input.date} at ${input.time}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle } : null,
     facts: facts(
@@ -253,11 +273,11 @@ export function bookingCancelledMessage(input: BookingEventInput & { wasConfirme
   const partyLabel = input.partyLabel ?? input.presentation.partyLabel
   const standing = input.wasConfirmed ? `Confirmed ${input.presentation.noun}` : `${input.presentation.label} request`
   return {
-    title: `${standing} cancelled by ${input.guestName}`,
+    title: `${input.presentation.label} ${input.wasConfirmed ? 'canceled' : 'request withdrawn'} - ${input.guestName}, ${input.day}`,
     preheader: `${input.productTitle} · ${input.date} at ${input.time}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle } : null,
     facts: facts(
-      fact('context', 'What was cancelled', `${standing} · ${input.productTitle}`, true),
+      fact('context', 'What was canceled', `${standing} · ${input.productTitle}`, true),
       fact('guestName', counterparty, input.guestName, true),
       fact('date', 'Date', input.date, true),
       fact('time', 'Time', input.time, true),
@@ -269,7 +289,7 @@ export function bookingCancelledMessage(input: BookingEventInput & { wasConfirme
     primaryAction: { url: input.replyUrl, label: 'Open in dashboard' },
     category: 'reservations_bookings',
     emailPurpose: 'transactional',
-    emailReason: `You received this email because a ${input.presentation.noun} with ${input.organizationName} was cancelled and you receive its booking notifications.`,
+    emailReason: `You received this email because a ${input.presentation.noun} with ${input.organizationName} was canceled and you receive its booking notifications.`,
     organizationName: input.organizationName,
   }
 }
@@ -285,15 +305,22 @@ export interface ContactEventInput {
   replyUrl: string
 }
 
+/** Where a reply to a message alert goes: KrabiClaw, not this email, until email replies reach the channel. */
+function replyNote(name: string): string {
+  return `Reply from the dashboard or the KrabiClaw app. Replies to this email are not delivered to ${name}.`
+}
+
 export function contactReceivedMessage(input: ContactEventInput): MemberAlertMessage {
   // The product a guest is asking about is the whole point of the message, and
   // the approved template has no slot for it — so it rides in the subject,
   // which does have one, rather than staying in the email alone.
   const subject = [input.subject, input.productTitle].filter(Boolean).join(' · ')
+  const first = firstName(input.guestName)
   return {
-    title: `New website message from ${input.guestName}`,
-    preheader: subject,
+    title: `Message from ${first}`,
+    preheader: input.message.slice(0, 120),
     hero: null,
+    intro: subject ? `About: ${subject}` : undefined,
     facts: facts(
       fact('guestName', 'From', input.guestName, true),
       fact('subject', 'About', subject, true),
@@ -301,7 +328,9 @@ export function contactReceivedMessage(input: ContactEventInput): MemberAlertMes
       fact('message', 'Message', input.message, true),
       input.consentAcknowledged ? fact('consent', 'Contact/privacy notice', 'Acknowledged') : null,
     ),
-    primaryAction: { url: input.replyUrl, label: 'Reply in dashboard' },
+    quote: { author: input.guestName, body: input.message, translation: null, photos: [] },
+    primaryAction: { url: input.replyUrl, label: 'Reply' },
+    finePrint: replyNote(first),
     category: 'messages',
     emailPurpose: 'transactional',
     emailReason: `You received this email because someone contacted ${input.organizationName} and you receive its website messages.`,
@@ -309,30 +338,72 @@ export function contactReceivedMessage(input: ContactEventInput): MemberAlertMes
   }
 }
 
+/**
+ * What a conversation is about now, under its message: a stay's details, or an
+ * inquiry's with the time Airbnb counts a reply as on time. A contact or team
+ * conversation, and an Airbnb Support case, have none.
+ */
+export interface ConversationRecord {
+  /** The home's own picture; none is substituted. */
+  image: { imageUrl: string; alt: string } | null
+  homeName: string
+  /** Calendar dates. */
+  checkIn: string
+  checkOut: string
+  guests: string
+  /** An inquiry's reply deadline, in the home's clock with its zone: "Oct 31, 4:53 PM MDT". Null for a booked stay. */
+  replyBy: string | null
+}
+
+function recordSection(record: ConversationRecord): NotificationSection {
+  const day = (date: string) => formatCalendarDate(date, 'en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+  return {
+    title: record.replyBy === null ? 'Reservation details' : 'Inquiry',
+    image: record.image,
+    facts: facts(
+      fact('home', 'Home', record.homeName),
+      fact('guests', 'Guests', record.guests),
+      fact('checkIn', 'Check-in', day(record.checkIn)),
+      fact('checkOut', 'Checkout', day(record.checkOut)),
+      fact('replyBy', 'Reply by', record.replyBy),
+    ),
+  }
+}
+
 export interface MessageEventInput {
-  senderName: string
-  senderEmail: string | null
+  /** Who wrote: a guest or teammate by the name the conversation records, or Airbnb Support about a case. */
+  sender: { kind: 'person'; name: string; email: string | null } | { kind: 'support' }
   conversationLabel: string
   /** The home, class or booking the conversation belongs to, when it belongs to one. */
   about: string | null
   messagePreview: string
+  translation: NotificationQuote['translation']
+  record: ConversationRecord | null
   organizationName: string | null
   replyUrl: string
 }
 
+const SUPPORT = 'Airbnb Support'
+
 export function messageReceived(input: MessageEventInput): MemberAlertMessage {
   const subject = [input.conversationLabel, input.about, input.organizationName].filter(Boolean).join(' · ')
+  const support = input.sender.kind === 'support'
+  const name = input.sender.kind === 'person' ? input.sender.name : SUPPORT
+  const first = support ? SUPPORT : firstName(name)
   return {
-    title: input.about ? `${input.senderName} wrote about ${input.about}` : `${input.senderName} sent a message`,
+    title: support ? 'New message about your Airbnb Support case' : `Message from ${first}`,
     preheader: input.messagePreview.slice(0, 120),
     hero: null,
     facts: facts(
-      fact('guestName', 'From', input.senderName, true),
+      fact('guestName', 'From', name, true),
       fact('subject', 'Conversation', subject, true),
-      fact('guestEmail', 'Email', input.senderEmail),
+      fact('guestEmail', 'Email', input.sender.kind === 'person' ? input.sender.email : null),
       fact('message', 'Message', input.messagePreview, true),
     ),
-    primaryAction: { url: input.replyUrl, label: 'Open conversation' },
+    quote: { author: first, body: input.messagePreview, translation: input.translation, photos: [] },
+    primaryAction: { url: input.replyUrl, label: 'Reply' },
+    finePrint: replyNote(first),
+    sections: input.record && !support ? [recordSection(input.record)] : [],
     category: 'messages',
     emailPurpose: 'transactional',
     emailReason: input.organizationName
@@ -344,28 +415,33 @@ export function messageReceived(input: MessageEventInput): MemberAlertMessage {
 
 export interface InquiryEventInput {
   guestName: string
-  homeName: string
-  /** "Nov 15, 2026 – Feb 15, 2027 · 92 nights · 1 adult, 1 pet" */
-  request: string
-  /** When Airbnb stops counting a reply as on time, in the home's own clock. */
-  respondBy: string
+  /** The guest's words that asked, as the conversation recorded them. */
+  message: string
+  translation: NotificationQuote['translation']
+  record: ConversationRecord & { replyBy: string }
   organizationName: string
   replyUrl: string
 }
 
 /** An Airbnb guest asked about dates before booking; Airbnb times the host's reply. */
 export function inquiryReceivedMessage(input: InquiryEventInput): MemberAlertMessage {
+  const { record } = input
+  const dates = formatCalendarRange(record.checkIn, record.checkOut, 'en-US')
+  const nights = Math.round((Date.parse(`${record.checkOut}T00:00:00Z`) - Date.parse(`${record.checkIn}T00:00:00Z`)) / 86_400_000)
+  const first = firstName(input.guestName)
   return {
-    title: `${input.guestName} asked about ${input.homeName} on Airbnb`,
-    preheader: `Reply by ${input.respondBy} · ${input.request}`,
+    title: `Inquiry for ${record.homeName} for ${dates}`,
+    preheader: `Reply by ${record.replyBy} · ${input.message.slice(0, 100)}`,
     hero: null,
-    intro: `This is an inquiry, not a booking. Airbnb counts your reply as on time until ${input.respondBy}.`,
     facts: facts(
       fact('guestName', 'From', input.guestName, true),
-      fact('subject', 'Inquiry', `Airbnb inquiry · ${input.homeName}`, true),
-      fact('message', 'Asking for', `Reply by ${input.respondBy} · ${input.request}`, true),
+      fact('subject', 'Inquiry', `Airbnb inquiry · ${record.homeName}`, true),
+      fact('message', 'Asking for', `Reply by ${record.replyBy} · ${dates} · ${nights} night${nights === 1 ? '' : 's'} · ${record.guests}`, true),
     ),
-    primaryAction: { url: input.replyUrl, label: 'Reply to inquiry' },
+    quote: { author: first, body: input.message, translation: input.translation, photos: [] },
+    primaryAction: { url: input.replyUrl, label: 'Reply' },
+    finePrint: replyNote(first),
+    sections: [recordSection(record)],
     category: 'messages',
     emailPurpose: 'transactional',
     emailReason: `You received this email because a guest asked ${input.organizationName} about a stay on Airbnb and you receive its messages.`,
@@ -386,11 +462,11 @@ export interface ReviewEventInput {
 export function reviewReceivedMessage(input: ReviewEventInput): MemberAlertMessage {
   // The approved template has a rating slot and an excerpt slot and no author
   // slot, so the author leads the excerpt — the email's own headline is
-  // "New review from {author}", and WhatsApp used to name nobody at all.
+  // "Read {author}'s review", and WhatsApp used to name nobody at all.
   const privately = input.hasPrivateFeedback ? ' and private feedback' : ''
   const excerpt = input.content.trim() ? `${input.authorName}: ${input.content.trim()}` : `${input.authorName} left a rating${privately}.`
   return {
-    title: `New ${input.rating}-star review from ${input.authorName}`,
+    title: `Read ${firstName(input.authorName)}'s review`,
     preheader: input.content.slice(0, 120) || `${input.rating} out of 5`,
     hero: null,
     facts: facts(
@@ -525,13 +601,16 @@ export function bookingChangeMessage(input: BookingChangeEventInput): MemberAler
     changed: `Changed${input.channel ? ` on ${input.channel}` : ''} · the new details are confirmed`,
   }[input.status]
   const differences = input.differences.map(difference => difference.text).join(' · ') || 'No change to the booked details'
+  // A stay is a reservation, as Airbnb calls it; a booking or consultation keeps its own name.
+  const noun = input.recordKind === 'stay' ? 'reservation' : input.recordKind
+  const Noun = noun.charAt(0).toUpperCase() + noun.slice(1)
   return {
     title: {
-      requested: awaitingHost ? `${input.guestName} asked to change their ${what}` : `Changes proposed for ${input.guestName}'s ${what}`,
-      accepted: `${input.guestName} accepted the ${what} changes`,
-      declined: `${input.guestName} declined the ${what} changes`,
-      withdrawn: `${input.guestName} withdrew their ${what} change request`,
-      changed: `${input.guestName}'s ${what} changed`,
+      requested: awaitingHost ? `${Noun} change requested - ${input.guestName}` : `${Noun} change proposed - ${input.guestName}`,
+      accepted: `Your ${noun} change was accepted`,
+      declined: `Your ${noun} change was declined`,
+      withdrawn: `Your ${noun} change was withdrawn`,
+      changed: `${Noun} changed - ${input.guestName}`,
     }[input.status],
     preheader: differences,
     hero: null,
@@ -571,6 +650,8 @@ export interface CalendarSyncEventInput {
   recordKind: string
   guestName: string
   whenLabel: string
+  /** The booked day as the subject names it, "Jul 20". */
+  day: string
   /** Why the move could not be applied; absent for a deletion. */
   reason: string | null
   replyUrl: string
@@ -584,7 +665,7 @@ export function calendarSyncMessage(input: CalendarSyncEventInput): MemberAlertM
     ? `${input.guestName}'s ${input.recordKind} is still booked for ${input.whenLabel}. Deleting its event in Google Calendar never cancels it or refunds anyone, and the event has been put back. Cancel the ${input.recordKind} in KrabiClaw if you meant to.`
     : `${input.guestName}'s ${input.recordKind} stays at ${input.whenLabel}${input.reason ? `: ${input.reason}` : '.'} The event has been moved back in Google Calendar. Change the ${input.recordKind} in KrabiClaw to pick a time that works.`
   return {
-    title: deleted ? `${input.guestName}'s ${input.recordKind} was deleted in Google Calendar` : `${input.guestName}'s ${input.recordKind} could not be moved`,
+    title: `${deleted ? 'Calendar event deleted' : 'Calendar change not applied'} - ${input.guestName}, ${input.day}`,
     preheader: summary,
     hero: null,
     intro: summary,

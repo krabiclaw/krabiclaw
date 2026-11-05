@@ -157,11 +157,15 @@ the existing `TodayAgendaCard` presentation: one small time or status line,
 headline, location or context, image and badge, with the entire card a link.
 An undated task states its status rather than inventing an appointment time.
 
-Today shows three things, in this order: work that is due now, scheduled
-activity, and optional work. Work is due when a recorded fact makes it so: a
+Today groups work that needs attention, activity happening today, currently
+hosted stays as compact expandable context, completed work, and optional work,
+in that order. Priorities and their suggestions sit below the operational day.
+The attention count includes only outstanding work; hosting and completed work
+do not increase it. Work is due when a recorded fact makes it so: a
 booking awaiting the owner's decision, an unanswered guest message about a live
 (pending or confirmed, not yet ended) commitment, an unanswered message or
-contact form from the last seven days, or a failed publication. Inbox state
+contact form from the last seven days, a failed or uncertain scheduled send,
+a failed review invitation, or a failed publication. Inbox state
 alone is not due work: an older unanswered inquiry with no live commitment
 stays in Messages and is not mandatory on Today.
 
@@ -200,9 +204,30 @@ draft opens its article; a failed publication opens its publishing controls.
 Current domain state determines whether work remains outstanding. Reading a
 notification does not complete it; several notifications for one concern make
 one card. Resolved work disappears, while unresolved work survives midnight.
-A reply that reached the guest or a published draft is recognised on the next
-read. Booking occurrences retain their own location's timezone. Future bookings
+A successful business reply, including a property reply mirrored from Airbnb,
+or a published draft is recognised on the next read. A delayed mirror of an old
+reply cannot answer a newer guest message, and a scheduled check-in template
+does not answer an unrelated question. Waiting age starts at the first still
+unanswered guest message, rather than restarting for every follow-up.
+
+Upcoming includes actual pending scheduled communications and delayed replies,
+with their due time and automatic or member responsibility, alongside booked
+activity and explicitly deferred work. A sent, cancelled or superseded schedule
+no longer appears as future work. Failed and uncertain sends belong in Today
+until their canonical state changes; reading an alert does not clear them.
+An eligible unsent automatic review invitation is scheduled work; it does not
+ask the owner to perform an action that only the automation currently owns.
+Booking occurrences retain their own location's timezone. Future bookings
 needing a decision belong in Today now and retain their actual booking date.
+
+Completed today projects verified canonical outcomes: conversations answered, completed
+booking decisions or agreed changes, new confirmed bookings, first review
+invitations and successful scheduled work. Each underlying obligation appears
+once, including automatic work while the team is away. A retry, copied provider
+message, notification or repeated invitation is not another accomplishment.
+These cards link to their existing data owner and have no completion control.
+Today re-reads on relevant dashboard invalidations, when the page regains focus,
+and when time passing makes an existing due item or day boundary current.
 
 Stay cards read the canonical agenda and open `O/bookings/stay/:stayId`.
 Booked activity opens beneath Today: desktop keeps the agenda beside the

@@ -92,9 +92,8 @@ export async function getGuestThreadDetail(
       throw new HTTPError({ statusCode: 500, message: 'The mirrored message has invalid attachment links', data: { code: 'CHANNEL_MESSAGE_PAYLOAD_INVALID', entry_id: entry.id, field: 'attachments' } })
     }
     const providerRecordedAt = mirrored ? providerTimestamp(payload!.provider_inserted_at, `activity_entry:${entry.id}`, 'provider_inserted_at') : null
-    const attachments = mirrored
-      ? (payload!.attachments as string[]).map((url, index) => ({ id: `${entry.id}:${index}`, url, alt: null, width: null, height: null }))
-      : photos.get(entry.id) ?? []
+    // Airbnb's photos are our own media once the mirror has stored them, like every message's.
+    const attachments = photos.get(entry.id) ?? []
     return {
       id: entry.id,
       kind: entry.kind,
@@ -102,7 +101,7 @@ export async function getGuestThreadDetail(
       actorUserId: audience
         ? entry.actor_kind === 'guest' && entry.channel === 'web' && entry.actor_user_id === audience.buyerUserId ? entry.actor_user_id : null
         : entry.actor_user_id,
-      actorLabel: actorLabel(entry, mirrored, actorNames),
+      actorLabel: actorLabel(entry, mirrored, actorNames, organization.name),
       channel: entry.channel,
       body: entry.body,
       eventName: entry.event_name,
@@ -197,8 +196,9 @@ export async function getGuestThreadDetail(
  * account is deleted, which is a recorded fact rather than a missing one. A
  * system message is either a provider message or a scheduled message.
  */
-function actorLabel(entry: GuestThreadEntryRow, mirrored: boolean, actorNames: Map<string, string>): string | null {
-  if (mirrored) return entry.actor_kind === 'system' ? 'Airbnb' : entry.actor_kind === 'member' ? 'Property on Airbnb' : null
+function actorLabel(entry: GuestThreadEntryRow, mirrored: boolean, actorNames: Map<string, string>, business: string): string | null {
+  // The host's Airbnb messages are the business's side, whoever typed them on Airbnb.
+  if (mirrored) return entry.actor_kind === 'system' ? 'Airbnb' : entry.actor_kind === 'member' ? business : null
   if (entry.event_name === 'thread.scheduled_message') return 'Scheduled message'
   if (entry.actor_user_id) {
     const name = actorNames.get(entry.actor_user_id)

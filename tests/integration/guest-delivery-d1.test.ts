@@ -148,7 +148,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       assert.equal(sent?.encoding, 'aes128gcm')
       assert.match(sent?.authorization ?? '', new RegExp(`^vapid t=[\\w-]+\\.[\\w-]+\\.[\\w-]+, k=${webEnv.NUXT_PUBLIC_VAPID_PUBLIC_KEY}$`))
       // The alert's own title and its reply link: the conversation in the organization's inbox.
-      assert.equal(sent?.payload.title, 'New website message from Proof Guest')
+      assert.equal(sent?.payload.title, 'Message from Proof')
       assert.equal(sent?.payload.url, 'https://proof.example/dashboard/proof/messages/web-delivered')
       assert.equal(sent?.payload.tag, 'web-delivered')
       await notifyPushContact(webEnv, 'web-gone')
@@ -646,9 +646,9 @@ test('a guest-cancelled stay alerts owners with the whole stay and the team look
     assert.equal(to('cleaner@provider-proof.com').length, 1)
     const [ownerEmail] = to('owner@provider-proof.com')
     const [memberEmail] = to('cleaner@provider-proof.com')
-    assert.equal(ownerEmail!.subject, 'Stay cancelled by Ana Silva')
+    assert.equal(ownerEmail!.subject, 'Reservation canceled - Ana Silva, Oct 1')
     for (const fact of ['guest@provider-proof.com', '$123.45', '3:30 PM']) assert(ownerEmail!.text.includes(fact), `the owner's alert states ${fact}`)
-    assert.equal(memberEmail!.subject, 'Stay cancelled by Ana')
+    assert.equal(memberEmail!.subject, 'Reservation canceled - Ana, Oct 1')
     for (const fact of ['Place to stay\nTurnover Cabin', 'Guest\nAna\n', 'Check-in\nWed, Oct 1, 2098 · 4:00 PM', 'Check-out\nFri, Oct 3, 2098 · 10:00 AM', 'Arriving\n3:30 PM', 'Guests\n3\n', `https://proof.example/dashboard/turnover/bookings/stay/${stay.id}`]) assert(memberEmail!.text.includes(fact), `the member's alert states ${fact}`)
     for (const secret of ['Silva', 'guest@provider-proof.com', '$123.45', 'Door code', stay.request_id!]) {
       assert(!memberEmail!.text.includes(secret) && !memberEmail!.html.includes(secret), `the member's alert leaves out ${secret}`)
@@ -658,7 +658,7 @@ test('a guest-cancelled stay alerts owners with the whole stay and the team look
     assert.equal(pushes[0]!.url, `https://api.sandbox.push.apple.com/3/device/${deviceToken}`)
     // The icon counts what the member can read: an organization's stay notification is not in their bell.
     assert.deepEqual(pushes[0]!.body, {
-      aps: { alert: { title: 'Stay cancelled by Ana', body: 'Turnover Cabin · Wed, Oct 1, 2098 · 4:00 PM – Fri, Oct 3, 2098 · 10:00 AM' }, sound: 'default', badge: 0 },
+      aps: { alert: { title: 'Reservation canceled - Ana, Oct 1', body: 'Turnover Cabin · Wed, Oct 1, 2098 · 4:00 PM – Fri, Oct 3, 2098 · 10:00 AM' }, sound: 'default', badge: 0 },
       organizationId: access.organizationId, userId: 'cleaner-turnover', kind: 'stay', stayId: stay.id,
     })
   } finally {

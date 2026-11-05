@@ -20,29 +20,23 @@
 <script setup lang="ts">
 import BookingDetails from '~/components/dashboard/BookingDetails.vue'
 import StayDetails from '~/components/dashboard/StayDetails.vue'
-import { threadRecordTitle } from '~/lib/components/workspace/messages/guest-thread-client'
 
 definePageMeta({ layout: 'dashboard' })
 
 const route = useRoute()
 const threadId = computed(() => String(route.params.threadId))
 
-// The record is the thread's own opening submission, so it is read from the
-// thread rather than passed through the URL a second time. A contact thread has
-// no record and therefore no level here.
+// Airbnb's Reservation pane: the record the conversation is about, read from
+// the thread. A conversation with no record has no level here.
 const { thread } = await useGuestThread(threadId)
-if (thread.value && !thread.value.operationalRecord) {
+if (thread.value && !thread.value.recordId) {
   showError(createError({ statusCode: 404, statusMessage: 'This conversation has no reservation' }))
 }
-// A stay is shown by its own record screen, keyed by the stay rather than the thread.
-const stayId = computed(() => thread.value?.submissionType === 'stay' ? thread.value.operationalRecord?.id ?? null : null)
-const bookingType = computed(() => thread.value?.submissionType === 'contact' || thread.value?.submissionType === 'stay' ? null : thread.value?.submissionType ?? null)
-const bookingId = computed(() => thread.value?.submissionId ?? null)
-const dashboard = useDashboardOrganization()
-// The tenant's own word for the record, the same one the thread's control uses.
-const recordTitle = computed(() => (thread.value
-  ? threadRecordTitle(thread.value.submissionType, dashboard.organization.value?.vertical ?? null)
-  : 'Details'))
+// A stay is shown by its own record screen, keyed by the stay; a booking or reservation by its conversation.
+const stayId = computed(() => thread.value?.recordKind === 'stay' ? thread.value.recordId : null)
+const bookingType = computed(() => thread.value?.recordKind === 'booking' || thread.value?.recordKind === 'reservation' ? thread.value.recordKind : null)
+const bookingId = computed(() => bookingType.value ? thread.value!.recordId : null)
+const recordTitle = computed(() => thread.value?.recordTitle ?? 'Reservation')
 
-useSeoMeta({ title: 'Reservation details | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Reservation | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>
