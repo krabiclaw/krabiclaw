@@ -247,6 +247,43 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
+test('a message mirrored before photos were stored gets its photo on the next backfill or re-mirror, and keeps one set', async () => {
+  const { runtime, db, env } = await boot()
+  const provider = new Provider(), realFetch = globalThis.fetch
+  globalThis.fetch = provider.fetch as typeof fetch
+  try {
+    // The conversation as production holds it: adopted, with the attachment message
+    // recorded by the earlier mirror, which kept only Channex's link.
+    const attachmentMessage = provider.messages[1]!
+    provider.messages = [provider.messages[0]!]
+    assert.deepEqual(await backfillChannexMessages(db, env, 'property', ORG), { threads: 1 })
+    const requestId = await db.prepare("SELECT request_id FROM channel_threads WHERE external_thread_id = 'thread'").first<string>('request_id')
+    assert.ok(requestId)
+    const recorded = await appendEntry(db, {
+      threadId: requestId, kind: 'message', actorKind: 'system', channel: 'airbnb', body: null, eventName: 'channel.message_mirrored', dedupeKey: 'channex-message:second',
+      payloadJson: { provider_message_id: 'second', provider_inserted_at: RAW, provider_updated_at: RAW, attachments: ['https://channex.test/attachment/file'], meta: { inquiry: true } },
+    })
+    const placements = () => db.prepare("SELECT count(*) AS n FROM media_placements WHERE owner_type = 'activity_entry' AND owner_id = ? AND slot = 'attachments' AND status = 'active'").bind(recorded.id).first<number>('n')
+    assert.equal(await placements(), 0)
+    assert.deepEqual(provider.fileReads, [])
+
+    // The backfill finds the recorded message and stores its photo on it.
+    provider.messages = [provider.messages[0]!, attachmentMessage]
+    assert.deepEqual(await backfillChannexMessages(db, env, 'property', ORG), { threads: 1 })
+    assert.equal(await placements(), 1)
+    assert.deepEqual(provider.fileReads, ['/attachment/file'])
+    assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE dedupe_key = 'channex-message:second'").first('count(*)'), 1)
+    const [photo] = (await getGuestThreadDetail(db, requestId, ORG))!.entries.find(entry => entry.id === recorded.id)!.attachments
+    assert.ok(photo && photo.url.startsWith('https://media.example.test/'), 'the message shows our stored photo, not the Channex link')
+
+    // A webhook's re-mirror of the same conversation keeps exactly that one set.
+    await mirrorChannexThread(db, env, 'thread', 'property')
+    assert.equal(await placements(), 1)
+    assert.deepEqual(provider.fileReads, ['/attachment/file'])
+    assert.equal(await db.prepare("SELECT count(*) FROM media_assets WHERE status = 'active'").first('count(*)'), 1)
+  } finally { globalThis.fetch = realFetch; await runtime.dispose() }
+})
+
 test('the inbox exposes every page with a stable tie order and validates pagination instead of hiding a row cap', async () => {
   const { runtime, db } = await boot()
   try {
