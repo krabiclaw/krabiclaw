@@ -309,11 +309,9 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
       const todayResponse = await memberRequest.get('/api/dashboard/today', { params: { org } })
       expect(todayResponse.status(), await todayResponse.text()).toBe(200)
       const todayCards = (await todayResponse.json() as TodayFeedPayload).cards.filter(card => card.id.endsWith(`:${reservationId}`))
-      // Its future occurrence stays on Upcoming. The confirmed booking was
-      // received today, so its completed fact follows exactly the same access.
-      expect(todayCards.filter(card => card.completedAt === null)).toEqual([])
-      if (assigned) expect(todayCards).toEqual([expect.objectContaining({ id: `completed:booking:${reservationId}`, priority: 'schedule', completedAt: expect.any(String), to: destination })])
-      else expect(todayCards).toEqual([])
+      // Its future occurrence belongs on Upcoming, with the same access as
+      // the canonical record. A received booking creates no action for today.
+      expect(todayCards).toEqual([])
       const upcomingResponse = await memberRequest.get('/api/dashboard/today', { params: { org, range: 'upcoming', from: day.date, to: day.date } })
       expect(upcomingResponse.status(), await upcomingResponse.text()).toBe(200)
       const feed = await upcomingResponse.json() as TodayFeedPayload
@@ -347,9 +345,6 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
         await memberPage.getByRole('tab', { name: 'Today', exact: true }).click()
         await expect(memberPage.getByRole('tab', { name: 'Today', exact: true })).toHaveAttribute('aria-selected', 'true')
         await expect(memberPage.locator(`[data-card-id="reservation:${reservationId}"]`)).toHaveCount(0)
-        // The recorded completion is not a task on Today; its future visit
-        // remains available through the Upcoming card verified above.
-        await expect(memberPage.locator(`[data-card-id="completed:booking:${reservationId}"]`)).toHaveCount(0)
         const openedThread = memberPage.waitForResponse(response => response.request().method() === 'GET'
           && new URL(response.url()).pathname === `${inboxPath}/${reservationId}`)
         expect((await memberPage.goto(`${ORG}/messages/${reservationId}`))?.status()).toBe(200)

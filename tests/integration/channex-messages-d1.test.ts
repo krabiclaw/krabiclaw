@@ -284,8 +284,7 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
       return await response.json() as TodayFeedPayload
     }
     const afterEmpty = await readToday()
-    assert.equal(afterEmpty.cards.some(card => card.id === `attention:${requestId}`), true)
-    assert.equal(afterEmpty.cards.some(card => card.id === `completed:reply:${requestId}`), false)
+    assert.deepEqual(afterEmpty.cards.map(card => card.id), [`attention:${requestId}`])
 
     // The conversation reads as the guest's words alone, and the list previews them.
     const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
@@ -302,8 +301,7 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
     await mirrorChannexThread(db, env, 'thread', 'property')
     assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [requestId])).get(requestId), guestAt)
     const afterBlank = await readToday()
-    assert.equal(afterBlank.cards.some(card => card.id === `attention:${requestId}`), true)
-    assert.equal(afterBlank.cards.some(card => card.id === `completed:reply:${requestId}`), false)
+    assert.deepEqual(afterBlank.cards.map(card => card.id), [`attention:${requestId}`])
 
     // A real image-only host reply is downloaded and placed on its message.
     provider.messages.push(provider.message('host-photo', 'property', null, ['/attachment/file'], new Date(receivedAt + 3).toISOString()))
@@ -317,8 +315,7 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
     assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [requestId])).size, 0)
     assert.equal(await db.prepare('SELECT conversation_state FROM requests WHERE id=?').bind(requestId).first('conversation_state'), 'waiting_on_guest')
     const afterPhoto = await readToday()
-    assert.equal(afterPhoto.cards.some(card => card.id === `attention:${requestId}`), false)
-    assert.equal(afterPhoto.cards.some(card => card.id === `completed:reply:${requestId}`), true)
+    assert.deepEqual(afterPhoto.cards, [])
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 

@@ -203,13 +203,16 @@ test('Today and Upcoming select work from obligations, the owner’s priority an
     feed = await today()
     assert.equal(ids(feed).includes(`draft:${sourdough.id}`), false)
     assert.equal(ids(feed).includes(`attention:${stayThread}`), false)
-    assert.equal(feed.cards.filter(card => card.id === `completed:reply:${stayThread}`).length, 1)
     assert.equal(feed.cards.filter(card => card.priority === 'opportunity').length, 0, 'with nothing worth doing, no optional work is invented')
 
     // A physically accepted reply answers the guest, but its own recorded completion error still needs attention.
     const receipt = (await db.prepare(`SELECT d.* FROM guest_thread_deliveries d JOIN activity_entries e ON e.id=d.entry_id
       WHERE e.request_id=? AND e.event_name='thread.member_reply' AND d.purpose='member_reply' AND d.channel='email'`).bind(stayThread).first<GuestThreadDeliveryRow>())!
     assert.ok(receipt)
+    assert.equal(receipt.status, 'sent')
+    assert.equal(receipt.error, null)
+    assert.ok(receipt.provider_message_id)
+    assert.match(receipt.email_message_id!, /^<.+@provider\.example>$/)
     await db.prepare(`CREATE TRIGGER reject_direct_reply_completion BEFORE UPDATE OF error ON guest_thread_deliveries
       WHEN OLD.id='${receipt.id.replaceAll("'", "''")}' AND NEW.error IS NULL BEGIN SELECT RAISE(ABORT,'controlled direct reply completion failure'); END`).run()
     const snapshot = JSON.parse(receipt.email_json!) as { message: Parameters<typeof deliverReceiptEmail>[1]['email'] }
@@ -224,23 +227,21 @@ test('Today and Upcoming select work from obligations, the owner’s priority an
     const attention = find(feed, `attention:${stayThread}`)!
     assert.equal(attention.priority, 'attention')
     assert.equal(attention.headline, 'Check the message to Stella')
-    assert.equal(attention.completedAt, null)
     assert.equal(attention.reason, await db.prepare('SELECT error FROM guest_thread_deliveries WHERE id=?').bind(receipt.id).first('error'))
-    assert.equal(feed.cards.some(card => card.id === `completed:reply:${stayThread}`), false)
     assert.equal(provider.sendAttempts, 1)
     const deliveredEvent = { type: 'email.delivered', created_at: new Date().toISOString(), data: { email_id: receipt.provider_message_id!,
       created_at: new Date().toISOString(), from: 'hello@krabiclaw.com', to: ['stella@provider-proof.com'], subject: 'Proof', message_id: receipt.email_message_id! } } as Parameters<typeof applyResendEmailEvent>[2]
     assert.equal(await applyResendEmailEvent(db, env, deliveredEvent), 'advanced')
     feed = await today()
     assert.equal(feed.cards.some(card => card.id === `attention:${stayThread}`), false)
-    assert.equal(feed.cards.filter(card => card.id === `completed:reply:${stayThread}`).length, 1)
+    assert.deepEqual(await db.prepare('SELECT status,error FROM guest_thread_deliveries WHERE id=?').bind(receipt.id).first(), { status: 'delivered', error: null })
     assert.equal(provider.sendAttempts, 1, 'the provider callback recovers the saved completion without sending another reply')
   } finally {
     await runtime.dispose()
   }
 })
 
-test('Today reads actual scheduled work and review outcomes: cancellation clears it, successful work moves to completed once, and an unsent failure stays actionable', async t => {
+test('Today reads actual scheduled work and review outcomes: cancellation and success clear work, and failed or unconfirmed delivery stays actionable', async t => {
   const reference = new Date()
   reference.setUTCHours(18, 0, 0, 0)
   t.mock.timers.enable({ apis: ['Date'], now: reference })
@@ -260,7 +261,6 @@ test('Today reads actual scheduled work and review outcomes: cancellation clears
     assert.ok(automatic)
     assert.equal(automatic.actionAt, planned.due_at)
     assert.match(automatic.reason!, /^Automatic · /)
-    assert.equal(automatic.completedAt, null)
     await cancelScheduledGuestMessage(db, env, access, planned.id)
     assert.equal(await db.prepare('SELECT status FROM scheduled_guest_messages WHERE id=?').bind(planned.id).first('status'), 'cancelled')
     assert.equal((await read('upcoming')).cards.some(card => card.id === automatic.id), false)
@@ -272,16 +272,20 @@ test('Today reads actual scheduled work and review outcomes: cancellation clears
 
     const provider = providerTransport(t), providerEnv = { ...env, ...provider.configuration }
     const later = await createSendLaterMessage(db, principal, stay.request_id!, { body: 'Your cabin is ready.', sendAt: new Date(now + 60_000).toISOString() })
-    assert.equal((await read()).cards.find(card => card.id === `send-later:${later.id}`)?.completedAt, null)
+    assert.equal((await read()).cards.find(card => card.id === `send-later:${later.id}`)?.priority, 'schedule')
     t.mock.timers.tick(120_000)
     const sentResult = await sendDueSendLaterMessages(db, providerEnv)
     assert.deepEqual(sentResult, { sent: 1, failed: 0, needs_review: 0 }, JSON.stringify(await db.prepare('SELECT status,reason,error_code FROM send_later_messages WHERE id=?').bind(later.id).first()))
     const sent = await db.prepare('SELECT status,sent_at,entry_id FROM send_later_messages WHERE id=?').bind(later.id).first<{ status: string; sent_at: string; entry_id: string }>()
     assert.equal(sent?.status, 'sent')
     feed = await read()
-    assert.equal(feed.cards.filter(card => card.id === `send-later:${later.id}` && card.completedAt === sent!.sent_at).length, 1)
-    assert.equal(feed.cards.some(card => card.id === `completed:reply:${stay.request_id}`), false, 'one scheduled send never creates a second manual reply completion')
+    assert.ok(sent?.sent_at)
+    assert.equal(feed.cards.some(card => card.id === `send-later:${later.id}`), false)
     const receipt = (await db.prepare('SELECT * FROM guest_thread_deliveries WHERE entry_id=? AND purpose=?').bind(sent!.entry_id, 'member_reply').first<GuestThreadDeliveryRow>())!
+    assert.equal(receipt.status, 'sent')
+    assert.equal(receipt.error, null)
+    assert.ok(receipt.provider_message_id)
+    assert.match(receipt.email_message_id!, /^<.+@provider\.example>$/)
     // A later completion/metadata error is visible even though dispatch itself already succeeded.
     await db.prepare(`CREATE TRIGGER reject_delivery_completion BEFORE UPDATE OF error ON guest_thread_deliveries
       WHEN OLD.id='${receipt.id.replaceAll("'", "''")}' AND NEW.error IS NULL BEGIN SELECT RAISE(ABORT,'controlled completion failure'); END`).run()
@@ -294,14 +298,13 @@ test('Today reads actual scheduled work and review outcomes: cancellation clears
     await db.prepare('DROP TRIGGER reject_delivery_completion').run()
     let attention = (await read()).cards.find(card => card.id === `send-later:${later.id}`)
     assert.equal(attention?.priority, 'attention')
-    assert.equal(attention?.completedAt, null)
     assert.equal(attention!.reason, await db.prepare('SELECT error FROM guest_thread_deliveries WHERE id=?').bind(receipt.id).first('error'))
     const deliveredEvent = { type: 'email.delivered', created_at: new Date().toISOString(), data: { email_id: receipt.provider_message_id!,
       created_at: new Date().toISOString(), from: 'hello@krabiclaw.com', to: ['stella@provider-proof.com'], subject: 'Proof', message_id: receipt.email_message_id! } } as Parameters<typeof applyResendEmailEvent>[2]
     assert.equal(await applyResendEmailEvent(db, env, deliveredEvent), 'advanced')
     attention = (await read()).cards.find(card => card.id === `send-later:${later.id}`)
-    assert.equal(attention?.priority, 'schedule')
-    assert.equal(attention?.completedAt, sent!.sent_at)
+    assert.equal(attention, undefined)
+    assert.deepEqual(await db.prepare('SELECT status,error FROM guest_thread_deliveries WHERE id=?').bind(receipt.id).first(), { status: 'delivered', error: null })
     assert.equal(provider.sent.size, 1, 'receipt recovery never sends another email')
 
     const failure = await createSendLaterMessage(db, principal, stay.request_id!, { body: 'Please call about arrival.', sendAt: new Date(Date.now() + 60_000).toISOString() })
@@ -310,7 +313,6 @@ test('Today reads actual scheduled work and review outcomes: cancellation clears
     assert.deepEqual(await sendDueSendLaterMessages(db, providerEnv), { sent: 0, failed: 1, needs_review: 0 })
     const failedCard = (await read()).cards.find(card => card.id === `send-later:${failure.id}`)
     assert.equal(failedCard?.priority, 'attention')
-    assert.equal(failedCard?.completedAt, null)
     assert.match(failedCard!.reason!, /controlled recipient rejection/)
     provider.reject(false)
     const willBounce = await createSendLaterMessage(db, principal, stay.request_id!, { body: 'Please review your arrival details.', sendAt: new Date(Date.now() + 60_000).toISOString() })
@@ -321,13 +323,8 @@ test('Today reads actual scheduled work and review outcomes: cancellation clears
       bounce: { type: 'Permanent', subType: 'General', message: 'mailbox unavailable' } } } as Parameters<typeof applyResendEmailEvent>[2]), 'advanced')
     const bounced = (await read()).cards.find(card => card.id === `send-later:${willBounce.id}`)
     assert.equal(bounced?.priority, 'attention')
-    assert.equal(bounced?.completedAt, null)
     assert.match(bounced!.reason!, /mailbox unavailable/)
     assert.equal((await read('upcoming')).cards.some(card => card.id === bounced!.id), false)
-    const ordered = (await read()).cards
-    const firstScheduled = ordered.findIndex(card => card.priority === 'schedule')
-    assert.ok(firstScheduled > 0)
-    assert.equal(ordered.slice(firstScheduled).some(card => card.priority === 'attention'), false, 'attention cannot be pushed behind scheduled or completed work by pagination')
 
     // The existing review dispatch owns the automatic work and marks its real success.
     await db.prepare("INSERT INTO organization_domains (id,organization_id,domain,role,status,type) VALUES ('review-domain',?,'cabin.example','canonical','active','custom')").bind(ORG).run()
@@ -341,7 +338,8 @@ test('Today reads actual scheduled work and review outcomes: cancellation clears
     assert.equal(reservation.status, 201, JSON.stringify(reservation.body))
     const reservationId = String(reservation.body.request_id)
     assert.equal(await db.prepare('SELECT status FROM reservations WHERE request_id=?').bind(reservationId).first('status'), 'confirmed')
-    assert.equal((await read()).cards.filter(card => card.id === `completed:booking:${reservationId}`).length, 1)
+    assert.equal((await read()).cards.some(card => card.id.endsWith(`:${reservationId}`)), false, 'a confirmed future reservation is not work due today')
+    assert.equal((await read('upcoming')).cards.find(card => card.id === `reservation:${reservationId}`)?.priority, 'schedule')
     const ended = await createStay(db, env, access, { product_id: homeId, idempotency_key: 'ended-stay', check_in_date: localDateAt(new Date(now - 5 * DAY), ZONE),
       check_out_date: localDateAt(new Date(now - 2 * DAY), ZONE), adults: 1, guest_name: 'Rhea', guest_email: 'rhea@provider-proof.com', total_minor: 45_000 })
     const guest = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
@@ -359,15 +357,20 @@ test('Today reads actual scheduled work and review outcomes: cancellation clears
     const dueReview = (await read()).cards.find(card => card.id === `review-invitation:${ended.request_id}`)
     assert.ok(dueReview)
     assert.equal(dueReview.priority, 'schedule', 'automatic work with no failure is not an invented owner action')
+    const ordered = (await read()).cards
+    const firstScheduled = ordered.findIndex(card => card.priority === 'schedule')
+    assert.ok(firstScheduled > 0)
+    assert.equal(ordered.slice(firstScheduled).some(card => card.priority === 'attention'), false, 'attention cannot be pushed behind scheduled work by pagination')
+
     const delivered = await sendReviewRequestForBooking(providerEnv, db, 'stay', ended.request_id!)
     assert.equal(delivered.sent, true)
     const visit = await db.prepare('SELECT first_sent_at,send_count FROM review_requests WHERE booking_id=?').bind(ended.request_id).first<{ first_sent_at: string; send_count: number }>()
     assert.equal(visit?.send_count, 1)
     feed = await read()
     assert.equal(feed.cards.some(card => card.id === dueReview.id), false)
-    assert.deepEqual(feed.cards.filter(card => card.id === `completed:review:${ended.request_id}`).map(card => card.completedAt), [visit!.first_sent_at])
+    assert.ok(visit?.first_sent_at)
     await assert.rejects(sendReviewRequestForBooking(providerEnv, db, 'stay', ended.request_id!), /not due a review invitation/)
-    assert.equal((await read()).cards.filter(card => card.id === `completed:review:${ended.request_id}`).length, 1)
+    assert.equal((await read()).cards.some(card => card.id === dueReview.id), false)
     assert.equal(provider.sent.size, 3, 'two scheduled sends and one invitation reached the controlled provider')
 
     const reviewReceipt = (await db.prepare(`SELECT d.* FROM guest_thread_deliveries d JOIN activity_entries e ON e.id=d.entry_id
@@ -385,13 +388,12 @@ test('Today reads actual scheduled work and review outcomes: cancellation clears
     await db.prepare('DROP TRIGGER reject_review_completion').run()
     feed = await read()
     assert.equal(feed.cards.find(card => card.id === `review-invitation:${ended.request_id}`)?.priority, 'attention')
-    assert.equal(feed.cards.some(card => card.id === `completed:review:${ended.request_id}`), false)
-    assert.equal(feed.cards.filter(card => card.id === `completed:booking:${reservationId}`).length, 1, 'an invitation error never hides a different completed obligation')
     assert.equal(await applyResendEmailEvent(db, env, { ...deliveredEvent, data: { ...deliveredEvent.data, email_id: reviewReceipt.provider_message_id!,
       message_id: reviewReceipt.email_message_id!, to: ['rhea@provider-proof.com'] } } as Parameters<typeof applyResendEmailEvent>[2]), 'advanced')
     feed = await read()
     assert.equal(feed.cards.some(card => card.id === `review-invitation:${ended.request_id}`), false)
-    assert.deepEqual(feed.cards.filter(card => card.id === `completed:review:${ended.request_id}`).map(card => card.completedAt), [visit!.first_sent_at])
+    assert.deepEqual(await db.prepare('SELECT status,error FROM guest_thread_deliveries WHERE id=?').bind(reviewReceipt.id).first(), { status: 'delivered', error: null })
+    assert.deepEqual(await db.prepare('SELECT first_sent_at,send_count FROM review_requests WHERE booking_id=?').bind(ended.request_id).first(), visit)
     assert.equal(provider.sendAttempts, attemptsBeforeReviewRecovery, 'the recovered invitation keeps its original completion and sends no repeat email')
     assert.equal(feed.cards.some(card => /paid sale|gems|coins|recipe points/i.test(card.headline)), false)
     const other = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
@@ -401,16 +403,34 @@ test('Today reads actual scheduled work and review outcomes: cancellation clears
     assert.equal((await read()).cards.some(card => card.id === `send-later:${teamReply.id}`), false, 'another member’s unsent reply remains private')
     t.mock.timers.tick(120_000)
     assert.deepEqual(await sendDueSendLaterMessages(db, providerEnv), { sent: 1, failed: 0, needs_review: 0 })
-    const teamCompletion = (await read()).cards.find(card => card.id === `send-later:${teamReply.id}`)
-    assert.ok(teamCompletion?.completedAt)
-    assert.equal(teamCompletion.eyebrow, 'Sent · Scheduled reply')
+    const teamSent = (await db.prepare('SELECT status,entry_id FROM send_later_messages WHERE id=?').bind(teamReply.id).first<{ status: string; entry_id: string }>())!
+    assert.equal(teamSent.status, 'sent')
+    assert.equal((await read()).cards.some(card => card.id === `send-later:${teamReply.id}`), false)
+    const teamReceipt = (await db.prepare('SELECT * FROM guest_thread_deliveries WHERE entry_id=? AND purpose=?').bind(teamSent.entry_id, 'member_reply').first<GuestThreadDeliveryRow>())!
+    assert.equal(teamReceipt.status, 'sent')
+    assert.equal(teamReceipt.error, null)
+    assert.equal(await applyResendEmailEvent(db, env, { ...deliveredEvent, type: 'email.bounced', data: { ...deliveredEvent.data, email_id: teamReceipt.provider_message_id!, message_id: teamReceipt.email_message_id!,
+      bounce: { type: 'Permanent', subType: 'General', message: 'teammate delivery failed' } } } as Parameters<typeof applyResendEmailEvent>[2]), 'advanced')
+    const teamFailure = (await read()).cards.find(card => card.id === `send-later:${teamReply.id}`)
+    assert.equal(teamFailure?.priority, 'attention', 'a teammate’s already-sent message is shared work when its delivery later fails')
+    assert.match(teamFailure!.reason!, /teammate delivery failed/)
+
     const teamPrivate = await createSendLaterMessage(db, teammate, stay.request_id!, { body: 'Private draft for tomorrow.', sendAt: new Date(Date.now() + DAY).toISOString() })
     assert.equal((await read('upcoming')).cards.some(card => card.id === `send-later:${teamPrivate.id}`), false)
+
+    // A log-only run records its simulated send, but supplies no real delivery proof.
+    const preview = await createSendLaterMessage(db, principal, stay.request_id!, { body: 'Transport preview only.', sendAt: new Date(Date.now() + 60_000).toISOString() })
+    t.mock.timers.tick(120_000)
+    assert.deepEqual(await sendDueSendLaterMessages(db, env), { sent: 1, failed: 0, needs_review: 0 })
+    assert.deepEqual(await db.prepare('SELECT m.status,d.provider FROM send_later_messages m JOIN guest_thread_deliveries d ON d.entry_id=m.entry_id WHERE m.id=?').bind(preview.id).first(), { status: 'sent', provider: 'log_only' })
+    const unconfirmed = (await read()).cards.find(card => card.id === `send-later:${preview.id}`)
+    assert.equal(unconfirmed?.priority, 'attention')
+    assert.equal(unconfirmed?.reason, 'No successful delivery is recorded for this message.')
     assert.equal(provider.sent.size, 4)
     t.mock.timers.tick(DAY)
     const tomorrow = await read()
     assert.equal(tomorrow.cards.find(card => card.id === `send-later:${failure.id}`)?.priority, 'attention', 'an unresolved send failure survives midnight')
-    assert.equal(tomorrow.cards.some(card => card.id === `completed:review:${ended.request_id}`), false, 'yesterday’s completed work is not presented as completed today')
+    assert.equal(tomorrow.cards.some(card => card.id === dueReview.id), false, 'a sent invitation does not become pending work again on the next day')
   } finally {
     await runtime.dispose()
     t.mock.timers.reset()

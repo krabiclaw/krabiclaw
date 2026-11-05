@@ -160,7 +160,7 @@ An undated task states its status rather than inventing an appointment time.
 Today groups work that needs attention, activity happening today, currently
 hosted stays as compact expandable context, and optional work, in that order.
 Priorities and their suggestions sit below the operational day. Completed work
-leaves the page and consumes none of its display or pagination budget. The
+leaves the shared action feed and consumes none of its display or pagination budget. The
 attention count includes only outstanding work; hosting does not increase it.
 Work is due when a recorded fact makes it so: a
 booking awaiting the owner's decision, an unanswered guest message about a live
@@ -221,14 +221,13 @@ ask the owner to perform an action that only the automation currently owns.
 Booking occurrences retain their own location's timezone. Future bookings
 needing a decision belong in Today now and retain their actual booking date.
 
-The feed retains verified canonical outcomes: conversations answered, completed
-booking decisions or agreed changes, new confirmed bookings, first review
-invitations and successful scheduled work. Each underlying obligation appears
-once, including automatic work while the team is away. A retry, copied provider
-message, notification or repeated invitation is not another accomplishment.
-Completion facts remain in their existing data owners. They are not tasks or a
-completed-history section on Today. The page excludes them before pagination,
-so finished work cannot push a current action behind Load more.
+Canonical conversation, booking and delivery records retain completed outcomes.
+The shared Today action feed excludes finished work for every consumer,
+including web and native. Clients render that projection rather than filtering
+completion history independently. A successful reply or scheduled send clears
+its action; a failed or uncertain outcome remains actionable. A booking's
+actual current or future visit remains on its agenda after the decision is
+finished. Completed work cannot push a current action behind Load more.
 Today re-reads on relevant dashboard invalidations, when the page regains focus,
 and when time passing makes an existing due item or day boundary current.
 
