@@ -1555,7 +1555,7 @@ test.describe('dashboard pane hierarchy', () => {
     const feedRead = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo', locationId: seededTenant('restaurant').locations.brooklyn.id } })
     expect(feedRead.status(), await feedRead.text()).toBe(200)
     const feed = await feedRead.json() as TodayFeedPayload
-    expect(feed.cards.length, 'The demo owner has real Today cards').toBeGreaterThan(0)
+    expect(feed.cards.length, 'The demo owner has real current work on Today').toBeGreaterThan(0)
     await page.setViewportSize(SHORT_PHONE)
     await open(page, `${ORG}?locationId=${seededTenant('restaurant').locations.brooklyn.id}`)
     const panel = page.locator('#dashboard-panel-org-today')
