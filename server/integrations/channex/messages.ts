@@ -134,7 +134,9 @@ export function parseChannexMessage(value: unknown, env: ChannexEnv, uncertain =
   const attachments = attributes.attachments.map((link, index) => attachmentUrl(link, env, label, `attachments[${index}]`, uncertain))
   const text = attributes.message
   if (text !== null && typeof text !== 'string') fail(label, 'message', 'Expected text or null for an attachment-only message', uncertain)
-  if ((text === null || !text.trim()) && attachments.length === 0) fail(label, 'message', 'A message needs text or an attachment', uncertain)
+  // A message with neither words nor a file is real: Airbnb records some host
+  // actions that way (message c2f68d4e, a host message of 2026-09-14 with
+  // message null and no attachments). It is recorded, and the inbox shows nothing for it.
   const sender = attributes.sender
   if (sender !== 'guest' && sender !== 'property' && sender !== 'system' && sender !== 'agent') fail(label, 'sender', 'Expected guest, property, system or agent', uncertain)
   const meta = attributes.meta === undefined || attributes.meta === null

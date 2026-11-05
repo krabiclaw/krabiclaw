@@ -11,6 +11,7 @@ import { applyChannelBooking, type ChannelBooking } from '../../server/domain/st
 import { backfillChannexMessages, mirrorChannexMessageEvent, mirrorChannexThread } from '../../server/domain/guest-threads/channel-messages.ts'
 import { executeGuestThreadOperation, sendScheduledGuestReply } from '../../server/domain/guest-threads/operations.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
+import { getInboxThread } from '../../server/domain/guest-threads/inbox.ts'
 import { firstUnansweredGuestEntryTimes, listGuestThreads } from '../../server/domain/guest-threads/repository.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
@@ -245,6 +246,33 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     provider.propertyId = 'property'
     provider.messages[0]!.attributes.message = 'Changed after recording'
     await assert.rejects(mirrorChannexThread(db, env, 'thread', 'property'), code('CHANNEL_MESSAGE_ID_CONFLICT'))
+  } finally { globalThis.fetch = realFetch; await runtime.dispose() }
+})
+
+test('a Channex message with neither words nor a file is recorded and shows nothing, and never refuses the conversation', async () => {
+  const { runtime, db, env } = await boot()
+  const provider = new Provider(), realFetch = globalThis.fetch
+  globalThis.fetch = provider.fetch as typeof fetch
+  try {
+    // The shape Channex returned for message c2f68d4e (read 2026-11-05): a host message, message null, no attachments, no meta.
+    const empty = provider.message('host-action', 'property', null)
+    provider.messages = [provider.messages[0]!, empty]
+    assert.deepEqual(await backfillChannexMessages(db, env, 'property', ORG), { threads: 1 })
+    const requestId = await db.prepare("SELECT request_id FROM channel_threads WHERE external_thread_id = 'thread'").first<string>('request_id')
+    assert.ok(requestId)
+    const recorded = await db.prepare("SELECT actor_kind, body FROM activity_entries WHERE dedupe_key = 'channex-message:host-action'").first<{ actor_kind: string; body: string | null }>()
+    assert.deepEqual(recorded, { actor_kind: 'member', body: null })
+
+    // The conversation reads as the guest's words alone, and the list previews them.
+    const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
+    const thread = (await getInboxThread(db, requestId, ORG, { audience: 'member', userId: OWNER, principal: owner }))!
+    assert.deepEqual(thread.stream.filter(item => item.type === 'message').map(item => item.type === 'message' ? [item.side, item.body] : null), [['guest', 'Hello']])
+    const [row] = await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay', mailbox: 'current' })
+    assert.deepEqual([row!.preview, row!.previewFrom], ['Hello', 'Conversation supplied by Airbnb'])
+
+    // A webhook re-mirror of the same conversation records it once and still succeeds.
+    await mirrorChannexThread(db, env, 'thread', 'property')
+    assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE dedupe_key = 'channex-message:host-action'").first('count(*)'), 1)
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 

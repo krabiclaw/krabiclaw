@@ -284,8 +284,11 @@ const BUYER_VISIBLE_MESSAGE_SQL = "((e.actor_kind='guest' AND e.channel IN ('web
 const SUPPORT_THREAD_SQL = `(EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND e.actor_kind = 'system' AND e.event_name = 'channel.message_mirrored')
   AND NOT EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND e.actor_kind = 'guest'))`
 
+/** A message with words, a photo or a file; Airbnb records some host actions as messages with none. */
+const SAYS_SOMETHING_SQL = "(NULLIF(TRIM(e.body), '') IS NOT NULL OR COALESCE(json_array_length(e.payload_json, '$.attachments'), 0) > 0 OR EXISTS (SELECT 1 FROM media_placements mp WHERE mp.owner_type = 'activity_entry' AND mp.owner_id = e.id AND mp.slot = 'attachments' AND mp.status = 'active'))"
+
 /** A booking lands as a stay, not as a conversation: a stay is in the inbox once someone has written. */
-const HAS_CONVERSATION_SQL = "(gt.kind <> 'stay' OR EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message'))"
+const HAS_CONVERSATION_SQL = `(gt.kind <> 'stay' OR EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND ${SAYS_SOMETHING_SQL}))`
 
 const UNREAD_FOR_MEMBER_SQL = `EXISTS (
         SELECT 1 FROM activity_entries n
@@ -372,9 +375,9 @@ export async function listGuestThreads(
       op.starts_at AS record_starts_at, op.check_in_date AS record_check_in_date, op.check_out_date AS record_check_out_date,
       (SELECT json_extract(e.payload_json, '$.check_in_date') FROM activity_entries e WHERE e.request_id = gt.id AND e.event_name = 'channel.inquiry_received' ORDER BY e.sequence DESC LIMIT 1) AS inquiry_check_in,
       (SELECT json_extract(e.payload_json, '$.check_out_date') FROM activity_entries e WHERE e.request_id = gt.id AND e.event_name = 'channel.inquiry_received' ORDER BY e.sequence DESC LIMIT 1) AS inquiry_check_out,
-      (SELECT e.id FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message'${visible} ORDER BY e.sequence DESC LIMIT 1) AS latest_message_id,
+      (SELECT e.id FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message'${visible} AND ${SAYS_SOMETHING_SQL} ORDER BY e.sequence DESC LIMIT 1) AS latest_message_id,
       COALESCE((SELECT substr(COALESCE(json_extract(e.payload_json, '$.provider_inserted_at'), e.occurred_at), 1, 23) FROM activity_entries e
-        WHERE e.request_id = gt.id AND e.kind = 'message'${visible} ORDER BY e.sequence DESC LIMIT 1), substr(gt.created_at, 1, 23)) AS latest_at
+        WHERE e.request_id = gt.id AND e.kind = 'message'${visible} AND ${SAYS_SOMETHING_SQL} ORDER BY e.sequence DESC LIMIT 1), substr(gt.created_at, 1, 23)) AS latest_at
     FROM requests gt${OPERATIONAL_RECORD_SQL}
     JOIN organization o ON o.id = gt.organization_id
     LEFT JOIN business_locations bl ON bl.id = gt.location_id

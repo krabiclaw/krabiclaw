@@ -225,6 +225,8 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date): InboxStreamItem[
       continue
     }
     if (entry.kind === 'message') {
+      // A message with no words, photo or file (an Airbnb host action Channex records that way) says nothing.
+      if (!text(entry.body) && !entry.attachments.length && !unshownFiles(entry)) continue
       const photos = entry.attachments.map(photo => ({ id: photo.id, url: photo.url, thumbnailUrl: photo.thumbnailUrl, width: photo.width, height: photo.height }))
       if (entry.actorKind === 'guest') {
         const translation = text(meta(entry)?.translated_message)
