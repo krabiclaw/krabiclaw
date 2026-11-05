@@ -10,6 +10,10 @@ export default {
       "reply": "You received this email because {organization} replied to your conversation.",
       "booking_update": "You received this email because there is an update to your request with {organization}.",
       "booking_change": "You received this email because {organization} proposed changes to your request."
+    },
+    "subject": {
+      "reservation_confirmed": "Reservation confirmed for {place}",
+      "message_from": "Message from {name}"
     }
   },
   "reservations": {

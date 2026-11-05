@@ -150,7 +150,7 @@ export function guestReservationReceivedMessage(input: GuestBookingInput): Notif
   const locale = guestLocale(input)
   return {
     locale: locale.locale,
-    title: locale.messages['reservations.confirmed']!,
+    title: locale.messages['email.subject.reservation_confirmed']!.replace('{place}', input.organizationName),
     preheader: `${input.organizationName} · ${input.date} · ${input.time}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.organizationName } : null,
     facts: guestVisitFacts(input),
@@ -229,7 +229,7 @@ export function guestStayConfirmedMessage(input: GuestStayInput): NotificationMe
   const labels = locale.messages
   return {
     locale: locale.locale,
-    title: labels['stay.confirmed_title']!,
+    title: labels['email.subject.reservation_confirmed']!.replace('{place}', input.homeName),
     preheader: `${input.homeName} · ${input.checkIn} – ${input.checkOut}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.homeName } : null,
     facts: facts(
@@ -322,12 +322,11 @@ export function guestThreadReplyMessage(input: {
   const photos = input.photos ?? []
   return {
     locale: locale.locale,
-    title: `Reply from ${input.organizationName}`,
+    title: locale.messages['email.subject.message_from']!.replace('{name}', input.organizationName),
     preheader: input.body ? input.body.slice(0, 120) : `${input.organizationName} sent ${photos.length === 1 ? 'a photo' : `${photos.length} photos`}`,
     hero: null,
     facts: [],
-    sections: input.body ? [{ title: '', body: input.body }] : [],
-    photos,
+    quote: { author: input.organizationName, body: input.body, translation: null, photos },
     primaryAction: manageAction(input),
     finePrint: 'Reply to this email and your message goes straight back to the same conversation.',
     emailPurpose: 'transactional',

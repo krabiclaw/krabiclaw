@@ -84,6 +84,20 @@ export function formatCalendarDate(value: string, locale: string, options: Intl.
   assertCalendarDate(value)
   return new Intl.DateTimeFormat(locale, { ...options, calendar: 'gregory', timeZone: 'UTC' }).format(new Date(`${value}T00:00:00Z`))
 }
+/**
+ * Two calendar dates as one range, as Airbnb writes a stay: the month written
+ * once when it does not change ("Oct 16 – 23", "Nov 7 – Dec 5"), and no years,
+ * also across the new year ("Nov 1 – Jan 1").
+ */
+export function formatCalendarRange(start: string, end: string, locale: string): string {
+  assertCalendarDate(start)
+  assertCalendarDate(end)
+  const format = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', calendar: 'gregory', timeZone: 'UTC' })
+  const from = new Date(`${start}T00:00:00Z`), to = new Date(`${end}T00:00:00Z`)
+  // Intl names both years when they differ; Airbnb's range does not.
+  const range = from.getUTCFullYear() === to.getUTCFullYear() ? format.formatRange(from, to) : `${format.format(from)} – ${format.format(to)}`
+  return range.replace(/[\u2009\u202f]/g, ' ')
+}
 export function formatTime(value: string, locale: string): string {
   if (!MINUTE_TIME_PATTERN.test(value) && !PRECISE_TIME_PATTERN.test(value)) throw new Error('Invalid local wall-clock time')
   const time = MINUTE_TIME_PATTERN.test(value) ? `${value}:00` : value

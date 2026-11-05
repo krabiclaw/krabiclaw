@@ -1,30 +1,38 @@
 <template>
+  <DefineControls>
+    <div class="space-y-3">
+      <UInput v-if="searching" v-model="query" icon="i-lucide-search" placeholder="Search messages" aria-label="Search messages" autofocus size="lg" class="w-full" :ui="{ base: 'rounded-full' }" />
+      <InboxFilters v-if="!personalScope" :team="teamScope" :can-read-team="canReadTeam" :can-read-guests="canReadGuests" />
+    </div>
+  </DefineControls>
   <DashboardIndexPanel :id="personalScope ? 'account-messages' : 'organization-messages'" :title="pastOnly && !teamScope ? 'Past conversations' : 'Messages'" :auto-open="firstThread" fill>
-    <template v-if="!personalScope" #right>
-      <UDropdownMenu v-if="canReadGuests" :items="[{ label: 'Automatic messages', to: `${listPath}/automatic`, icon: 'i-lucide-message-square-text' }, { label: 'Sent and upcoming', to: `${listPath}/scheduled`, icon: 'i-lucide-clock' }]">
-        <UButton icon="i-lucide-settings-2" color="neutral" variant="ghost" aria-label="Guest messaging tools" />
-      </UDropdownMenu>
-      <UButton v-if="canSendTeam" :to="{ path: `${listPath}/new`, query: { view: 'team' } }" icon="i-lucide-square-pen" color="neutral" variant="ghost" aria-label="New team conversation" />
+    <!-- Search and settings beside the title, as on Airbnb. -->
+    <template #right>
+      <UButton v-if="!teamScope" icon="i-lucide-search" color="neutral" variant="soft" class="rounded-full" :aria-label="searching ? 'Close search' : 'Search messages'" :aria-pressed="searching" @click="toggleSearch" />
+      <UButton v-if="!personalScope && canReadGuests" icon="i-lucide-settings" color="neutral" variant="soft" class="rounded-full" aria-label="Messaging settings" @click="settingsOpen = true" />
+      <UButton v-if="teamScope && canSendTeam" :to="{ path: `${listPath}/new`, query: { view: 'team' } }" icon="i-lucide-square-pen" color="neutral" variant="soft" class="rounded-full" aria-label="New team conversation" />
     </template>
     <TeamThreadList v-if="teamScope && canReadTeam" @first="firstThread = $event">
-      <template #filters>
-        <DashboardFilterPills v-if="!personalScope && canReadTeam && canReadGuests" id="messages-view" v-model="messageView" label="Conversations" :items="[{ value: 'guests', label: dashboard.organization.value?.vertical === 'service' ? 'Clients' : 'Guests' }, { value: 'team', label: 'Team' }]" />
-      </template>
+      <template #filters><ReuseControls /></template>
     </TeamThreadList>
     <GuestThreadList v-else-if="personalScope || canReadGuests" :personal-scope="personalScope" @first="firstThread = $event">
-      <template #filters>
-        <DashboardFilterPills v-if="!personalScope && canReadTeam && canReadGuests" id="messages-view" v-model="messageView" label="Conversations" :items="[{ value: 'guests', label: dashboard.organization.value?.vertical === 'service' ? 'Clients' : 'Guests' }, { value: 'team', label: 'Team' }]" />
-      </template>
+      <template #filters><ReuseControls /></template>
     </GuestThreadList>
     <UAlert v-else class="m-6" color="error" title="Messages are unavailable" description="Your membership does not allow access to conversations." />
     <UAlert v-if="accessError" class="m-6" color="error" title="Conversation access changed" :description="accessError" />
+    <UModal v-model:open="settingsOpen" title="Messaging settings">
+      <template #body><MessagingSettings :manage="canManageMessages" @navigate="settingsOpen = false" /></template>
+    </UModal>
   </DashboardIndexPanel>
 </template>
 
 <script setup lang="ts">
 import type { RouteLocationRaw } from 'vue-router'
+import { createReusableTemplate, watchDebounced } from '@vueuse/core'
 import GuestThreadList from '~/lib/components/workspace/messages/GuestThreadList.vue'
 import TeamThreadList from '~/lib/components/workspace/messages/TeamThreadList.vue'
+import InboxFilters from '~/lib/components/workspace/messages/InboxFilters.vue'
+import MessagingSettings from '~/lib/components/workspace/messages/MessagingSettings.vue'
 import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
 import type { TeamThread } from '~/server/domain/team-messages'
@@ -39,11 +47,26 @@ const role = computed(() => dashboard.organization.value?.role as keyof typeof o
 const canReadTeam = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { team_messages: ['read'] } })))
 const canSendTeam = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { team_messages: ['send'] } })))
 const canReadGuests = computed(() => Boolean(role.value && (authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['read'] } }) || authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['assigned'] } }))))
+const canManageMessages = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['update'] } })))
 const teamScope = computed(() => !props.personalScope && (route.query.view === 'team' || route.path.startsWith(`${listPath.value}/team/`) || route.path === `${listPath.value}/new` || !canReadGuests.value))
-const messageView = computed({
-  get: () => teamScope.value ? 'team' : 'guests',
-  set: (view: string) => { firstThread.value = null; void router.push({ path: listPath.value, query: view === 'team' ? { view: 'team' } : {} }) },
-})
+const settingsOpen = ref(false)
+const [DefineControls, ReuseControls] = createReusableTemplate()
+
+// Search is a field the disc opens over the pills; its words are the list's `q`, so a search is a link.
+const searching = ref(typeof route.query.q === 'string' && Boolean(route.query.q))
+const query = ref(typeof route.query.q === 'string' ? route.query.q : '')
+function toggleSearch() {
+  searching.value = !searching.value
+  if (!searching.value && route.query.q !== undefined) {
+    query.value = ''
+    const { q: _q, ...rest } = route.query
+    void router.replace({ path: route.path, query: rest })
+  }
+}
+watchDebounced(query, words => {
+  const { q: _q, ...rest } = route.query
+  void router.replace({ path: route.path, query: words.trim() ? { ...rest, q: words.trim() } : rest })
+}, { debounce: 250 })
 const pastOnly = computed(() => route.query.archived !== undefined)
 const firstThread = ref<RouteLocationRaw | null>(null)
 const session = authClient.useSession()

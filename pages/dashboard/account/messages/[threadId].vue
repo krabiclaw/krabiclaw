@@ -1,5 +1,5 @@
 <template>
-  <DashboardIndexPanel id="account-message-thread" :title="thread?.organizationName || 'Conversation'" fill>
+  <DashboardIndexPanel id="account-message-thread" :title="thread?.guestName || 'Conversation'" fill>
     <!-- Airbnb's "Show reservation": the record this conversation is about. A contact thread has none. -->
     <template v-if="activityTo" #right><UButton :to="activityTo" color="neutral" variant="soft" class="rounded-full" :label="activityLabel" /></template>
     <GuestThreadDetail :thread-id="threadId" personal-scope />
@@ -18,5 +18,5 @@ const threadId = computed(() => {
 })
 const { thread } = await useGuestThread(threadId, computed(() => true))
 const activityTo = computed(() => thread.value?.activityPath || null)
-const activityLabel = computed(() => thread.value ? `Show ${threadRecordTitle(thread.value.submissionType, thread.value.organizationVertical).toLowerCase()}` : '')
+const activityLabel = computed(() => thread.value?.recordKind ? `Show ${threadRecordTitle(thread.value.recordKind, null).toLowerCase()}` : '')
 </script>

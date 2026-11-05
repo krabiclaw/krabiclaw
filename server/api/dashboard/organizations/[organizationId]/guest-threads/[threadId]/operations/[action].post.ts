@@ -1,6 +1,7 @@
 import { getGuestRequest } from '~/server/domain/requests'
 import { defineHandler, HTTPError } from 'nitro'
 import { getRouterParam, readBody } from 'nitro/h3'
+import { queryFirst } from '~/server/db'
 
 // Canonical guest-thread operation endpoint (issue #442 Locked Decision #8). Every
 // state-mutating guest-thread action — confirm/cancel/complete/resolve/reopen/reply —
@@ -9,7 +10,7 @@ import { getRouterParam, readBody } from 'nitro/h3'
 import { jsonResponse } from '~/server/utils/api-response'
 import { requireOrganizationMembership } from '~/server/utils/location-access'
 import { assertAssignedBookingAccess, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
-import { getGuestThreadDetail } from '~/server/domain/guest-threads/detail'
+import { getInboxThread } from '~/server/domain/guest-threads/inbox'
 import { executeGuestThreadOperation, GUEST_THREAD_ACTIONS } from '~/server/domain/guest-threads/operations'
 import { publishDashboardInvalidation } from '~/server/cloudflare/guest-inbox-events'
 
@@ -46,19 +47,33 @@ export default defineHandler(async (event) => {
     return jsonResponse({ error: 'Idempotency key is required', code: 'MISSING_IDEMPOTENCY_KEY', field: 'idempotencyKey' }, { status: 400 })
   }
 
+  // "Try again" on a reply that did not reach the guest is that same reply sent
+  // again under its own idempotency key, so a send that did land is not repeated.
+  let retried: { body: string; idempotencyKey: string } | null = null
+  if (action === 'retry') {
+    const messageId = field('messageId')
+    const entry = messageId ? await queryFirst<{ body: string | null; dedupe_key: string; photos: number }>(db, `SELECT e.body, e.dedupe_key,
+        (SELECT COUNT(*) FROM media_placements mp WHERE mp.owner_type = 'activity_entry' AND mp.owner_id = e.id AND mp.slot = 'attachments' AND mp.status = 'active') AS photos
+      FROM activity_entries e WHERE e.id = ? AND e.request_id = ? AND e.kind = 'message' AND e.event_name = 'thread.member_reply'`, [messageId, thread.id]) : null
+    const prefix = `guest-thread-operation:${thread.id}:`
+    if (!entry || !entry.dedupe_key.startsWith(prefix)) return jsonResponse({ error: 'That reply is not in this conversation', code: 'MESSAGE_NOT_FOUND', field: 'messageId' }, { status: 404 })
+    if (entry.photos || !entry.body?.trim()) return jsonResponse({ error: 'Send the photo again from the composer', code: 'RETRY_TEXT_ONLY', field: 'messageId' }, { status: 409 })
+    retried = { body: entry.body, idempotencyKey: entry.dedupe_key.slice(prefix.length) }
+  }
+
   const outcome = await executeGuestThreadOperation(db, {
     threadId,
     organizationId,
-    action,
+    action: retried ? 'reply' : action,
     actorUserId: session.user.id,
     financialWritesAllowed: await roleAllows({ ...organization.membership, permissions: { payments: ['refund'] } }),
-    body: field('body'),
+    body: retried ? retried.body : field('body'),
     reason: field('reason'),
     requestId: field('requestId'),
     // Who may change a stay (stayAccessFor): the role that updates operations.
     stayManager: await roleAllows({ ...organization.membership, permissions: { operations: ['update'] } }),
     photos,
-    idempotencyKey,
+    idempotencyKey: retried ? retried.idempotencyKey : idempotencyKey,
     env,
   })
 
@@ -116,6 +131,7 @@ export default defineHandler(async (event) => {
     throw new HTTPError({ statusCode: 500, message: 'Guest-thread operation returned an unhandled outcome', data: { code: 'INVALID_OPERATION_OUTCOME', field: 'outcome.reason' } })
   }
 
-  const detail = await getGuestThreadDetail(db, threadId, organizationId)
+  const principal = memberAccessPrincipal(organization.membership, { env, event })
+  const detail = await getInboxThread(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal })
   return jsonResponse({ thread: detail, availableActions: outcome.availableActions }, { status: outcome.status })
 })

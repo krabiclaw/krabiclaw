@@ -8,6 +8,8 @@
   "email.reason.reply": "คุณได้รับอีเมลนี้เนื่องจาก {organization} ได้ตอบกลับในการสนทนาของคุณ",
   "email.reason.booking_update": "คุณได้รับอีเมลนี้เนื่องจากมีการอัปเดตคำขอของคุณกับ {organization}",
   "email.reason.booking_change": "คุณได้รับอีเมลนี้เนื่องจาก {organization} ได้เสนอการเปลี่ยนแปลงคำขอของคุณ",
+  "email.subject.reservation_confirmed": "ยืนยันการจองที่ {place} แล้ว",
+  "email.subject.message_from": "ข้อความจาก {name}",
   "site.product_detail.description": "รายละเอียด",
   "booking.request_declined": "คำขอจองถูกปฏิเสธ",
   "booking.change_review": "ตรวจสอบการเปลี่ยนแปลง",

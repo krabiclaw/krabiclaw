@@ -1,5 +1,5 @@
 import { expect, test, type APIResponse } from '@playwright/test'
-import type { GuestThreadDetailViewModel, GuestThreadListItemViewModel } from '../../server/domain/guest-threads/types'
+import type { InboxRow, InboxThread } from '../../server/domain/guest-threads/types'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 import type { ReviewFeedback } from '../../shared/review-feedback'
 import { loginAs } from './helpers/auth'
@@ -25,12 +25,15 @@ test('a guest who did not come is marked a no-show from the booking record, and 
   const release = await acquireTenantMutationLock(testInfo, organizationId)
   try {
     await loginAs(page.request, baseURL, ownerId)
-    const past = (await body<{ threads: GuestThreadListItemViewModel[] }>(await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads`, { params: { mailbox: 'past' } }), 200)).threads
     // An ended, confirmed visit nobody has reviewed: the record says whether it may still be a no-show.
-    let target: { thread: GuestThreadListItemViewModel; details: DashboardBookingDetails } | null = null
-    for (const thread of past.filter(item => item.submissionType === 'booking' || item.submissionType === 'reservation')) {
-      const { booking } = await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/${thread.submissionType}/${thread.id}`, { params: { org: slug } }), 200)
-      if (booking.canMarkNoShow) { target = { thread, details: booking }; break }
+    let target: { thread: InboxRow & { submissionType: 'booking' | 'reservation' }; details: DashboardBookingDetails } | null = null
+    for (const submissionType of ['booking', 'reservation'] as const) {
+      const past = (await body<{ threads: InboxRow[] }>(await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads`, { params: { mailbox: 'past', type: submissionType } }), 200)).threads
+      for (const row of past) {
+        const { booking } = await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/${submissionType}/${row.id}`, { params: { org: slug } }), 200)
+        if (booking.canMarkNoShow) { target = { thread: { ...row, submissionType }, details: booking }; break }
+      }
+      if (target) break
     }
     expect(target, 'The studio\'s seed includes an ended, confirmed visit with no review').not.toBeNull()
     const { thread, details } = target!
@@ -49,8 +52,9 @@ test('a guest who did not come is marked a no-show from the booking record, and 
     expect(after.noShowAt).not.toBeNull()
     expect(after.canMarkNoShow).toBe(false)
     expect(after.status).toBe(details.status)
-    const conversation = (await body<{ thread: GuestThreadDetailViewModel }>(await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${thread.id}`), 200)).thread
-    expect(conversation.entries.filter(entry => entry.eventName === `${thread.submissionType}.no_show`)).toHaveLength(1)
+    // The conversation says it once, as the owner who marked it reads it.
+    const conversation = (await body<{ thread: InboxThread }>(await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${thread.id}`), 200)).thread
+    expect(conversation.stream.filter(item => item.type === 'event' && item.text === `You marked the ${thread.submissionType} as a no-show`)).toHaveLength(1)
     const repeat = await page.request.post(`/api/dashboard/organizations/${organizationId}/guest-threads/${thread.id}/operations/no_show`, { data: { idempotencyKey: `repeat-${Date.now()}` } })
     expect(repeat.status(), await repeat.text()).toBe(409)
   } finally {

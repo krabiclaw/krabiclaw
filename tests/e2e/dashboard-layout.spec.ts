@@ -1852,9 +1852,11 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(page.getByRole('heading', { name: 'Calendar', exact: true })).toBeVisible()
       await mobileNav.getByRole('link', { name: 'Messages', exact: true }).click()
       await expect(page).toHaveURL('/dashboard/account/messages')
-      await page.getByRole('button', { name: 'All, filter by message type' }).click()
+      // A guest's own Messages lists their conversations and nothing else: no kind
+      // menu at all, so no Updates in it; updates are the bell's.
+      await expect(page.locator('[data-guest-thread-list-hydrated="true"]')).toBeVisible()
+      await expect(page.getByRole('button', { name: /filter by (conversation|message) type$/ })).toHaveCount(0)
       await expect(page.getByRole('menuitemcheckbox', { name: 'Updates', exact: true })).toHaveCount(0)
-      await page.keyboard.press('Escape')
       const personalUnread = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/notifications/unread-count'
         && new URL(response.url()).searchParams.get('scope') === 'personal')
       const personalNotifications = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/notifications'

@@ -7,7 +7,7 @@ import { seededTenant } from './seed/manifest'
 import type { TodayFeedPayload } from '../../shared/dashboard-today'
 import type { AgendaPayload } from '../../server/utils/dashboard-agenda'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
-import type { GuestThreadDetailViewModel, GuestThreadListPage } from '../../server/domain/guest-threads/types'
+import type { InboxListPage, InboxThread } from '../../server/domain/guest-threads/types'
 import { isDashboardInvalidation } from '../../shared/dashboard-invalidations'
 import { localNow } from '../../utils/timezone'
 
@@ -195,7 +195,12 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
     expect(booking).toMatchObject({ id: reservationId, threadId: reservationId, organizationId, locationId, guestName, status: 'confirmed', bookingDate: day.date, bookingTime: slot.time_slot, timeZone: calendar.timezone, partySize: 2 })
     const ownerThread = await page.request.get(`${inboxPath}/${reservationId}`)
     expect(ownerThread.status(), await ownerThread.text()).toBe(200)
-    expect((await ownerThread.json() as { thread: GuestThreadDetailViewModel }).thread).toMatchObject({ id: reservationId, guestName, submissionType: 'reservation', source: { operationalStatus: 'confirmed', fields: { startsAt: slot.starts_at, partySize: 2 } } })
+    // The conversation is about this reservation at this branch; the record above holds its time, party and status.
+    const ownerConversation = (await ownerThread.json() as { thread: InboxThread }).thread
+    expect(ownerConversation).toMatchObject({ id: reservationId, kind: 'guest', guestName, channel: 'direct', home: booking.locationTitle, recordId: reservationId, recordKind: 'reservation' })
+    expect(ownerConversation.when).toEqual(expect.any(String))
+    // The thread header's second line: the branch and the reservation's time, as the server wrote them.
+    const headerFacts = `${booking.locationTitle} · ${ownerConversation.when}`
 
     const changed = await page.request.post('/api/auth/organization/update-member-role', {
       headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor.id, role: 'member' },
@@ -227,8 +232,8 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
       for (const path of [inboxPath, '/api/dashboard/guest-threads']) {
         const response = await memberRequest.get(path, { params: { org, location_id: locationId, type: 'reservation' } })
         expect(response.status(), await response.text()).toBe(200)
-        const { threads } = await response.json() as GuestThreadListPage
-        if (assigned) expect(threads.find(thread => thread.id === reservationId)).toMatchObject({ id: reservationId, guestName, locationId, submissionType: 'reservation', operationalStatus: 'confirmed', occurrenceAt: slot.starts_at })
+        const { threads } = await response.json() as InboxListPage
+        if (assigned) expect(threads.find(thread => thread.id === reservationId)).toMatchObject({ id: reservationId, kind: 'guest', guestName, home: booking.locationTitle, when: ownerConversation.when })
         else expect(threads.some(thread => thread.id === reservationId)).toBe(false)
       }
       const detail = await memberRequest.get(`${inboxPath}/${reservationId}`)
@@ -236,7 +241,7 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
       const record = await memberRequest.get(bookingPath, { params: { org } })
       expect(record.status(), await record.text()).toBe(assigned ? 200 : 404)
       if (assigned) {
-        expect((await detail.json() as { thread: GuestThreadDetailViewModel }).thread).toMatchObject({ id: reservationId, guestName, source: { operationalStatus: 'confirmed' } })
+        expect((await detail.json() as { thread: InboxThread }).thread).toMatchObject({ id: reservationId, guestName, home: booking.locationTitle, when: ownerConversation.when, recordId: reservationId, recordKind: 'reservation' })
         expect((await record.json() as { booking: DashboardBookingDetails }).booking).toMatchObject({ id: reservationId, threadId: reservationId, guestName, locationId, status: 'confirmed' })
         expect((await memberPage.goto(`${ORG}?range=upcoming`))?.status()).toBe(200)
         await waitForNuxtHydration(memberPage)
@@ -250,7 +255,7 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
         await expect(memberPage.locator(`[data-thread-row="${reservationId}"]`)).toContainText(guestName)
         // The first-open reconciliation read happens after the real socket upgrade.
         expect((await openedThread).status()).toBe(200)
-        await expect(memberPage.getByText('New reservation', { exact: true })).toBeVisible()
+        await expect(memberPage.getByText(headerFacts, { exact: true })).toBeVisible()
         await expect(memberPage.getByRole('textbox', { name: 'Write a message…', exact: true })).toBeVisible()
       }
     }
@@ -287,7 +292,7 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
     await accessChanged
     // Revocation clears the conversation already on screen before any fresh navigation or member reads.
     await expect(memberPage.getByText(guestName, { exact: true })).toHaveCount(0)
-    await expect(memberPage.getByText('New reservation', { exact: true })).toHaveCount(0)
+    await expect(memberPage.getByText(headerFacts, { exact: true })).toHaveCount(0)
     await expect(memberPage.getByRole('textbox', { name: 'Write a message…', exact: true })).toHaveCount(0)
     await expect(memberPage.locator(`[data-thread-row="${reservationId}"]`)).toHaveCount(0)
     await expect(memberPage.getByText('This conversation is no longer available', { exact: true })).toBeVisible()

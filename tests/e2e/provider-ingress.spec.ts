@@ -3,6 +3,8 @@ import { createHmac, randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import { buildReplyToAddress } from '../../server/utils/submission-messages'
 import { loginAs } from './helpers/auth'
+import { mcpData, mcpRequest } from './helpers/mcp'
+import type { InboxRow, InboxStreamItem, InboxThread } from '../../server/domain/guest-threads/types'
 import { seededTenant } from './seed/manifest'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { devLoginHeaders, seededSiteHeaders } from './test-env'
@@ -122,13 +124,21 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
 
   const listed = await fetchPhase('find contact thread', `/api/dashboard/organizations/${organizationId}/guest-threads`, {})
   expect(listed.status(), await listed.text()).toBe(200)
-  const { threads } = await listed.json() as { threads: Array<{ id: string; guestName: string }> }
+  const { threads } = await listed.json() as { threads: InboxRow[] }
   const own = threads.filter(thread => thread.guestName === name)
   expect(own, `no guest thread named ${name} in the restaurant's ${threads.length} threads`).toHaveLength(1)
   const detailUrl = `/api/dashboard/organizations/${organizationId}/guest-threads/${own[0]!.id}`
   const initialResponse = await fetchPhase('read initial entries', detailUrl, {})
   expect(initialResponse.status(), await initialResponse.text()).toBe(200)
-  const { thread: initial } = await initialResponse.json()
+  const { thread: initial } = await initialResponse.json() as { thread: InboxThread }
+  // Day headers are the reader's calendar, not conversation items.
+  const items = (thread: InboxThread) => thread.stream.filter((item): item is Exclude<InboxStreamItem, { type: 'day' }> => item.type !== 'day')
+  // The ledger behind the view: each entry's channel and payload, which MCP reads out.
+  const ledger = async () => {
+    const response = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_guest_conversation', args: { organization_id: organizationId, request_id: own[0]!.id } })
+    expect(response.status(), await response.text()).toBe(200)
+    return mcpData<{ conversation: { entries: Array<{ id: string; kind: string; channel: string | null; body: string | null; payload: Record<string, unknown> | null }> } }>(await response.json()).conversation.entries
+  }
   type EmailReceipt = {
     id: string; request_id: string; entry_id: string; purpose: string; status: string;
     email_json: string | null; email_message_id: string | null; provider_message_id: string | null;
@@ -165,7 +175,7 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   const replyTo = await buildReplyToAddress({
     EMAIL_REPLY_SECRET: process.env.EMAIL_REPLY_SECRET,
     NUXT_PUBLIC_PLATFORM_DOMAIN: baseURL,
-  }, 'contact', initial.submissionId)
+  }, 'contact', initial.id)
   expect(replyTo).toMatch(/^rc[0-9a-f]{56}@/)
   const body = `Signed guest reply ${randomUUID()}`
   const subject = `Re: ${originalEmail.message.subject}`
@@ -218,18 +228,20 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   }
   const finalResponse = await fetchPhase('verify final entries', detailUrl, {})
   expect(finalResponse.status(), await finalResponse.text()).toBe(200)
-  const { thread: final } = await finalResponse.json()
-  expect(final.entries).toHaveLength(initial.entries.length + 2)
-  expect(final.entries.at(-2)).toMatchObject({
-    body, channel: 'email', actorKind: 'guest',
-  })
-  expect(final.entries.at(-1)).toMatchObject({
-    body, channel: 'email', actorKind: 'guest',
-  })
+  const { thread: final } = await finalResponse.json() as { thread: InboxThread }
+  // The two accepted emails are two guest messages; the refused ones left nothing.
+  expect(items(final)).toHaveLength(items(initial).length + 2)
+  expect(items(final).slice(-2)).toMatchObject([
+    { type: 'message', side: 'guest', author: name, body },
+    { type: 'message', side: 'guest', author: name, body },
+  ])
   // Normal inbox presentation hides transport metadata. The frozen staff
   // requests below prove the received RFC IDs still drive the actual replies.
-  expect(final.entries.at(-2).payload).toEqual({})
-  expect(final.entries.at(-1).payload).toEqual({})
+  const received = (await ledger()).filter(entry => items(final).slice(-2).some(item => item.id === entry.id))
+  expect(received).toEqual([
+    expect.objectContaining({ kind: 'message', channel: 'email', body, payload: {} }),
+    expect.objectContaining({ kind: 'message', channel: 'email', body, payload: {} }),
+  ])
 
   const replyUrl = `${detailUrl}/operations/reply`
   const operationKey = `mime-staff-${randomUUID()}`
@@ -276,9 +288,9 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   expect(nextEmail.message.html).toContain(nextStaffBody)
   const repliedResponse = await fetchPhase('verify repeated staff entries', detailUrl, {})
   expect(repliedResponse.status(), await repliedResponse.text()).toBe(200)
-  const { thread: replied } = await repliedResponse.json()
-  expect(replied.entries.filter((entry: { body: string | null }) => entry.body === staffBody)).toHaveLength(1)
-  expect(replied.entries.filter((entry: { body: string | null }) => entry.body === nextStaffBody)).toHaveLength(1)
+  const { thread: replied } = await repliedResponse.json() as { thread: InboxThread }
+  expect(replied.stream.filter(item => item.type === 'message' && item.body === staffBody)).toMatchObject([{ side: 'business', author: 'You' }])
+  expect(replied.stream.filter(item => item.type === 'message' && item.body === nextStaffBody)).toMatchObject([{ side: 'business', author: 'You' }])
   } finally {
     await release()
   }

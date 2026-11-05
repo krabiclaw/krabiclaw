@@ -2,15 +2,19 @@ import { guestThreadConversationStateSql } from './booking-change-state'
 import { REQUEST_CURRENT_BUYER_SQL, STAY_THREAD_ENDS_SQL, STAY_THREAD_STARTS_SQL, stayPreview, parseGuestRequest, participantLabel } from '~/server/domain/requests'
 import { BUYER_UNREAD_THREAD_SQL, buyerUnreadThreadParams } from './entries'
 import { messagePreview } from './attachments'
-import { execute, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { execute, queryAll, type BatchQuery, type DbClient } from '~/server/db'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import { assignedGuestThreadScope, roleAllows, assertRoleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import type {
   ConversationState,
   GuestThreadListItemViewModel,
   GuestThreadRow,
+  InboxRow,
+  InboxUnreadCounts,
   ListGuestThreadsOptions,
 } from './types'
+import { calendarDate, clockTime, firstName, initial, listTime, localDateKey, providerInstant, stayWhen } from './presentation'
+import { formatCalendarRange } from '~/utils/timezone'
 import { formatOperationalStatusLabel, formatThreadWhenLabel } from './status-labels'
 import { resolveGuestThreadMailbox, type GuestThreadMailbox } from './mailbox'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
@@ -188,91 +192,6 @@ function sourcePreviewText(row: {
   return `${when} - ${size} ${size === '1' ? 'guest' : 'guests'}`.slice(0, 160)
 }
 
-export interface OperationSummary {
-  openThreads: number
-  unreadThreads: number
-  reservations: number
-  experienceBookings: number
-}
-
-export async function getGuestThreadOperationSummary(
-  db: DbClient,
-  organizationId: string | null,
-  opts: ListGuestThreadsOptions,
-): Promise<OperationSummary> {
-  const params: Array<string | number> = []
-  let where: string
-
-  if (organizationId) {
-    params.push(organizationId)
-    where = 'gt.organization_id = ?'
-  } else if (opts.organizationId) {
-    params.push(opts.organizationId)
-    where = 'gt.organization_id = ?'
-  } else {
-    return { openThreads: 0, unreadThreads: 0, reservations: 0, experienceBookings: 0 }
-  }
-  const access = await assignedThreadScope(opts.principal)
-  where += access.sql
-  params.push(...access.params)
-
-  if (opts.locationId) {
-    where += ' AND gt.location_id = ?'
-    params.push(opts.locationId)
-  }
-  if (opts.assignedMemberId) {
-    where += ' AND op.assigned_member_id = ?'
-    params.push(opts.assignedMemberId)
-  }
-  // The counts beside a mailbox are that mailbox's counts.
-  const mailbox = mailboxWhere(opts.mailbox ?? null, new Date().toISOString())
-  where += mailbox.sql
-  params.push(...mailbox.params)
-
-  const counts = await queryFirst<OperationSummary>(db, `
-    SELECT
-      SUM(CASE WHEN gt.conversation_state != 'resolved' THEN 1 ELSE 0 END) AS openThreads,
-      0 AS unreadThreads,
-      SUM(CASE WHEN gt.conversation_state != 'resolved' AND gt.kind = 'reservation' THEN 1 ELSE 0 END) AS reservations,
-      SUM(CASE WHEN gt.conversation_state != 'resolved' AND gt.kind = 'booking' THEN 1 ELSE 0 END) AS experienceBookings
-    FROM requests gt${OPERATIONAL_RECORD_SQL}
-    WHERE gt.kind IN ('contact', 'reservation', 'booking', 'stay') AND ${where}
-  `, params)
-
-  const unreadThreads = opts.userId
-    ? await countUnreadThreadIds(db, where, params, opts.userId)
-    : 0
-
-  return {
-    openThreads: counts?.openThreads ?? 0,
-    unreadThreads,
-    reservations: counts?.reservations ?? 0,
-    experienceBookings: counts?.experienceBookings ?? 0,
-  }
-}
-
-async function countUnreadThreadIds(
-  db: DbClient,
-  where: string,
-  params: Array<string | number>,
-  userId: string,
-): Promise<number> {
-  const rows = await queryAll<{ id: string }>(db, `
-    SELECT gt.id
-    FROM requests gt${OPERATIONAL_RECORD_SQL}
-    WHERE gt.kind IN ('contact', 'reservation', 'booking', 'stay') AND ${where}
-      AND EXISTS (
-        SELECT 1 FROM activity_entries n
-        JOIN activity_entries notification_entry ON notification_entry.id = n.parent_id
-        LEFT JOIN activity_entries nr ON nr.parent_id = n.id AND nr.actor_user_id = ? AND nr.kind = 'acknowledgement'
-        WHERE notification_entry.request_id = gt.id
-          AND (n.target_user_id IS NULL OR n.target_user_id = ?)
-          AND nr.id IS NULL AND n.kind = 'notification'
-      )
-  `, [...params, userId, userId])
-  return rows.length
-}
-
 type GuestThreadListRow = GuestThreadRow & {
   effective_conversation_state: GuestThreadRow['conversation_state']
   assigned_member_id: string | null
@@ -310,146 +229,193 @@ function threadProductId(row: GuestThreadListRow): string | null {
   return row.record_product_id ?? row.channel_product_id
 }
 
-/** Returns list view models with member-specific unread and one canonical `preview` field. */
-export async function listGuestThreads(
-  db: DbClient,
-  organizationId: string | null,
-  opts: ListGuestThreadsOptions,
-): Promise<GuestThreadListItemViewModel[]> {
+const BUYER_VISIBLE_MESSAGE_SQL = "((e.actor_kind='guest' AND e.channel IN ('web','email','whatsapp')) OR (e.actor_kind='member' AND e.event_name='thread.member_reply') OR (e.actor_kind='system' AND e.event_name='thread.scheduled_message'))"
+
+/** An Airbnb Support case, said to the database as `isSupportThread` says it: Airbnb's agents wrote and no guest did. */
+const SUPPORT_THREAD_SQL = `(EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND e.actor_kind = 'system' AND e.event_name = 'channel.message_mirrored')
+  AND NOT EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND e.actor_kind = 'guest'))`
+
+/** A booking lands as a stay, not as a conversation: a stay is in the inbox once someone has written. */
+const HAS_CONVERSATION_SQL = "(gt.kind <> 'stay' OR EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message'))"
+
+const UNREAD_FOR_MEMBER_SQL = `EXISTS (
+        SELECT 1 FROM activity_entries n
+        JOIN activity_entries notification_entry ON notification_entry.id = n.parent_id
+        LEFT JOIN activity_entries nr ON nr.parent_id = n.id AND nr.actor_user_id = ? AND nr.kind = 'acknowledgement'
+        WHERE notification_entry.request_id = gt.id
+          AND (n.target_user_id IS NULL OR n.target_user_id = ?)
+          AND nr.id IS NULL AND n.kind = 'notification'
+      )`
+
+/** The scope every inbox read shares: whose threads, which location, which mailbox, which kind, what was searched. */
+async function inboxWhere(organizationId: string | null, opts: ListGuestThreadsOptions, now: string) {
   if (!organizationId && !opts.buyerAudience) throw new Error('Thread list requires organization scope')
   if (opts.buyerAudience && !opts.userId) throw new Error('Buyer thread list requires authenticated identity')
-  const now = new Date().toISOString()
-  const stateSql = guestThreadConversationStateSql('gt', now)
   const params: Array<string | number> = opts.buyerAudience ? [opts.userId] : [organizationId!]
   let where = opts.buyerAudience ? 'gt.user_id = ?' : 'gt.organization_id = ?'
   if (!opts.buyerAudience) {
     const access = await assignedThreadScope(opts.principal)
     where += access.sql
     params.push(...access.params)
-  }
-  if (opts.buyerAudience) {
-    where += ` AND ${REQUEST_CURRENT_BUYER_SQL.replaceAll('r.','gt.')}`
+  } else {
+    where += ` AND ${REQUEST_CURRENT_BUYER_SQL.replaceAll('r.', 'gt.')}`
     if (organizationId) { where += ' AND gt.organization_id = ?'; params.push(organizationId) }
   }
-
-  if (opts.locationId) {
-    where += ' AND gt.location_id = ?'
-    params.push(opts.locationId)
+  if (opts.locationId) { where += ' AND gt.location_id = ?'; params.push(opts.locationId) }
+  if (opts.assignedMemberId) { where += ' AND op.assigned_member_id = ?'; params.push(opts.assignedMemberId) }
+  if (opts.type) { where += ' AND gt.kind = ?'; params.push(opts.type) }
+  if (opts.kind) where += ` AND ${opts.kind === 'support' ? '' : 'NOT '}${SUPPORT_THREAD_SQL}`
+  if (opts.q) {
+    const like = `%${opts.q.toLowerCase().replace(/[\\%_]/g, char => `\\${char}`)}%`
+    where += ` AND (LOWER(COALESCE(json_extract(gt.payload_json, '$.guest.name'), '')) LIKE ? ESCAPE '\\'
+      OR LOWER(COALESCE(json_extract(gt.payload_json, '$.participant.title'), '')) LIKE ? ESCAPE '\\'
+      OR LOWER(COALESCE(bl.title, '')) LIKE ? ESCAPE '\\'
+      OR EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind IN ('message', 'submission')
+        AND (LOWER(COALESCE(e.body, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(json_extract(e.payload_json, '$.meta.name'), '')) LIKE ? ESCAPE '\\')))`
+    params.push(like, like, like, like, like)
   }
-  if (opts.assignedMemberId) {
-    where += ' AND op.assigned_member_id = ?'
-    params.push(opts.assignedMemberId)
-  }
-  if (opts.type) {
-    where += ' AND gt.kind = ?'
-    params.push(opts.type)
-  }
-  if (opts.conversationState) {
-    where += ` AND ${stateSql} = ?`
-    params.push(opts.conversationState)
-    if (opts.conversationState === 'needs_attention') where += ` AND ${CANCELLED_ATTENTION_SQL}`
-  }
-  // One instant for the filter and for each row's mailbox, so a row cannot be
-  // listed as Current and labelled Past.
+  where += ` AND ${HAS_CONVERSATION_SQL}`
   const mailbox = mailboxWhere(opts.mailbox ?? null, now, opts.buyerAudience)
   where += mailbox.sql
   params.push(...mailbox.params)
+  return { where, params }
+}
 
+type InboxListRow = GuestThreadRow & {
+  reply_channel: 'email' | 'airbnb'
+  support: number
+  organization_name: string
+  location_title: string | null
+  time_zone: string
+  airbnb_name: string | null
+  record_starts_at: string | null
+  record_check_in_date: string | null
+  record_check_out_date: string | null
+  inquiry_check_in: string | null
+  inquiry_check_out: string | null
+  latest_message_id: string | null
+}
+
+/**
+ * The inbox list, as `InboxRow`s (inbox-parity.md, "The list"): the person
+ * first, the dates and home, the last message and its time, newest first. A
+ * stay nobody has written about is not listed, and Airbnb Support is its own
+ * kind. The same rows serve the business's inbox and a guest's own.
+ */
+export async function listGuestThreads(
+  db: DbClient,
+  organizationId: string | null,
+  opts: ListGuestThreadsOptions,
+  now = new Date(),
+): Promise<InboxRow[]> {
+  const scope = await inboxWhere(organizationId, opts, now.toISOString())
+  const visible = opts.buyerAudience ? ` AND ${BUYER_VISIBLE_MESSAGE_SQL}` : ''
+  const unreadFilter = opts.unreadOnly && opts.userId ? ` AND ${opts.buyerAudience ? BUYER_UNREAD_THREAD_SQL : UNREAD_FOR_MEMBER_SQL}` : ''
+  const unreadParams = opts.unreadOnly && opts.userId ? (opts.buyerAudience ? buyerUnreadThreadParams(opts.userId) : [opts.userId, opts.userId]) : []
   const limit = Math.max(1, Math.min(opts.limit ?? 100, 200))
-
-  const unreadFilter = opts.unreadOnly && opts.userId
-    ? opts.buyerAudience ? ` AND ${BUYER_UNREAD_THREAD_SQL}` : `
-      AND EXISTS (
-        SELECT 1 FROM activity_entries n
-        JOIN activity_entries notification_entry ON notification_entry.id = n.parent_id
-        LEFT JOIN activity_entries nr ON nr.parent_id = n.id AND nr.actor_user_id = ? AND nr.kind = 'acknowledgement'
-        WHERE notification_entry.request_id = gt.id
-          AND ${opts.buyerAudience ? 'n.target_user_id = ?' : '(n.target_user_id IS NULL OR n.target_user_id = ?)'}
-          AND nr.id IS NULL AND n.kind = 'notification'
-      )
-    `
-    : ''
-
-  const rows = await queryAll<GuestThreadListRow>(db, `
-    SELECT
-      gt.*, ${stateSql} AS effective_conversation_state,
-      ${SOURCE_GUEST_NAME_SQL} AS guest_name, ${REPLY_CHANNEL_SQL} AS reply_channel, o.name AS organization_name, o.vertical AS organization_vertical,
-      bl.title AS location_title,
-      (
-        SELECT body FROM activity_entries
-        WHERE request_id = gt.id AND kind = 'message' ${opts.buyerAudience ? "AND ((actor_kind='guest' AND channel IN ('web','email','whatsapp')) OR (actor_kind='member' AND event_name='thread.member_reply') OR (actor_kind='system' AND event_name='thread.scheduled_message'))" : ''}
-        ORDER BY sequence DESC LIMIT 1
-      ) AS latest_message_body,
-      (
-        SELECT kind FROM activity_entries
-        WHERE request_id = gt.id AND kind = 'message' ${opts.buyerAudience ? "AND ((actor_kind='guest' AND channel IN ('web','email','whatsapp')) OR (actor_kind='member' AND event_name='thread.member_reply') OR (actor_kind='system' AND event_name='thread.scheduled_message'))" : ''}
-        ORDER BY sequence DESC LIMIT 1
-      ) AS latest_message_kind,
-      (SELECT actor_kind FROM activity_entries WHERE request_id = gt.id AND kind = 'message' ORDER BY sequence DESC LIMIT 1) AS latest_message_actor_kind,
-      (
-        SELECT COUNT(*) FROM media_placements mp
-        WHERE mp.owner_type = 'activity_entry' AND mp.slot = 'attachments' AND mp.status = 'active'
-          AND mp.owner_id = (SELECT id FROM activity_entries WHERE request_id = gt.id AND kind = 'message' ${opts.buyerAudience ? "AND ((actor_kind='guest' AND channel IN ('web','email','whatsapp')) OR (actor_kind='member' AND event_name='thread.member_reply') OR (actor_kind='system' AND event_name='thread.scheduled_message'))" : ''} ORDER BY sequence DESC LIMIT 1)
-      ) AS latest_message_photos,
-      ${SOURCE_PREVIEW_SQL} AS source_preview,
-      ${SOURCE_PREVIEW_COLUMNS},
-      ${PLACE_IMAGE_COLUMNS},
-      op.status AS operational_status
+  const rows = await queryAll<InboxListRow>(db, `
+    SELECT gt.*, ${REPLY_CHANNEL_SQL} AS reply_channel, ${SUPPORT_THREAD_SQL} AS support,
+      o.name AS organization_name, bl.title AS location_title, COALESCE(bl.timezone, o.timezone) AS time_zone,
+      (SELECT json_extract(e.payload_json, '$.meta.name') FROM activity_entries e
+        WHERE e.request_id = gt.id AND e.kind = 'message' AND e.actor_kind = 'guest' AND e.event_name = 'channel.message_mirrored'
+          AND json_extract(e.payload_json, '$.meta.name') IS NOT NULL ORDER BY e.sequence DESC LIMIT 1) AS airbnb_name,
+      op.starts_at AS record_starts_at, op.check_in_date AS record_check_in_date, op.check_out_date AS record_check_out_date,
+      (SELECT json_extract(e.payload_json, '$.check_in_date') FROM activity_entries e WHERE e.request_id = gt.id AND e.event_name = 'channel.inquiry_received' ORDER BY e.sequence DESC LIMIT 1) AS inquiry_check_in,
+      (SELECT json_extract(e.payload_json, '$.check_out_date') FROM activity_entries e WHERE e.request_id = gt.id AND e.event_name = 'channel.inquiry_received' ORDER BY e.sequence DESC LIMIT 1) AS inquiry_check_out,
+      (SELECT e.id FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message'${visible} ORDER BY e.sequence DESC LIMIT 1) AS latest_message_id,
+      COALESCE((SELECT substr(COALESCE(json_extract(e.payload_json, '$.provider_inserted_at'), e.occurred_at), 1, 19) FROM activity_entries e
+        WHERE e.request_id = gt.id AND e.kind = 'message'${visible} ORDER BY e.sequence DESC LIMIT 1), substr(gt.created_at, 1, 19)) AS latest_at
     FROM requests gt${OPERATIONAL_RECORD_SQL}
-    JOIN organization o ON o.id=gt.organization_id
-    LEFT JOIN business_locations bl ON bl.id = gt.location_id${PLACE_IMAGE_SQL}
-    WHERE gt.kind IN ('contact', 'reservation', 'booking', 'stay') AND ${where}
-    ${unreadFilter}
-    ORDER BY gt.updated_at DESC, gt.id
+    JOIN organization o ON o.id = gt.organization_id
+    LEFT JOIN business_locations bl ON bl.id = gt.location_id
+    WHERE gt.kind IN ('contact', 'reservation', 'booking', 'stay') AND ${scope.where}${unreadFilter}
+    ORDER BY latest_at DESC, gt.id
     LIMIT ? OFFSET ?
-  `, opts.unreadOnly && opts.userId ? [...params, ...(opts.buyerAudience?buyerUnreadThreadParams(opts.userId):[opts.userId,opts.userId]), limit, opts.offset ?? 0] : [...params, limit, opts.offset ?? 0])
+  `, [...scope.params, ...unreadParams, limit, opts.offset ?? 0])
 
-  const unreadIds = opts.userId
-    ? new Set(await listUnreadThreadIds(db, rows.map(row => row.id), opts.userId, opts.buyerAudience))
-    : new Set<string>()
-  const items: GuestThreadListItemViewModel[] = []
-  for (const row of rows ?? []) {
-    const unread = unreadIds.has(row.id)
-    const preview = sourcePreviewText(row)
-    items.push({
+  const [unreadIds, latest] = await Promise.all([
+    opts.userId ? listUnreadThreadIds(db, rows.map(row => row.id), opts.userId, opts.buyerAudience).then(ids => new Set(ids)) : new Set<string>(),
+    latestMessages(db, rows.flatMap(row => row.latest_message_id ? [row.latest_message_id] : [])),
+  ])
+  return rows.map(row => {
+    const request = parseGuestRequest(row as unknown as Record<string, unknown>)
+    const support = row.support === 1
+    const recordedName = request.payload.guest.name ?? participantLabel(request)
+    // Airbnb's first name from the guest's messages, else the booked guest's first name, else what the conversation was recorded as.
+    const guestName = support ? 'Airbnb Support' : row.airbnb_name ?? (row.reply_channel === 'airbnb' && request.payload.guest.name ? firstName(request.payload.guest.name) : recordedName)
+    const shownName = opts.buyerAudience ? row.organization_name : guestName
+    const message = row.latest_message_id ? latest.get(row.latest_message_id) : undefined
+    if (row.latest_message_id && !message) throw new Error(`The latest message of conversation ${row.id} could not be read`)
+    const opening = request.kind === 'contact' ? request.payload.message : 'notes' in request.payload ? request.payload.notes : null
+    const sentAt = message ? message.sentAt : row.created_at
+    return {
       id: row.id,
-      organizationId: row.organization_id,
-      organizationName: row.organization_name,
-      organizationVertical: row.organization_vertical ?? null,
-      guestName: row.guest_name,
-      participantLabel: participantLabel(parseGuestRequest(row as unknown as Record<string, unknown>)),
-      replyChannel: row.reply_channel,
-      submissionType: row.kind,
-      locationLabel: row.location_title,
-      locationId: row.location_id,
-      assignedMemberId: row.assigned_member_id,
-      productId: threadProductId(row),
-      stayChannel: row.stay_channel,
-      occurrenceAt: row.record_starts_at,
-      timeZone: row.record_timezone,
-      latestMessageFromGuest: row.latest_message_actor_kind === 'guest',
-      conversationState: opts.buyerAudience ? null : row.effective_conversation_state,
-      operationalStatus: row.operational_status,
-      operationalStatusLabel: row.operational_status ? formatOperationalStatusLabel(row.kind, row.operational_status) : null,
-      unread,
-      unreadCount: unread ? 1 : 0,
-      preview: row.latest_message_kind === 'message'
-        ? { kind: 'message', text: messagePreview(row.latest_message_body, row.latest_message_photos) }
-        : (preview ? { kind: 'submission', text: preview } : null),
-      lastActivityAt: row.updated_at,
-      needsAttention: opts.buyerAudience ? unread : row.effective_conversation_state === 'needs_attention',
-      // Two renditions of one asset, not two sources: a row 60px wide takes the
-      // thumbnail, and an asset with no rendition yet is served at full size.
-      imageUrl: mediaStillUrl({ kind: row.place_image_kind, public_url: row.place_image_public_url, thumbnail_url: row.place_image_thumbnail_url }),
-      imageFit: row.place_image_whole ? 'contain' : 'cover',
-      whenLabel: row.record_check_in_date ? stayRecordLabel(row)
-        : row.record_starts_at && row.record_timezone ? formatThreadWhenLabel(row.record_starts_at, row.record_timezone)
-          : null,
-      ...mailboxFields(row, now, opts.buyerAudience),
-      ...(opts.buyerAudience ? {canArchive:false,canUnarchive:false} : {}),
-    })
+      kind: support ? 'support' : 'guest',
+      guestName: shownName,
+      avatarInitial: initial(shownName),
+      channel: row.reply_channel === 'airbnb' ? 'airbnb' : 'direct',
+      home: row.location_title,
+      when: support ? null
+        : row.record_check_in_date && row.record_check_out_date ? stayWhen(row.record_check_in_date, row.record_check_out_date, now, row.time_zone)
+          : row.record_starts_at ? `${calendarDate(localDateKey(row.record_starts_at, row.time_zone))}, ${clockTime(row.record_starts_at, row.time_zone)}`
+            : row.inquiry_check_in && row.inquiry_check_out ? formatCalendarRange(row.inquiry_check_in, row.inquiry_check_out, 'en-US') : null,
+      preview: message ? messagePreview(message.text, message.photos) : opening?.trim() || 'New conversation',
+      previewFrom: message ? previewFrom(message, { guestName: row.reply_channel === 'airbnb' ? guestName : firstName(guestName), viewerId: opts.userId, buyer: Boolean(opts.buyerAudience), business: row.organization_name })
+        : opts.buyerAudience ? 'You' : firstName(guestName),
+      time: listTime(sentAt, row.time_zone, now),
+      unread: unreadIds.has(row.id),
+    } satisfies InboxRow
+  })
+}
+
+type LatestMessage = { actorKind: string; actorUserId: string | null; actorName: string | null; eventName: string | null; text: string | null; photos: number; sentAt: string }
+
+/** The last message of each listed conversation: who sent it, its words (Airbnb's translation where there is one) and when. */
+async function latestMessages(db: DbClient, ids: string[]): Promise<Map<string, LatestMessage>> {
+  if (!ids.length) return new Map()
+  const rows = await queryAll<{ id: string; actor_kind: string; actor_user_id: string | null; actor_name: string | null; event_name: string | null; body: string | null; translated: string | null; provider_inserted_at: string | null; occurred_at: string; photos: number; attachments: number }>(db, `
+    SELECT e.id, e.actor_kind, e.actor_user_id, u.name AS actor_name, e.event_name, e.body,
+      json_extract(e.payload_json, '$.meta.translated_message') AS translated,
+      json_extract(e.payload_json, '$.provider_inserted_at') AS provider_inserted_at, e.occurred_at,
+      (SELECT COUNT(*) FROM media_placements mp WHERE mp.owner_type = 'activity_entry' AND mp.owner_id = e.id AND mp.slot = 'attachments' AND mp.status = 'active') AS photos,
+      COALESCE(json_array_length(e.payload_json, '$.attachments'), 0) AS attachments
+    FROM activity_entries e LEFT JOIN user u ON u.id = e.actor_user_id
+    WHERE e.id IN (SELECT value FROM json_each(?))`, [d1JsonStringSet(ids)])
+  return new Map(rows.map(row => [row.id, {
+    actorKind: row.actor_kind, actorUserId: row.actor_user_id, actorName: row.actor_name, eventName: row.event_name,
+    text: row.actor_kind === 'guest' && row.translated?.trim() ? row.translated : row.body,
+    photos: Math.max(row.photos, row.attachments),
+    sentAt: row.provider_inserted_at ? providerInstant(row.provider_inserted_at) : row.occurred_at,
+  }]))
+}
+
+/** "You", or the sender's first name, before the preview. */
+function previewFrom(message: LatestMessage, context: { guestName: string; viewerId: string; buyer: boolean; business: string }): string {
+  if (message.actorKind === 'guest') return context.buyer ? 'You' : context.guestName
+  if (message.actorKind === 'system' && message.eventName === 'channel.message_mirrored') return 'Airbnb Support'
+  if (context.buyer) return context.business
+  if (message.actorKind === 'member' && message.actorUserId && message.actorUserId !== context.viewerId) {
+    if (!message.actorName) throw new Error('A team reply has no author name')
+    return firstName(message.actorName)
   }
-  return items
+  return 'You'
+}
+
+/**
+ * Unread conversations per kind in the current mailbox, for the filter menu:
+ * All, Guests and Airbnb Support. Team conversations are counted by their own
+ * inbox.
+ */
+export async function countUnreadInboxThreads(db: DbClient, organizationId: string, opts: ListGuestThreadsOptions): Promise<Omit<InboxUnreadCounts, 'team'>> {
+  const scope = await inboxWhere(organizationId, { ...opts, kind: null, q: null, mailbox: 'current' }, new Date().toISOString())
+  const rows = await queryAll<{ support: number; count: number }>(db, `
+    SELECT ${SUPPORT_THREAD_SQL} AS support, COUNT(*) AS count
+      FROM requests gt${OPERATIONAL_RECORD_SQL} LEFT JOIN business_locations bl ON bl.id = gt.location_id
+     WHERE gt.kind IN ('contact', 'reservation', 'booking', 'stay') AND ${scope.where} AND ${UNREAD_FOR_MEMBER_SQL}
+     GROUP BY 1`, [...scope.params, opts.userId, opts.userId])
+  const support = rows.find(row => row.support === 1)?.count ?? 0
+  const guests = rows.find(row => row.support !== 1)?.count ?? 0
+  return { all: guests + support, guests, support }
 }
 
 export async function listOrganizationGuestThreads(

@@ -64,7 +64,8 @@ export default defineComponent({
               .email-body .email-header-name { color: ${dark.text} !important; }
               /* The hero's letterbox is the page behind the picture, so it
                  follows the scheme rather than staying a light band. */
-              .email-hero-img { background-color: ${dark.bg} !important; }
+              .email-hero-img, .email-section-img { background-color: ${dark.bg} !important; }
+              .email-avatar { background-color: ${dark.bg} !important; }
               /* The primary button inverts with the scheme, like the
                  product's: navy on light, white on dark. The label lives in a
                  span inside the anchor and the generic span rule above sets

@@ -25,6 +25,12 @@ import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
 const ORG = 'org', OWNER = 'owner'
 const NOW = '2026-10-16T00:00:00.000Z'
 const RAW = '2026-10-15T23:12:00.123456'
+/**
+ * A real photo, what a guest's Airbnb attachment is once downloaded. AVIF is the
+ * photo type the media store keeps in R2; JPEG and PNG go to Cloudflare Images,
+ * which only production configures.
+ */
+const GUEST_PHOTO = Uint8Array.from(await sharp({ create: { width: 4, height: 3, channels: 3, background: '#16a34a' } }).avif().toBuffer())
 const code = (expected: string) => (error: unknown) => (error as { data?: { code?: string } }).data?.code === expected
 
 class Provider {
@@ -47,6 +53,9 @@ class Provider {
   refuseImageRead = false
   onSend?: () => void
   holdReply?: Promise<void>
+  /** The files Channex serves behind its attachment links, by path: the guest's photo, and each photo uploaded with a reply. */
+  files = new Map<string, Uint8Array<ArrayBuffer>>([['/attachment/file', GUEST_PHOTO]])
+  fileReads: string[] = []
   messages = [this.message('first', 'guest', 'Hello'), this.message('second', 'system', null, ['/attachment/file'])]
 
   thread() {
@@ -97,10 +106,14 @@ class Provider {
     if (method === 'POST' && url.pathname === '/api/v1/attachments') {
       const body = JSON.parse(String(init.body)) as { attachment: { file: string; file_name: string; file_type: string } }
       this.uploads.push(body.attachment)
+      if (!this.refuseAttachment && !this.attachmentNetworkFailure) this.files.set(`/api/v1/attachments/photo-${this.uploads.length}`, Uint8Array.from(Buffer.from(body.attachment.file, 'base64')))
       if (this.refuseAttachment) return Response.json({ errors: { code: 'not_supported', title: 'Attachment refused' } }, { status: 422 })
       if (this.attachmentNetworkFailure) throw new TypeError('The attachment upload connection ended without an answer')
       return json({ data: { id: `photo-${this.uploads.length}`, type: 'attachment' } })
     }
+    // An attachment link answers with the file itself once Channex's redirect to its signed download is followed.
+    const file = method === 'GET' && url.hostname === 'channex.test' ? this.files.get(url.pathname) : undefined
+    if (file) { this.fileReads.push(url.pathname); return new Response(file, { headers: { 'content-type': 'application/octet-stream' } }) }
     if (method === 'POST' && url.pathname === `/api/v1/message_threads/${this.threadId}/messages`) {
       this.sends += 1
       if (this.refuseMessage) return Response.json({ errors: { code: 'not_supported', title: 'Message refused' } }, { status: 422 })
@@ -161,15 +174,29 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     assert.equal(await db.prepare('SELECT count(*) FROM requests').first('count(*)'), 0)
     provider.empty = false
     assert.deepEqual(await backfillChannexMessages(db, env, 'property', ORG), { threads: 1 })
-    const rows = await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay' })
+    const rows = await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay', mailbox: 'current' })
     assert.equal(rows.length, 1)
-    assert.equal(rows[0]!.productId, productId)
-    assert.equal(rows[0]!.stayChannel, null)
-    assert.deepEqual([rows[0]!.guestName, rows[0]!.participantLabel, rows[0]!.replyChannel, rows[0]!.mailbox], [null, 'Conversation supplied by Airbnb', 'airbnb', 'current'])
+    // An unbooked Airbnb conversation with no guest name reads as the title Airbnb gave it, on the home it was asked about, with no dates invented.
+    // Unread follows the owner alerts, and a backfilled history raises none.
+    assert.deepEqual({ ...rows[0]!, time: undefined }, { id: rows[0]!.id, kind: 'guest', guestName: 'Conversation supplied by Airbnb', avatarInitial: 'C', channel: 'airbnb', home: 'Cabin', when: null,
+      preview: 'Sent a photo', previewFrom: 'Airbnb Support', time: undefined, unread: false })
+    assert.deepEqual(await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay', mailbox: 'past' }), [])
+    assert.equal(await db.prepare('SELECT product_id FROM channel_threads WHERE request_id = ?').bind(rows[0]!.id).first('product_id'), productId)
     const detail = (await getGuestThreadDetail(db, rows[0]!.id, ORG))!
-    assert.deepEqual([detail.operationalRecord, detail.guestEmail, detail.guestPhone], [null, null, null])
+    assert.deepEqual([detail.operationalRecord, detail.guestEmail, detail.guestPhone, detail.guestName, detail.participantLabel, detail.replyChannel], [null, null, null, null, 'Conversation supplied by Airbnb', 'airbnb'])
     assert.deepEqual(detail.entries.map(entry => [entry.body, entry.actorKind, entry.providerTimestamp]), [['Hello', 'guest', RAW], [null, 'system', RAW]])
-    assert.equal(detail.entries[1]!.attachments[0]!.url, 'https://channex.test/attachment/file')
+    // Airbnb's photo is read once when the message lands and kept as the business's own media, placed on that message.
+    assert.deepEqual(provider.fileReads, ['/attachment/file'])
+    const stored = await db.prepare(`SELECT ma.id, ma.r2_key, ma.public_url FROM media_assets ma JOIN media_placements mp ON mp.asset_id = ma.id AND mp.organization_id = ma.organization_id
+      WHERE mp.owner_type = 'activity_entry' AND mp.owner_id = ? AND mp.slot = 'attachments' AND mp.status = 'active' AND ma.status = 'active'`).bind(detail.entries[1]!.id).all<{ id: string; r2_key: string; public_url: string }>()
+    assert.equal(stored.results.length, 1)
+    const photo = stored.results[0]!
+    assert.ok(photo.public_url.startsWith('https://media.example.test/'), photo.public_url)
+    const kept = await (await runtime.getR2Bucket('MEDIA_BUCKET')).get(photo.r2_key)
+    assert.ok(kept)
+    assert.deepEqual(new Uint8Array(await kept.arrayBuffer()), GUEST_PHOTO)
+    assert.deepEqual(detail.entries[1]!.attachments.map(item => [item.id, item.url]), [[photo.id, photo.public_url]])
+    assert.equal(detail.entries.some(entry => entry.attachments.some(item => item.url.startsWith('https://channex.test/'))), false, 'no Channex link reaches the conversation')
     assert.notEqual(detail.entries[0]!.occurredAt, RAW)
     // The actual imported inquiry has no guest identity or linked stay. Today
     // displays its recorded conversation title without inventing either one.
@@ -206,6 +233,10 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     await assert.rejects(assertAssignedBookingAccess(db, { ...principal('unassigned-user', 'member'), requestId: rows[0]!.id }), code('THREAD_NOT_FOUND'))
     await mirrorChannexThread(db, env, 'thread', 'property')
     assert.equal(await db.prepare('SELECT count(*) FROM activity_entries WHERE request_id IS NOT NULL').first('count(*)'), 2)
+    // Mirrored again, the message finds its photo already placed: nothing is downloaded or stored twice.
+    assert.deepEqual(provider.fileReads, ['/attachment/file'])
+    assert.equal(await db.prepare("SELECT count(*) FROM media_placements WHERE owner_type = 'activity_entry'").first('count(*)'), 1)
+    assert.equal(await db.prepare('SELECT count(*) FROM media_assets').first('count(*)'), 1)
     await assert.rejects(mirrorChannexMessageEvent(db, env, { event: 'message', property_id: 'property', payload: { id: 'not-visible-yet', property_id: 'property', message_thread_id: 'thread' } }), code('CHANNEL_MESSAGE_NOT_READY'))
     provider.propertyId = 'another-property'
     await assert.rejects(mirrorChannexThread(db, env, 'thread', 'property'), code('INVALID_PROVIDER_RESPONSE'))
@@ -230,10 +261,10 @@ test('the inbox exposes every page with a stable tie order and validates paginat
     assert.deepEqual(last.threads.map(thread => thread.id), ['d', 'e'])
     assert.deepEqual(last.pagination, { limit: 3, offset: 3, hasMore: false, nextOffset: null })
     for (const [query, field] of [[{ limit: '0' }, 'limit'], [{ limit: '101' }, 'limit'], [{ offset: '-1' }, 'offset'], [{ limit: ['3'] }, 'limit'],
-      [{ type: 'everything' }, 'type'], [{ conversation_state: '' }, 'conversation_state'], [{ mailbox: ['past'] }, 'mailbox'], [{ unread: 'yes' }, 'unread'], [{ location_id: ' ' }, 'location_id'], [{ organization_id: 'org' }, 'organization_id']] as const) {
+      [{ type: 'everything' }, 'type'], [{ conversation_state: 'resolved' }, 'conversation_state'], [{ kind: 'team' }, 'kind'], [{ q: 'x'.repeat(201) }, 'q'], [{ mailbox: ['past'] }, 'mailbox'], [{ unread: 'yes' }, 'unread'], [{ location_id: ' ' }, 'location_id'], [{ organization_id: 'org' }, 'organization_id']] as const) {
       assert.throws(() => parseGuestThreadListQuery(query), { status: 400, data: { code: 'INVALID_GUEST_THREAD_FILTER', field } })
     }
-    assert.deepEqual(parseGuestThreadListQuery({ limit: '3', offset: '3' }), { limit: 3, offset: 3, locationId: null, type: null, conversationState: null, unreadOnly: false, mailbox: null })
+    assert.deepEqual(parseGuestThreadListQuery({ limit: '3', offset: '3' }), { limit: 3, offset: 3, locationId: null, type: null, kind: null, q: null, unreadOnly: false, mailbox: null })
   } finally { await runtime.dispose() }
 })
 
@@ -512,7 +543,11 @@ test('photo replies retain their canonical media, replay without expired source 
     const afterUncertain = (await getGuestThreadDetail(db, mirrored.request_id, ORG))!
     assert.equal(afterUncertain.entries.length, 5, 'an unknown provider identity preserves both the attempted photo and actual resource')
     assert.equal(afterUncertain.deliveryFailures[0]!.status, 'uncertain')
-    assert.equal(await db.prepare('SELECT count(*) FROM media_assets').first('count(*)'), 2)
+    // Mirroring keeps the photos Channex holds that KrabiClaw does not: the guest's, and the echo of the uncertain reply whose
+    // identity was never learned. The echo of the accepted reply is that reply's own photo, already stored, and is not read again.
+    assert.deepEqual(provider.fileReads, ['/attachment/file', '/api/v1/attachments/photo-2'])
+    const mirroredPhotos = 2
+    assert.equal(await db.prepare('SELECT count(*) FROM media_assets').first('count(*)'), 2 + mirroredPhotos)
 
     provider.uncertain = false
     const simultaneous = { ...input, idempotencyKey: 'simultaneous-photo' }
@@ -528,9 +563,9 @@ test('photo replies retain their canonical media, replay without expired source 
       JOIN activity_entries a ON a.id = d.entry_id LEFT JOIN media_placements mp ON mp.owner_type = 'activity_entry' AND mp.owner_id = a.id AND mp.status = 'active'
       WHERE a.dedupe_key = ? GROUP BY d.id`).bind(`guest-thread-operation:${mirrored.request_id}:simultaneous-photo`).first(),
     { status: 'accepted', provider_message_id: 'accepted-3', photos: 1 })
-    assert.equal(await db.prepare("SELECT count(*) FROM media_assets WHERE status = 'active'").first('count(*)'), 3, 'the losing request retains no active orphan media asset')
-    assert.equal((await (await runtime.getR2Bucket('MEDIA_BUCKET')).list({ prefix: `organizations/${ORG}/media/` })).objects.length, 3, 'only the three retained photos remain stored')
-    assert.equal(await db.prepare("SELECT count(*) FROM media_placements WHERE owner_type = 'activity_entry'").first('count(*)'), 3)
+    assert.equal(await db.prepare("SELECT count(*) FROM media_assets WHERE status = 'active'").first('count(*)'), 3 + mirroredPhotos, 'the losing request retains no active orphan media asset')
+    assert.equal((await (await runtime.getR2Bucket('MEDIA_BUCKET')).list({ prefix: `organizations/${ORG}/media/` })).objects.length, 3 + mirroredPhotos, 'only the three retained reply photos and the mirrored photos remain stored')
+    assert.equal(await db.prepare("SELECT count(*) FROM media_placements WHERE owner_type = 'activity_entry'").first('count(*)'), 3 + mirroredPhotos)
     assert.equal((await getGuestThreadDetail(db, mirrored.request_id, ORG))!.entries.filter(entry => entry.eventName === 'thread.member_reply').length, 3)
 
     provider.refuseAttachment = true
@@ -592,7 +627,7 @@ test('photo replies retain their canonical media, replay without expired source 
     assert.deepEqual(new Uint8Array(await recoveredBytes.arrayBuffer()), bytes)
     assert.deepEqual(await db.prepare('SELECT status, provider_message_id, error, non_delivery_confirmed FROM guest_thread_deliveries WHERE entry_id = ?').bind(refusedReceipt.id).first(),
       { status: 'accepted', provider_message_id: 'accepted-4', error: null, non_delivery_confirmed: 0 })
-    assert.equal(await db.prepare("SELECT count(*) FROM media_assets WHERE status = 'active'").first('count(*)'), 4, 'retry reuses the retained photo')
+    assert.equal(await db.prepare("SELECT count(*) FROM media_assets WHERE status = 'active'").first('count(*)'), 4 + mirroredPhotos, 'retry reuses the retained photo')
 
     provider.attachmentNetworkFailure = true
     const networkInput = { ...input, idempotencyKey: 'interrupted-photo-upload' }
@@ -619,7 +654,7 @@ test('photo replies retain their canonical media, replay without expired source 
     assert.deepEqual(await db.prepare('SELECT status, provider_message_id, error, non_delivery_confirmed FROM guest_thread_deliveries WHERE entry_id = ?').bind(retained.id).first(),
       { status: 'accepted', provider_message_id: 'accepted-5', error: null, non_delivery_confirmed: 0 })
     assert.equal(await db.prepare('SELECT count(*) FROM activity_entries WHERE dedupe_key = ?').bind(`guest-thread-operation:${mirrored.request_id}:interrupted-photo-upload`).first('count(*)'), 1)
-    assert.equal(await db.prepare("SELECT count(*) FROM media_assets WHERE status = 'active'").first('count(*)'), 5)
+    assert.equal(await db.prepare("SELECT count(*) FROM media_assets WHERE status = 'active'").first('count(*)'), 5 + mirroredPhotos)
     assert.equal((await executeGuestThreadOperation(db, networkInput)).ok, true)
     assert.deepEqual([provider.sends, provider.uploads.length], [5, 7], 'a successful receipt still prevents all repeat sends')
 

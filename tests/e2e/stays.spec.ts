@@ -7,6 +7,7 @@ import { openTenantPage, waitForNuxtHydration } from './helpers'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations'
 import type { Product } from '../../server/types/products'
 import type { GuestStay, PublicStayCalendar, StayDetail, StayQuote } from '../../server/domain/stays'
+import type { InboxThread } from '../../server/domain/guest-threads/types'
 import { createReplayableReservationCancelToken } from '../../server/utils/reservation-cancel-token'
 import type { PostalAddress } from '../../utils/postal-address'
 import { STAY_SAFETY_DETAIL_KEYS } from '../../shared/stay-safety'
@@ -511,10 +512,13 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
     expect(afterRequest.data!.stay).toEqual(beforeRequest.data!.stay)
     const requestedThread = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${activityId}`)
     await expectStatus(requestedThread, 200)
-    const requestedState = await requestedThread.json() as { thread: { conversationState: string; entries: Array<{ id: string; body: string | null; actorKind: string }> } }
-    expect(requestedState.thread.conversationState).toBe('needs_attention')
-    const changeMessages = requestedState.thread.entries.filter(entry => entry.actorKind === 'guest' && entry.body === 'Can I arrive at 4 pm?')
+    const requestedState = await requestedThread.json() as { thread: InboxThread }
+    const changeMessages = requestedState.thread.stream.filter(item => item.type === 'message' && item.side === 'guest' && item.body === 'Can I arrive at 4 pm?')
     expect(changeMessages).toHaveLength(1)
+    // The guest's request is now the business's to answer.
+    const requestedLedger = await call<{ conversation: { state: string } }>('get_guest_conversation', { request_id: activityId })
+    expect(requestedLedger.error).toBeNull()
+    expect(requestedLedger.data!.conversation.state).toBe('needs_attention')
     const requestDeliveries = await request.get(`${baseURL}/api/dev/notifications`, { headers: devLoginHeaders(), params: { organization_id: organizationId } })
     await expectStatus(requestDeliveries, 200)
     const deliveryState = await requestDeliveries.json() as { deliveries: Array<{ entry_id: string; purpose: string; status: string }> }

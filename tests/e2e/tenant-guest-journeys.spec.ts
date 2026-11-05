@@ -6,7 +6,7 @@ import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import type { Product, PublicProduct } from '../../server/types/products'
-import type { GuestThreadDetailViewModel } from '../../server/domain/guest-threads/types'
+import type { InboxThread } from '../../server/domain/guest-threads/types'
 import type { TodayFeedPayload } from '../../shared/dashboard-today'
 
 type NotificationRow = { template: string }
@@ -325,7 +325,14 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const threadURL = `${baseURL}/api/dashboard/organizations/${wheel.organizationId}/guest-threads/${body.booking_id}`
     const pendingThread = await request.get(threadURL)
     expect(pendingThread.status(), await pendingThread.text()).toBe(200)
-    expect((await pendingThread.json() as { thread: GuestThreadDetailViewModel }).thread).toMatchObject({ id: body.booking_id, conversationState: 'needs_attention', resolvedAt: null })
+    expect((await pendingThread.json() as { thread: InboxThread }).thread).toMatchObject({ id: body.booking_id, guestName: 'Cancel Once', recordKind: 'booking' })
+    // The conversation's state is the ledger's, which MCP reads out; the inbox view keeps it on the server.
+    const conversationLedger = async () => {
+      const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_guest_conversation', args: { organization_id: wheel.organizationId, request_id: body.booking_id } })
+      expect(response.status()).toBe(200)
+      return mcpData<{ conversation: { state: string; operational_record: { status: string } | null; entries: Array<{ id: string; event: string | null }> } }>(await response.json()).conversation
+    }
+    expect((await conversationLedger()).state).toBe('needs_attention')
     const todayBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
     expect(todayBefore.status(), await todayBefore.text()).toBe(200)
     const todayBeforePayload = await todayBefore.json() as TodayFeedPayload
@@ -352,10 +359,13 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect(await replay.json()).toEqual({ success: true, kind: 'booking' })
     const cancelledThread = await request.get(threadURL)
     expect(cancelledThread.status(), await cancelledThread.text()).toBe(200)
-    const thread = (await cancelledThread.json() as { thread: GuestThreadDetailViewModel }).thread
-    expect(thread).toMatchObject({ id: body.booking_id, conversationState: 'resolved', source: { operationalStatus: 'cancelled' } })
-    expect(thread.resolvedAt).toEqual(expect.any(String))
-    expect(thread.entries.filter(entry => entry.eventName === 'booking.cancel')).toHaveLength(1)
+    const thread = (await cancelledThread.json() as { thread: InboxThread }).thread
+    // A cancel and its replay are one cancellation: one ledger entry, said once in the conversation.
+    const cancelledLedger = await conversationLedger()
+    expect(cancelledLedger).toMatchObject({ state: 'resolved', operational_record: { status: 'cancelled' } })
+    const cancelEntries = cancelledLedger.entries.filter(entry => entry.event === 'booking.cancel')
+    expect(cancelEntries).toHaveLength(1)
+    expect(thread.stream.filter(item => item.type === 'event' && item.id === cancelEntries[0]!.id)).toMatchObject([{ text: expect.stringMatching(/ canceled the booking$/) }])
     const scheduleAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: scheduleParams })
     expect(scheduleAfter.status(), await scheduleAfter.text()).toBe(200)
     expect((await scheduleAfter.json() as TodayFeedPayload).cards.some(card => card.id === `booking:${body.booking_id}`)).toBe(false)

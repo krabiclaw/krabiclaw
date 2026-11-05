@@ -8,6 +8,8 @@
   "email.reason.reply": "Bạn nhận được email này vì {organization} đã trả lời cuộc trò chuyện của bạn.",
   "email.reason.booking_update": "Bạn nhận được email này vì có thông tin cập nhật về yêu cầu của bạn với {organization}.",
   "email.reason.booking_change": "Bạn nhận được email này vì {organization} đã đề xuất thay đổi yêu cầu của bạn.",
+  "email.subject.reservation_confirmed": "Đã xác nhận đặt chỗ tại {place}",
+  "email.subject.message_from": "Tin nhắn từ {name}",
   "site.product_detail.description": "Mô tả",
   "booking.request_declined": "Yêu cầu đặt chỗ đã bị từ chối",
   "booking.change_review": "Xem thay đổi",
