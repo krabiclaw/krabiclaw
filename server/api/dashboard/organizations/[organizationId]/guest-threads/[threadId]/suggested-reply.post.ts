@@ -11,5 +11,5 @@ export default defineHandler(async (event) => {
   const organizationId = messageText(getRouterParam(event, 'organizationId'), 'organizationId', 200)
   const threadId = messageText(getRouterParam(event, 'threadId'), 'threadId', 200)
   const { db, env, organization } = await requireOrganizationMembership(event, organizationId)
-  return jsonResponse({ suggestions: await suggestGuestReplies(db, env as unknown as Record<string, unknown>, memberAccessPrincipal(organization.membership, { env, event }), threadId) })
+  return jsonResponse(await suggestGuestReplies(db, env as unknown as Record<string, unknown>, memberAccessPrincipal(organization.membership, { env, event }), threadId))
 })

@@ -2,6 +2,7 @@ import { getGuestRequest } from '~/server/domain/requests'
 import { defineHandler, HTTPError } from 'nitro'
 import { getRouterParam, readBody } from 'nitro/h3'
 import { queryFirst } from '~/server/db'
+import { parseSuggestionUse, recordSuggestionAccepted, suggestedDraft } from '~/server/domain/suggested-reply'
 
 // Canonical guest-thread operation endpoint (issue #442 Locked Decision #8). Every
 // state-mutating guest-thread action — confirm/cancel/complete/resolve/reopen/reply —
@@ -61,6 +62,10 @@ export default defineHandler(async (event) => {
     retried = { body: entry.body, idempotencyKey: entry.dedupe_key.slice(prefix.length) }
   }
 
+  // A reply that started from a suggested draft says which; it is checked before anything is sent and metered once it is.
+  const suggestionUse = action === 'reply' ? parseSuggestionUse(form ? form.get('suggestion') : body && typeof body === 'object' ? Reflect.get(body, 'suggestion') : undefined) : null
+  const draft = suggestionUse ? await suggestedDraft(db, { organizationId, threadId: thread.id, suggestion: suggestionUse }) : null
+
   const outcome = await executeGuestThreadOperation(db, {
     threadId,
     organizationId,
@@ -76,6 +81,8 @@ export default defineHandler(async (event) => {
     idempotencyKey: retried ? retried.idempotencyKey : idempotencyKey,
     env,
   })
+
+  if (outcome.ok && draft) await recordSuggestionAccepted(db, { organizationId, threadId: thread.id, userId: session.user.id, body: field('body') ?? '', draft })
 
   if (outcome.ok || outcome.reason === 'delivery_failed') {
     const changedThread = outcome.ok ? outcome.thread : thread

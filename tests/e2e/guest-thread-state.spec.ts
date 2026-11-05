@@ -558,7 +558,7 @@ test('suggested replies fill the composer, hide while typing or after ×, and co
   // The drafts come from Workers AI, which the E2E server has no binding for; the
   // composer's behaviour around them is what this covers, so their words are fixed here.
   const drafts = ['Thanks for writing, we will check and get back to you.', 'Happy to help with that.']
-  await page.route(`**/guest-threads/${threadId}/suggested-reply`, route => route.fulfill({ json: { suggestions: drafts } }))
+  await page.route(`**/guest-threads/${threadId}/suggested-reply`, route => route.fulfill({ json: { generationId: 'e2e-generation', suggestions: drafts } }))
   await dismissPreviewToolbar(page)
   await page.goto(`${baseURL}/dashboard/${organizationSlug()}/messages/${threadId}`)
 

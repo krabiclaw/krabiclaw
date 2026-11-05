@@ -106,7 +106,7 @@
             </button>
           </div>
           <div class="flex flex-col gap-2">
-            <button v-for="option in shownSuggestions" :key="option" type="button" class="flex min-h-12 items-center gap-3 rounded-2xl bg-elevated px-4 py-3 text-left text-base text-highlighted transition hover:bg-accented" @click="draft = option">
+            <button v-for="(option, index) in shownSuggestions" :key="option" type="button" class="flex min-h-12 items-center gap-3 rounded-2xl bg-elevated px-4 py-3 text-left text-base text-highlighted transition hover:bg-accented" @click="useSuggestion(option, index)">
               <span class="flex-1">{{ option }}</span>
               <UIcon name="i-lucide-arrow-up-right" class="size-4 shrink-0 text-muted" />
             </button>
@@ -231,6 +231,9 @@ const viewer = ref<MessagePhotoViewerState | null>(null)
 */
 const suggestionsOn = useSuggestedReplies(() => dashboard.organizationId.value)
 const suggestions = ref<string[]>([])
+const generationId = ref<string | null>(null)
+// The draft the field was filled from, sent with the reply so the server meters it; edits keep it.
+const usedSuggestion = ref<{ generationId: string; index: number } | null>(null)
 const suggestionError = ref<string | null>(null)
 const suggestionAttempt = ref(0)
 const dismissedFor = ref<string | null>(null)
@@ -244,13 +247,20 @@ const suggestionsVisible = computed(() => recalledFor.value === latestGuestMessa
 const shownSuggestions = computed(() => suggestionsVisible.value ? suggestions.value : [])
 const suggestionsHidden = computed(() => suggestions.value.length > 0 && !suggestionsVisible.value)
 function recallSuggestions() { recalledFor.value = latestGuestMessage.value }
+function useSuggestion(option: string, index: number) {
+  draft.value = option
+  usedSuggestion.value = generationId.value ? { generationId: generationId.value, index } : null
+}
+// Clearing the field lets go of the draft it came from.
+watch(draft, words => { if (!words.trim()) usedSuggestion.value = null })
 watch([latestGuestMessage, suggestionsOn, suggestionAttempt], async ([messageId, on]) => {
   suggestions.value = []
+  generationId.value = null
   suggestionError.value = null
   if (props.personalScope || !on || !messageId || !import.meta.client) return
   try {
     const result = await dashboardApi(`${threadPath.value}/suggested-reply`, { method: 'POST', validate: isSuggestedReplies })
-    if (latestGuestMessage.value === messageId) suggestions.value = result.suggestions
+    if (latestGuestMessage.value === messageId) { suggestions.value = result.suggestions; generationId.value = result.generationId }
   } catch (err) {
     suggestionError.value = `Replies could not be suggested: ${getErrorMessage(err, 'Suggested reply request failed')}`
   }
@@ -361,7 +371,7 @@ async function sendReply() {
   try {
     const res = await (props.personalScope ? applicationFetch : dashboardApi)<{ thread: ThreadDetail }>(`${threadPath.value}/${props.personalScope ? 'reply' : 'operations/reply'}`, {
       method: 'POST',
-      body: photos.length ? messageReplyForm(body, photos, current.key) : { body, idempotencyKey: current.key },
+      body: photos.length ? messageReplyForm(body, photos, current.key, props.personalScope ? null : usedSuggestion.value) : { body, idempotencyKey: current.key, ...(!props.personalScope && usedSuggestion.value ? { suggestion: usedSuggestion.value } : {}) },
       validate: isThreadDetailResponse,
     })
     const reply = res.thread.stream.findLast(item => item.type === 'message' && item.side === mineSide.value && !current.sentAfter.has(item.id))
@@ -370,6 +380,7 @@ async function sendReply() {
     if (requestingChange.value) changeRequestSent.value = true
     attempt.value = null
     draft.value = ''
+    usedSuggestion.value = null
     chosen.value = []
   } catch (err) {
     actionError.value = getErrorMessage(err, 'Failed to send reply')
