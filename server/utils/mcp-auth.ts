@@ -39,6 +39,7 @@ export interface McpUserContext {
   scopes: string[]
   oauthClientId?: string | null
   sessionId?: string | null
+  impersonatedBy?: string | null
   oauthClaims?: Pick<JWTPayload, 'jti' | 'iat' | 'exp'>
   // Only populated for session-based auth (ChowBot/dashboard) — bearer-token
   // auth (e.g. ChatGPT connector) has no browser session to read this from.
@@ -93,6 +94,7 @@ export async function requireMcpUser(
     isPlatformAdmin: await hasPlatformEventPermission(event, env, { platform: ['access'] }),
     scopes: options.requiredScopes ?? ['tenant'],
     sessionId: session.session.id,
+    impersonatedBy: session.session.impersonatedBy ?? null,
     activeOrganizationId: typeof sessionRecord.activeOrganizationId === 'string' ? sessionRecord.activeOrganizationId : undefined,
   }
   return user

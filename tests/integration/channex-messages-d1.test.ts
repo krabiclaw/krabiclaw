@@ -7,7 +7,7 @@ import { hashPassword } from 'better-auth/crypto'
 import sharp from 'sharp'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { applyChannelBooking, type ChannelBooking } from '../../server/domain/stays.ts'
+import { applyChannelBooking, createStay, type ChannelBooking } from '../../server/domain/stays.ts'
 import { backfillChannexMessages, mirrorChannexMessageEvent, mirrorChannexThread } from '../../server/domain/guest-threads/channel-messages.ts'
 import { executeGuestThreadOperation, sendScheduledGuestReply } from '../../server/domain/guest-threads/operations.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
@@ -91,6 +91,7 @@ class Provider {
         return this.refuseImageRead || !bytes ? new Response('Image unavailable', { status: 404 }) : new Response(bytes)
       }
     }
+    if (method === 'POST' && ['/api/v1/restrictions', '/api/v1/availability'].includes(url.pathname)) return json({ data: [{ id: crypto.randomUUID(), type: 'task' }], meta: { message: 'Success', warnings: [] } })
     if (method === 'GET' && url.pathname === '/api/v1/message_threads') return json({ data: this.empty ? [] : [this.thread()], meta: { total: this.empty ? 0 : 1 } })
     if (method === 'GET' && url.pathname === `/api/v1/message_threads/${this.threadId}`) return json({ data: this.thread() })
     // Bookings reach KrabiClaw as revisions only; a booking read by id is not answered.
@@ -335,11 +336,20 @@ test('the inbox exposes every page with a stable tie order and validates paginat
 })
 
 test('booking assignment before or after booking arrival adopts one request and preserves its immutable ledger and receipts', async () => {
-  for (const first of ['conversation', 'booking'] as const) {
+  for (const withImport of [false, true]) for (const first of ['conversation', 'booking'] as const) {
     const { runtime, db, env, productId } = await boot()
     const provider = new Provider(), realFetch = globalThis.fetch
     globalThis.fetch = provider.fetch as typeof fetch
     try {
+      const terms = booking()
+      const imported = withImport ? await createStay(db, env, { organizationId: ORG, actorId: OWNER, manage: true }, {
+        product_id: productId, idempotency_key: 'hostaway:imported-ota', guest_name: 'Actual', guest_surname: 'Guest', guest_email: 'actual@example.test',
+        check_in_date: terms.check_in_date, check_out_date: terms.check_out_date, adults: terms.adults, total_minor: terms.total_minor,
+      }, { imported: { source: 'hostaway', source_id: 'imported-ota', row: { id: 'imported-ota' }, fingerprint: 'imported-ota-fingerprint', channel: terms.channel, channel_booking_id: terms.channel_booking_id } }) : null
+      if (imported) {
+        assert.equal(imported.request_id, null, 'an imported OTA contact does not open a direct conversation')
+        assert.equal(await db.prepare('SELECT count(*) FROM requests').first('count(*)'), 0)
+      }
       provider.bookingId = 'booking'
       let stay = first === 'booking' ? await applyChannelBooking(db, env, ORG, productId, booking()) : null
       if (stay) assert.equal(stay.request_id, null)
@@ -349,6 +359,11 @@ test('booking assignment before or after booking arrival adopts one request and 
       const receipt = await createDeliveryReceipt(db, { entryId: historical.id, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'historical-delivery' })
       stay = await applyChannelBooking(db, env, ORG, productId, { ...booking(), revision_id: 'revision-2', provider_updated_at: '2026-10-16T01:00:00Z' })
       assert.equal(stay.request_id, requestId)
+      if (imported) {
+        assert.equal(stay.id, imported.id, 'the channel revision adopts the imported stay')
+        assert.deepEqual(await db.prepare('SELECT owner, request_id FROM stays WHERE id = ?').bind(imported.id).first(), { owner: 'channel', request_id: requestId })
+      }
+      assert.equal(await db.prepare('SELECT count(*) FROM stays').first('count(*)'), 1)
       assert.equal(await db.prepare('SELECT count(*) FROM requests').first('count(*)'), 1)
       assert.equal(await db.prepare('SELECT entry_id FROM guest_thread_deliveries WHERE id = ?').bind(receipt.id).first('entry_id'), historical.id)
       const detail = (await getGuestThreadDetail(db, requestId, ORG))!

@@ -18,8 +18,8 @@ export async function useGuestThread(threadId: Ref<string> | ComputedRef<string>
   const organizationId = computed(() => dashboard.organizationId.value)
   const key = computed(() => `${personalScope.value ? `account-guest-thread:${session.value.data?.user.id}` : `dashboard-guest-thread:${organizationId.value ?? 'pending-organization'}`}:${threadId.value}`)
 
-  const { data, pending, error, refresh } = await useAsyncData<{ thread: ThreadDetail }>(key, async () => {
-    if (personalScope.value) return await applicationFetch<{thread:ThreadDetail}>(`/api/account/messages/${encodeURIComponent(threadId.value)}`,{validate:isThreadDetailResponse})
+  const { data, pending, error, refresh, clear } = await useAsyncData<{ thread: ThreadDetail }>(key, async (_app, { signal }) => {
+    if (personalScope.value) return await applicationFetch<{thread:ThreadDetail}>(`/api/account/messages/${encodeURIComponent(threadId.value)}`,{signal,validate:isThreadDetailResponse})
     if (!dashboardScope.value) {
       throw createError({ statusCode: 400, statusMessage: 'Dashboard route scope is incomplete' })
     }
@@ -28,7 +28,7 @@ export async function useGuestThread(threadId: Ref<string> | ComputedRef<string>
     }
     return await dashboardApi<{ thread: ThreadDetail }>(
       `/api/dashboard/organizations/${organizationId.value}/guest-threads/${threadId.value}`,
-      { validate: isThreadDetailResponse },
+      { signal, validate: isThreadDetailResponse },
     )
   }, { server: !personalScope.value })
 
@@ -39,5 +39,5 @@ export async function useGuestThread(threadId: Ref<string> | ComputedRef<string>
 
   const thread = computed(() => data.value?.thread ?? null)
 
-  return { data, thread, pending, error, refresh, organizationId }
+  return { data, thread, pending, error, refresh, clear, organizationId }
 }

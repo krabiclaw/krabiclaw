@@ -1,4 +1,20 @@
 import { queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import type { H3Event } from 'nitro'
+import { getRequestDataMetrics } from '~/server/utils/request-metrics'
+
+/** Evidence from the authenticated request; never persist cookies or bearer tokens. */
+export function organizationEventContext(event: H3Event, source: 'dashboard' | 'mcp', userId: string, session?: { id: string; impersonatedBy?: string | null }) {
+  const metrics = getRequestDataMetrics(event)
+  const context = {
+    source, user_id: userId, request_id: metrics.requestId,
+    ray_id: event.req.headers.get('cf-ray'), method: event.req.method, path: event.url.pathname,
+    user_agent: event.req.headers.get('user-agent'),
+    session_id: session?.id ?? null, impersonated_by: session?.impersonatedBy ?? null,
+  }
+  // The same provenance remains on failed authenticated requests, which commit no audit row.
+  metrics.auditContext = context
+  return context
+}
 
 export type OrganizationEventType =
   | 'post.created' | 'post.published' | 'post.deleted' | 'post.channel_deleted' | 'post.publication_started' | 'article.created' | 'article.updated' | 'article.published'
@@ -9,7 +25,7 @@ export type OrganizationEventType =
   | 'review.received' | 'review.replied'
   | 'location.created' | 'location.updated'
   | 'experience.created'
-  | 'stay.created' | 'stay.updated' | 'stay.cancelled' | 'stay.payment_recorded' | 'stay.payment_deleted' | 'stay.nights_changed' | 'stay.nights_imported' | 'stay.calendar_linked' | 'stay.calendar_unlinked'
+  | 'stay.created' | 'stay.updated' | 'stay.cancelled' | 'stay.payment_recorded' | 'stay.payment_deleted' | 'stay.nights_changed' | 'stay.nights_imported' | 'stay.reservations_import_requested' | 'stay.migration_imported' | 'stay.migration_verified' | 'stay.calendar_linked' | 'stay.calendar_unlinked'
   | 'team.message_sent' | 'team.group_created' | 'team.group_updated'
   | 'message_template.created' | 'message_template.updated' | 'message_template.deleted' | 'scheduled_message.cancelled' | 'stay.instructions_updated'
   | 'domain.connected' | 'domain.verified' | 'domain.failed'
@@ -32,6 +48,9 @@ export interface OrganizationEvent {
   message?: string
   beforeState?: unknown
   afterState?: unknown
+  context?: ReturnType<typeof organizationEventContext> & { tool?: string; oauth_client_id?: string | null }
+  /** Read inside the write's transaction, before its mutation, for an atomic snapshot. */
+  beforeStateQuery?: BatchQuery
   /**
    * Record the event only when the statement just before it in the batch
    * changed exactly one row. A compare-and-set write that lost its guard
@@ -67,13 +86,15 @@ export function organizationEventQuery(event: OrganizationEvent): BatchQuery {
       INSERT INTO activity_entries
         (id, kind, scope_kind, organization_id, location_id, actor_kind, actor_user_id,
          event_name, body, payload_json, occurred_at, created_at, dedupe_key)
-      SELECT ?, 'audit', 'organization', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      SELECT ?, 'audit', 'organization', ?, ?, ?, ?, ?, ?, ${event.beforeStateQuery ? `json_set(?, '$.beforeState', json((${event.beforeStateQuery.query})))` : '?'}, ?, ?, ?
       ${event.onlyIfPreviousChangedOneRow ? 'WHERE changes() = 1' : ''}
     `,
     params: [id, organizationId, locationId ?? null,
       actorKind, actorId ?? null, eventType, message ?? null,
       JSON.stringify({ entityType: entityType ?? null, entityId: entityId ?? null, actorType: actorType ?? actorKind,
-        beforeState: beforeState ?? null, afterState: afterState ?? null, metadata: metadata ?? null }),
+        beforeState: beforeState ?? null, afterState: afterState ?? null, metadata: metadata ?? null,
+        ...(event.context ? { context: event.context } : {}) }),
+      ...(event.beforeStateQuery?.params ?? []),
       now, now, event.dedupeKey ?? 'audit:' + id],
   }
 }

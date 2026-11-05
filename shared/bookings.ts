@@ -67,6 +67,11 @@ export function changeNightPrice(priceMinor: number, percent: number): number {
 }
 export const STAY_CHANNELS = ['airbnb', 'vrbo', 'booking_com', 'direct'] as const
 export type StayChannel = typeof STAY_CHANNELS[number]
+
+/** A migrated OTA reservation stays managed on its channel before its provider revision arrives. */
+export function isChannelManagedStay(stay: { owner: 'app' | 'channel'; channel: StayChannel }): boolean {
+  return stay.owner === 'channel' || stay.channel !== 'direct'
+}
 export const STAY_CHANNEL_LABELS: Record<StayChannel, string> = { airbnb: 'Airbnb', vrbo: 'Vrbo', booking_com: 'Booking.com', direct: 'Direct' }
 
 /**

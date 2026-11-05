@@ -20,7 +20,7 @@
     </template>
 
     <GuestThreadDetail :thread-id="threadId" />
-    <ConversationSheet v-model:open="sheetOpen" :thread-id="threadId" :reservation-to="reservationTo" @moved="moved" />
+    <ConversationSheet v-if="thread" v-model:open="sheetOpen" :thread-id="threadId" :reservation-to="reservationTo" @moved="moved" />
   </DashboardIndexPanel>
 </template>
 

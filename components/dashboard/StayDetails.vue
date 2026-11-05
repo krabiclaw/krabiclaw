@@ -115,7 +115,7 @@
           <dt class="text-base font-semibold text-highlighted">Total</dt>
           <dd class="text-right text-base font-semibold text-highlighted">{{ money(detail.total_minor) }}</dd>
         </div>
-        <div v-if="detail.owner === 'app'" class="flex items-start justify-between gap-4 border-t border-default pt-4">
+        <div v-if="!channelManaged" class="flex items-start justify-between gap-4 border-t border-default pt-4">
           <dt class="text-base text-muted">Paid</dt>
           <dd class="text-right text-base text-highlighted">{{ money(detail.paid_minor) }}</dd>
         </div>
@@ -123,7 +123,7 @@
       </UCard>
 
       <!-- The Stripe payment the guest made on the site: its record and refunds are the payment's own screens. -->
-      <UCard v-if="!personalScope && (detail.owner === 'app' || detail.online_payment)" variant="record">
+      <UCard v-if="!personalScope && (!channelManaged || detail.online_payment)" variant="record">
       <h2 class="text-base font-semibold text-highlighted">Payments</h2>
       <template v-if="detail.online_payment">
         <h3 class="mt-6 text-base font-semibold text-highlighted">Paid on your site</h3>
@@ -140,7 +140,7 @@
         </div>
       </template>
 
-      <template v-if="detail.owner === 'app'">
+      <template v-if="!channelManaged">
         <p class="text-sm text-muted" :class="detail.online_payment ? 'mt-6' : 'mt-1'">Money you received or refunded outside KrabiClaw. Recording it moves no money.</p>
         <ul v-if="detail.payments.length" class="mt-4 divide-y divide-default border-y border-default">
           <li v-for="payment in detail.payments" :key="payment.id" class="flex items-center gap-4 py-3">
@@ -190,8 +190,8 @@
           <dd class="text-right text-base text-highlighted">{{ STAY_CHANNEL_LABELS[detail.channel] }}</dd>
         </div>
       </dl>
-      <p v-if="!personalScope && detail.owner === 'channel'" class="mt-4 text-base text-muted">
-        {{ channelName }} collected payment for this stay. Change or cancel it on
+      <p v-if="!personalScope && channelManaged" class="mt-4 text-base text-muted">
+        Payments, changes and cancellations for this stay are managed on
         <ULink v-if="detail.channel_booking_url" :to="detail.channel_booking_url" target="_blank" rel="noopener noreferrer" class="text-highlighted underline">{{ channelName }}</ULink><template v-else>{{ channelName }}</template>.
       </p>
       <div v-if="embedded && (messagePath || callPhone)" class="mt-6 flex flex-wrap justify-center gap-3">
@@ -211,10 +211,10 @@
   </component>
   <DashboardListItemDialog v-model:open="manageOpen" :title="t('booking.manage')" :show-actions="false" :error="actionError">
     <div v-if="detail" class="divide-y divide-default">
-      <p v-if="detail.owner === 'channel'" class="py-4 text-base text-muted">{{ t('booking.channel_manage', { channel: channelName }) }}</p>
+      <p v-if="channelManaged" class="py-4 text-base text-muted">{{ t('booking.channel_manage', { channel: channelName }) }}</p>
       <NuxtLink v-if="canRequestChange && messagePath" :to="{ path: messagePath, query: { intent: 'booking-change' } }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>{{ t('booking.request_change') }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
       <NuxtLink v-if="messagePath" :to="messagePath" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>{{ t('stay.message_host') }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
-      <UButton v-if="personalScope && detail.owner === 'app' && cancellation" color="error" variant="ghost" block class="justify-start py-4" label="Cancel stay" :loading="busy === 'cancel'" @click="manageOpen = false; cancelAsGuest()" />
+      <UButton v-if="personalScope && !channelManaged && cancellation" color="error" variant="ghost" block class="justify-start py-4" label="Cancel stay" :loading="busy === 'cancel'" @click="manageOpen = false; cancelAsGuest()" />
     </div>
   </DashboardListItemDialog>
 </template>
@@ -229,7 +229,7 @@ import { STAY_CHECK_IN_METHODS } from '~/shared/stay-listing'
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import type { GuestStay, StayDetail, StayHome, StayTurnover } from '~/server/domain/stays'
-import { STAY_CHANNEL_LABELS, STAY_PAYMENT_METHOD_LABELS, type StayPaymentMethod } from '~/shared/bookings'
+import { isChannelManagedStay, STAY_CHANNEL_LABELS, STAY_PAYMENT_METHOD_LABELS, type StayPaymentMethod } from '~/shared/bookings'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
@@ -266,6 +266,7 @@ const { data, error, refresh } = await useAsyncData(`${props.personalScope ? 'ac
 const stay = computed(() => data.value?.stay ?? null)
 /** The whole stay: the guest's own, or a manager's. Null for a member's turnover. */
 const detail = computed(() => !data.value ? null : 'home' in data.value ? data.value.stay : data.value.manage ? data.value.stay : null)
+const channelManaged = computed(() => detail.value !== null && isChannelManagedStay(detail.value))
 const manage = computed(() => !props.personalScope && data.value !== null && 'manage' in data.value! && data.value.manage === true)
 const home = computed(() => data.value && 'home' in data.value ? data.value.home : null)
 const { data: hostHomeData, error: homeError, refresh: refreshHostHome } = await useAsyncData(
@@ -296,7 +297,7 @@ const messagePath = computed(() => detail.value?.request_id
 const callPhone = computed(() => !props.personalScope ? detail.value?.guest_phone ?? null : null)
 const guestAddress = computed(() => home.value?.location?.address ? formatPostalAddress(home.value.location.address) : '')
 const cancellation = computed(() => data.value && 'cancellation' in data.value ? data.value.cancellation : null)
-const canRequestChange = computed(() => props.personalScope && detail.value?.owner === 'app' && Boolean(messagePath.value) && ['pending', 'confirmed'].includes(detail.value.status)
+const canRequestChange = computed(() => props.personalScope && detail.value !== null && !isChannelManagedStay(detail.value) && Boolean(messagePath.value) && ['pending', 'confirmed'].includes(detail.value.status)
   && Boolean(recordHome.value) && localDateTimeToInstant(detail.value.check_out_date, recordHome.value!.check_out_time, detail.value.timezone, 'compatible').getTime() > Date.now())
 const policy = computed(() => detail.value?.cancellation_policy ? bookedPolicyTerms(detail.value.cancellation_policy) : null)
 const paymentPath = computed(() => detail.value?.online_payment ? `/dashboard/${route.params.orgSlug}/bookings/payment/${encodeURIComponent(detail.value.online_payment.payment_id)}` : '')
@@ -385,7 +386,7 @@ async function run(key: string, action: () => Promise<unknown>, failure: string)
 
 async function recordPayment() {
   const value = detail.value
-  if (!value || !isCurrencyCode(value.currency)) return
+  if (!value || isChannelManagedStay(value) || !isCurrencyCode(value.currency)) return
   const typed = draft.amount.trim()
   const negative = typed.startsWith('-')
   await run('record', async () => {
@@ -402,7 +403,7 @@ async function recordPayment() {
 
 async function deletePayment(paymentId: string) {
   const value = detail.value
-  if (!value) return
+  if (!value || isChannelManagedStay(value)) return
   await run(paymentId, () => dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/payments/${encodeURIComponent(paymentId)}`, { method: 'DELETE', validate: isStay }), 'The payment could not be deleted')
 }
 
@@ -438,7 +439,7 @@ async function markNoShow() {
 
 async function cancel() {
   const value = detail.value
-  if (!value) return
+  if (!value || isChannelManagedStay(value)) return
   const held = value.online_payment ? value.online_payment.captured_minor - value.online_payment.refunded_minor : 0
   const description = held > 0
     ? `Its nights become available again and ${guest.value.state === 'named' ? guest.value.name : 'the guest'} is refunded ${money(held)} in full. You approve the refund next.`
@@ -472,7 +473,7 @@ async function cancel() {
 async function cancelAsGuest() {
   const value = detail.value
   const quote = cancellation.value
-  if (!value || !quote || !value.request_id || !policy.value) return
+  if (!value || isChannelManagedStay(value) || !quote || !value.request_id || !policy.value) return
   const description = quote.refund_minor === quote.paid_minor ? `You get back the full ${money(quote.paid_minor)}.`
     : quote.refund_minor > 0 ? `Under the ${policy.value.label} policy you get back ${money(quote.refund_minor)} of the ${money(quote.paid_minor)} you paid.`
       : `Under the ${policy.value.label} policy none of the ${money(quote.paid_minor)} you paid comes back.`

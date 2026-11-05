@@ -258,7 +258,7 @@ export function requestInsertQueries(request: Omit<GuestRequest, 'archived_at' |
  * stays row as committed, never from the caller: a write that lost its version
  * race opens nothing with details that were not saved.
  *
- * A stay whose guest has a name and an email or a phone opens a thread once; a
+ * A direct stay whose guest has a name and an email or a phone opens a thread once; a
  * later write that brings one opens it then. The host who took the stay, or the
  * channel it came from, opens it. A thread already open takes the stay's current
  * guest and home location exactly for a host edit. A channel revision always
@@ -296,7 +296,7 @@ export function stayThreadQueries(input: { organizationId: string; stayId: strin
     query: `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, conversation_state, resolved_at, payload_json, created_at, updated_at)
       SELECT ?, 'stay', st.organization_id, c.location_id, st.user_id, NULL, ?, NULL,
         json_object('guest', json_object('name', ${name}, 'email', ${email}, 'phone', ${phone})), ?, ?
-      FROM ${stay} AND st.request_id IS NULL AND st.owner = 'app' AND (${email} IS NOT NULL OR ${phone} IS NOT NULL) AND ${name} <> ''`,
+      FROM ${stay} AND st.request_id IS NULL AND st.owner = 'app' AND st.channel = 'direct' AND (${email} IS NOT NULL OR ${phone} IS NOT NULL) AND ${name} <> ''`,
     params: [id, host ? 'waiting_on_guest' : 'needs_attention', input.now, input.now, input.stayId, input.organizationId],
   }, {
     query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, payload_json, dedupe_key, sequence, occurred_at, created_at)
