@@ -102,7 +102,7 @@ import { isThreadListResponse, type ThreadListItem, type ThreadListPage } from '
 import { useDashboardInvalidations } from '~/composables/useDashboardInvalidations'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import InboxAvatar from './InboxAvatar.vue'
-import { useInboxUnread } from './inbox-filters'
+import { useInboxUnread } from './inbox-unread'
 
 /*
   The thread list, and only the list. A thread opens as this level's detail

@@ -1,7 +1,7 @@
 import type { DbClient } from '~/server/db'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import { runWorkersAiText } from '~/server/utils/workers-ai'
-import { getGuestThreadDetail } from './guest-threads/detail'
+import { getInboxThread } from './guest-threads/inbox'
 import { guestThreadMessagingContext } from './guest-messaging'
 import { messagingError } from './guest-message-schedule'
 
@@ -20,14 +20,15 @@ Output only a JSON array of the reply strings, without commentary, markdown, or 
  */
 export async function suggestGuestReplies(db: DbClient, env: Record<string, unknown>, principal: MemberAccessPrincipal, threadId: string): Promise<string[]> {
   const context = await guestThreadMessagingContext(db, principal, threadId)
-  const thread = await getGuestThreadDetail(db, threadId, principal.organizationId)
+  // The conversation as it is shown: a contact form's words are the guest's opening message too.
+  const thread = await getInboxThread(db, threadId, principal.organizationId, { audience: 'member', userId: principal.userId, principal })
   if (!thread) messagingError(404, 'THREAD_NOT_FOUND', 'This conversation is not in the workspace', 'threadId')
-  const messages = thread.entries
-    .filter(entry => entry.kind === 'message' && entry.actorKind !== 'system' && entry.body?.trim())
+  if (thread.kind !== 'guest') messagingError(409, 'SUGGESTION_NEEDS_GUEST_MESSAGE', 'Airbnb Support cases have no suggested replies', 'threadId')
+  const messages = thread.stream
+    .flatMap(item => item.type === 'message' && item.body?.trim() ? [{ from: item.side, at: item.sentAt, text: item.body }] : [])
     .slice(-40)
-    .map(entry => ({ from: entry.actorKind === 'guest' ? 'guest' : 'business', at: entry.occurredAt, text: entry.body }))
   if (messages.at(-1)?.from !== 'guest') messagingError(409, 'SUGGESTION_NEEDS_GUEST_MESSAGE', 'A reply is suggested only when the guest wrote last', 'threadId')
-  const facts = JSON.stringify({ business: thread.organizationName, guest: thread.participantLabel, home: context.home, stay: context.stay, messages })
+  const facts = JSON.stringify({ guest: thread.guestName, home: context.home, stay: context.stay, messages })
   const draft = await runWorkersAiText(env, [
     { role: 'system', content: INSTRUCTIONS },
     { role: 'user', content: `Write the reply using this quoted context:\n${facts}` },

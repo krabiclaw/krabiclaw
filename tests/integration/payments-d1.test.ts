@@ -16,6 +16,7 @@ import { cancelBookingRequest, requestInsertQueries, threadPayloadForGuest } fro
 import { claimReservation, listReservationSlots, upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
+import { getInboxThread } from '../../server/domain/guest-threads/inbox.ts'
 import { listGuestThreads } from '../../server/domain/guest-threads/repository.ts'
 import { receiveGuestWebReply } from '../../server/domain/guest-threads/inbound-email.ts'
 import { acknowledgeBuyerThreadEntries } from '../../server/utils/notification-acknowledgement.ts'
@@ -658,19 +659,26 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   assert.equal(view.conversationState,null)
   assert.equal(view.manuallyArchived,false)
   assert.equal(view.archivedByUserId,null)
-  for(const secret of ['private-ip-hash','private-diagnostic','private-charge','private-dispute','Internal staff note','Merchant dispute diagnostic'])assert.equal(JSON.stringify(view).includes(secret),false)
+  const secrets=['private-ip-hash','private-diagnostic','private-charge','private-dispute','Internal staff note','Merchant dispute diagnostic']
+  for(const secret of secrets)assert.equal(JSON.stringify(view).includes(secret),false)
+  // The buyer's own conversation, as their inbox draws it, says only what the buyer may read.
+  const thread=await getInboxThread(db,'buyer-conversation',ORG,{audience:'buyer',userId:'verified'})
+  assert(thread)
+  assert.deepEqual(thread.stream.filter(item=>item.type!=='day').map(item=>item.type==='message'?[item.side,item.author,item.body]:item.type==='event'?['event',item.text]:[item.type]),
+   [['guest','You','My question'],['business','Payments','Public host reply'],['event','Payment received']])
+  assert.deepEqual([thread.pending,thread.composer],[[],{channel:'email',available:true}])
+  for(const secret of secrets)assert.equal(JSON.stringify(thread).includes(secret),false,secret)
   const inbox=await listGuestThreads(db,null,{userId:'verified',buyerAudience:true})
-  assert.equal(inbox[0]?.unreadCount,1)
-  assert.equal(inbox[0]?.unread,true)
-  assert.equal(inbox[0]?.preview?.text,'Public host reply')
+  // The newest message is the internal note; the buyer's row previews the newest message they can read, unread.
+  assert.deepEqual(inbox.map(row=>[row.id,row.preview,row.previewFrom,row.guestName,row.unread]),[['buyer-conversation','Public host reply','Payments','Payments',true]])
   assert.deepEqual(await listGuestThreads(db,null,{userId:'other',buyerAudience:true}),[])
   assert.equal(await acknowledgeBuyerThreadEntries(db,'other','buyer-conversation',[publicReply.id,capture.id]),0)
   assert.equal(await acknowledgeBuyerThreadEntries(db,'verified','buyer-conversation',[publicReply.id,capture.id,internal.id,dispute.id]),2)
   assert.deepEqual((await db.prepare("SELECT parent_id,actor_user_id FROM activity_entries WHERE kind='acknowledgement' AND request_id='buyer-conversation' ORDER BY parent_id").all()).results,[{parent_id:publicReply.id,actor_user_id:'verified'},{parent_id:capture.id,actor_user_id:'verified'}].sort((a,b)=>a.parent_id.localeCompare(b.parent_id)))
   assert.equal(await acknowledgeBuyerThreadEntries(db,'verified','buyer-conversation',[publicReply.id,capture.id]),0)
   const readInbox=await listGuestThreads(db,null,{userId:'verified',buyerAudience:true})
-  assert.equal(readInbox[0]?.unreadCount,0)
-  assert.equal(readInbox[0]?.unread,false)
+  assert.deepEqual(readInbox.map(row=>[row.id,row.unread]),[['buyer-conversation',false]])
+  assert.deepEqual(await listGuestThreads(db,null,{userId:'verified',buyerAudience:true,unreadOnly:true}),[])
   assert.deepEqual((await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'verified'}))?.entries,view.entries)
   assert.equal((await getGuestThreadDetail(db,'buyer-conversation',ORG))?.entries.some(entry=>entry.kind==='acknowledgement'),false)
   const input={threadId:'buyer-conversation',userId:'verified',body:'My web reply',photos:[],idempotencyKey:'buyer-reply-key'}

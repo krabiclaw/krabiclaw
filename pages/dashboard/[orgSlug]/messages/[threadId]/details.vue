@@ -20,7 +20,6 @@
 <script setup lang="ts">
 import BookingDetails from '~/components/dashboard/BookingDetails.vue'
 import StayDetails from '~/components/dashboard/StayDetails.vue'
-import { threadRecordTitle } from '~/lib/components/workspace/messages/guest-thread-client'
 
 definePageMeta({ layout: 'dashboard' })
 
@@ -36,10 +35,8 @@ if (thread.value && !thread.value.recordId) {
 // A stay is shown by its own record screen, keyed by the stay; a booking or reservation by its conversation.
 const stayId = computed(() => thread.value?.recordKind === 'stay' ? thread.value.recordId : null)
 const bookingType = computed(() => thread.value?.recordKind === 'booking' || thread.value?.recordKind === 'reservation' ? thread.value.recordKind : null)
-const bookingId = computed(() => thread.value?.id ?? null)
-const dashboard = useDashboardOrganization()
-const recordTitle = computed(() => thread.value?.recordKind === 'stay' ? 'Reservation'
-  : thread.value?.recordKind ? threadRecordTitle(thread.value.recordKind, dashboard.organization.value?.vertical ?? null) : 'Reservation')
+const bookingId = computed(() => bookingType.value ? thread.value!.recordId : null)
+const recordTitle = computed(() => thread.value?.recordTitle ?? 'Reservation')
 
 useSeoMeta({ title: 'Reservation | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

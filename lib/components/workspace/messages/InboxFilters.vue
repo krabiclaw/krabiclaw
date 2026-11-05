@@ -43,7 +43,7 @@
 
 <script setup lang="ts">
 import { normalizeVertical } from '~/utils/vertical-copy'
-import { useInboxUnread } from './inbox-filters'
+import { useInboxUnread } from './inbox-unread'
 
 const props = defineProps<{ team: boolean; canReadTeam: boolean; canReadGuests: boolean }>()
 const route = useRoute()

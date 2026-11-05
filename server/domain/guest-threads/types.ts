@@ -333,9 +333,11 @@ export interface InboxThread {
   when: string | null
   /** A message in the conversation was translated: the header says "Translation on". */
   translated: boolean
-  /** The stay, booking or reservation the conversation is about, for Show reservation. */
+  /** What Show reservation opens: a stay's id, or the conversation's own id for a booking or reservation (the id the reservation route takes). */
   recordId: string | null
   recordKind: 'stay' | 'booking' | 'reservation' | null
+  /** The record in the business's own word: "Reservation", "Consultation", "Experience". */
+  recordTitle: string | null
   /** In a guest's own inbox, where their booking is shown; null for the business. */
   activityPath: string | null
   stream: InboxStreamItem[]

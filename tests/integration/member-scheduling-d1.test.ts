@@ -9,7 +9,7 @@ import { claimSessionCapacity, CapacityUnavailableError } from '../../server/uti
 import { publicProductHosts } from '../../server/utils/public-provider.ts'
 import { requestInsertQueries, threadPayloadForGuest, getGuestRequest } from '../../server/domain/requests.ts'
 import { formatTimestamp } from '../../utils/timezone.ts'
-import { listGuestThreads, listOrganizationGuestThreads } from '../../server/domain/guest-threads/repository.ts'
+import { listOrganizationGuestThreads } from '../../server/domain/guest-threads/repository.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { memberAccessPrincipal, resolveOrganizationMembership } from '../../server/utils/member-access.ts'

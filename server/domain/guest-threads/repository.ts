@@ -229,6 +229,9 @@ function threadProductId(row: GuestThreadListRow): string | null {
   return row.record_product_id ?? row.channel_product_id
 }
 
+/** The inbox filters by what a person sees — kind, unread, search — not by the attention state Today and MCP read. */
+type InboxListOptions = Omit<ListGuestThreadsOptions, 'conversationState'> & { conversationState?: never }
+
 const BUYER_VISIBLE_MESSAGE_SQL = "((e.actor_kind='guest' AND e.channel IN ('web','email','whatsapp')) OR (e.actor_kind='member' AND e.event_name='thread.member_reply') OR (e.actor_kind='system' AND e.event_name='thread.scheduled_message'))"
 
 /** An Airbnb Support case, said to the database as `isSupportThread` says it: Airbnb's agents wrote and no guest did. */
@@ -248,7 +251,7 @@ const UNREAD_FOR_MEMBER_SQL = `EXISTS (
       )`
 
 /** The scope every inbox read shares: whose threads, which location, which mailbox, which kind, what was searched. */
-async function inboxWhere(organizationId: string | null, opts: ListGuestThreadsOptions, now: string) {
+async function inboxWhere(organizationId: string | null, opts: InboxListOptions, now: string) {
   if (!organizationId && !opts.buyerAudience) throw new Error('Thread list requires organization scope')
   if (opts.buyerAudience && !opts.userId) throw new Error('Buyer thread list requires authenticated identity')
   const params: Array<string | number> = opts.buyerAudience ? [opts.userId] : [organizationId!]
@@ -305,7 +308,7 @@ type InboxListRow = GuestThreadRow & {
 export async function listGuestThreads(
   db: DbClient,
   organizationId: string | null,
-  opts: ListGuestThreadsOptions,
+  opts: InboxListOptions,
   now = new Date(),
 ): Promise<InboxRow[]> {
   const scope = await inboxWhere(organizationId, opts, now.toISOString())
@@ -323,8 +326,8 @@ export async function listGuestThreads(
       (SELECT json_extract(e.payload_json, '$.check_in_date') FROM activity_entries e WHERE e.request_id = gt.id AND e.event_name = 'channel.inquiry_received' ORDER BY e.sequence DESC LIMIT 1) AS inquiry_check_in,
       (SELECT json_extract(e.payload_json, '$.check_out_date') FROM activity_entries e WHERE e.request_id = gt.id AND e.event_name = 'channel.inquiry_received' ORDER BY e.sequence DESC LIMIT 1) AS inquiry_check_out,
       (SELECT e.id FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message'${visible} ORDER BY e.sequence DESC LIMIT 1) AS latest_message_id,
-      COALESCE((SELECT substr(COALESCE(json_extract(e.payload_json, '$.provider_inserted_at'), e.occurred_at), 1, 19) FROM activity_entries e
-        WHERE e.request_id = gt.id AND e.kind = 'message'${visible} ORDER BY e.sequence DESC LIMIT 1), substr(gt.created_at, 1, 19)) AS latest_at
+      COALESCE((SELECT substr(COALESCE(json_extract(e.payload_json, '$.provider_inserted_at'), e.occurred_at), 1, 23) FROM activity_entries e
+        WHERE e.request_id = gt.id AND e.kind = 'message'${visible} ORDER BY e.sequence DESC LIMIT 1), substr(gt.created_at, 1, 23)) AS latest_at
     FROM requests gt${OPERATIONAL_RECORD_SQL}
     JOIN organization o ON o.id = gt.organization_id
     LEFT JOIN business_locations bl ON bl.id = gt.location_id
@@ -406,7 +409,7 @@ function previewFrom(message: LatestMessage, context: { guestName: string; viewe
  * All, Guests and Airbnb Support. Team conversations are counted by their own
  * inbox.
  */
-export async function countUnreadInboxThreads(db: DbClient, organizationId: string, opts: ListGuestThreadsOptions): Promise<Omit<InboxUnreadCounts, 'team'>> {
+export async function countUnreadInboxThreads(db: DbClient, organizationId: string, opts: InboxListOptions): Promise<Omit<InboxUnreadCounts, 'team'>> {
   const scope = await inboxWhere(organizationId, { ...opts, kind: null, q: null, mailbox: 'current' }, new Date().toISOString())
   const rows = await queryAll<{ support: number; count: number }>(db, `
     SELECT ${SUPPORT_THREAD_SQL} AS support, COUNT(*) AS count

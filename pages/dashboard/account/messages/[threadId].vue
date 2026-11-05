@@ -8,7 +8,6 @@
 
 <script setup lang="ts">
 import GuestThreadDetail from '~/lib/components/workspace/messages/GuestThreadDetail.vue'
-import { threadRecordTitle } from '~/lib/components/workspace/messages/guest-thread-client'
 definePageMeta({ layout: 'dashboard' })
 useSeoMeta({ title: 'Conversation | KrabiClaw', robots: 'noindex, nofollow' })
 const route = useRoute()
@@ -18,5 +17,5 @@ const threadId = computed(() => {
 })
 const { thread } = await useGuestThread(threadId, computed(() => true))
 const activityTo = computed(() => thread.value?.activityPath || null)
-const activityLabel = computed(() => thread.value?.recordKind ? `Show ${threadRecordTitle(thread.value.recordKind, null).toLowerCase()}` : '')
+const activityLabel = computed(() => thread.value?.recordTitle ? `Show ${thread.value.recordTitle.toLowerCase()}` : '')
 </script>

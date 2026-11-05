@@ -6,6 +6,7 @@ import { stayAccessFor } from '~/server/domain/stays'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import { getGuestThreadDetail } from './detail'
 import { formatFormAnswer } from '~/shared/form-questions'
+import { threadRecordTitle } from '~/lib/components/workspace/messages/guest-thread-client'
 import { calendarDate, clockTime, dayLabel, firstName, initial, localDateKey, providerInstant, sendTime, stayWhen } from './presentation'
 import { formatCalendarRange } from '~/utils/timezone'
 import type {
@@ -281,8 +282,9 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
     home: facts.home,
     when: facts.when,
     translated: items.some(item => item.type === 'message' && item.translated !== null),
-    recordId: record?.id ?? null,
+    recordId: record ? record.kind === 'stay' ? record.id : raw.id : null,
     recordKind: record?.kind ?? null,
+    recordTitle: record ? record.kind === 'stay' ? 'Reservation' : threadRecordTitle(record.kind, raw.organizationVertical) : null,
     activityPath: raw.activityPath,
     stream: items,
     pending: viewer.audience === 'member' ? await pendingMessages(db, raw.id, organizationId, viewer.principal, facts.timeZone, now.toISOString()) : [],

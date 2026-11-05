@@ -138,7 +138,8 @@ async function mirrorMessage(db: DbClient, env: ChannelEnv, mapping: ChannelThre
     if (error instanceof GuestThreadEntryDedupeConflictError) fail(409, 'CHANNEL_MESSAGE_ID_CONFLICT', 'The provider message ID differs from its immutable recorded fact; review the conversation', 'message.id')
     throw error
   })
-  await mirrorMessagePhotos(db, env, mapping.organization_id, entry.id, message.attachments)
+  // Our own reply's echo carries the photo the reply already holds; only someone else's photos are fetched.
+  if (!delivery) await mirrorMessagePhotos(db, env, mapping.organization_id, entry.id, message.attachments)
   await updateThreadProjectionIfLatestEntry(db, mapping.request_id, entry.id, { conversationState: message.sender === 'property' ? 'waiting_on_guest' : 'needs_attention' })
 }
 

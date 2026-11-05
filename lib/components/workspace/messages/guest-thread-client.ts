@@ -109,7 +109,7 @@ export function isThreadDetailResponse(value: unknown): value is { thread: Threa
     && isText(thread.id) && (thread.kind === 'guest' || thread.kind === 'support')
     && isText(thread.guestName) && isText(thread.avatarInitial) && (thread.channel === 'airbnb' || thread.channel === 'direct')
     && isNullableText(thread.home) && isNullableText(thread.when) && typeof thread.translated === 'boolean'
-    && isNullableText(thread.recordId) && (thread.recordKind === null || ['stay', 'booking', 'reservation'].includes(String(thread.recordKind)))
+    && isNullableText(thread.recordId) && isNullableText(thread.recordTitle) && (thread.recordKind === null || ['stay', 'booking', 'reservation'].includes(String(thread.recordKind)))
     && isNullableText(thread.activityPath)
     && Array.isArray(thread.stream) && thread.stream.every(isStreamItem)
     && Array.isArray(thread.pending) && thread.pending.every(item => isRecord(item) && isText(item.id) && (item.source === 'automatic' || item.source === 'later')

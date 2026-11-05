@@ -578,6 +578,8 @@ for (const viewport of [
     const openConversation = async (id: string, query = '') => {
       await page.locator(`[data-thread-row="${id}"]`).click()
       await expect(page).toHaveURL(new RegExp(`/messages/${id}${query.replace('?', '\\?')}$`))
+      // The URL changes before the new conversation replaces the old one; its header names which is open.
+      await expect(thread.locator(`[data-thread-id="${id}"]`)).toBeVisible()
       await expect(sheetButton).toBeVisible()
     }
 

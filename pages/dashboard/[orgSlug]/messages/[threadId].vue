@@ -7,7 +7,7 @@
   -->
   <DashboardIndexPanel id="organization-messages-thread" :title="thread?.guestName ?? 'Conversation'" fill>
     <template v-if="thread" #center>
-      <div class="flex min-w-0 items-center gap-4">
+      <div class="flex min-w-0 items-center gap-4" :data-thread-id="thread.id">
         <InboxAvatar :name="thread.guestName" :initial="thread.avatarInitial" :support="thread.kind === 'support'" />
         <div class="min-w-0">
           <p class="truncate text-2xl font-semibold text-highlighted">{{ thread.guestName }}</p>
