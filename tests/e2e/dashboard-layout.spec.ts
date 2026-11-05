@@ -1560,7 +1560,7 @@ test.describe('dashboard pane hierarchy', () => {
     await open(page, `${ORG}?locationId=${seededTenant('restaurant').locations.brooklyn.id}`)
     const panel = page.locator('#dashboard-panel-org-today')
     const body = panel.locator(':scope > [data-slot="body"]')
-    const cards = panel.getByTestId('today-card')
+    const cards = panel.getByTestId('today-list').getByTestId('today-card')
     await expect(cards.first()).toBeVisible()
     expect(await body.evaluate(element => element.scrollHeight > element.clientHeight), 'Today overflows the phone, so it has a scroll end to measure').toBe(true)
     await expect(page.getByTestId('dashboard-mobile-nav')).toBeVisible()
@@ -1578,7 +1578,7 @@ test.describe('dashboard pane hierarchy', () => {
     const last = cards.last()
     await expect(last).toContainText(feed.cards.at(-1)!.headline)
     const finalBody = (await body.boundingBox())!
-    // Optional suggestions and the owner's priority form follow operational work.
+    // The owner's priority control follows the list.
     const priorityForm = panel.getByTestId('today-priorities').locator('form')
     await expect(priorityForm).toBeInViewport({ ratio: 1 })
     const finalItem = (await priorityForm.boundingBox())!

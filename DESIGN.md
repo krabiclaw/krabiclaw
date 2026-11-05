@@ -157,12 +157,13 @@ the existing `TodayAgendaCard` presentation: one small time or status line,
 headline, location or context, image and badge, with the entire card a link.
 An undated task states its status rather than inventing an appointment time.
 
-Today groups work that needs attention, activity happening today, currently
-hosted stays as compact expandable context, and optional work, in that order.
-Priorities and their suggestions sit below the operational day. Completed work
-leaves the shared action feed and consumes none of its display or pagination budget. The
-attention count includes only outstanding work; hosting does not increase it.
-Work is due when a recorded fact makes it so: a
+Today and Upcoming each render one list in the canonical server order, without
+category headings, separate groups or hosting accordions. Today puts due work
+and dated activity first, then optional work, then ongoing hosting context so
+it cannot displace an action from the first page. Item status and time stay on
+the item. Priority controls sit below the list without a category wrapper.
+Completed work leaves the shared action feed and consumes none of its display
+or pagination budget. Work is due when a recorded fact makes it so: a
 booking awaiting the owner's decision, an unanswered guest message about a live
 (pending or confirmed, not yet ended) commitment, an unanswered message or
 contact form from the last seven days, a failed or uncertain scheduled send,

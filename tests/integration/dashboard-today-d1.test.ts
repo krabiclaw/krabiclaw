@@ -150,9 +150,13 @@ test('Today and Upcoming select work from obligations, the owner’s priority an
 
     // A priority makes the work it names worth doing, and says why.
     const { goal: kayakGoal } = await call<{ goal: { id: string; revision: string } }>('POST', `/api/organizations/${ORG}/goals`, { idempotencyKey: 'kayak-goal', intent: 'Fill the remaining places on Saturday’s kayak trip' }, 201)
+    const currentStay = await createStay(db, env, manager, { product_id: homeId, idempotency_key: 'current-stay',
+      check_in_date: localDateAt(new Date(now - DAY), ZONE), check_out_date: localDateAt(new Date(now + DAY), ZONE), adults: 1, guest_name: 'Mara', total_minor: 15_000 })
     feed = await today()
     assert.deepEqual(feed.priorities?.map(priority => priority.id), [kayakGoal.id])
     assert.deepEqual(feed.cards.filter(card => card.priority === 'opportunity').map(card => card.id).sort(), [`draft:${kayak.id}`, 'reply:old-inquiry'].sort())
+    assert.ok(ids(feed).indexOf(`stay:${currentStay.id}:current`) > ids(feed).indexOf(`draft:${kayak.id}`), 'ongoing hosting context cannot displace an actionable item in the flat list')
+    assert.ok(ids(feed).indexOf(`stay:${currentStay.id}:current`) > ids(feed).indexOf('reply:old-inquiry'))
     assert.match(find(feed, 'reply:old-inquiry')!.reason!, /Olive has had no reply since .*It supports your priority “Fill the remaining places on Saturday’s kayak trip”\./)
     assert.deepEqual(find(feed, `draft:${kayak.id}`)!.decision, { operation: 'article.publish', subjectId: kayak.id, evidenceRevision: find(feed, `draft:${kayak.id}`)!.decision!.evidenceRevision,
       goalId: kayakGoal.id, goalRevision: kayakGoal.revision, revision: null, current: null })

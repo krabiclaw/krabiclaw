@@ -425,7 +425,8 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
   const chosen = optional.sort(byRank).slice(0, OPTIONAL_LIMIT).map(item => item.card)
   const deliveryFailureIds = new Set(deliveryFailures.map(item => item.id))
   const cards = [...due.filter(item => !deliveryFailureIds.has(item.id)), ...deliveryFailures, ...failures, ...messages, ...reviews.filter(item => !deliveryFailureIds.has(item.id)), ...scheduleCards.filter(item => !handledRequests.has(item.id.slice(item.id.indexOf(':') + 1))), ...planned.sort((a, b) => a.actionAt!.localeCompare(b.actionAt!)), ...chosen]
-  const rank = (item: TodayCard) => item.priority === 'attention' ? 0 : item.priority === 'opportunity' ? 2 : 1
+  const rank = (item: TodayCard) => item.priority === 'attention' ? 0 : item.priority === 'opportunity' ? 2
+    : item.bookingKind === 'stay' && item.occurrenceAt === null && item.actionAt === null ? 3 : 1
   cards.sort((a, b) => rank(a) - rank(b))
   return todayFeedSchema.parse({ cards, availableKinds, locations, resolvedAt, priorities })
 }

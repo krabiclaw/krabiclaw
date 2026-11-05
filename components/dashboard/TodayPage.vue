@@ -34,80 +34,29 @@
 
       <UAlert v-if="decisionError" class="mb-6" color="error" variant="soft" title="Your choice was not saved" :description="getErrorMessage(decisionError, 'The request failed')" />
 
-      <h2 v-if="(personalScope && visibleItems.length) || activeRange === 'upcoming'" class="text-base font-semibold text-highlighted">
-        {{ heading }}
-      </h2>
+      <ul v-if="visibleItems.length && !activeError" class="space-y-4" role="list" data-testid="today-list">
+        <li v-for="item in visibleItems" :key="item.id">
+          <TodayAgendaCard :item="item" :surface="activeRange" :on-decide="decide" />
+        </li>
+      </ul>
 
-      <div v-if="(personalScope || activeRange === 'upcoming') && visibleItems.length" class="mt-6 space-y-4">
-        <TodayAgendaCard
-          v-for="item in visibleItems"
-          :key="item.id"
-          :item="item"
-          :surface="activeRange"
-          :on-decide="decide"
-        />
+      <p v-if="!visibleItems.length && !activeLoading && !activeError && !hasMore" class="text-sm text-muted">{{ emptyTitle }}</p>
+
+      <div v-if="!personalScope && activeRange === 'today' && !activeError && priorities" class="mt-8" role="group" aria-label="Your priority" data-testid="today-priorities">
+        <ul v-if="priorities.length" class="mb-4 space-y-2">
+          <li v-for="goal in priorities" :key="goal.id" class="flex items-start justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2" data-testid="today-priority">
+            <span class="min-w-0 text-sm text-highlighted">{{ goal.intent }}</span>
+            <UButton size="xs" color="neutral" variant="ghost" icon="i-lucide-x" :aria-label="`Remove priority: ${goal.intent}`" :loading="priorityBusy === goal.id" :disabled="priorityBusy !== null" @click="removePriority(goal)" />
+          </li>
+        </ul>
+        <form class="flex gap-2" @submit.prevent="addPriority">
+          <UInput v-model="priorityDraft" class="flex-1" :maxlength="2000" required placeholder="What should the business focus on now?" aria-label="New priority" />
+          <UButton type="submit" color="neutral" variant="soft" label="Add" :loading="priorityBusy === 'new'" :disabled="priorityBusy !== null || !priorityDraft.trim()" />
+        </form>
       </div>
-
-      <div v-else-if="!personalScope && activeRange === 'today' && !activeError" class="space-y-8">
-        <section aria-labelledby="today-attention-heading" data-testid="today-attention">
-          <h2 id="today-attention-heading" class="text-base font-semibold text-highlighted">Needs your attention<span v-if="attentionCount"> · {{ attentionCount }}</span></h2>
-          <div v-if="attentionItems.length" class="mt-4 space-y-4">
-            <TodayAgendaCard v-for="item in attentionItems" :key="item.id" :item="item" :surface="activeRange" :on-decide="decide" />
-          </div>
-          <p v-else-if="!activeLoading && !attentionCount" class="mt-2 text-sm text-muted">Nothing needs your attention today</p>
-        </section>
-
-        <section v-if="scheduledItems.length" aria-labelledby="today-schedule-heading" data-testid="today-schedule">
-          <h2 id="today-schedule-heading" class="text-base font-semibold text-highlighted">Happening today</h2>
-          <div class="mt-4 space-y-4">
-            <TodayAgendaCard v-for="item in scheduledItems" :key="item.id" :item="item" :surface="activeRange" :on-decide="decide" />
-          </div>
-        </section>
-
-        <details v-if="hostingItems.length" class="rounded-xl border border-default p-4" data-testid="today-hosting">
-          <summary class="cursor-pointer text-base font-semibold text-highlighted">Currently hosting · {{ hostingItems.length }} {{ hostingItems.length === 1 ? 'stay' : 'stays' }}</summary>
-          <div class="mt-4 grid gap-3 sm:grid-cols-2">
-            <TodayAgendaCard v-for="item in hostingItems" :key="item.id" :item="item" :surface="activeRange" compact />
-          </div>
-        </details>
-      </div>
-
-      <div v-if="!visibleItems.length && !hostingItems.length && !activeLoading && !activeError && !hasMore && (personalScope || activeRange === 'upcoming')" class="py-24 text-center">
-        <img
-          src="https://imagedelivery.net/Frxyb2_d_vGyiaXhS5xqCg/0b7e08d0-6b7d-471b-2957-9845392cc200/w=224"
-          alt=""
-          aria-hidden="true"
-          width="112"
-          height="112"
-          class="mx-auto size-28 object-contain"
-        >
-        <p class="mt-6 text-base font-semibold text-highlighted">{{ emptyTitle }}</p>
-        <p class="mt-1 text-sm text-muted">{{ emptyDescription }}</p>
-      </div>
-
-      <section v-if="!personalScope && activeRange === 'today' && !activeError && (optionalItems.length || priorities)" class="mt-10 border-t border-default pt-8" aria-labelledby="today-optional-heading" data-testid="today-optional">
-        <h2 id="today-optional-heading" class="text-base font-semibold text-highlighted">Optional work</h2>
-        <div v-if="optionalItems.length" class="mt-4 space-y-4">
-          <TodayAgendaCard v-for="item in optionalItems" :key="item.id" :item="item" :surface="activeRange" :on-decide="decide" />
-        </div>
-        <div v-if="priorities" class="mt-6" aria-labelledby="today-priorities-heading" data-testid="today-priorities">
-          <h3 id="today-priorities-heading" class="text-sm font-semibold text-highlighted">Your priority</h3>
-          <p class="mt-1 text-sm text-muted">Choose a focus for optional suggestions.</p>
-          <ul v-if="priorities.length" class="mt-4 space-y-2">
-            <li v-for="goal in priorities" :key="goal.id" class="flex items-start justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2" data-testid="today-priority">
-              <span class="min-w-0 text-sm text-highlighted">{{ goal.intent }}</span>
-              <UButton size="xs" color="neutral" variant="ghost" icon="i-lucide-x" :aria-label="`Remove priority: ${goal.intent}`" :loading="priorityBusy === goal.id" :disabled="priorityBusy !== null" @click="removePriority(goal)" />
-            </li>
-          </ul>
-          <form class="mt-4 flex gap-2" @submit.prevent="addPriority">
-            <UInput v-model="priorityDraft" class="flex-1" :maxlength="2000" required placeholder="What should the business focus on now?" aria-label="New priority" />
-            <UButton type="submit" color="neutral" variant="soft" label="Add" :loading="priorityBusy === 'new'" :disabled="priorityBusy !== null || !priorityDraft.trim()" />
-          </form>
-        </div>
-      </section>
 
       <div
-        v-if="hasMore"
+        v-if="(hasMore || activeLoading) && !activeError"
         :key="`${activeRange}-${filterSignature}`"
         ref="loadMoreSentinel"
         class="flex min-h-24 items-center justify-center"
@@ -125,7 +74,6 @@
 import { localDateAt } from '~/utils/timezone'
 import AgendaFilters from './AgendaFilters.vue'
 import TodayAgendaCard from './TodayAgendaCard.vue'
-import { bookingCountLabel, resolveAggregateBookingPresentation } from '~/utils/booking-presentation'
 import { getErrorMessage } from '~/utils/errors'
 import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayDecisionInput, type TodayFeedPayload, type TodayPriority } from '~/shared/dashboard-today'
 import type { AgendaItem, AgendaPayload } from '~/server/utils/dashboard-agenda'
@@ -200,35 +148,16 @@ const priorities = computed(() => props.personalScope ? null : todayData.value?.
 const priorityDraft = ref('')
 const priorityBusy = ref<string | null>(null)
 const decisionError = ref<unknown>(null)
-const allRangeItems = computed(() => activeRange.value === 'today' ? todayCards.value : upcomingItems.value)
-// Only a current stay has no occurrence/action instant in the canonical agenda.
-const isHosting = (card: TodayCard) => card.priority === 'schedule' && card.bookingKind === 'stay' && card.occurrenceAt === null && card.actionAt === null
-const dayItems = computed(() => todayCards.value.filter(card => props.personalScope || !isHosting(card)))
-const visibleItems = computed(() => (activeRange.value === 'today' ? dayItems.value.slice(0, todayVisibleCount.value) : upcomingItems.value).map(cardWithContext))
-const hostingItems = computed(() => props.personalScope || activeRange.value !== 'today' ? [] : todayCards.value.filter(isHosting).map(cardWithContext))
-const attentionItems = computed(() => visibleItems.value.filter(card => card.priority === 'attention'))
-const scheduledItems = computed(() => visibleItems.value.filter(card => card.priority === 'schedule'))
-const optionalItems = computed(() => visibleItems.value.filter(card => card.priority === 'opportunity'))
+const visibleItems = computed(() => (activeRange.value === 'today' ? todayCards.value.slice(0, todayVisibleCount.value) : upcomingItems.value).map(cardWithContext))
 const hasMore = computed(() => activeRange.value === 'today'
-  ? todayVisibleCount.value < dayItems.value.length
+  ? todayVisibleCount.value < todayCards.value.length
   : upcomingCursor.value !== null && upcomingHorizon.value !== null && upcomingCursor.value <= upcomingHorizon.value)
 const activeLoading = computed(() => activeRange.value === 'today' ? pending.value : upcomingLoading.value)
 const activeError = computed(() => navigationError.value ?? todayError.value ?? (activeRange.value === 'upcoming' ? upcomingError.value : null))
 const activeLabel = computed(() => activeRange.value === 'today' ? 'Today' : 'Upcoming')
-const attentionCount = computed(() => todayCards.value.filter(card => card.priority === 'attention').length)
-const personalPresentation = resolveAggregateBookingPresentation([])
-const heading = computed(() => {
-  if (props.personalScope) return `You have ${bookingCountLabel(personalPresentation, new Set(allRangeItems.value.map(item => item.stayId ?? item.id)).size)}`
-  if (activeRange.value === 'upcoming') return 'Your upcoming schedule'
-  return attentionCount.value ? `You have ${attentionCount.value} ${attentionCount.value === 1 ? 'thing' : 'things'} to do` : 'Your day at a glance'
-})
-const emptyTitle = computed(() => activeRange.value === 'today'
-  ? props.personalScope ? 'No bookings today' : 'Nothing needs your attention today'
+const emptyTitle = computed(() => hasActiveFilters.value && !props.personalScope ? 'No items match these filters.' : activeRange.value === 'today'
+  ? props.personalScope ? 'No bookings today' : 'Nothing for today'
   : props.personalScope ? 'No upcoming bookings' : 'Nothing upcoming')
-const emptyDescription = computed(() => hasActiveFilters.value && !props.personalScope
-  ? 'Try adjusting the filters.'
-  : props.personalScope ? 'Your booked activity will appear here.'
-    : activeRange.value === 'today' ? 'Your scheduled activity and outstanding work will appear here.' : 'Future scheduled activity will appear here.')
 
 function resetUpcoming() {
   upcomingEpoch += 1

@@ -206,7 +206,12 @@ test('an assigned staff member can review a future online consultation from Toda
     await memberPage.setViewportSize({ width: 1440, height: 900 })
     await expect(todayPanel).toBeVisible()
     await expect(attention).toHaveCount(0)
-    await expect(todayPanel.getByRole('heading', { name: 'Needs your attention', exact: true })).toBeVisible()
+    if (completed.cards.length) {
+      const first = completed.cards[0]!
+      await expect(todayPanel.getByTestId('today-list').locator(`[data-card-id="${first.id}"]`)).toHaveAttribute('href', first.to)
+    } else {
+      await expect(todayPanel.getByText('Nothing for today', { exact: true })).toBeVisible()
+    }
     await memberPage.clock.setFixedTime(new Date(`${day}T13:00:00.000Z`))
     await memberPage.reload()
     await expect(detail.getByRole('heading', { name: 'Today', exact: true })).toBeVisible()
