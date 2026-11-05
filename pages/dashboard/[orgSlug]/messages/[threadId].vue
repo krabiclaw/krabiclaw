@@ -49,7 +49,9 @@ const reservationTo = computed(() => {
 
 // A conversation archived or blocked leaves this list; the list opens the next one.
 async function moved(transition: string) {
-  refreshNuxtData()
+  // The list is read again first: going back to a list that still holds this
+  // conversation would open it again as the list's newest.
+  await refreshNuxtData()
   if (transition === 'archive' || transition === 'block') await router.push({ path: `/dashboard/${String(route.params.orgSlug)}/messages`, query: route.query })
   else await refresh()
 }
