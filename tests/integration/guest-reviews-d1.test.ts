@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import test, { mock } from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { H3 } from 'nitro/h3'
 import { Miniflare } from 'miniflare'
@@ -8,6 +8,7 @@ import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { getGuestRequest, requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { getReviewBookingContext, getReviewRequestByToken } from '../../server/utils/review-requests.ts'
+import { sendReviewRequestForBooking } from '../../server/utils/review-request-delivery.ts'
 import { loadReviewFeedback } from '../../server/utils/review-feedback.ts'
 import { listOrganizationReviews, setReviewStatus } from '../../server/utils/organization-reviews.ts'
 import reviewTask from '../../server/tasks/review-request-automation.ts'
@@ -20,10 +21,23 @@ import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
 const HOUR = 3_600_000
 const at = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString()
 
-test('guest reviews: invitations for every kind of visit, no-show, consent and who reads private feedback', { timeout: 180_000 }, async () => {
+test('guest reviews: invitations for every kind of visit, no-show, consent and who reads private feedback', { timeout: 240_000 }, async () => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'guest-reviews-proof', compatibilityDate: '2024-11-01',
-    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: `export class Hub {
+      constructor(ctx) { this.storage = ctx.storage }
+      async fetch(request) {
+        const path = new URL(request.url).pathname
+        if (path === '/fail-next-delivery') { await this.storage.put('fail', true); return new Response(null, { status: 204 }) }
+        if (path === '/delivery-publications') return Response.json(await this.storage.get('publications') ?? 0)
+        const event = await request.json()
+        if (event.type === 'delivery.changed') {
+          if (await this.storage.get('fail')) { await this.storage.delete('fail'); return new Response('controlled publication failure', { status: 503 }) }
+          await this.storage.put('publications', (await this.storage.get('publications') ?? 0) + 1)
+        }
+        return new Response(null, { status: 204 })
+      }
+    } export default { fetch() { return new Response("ok") } }` } } },
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
     env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'guest-reviews-proof', exportName: 'Hub' } },
   } }] })
@@ -143,6 +157,91 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
       const row = await db.prepare(`SELECT d.email_json FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id WHERE e.request_id = ? AND e.event_name = 'review.requested'`).bind(T[key]).first<{ email_json: string }>()
       return tokenOf((JSON.parse(row!.email_json) as { message: { html: string } }).message.html)
     }
+
+    // Provider acceptance is not completion: metadata failure must resume the
+    // same invitation and leave the emailed link usable.
+    await reservation('retry-metadata', 'g-dinner', 'room', at(-25 * HOUR))
+    await db.prepare("UPDATE requests SET payload_json = json_set(payload_json, '$.guest.email', 'guest@provider-proof.com') WHERE id = ?").bind(T['retry-metadata']).run()
+    const accepted: Array<{ key: string | null; body: { to: string[]; subject: string; html: string } }> = []
+    let failReadback = true
+    let rejectSend = false
+    let sendAttempts = 0
+    const transport = mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+      if (init.method === 'GET') {
+        if (failReadback) return Response.json({ name: 'application_error', message: 'controlled metadata failure' }, { status: 503 })
+        const sent = accepted.find(item => url.endsWith(`/${item.key}`))!
+        assert(sent)
+        return Response.json({ id: sent.key, message_id: `<${sent.key}@provider-proof.com>`, to: sent.body.to, subject: sent.body.subject })
+      }
+      assert.equal(url, 'https://api.resend.com/emails')
+      sendAttempts += 1
+      if (rejectSend) return Response.json({ name: 'application_error', message: 'controlled unsent failure' }, { status: 503 })
+      const key = new Headers(init.headers).get('idempotency-key')
+      const body = JSON.parse(String(init.body))
+      const prior = accepted.find(item => item.key === key)
+      if (prior) assert.deepEqual(body, prior.body, 'provider idempotency requires the exact frozen payload')
+      else accepted.push({ key, body })
+      return Response.json({ id: key })
+    })
+    try {
+      const providerEnv = { ...env, EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'Proof <hello@krabiclaw.com>' }
+      const send = () => sendReviewRequestForBooking(providerEnv, db, 'reservation', T['retry-metadata']!)
+      const failed = await send()
+      assert.equal(failed.sent, false)
+      assert.match(failed.error!, /controlled metadata failure/)
+      assert.equal(accepted.length, 1)
+      const emailedToken = tokenOf(accepted[0]!.body.html)
+      // A pre-migration row recovers only the exact token that was emailed.
+      // Once acceptance is persisted, recovery also works past provider key expiry.
+      await db.prepare("UPDATE guest_thread_deliveries SET email_json = json_set(email_json, '$.preparedAt', ?) WHERE entry_id IN (SELECT id FROM activity_entries WHERE request_id = ?)").bind(at(-25 * HOUR), T['retry-metadata']).run()
+      await db.prepare('UPDATE review_requests SET token = NULL WHERE id = ?').bind(failed.requestId).run()
+      await db.prepare("UPDATE guest_thread_deliveries SET id = 'historical-review-receipt' WHERE entry_id IN (SELECT id FROM activity_entries WHERE request_id = ?)").bind(T['retry-metadata']).run()
+      await db.prepare("UPDATE requests SET payload_json = json_set(payload_json, '$.guest.email', 'edited@provider-proof.com') WHERE id = ?").bind(T['retry-metadata']).run()
+      failReadback = false
+      const retries = await Promise.all([send(), send(), send()])
+      assert.ok(retries.every(result => result.sent), JSON.stringify(retries))
+      assert.equal(accepted.length, 1, 'an accepted invitation resumes readback rather than sending another email')
+      assert.ok(await getReviewRequestByToken(db, emailedToken), 'the original emailed link still validates')
+      assert.deepEqual(await db.prepare('SELECT send_count, last_error, first_sent_at IS NOT NULL AS sent FROM review_requests WHERE id = ?').bind(failed.requestId).first(), { send_count: 1, last_error: null, sent: 1 })
+      assert.equal(await db.prepare('SELECT count(*) n FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id WHERE e.request_id = ?').bind(T['retry-metadata']).first('n'), 1)
+
+      const hub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName('org'))
+      const publicationCount = async () => await (await hub.fetch('https://hub/delivery-publications')).json() as number
+      for (const boundary of ['publication', 'persistence', 'unsent', 'concurrent']) {
+        const key = `retry-${boundary}`
+        await reservation(key, 'g-dinner', 'room', at(-25 * HOUR))
+        await db.prepare("UPDATE requests SET payload_json = json_set(payload_json, '$.guest.email', 'guest@provider-proof.com') WHERE id = ?").bind(T[key]).run()
+        const invitation = () => sendReviewRequestForBooking(providerEnv, db, 'reservation', T[key]!)
+        const before = accepted.length
+        const attemptsBefore = sendAttempts
+        if (boundary === 'publication') await hub.fetch('https://hub/fail-next-delivery')
+        if (boundary === 'persistence') await db.prepare(`CREATE TRIGGER fail_review_completion BEFORE UPDATE OF first_sent_at ON review_requests
+          WHEN NEW.booking_id = '${T[key]}' BEGIN SELECT RAISE(FAIL, 'controlled completion failure'); END`).run()
+        rejectSend = boundary === 'unsent'
+        if (boundary === 'concurrent') {
+          const concurrent = await Promise.all([invitation(), invitation(), invitation()])
+          assert.ok(concurrent.every(result => result.sent), JSON.stringify(concurrent))
+        } else {
+          const incomplete = await invitation()
+          assert.equal(incomplete.sent, false, boundary)
+          // Drizzle reports the failed completion query as the outer error.
+          assert.match(incomplete.error!, boundary === 'unsent' ? /controlled unsent failure/ : boundary === 'persistence' ? /Failed query:[\s\S]*SET first_sent_at/ : /publication|503|invalidation/i)
+          assert.deepEqual(await db.prepare('SELECT first_sent_at, send_count, last_error IS NOT NULL AS failed FROM review_requests WHERE id = ?').bind(incomplete.requestId).first(), { first_sent_at: null, send_count: 0, failed: 1 })
+          if (boundary === 'persistence') await db.prepare('DROP TRIGGER fail_review_completion').run()
+          rejectSend = false
+          const publicationsBefore = await publicationCount()
+          assert.equal((await invitation()).sent, true)
+          assert.equal(await publicationCount(), publicationsBefore + 1, 'retry completes required visibility work')
+        }
+        assert.equal(accepted.length, before + 1, `${boundary}: exactly one provider-accepted invitation`)
+        if (boundary !== 'concurrent') assert.equal(sendAttempts, attemptsBefore + (boundary === 'unsent' ? 2 : 1), `${boundary}: accepted mail is never posted again`)
+        const invitationToken = tokenOf(accepted.at(-1)!.body.html)
+        assert.ok(await getReviewRequestByToken(db, invitationToken), `${boundary}: emailed link validates`)
+        assert.deepEqual(await db.prepare('SELECT send_count, last_error, first_sent_at IS NOT NULL AS sent FROM review_requests WHERE booking_id = ?').bind(T[key]).first(), { send_count: 1, last_error: null, sent: 1 })
+        assert.equal(await db.prepare('SELECT count(*) n FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id WHERE e.request_id = ?').bind(T[key]).first('n'), 1)
+      }
+
+    } finally { transport.mock.restore() }
 
     // A no-show after the invitation went out: the unused link stops working.
     const lessonToken = await tokenFor('lesson')
