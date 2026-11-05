@@ -1,4 +1,4 @@
-import { execute, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { execute, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { wantsNotification } from '~/server/domain/notification-preferences'
 import { localDateTimeToInstant } from '~/utils/timezone'
@@ -14,6 +14,7 @@ export interface ReviewRequestRow {
   booking_type: ReviewBookingType
   booking_id: string
   token_hash: string
+  token: string | null
   expires_at: string
   first_sent_at: string | null
   reminder_sent_at: string | null
@@ -187,12 +188,12 @@ export async function getReviewRequestByToken(
   return { request, context }
 }
 
-export async function createOrRotateReviewRequest(
+export async function createReviewRequest(
   env: CloudflareEnv,
   db: DbClient,
   context: ReviewBookingContext,
   now = new Date().toISOString(),
-): Promise<{ request: ReviewRequestRow; token: string; created: boolean }> {
+): Promise<{ request: ReviewRequestRow; token: string }> {
   if (!context.user_id) throw new Error('Booking is not linked to a guest identity')
   if (!reviewInvitationDue(context, new Date(now))) throw new Error('This visit is not due a review invitation')
   if (!await wantsNotification(db, context.user_id, 'review_requests', 'email')) throw new Error('Guest has opted out of review requests')
@@ -205,12 +206,12 @@ export async function createOrRotateReviewRequest(
   const expiresAt = addDays(now, REVIEW_REQUEST_TTL_DAYS)
   const id = crypto.randomUUID()
 
-  const insertResult = await execute(db, `
+  await execute(db, `
     INSERT OR IGNORE INTO review_requests (
       id, organization_id, location_id, user_id, booking_type, booking_id,
-      token_hash, expires_at, send_count, created_at, updated_at
+      token_hash, token, expires_at, send_count, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
   `, [
     id,
     context.organization_id,
@@ -219,36 +220,46 @@ export async function createOrRotateReviewRequest(
     context.booking_type,
     context.booking_id,
     tokenHash,
+    token,
     expiresAt,
     now,
     now,
   ])
 
-  const created = Number(insertResult.meta.changes ?? 0) > 0
-  if (!created) {
-    await execute(db, `
-      UPDATE review_requests
-      SET token_hash = ?,
-          expires_at = ?,
-          last_error = NULL,
-          updated_at = ?
-      WHERE organization_id = ?
-        AND booking_type = ?
-        AND booking_id = ?
-        AND submitted_at IS NULL
-        AND revoked_at IS NULL
-    `, [tokenHash, expiresAt, now, context.organization_id, context.booking_type, context.booking_id])
+  let request = await queryFirst<ReviewRequestRow>(db, `
+    SELECT * FROM review_requests
+    WHERE organization_id = ? AND booking_type = ? AND booking_id = ?
+      AND submitted_at IS NULL AND revoked_at IS NULL
+  `, [context.organization_id, context.booking_type, context.booking_id])
+
+  // Existing invitations keep their link. Recover older rows only from their
+  // actual recorded email, checking the hash before adopting its token.
+  if (request && request.token === null) {
+    const receipts = await queryAll<{ email_json: string | null }>(db, `
+      SELECT d.email_json FROM guest_thread_deliveries d
+      JOIN activity_entries e ON e.id = d.entry_id
+      WHERE e.dedupe_key = ? AND d.channel = 'email' AND d.purpose = 'status_update'
+    `, [`review-request:${request.id}`])
+    let recovered: string | null = null
+    for (const receipt of receipts) {
+      if (!receipt.email_json) continue
+      const html: unknown = JSON.parse(receipt.email_json).message?.html
+      if (typeof html !== 'string') throw new Error('Review invitation has an invalid recorded email')
+      for (const match of html.matchAll(/\/review-submit\?token=([A-Za-z0-9_-]+)/g)) {
+        if (await hashReviewRequestToken(match[1]!) === request.token_hash) recovered = match[1]!
+      }
+    }
+    if (receipts.length && !recovered) throw new Error('Review invitation token cannot be recovered from its recorded email')
+    const retained = recovered ?? token
+    await execute(db, `UPDATE review_requests SET token = ?, token_hash = ? WHERE id = ? AND token IS NULL`,
+      [retained, await hashReviewRequestToken(retained), request.id])
+    request = await queryFirst<ReviewRequestRow>(db, 'SELECT * FROM review_requests WHERE id = ?', [request.id])
   }
 
-  const request = await queryFirst<ReviewRequestRow>(db, `
-    SELECT *
-    FROM review_requests
-    WHERE token_hash = ?
-    LIMIT 1
-  `, [tokenHash])
-
   if (!request) throw new Error('Failed to create review request')
-  return { request, token, created }
+  if (!request.token || await hashReviewRequestToken(request.token) !== request.token_hash) throw new Error('Review invitation token does not match its recorded hash')
+  if (request.user_id !== context.user_id) throw new Error('Review invitation belongs to a different guest identity')
+  return { request, token: request.token }
 }
 
 export async function markReviewRequestSendSuccess(

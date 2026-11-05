@@ -66,6 +66,42 @@ through the built Worker. The opt-in native transport test uses only Resend's
 provider IDs and subjects. It does not inspect a real Gmail or Outlook inbox.
 The configured Resend API key must permit both sending and retrieving sent email.
 
+## Review invitation retries
+
+An ended visit gets one initial invitation. A retry resumes that invitation;
+metadata readback, inbox publication or final success persistence failing after
+Resend acceptance must not issue a new link or another email. `first_sent_at`
+marks completed application work, not proof that no earlier send was accepted.
+`send_count` counts completed initial invitations, not physical provider sends.
+
+The existing receipt owns the frozen email and Resend identity. The request now
+also retains its token at creation: the receipt cannot recover a token when work
+fails before the email snapshot exists, and its hash cannot be reversed. The
+nullable `review_requests.token` column solves that concrete retry gap without a
+second invitation store. Existing pending requests recover only a recorded email
+token matching their stored hash; an unmailed request can retain a new token.
+An inconsistent recorded invitation fails visibly instead of invalidating its
+emailed link. The token is private application data, like the existing email
+snapshot, and is never returned in review API responses.
+
+Retries preserve the original expiry, token, invitation entry and receipt key.
+Provider acceptance resumes metadata readback even after the 24-hour idempotency
+window. An unknown send outcome past that window still requires provider review;
+automation must not mint a fresh key to bypass the dispatcher guard. Failures
+remain reported and incomplete work remains eligible for automation retry.
+
+A retry is neither a reminder nor a reissue. The current automation sends one
+initial invitation and implements no reminder schedule. This change leaves the
+existing cancellation/no-show revocation, submission and 30-day invitation
+window intact; it does not add a new resend policy or revive revoked links.
+
+`guest-reviews-d1.test.ts` runs the actual automation, review APIs, dispatcher,
+local D1 and a local Durable Object. Its controlled Resend transport proves one
+accepted email and a usable original link across preparation failure, acceptance
+persistence failure, metadata failure, publication failure, final write failure
+and concurrency, plus recovery of rejected sends.
+No customer email is sent by these tests.
+
 ## Local verification
 
 Local development and preview use log-only delivery modes. A log-only send must still write a terminal `guest_thread_deliveries` receipt with a `log-only:` provider message ID when the send belongs to a guest thread.
