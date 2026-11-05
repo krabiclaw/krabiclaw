@@ -203,7 +203,7 @@ interface ReviewRequestNotificationInput extends OrganizationContext {
   /** Whose review_requests preference governs this email and its unsubscribe link. */
   userId: string
   /** The invitation's entry in the visit's conversation, which this email is the receipt of. */
-  delivery: { guestThreadId: string; sourceEntryId: string; eventKey: string }
+  delivery: { guestThreadId: string; sourceEntryId: string }
 }
 
 interface EmailTemplate extends RenderedNotificationEmail {
@@ -420,10 +420,8 @@ async function sendEmailNotification(
         idempotencyKey: deliveryContext.idempotencyKey,
       })
     : null
-  // A receipt that already reached Resend is this event's email for this
-  // recipient: a replayed event sends nothing. Otherwise the receipt id is the
-  // Resend idempotency key, so a concurrent replay cannot send it twice.
-  if (delivery && isDeliverySent(delivery)) return
+  // The dispatcher resumes the recorded receipt without resending accepted
+  // mail. Replays still complete metadata, error clearing and publication.
 
   const email = {
     to: opts.to, replyTo: opts.replyTo, subject: opts.email.subject,
@@ -1237,6 +1235,14 @@ export async function notifyReviewRequest(
   db: DbClient,
   opts: ReviewRequestNotificationInput
 ): Promise<void> {
+  // The invitation owns one email, even if contact details are edited while
+  // completion is pending. Retain any already-recorded receipt for this link.
+  const recorded = await queryFirst<{ id: string }>(db, `
+    SELECT id FROM guest_thread_deliveries
+    WHERE entry_id = ? AND channel = 'email' AND purpose = 'status_update'
+      AND (email_json IS NULL OR instr(email_json, ?) > 0)
+    ORDER BY created_at DESC, id DESC LIMIT 1
+  `, [opts.delivery.sourceEntryId, new URL(opts.reviewUrl).searchParams.get('token')])
   const restaurant = organizationName(opts)
   const platformDomain = getPlatformDomain(env)
   const logoUrl = await organizationLogo(db, opts.organizationId)
@@ -1260,7 +1266,7 @@ export async function notifyReviewRequest(
     replyTo: await buildReplyToAddress(env, opts.bookingType, opts.bookingId),
     template: 'booking_thank_you_review_request',
     title: `How was your visit to ${restaurant}?`,
-    delivery: threadDelivery(opts.delivery, 'status_update', 'email', 'booking_thank_you_review_request', opts.email, opts.delivery.eventKey),
+    delivery: { threadId: opts.delivery.guestThreadId, entryId: opts.delivery.sourceEntryId, purpose: 'status_update', idempotencyKey: recorded?.id ?? `review-request:${opts.requestId}` },
     payload: {
       request_id: opts.requestId,
       booking_type: opts.bookingType,

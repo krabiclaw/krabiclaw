@@ -5,7 +5,7 @@ import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { notifyReviewRequest } from '~/server/utils/notifications'
 import { appendEntry } from '~/server/domain/guest-threads/entries'
 import {
-  createOrRotateReviewRequest,
+  createReviewRequest,
   getReviewBookingContext,
   markReviewRequestSendFailure,
   markReviewRequestSendSuccess,
@@ -32,7 +32,7 @@ export async function sendReviewRequestForBooking(
   const publicUrl = context.organization_public_url?.replace(/\/$/, '')
   if (!publicUrl) throw new Error('Organization has no active canonical domain')
 
-  const { request, token } = await createOrRotateReviewRequest(env, db, context)
+  const { request, token } = await createReviewRequest(env, db, context)
   if (!request.user_id) throw new Error('Review request is not linked to a guest identity')
   const reviewUrl = `${publicUrl}/review-submit?token=${encodeURIComponent(token)}`
   const entry = await appendEntry(db, {
@@ -57,9 +57,9 @@ export async function sendReviewRequestForBooking(
       partyLabel: resolveBookingPresentation(bookingType === 'reservation' ? 'reservation' : 'booking', context.organization_vertical).partyLabel,
       reviewUrl,
       userId: request.user_id,
-      // Each minted link is its own email: a retry after a failure sends the
-      // new link rather than replaying the one it replaced.
-      delivery: { guestThreadId: bookingId, sourceEntryId: entry.id, eventKey: `review-request:${request.token_hash}` },
+      // One invitation retains its link and receipt across retries. The
+      // receipt resumes provider readback rather than sending accepted mail.
+      delivery: { guestThreadId: bookingId, sourceEntryId: entry.id },
     })
     await markReviewRequestSendSuccess(db, request.id)
     return { sent: true, requestId: request.id }
