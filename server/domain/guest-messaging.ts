@@ -1,11 +1,13 @@
-import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { HTTPError } from 'nitro'
+import { executeBatch, queryAll, queryAllPages, queryFirst, type DbClient } from '~/server/db'
 import { assertAssignedBookingAccess, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { getGuestRequest } from '~/server/domain/requests'
 import { getStay, readStayHome, stayAccessFor, type StayAccess } from '~/server/domain/stays'
 import { isValidInstant } from '~/utils/timezone'
 import { messageListPage, messageText, messagingError, parseGuestMessageSchedule, type GuestMessageSchedule, type MessageListQuery } from './guest-message-schedule'
-import { CHECK_IN_MESSAGE_TITLE, planTemplateMessages } from './scheduled-guest-messages'
+import { CHECK_IN_MESSAGE_TITLE, planTemplateMessages, publishScheduledGuestMessageChange } from './scheduled-guest-messages'
+import type { GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 
 export interface MessageTemplateRow {
   id: string
@@ -85,7 +87,7 @@ export async function getMessageTemplate(db: DbClient, organizationId: string, t
 }
 
 /** A full write names the message's text and its schedule; every automatic message has one. */
-export async function saveMessageTemplate(db: DbClient, access: StayAccess, templateId: string | null, value: unknown, now = new Date().toISOString()): Promise<MessageTemplate> {
+export async function saveMessageTemplate(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, templateId: string | null, value: unknown, now = new Date().toISOString()): Promise<MessageTemplate> {
   manager(access)
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['title', 'body', 'schedule', 'expectedVersion'].includes(key))) {
     messagingError(422, 'INVALID_MESSAGING_FIELD', 'Provide title, body, schedule and the current expectedVersion when editing an automatic message', 'template')
@@ -125,10 +127,17 @@ export async function saveMessageTemplate(db: DbClient, access: StayAccess, temp
     messagingError(500, 'MESSAGE_TEMPLATE_READBACK_FAILED', 'The automatic message was saved but its value was not returned; reload before saving again', 'template')
   }
   await planTemplateMessages(db, saved, now)
+  const messages = await queryAllPages<ScheduledGuestMessageRow>(db, 'SELECT * FROM scheduled_guest_messages WHERE organization_id = ? AND template_id = ? ORDER BY id', [access.organizationId, saved.id])
+  try {
+    for (const message of messages) await publishScheduledGuestMessageChange(db, env, message)
+  } catch (cause) {
+    throw new HTTPError({ statusCode: 503, message: 'The automatic message was saved, but open apps could not be updated. Reload before editing it again.',
+      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, template_id: saved.id, version: saved.version }, cause })
+  }
   return messageTemplate(saved)
 }
 
-export async function deleteMessageTemplate(db: DbClient, access: StayAccess, templateId: string, expectedVersion: unknown, now = new Date().toISOString()): Promise<void> {
+export async function deleteMessageTemplate(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, templateId: string, expectedVersion: unknown, now = new Date().toISOString()): Promise<void> {
   manager(access)
   const version = expectedTemplateVersion(expectedVersion)
   const current = await getMessageTemplate(db, access.organizationId, templateId)
@@ -137,12 +146,19 @@ export async function deleteMessageTemplate(db: DbClient, access: StayAccess, te
     query: `UPDATE scheduled_guest_messages SET status = CASE WHEN status = 'pending' THEN 'cancelled' ELSE status END,
       reason = CASE WHEN status = 'pending' THEN 'The automatic message was deleted.' ELSE reason END,
       template_id = NULL, updated_at = ? WHERE organization_id = ? AND template_id = ?
-      AND EXISTS (SELECT 1 FROM message_templates WHERE id = ? AND organization_id = ? AND version = ?)`,
+      AND EXISTS (SELECT 1 FROM message_templates WHERE id = ? AND organization_id = ? AND version = ?) RETURNING organization_id, product_id, stay_id, request_id, updated_at`,
     params: [now, access.organizationId, templateId, templateId, access.organizationId, current.version],
   }, {
     query: 'DELETE FROM message_templates WHERE organization_id = ? AND id = ? AND version = ?', params: [access.organizationId, templateId, current.version],
   }, organizationEventQuery({ organizationId: access.organizationId, actorId: access.actorId, eventType: 'message_template.deleted', entityType: 'message_template', entityId: templateId, onlyIfPreviousChangedOneRow: true })], { operation: 'Delete message template' })
   if (results[1]?.meta.changes !== 1) messagingError(409, 'MESSAGE_TEMPLATE_VERSION_CONFLICT', 'This automatic message changed; reload it before deleting', 'expectedVersion')
+  const messages = results[0]?.results as Array<Pick<ScheduledGuestMessageRow, 'organization_id' | 'product_id' | 'stay_id' | 'request_id' | 'updated_at'>>
+  try {
+    for (const message of messages) await publishScheduledGuestMessageChange(db, env, message)
+  } catch (cause) {
+    throw new HTTPError({ statusCode: 503, message: 'The automatic message was deleted, but open apps could not be updated. Reload to see its saved status.',
+      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, template_id: templateId }, cause })
+  }
 }
 
 /** No provider ID, location guess, or historical guest contact substitutes for a home. */
@@ -212,12 +228,18 @@ export async function listScheduledGuestMessages(db: DbClient, access: StayAcces
   return { messages: page.items, pagination: page.pagination }
 }
 
-export async function cancelScheduledGuestMessage(db: DbClient, access: StayAccess, messageId: string, now = new Date().toISOString()) {
+export async function cancelScheduledGuestMessage(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, messageId: string, now = new Date().toISOString()) {
   manager(access)
   const results = await executeBatch(db, [{ query: "UPDATE scheduled_guest_messages SET status = 'cancelled', reason = 'Cancelled by a workspace manager.', updated_at = ? WHERE id = ? AND organization_id = ? AND status = 'pending'", params: [now, messageId, access.organizationId] },
     organizationEventQuery({ organizationId: access.organizationId, actorId: access.actorId, eventType: 'scheduled_message.cancelled', entityType: 'scheduled_guest_message', entityId: messageId, onlyIfPreviousChangedOneRow: true })], { operation: 'Cancel scheduled message' })
   const current = await queryFirst<ScheduledGuestMessageRow>(db, 'SELECT * FROM scheduled_guest_messages WHERE organization_id = ? AND id = ?', [access.organizationId, messageId])
   if (!current) messagingError(404, 'SCHEDULED_MESSAGE_NOT_FOUND', 'This scheduled message is not in the workspace', 'messageId')
   if (results[0]?.meta.changes !== 1) messagingError(409, 'SCHEDULED_MESSAGE_NOT_PENDING', `The message is ${current.status}; only a pending message can be cancelled`, 'status')
+  try {
+    await publishScheduledGuestMessageChange(db, env, current)
+  } catch (cause) {
+    throw new HTTPError({ statusCode: 503, message: 'The automatic message was cancelled, but open apps could not be updated. Reload to see its saved status.',
+      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, message_id: current.id }, cause })
+  }
   return scheduledGuestMessage(current)
 }

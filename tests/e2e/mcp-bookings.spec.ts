@@ -1,7 +1,8 @@
 import { expect, test, type APIRequestContext, type APIResponse } from '@playwright/test'
 import { createHmac } from 'node:crypto'
 import type { Product, ProductBookingConfig } from '../../server/types/products'
-import type { GuestThreadDetailViewModel } from '../../server/domain/guest-threads/types'
+import type { InboxStreamItem, InboxThread } from '../../server/domain/guest-threads/types'
+import type { BookingChangeView } from '../../server/domain/guest-threads/booking-changes'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { dismissPreviewToolbar } from './helpers'
 import { mcpOrganizationId, mcpData, mcpRequest } from './helpers/mcp'
@@ -127,10 +128,11 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       expect((await read(created.operational_booking_id)).record.party_size).toBe(1)
       const detailResponse = await request.get(`${baseURL}/api/dashboard/organizations/${org}/guest-threads/${created.request_id}`)
       expect(detailResponse.status()).toBe(200)
-      const detail = (await detailResponse.json()).thread
-      const changeEntries = detail.entries.filter((entry: { eventName: string }) => entry.eventName === 'booking_change.requested')
-      expect(changeEntries).toHaveLength(1)
-      const changeId = changeEntries[0].id
+      const detail = (await detailResponse.json() as { thread: InboxThread }).thread
+      // Two calls under one key are one proposal in the conversation, waiting for the guest.
+      const changeEntries = detail.stream.filter(item => item.type === 'change')
+      expect(changeEntries).toMatchObject([{ change: { requestedBy: 'business', status: 'pending', after: { partySize: 2 } } }])
+      const changeId = changeEntries[0]!.id
       const token = createHmac('sha256', 'local-playwright-email-reply-secret').update(`booking-change:v1:${created.request_id}:${changeId}`).digest('hex')
       const accepted = await request.post(`${baseURL}/api/public/booking-changes/${created.request_id}/${changeId}`, { headers: { authorization: `Bearer ${token}` }, data: { decision: 'accept' } })
       expect(accepted.status(), await accepted.text()).toBe(200)
@@ -155,9 +157,9 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       expect((await call<{ change_status: string }>('request_product_booking_change', declineProposal)).change_status).toBe('awaiting_guest_acceptance')
       const declineDetail = await request.get(`${baseURL}/api/dashboard/organizations/${org}/guest-threads/${created.request_id}`)
       expect(declineDetail.status()).toBe(200)
-      const declineEntries = (await declineDetail.json()).thread.entries.filter((entry: { id: string; eventName: string }) => entry.eventName === 'booking_change.requested' && entry.id !== changeId)
-      expect(declineEntries).toHaveLength(1)
-      const declineId = declineEntries[0].id
+      const declineEntries = (await declineDetail.json() as { thread: InboxThread }).thread.stream.filter(item => item.type === 'change' && item.id !== changeId)
+      expect(declineEntries).toMatchObject([{ change: { status: 'pending' } }])
+      const declineId = declineEntries[0]!.id
       const declineToken = createHmac('sha256', 'local-playwright-email-reply-secret').update(`booking-change:v1:${created.request_id}:${declineId}`).digest('hex')
       const declined = await request.post(`${baseURL}/api/public/booking-changes/${created.request_id}/${declineId}`, { headers: { authorization: `Bearer ${declineToken}` }, data: { decision: 'decline' } })
       expect(declined.status(), await declined.text()).toBe(200)
@@ -243,9 +245,10 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       expect((await read(publicCreated.operational_booking_id)).record).toEqual(experienceBeforeRequest.record)
       const experienceThreadResponse = await request.get(`${baseURL}/api/dashboard/organizations/${org}/guest-threads/${publicCreated.request_id}`)
       expect(experienceThreadResponse.status(), await experienceThreadResponse.text()).toBe(200)
-      const experienceThread = (await experienceThreadResponse.json()).thread
-      expect(experienceThread.conversationState).toBe('needs_attention')
-      expect(experienceThread.entries.filter((entry: { actorKind: string; body: string }) => entry.actorKind === 'guest' && entry.body === 'Could we attend the following week instead?')).toHaveLength(1)
+      const experienceThread = (await experienceThreadResponse.json() as { thread: InboxThread }).thread
+      // The guest's request is one message from them that the business now has to answer.
+      expect(experienceThread.stream.filter(item => item.type === 'message' && item.side === 'guest' && item.body === 'Could we attend the following week instead?')).toHaveLength(1)
+      expect((await call<{ conversation: { state: string } }>('get_guest_conversation', { request_id: publicCreated.request_id })).conversation.state).toBe('needs_attention')
       const foreign = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_product_booking', args: { organization_id: seededTenant('restaurant').organizationId, operational_booking_id: instant.operational_booking_id } })
       expect(foreign.status()).toBe(200)
       expect((await foreign.json()).result.isError).toBe(true)
@@ -432,13 +435,14 @@ test('MCP consultation attorney replacement waits for buyer conversation approva
     const independentPending = await body<{ booking: { assignedMemberId: string; sessionId: string } }>(await request.get(`/api/dashboard/bookings/booking/${first.request_id}`, { params: { org: slug } }))
     expect(independentPending.booking).toMatchObject({ assignedMemberId: originalAttorney.id, sessionId: originalSession.id })
     expect(await read(other)).toEqual(otherBefore)
-    const detail = await body<{ thread: GuestThreadDetailViewModel }>(await page.request.get(`/api/account/messages/${first.request_id}`))
-    const proposals = detail.thread.entries.filter(entry => entry.eventName === 'booking_change.requested')
+    // The buyer's own conversation shows the one proposal, as the business's ledger holds it.
+    const detail = await body<{ thread: InboxThread }>(await page.request.get(`/api/account/messages/${first.request_id}`))
+    const proposals = detail.thread.stream.filter((item): item is Extract<InboxStreamItem, { type: 'change' }> => item.type === 'change')
     expect(proposals).toHaveLength(1)
-    expect(proposals[0]!.bookingChange).toMatchObject({ status: 'pending', before: { assignedMemberId: originalAttorney.id, assignedMemberName: 'MCP Original Attorney' }, after: { assignedMemberId: replacementAttorney.id, assignedMemberName: 'MCP Replacement Attorney' } })
-    const conversation = () => call<{ conversation: { entries: Array<{ id: string; booking_change: GuestThreadDetailViewModel['entries'][number]['bookingChange'] }> } }>('get_guest_conversation', { request_id: first.request_id })
-    expect((await conversation()).conversation.entries.find(entry => entry.id === proposals[0]!.id)?.booking_change).toEqual(proposals[0]!.bookingChange)
-    expect(proposals[0]!.bookingChange!.before.whenLabel).toBe(proposals[0]!.bookingChange!.after.whenLabel)
+    expect(proposals[0]!.change).toMatchObject({ status: 'pending', before: { assignedMemberId: originalAttorney.id, assignedMemberName: 'MCP Original Attorney' }, after: { assignedMemberId: replacementAttorney.id, assignedMemberName: 'MCP Replacement Attorney' } })
+    const conversation = () => call<{ conversation: { entries: Array<{ id: string; event: string | null; payload: Record<string, unknown> | null; booking_change: BookingChangeView | null }> } }>('get_guest_conversation', { request_id: first.request_id })
+    expect((await conversation()).conversation.entries.find(entry => entry.id === proposals[0]!.id)?.booking_change).toEqual(proposals[0]!.change)
+    expect(proposals[0]!.change.before.whenLabel).toBe(proposals[0]!.change.after.whenLabel)
     const deliveries = await body<{ deliveries: Array<{ entry_id: string; purpose: string; status: string; email_json: string | null }> }>(await request.get('/api/dev/notifications', { headers: devLoginHeaders(), params: { organization_id: organizationId, since } }))
     const proposalEmail = deliveries.deliveries.find(delivery => delivery.entry_id === proposals[0]!.id && delivery.purpose === 'status_update')
     expect(proposalEmail?.status).toBe('sent')
@@ -483,13 +487,15 @@ test('MCP consultation attorney replacement waits for buyer conversation approva
     expect(acceptedRead.record).toEqual({ ...before.record, assigned_member_id: replacementAttorney.id })
     expect(await read(other)).toEqual(otherBefore)
     expect((await call<{ change_status: string }>('reassign_product_booking', change)).change_status).toBe('accepted')
-    const answered = await body<{ thread: GuestThreadDetailViewModel }>(await request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${first.request_id}`))
-    const acceptanceEntries = answered.thread.entries.filter(entry => entry.eventName === 'booking_change.accepted' && entry.payload?.requestId === proposals[0]!.id)
+    // The business's conversation says the guest accepted, once; the ledger ties that answer to the proposal.
+    const answered = await body<{ thread: InboxThread }>(await request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${first.request_id}`))
+    expect(answered.thread.stream.filter(item => item.type === 'event' && item.text === 'E2E Buyer’s change was accepted')).toHaveLength(1)
+    const acceptanceEntries = (await conversation()).conversation.entries.filter(entry => entry.event === 'booking_change.accepted' && entry.payload?.requestId === proposals[0]!.id)
     expect(acceptanceEntries).toHaveLength(1)
     expect((await conversation()).conversation.entries.find(entry => entry.id === proposals[0]!.id)?.booking_change?.status).toBe('accepted')
     const staffNotifications = await body<{ notifications: Array<{ id: string; title: string; message: string }> }>(await request.get('/api/dashboard/notifications'))
     const acceptanceNotice = staffNotifications.notifications.find(notification => notification.id === `notification:${acceptanceEntries[0]!.id}:consultation.change_accepted`)
-    expect(acceptanceNotice?.title).toBe('E2E Buyer accepted the consultation changes')
+    expect(acceptanceNotice?.title).toBe('Your consultation change was accepted')
     expect(acceptanceNotice?.message).toContain('MCP Original Attorney')
     expect(acceptanceNotice?.message).toContain('MCP Replacement Attorney')
   } catch (error) { failures.push(error) }

@@ -25,15 +25,24 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'guest-reviews-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: `export class Hub {
-      constructor(ctx) { this.storage = ctx.storage }
+      constructor(ctx, env) { this.storage = ctx.storage; this.db = env.DB }
       async fetch(request) {
         const path = new URL(request.url).pathname
         if (path === '/fail-next-delivery') { await this.storage.put('fail', true); return new Response(null, { status: 204 }) }
+        if (path === '/fail-next-success') { await this.storage.put('failSuccess', true); return new Response(null, { status: 204 }) }
         if (path === '/delivery-publications') return Response.json(await this.storage.get('publications') ?? 0)
+        if (path === '/success-publications') return Response.json(await this.storage.get('successPublications') ?? [])
         const event = await request.json()
         if (event.type === 'delivery.changed') {
           if (await this.storage.get('fail')) { await this.storage.delete('fail'); return new Response('controlled publication failure', { status: 503 }) }
           await this.storage.put('publications', (await this.storage.get('publications') ?? 0) + 1)
+        }
+        if (event.type === 'thread.changed') {
+          const review = await this.db.prepare('SELECT first_sent_at FROM review_requests WHERE booking_id = ?').bind(event.threadId).first()
+          if (review) {
+            if (await this.storage.get('failSuccess')) { await this.storage.delete('failSuccess'); return new Response('controlled success publication failure', { status: 503 }) }
+            await this.storage.put('successPublications', [...await this.storage.get('successPublications') ?? [], { threadId: event.threadId, firstSentAt: review.first_sent_at }])
+          }
         }
         return new Response(null, { status: 204 })
       }
@@ -137,6 +146,10 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
       { booking_type: 'booking', booking_id: 'lesson', sent: 1 },
     ], 'every ended, confirmed visit inside the window is invited; the early, cancelled, old and no-show ones are not')
     assert.equal(run.result.sent, 4)
+    const reviewHub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName('org'))
+    const successPublications = await (await reviewHub.fetch('https://hub/success-publications')).json() as Array<{ threadId: string; firstSentAt: string | null }>
+    assert.deepEqual(successPublications.map(publication => name(publication.threadId)).sort(), ['consultation', 'cottage', 'dinner', 'lesson'])
+    assert.ok(successPublications.every(publication => publication.firstSentAt !== null), 'open apps are invalidated only after invitation success is persisted')
     // Inviting leaves every conversation readable: a stay's strict payload carries no review state.
     for (const key of ['dinner', 'consultation', 'lesson', 'cottage']) assert.ok(await getGuestRequest(db, T[key]!, 'org'), `${key} still reads as a conversation`)
 
@@ -249,6 +262,25 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
         assert.deepEqual(await db.prepare('SELECT send_count, last_error, first_sent_at IS NOT NULL AS sent FROM review_requests WHERE booking_id = ?').bind(T[key]).first(), { send_count: 1, last_error: null, sent: 1 })
         assert.equal(await db.prepare('SELECT count(*) n FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id WHERE e.request_id = ?').bind(T[key]).first('n'), 1)
       }
+
+      // A failure publishing the committed success is visible, but never
+      // turns an already-sent invitation back into another due email.
+      await reservation('retry-success-publication', 'g-dinner', 'room', at(-25 * HOUR))
+      await db.prepare("UPDATE requests SET payload_json = json_set(payload_json, '$.guest.email', 'guest@provider-proof.com') WHERE id = ?").bind(T['retry-success-publication']).run()
+      const acceptedBefore = accepted.length
+      await hub.fetch('https://hub/fail-next-success')
+      await assert.rejects(sendReviewRequestForBooking(providerEnv, db, 'reservation', T['retry-success-publication']!),
+        error => {
+          const data = (error as { data?: { code: string; field: string; committed: boolean } }).data
+          assert.deepEqual(data && { code: data.code, field: data.field, committed: data.committed }, { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true })
+          return true
+        })
+      assert.equal(accepted.length, acceptedBefore + 1)
+      assert.deepEqual(await db.prepare('SELECT send_count, last_error, first_sent_at IS NOT NULL AS sent FROM review_requests WHERE booking_id = ?').bind(T['retry-success-publication']).first(), { send_count: 1, last_error: null, sent: 1 })
+      assert.ok(await getReviewRequestByToken(db, tokenOf(accepted.at(-1)!.body.html)), 'the one delivered invitation retains its usable link')
+      const afterFailure = await reviewTask.run!({ context: { cloudflare: { env: providerEnv } }, payload: {}, name: 'review-request-automation' } as never) as { result: { sent: number; failed: number } }
+      assert.deepEqual(afterFailure.result, { sent: 0, failed: 0 })
+      assert.equal(accepted.length, acceptedBefore + 1, 'the next automation run does not resend a committed invitation')
 
     } finally { transport.mock.restore() }
 

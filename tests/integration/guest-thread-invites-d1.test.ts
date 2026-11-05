@@ -92,8 +92,9 @@ test('a host invites a phone-only guest into their conversation and replies reac
     const landed = { thread_id: deeThread, path: `/dashboard/account/messages/${deeThread}` }
     assert.deepEqual(await claimGuestThreadInvite(db, { token: thirdToken, userId: 'anon-a' }), landed)
     assert.deepEqual(await holders(deeThread), { request_user: 'anon-a', stay_user: 'anon-a' })
-    assert.deepEqual((await listGuestThreads(db, null, { userId: 'anon-a', buyerAudience: true })).map(row => row.id), [deeThread])
     assert.equal((await getGuestThreadDetail(db, deeThread, ORG, { buyerUserId: 'anon-a' }))?.id, deeThread)
+    // The stay is theirs to open, and their inbox lists it once someone has written in it.
+    assert.deepEqual(await listGuestThreads(db, null, { userId: 'anon-a', buyerAudience: true }), [])
     // Opening the spent link again as that guest lands on the same conversation; anyone else finds it used.
     assert.deepEqual(await claimGuestThreadInvite(db, { token: thirdToken, userId: 'anon-a' }), landed)
     await assert.rejects(claimGuestThreadInvite(db, { token: thirdToken, userId: 'bob' }), refused(410, 'GUEST_INVITE_USED', 'token'))
@@ -112,7 +113,11 @@ test('a host invites a phone-only guest into their conversation and replies reac
     const guestView = (userId: string) => getGuestThreadDetail(db, deeThread, ORG, { buyerUserId: userId })
     assert.deepEqual((await guestView('anon-a'))?.entries.filter(entry => entry.eventName === 'thread.member_reply').map(entry => entry.body), ['The gate code is 1234.'])
     const [unread] = await listGuestThreads(db, null, { userId: 'anon-a', buyerAudience: true, unreadOnly: true })
-    assert.equal(unread?.id, deeThread)
+    // In the guest's own inbox the conversation is the business's, unread, with the host's words.
+    assert.deepEqual({ ...unread, time: undefined }, { id: deeThread, kind: 'guest', guestName: 'Cabin Co', avatarInitial: 'C', channel: 'direct', home: 'Pine Cabin',
+      when: unread?.when, preview: 'The gate code is 1234.', previewFrom: 'Cabin Co', time: undefined, unread: true })
+    assert.ok(unread?.when)
+    assert.deepEqual((await listGuestThreads(db, null, { userId: 'anon-a', buyerAudience: true })).map(row => row.id), [deeThread])
     // The same key again is the same reply.
     const retried = await executeGuestThreadOperation(db, { threadId: deeThread, organizationId: ORG, action: 'reply', body: 'The gate code is 1234.', actorUserId: OWNER, idempotencyKey: 'after-claim', env })
     assert.deepEqual([retried.ok, retried.status], [true, 200])

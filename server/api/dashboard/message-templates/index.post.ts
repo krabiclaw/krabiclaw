@@ -8,5 +8,5 @@ import { saveMessageTemplate } from '~/server/domain/guest-messaging'
 export default defineHandler(async (event) => {
   const { db, env, organization } = await getDashboardMemberContext(event, {})
   const access = await stayAccessFor(memberAccessPrincipal(organization, { env, event }))
-  return jsonResponse({ template: await saveMessageTemplate(db, access, null, await readRequiredBody(event)) }, { status: 201 })
+  return jsonResponse({ template: await saveMessageTemplate(db, env, access, null, await readRequiredBody(event)) }, { status: 201 })
 })

@@ -29,6 +29,8 @@ export const todayCardSchema = z.object({
   occurrenceAt: z.iso.datetime({ offset: true }).nullable(), timeZone: z.string().nullable(),
   /** When the work itself should be done, when that differs from the occurrence it serves. Upcoming orders by this before occurrenceAt. */
   actionAt: z.iso.datetime({ offset: true }).nullable(),
+  /** A verified, recorded completion. Completed work is not an outstanding action. */
+  completedAt: z.iso.datetime({ offset: true }).nullable(),
   /** Why this work is here now, in terms of the recorded facts, the owner's priority and their earlier decisions. */
   reason: z.string().nullable(),
   decision: todayDecisionSchema.nullable(),
@@ -77,6 +79,6 @@ export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string;
     imageUrl: input.personal ? item.resourceImageUrl : item.guestImageUrl, imageFit: 'cover', imageIcon: input.personal ? resourceIcon : 'i-lucide-user',
     badgeImageUrl: input.personal ? null : item.resourceImageUrl, badgeIcon: input.personal ? null : resourceIcon,
     locationId: item.locationId, assignedMemberId: item.assignedMemberId, bookingKind: item.kind, stayId: item.stayId, productId: item.productId, stayChannel: item.stayChannel,
-    occurrenceAt: item.stayMoment === 'current' ? null : item.startsAt, timeZone: item.timeZone, actionAt: null, reason: null, decision: null, priority: 'schedule',
+    occurrenceAt: item.stayMoment === 'current' ? null : item.startsAt, timeZone: item.timeZone, actionAt: null, completedAt: null, reason: null, decision: null, priority: 'schedule',
   }
 }

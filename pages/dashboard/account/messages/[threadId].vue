@@ -1,5 +1,5 @@
 <template>
-  <DashboardIndexPanel id="account-message-thread" :title="thread?.organizationName || 'Conversation'" fill>
+  <DashboardIndexPanel id="account-message-thread" :title="thread?.guestName || 'Conversation'" fill>
     <!-- Airbnb's "Show reservation": the record this conversation is about. A contact thread has none. -->
     <template v-if="activityTo" #right><UButton :to="activityTo" color="neutral" variant="soft" class="rounded-full" :label="activityLabel" /></template>
     <GuestThreadDetail :thread-id="threadId" personal-scope />
@@ -8,7 +8,6 @@
 
 <script setup lang="ts">
 import GuestThreadDetail from '~/lib/components/workspace/messages/GuestThreadDetail.vue'
-import { threadRecordTitle } from '~/lib/components/workspace/messages/guest-thread-client'
 definePageMeta({ layout: 'dashboard' })
 useSeoMeta({ title: 'Conversation | KrabiClaw', robots: 'noindex, nofollow' })
 const route = useRoute()
@@ -18,5 +17,5 @@ const threadId = computed(() => {
 })
 const { thread } = await useGuestThread(threadId, computed(() => true))
 const activityTo = computed(() => thread.value?.activityPath || null)
-const activityLabel = computed(() => thread.value ? `Show ${threadRecordTitle(thread.value.submissionType, thread.value.organizationVertical).toLowerCase()}` : '')
+const activityLabel = computed(() => thread.value?.recordTitle ? `Show ${thread.value.recordTitle.toLowerCase()}` : '')
 </script>

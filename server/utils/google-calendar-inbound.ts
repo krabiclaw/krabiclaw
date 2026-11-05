@@ -211,7 +211,8 @@ async function flagForReview(env: CloudflareEnv, organizationId: string, link: E
   if (!existing) await updateThreadProjectionIfLatestEntry(db, subject.request_id, entry.id, { conversationState: 'needs_attention' })
   const request = await queryFirst<{ location_id: string | null }>(db, 'SELECT location_id FROM requests WHERE id=?', [subject.request_id])
   await notifyCalendarSyncOwner(env, db, { organizationId, organizationName: organization?.name, kind, threadId: subject.request_id, submissionType: subject.booking_kind, sourceEntryId: entry.id,
-    locationId: request?.location_id ?? null, guestName: subject.guest_name ?? 'The guest', noun, whenLabel, reason })
+    locationId: request?.location_id ?? null, guestName: subject.guest_name ?? 'The guest', noun, whenLabel, reason,
+    day: new Intl.DateTimeFormat('en-US', { timeZone: subject.timezone, month: 'short', day: 'numeric' }).format(new Date(subject.starts_at)) })
 }
 type InboundOutcome = 'unmanaged' | 'unchanged' | 'applied' | 'needs_review'
 async function applyCalendarEvent(env: CloudflareEnv, organizationId: string, integration: GoogleCalendarIntegration, sync: CalendarSync, item: GoogleEvent, token: string, provider: CalendarProvider): Promise<InboundOutcome> {

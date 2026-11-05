@@ -164,6 +164,8 @@ export interface GuestThreadEntryDeliveryViewModel {
 export interface GuestThreadEntryAttachmentViewModel {
   id: string
   url: string
+  /** The small rendition for a gallery tile; an asset with none yet is served at `url`. */
+  thumbnailUrl: string
   alt: string | null
   width: number | null
   height: number | null
@@ -234,6 +236,127 @@ export interface GuestThreadDetailViewModel {
   resolvedAt: string | null
 }
 
+/*
+  The inbox: one conversation model behind the web Messages pane, the iOS
+  Messages tab and the message emails (design: inbox-parity.md). The server
+  hands every surface these shapes already reduced; a client draws them and
+  decides nothing. Deliveries, event names, payloads, provider ids and
+  submission fields stay on the server.
+*/
+
+/** Airbnb Support is a case, not a guest: its own filter, never under Guests. */
+export type InboxThreadKind = 'guest' | 'support'
+/** The mark at the corner of the person's circle: Airbnb, or the business's own site and email. */
+export type InboxChannel = 'airbnb' | 'direct'
+
+/** One row of the list, as Airbnb's hosting inbox draws it. */
+export interface InboxRow {
+  id: string
+  kind: InboxThreadKind
+  guestName: string
+  avatarInitial: string
+  channel: InboxChannel
+  /** The home or location the conversation is about; null for one with the business itself. */
+  home: string | null
+  /** "Oct 16 – 23", "In 3 days", "Check out tomorrow"; null when the conversation has no dates. */
+  when: string | null
+  /** The last message's words, or "Sent a photo". */
+  preview: string
+  /** "You", or the sender's first name. */
+  previewFrom: string
+  /** The last message's time in the home's timezone: "2:33 PM", "Yesterday", "Mon", "Nov 2". */
+  time: string
+  unread: boolean
+}
+
+/** Unread conversations per kind, for the filter menu. */
+export interface InboxUnreadCounts { all: number; guests: number; support: number; team: number }
+
+export interface InboxListPage {
+  threads: InboxRow[]
+  pagination: GuestThreadPagination
+}
+
+export interface InboxPhoto {
+  id: string
+  url: string
+  thumbnailUrl: string
+  width: number | null
+  height: number | null
+}
+
+export type InboxStreamItem =
+  | { type: 'day'; id: string; label: string }
+  | {
+    type: 'message'
+    id: string
+    side: 'guest' | 'business'
+    /** "Mililani", "You", the team member's first name, "Skyler · Automatic". */
+    author: string
+    /** An automatic message's template, "Check-in instructions"; null otherwise. */
+    label: string | null
+    /** One instant: the provider's time when it has one, else when KrabiClaw sent it. */
+    sentAt: string
+    /** "2:33 PM" on the first message of a run from one side; null on the rest of the run. */
+    time: string | null
+    /** The words shown, which are the translation when Airbnb translated the message. */
+    body: string | null
+    photos: InboxPhoto[]
+    /** The guest's own words when `body` is Airbnb's translation of them. */
+    translated: { original: string } | null
+    /** Files the message carried that are not photos the conversation can show, such as a PDF. */
+    unshownFiles: number
+    /** On the newest business message only: Sending, Sent, Delivered, Read by <name>, Not delivered. */
+    receipt: string | null
+    /** The reply was not delivered and can be sent again as it was (a team member's text reply). */
+    retryable: boolean
+  }
+  | { type: 'event'; id: string; text: string; sentAt: string }
+  | { type: 'change'; id: string; sentAt: string; change: BookingChangeView }
+
+/** A message waiting to go out: an automatic message, or one a member set to send later. */
+export interface InboxPendingMessage {
+  id: string
+  source: 'automatic' | 'later'
+  /** "Check-in instructions" for an automatic message; the words for one sent later. */
+  label: string
+  sendAt: string
+  /** "Fri, Nov 6, 3:00 PM" in the home's timezone. */
+  time: string
+  body: string
+  cancellable: boolean
+}
+
+export interface InboxThread {
+  id: string
+  kind: InboxThreadKind
+  guestName: string
+  avatarInitial: string
+  channel: InboxChannel
+  home: string | null
+  when: string | null
+  /** A message in the conversation was translated: the header says "Translation on". */
+  translated: boolean
+  /** What Show reservation opens: a stay's id, or the conversation's own id for a booking or reservation (the id the reservation route takes). */
+  recordId: string | null
+  recordKind: 'stay' | 'booking' | 'reservation' | null
+  /** The record in the business's own word: "Reservation", "Consultation", "Experience". */
+  recordTitle: string | null
+  /** In a guest's own inbox, where their booking is shown; null for the business. */
+  activityPath: string | null
+  stream: InboxStreamItem[]
+  pending: InboxPendingMessage[]
+  /** Where a reply goes, and whether one can be sent. */
+  composer: { channel: 'airbnb' | 'email'; available: boolean }
+}
+
+/** "In this conversation": who is in it, its photos and what can be done to it. */
+export interface InboxThreadDetails {
+  participants: Array<{ name: string; initial: string; role: 'Guest' | 'Host' | 'Co-host' | 'Airbnb Support' }>
+  photos: Array<InboxPhoto & { sentAt: string }>
+  actions: { showReservation: boolean; archive: boolean; unarchive: boolean; report: boolean; block: boolean; unblock: boolean }
+}
+
 export interface ListGuestThreadsOptions {
   buyerAudience?: boolean
   organizationId?: string | null
@@ -246,6 +369,10 @@ export interface ListGuestThreadsOptions {
   unreadOnly?: boolean
   /** Current or Past, as `resolveGuestThreadMailbox` defines them. Null lists both. */
   mailbox?: GuestThreadMailbox | null
+  /** The inbox's kind filter; null lists both. */
+  kind?: InboxThreadKind | null
+  /** Matches the guest's name, the home and the conversation's words. */
+  q?: string | null
   limit?: number
   offset?: number
 }

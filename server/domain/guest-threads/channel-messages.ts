@@ -7,19 +7,19 @@ import { getChannexThread, listChannexMessages, listChannexThreads, sendChannexM
 import { appendEntry, findEntryByDedupeKey, parseEntryPayload, GuestThreadEntryDedupeConflictError } from './entries'
 import { getDeliveryById, getDeliveryByProviderMessageId, isDeliverySent, recordDeliveryOutcome } from './deliveries'
 import { updateThreadProjectionIfLatestEntry } from './repository'
-import { assertMessagePhotos, discardMessagePhotos, isMessagePhoto, messagePhotoPlacements, uploadMessagePhotos, type MessagePhoto } from './attachments'
+import { assertMessagePhotos, attachGuestPhotos, discardMessagePhotos, isMessagePhoto, listMessagePhotos, messagePhotoPlacements, sortGuestFiles, uploadMessagePhotos, type MessagePhoto } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import { getMediaAsset, readMediaPlacements } from '~/server/utils/media-asset-manager'
 import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
 import { downloadImageBuffer } from '~/server/utils/cloudflare-images'
 import { getGuestRequest, requestSummary, stayThreadQueries } from '~/server/domain/requests'
-import { notifyGuestThreadReply, notifyAirbnbInquiry } from '~/server/utils/notifications'
+import { isAirbnbSupportMessage, notifyGuestThreadReply, notifyAirbnbInquiry } from '~/server/utils/notifications'
 import { readAirbnbInquiry } from '~/server/integrations/channex/live-feed'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { planStayMessages } from '~/server/domain/scheduled-guest-messages'
 import type { GuestThreadEntryRow } from './types'
 
-type ChannelEnv = ChannexEnv & GuestInboxPublicationEnv & CloudflareEnv
+type ChannelEnv = ChannexEnv & GuestInboxPublicationEnv & CloudflareEnv & UploadResolvedMediaInput['env']
 interface HomeMapping { organization_id: string; product_id: string; property_id: string; channel_id: string; location_id: string; enabled: number }
 export interface ChannelThreadMapping { organization_id: string; product_id: string; request_id: string; external_thread_id: string; external_booking_id: string | null; moved_from_thread_id: string | null }
 
@@ -111,7 +111,7 @@ async function adoptThread(db: DbClient, env: ChannelEnv, home: HomeMapping, thr
   return saved
 }
 
-async function mirrorMessage(db: DbClient, mapping: ChannelThreadMapping, message: ChannexMessage): Promise<void> {
+async function mirrorMessage(db: DbClient, env: ChannelEnv, mapping: ChannelThreadMapping, message: ChannexMessage): Promise<void> {
   if (message.threadId !== mapping.external_thread_id) fail(502, 'INVALID_PROVIDER_RESPONSE', 'The message belongs to another conversation', 'relationships.message_thread')
   const delivery = await getDeliveryByProviderMessageId(db, 'channex', message.id)
   if (delivery) {
@@ -138,7 +138,56 @@ async function mirrorMessage(db: DbClient, mapping: ChannelThreadMapping, messag
     if (error instanceof GuestThreadEntryDedupeConflictError) fail(409, 'CHANNEL_MESSAGE_ID_CONFLICT', 'The provider message ID differs from its immutable recorded fact; review the conversation', 'message.id')
     throw error
   })
+  // Our own reply's echo carries the photo the reply already holds; only someone else's photos are fetched.
+  if (!delivery) await mirrorMessagePhotos(db, env, mapping.organization_id, entry.id, message.attachments)
   await updateThreadProjectionIfLatestEntry(db, mapping.request_id, entry.id, { conversationState: message.sender === 'property' ? 'waiting_on_guest' : 'needs_attention' })
+}
+
+/**
+ * Airbnb's photos, kept as our own media on the message they arrived with, so
+ * the conversation draws them inline and its gallery reads them. A Channex
+ * attachment link answers with a redirect to a signed download; the file is
+ * read once, when the message lands, and a message mirrored again finds its
+ * photos already placed. A file that is not a photo is not kept.
+ */
+async function mirrorMessagePhotos(db: DbClient, env: ChannelEnv, organizationId: string, entryId: string, links: string[]): Promise<void> {
+  if (!links.length || (await listMessagePhotos(db, 'activity_entry', [entryId])).has(entryId)) return
+  const files: MessagePhoto[] = []
+  for (const link of links) {
+    const response = await fetch(link)
+    if (!response.ok) fail(502, 'CHANNEL_ATTACHMENT_UNAVAILABLE', `Channex answered ${response.status} for a message attachment`, 'attachments')
+    // A file larger than a message photo is not kept, so it is never read past that size.
+    const bytes = await boundedBody(response, MAX_IMAGE_BYTES)
+    if (bytes) files.push({ filename: new URL(link).pathname.split('/').pop()!, bytes })
+  }
+  await attachGuestPhotos(db, env, organizationId, entryId, sortGuestFiles(files).photos)
+}
+
+/** The response's body, or null once it is larger than `limit`, read no further than that. */
+async function boundedBody(response: Response, limit: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  const declared = Number(response.headers.get('content-length'))
+  if (Number.isFinite(declared) && declared > limit) {
+    await response.body?.cancel()
+    return null
+  }
+  const chunks: Uint8Array[] = []
+  let total = 0
+  const reader = response.body?.getReader()
+  for (let chunk = reader ? await reader.read() : { done: true as const, value: undefined }; !chunk.done; chunk = await reader!.read()) {
+    total += chunk.value.byteLength
+    if (total > limit) {
+      await reader!.cancel()
+      return null
+    }
+    chunks.push(chunk.value)
+  }
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes
 }
 
 export async function mirrorChannexThread(db: DbClient, env: ChannelEnv, threadId: string, expectedPropertyId: string, assignedBookingId?: string, expectedMessageId?: string): Promise<{ status: 'mirrored'; request_id: string; messages: number } | { status: 'ignored_disconnected' }> {
@@ -152,7 +201,7 @@ export async function mirrorChannexThread(db: DbClient, env: ChannelEnv, threadI
   const mapping = await adoptThread(db, env, home, thread)
   // The provider query explicitly asks for ascending order. Keep its order; do not invent an absolute
   // ordering by converting offset-free timestamps through the server's timezone.
-  for (const message of messages) await mirrorMessage(db, mapping, message)
+  for (const message of messages) await mirrorMessage(db, env, mapping, message)
   await publishGuestInboxThreadEvent(env, db, { threadId: mapping.request_id, type: 'thread.changed' })
   // A booked conversation is the stay's conversation: its scheduled messages
   // follow the adopted request, and an open stay screen learns of the link.
@@ -201,19 +250,41 @@ export async function mirrorChannexMessageEvent(db: DbClient, env: ChannelEnv, v
     // The inquiry's own facts come from the event Channex holds, not the webhook body.
     const inquiry = await readAirbnbInquiry(env, inquiryId)
     if (inquiry.propertyId !== propertyId || inquiry.messageThreadId !== threadId) fail(409, 'CHANNEL_INQUIRY_MISMATCH', 'The inquiry belongs to another conversation', 'payload.live_feed_event_id')
-    const entry = await appendEntry(db, {
+    // Channex raises a new inquiry event each time the conversation moves (the
+    // host's reply raised Derek's a second time), so an inquiry is one per
+    // conversation and dates: a later event for the same dates is the same
+    // inquiry, recorded and alerted once.
+    const dedupeKey = `channex-inquiry:${mirrored.request_id}:${inquiry.checkInDate}:${inquiry.checkOutDate}`
+    // The same event redelivered finds its own entry and its alert, whose receipts send nothing twice.
+    const recorded = await findEntryByDedupeKey(db, dedupeKey)
+    if (recorded && parseEntryPayload(recorded)?.live_feed_event_id !== inquiry.id) return mirrored
+    const entry = recorded ?? await appendEntry(db, {
       threadId: mirrored.request_id, kind: 'operation', actorKind: 'guest', channel: 'airbnb', eventName: 'channel.inquiry_received',
-      dedupeKey: `channex-inquiry:${inquiry.id}`, body: `Asked on Airbnb about ${inquiry.checkInDate} to ${inquiry.checkOutDate}.`,
+      dedupeKey, body: null,
       payloadJson: { live_feed_event_id: inquiry.id, check_in_date: inquiry.checkInDate, check_out_date: inquiry.checkOutDate, nights: inquiry.nights,
         adults: inquiry.adults, children: inquiry.children, infants: inquiry.infants, pets: inquiry.pets, respond_by: inquiry.respondBy },
+    }).catch((error: unknown) => {
+      // A concurrent event for the same dates recorded it first; its alert is that entry's.
+      if (error instanceof GuestThreadEntryDedupeConflictError) return null
+      throw error
     })
+    if (!entry) return mirrored
     await notifyAirbnbInquiry(env, db, { threadId: mirrored.request_id, entryId: entry.id, inquiry })
     return mirrored
   }
   if (messageId === undefined) return mirrored
   // A moved conversation's history redelivered under new ids records no entry: there is nothing new to tell.
   const entry = await findEntryByDedupeKey(db, `channex-message:${messageId}`)
-  if (!entry || entry.actor_kind !== 'guest' || entry.request_id !== mirrored.request_id) return mirrored
+  // The guest's and Airbnb Support's messages alert the owners; the host's own Airbnb messages do not.
+  if (!entry || (entry.actor_kind !== 'guest' && !isAirbnbSupportMessage(entry)) || entry.request_id !== mirrored.request_id) return mirrored
+  // An inquiry opens with the guest's message, and Channex raises the inquiry
+  // event just after it (every unbooked conversation with a guest message in
+  // production has one, recorded after that message). The inquiry's alert
+  // carries the message, so its opening message is told once, there.
+  // A message of photos alone is not carried by the inquiry's alert, so it keeps its own.
+  if (entry.actor_kind === 'guest' && entry.body?.trim() && await queryFirst(db, `SELECT 1 FROM channel_threads ct WHERE ct.request_id = ? AND ct.external_booking_id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = ct.request_id AND e.kind = 'message' AND e.actor_kind = 'guest' AND e.sequence < ?)`,
+    [entry.request_id, entry.sequence])) return mirrored
   const request = await getGuestRequest(db, mirrored.request_id)
   if (!request) fail(500, 'CHANNEL_THREAD_MISSING', 'The mirrored conversation could not be read', 'request_id')
   const summary = await requestSummary(db, request)
