@@ -90,7 +90,7 @@ test('Upcoming removes a cancelled scheduled reply without a reload and keeps th
     await page.getByRole('tab', { name: 'Today', exact: true }).click()
     await expect(page.getByRole('tab', { name: 'Today', exact: true })).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByTestId('today-attention').locator(`[data-card-id="attention:${threadId}"]`)).toBeVisible()
-    await expect(page.getByTestId('today-completed').getByText(marker)).toHaveCount(0)
+    await expect(card).toHaveCount(0)
     await page.screenshot({ path: testInfo.outputPath('today-grouped-work.png'), fullPage: true, animations: 'disabled' })
   } finally {
     try {
@@ -347,7 +347,9 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
         await memberPage.getByRole('tab', { name: 'Today', exact: true }).click()
         await expect(memberPage.getByRole('tab', { name: 'Today', exact: true })).toHaveAttribute('aria-selected', 'true')
         await expect(memberPage.locator(`[data-card-id="reservation:${reservationId}"]`)).toHaveCount(0)
-        await expect(memberPage.locator(`[data-card-id="completed:booking:${reservationId}"]`)).toHaveAttribute('href', destination)
+        // The recorded completion is not a task on Today; its future visit
+        // remains available through the Upcoming card verified above.
+        await expect(memberPage.locator(`[data-card-id="completed:booking:${reservationId}"]`)).toHaveCount(0)
         const openedThread = memberPage.waitForResponse(response => response.request().method() === 'GET'
           && new URL(response.url()).pathname === `${inboxPath}/${reservationId}`)
         expect((await memberPage.goto(`${ORG}/messages/${reservationId}`))?.status()).toBe(200)

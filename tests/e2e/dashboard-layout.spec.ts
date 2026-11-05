@@ -1555,7 +1555,8 @@ test.describe('dashboard pane hierarchy', () => {
     const feedRead = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo', locationId: seededTenant('restaurant').locations.brooklyn.id } })
     expect(feedRead.status(), await feedRead.text()).toBe(200)
     const feed = await feedRead.json() as TodayFeedPayload
-    expect(feed.cards.length, 'The demo owner has real Today cards').toBeGreaterThan(0)
+    const activeCards = feed.cards.filter(card => card.completedAt === null)
+    expect(activeCards.length, 'The demo owner has real current work on Today').toBeGreaterThan(0)
     await page.setViewportSize(SHORT_PHONE)
     await open(page, `${ORG}?locationId=${seededTenant('restaurant').locations.brooklyn.id}`)
     const panel = page.locator('#dashboard-panel-org-today')
@@ -1567,16 +1568,16 @@ test.describe('dashboard pane hierarchy', () => {
     const bodyBox = await body.boundingBox()
     expect(bodyBox).not.toBeNull()
     await page.mouse.move(bodyBox!.x + 4, bodyBox!.y + bodyBox!.height / 2)
-    while (await cards.count() < feed.cards.length) {
+    while (await cards.count() < activeCards.length) {
       const count = await cards.count()
       await page.mouse.wheel(0, await body.evaluate(element => element.scrollHeight))
       await expect.poll(() => cards.count()).toBeGreaterThan(count)
     }
-    expect(await cards.evaluateAll(elements => elements.map(element => element.getAttribute('data-card-id')))).toEqual(feed.cards.map(card => card.id))
+    expect(await cards.evaluateAll(elements => elements.map(element => element.getAttribute('data-card-id')))).toEqual(activeCards.map(card => card.id))
     await page.mouse.wheel(0, await body.evaluate(element => element.scrollHeight))
     await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
     const last = cards.last()
-    await expect(last).toContainText(feed.cards.at(-1)!.headline)
+    await expect(last).toContainText(activeCards.at(-1)!.headline)
     const finalBody = (await body.boundingBox())!
     // Optional suggestions and the owner's priority form follow operational work.
     const priorityForm = panel.getByTestId('today-priorities').locator('form')
