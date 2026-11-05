@@ -350,8 +350,9 @@ async function sendReply() {
     sending.value = true
     actionError.value = null
     try {
-      await dashboardApi(`${threadPath.value}/send-later`, { method: 'POST', body: { body, sendAt: sendAt.value }, validate: isSendLaterResponse })
+      await dashboardApi(`${threadPath.value}/send-later`, { method: 'POST', body: { body, sendAt: sendAt.value, ...(usedSuggestion.value ? { suggestion: usedSuggestion.value } : {}) }, validate: isSendLaterResponse })
       draft.value = ''
+      usedSuggestion.value = null
       sendAt.value = null
       await refresh()
     } catch (err) {
