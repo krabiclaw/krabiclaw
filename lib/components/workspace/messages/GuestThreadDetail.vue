@@ -302,8 +302,9 @@ async function answerChange(requestId: string, decision: 'accept' | 'decline') {
       body: { thread_id: props.threadId, request_id: requestId, decision },
       validate: (value: unknown): value is BookingChangeView => isRecord(value) && ['accepted', 'declined'].includes(String(value.status)),
     })
-    await refresh()
-    if (error.value) throw error.value
+    // Read the conversation after the answer, not through a refresh that a read
+    // started before the answer could satisfy with the pending card.
+    data.value = await applicationFetch<{ thread: ThreadDetail }>(threadPath.value, { validate: isThreadDetailResponse })
     await refreshNuxtData(`account-activity:${session.value.data?.user.id}`)
   } catch (cause) {
     actionError.value = getErrorMessage(cause, 'Your answer could not be saved')
