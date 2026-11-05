@@ -3,13 +3,13 @@ import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/d
 import { listAgenda, listTodayAgenda, parseAgendaQuery, type AgendaQuery } from '~/server/utils/dashboard-agenda'
 import { getDashboardMemberContext, type DashboardOrganizationRow } from '~/server/utils/dashboard-context'
 import { memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
-import { businessReplyFollowsSql, firstUnansweredGuestEntryTimes, listOrganizationGuestThreads, successfulBusinessReplySql } from '~/server/domain/guest-threads/repository'
+import { firstUnansweredGuestEntryTimes, listOrganizationGuestThreads } from '~/server/domain/guest-threads/repository'
 import type { GuestThreadDeliveryRow, GuestThreadListItemViewModel } from '~/server/domain/guest-threads/types'
 import { readRecommendationDecisionInputs, readRecommendationDecisions } from '~/server/domain/business-progress'
 import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayDecision, type TodayFeedPayload } from '~/shared/dashboard-today'
 import type { BusinessGoal, RecommendationFeedback, RecommendationFeedbackView } from '~/shared/business-progress'
 import type { BusinessProgressOperation } from '~/shared/business-outcomes'
-import { formatTimestamp, isValidInstant, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
+import { formatTimestamp, isValidInstant, localDateAt } from '~/utils/timezone'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { blogEditorPath, bookingEditorPath, guestConversationPath, postEditorPath } from '~/server/utils/dashboard-links'
 import { loadOwnerPictures } from '~/server/notifications/hero'
@@ -187,25 +187,23 @@ async function messageCards(db: DbClient, organization: DashboardOrganizationRow
     const deliveries = receipts.filter(receipt => receipt.entry_id === row.entry_id && receipt.channel === row.entry_channel
       && receipt.purpose === (row.automatic ? 'scheduled_message' : 'member_reply'))
     const deliveryFailure = deliveries.find(isVisibleDeliveryFailure)
-    const failed = row.status === 'failed' || row.status === 'needs_review' || Boolean(deliveryFailure)
-    const completed = row.status === 'sent' && !failed
-    const failureReason = row.reason ?? deliveryFailure?.error
-    if (!row.automatic && row.user_id !== organization.userId && !completed) return []
-    if (completed) {
-      if (!row.sent_at || !row.entry_id) throw new Error(`Sent message ${row.id} has no completion record`)
-      if (!inWindow(row.sent_at, zone, input, now) || input.range !== 'today') return []
-      if (row.entry_channel !== 'web' && !deliveries.some(receipt => receipt.provider !== 'log_only' && isDeliverySent(receipt))) return []
-    } else if (failed) {
+    const sent = row.status === 'sent'
+    if (sent && (!isValidInstant(row.sent_at) || !row.entry_id)) throw new Error(`Sent message ${row.id} has no completion record`)
+    const unconfirmed = sent && row.entry_channel !== 'web' && !deliveries.some(receipt => receipt.provider !== 'log_only' && isDeliverySent(receipt))
+    const failed = row.status === 'failed' || row.status === 'needs_review' || Boolean(deliveryFailure) || unconfirmed
+    const failureReason = row.reason ?? deliveryFailure?.error ?? (unconfirmed ? 'No successful delivery is recorded for this message.' : null)
+    if (!row.automatic && row.user_id !== organization.userId && !sent) return []
+    if (sent && !failed) return []
+    if (failed) {
       if (input.range !== 'today') return []
       if (!failureReason) throw new Error(`Failed message ${row.id} has no recorded reason`)
     } else if (!row.due_at || !inWindow(row.due_at, timeZone, input, now, true)) return []
     const automaticLabel = row.automatic ? 'Automatic' : row.user_id === organization.userId ? 'Scheduled by you' : 'Scheduled reply'
-    const status = completed ? 'Sent' : failed ? row.status === 'needs_review' || row.status === 'sent' ? 'Delivery needs attention' : 'Message failed' : row.status === 'sending' ? 'Sending' : 'Scheduled'
+    const status = failed ? row.status === 'needs_review' || sent ? 'Delivery needs attention' : 'Message failed' : row.status === 'sending' ? 'Sending' : 'Scheduled'
     const values = { id: `${row.automatic ? 'automatic-message' : 'send-later'}:${row.id}`, priority: failed ? 'attention' as const : 'schedule' as const,
       eyebrow: `${status} · ${automaticLabel}`, headline: `${row.title}${name ? ` for ${name}` : ''}`,
-      reason: failed ? failureReason : completed ? row.entry_channel === 'web' ? 'Sent in the conversation.' : 'The provider accepted the message.'
-        : `${automaticLabel}${row.due_at ? ` · ${formatTimestamp(row.due_at, 'en', timeZone, { dateStyle: 'medium', timeStyle: 'short' })}` : ''}`,
-      actionAt: completed || failed ? null : row.due_at, completedAt: completed ? row.sent_at : null, timeZone,
+      reason: failed ? failureReason : `${automaticLabel}${row.due_at ? ` · ${formatTimestamp(row.due_at, 'en', timeZone, { dateStyle: 'medium', timeStyle: 'short' })}` : ''}`,
+      actionAt: failed ? null : row.due_at, timeZone,
       ...(row.automatic ? { stayId: row.stay_id, productId: row.product_id } : {}),
     }
     return [thread ? threadCard(thread, values, organization) : card({ ...values,
@@ -245,103 +243,6 @@ async function deliveryAttentionCards(db: DbClient, organization: DashboardOrgan
       imageIcon: 'i-lucide-message-circle-warning' }, organization))
   }
   return [...cards.values()]
-}
-
-/** One conversation, visit, booking or change is one completed concern, regardless of retry count. */
-async function completedCards(db: DbClient, organization: DashboardOrganizationRow, threads: GuestThreadListItemViewModel[], zone: string, now: Date): Promise<TodayCard[]> {
-  if (!threads.length) return []
-  const ids = d1JsonStringSet(threads.map(thread => thread.id)), byId = new Map(threads.map(thread => [thread.id, thread]))
-  const day = localDateAt(now, zone), from = localDateTimeToInstant(day, '00:00', zone, 'compatible').toISOString()
-  const rows = await queryAll<{ id: string; request_id: string; event_name: string; channel: string | null; occurred_at: string; provider_at: string | null; proposal_id: string | null }>(db, `
-    SELECT e.id,e.request_id,e.event_name,e.channel,e.occurred_at,json_extract(e.payload_json,'$.provider_inserted_at') AS provider_at,
-      json_extract(e.payload_json,'$.requestId') AS proposal_id
-      FROM activity_entries e JOIN requests r ON r.id=e.request_id
-     WHERE r.organization_id=? AND e.request_id IN (SELECT value FROM json_each(?)) AND e.occurred_at>=? AND e.occurred_at<=?
-       AND ((${successfulBusinessReplySql('e')} AND EXISTS (
-         SELECT 1 FROM activity_entries guest WHERE guest.request_id=e.request_id AND guest.actor_kind='guest'
-           AND (guest.kind='message' OR (guest.kind='submission' AND r.kind='contact')) AND ${businessReplyFollowsSql('e', 'guest')}
-       )) OR e.event_name IN ('booking.confirm','booking.reject','reservation.confirm','reservation.reject','booking_change.accepted','booking_change.declined','booking_change.moved'))
-       AND NOT EXISTS (SELECT 1 FROM scheduled_guest_messages m WHERE m.entry_id=e.id)
-       AND NOT EXISTS (SELECT 1 FROM send_later_messages m WHERE m.entry_id=e.id)
-     ORDER BY e.occurred_at,e.id`, [organization.id, ids, from, now.toISOString()])
-  const deliveries = rows.length ? await queryAll<GuestThreadDeliveryRow>(db, 'SELECT * FROM guest_thread_deliveries WHERE entry_id IN (SELECT value FROM json_each(?))', [d1JsonStringSet(rows.map(row => row.id))]) : []
-  const result = new Map<string, TodayCard>()
-  for (const row of rows) {
-    const thread = byId.get(row.request_id)!
-    const reply = row.event_name === 'thread.member_reply' || row.event_name === 'channel.message_mirrored'
-    // An imported reply's original date must be known; arrival/backfill time is not work completed today.
-    const at = row.event_name === 'channel.message_mirrored' ? isValidInstant(row.provider_at) ? new Date(row.provider_at).toISOString() : null : row.occurred_at
-    if (!at || !inWindow(at, zone, { range: 'today' }, now)) continue
-    // Direct decisions store no activity channel and notify by email; channel decisions have their own landed/acknowledged proof below.
-    const channel = row.channel ?? (reply ? null : 'email')
-    if ((!reply || row.event_name === 'thread.member_reply' && channel !== 'web') && !deliveries.some(receipt => receipt.entry_id === row.id
-      && receipt.channel === channel && receipt.purpose === (reply ? 'member_reply' : 'status_update') && receipt.provider !== 'log_only'
-      && isDeliverySent(receipt) && !isVisibleDeliveryFailure(receipt))) continue
-    const key = reply ? `reply:${row.request_id}` : row.proposal_id ? `change:${row.proposal_id}` : `decision:${row.request_id}`
-    const name = thread.guestName ?? thread.participantLabel
-    const noun = thread.submissionType === 'stay' ? 'stay' : thread.submissionType === 'contact' ? 'request' : resolveBookingPresentation(thread.submissionType, organization.vertical).noun
-    const action = reply ? `Replied to ${name}` : row.event_name.endsWith('reject') || row.event_name.endsWith('declined') ? `Declined ${name}’s ${noun}${row.proposal_id ? ' change' : ''}`
-      : row.proposal_id || row.event_name === 'booking_change.moved' ? `Changed ${name}’s ${noun}` : `Confirmed ${name}’s ${noun}`
-    if (!result.has(key) || result.get(key)!.completedAt! > at) result.set(key, threadCard(thread, { id: `completed:${key}`, eyebrow: reply ? 'Reply sent' : 'Decision completed', headline: action,
-      ...(!reply && (thread.submissionType === 'booking' || thread.submissionType === 'reservation') ? { to: bookingEditorPath(organization.slug, thread.submissionType, thread.id) } : {}),
-      completedAt: at, reason: reply ? 'A successful business reply is recorded in this conversation.' : 'The decision and its guest notification are recorded.' }, organization))
-  }
-  const created = await queryAll<{ request_id: string; created_at: string }>(db, `
-    SELECT r.id AS request_id,r.created_at FROM requests r WHERE r.organization_id=? AND r.id IN (SELECT value FROM json_each(?))
-      AND r.kind IN ('booking','reservation') AND r.created_at>=? AND r.created_at<=?
-      AND json_extract(r.payload_json,'$.provenance.creation_status')='confirmed'
-      AND json_extract(r.payload_json,'$.provenance.followups_completed')=1`, [organization.id, ids, from, now.toISOString()])
-  for (const row of created) {
-    const thread = byId.get(row.request_id)!
-    if (thread.operationalStatus !== 'confirmed' || result.has(`decision:${row.request_id}`)) continue
-    const noun = resolveBookingPresentation(thread.submissionType === 'reservation' ? 'reservation' : 'booking', organization.vertical).noun
-    result.set(`booking:${row.request_id}`, threadCard(thread, { id: `completed:booking:${row.request_id}`, eyebrow: 'Booking received',
-      to: bookingEditorPath(organization.slug, thread.submissionType === 'reservation' ? 'reservation' : 'booking', thread.id),
-      headline: `${noun[0]!.toUpperCase()}${noun.slice(1)} received for ${thread.guestName ?? thread.participantLabel}`,
-      completedAt: row.created_at, reason: 'The confirmed booking and its required follow-through are recorded.' }, organization))
-  }
-  // Channel acceptance is complete only once the exact proposed terms landed and the provider revision was acknowledged.
-  const fields = ['check_in_date', 'check_out_date', 'adults', 'children', 'infants', 'total_minor']
-  const channelChanges = await queryAll<{ request_id: string; proposal_id: string; completed_at: string }>(db, `
-    SELECT e.request_id,proposal.id AS proposal_id,MIN(MAX(e.occurred_at,audit.occurred_at,sync.created_at)) AS completed_at
-      FROM activity_entries e JOIN requests r ON r.id=e.request_id AND r.organization_id=?
-      JOIN activity_entries proposal ON proposal.id=json_extract(e.payload_json,'$.requestId') AND proposal.request_id=e.request_id
-      JOIN activity_entries audit ON audit.scope_kind='organization' AND audit.organization_id=r.organization_id AND audit.event_name='stay.updated'
-        AND json_extract(audit.payload_json,'$.entityId')=json_extract(proposal.payload_json,'$.stay_id')
-        AND json_extract(audit.payload_json,'$.metadata.provider')='channex'
-        AND json_extract(audit.payload_json,'$.metadata.external_booking_id')=json_extract(proposal.payload_json,'$.booking_id')
-      JOIN channel_sync_log sync ON sync.organization_id=r.organization_id AND sync.provider='channex' AND sync.direction='inbound'
-        AND sync.kind='booking_revision' AND sync.status='acknowledged' AND sync.external_id=json_extract(audit.payload_json,'$.metadata.revision_id')
-     WHERE e.request_id IN (SELECT value FROM json_each(?)) AND e.event_name='booking_change.accepted' AND e.channel='airbnb'
-       AND proposal.event_name='booking_change.requested' AND audit.occurred_at>=proposal.occurred_at
-       AND json_extract(audit.payload_json,'$.metadata.terms.status')='confirmed' AND json_extract(audit.payload_json,'$.metadata.terms.overbooked')=0
-       AND ${fields.map(field => `json_extract(audit.payload_json,'$.metadata.terms.${field}') IS json_extract(proposal.payload_json,'$.after.${field}') AND json_extract(audit.payload_json,'$.metadata.previous_terms.${field}') IS json_extract(proposal.payload_json,'$.before.${field}')`).join(' AND ')}
-       AND (${fields.map(field => `json_extract(proposal.payload_json,'$.after.${field}') IS NOT json_extract(proposal.payload_json,'$.before.${field}')`).join(' OR ')})
-     GROUP BY e.request_id,proposal.id HAVING completed_at>=? AND completed_at<=?`, [organization.id, ids, from, now.toISOString()])
-  for (const row of channelChanges) {
-    const thread = byId.get(row.request_id)!
-    result.set(`change:${row.proposal_id}`, threadCard(thread, { id: `completed:change:${row.proposal_id}`, eyebrow: 'Booking change completed',
-      headline: `Changed ${thread.guestName ?? thread.participantLabel}’s stay`, completedAt: row.completed_at,
-      reason: 'The agreed Airbnb terms are stored and the provider revision was acknowledged.' }, organization))
-  }
-  const reviews = await queryAll<{ request_id: string; first_sent_at: string }>(db, `
-    SELECT rr.booking_id AS request_id,MIN(rr.first_sent_at) AS first_sent_at FROM review_requests rr
-     WHERE rr.organization_id=? AND rr.booking_id IN (SELECT value FROM json_each(?)) AND rr.first_sent_at IS NOT NULL
-     GROUP BY rr.organization_id,rr.booking_type,rr.booking_id HAVING MIN(rr.first_sent_at)>=? AND MIN(rr.first_sent_at)<=?`, [organization.id, ids, from, now.toISOString()])
-  const reviewDeliveries = reviews.length ? await queryAll<GuestThreadDeliveryRow & { request_id: string; first_sent_at: string }>(db, `
-    SELECT d.*,rr.booking_id AS request_id,rr.first_sent_at FROM review_requests rr
-      JOIN activity_entries e ON e.request_id=rr.booking_id AND e.event_name='review.requested' AND e.dedupe_key='review-request:' || rr.id
-      JOIN guest_thread_deliveries d ON d.entry_id=e.id AND d.channel='email' AND d.purpose='status_update'
-     WHERE rr.organization_id=? AND rr.booking_id IN (SELECT value FROM json_each(?))`, [organization.id, d1JsonStringSet(reviews.map(row => row.request_id))]) : []
-  for (const row of reviews) {
-    if (!reviewDeliveries.some(receipt => receipt.request_id === row.request_id && receipt.first_sent_at === row.first_sent_at
-      && receipt.provider !== 'log_only' && isDeliverySent(receipt) && !isVisibleDeliveryFailure(receipt))) continue
-    const thread = byId.get(row.request_id)!
-    result.set(`review:${row.request_id}`, threadCard(thread, { id: `completed:review:${row.request_id}`, eyebrow: 'Sent automatically',
-      headline: `Review invitation sent to ${thread.guestName ?? thread.participantLabel}`, completedAt: row.first_sent_at,
-      reason: 'One invitation for this visit; reminders and delivery retries are not separate completions.' }, organization))
-  }
-  return [...result.values()].sort((a, b) => b.completedAt!.localeCompare(a.completedAt!) || a.id.localeCompare(b.id))
 }
 
 async function reviewCards(db: DbClient, organization: DashboardOrganizationRow, threads: GuestThreadListItemViewModel[], input: TodayFeedQuery, now: Date, env: Parameters<typeof hasOrganizationEntitlement>[0]): Promise<TodayCard[]> {
@@ -461,9 +362,8 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
   ])
   const unanswered = await firstUnansweredGuestEntryTimes(db, organization.id, records.map(thread => thread.id))
   const threads = records.map(thread => threadWork(thread, unanswered.get(thread.id), organization, zone, now)).filter((work): work is Work => work !== null)
-  const [messages, completed, reviews, deliveryFailures] = await Promise.all([
+  const [messages, reviews, deliveryFailures] = await Promise.all([
     messageCards(db, organization, records, input, zone, now, organizationWide && await roleAllows({ ...organization, permissions: { operations: ['update'] } })),
-    input.range === 'today' ? completedCards(db, organization, records, zone, now) : [],
     organizationWide && await roleAllows({ ...organization, permissions: { operations: ['update'] } }) ? reviewCards(db, organization, records, input, now, env) : [],
     input.range === 'today' ? deliveryAttentionCards(db, organization, records, unanswered) : [],
   ])
@@ -524,8 +424,8 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
   }
   const chosen = optional.sort(byRank).slice(0, OPTIONAL_LIMIT).map(item => item.card)
   const deliveryFailureIds = new Set(deliveryFailures.map(item => item.id))
-  const cards = [...due.filter(item => !deliveryFailureIds.has(item.id)), ...deliveryFailures, ...failures, ...messages, ...reviews.filter(item => !deliveryFailureIds.has(item.id)), ...scheduleCards.filter(item => !handledRequests.has(item.id.slice(item.id.indexOf(':') + 1))), ...planned.sort((a, b) => a.actionAt!.localeCompare(b.actionAt!)), ...completed.filter(item => !item.id.startsWith('completed:review:') || !deliveryFailureIds.has(`review-invitation:${item.id.slice('completed:review:'.length)}`)), ...chosen]
-  const rank = (item: TodayCard) => item.priority === 'attention' ? 0 : item.priority === 'opportunity' ? 3 : item.completedAt ? 2 : 1
+  const cards = [...due.filter(item => !deliveryFailureIds.has(item.id)), ...deliveryFailures, ...failures, ...messages, ...reviews.filter(item => !deliveryFailureIds.has(item.id)), ...scheduleCards.filter(item => !handledRequests.has(item.id.slice(item.id.indexOf(':') + 1))), ...planned.sort((a, b) => a.actionAt!.localeCompare(b.actionAt!)), ...chosen]
+  const rank = (item: TodayCard) => item.priority === 'attention' ? 0 : item.priority === 'opportunity' ? 2 : 1
   cards.sort((a, b) => rank(a) - rank(b))
   return todayFeedSchema.parse({ cards, availableKinds, locations, resolvedAt, priorities })
 }

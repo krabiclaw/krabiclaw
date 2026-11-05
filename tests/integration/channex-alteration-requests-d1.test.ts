@@ -187,7 +187,7 @@ test('a guest change request lands once in the stay conversation, survives a rel
       after: { whenLabel: 'Jan 10, 2027 – Jan 14, 2027', partySize: 3, totalLabel: '$600.00', assignedMemberId: null, assignedMemberName: null },
     })
     assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-13', adults: 2, total_minor: 45_000, version: 1 })
-    assert.equal((await today()).cards.some(card => card.id === `completed:change:${request!.id}`), false, 'a proposal is not a completed change')
+    assert.deepEqual((await today()).cards.map(card => card.id), [`attention:${stay.request_id}`])
 
     // A member who cannot change stays is refused before Channex hears anything.
     await assert.rejects(answer(db, env, stay.request_id, request!.id, 'accept_change', false), (error: unknown) => (error as { data?: { code?: string } }).data?.code === 'STAY_ROLE_REQUIRED')
@@ -202,16 +202,15 @@ test('a guest change request lands once in the stay conversation, survives a rel
     assert.deepEqual(channex.acked, ['rev-1', 'rev-2'])
     const answered = (await getGuestThreadDetail(db, stay.request_id, ORG))!.entries.find(entry => entry.id === request!.id)!.bookingChange!
     assert.equal(answered.status, 'accepted')
-    const completed = (await today()).cards.filter(card => card.id === `completed:change:${request!.id}`)
-    assert.equal(completed.length, 1, 'the actual landed, acknowledged change appears once in Today')
-    assert.ok(completed[0]!.completedAt)
-    assert.match(completed[0]!.reason!, /agreed Airbnb terms are stored and the provider revision was acknowledged/)
+    // The accepted change is recorded above; the guest's separate unanswered
+    // message remains the only action, rather than adding completion history.
+    assert.deepEqual((await today()).cards.map(card => card.id), [`attention:${stay.request_id}`])
 
     // Answering again, or the feed seeing it resolved, changes nothing and sends nothing to Channex.
     assert.equal((await answer(db, env, stay.request_id, request!.id, 'accept_change')).ok, true)
     assert.deepEqual(await runAlterationRequestFeed(db, env), { recorded: 0, reconciled: 0 })
     assert.equal(channex.resolutions.length, 1)
-    assert.equal((await today()).cards.filter(card => card.id === `completed:change:${request!.id}`).length, 1)
+    assert.deepEqual((await today()).cards.map(card => card.id), [`attention:${stay.request_id}`])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

@@ -202,8 +202,8 @@ const priorityBusy = ref<string | null>(null)
 const decisionError = ref<unknown>(null)
 const allRangeItems = computed(() => activeRange.value === 'today' ? todayCards.value : upcomingItems.value)
 // Only a current stay has no occurrence/action instant in the canonical agenda.
-const isHosting = (card: TodayCard) => !card.completedAt && card.priority === 'schedule' && card.bookingKind === 'stay' && card.occurrenceAt === null && card.actionAt === null
-const dayItems = computed(() => todayCards.value.filter(card => props.personalScope || (!card.completedAt && !isHosting(card))))
+const isHosting = (card: TodayCard) => card.priority === 'schedule' && card.bookingKind === 'stay' && card.occurrenceAt === null && card.actionAt === null
+const dayItems = computed(() => todayCards.value.filter(card => props.personalScope || !isHosting(card)))
 const visibleItems = computed(() => (activeRange.value === 'today' ? dayItems.value.slice(0, todayVisibleCount.value) : upcomingItems.value).map(cardWithContext))
 const hostingItems = computed(() => props.personalScope || activeRange.value !== 'today' ? [] : todayCards.value.filter(isHosting).map(cardWithContext))
 const attentionItems = computed(() => visibleItems.value.filter(card => card.priority === 'attention'))

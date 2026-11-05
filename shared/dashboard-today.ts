@@ -29,7 +29,7 @@ export const todayCardSchema = z.object({
   occurrenceAt: z.iso.datetime({ offset: true }).nullable(), timeZone: z.string().nullable(),
   /** When the work itself should be done, when that differs from the occurrence it serves. Upcoming orders by this before occurrenceAt. */
   actionAt: z.iso.datetime({ offset: true }).nullable(),
-  /** A verified, recorded completion. Completed work is not an outstanding action. */
+  /** Active work has no completion instant; completed work leaves the action feed. */
   completedAt: z.iso.datetime({ offset: true }).nullable(),
   /** Why this work is here now, in terms of the recorded facts, the owner's priority and their earlier decisions. */
   reason: z.string().nullable(),
