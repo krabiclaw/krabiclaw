@@ -5,7 +5,8 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { threadPayloadForGuest, requestInsertQueries, cancelBookingRequest, getGuestRequest, getThreadOperationalRecord } from '../../server/domain/requests.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
-import { getGuestThreadOperationSummary, listGuestThreads, updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
+import { countUnreadInboxThreads, listGuestThreads, listOrganizationGuestThreads, updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
+import { getInboxThreadDetails } from '../../server/domain/guest-threads/inbox.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { resolveGuestThreadMailbox } from '../../server/domain/guest-threads/mailbox.ts'
@@ -13,11 +14,17 @@ import { claimReservation, requireLocationReservationConfig, upsertLocationReser
 import { CapacityUnavailableError, claimSessionCapacity, setBookingStatus } from '../../server/utils/availability.ts'
 import { buildCanonicalNotificationInsert } from '../../server/utils/notification-center.ts'
 import { acknowledgeNotification, acknowledgeThreadNotifications } from '../../server/utils/notification-acknowledgement.ts'
+import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
+import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
 const ORG = 'org-proof'
 const LOCATION = 'location-proof'
 const ACTOR = 'user-proof'
 const NOW = '2026-09-11T00:00:00.000Z'
+/** The owner, as every dashboard and MCP read is scoped: through their membership. */
+const OWNER = memberAccessPrincipal({ userId: ACTOR, organizationId: ORG, role: 'owner' }, { env: {} as CloudflareEnv })
+/** The attention read Today and MCP share: conversations that need the business, from their real facts. */
+const needsAttention = (db: D1Database) => listOrganizationGuestThreads(db, { organizationId: ORG, principal: OWNER, userId: ACTOR, conversationState: 'needs_attention' })
 
 /**
  * A thread carries the conversation; a booking or reservation holds the seats.
@@ -91,8 +98,9 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     assert.equal(record?.party_size, 1)
     assert.equal(record?.starts_at, '2099-01-05T07:00:00.000Z')
 
-    const inbox = await listGuestThreads(db, ORG, { userId: ACTOR, locationId: LOCATION, type: 'booking', search: 'guest@proof.example' })
+    const inbox = await listGuestThreads(db, ORG, { userId: ACTOR, locationId: LOCATION, type: 'booking', q: 'guest' })
     assert.deepEqual(inbox.map(item => item.id), [winner])
+    assert.deepEqual(await listGuestThreads(db, ORG, { userId: ACTOR, locationId: LOCATION, type: 'booking', q: 'nobody' }), [])
 
     // Cancelling is idempotent: the same operation key twice writes one entry.
     // A booking arrives confirmed and is complete once its end passes, so
@@ -157,13 +165,13 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     // Reading attention must consult its real cancellation fact, without
     // rewriting the row or treating its older guest message as new work.
     await db.prepare("UPDATE requests SET conversation_state='needs_attention',resolved_at=NULL WHERE id=?").bind(reservationThread).run()
-    assert.deepEqual((await listGuestThreads(db, ORG, { userId: ACTOR, conversationState: 'needs_attention' })).map(thread => thread.id), [])
+    assert.deepEqual((await needsAttention(db)).map(thread => thread.id), [])
     assert.equal((await getGuestRequest(db, reservationThread))?.conversation_state, 'needs_attention')
-    assert.equal((await listGuestThreads(db, ORG, { userId: ACTOR })).find(thread => thread.id === reservationThread)?.operationalStatus, 'cancelled')
+    assert.equal((await listOrganizationGuestThreads(db, { organizationId: ORG, principal: OWNER, userId: ACTOR })).find(thread => thread.id === reservationThread)?.operationalStatus, 'cancelled')
 
     const guestReply = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'When will my refund arrive?', occurredAt: '2098-01-02T00:00:00.000Z' })
     await updateThreadProjectionIfLatestEntry(db, reservationThread, guestReply.id, { conversationState: 'needs_attention' })
-    assert.deepEqual((await listGuestThreads(db, ORG, { userId: ACTOR, conversationState: 'needs_attention' })).map(thread => thread.id), [reservationThread])
+    assert.deepEqual((await needsAttention(db)).map(thread => thread.id), [reservationThread])
     const retry = await cancelBookingRequest(db, { id: reservationThread, organizationId: ORG, kind: 'reservation', tokenHash: 'hash', now: '2098-01-03T00:00:00.000Z' })
     assert.equal(retry?.changed, false)
     assert.equal((await getGuestRequest(db, reservationThread))?.conversation_state, 'needs_attention')
@@ -175,15 +183,15 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     const failedReply = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'member', actorUserId: ACTOR, channel: 'email', eventName: 'thread.member_reply', body: 'Your refund is on its way.', occurredAt: '2098-01-04T00:00:00.000Z' })
     const receipt = await createDeliveryReceipt(db, { entryId: failedReply.id, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'cancelled-reply-delivery' })
     await recordDeliveryOutcome(db, { deliveryId: receipt.id, status: 'failed', error: 'Delivery refused' })
-    const stillNeedsReply = await listGuestThreads(db, ORG, { userId: ACTOR, conversationState: 'needs_attention' })
+    const stillNeedsReply = await needsAttention(db)
     assert.deepEqual(stillNeedsReply.map(thread => thread.id), [reservationThread])
     assert.equal(stillNeedsReply[0]?.latestMessageFromGuest, false)
     await recordDeliveryOutcome(db, { deliveryId: receipt.id, status: 'sent', providerMessageId: 'delivered-cancelled-reply' })
-    assert.deepEqual((await listGuestThreads(db, ORG, { userId: ACTOR, conversationState: 'needs_attention' })).map(thread => thread.id), [])
+    assert.deepEqual((await needsAttention(db)).map(thread => thread.id), [])
     const nextQuestion = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Thank you. Can you send the receipt?', occurredAt: '2098-01-05T00:00:00.000Z' })
     await updateThreadProjectionIfLatestEntry(db, reservationThread, nextQuestion.id, { conversationState: 'needs_attention' })
     const webReply = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'member', actorUserId: ACTOR, channel: 'web', eventName: 'thread.member_reply', body: 'Here is your receipt.', occurredAt: '2098-01-06T00:00:00.000Z' })
-    assert.deepEqual((await listGuestThreads(db, ORG, { userId: ACTOR, conversationState: 'needs_attention' })).map(thread => thread.id), [])
+    assert.deepEqual((await needsAttention(db)).map(thread => thread.id), [])
     await updateThreadProjectionIfLatestEntry(db, reservationThread, webReply.id, { conversationState: 'resolved', preserveUnansweredGuestMessages: true })
     assert.equal((await getGuestRequest(db, reservationThread))?.conversation_state, 'resolved', 'a committed web reply needs no external delivery receipt')
 
@@ -278,9 +286,10 @@ test('archive and unarchive file a conversation without touching its booking, st
         ? { subject: null, message, consent_at: null, ip_hash: null }
         : { party_size_is_minimum: false, notes: null, ip_hash: null, cancellation: { token_hash: null, expires_at: null, used_at: null } }),
     })
-    const thread = (id: string, kind: string, updatedAt: string) =>
+    // A conversation's activity is its last message, or its opening when nobody has written since.
+    const thread = (id: string, kind: string, openedAt: string) =>
       `INSERT INTO requests (id,kind,organization_id,location_id,conversation_state,payload_json,created_at,updated_at)
-       VALUES ('${id}','${kind}','${ORG}','${LOCATION}','needs_attention','${guest(id, kind === 'contact' ? 'Hello' : undefined)}','${NOW}','${updatedAt}')`
+       VALUES ('${id}','${kind}','${ORG}','${LOCATION}','needs_attention','${guest(id, kind === 'contact' ? 'Hello' : undefined)}','${openedAt}','${openedAt}')`
     const reservation = (id: string, [startsAt, endsAt]: string[]) =>
       `INSERT INTO reservations (id,organization_id,location_id,request_id,timezone,starts_at,ends_at,party_size,created_at,updated_at)
        VALUES ('row-${id}','${ORG}','${LOCATION}','${id}','Asia/Bangkok','${startsAt}','${endsAt}',2,'${NOW}','${NOW}')`
@@ -293,6 +302,7 @@ test('archive and unarchive file a conversation without touching its booking, st
     await db.batch([
       `INSERT INTO organization (id,name,slug, default_currency, timezone) VALUES ('${ORG}','Proof','proof', 'USD', 'UTC'), ('org-foreign','Foreign','foreign', 'USD', 'UTC')`,
       `INSERT INTO user (id,name,email) VALUES ('${ACTOR}','Proof','owner@proof.example')`,
+      `INSERT INTO member (id,organizationId,userId,role,createdAt) VALUES ('member-proof','${ORG}','${ACTOR}','owner',0)`,
       `INSERT INTO business_locations (id,organization_id,slug,title,timezone) VALUES ('${LOCATION}','${ORG}','proof','Proof','Asia/Bangkok')`,
       `INSERT INTO products (kind, id,organization_id,name,slug,created_by,updated_by) VALUES ('experience', 'product-proof','${ORG}','Pottery Class','pottery-class','${ACTOR}','${ACTOR}')`,
       `INSERT INTO product_variants (id,organization_id,product_id,name,created_by,updated_by) VALUES ('variant-proof','${ORG}','product-proof','Standard','${ACTOR}','${ACTOR}')`,
@@ -319,8 +329,13 @@ test('archive and unarchive file a conversation without touching its booking, st
       `UPDATE requests SET archived_at='1999-12-31T00:00:00.000Z', archived_by_user_id='${ACTOR}' WHERE id='ended-archived'`,
     ].map(statement => db.prepare(statement)))
 
-    const list = async (mailbox: 'current' | 'past') => listGuestThreads(db, ORG, { userId: ACTOR, mailbox })
-    const ids = async (mailbox: 'current' | 'past') => (await list(mailbox)).map(row => row.id)
+    const ids = async (mailbox: 'current' | 'past', unreadOnly = false) => (await listGuestThreads(db, ORG, { userId: ACTOR, mailbox, unreadOnly })).map(row => row.id)
+    // What the conversation's sheet offers: Archive, or Move to messages.
+    const filing = async (id: string) => {
+      const details = await getInboxThreadDetails(db, id, ORG, { audience: 'member', userId: ACTOR, principal: OWNER })
+      assert.ok(details, id)
+      return { archive: details.actions.archive, unarchive: details.actions.unarchive }
+    }
     const row = (id: string) => db.prepare('SELECT archived_at, archived_by_user_id, conversation_state, resolved_at, updated_at FROM requests WHERE id=?').bind(id).first()
     const recordRow = (id: string) => db.prepare('SELECT * FROM reservations WHERE request_id=?').bind(id).first()
     const entries = (id: string, eventName: string) => db.prepare("SELECT count(*) AS n FROM activity_entries WHERE request_id=? AND kind='operation' AND event_name=?").bind(id, eventName).first('n')
@@ -331,16 +346,22 @@ test('archive and unarchive file a conversation without touching its booking, st
     // Ordered by conversation activity, and split by the end of each occurrence.
     assert.deepEqual(await ids('current'), ['newest', 'booking-future', 'ongoing', 'future', 'contact'])
     assert.deepEqual(await ids('past'), ['booking-ended', 'ended-archived', 'ended'])
-    const past = new Map((await list('past')).map(item => [item.id, item]))
     assert.deepEqual(
-      [past.get('ended'), past.get('ended-archived')].map(item => [item?.mailbox, item?.manuallyArchived, item?.canArchive, item?.canUnarchive]),
-      [['past', false, false, false], ['past', true, false, false]],
+      [await filing('ended'), await filing('ended-archived'), (await row('ended'))?.archived_at, typeof (await row('ended-archived'))?.archived_at],
+      [{ archive: false, unarchive: false }, { archive: false, unarchive: false }, null, 'string'],
       'an ended occurrence is Past whether or not it was archived, and cannot be moved back',
     )
-    assert.equal((await list('current')).every(item => item.mailbox === 'current' && item.canArchive && !item.canUnarchive), true)
-    // The counts beside a mailbox are that mailbox's.
-    assert.equal((await getGuestThreadOperationSummary(db, ORG, { userId: ACTOR, mailbox: 'current' })).openThreads, 5)
-    assert.equal((await getGuestThreadOperationSummary(db, ORG, { userId: ACTOR, mailbox: 'past' })).openThreads, 3)
+    for (const id of await ids('current')) assert.deepEqual(await filing(id), { archive: true, unarchive: false }, id)
+    // The unread counts beside the inbox are the Current mailbox's: a guest who wrote about an ended dinner is in Past, not counted.
+    // Each message is written at its conversation's own activity time, so the order above holds.
+    for (const [id, at] of [['future', '2026-09-02T00:00:00.000Z'], ['ended', '2026-09-04T00:00:00.000Z']] as const) {
+      const message = await appendEntry(db, { threadId: id, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Is parking nearby?', occurredAt: at })
+      const alert = buildCanonicalNotificationInsert({ scope: 'organization', organizationId: ORG, title: 'Message', template: 'guest.reply', sourceEntryId: message.id }, `alert-${id}`)
+      await db.prepare(alert.query).bind(...alert.params).run()
+    }
+    assert.deepEqual(await ids('current'), ['newest', 'booking-future', 'ongoing', 'future', 'contact'])
+    assert.deepEqual([await ids('current', true), await ids('past', true)], [['future'], ['ended']])
+    assert.deepEqual(await countUnreadInboxThreads(db, ORG, { userId: ACTOR }), { all: 1, guests: 1, support: 0 })
 
     // Archive a future reservation: Past at once, with who and when, and
     // nothing about the reservation, the conversation state or the order moves.
@@ -358,9 +379,9 @@ test('archive and unarchive file a conversation without touching its booking, st
     assert.deepEqual(await recordRow('future'), reservationBefore)
     assert.equal(await entries('future', 'thread.archived'), 1)
     assert.equal((await ids('current')).includes('future'), false)
-    assert.deepEqual((await list('past')).find(item => item.id === 'future'), {
-      ...(await list('past')).find(item => item.id === 'future'), mailbox: 'past', manuallyArchived: true, canArchive: false, canUnarchive: true,
-    })
+    assert.equal((await ids('past')).includes('future'), true)
+    assert.deepEqual(await filing('future'), { archive: false, unarchive: true })
+    assert.deepEqual(await countUnreadInboxThreads(db, ORG, { userId: ACTOR }), { all: 0, guests: 0, support: 0 }, 'an archived conversation leaves the Current count')
 
     // The same key again later changes nothing: not the time, not the actor, not the ledger.
     assert.equal((await operate('future', 'archive', 'archive-future')).ok, true)
@@ -382,6 +403,8 @@ test('archive and unarchive file a conversation without touching its booking, st
     assert.deepEqual(await row('future'), { ...before, archived_at: null, archived_by_user_id: null })
     assert.deepEqual(await recordRow('future'), reservationBefore)
     assert.deepEqual(await ids('current'), ['newest', 'booking-future', 'ongoing', 'future', 'contact'])
+    assert.deepEqual(await filing('future'), { archive: true, unarchive: false })
+    assert.deepEqual(await countUnreadInboxThreads(db, ORG, { userId: ACTOR }), { all: 1, guests: 1, support: 0 })
     assert.equal((await operate('future', 'unarchive', 'unarchive-future')).ok, true)
     assert.equal(await entries('future', 'thread.unarchived'), 1)
 

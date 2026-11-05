@@ -8,6 +8,7 @@ import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { generateReservationTimes, type OpeningHours, type SpecialHours } from '../../shared/reservation-hours'
 import { addLocalDays, localDateAt, localDateTimeToInstant, localNow } from '../../utils/timezone'
 import type { Product } from '../../server/types/products'
+import type { InboxThread, InboxThreadDetails } from '../../server/domain/guest-threads/types'
 import { formQuestionsRevision } from '../../shared/form-questions'
 import type { SessionAvailability } from '../../server/utils/availability'
 import type { readMemberScheduling } from '../../server/domain/member-scheduling'
@@ -352,7 +353,7 @@ test.describe('stateless MCP server', () => {
         .conversations.find(row => row.guest_name === `MCP Contact ${contactEmail}`)
       expect(contactSubmission).toMatchObject({ request_id: expect.any(String), preview: 'hello from MCP e2e' })
       const contactRead = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'get_guest_conversation',args:{organization_id:organizationId,request_id:contactSubmission!.request_id}})
-      const contact = mcpData<{conversation:{guest:{email:string};entries:unknown[];archived:boolean}}>(await contactRead.json()).conversation
+      const contact = mcpData<{conversation:{guest:{email:string};entries:Array<{id:string;event:string|null}>;archived:boolean}}>(await contactRead.json()).conversation
       expect(contact.guest.email).toBe(contactEmail)
       const emptyReply = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'reply_to_guest',args:{organization_id:organizationId,request_id:contactSubmission!.request_id,idempotency_key:crypto.randomUUID()}})
       expect(emptyReply.status()).toBe(200)
@@ -360,10 +361,14 @@ test.describe('stateless MCP server', () => {
       expect(emptyReplyResult.isError).toBe(true)
       expect(emptyReplyResult.structuredContent).toBeUndefined()
       expect(emptyReplyResult.content[0].text).toContain('Invalid arguments for tool reply_to_guest')
+      // The refused reply wrote nothing: the ledger and the conversation the dashboard draws are as they were.
+      const unchangedContactRead = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'get_guest_conversation',args:{organization_id:organizationId,request_id:contactSubmission!.request_id}})
+      const unchangedContactLedger = mcpData<{conversation:{entries:Array<{id:string;event:string|null}>}}>(await unchangedContactRead.json()).conversation
+      expect(unchangedContactLedger.entries.map(entry => entry.id)).toEqual(contact.entries.map(entry => entry.id))
       const unchangedContact = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${contactSubmission!.request_id}`)
       expect(unchangedContact.status()).toBe(200)
-      const unchangedContactState = (await unchangedContact.json()).thread
-      expect(unchangedContactState.entries).toHaveLength(contact.entries.length)
+      const unchangedContactState = (await unchangedContact.json() as { thread: InboxThread }).thread
+      expect(unchangedContactState.stream.filter(item => item.type === 'message')).toMatchObject([{ side: 'guest', body: 'hello from MCP e2e' }])
       for (const archived of [true, false]) {
         const archive = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'set_guest_conversation_archived',args:{organization_id:organizationId,request_id:contactSubmission!.request_id,archived,idempotency_key:crypto.randomUUID()}})
         expect(archive.status()).toBe(200)
@@ -371,13 +376,21 @@ test.describe('stateless MCP server', () => {
         expect(receipt.outcome).toEqual({ok:true})
         expect(Object.keys(receipt.conversation).sort()).toEqual(['archived','request_id','state','updated_at'])
         expect(receipt.conversation).toMatchObject({request_id:contactSubmission!.request_id,archived})
+        // The dashboard reads the same filing: the conversation keeps every earlier item, and says each move once.
         const native = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${contactSubmission!.request_id}`)
         expect(native.status()).toBe(200)
-        const nativeConversation = (await native.json()).thread
-        expect(nativeConversation.manuallyArchived).toBe(archived)
-        expect(nativeConversation.guestEmail).toBe(contactEmail)
-        expect(nativeConversation.entries).toEqual(expect.arrayContaining(unchangedContactState.entries))
-        expect(nativeConversation.entries).toHaveLength(unchangedContactState.entries.length + (archived ? 1 : 2))
+        const nativeConversation = (await native.json() as { thread: InboxThread }).thread
+        const nativeActions = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${contactSubmission!.request_id}/details`)
+        expect(nativeActions.status()).toBe(200)
+        expect((await nativeActions.json() as InboxThreadDetails).actions).toMatchObject({ archive: !archived, unarchive: archived })
+        expect(nativeConversation.composer).toEqual({ channel: 'email', available: true })
+        // Day headers are the reader's calendar, not conversation items.
+        const earlier = unchangedContactState.stream.filter(item => item.type !== 'day')
+        const items = nativeConversation.stream.filter(item => item.type !== 'day')
+        expect(items).toEqual(expect.arrayContaining(earlier))
+        expect(items).toHaveLength(earlier.length + (archived ? 1 : 2))
+        expect(items.slice(earlier.length).map(item => item.type === 'event' ? item.text : item.type))
+          .toEqual(archived ? ['You archived this conversation'] : ['You archived this conversation', 'You moved this conversation back to Messages'])
       }
 
       const listReservations = await mcpRequest(request, baseURL!, {

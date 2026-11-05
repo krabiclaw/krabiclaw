@@ -176,8 +176,8 @@ export async function discardMessagePhotos(
 export async function listMessagePhotos(db: DbClient, ownerType: MessageOwnerType, messageIds: string[]): Promise<Map<string, GuestThreadEntryAttachmentViewModel[]>> {
   const photos = new Map<string, GuestThreadEntryAttachmentViewModel[]>()
   if (!messageIds.length) return photos
-  const rows = await queryAll<{ owner_id: string; id: string; public_url: string; alt_text: string | null; width: number | null; height: number | null }>(db, `
-    SELECT mp.owner_id, ma.id, ma.public_url, ma.alt_text, ma.width, ma.height
+  const rows = await queryAll<{ owner_id: string; id: string; public_url: string; thumbnail_url: string | null; alt_text: string | null; width: number | null; height: number | null }>(db, `
+    SELECT mp.owner_id, ma.id, ma.public_url, ma.thumbnail_url, ma.alt_text, ma.width, ma.height
       FROM media_placements mp
       JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id
      WHERE mp.owner_type = ? AND mp.slot = 'attachments' AND mp.status = 'active'
@@ -187,7 +187,7 @@ export async function listMessagePhotos(db: DbClient, ownerType: MessageOwnerTyp
   `, [ownerType, d1JsonStringSet(messageIds)])
   for (const row of rows) {
     const list = photos.get(row.owner_id) ?? []
-    list.push({ id: row.id, url: row.public_url, alt: row.alt_text, width: row.width, height: row.height })
+    list.push({ id: row.id, url: row.public_url, thumbnailUrl: row.thumbnail_url ?? row.public_url, alt: row.alt_text, width: row.width, height: row.height })
     photos.set(row.owner_id, list)
   }
   return photos

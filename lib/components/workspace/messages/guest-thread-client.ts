@@ -2,13 +2,14 @@ import { isRecord } from '~/utils/api-clients'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { EXPERIENCE_PRESENTATION } from '~/utils/product-presentation'
 import { normalizeVertical } from '~/utils/vertical-copy'
-import { STAY_CHANNELS } from '~/shared/bookings'
 import type {
-  GuestThreadDeliveryFailureViewModel,
-  GuestThreadDetailViewModel,
-  GuestThreadListItemViewModel,
-  GuestThreadListPage,
   GuestThreadSubmissionType,
+  InboxListPage,
+  InboxRow,
+  InboxStreamItem,
+  InboxThread,
+  InboxThreadDetails,
+  InboxUnreadCounts,
 } from '~/server/domain/guest-threads/types'
 
 /*
@@ -22,9 +23,11 @@ import type {
 // these shapes are what let the client read field names the server had
 // stopped sending, so there is one declaration and this reads it.
 export type SubmissionType = GuestThreadSubmissionType
-export type ThreadListItem = GuestThreadListItemViewModel
-export type ThreadListPage = GuestThreadListPage
-export type ThreadDetail = GuestThreadDetailViewModel
+export type ThreadListItem = InboxRow
+export type ThreadListPage = InboxListPage & { unread?: InboxUnreadCounts }
+export type ThreadDetail = InboxThread
+export type ThreadDetails = InboxThreadDetails
+export type StreamItem = InboxStreamItem
 
 /*
   What a thread is called, in the tenant's own word.
@@ -54,6 +57,17 @@ export function threadFilterLabel(type: SubmissionType, vertical: string | null 
   return resolveBookingPresentation(type === 'booking' ? 'booking' : 'reservation', vertical).labelPlural
 }
 
+const isText = (value: unknown): value is string => typeof value === 'string' && value.length > 0
+const isNullableText = (value: unknown) => value === null || typeof value === 'string'
+const isCount = (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0
+
+function isRow(value: unknown): value is InboxRow {
+  return isRecord(value) && isText(value.id) && (value.kind === 'guest' || value.kind === 'support')
+    && isText(value.guestName) && isText(value.avatarInitial) && (value.channel === 'airbnb' || value.channel === 'direct')
+    && isNullableText(value.home) && isNullableText(value.when) && typeof value.preview === 'string' && isText(value.previewFrom)
+    && isText(value.time) && typeof value.unread === 'boolean'
+}
+
 export function isThreadListResponse(value: unknown): value is ThreadListPage {
   return isRecord(value)
     && isRecord(value.pagination)
@@ -67,85 +81,46 @@ export function isThreadListResponse(value: unknown): value is ThreadListPage {
     && value.threads.length <= Number(value.pagination.limit)
     && (!value.pagination.hasMore || value.threads.length === Number(value.pagination.limit))
     && new Set(value.threads.map(thread => isRecord(thread) ? thread.id : undefined)).size === value.threads.length
-    && value.threads.every(thread =>
-      isRecord(thread)
-      && (thread.productId === null || typeof thread.productId === 'string')
-      && (thread.stayChannel === null || STAY_CHANNELS.some(channel => channel === thread.stayChannel))
-      && typeof thread.id === 'string'
-      && (thread.guestName === null || typeof thread.guestName === 'string')
-      && typeof thread.participantLabel === 'string'
-      && (thread.replyChannel === 'email' || thread.replyChannel === 'airbnb')
-      && typeof thread.submissionType === 'string'
-      && typeof thread.lastActivityAt === 'string'
-      && (thread.mailbox === 'current' || thread.mailbox === 'past' || thread.mailbox === 'blocked')
-      && typeof thread.manuallyArchived === 'boolean'
-      && typeof thread.canArchive === 'boolean'
-      && typeof thread.canUnarchive === 'boolean',
-    )
+    && value.threads.every(isRow)
+    && (value.unread === undefined || (isRecord(value.unread) && ['all', 'guests', 'support', 'team'].every(kind => isCount((value.unread as Record<string, unknown>)[kind]))))
 }
 
-export function isDeliveryFailure(value: unknown): value is GuestThreadDeliveryFailureViewModel {
-  return isRecord(value)
-    && typeof value.id === 'string'
-    && (value.channel === 'email' || value.channel === 'whatsapp' || value.channel === 'airbnb' || value.channel === 'push')
-    && (value.status === 'failed' || value.status === 'uncertain')
-    && (
-      value.purpose === 'owner_alert'
-      || value.purpose === 'guest_acknowledgement'
-      || value.purpose === 'member_reply'
-      || value.purpose === 'scheduled_message'
-      || value.purpose === 'status_update'
-    )
-    && (value.recipient === null || typeof value.recipient === 'string')
-    && (value.error === null || typeof value.error === 'string')
-    && typeof value.createdAt === 'string'
+function isPhoto(value: unknown): boolean {
+  return isRecord(value) && isText(value.id) && isText(value.url) && isText(value.thumbnailUrl)
+    && (value.width === null || isCount(value.width)) && (value.height === null || isCount(value.height))
 }
 
-export const CHANNEL_LABELS = { email: 'email', whatsapp: 'WhatsApp', airbnb: 'Airbnb', push: 'push notification' } as const
-
-/**
- * What failed, said as the owner reads it: a host alert is told apart from the
- * guest's own messages. Only a guest acknowledgement names its address, the
- * guest's own; a host alert's recipient is a teammate's account, which not
- * everyone who can open the conversation may see.
- */
-export function deliveryFailureTitle(failure: GuestThreadDeliveryFailureViewModel): string {
-  if (failure.status === 'uncertain') return 'Reply needs review: send outcome unknown'
-  const channel = CHANNEL_LABELS[failure.channel]
-  switch (failure.purpose) {
-    case 'owner_alert': return `Host ${channel} alert could not be delivered`
-    case 'guest_acknowledgement': return `Guest acknowledgement could not be delivered${failure.recipient ? ` to ${failure.recipient}` : ''}`
-    case 'member_reply': return `Reply could not be delivered on ${channel}`
-    case 'status_update': return `Status update could not be delivered on ${channel}`
-    case 'scheduled_message': return `Scheduled message could not be delivered on ${channel}`
-  }
+function isStreamItem(value: unknown): value is InboxStreamItem {
+  if (!isRecord(value) || !isText(value.id)) return false
+  if (value.type === 'day') return isText(value.label)
+  if (value.type === 'event') return isText(value.text) && isText(value.sentAt)
+  if (value.type === 'change') return isText(value.sentAt) && isRecord(value.change)
+    && ['pending', 'accepted', 'declined', 'withdrawn', 'stale', 'expired'].includes(String(value.change.status))
+  return value.type === 'message' && (value.side === 'guest' || value.side === 'business') && isText(value.author)
+    && isNullableText(value.label) && isText(value.sentAt) && isNullableText(value.time) && isNullableText(value.body)
+    && Array.isArray(value.photos) && value.photos.every(isPhoto)
+    && (value.translated === null || (isRecord(value.translated) && typeof value.translated.original === 'string'))
+    && isNullableText(value.receipt) && typeof value.retryable === 'boolean' && isCount(value.unshownFiles)
 }
 
 export function isThreadDetailResponse(value: unknown): value is { thread: ThreadDetail } {
+  const thread = isRecord(value) ? value.thread : null
+  return isRecord(thread)
+    && isText(thread.id) && (thread.kind === 'guest' || thread.kind === 'support')
+    && isText(thread.guestName) && isText(thread.avatarInitial) && (thread.channel === 'airbnb' || thread.channel === 'direct')
+    && isNullableText(thread.home) && isNullableText(thread.when) && typeof thread.translated === 'boolean'
+    && isNullableText(thread.recordId) && isNullableText(thread.recordTitle) && (thread.recordKind === null || ['stay', 'booking', 'reservation'].includes(String(thread.recordKind)))
+    && isNullableText(thread.activityPath)
+    && Array.isArray(thread.stream) && thread.stream.every(isStreamItem)
+    && Array.isArray(thread.pending) && thread.pending.every(item => isRecord(item) && isText(item.id) && (item.source === 'automatic' || item.source === 'later')
+      && isText(item.label) && isText(item.sendAt) && isText(item.time) && typeof item.body === 'string' && typeof item.cancellable === 'boolean')
+    && isRecord(thread.composer) && (thread.composer.channel === 'airbnb' || thread.composer.channel === 'email') && typeof thread.composer.available === 'boolean'
+}
+
+export function isThreadDetails(value: unknown): value is ThreadDetails {
   return isRecord(value)
-    && isRecord(value.thread)
-    && typeof value.thread.id === 'string'
-    && (value.thread.guestName === null || typeof value.thread.guestName === 'string')
-    && typeof value.thread.participantLabel === 'string'
-    && (value.thread.replyChannel === 'email' || value.thread.replyChannel === 'airbnb')
-    && typeof value.thread.guestAccountLinked === 'boolean'
-    && (value.thread.organizationName === null || typeof value.thread.organizationName === 'string')
-    && (value.thread.organizationVertical === null || typeof value.thread.organizationVertical === 'string')
-    && Array.isArray(value.thread.entries)
-    && value.thread.entries.every(entry => isRecord(entry) && (entry.providerTimestamp === null || typeof entry.providerTimestamp === 'string')
-      && (entry.kind !== 'message' || entry.actorKind === 'guest' || (typeof entry.actorLabel === 'string' && Boolean(entry.actorLabel)))
-      && (entry.bookingChange === null || (isRecord(entry.bookingChange)
-        && ['pending', 'accepted', 'declined', 'withdrawn', 'stale', 'expired'].includes(String(entry.bookingChange.status))
-        && isRecord(entry.bookingChange.before) && typeof entry.bookingChange.before.whenLabel === 'string'
-        && isRecord(entry.bookingChange.after) && typeof entry.bookingChange.after.whenLabel === 'string')))
-    && Array.isArray(value.thread.availableActions)
-    && (value.thread.mailbox === 'current' || value.thread.mailbox === 'past' || value.thread.mailbox === 'blocked')
-    && typeof value.thread.manuallyArchived === 'boolean'
-    && (value.thread.archivedAt === null || typeof value.thread.archivedAt === 'string')
-    && (value.thread.archivedByUserId === null || typeof value.thread.archivedByUserId === 'string')
-    && (value.thread.blockedAt === null || typeof value.thread.blockedAt === 'string')
-    && typeof value.thread.canArchive === 'boolean'
-    && typeof value.thread.canUnarchive === 'boolean'
-    && Array.isArray(value.thread.deliveryFailures)
-    && value.thread.deliveryFailures.every(isDeliveryFailure)
+    && Array.isArray(value.participants) && value.participants.every(person => isRecord(person) && isText(person.name) && isText(person.initial)
+      && ['Guest', 'Host', 'Co-host', 'Airbnb Support'].includes(String(person.role)))
+    && Array.isArray(value.photos) && value.photos.every(photo => isPhoto(photo) && isRecord(photo) && isText(photo.sentAt))
+    && isRecord(value.actions) && ['showReservation', 'archive', 'unarchive', 'report', 'block', 'unblock'].every(key => typeof (value.actions as Record<string, unknown>)[key] === 'boolean')
 }

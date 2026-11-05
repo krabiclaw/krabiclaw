@@ -30,6 +30,20 @@ export interface NotificationSection {
   title: string
   body?: string
   facts?: NotificationFact[]
+  /** The picture the section is about — the home a reservation's details describe — shown above its title. */
+  image?: { imageUrl: string; alt: string } | null
+}
+
+/** Someone's own words, the thing the email is about. */
+export interface NotificationQuote {
+  /** Who wrote them, as the reader knows them: a first name, a business, or "Airbnb Support". */
+  author: string
+  /** The words as written; empty when the message is only photos. */
+  body: string
+  /** The channel's translation into the reader's language, when it made one, and the channel that made it. */
+  translation: { by: string; text: string } | null
+  /** Photos the message carries, shown whole, uncropped. */
+  photos: Array<{ imageUrl: string; alt: string }>
 }
 
 export interface NotificationAction {
@@ -62,12 +76,16 @@ export interface NotificationMessage {
   /** Markdown read in full under the intro — an article's own text. Email only. */
   body?: string
   facts: NotificationFact[]
+  /**
+   * The message the email is about, as a card in place of the fact grid. Email
+   * only: the facts still carry the same words to WhatsApp and the in-app
+   * notification.
+   */
+  quote?: NotificationQuote
   sections?: NotificationSection[]
-  /** Photos the message itself carries — a reply's attachments — shown whole, uncropped. Email only. */
-  photos?: Array<{ imageUrl: string; alt: string }>
   primaryAction?: NotificationAction
   secondaryAction?: NotificationAction
-  /** Shown small, under the actions — cancellation windows, link expiry. */
+  /** Shown small, under the actions — cancellation windows, link expiry, where a reply goes. */
   finePrint?: string
   /** Which notification preference governs delivery, independently of email purpose. */
   category: NotificationCategory

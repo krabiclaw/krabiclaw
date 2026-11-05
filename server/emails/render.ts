@@ -1,11 +1,12 @@
 import { defineComponent, h, type CSSProperties, type PropType } from 'vue'
-import { EImg, EMarkdown, ESection, EText } from './vue-email'
+import { EMarkdown, ESection, EText } from './vue-email'
 import { renderEmail, type RenderedEmail } from './vue-email'
 import EmailFrame from './blocks/EmailFrame'
 import EmailHero from './blocks/EmailHero'
 import EmailFactGrid from './blocks/EmailFactGrid'
 import EmailSection from './blocks/EmailSection'
 import EmailActions from './blocks/EmailActions'
+import EmailQuote from './blocks/EmailQuote'
 import { light, layout, type } from './tokens'
 import type { NotificationEmailPurpose, NotificationMessage } from '~/server/notifications/messages'
 
@@ -71,24 +72,18 @@ export const NotificationEmail = defineComponent({
             : null,
         ]),
 
-        h(EmailFactGrid, { facts: message.facts, columns: 2 }),
+        message.quote ? h(EmailQuote, { quote: message.quote }) : h(EmailFactGrid, { facts: message.facts, columns: 2 }),
         h(EmailActions, { primary: message.primaryAction ?? null, secondary: message.secondaryAction ?? null }),
 
-        ...(message.sections ?? []).map(section =>
-          h(EmailSection, { title: section.title, body: section.body ?? null, facts: section.facts ?? [] }),
-        ),
-
-        ...(message.photos ?? []).map(photo =>
-          h(ESection, { class: 'email-gutter', style: `padding:16px ${layout.gutter} 0` }, () => [
-            h(EImg, { src: photo.imageUrl, alt: photo.alt, width: '552', style: `display:block;width:100%;max-width:100%;height:auto;border-radius:12px;background:${light.bg}` }),
-          ]),
-        ),
-
         message.finePrint
-          ? h(ESection, { class: 'email-gutter', style: `padding:24px ${layout.gutter} 0` }, () => [
-              h(EText, { class: 'email-footer', style: `margin:0;${type.footer};color:${light.textDimmed};white-space:pre-line` }, () => message.finePrint),
+          ? h(ESection, { class: 'email-gutter', style: `padding:12px ${layout.gutter} 0` }, () => [
+              h(EText, { class: 'email-footer', style: `margin:0;font-size:14px;line-height:20px;color:${light.textMuted};white-space:pre-line` }, () => message.finePrint),
             ])
           : null,
+
+        ...(message.sections ?? []).map(section =>
+          h(EmailSection, { title: section.title, body: section.body ?? null, facts: section.facts ?? [], image: section.image ?? null }),
+        ),
       ])
     }
   },

@@ -8,6 +8,8 @@
   "email.reason.reply": "{organization}から会話への返信があったため、このメールをお送りしています。",
   "email.reason.booking_update": "{organization}へのリクエストに更新があったため、このメールをお送りしています。",
   "email.reason.booking_change": "{organization}からリクエスト内容の変更が提案されたため、このメールをお送りしています。",
+  "email.subject.reservation_confirmed": "{place}の予約が確定しました",
+  "email.subject.message_from": "{name}からのメッセージ",
   "site.product_detail.description": "説明",
   "booking.request_declined": "予約リクエストは承認されませんでした",
   "booking.change_review": "変更内容を確認",

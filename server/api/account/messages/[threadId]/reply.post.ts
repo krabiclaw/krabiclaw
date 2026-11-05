@@ -5,6 +5,7 @@ import {getAuthSession} from '~/server/utils/auth'
 import {requireFinancialBrowserOrigin} from '~/server/utils/financial-browser'
 import {getGuestRequest} from '~/server/domain/requests'
 import {getGuestThreadDetail} from '~/server/domain/guest-threads/detail'
+import {getInboxThread} from '~/server/domain/guest-threads/inbox'
 import {receiveGuestWebReply} from '~/server/domain/guest-threads/inbound-email'
 import {MAX_IMAGE_BYTES} from '~/server/utils/media-mime'
 import {MAX_MESSAGE_PHOTOS,MessagePhotoRejection} from '~/server/domain/guest-threads/attachments'
@@ -37,7 +38,7 @@ export default defineHandler(async event=>{
   if(error instanceof MessagePhotoRejection)throw new HTTPError({statusCode:400,statusMessage:error.message})
   throw error
  }
- const thread=await getGuestThreadDetail(env.DB,threadId,request.organization_id,{buyerUserId:session.user.id})
+ const thread=await getInboxThread(env.DB,threadId,request.organization_id,{audience:'buyer',userId:session.user.id})
  if(!thread)throw new HTTPError({statusCode:404,statusMessage:'Conversation not found'})
  return jsonResponse({thread},{headers:{'cache-control':'private, no-store'}})
 })

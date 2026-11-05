@@ -3,7 +3,7 @@
     <UAlert v-if="selectionError" color="error" variant="soft" :description="selectionError" class="mb-3" />
     <p v-if="incompatibleContent" class="mb-3 text-sm text-warning">Send text and photos to Airbnb separately. Remove the text or photo before sending.</p>
     <p v-if="sendAt && photos.length" class="mb-3 text-sm text-warning">Send later carries text only. Remove the photo, or send it now.</p>
-    <UChatPrompt v-model="body" :autofocus="false" :placeholder="offeredSuggestion ?? (sendAt ? 'Send later' : placeholder)" :aria-label="placeholder" color="neutral" :disabled="disabled || sending" :rows="2" :maxrows="8" class="gap-2 rounded-2xl px-5 pb-2.5 pt-4" :ui="{ header: 'flex-wrap gap-2 pb-1', base: 'px-0 py-0 text-base/6 sm:text-base/6', footer: 'items-center' }" @submit="submit" @paste="paste" @keydown.tab="acceptWithTab">
+    <UChatPrompt v-model="body" :autofocus="false" :placeholder="sendAt ? 'Send later' : placeholder" :aria-label="placeholder" color="neutral" :disabled="disabled || sending" :rows="2" :maxrows="8" class="gap-2 rounded-2xl px-5 pb-2.5 pt-4" :ui="{ header: 'flex-wrap gap-2 pb-1', base: 'px-0 py-0 text-base/6 sm:text-base/6', footer: 'items-center' }" @submit="submit" @paste="paste">
       <template v-if="photos.length || sendAt" #header>
         <!-- A message set to send later carries its time above the words, the way Messages does. -->
         <div v-if="sendAt" class="flex w-full items-center gap-2 rounded-xl border border-dashed border-primary px-3 py-1.5 text-sm text-primary">
@@ -25,7 +25,6 @@
             </UDropdownMenu>
           </template>
         </UFileUpload>
-        <UButton v-if="offeredSuggestion" label="Use" color="neutral" variant="soft" size="sm" class="ms-auto rounded-full" aria-label="Use suggested reply" @click="body = offeredSuggestion" />
         <!-- Nuxt UI owns keyboard/IME submission; this explicit button also sends a photo with no text. -->
         <UButton type="button" icon="i-lucide-arrow-up" color="neutral" variant="solid" square class="size-8 justify-center rounded-full p-0 transition duration-200 active:scale-90 disabled:bg-elevated disabled:text-dimmed disabled:opacity-100" :ui="{ leadingIcon: 'size-4' }" :aria-label="sendLabel" :title="sendLabel" :loading="sending" :disabled="disabled || sending || incompatibleContent || (sendAt !== null && photos.length > 0) || (!body.trim() && !photos.length)" @click="submit" />
       </template>
@@ -53,10 +52,11 @@ export function useMessagePhotoDraft() {
   onBeforeUnmount(() => { for (const photo of photos.value) URL.revokeObjectURL(photo.url) })
   return photos
 }
-export function messageReplyForm(body: string, photos: MessagePhotoDraft[], idempotencyKey: string) {
+export function messageReplyForm(body: string, photos: MessagePhotoDraft[], idempotencyKey: string, suggestion: { generationId: string; index: number } | null = null) {
   const form = new FormData()
   form.set('body', body)
   form.set('idempotencyKey', idempotencyKey)
+  if (suggestion) form.set('suggestion', JSON.stringify(suggestion))
   for (const photo of photos) form.append('photos', photo.file, photo.file.name)
   return form
 }
@@ -66,21 +66,13 @@ export function sameMessagePhotos(left: MessagePhotoDraft[], right: MessagePhoto
 </script>
 <script setup lang="ts">
 import type { DropdownMenuItem } from '@nuxt/ui'
-const props = withDefaults(defineProps<{ disabled?: boolean; sending?: boolean; channel?: 'airbnb' | 'email' | 'team'; placeholder?: string; sendLabel?: string; suggestion?: string | null; sendLater?: boolean }>(), { disabled: false, sending: false, channel: 'email', placeholder: 'Write a message…', sendLabel: 'Send message', suggestion: null, sendLater: false })
-const emit = defineEmits<{ send: [] }>()
+const props = withDefaults(defineProps<{ disabled?: boolean; sending?: boolean; channel?: 'airbnb' | 'email' | 'team'; placeholder?: string; sendLabel?: string; sendLater?: boolean; suggestionsHidden?: boolean }>(), { disabled: false, sending: false, channel: 'email', placeholder: 'Write a message…', sendLabel: 'Send message', sendLater: false, suggestionsHidden: false })
+const emit = defineEmits<{ send: []; showSuggestions: [] }>()
 const body = defineModel<string>({ required: true })
 const photos = defineModel<MessagePhotoDraft[]>('photos', { required: true })
 /** When the message is sent later: an ISO instant, or null to send now. */
 const sendAt = defineModel<string | null>('sendAt', { default: null })
 const { locale } = useI18n()
-
-// A suggested reply is the field's placeholder until Use or Tab puts it in the field.
-const offeredSuggestion = computed(() => !body.value && !photos.value.length && !sendAt.value && props.suggestion ? props.suggestion : null)
-function acceptWithTab(event: KeyboardEvent) {
-  if (!offeredSuggestion.value) return
-  event.preventDefault()
-  body.value = offeredSuggestion.value
-}
 
 const scheduling = ref(false)
 const when = ref('')
@@ -92,6 +84,8 @@ function addItems(open: () => void): DropdownMenuItem[] {
   return [
     { label: 'Photos', icon: 'i-lucide-image', disabled: photos.value.length >= maxPhotos.value || Boolean(sendAt.value), onSelect: open },
     ...(props.sendLater ? [{ label: 'Send later', icon: 'i-lucide-clock', onSelect: () => { when.value = sendAt.value ? localInput(new Date(sendAt.value)) : localInput(new Date(Date.now() + 3_600_000)); scheduleError.value = ''; scheduling.value = true } }] : []),
+    // Suggested replies that exist but are hidden (dismissed, or put away by typing) come back from here.
+    ...(props.suggestionsHidden ? [{ label: 'Suggested replies', icon: 'i-lucide-sparkles', onSelect: () => emit('showSuggestions') }] : []),
   ]
 }
 function schedule() {

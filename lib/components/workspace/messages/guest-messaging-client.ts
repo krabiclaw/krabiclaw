@@ -55,7 +55,7 @@ function isSendLaterMessage(value: unknown): value is SendLaterMessage {
 }
 export function isSendLaterResponse(value: unknown): value is { message: SendLaterMessage } { return isRecord(value) && isSendLaterMessage(value.message) }
 export function isSendLaterList(value: unknown): value is { messages: SendLaterMessage[] } { return isRecord(value) && Array.isArray(value.messages) && value.messages.every(isSendLaterMessage) }
-export function isSuggestedReply(value: unknown): value is { suggestion: string } { return isRecord(value) && typeof value.suggestion === 'string' && Boolean(value.suggestion.trim()) }
+export function isSuggestedReplies(value: unknown): value is { generationId: string; suggestions: string[] } { return isRecord(value) && typeof value.generationId === 'string' && Boolean(value.generationId) && Array.isArray(value.suggestions) && value.suggestions.length > 0 && value.suggestions.length <= 3 && value.suggestions.every(item => typeof item === 'string' && Boolean(item.trim())) }
 
 /** Suggested replies are each person's choice for one workspace in this browser; on until turned off. */
 export function useSuggestedReplies(organizationId: MaybeRefOrGetter<string | null>) {
