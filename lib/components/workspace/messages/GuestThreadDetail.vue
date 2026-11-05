@@ -50,7 +50,7 @@
 
             <!-- A run: the guest on the left with their circle at its foot, the business on the right. -->
             <div v-else class="flex min-w-0 max-w-[76%] flex-col gap-0.5" :class="item.mine ? 'items-end self-end' : 'relative items-start self-start pl-10'" :data-message="item.key">
-              <InboxAvatar v-if="!item.mine" class="absolute bottom-0 left-0" :name="item.runs[0]!.author" :initial="initialOf(item.runs[0]!.author)" :support="thread.kind === 'support'" size="sm" />
+              <span v-if="!item.mine" class="absolute bottom-0 left-0"><InboxAvatar :name="item.runs[0]!.author" :initial="initialOf(item.runs[0]!.author)" :support="thread.kind === 'support'" size="sm" /></span>
               <p class="mb-1 mt-2.5 text-sm text-muted"><span class="text-highlighted">{{ item.runs[0]!.label ? `${item.runs[0]!.author} · ${item.runs[0]!.label}` : item.runs[0]!.author }}</span> {{ item.runs[0]!.time }}</p>
               <template v-for="message in item.runs" :key="message.id">
                 <div v-if="message.photos.length" class="grid max-w-sm gap-1" :class="[message.photos.length > 1 ? 'grid-cols-2' : 'grid-cols-1', message.sending ? 'opacity-60' : '']">
