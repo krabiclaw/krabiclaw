@@ -207,13 +207,17 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
 
       const hub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName('org'))
       const publicationCount = async () => await (await hub.fetch('https://hub/delivery-publications')).json() as number
-      for (const boundary of ['publication', 'persistence', 'unsent', 'concurrent']) {
+      for (const boundary of ['preparation', 'acceptance-write', 'publication', 'persistence', 'unsent', 'concurrent']) {
         const key = `retry-${boundary}`
         await reservation(key, 'g-dinner', 'room', at(-25 * HOUR))
         await db.prepare("UPDATE requests SET payload_json = json_set(payload_json, '$.guest.email', 'guest@provider-proof.com') WHERE id = ?").bind(T[key]).run()
         const invitation = () => sendReviewRequestForBooking(providerEnv, db, 'reservation', T[key]!)
         const before = accepted.length
         const attemptsBefore = sendAttempts
+        if (boundary === 'preparation') await db.prepare(`CREATE TRIGGER fail_review_preparation BEFORE INSERT ON guest_thread_deliveries
+          WHEN NEW.entry_id IN (SELECT id FROM activity_entries WHERE request_id = '${T[key]}') BEGIN SELECT RAISE(FAIL, 'controlled preparation failure'); END`).run()
+        if (boundary === 'acceptance-write') await db.prepare(`CREATE TRIGGER fail_review_acceptance BEFORE UPDATE OF provider_message_id ON guest_thread_deliveries
+          WHEN NEW.provider_message_id IS NOT NULL AND NEW.entry_id IN (SELECT id FROM activity_entries WHERE request_id = '${T[key]}') BEGIN SELECT RAISE(FAIL, 'controlled acceptance persistence failure'); END`).run()
         if (boundary === 'publication') await hub.fetch('https://hub/fail-next-delivery')
         if (boundary === 'persistence') await db.prepare(`CREATE TRIGGER fail_review_completion BEFORE UPDATE OF first_sent_at ON review_requests
           WHEN NEW.booking_id = '${T[key]}' BEGIN SELECT RAISE(FAIL, 'controlled completion failure'); END`).run()
@@ -225,16 +229,21 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
           const incomplete = await invitation()
           assert.equal(incomplete.sent, false, boundary)
           // Drizzle reports the failed completion query as the outer error.
-          assert.match(incomplete.error!, boundary === 'unsent' ? /controlled unsent failure/ : boundary === 'persistence' ? /Failed query:[\s\S]*SET first_sent_at/ : /publication|503|invalidation/i)
+          assert.match(incomplete.error!, boundary === 'unsent' ? /controlled unsent failure/ : boundary === 'persistence' ? /Failed query:[\s\S]*SET first_sent_at/ : boundary === 'preparation' ? /Failed query:[\s\S]*INSERT INTO guest_thread_deliveries/ : boundary === 'acceptance-write' ? /Failed query:[\s\S]*provider_message_id/ : /publication|503|invalidation/i)
           assert.deepEqual(await db.prepare('SELECT first_sent_at, send_count, last_error IS NOT NULL AS failed FROM review_requests WHERE id = ?').bind(incomplete.requestId).first(), { first_sent_at: null, send_count: 0, failed: 1 })
+          const retainedRequest = await db.prepare('SELECT token, token_hash, expires_at FROM review_requests WHERE id = ?').bind(incomplete.requestId).first()
+          if (boundary === 'preparation') await db.prepare('DROP TRIGGER fail_review_preparation').run()
+          if (boundary === 'acceptance-write') await db.prepare('DROP TRIGGER fail_review_acceptance').run()
           if (boundary === 'persistence') await db.prepare('DROP TRIGGER fail_review_completion').run()
           rejectSend = false
           const publicationsBefore = await publicationCount()
-          assert.equal((await invitation()).sent, true)
+          const resumed = await reviewTask.run!({ context: { cloudflare: { env: providerEnv } }, payload: {}, name: 'review-request-automation' } as never) as { result: { sent: number; failed: number } }
+          assert.deepEqual(resumed.result, { sent: 1, failed: 0 }, 'automation resumes the incomplete invitation')
+          assert.deepEqual(await db.prepare('SELECT token, token_hash, expires_at FROM review_requests WHERE id = ?').bind(incomplete.requestId).first(), retainedRequest, 'retry preserves the original link and expiry')
           assert.equal(await publicationCount(), publicationsBefore + 1, 'retry completes required visibility work')
         }
         assert.equal(accepted.length, before + 1, `${boundary}: exactly one provider-accepted invitation`)
-        if (boundary !== 'concurrent') assert.equal(sendAttempts, attemptsBefore + (boundary === 'unsent' ? 2 : 1), `${boundary}: accepted mail is never posted again`)
+        if (boundary !== 'concurrent') assert.equal(sendAttempts, attemptsBefore + (['unsent', 'acceptance-write'].includes(boundary) ? 2 : 1), `${boundary}: only an unsent or unknown outcome repeats the idempotent provider request`)
         const invitationToken = tokenOf(accepted.at(-1)!.body.html)
         assert.ok(await getReviewRequestByToken(db, invitationToken), `${boundary}: emailed link validates`)
         assert.deepEqual(await db.prepare('SELECT send_count, last_error, first_sent_at IS NOT NULL AS sent FROM review_requests WHERE booking_id = ?').bind(T[key]).first(), { send_count: 1, last_error: null, sent: 1 })

@@ -97,8 +97,9 @@ window intact; it does not add a new resend policy or revive revoked links.
 
 `guest-reviews-d1.test.ts` runs the actual automation, review APIs, dispatcher,
 local D1 and a local Durable Object. Its controlled Resend transport proves one
-accepted email and a usable original link across metadata failure, publication
-failure, final write failure and concurrency, plus recovery of rejected sends.
+accepted email and a usable original link across preparation failure, acceptance
+persistence failure, metadata failure, publication failure, final write failure
+and concurrency, plus recovery of rejected sends.
 No customer email is sent by these tests.
 
 ## Local verification
