@@ -9,7 +9,7 @@ import { createProduct } from '../../server/utils/product-management.ts'
 import { createStay, type StayAccess } from '../../server/domain/stays.ts'
 import { requestInsertQueries } from '../../server/domain/requests.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
-import { updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
+import { firstUnansweredGuestEntryTimes, updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
 import { createArticleCategory } from '../../server/utils/content/article-categories.ts'
@@ -37,7 +37,7 @@ const DAY = 86_400_000
 /** Only the provider HTTP boundary is controlled; domain writes, receipts, authorization and reads stay real. */
 function providerTransport(t: TestContext) {
   const sent = new Map<string, { to: string[]; subject: string }>()
-  let reject = false
+  let reject = false, sendAttempts = 0
   t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
     if (init.method === 'GET') {
       const id = url.split('/').at(-1)!, message = sent.get(id)
@@ -45,13 +45,14 @@ function providerTransport(t: TestContext) {
       return Response.json({ id, message_id: `<${id}@provider.example>`, to: message.to, subject: message.subject })
     }
     assert.equal(url, 'https://api.resend.com/emails')
+    sendAttempts++
     if (reject) return Response.json({ name: 'validation_error', message: 'controlled recipient rejection' }, { status: 422 })
     const id = new Headers(init.headers).get('idempotency-key')!
     assert.ok(id)
     sent.set(id, JSON.parse(String(init.body)))
     return Response.json({ id })
   })
-  return { sent, reject(value: boolean) { reject = value }, configuration: { EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-today-provider', EMAIL_FROM: 'Proof <hello@krabiclaw.com>' } }
+  return { sent, get sendAttempts() { return sendAttempts }, reject(value: boolean) { reject = value }, configuration: { EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-today-provider', EMAIL_FROM: 'Proof <hello@krabiclaw.com>' } }
 }
 
 async function boot() {
@@ -204,6 +205,36 @@ test('Today and Upcoming select work from obligations, the owner’s priority an
     assert.equal(ids(feed).includes(`attention:${stayThread}`), false)
     assert.equal(feed.cards.filter(card => card.id === `completed:reply:${stayThread}`).length, 1)
     assert.equal(feed.cards.filter(card => card.priority === 'opportunity').length, 0, 'with nothing worth doing, no optional work is invented')
+
+    // A physically accepted reply answers the guest, but its own recorded completion error still needs attention.
+    const receipt = (await db.prepare(`SELECT d.* FROM guest_thread_deliveries d JOIN activity_entries e ON e.id=d.entry_id
+      WHERE e.request_id=? AND e.event_name='thread.member_reply' AND d.purpose='member_reply' AND d.channel='email'`).bind(stayThread).first<GuestThreadDeliveryRow>())!
+    assert.ok(receipt)
+    await db.prepare(`CREATE TRIGGER reject_direct_reply_completion BEFORE UPDATE OF error ON guest_thread_deliveries
+      WHEN OLD.id='${receipt.id.replaceAll("'", "''")}' AND NEW.error IS NULL BEGIN SELECT RAISE(ABORT,'controlled direct reply completion failure'); END`).run()
+    const snapshot = JSON.parse(receipt.email_json!) as { message: Parameters<typeof deliverReceiptEmail>[1]['email'] }
+    await assert.rejects(deliverReceiptEmail(db, { delivery: receipt, env: { ...env, ...provider.configuration }, threadId: stayThread, email: snapshot.message }), (error: Error) => {
+      assert.ok(error.cause instanceof Error)
+      assert.match(error.cause.message, /controlled direct reply completion failure/)
+      return true
+    })
+    await db.prepare('DROP TRIGGER reject_direct_reply_completion').run()
+    assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [stayThread])).has(stayThread), false, 'saved metadata failure does not undo the actual customer reply')
+    feed = await today()
+    const attention = find(feed, `attention:${stayThread}`)!
+    assert.equal(attention.priority, 'attention')
+    assert.equal(attention.headline, 'Check the message to Stella')
+    assert.equal(attention.completedAt, null)
+    assert.equal(attention.reason, await db.prepare('SELECT error FROM guest_thread_deliveries WHERE id=?').bind(receipt.id).first('error'))
+    assert.equal(feed.cards.some(card => card.id === `completed:reply:${stayThread}`), false)
+    assert.equal(provider.sendAttempts, 1)
+    const deliveredEvent = { type: 'email.delivered', created_at: new Date().toISOString(), data: { email_id: receipt.provider_message_id!,
+      created_at: new Date().toISOString(), from: 'hello@krabiclaw.com', to: ['stella@provider-proof.com'], subject: 'Proof', message_id: receipt.email_message_id! } } as Parameters<typeof applyResendEmailEvent>[2]
+    assert.equal(await applyResendEmailEvent(db, env, deliveredEvent), 'advanced')
+    feed = await today()
+    assert.equal(feed.cards.some(card => card.id === `attention:${stayThread}`), false)
+    assert.equal(feed.cards.filter(card => card.id === `completed:reply:${stayThread}`).length, 1)
+    assert.equal(provider.sendAttempts, 1, 'the provider callback recovers the saved completion without sending another reply')
   } finally {
     await runtime.dispose()
   }
@@ -338,6 +369,30 @@ test('Today reads actual scheduled work and review outcomes: cancellation clears
     await assert.rejects(sendReviewRequestForBooking(providerEnv, db, 'stay', ended.request_id!), /not due a review invitation/)
     assert.equal((await read()).cards.filter(card => card.id === `completed:review:${ended.request_id}`).length, 1)
     assert.equal(provider.sent.size, 3, 'two scheduled sends and one invitation reached the controlled provider')
+
+    const reviewReceipt = (await db.prepare(`SELECT d.* FROM guest_thread_deliveries d JOIN activity_entries e ON e.id=d.entry_id
+      WHERE e.dedupe_key=? AND d.channel='email' AND d.purpose='status_update'`).bind(`review-request:${delivered.requestId}`).first<GuestThreadDeliveryRow>())!
+    assert.ok(reviewReceipt)
+    const attemptsBeforeReviewRecovery = provider.sendAttempts
+    await db.prepare(`CREATE TRIGGER reject_review_completion BEFORE UPDATE OF error ON guest_thread_deliveries
+      WHEN OLD.id='${reviewReceipt.id.replaceAll("'", "''")}' AND NEW.error IS NULL BEGIN SELECT RAISE(ABORT,'controlled review completion failure'); END`).run()
+    const reviewSnapshot = JSON.parse(reviewReceipt.email_json!) as { message: Parameters<typeof deliverReceiptEmail>[1]['email'] }
+    await assert.rejects(deliverReceiptEmail(db, { delivery: reviewReceipt, env: providerEnv, threadId: ended.request_id!, email: reviewSnapshot.message }), (error: Error) => {
+      assert.ok(error.cause instanceof Error)
+      assert.match(error.cause.message, /controlled review completion failure/)
+      return true
+    })
+    await db.prepare('DROP TRIGGER reject_review_completion').run()
+    feed = await read()
+    assert.equal(feed.cards.find(card => card.id === `review-invitation:${ended.request_id}`)?.priority, 'attention')
+    assert.equal(feed.cards.some(card => card.id === `completed:review:${ended.request_id}`), false)
+    assert.equal(feed.cards.filter(card => card.id === `completed:booking:${reservationId}`).length, 1, 'an invitation error never hides a different completed obligation')
+    assert.equal(await applyResendEmailEvent(db, env, { ...deliveredEvent, data: { ...deliveredEvent.data, email_id: reviewReceipt.provider_message_id!,
+      message_id: reviewReceipt.email_message_id!, to: ['rhea@provider-proof.com'] } } as Parameters<typeof applyResendEmailEvent>[2]), 'advanced')
+    feed = await read()
+    assert.equal(feed.cards.some(card => card.id === `review-invitation:${ended.request_id}`), false)
+    assert.deepEqual(feed.cards.filter(card => card.id === `completed:review:${ended.request_id}`).map(card => card.completedAt), [visit!.first_sent_at])
+    assert.equal(provider.sendAttempts, attemptsBeforeReviewRecovery, 'the recovered invitation keeps its original completion and sends no repeat email')
     assert.equal(feed.cards.some(card => /paid sale|gems|coins|recipe points/i.test(card.headline)), false)
     const other = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
     await createAuth(env).api.addMember({ body: { organizationId: ORG, userId: other.response!.user.id, role: 'admin' } })

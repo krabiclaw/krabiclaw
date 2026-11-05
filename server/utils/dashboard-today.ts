@@ -231,7 +231,9 @@ async function deliveryAttentionCards(db: DbClient, organization: DashboardOrgan
     if (!isVisibleDeliveryFailure(row)) continue
     if (row.purpose === 'status_update' && notified.has(notification)) continue
     const thread = byId.get(row.request_id)!
-    if (row.purpose === 'member_reply' && !unanswered.has(thread.id)) continue
+    const acceptedWithError = Boolean(row.error) && row.provider !== 'log_only' && Boolean(row.provider_message_id?.trim())
+      && ['accepted', 'sent', 'delivered', 'read'].includes(row.status)
+    if (row.purpose === 'member_reply' && !unanswered.has(thread.id) && !acceptedWithError) continue
     if ((row.event_name === 'booking.confirm' || row.event_name === 'reservation.confirm') && thread.operationalStatus !== 'confirmed') continue
     if ((row.event_name === 'booking.reject' || row.event_name === 'reservation.reject' || row.event_name === 'booking.cancel' || row.event_name === 'reservation.cancel') && thread.operationalStatus !== 'cancelled') continue
     if (thread.manuallyArchived || thread.mailbox === 'blocked') continue
@@ -270,7 +272,11 @@ async function completedCards(db: DbClient, organization: DashboardOrganizationR
     // An imported reply's original date must be known; arrival/backfill time is not work completed today.
     const at = row.event_name === 'channel.message_mirrored' ? isValidInstant(row.provider_at) ? new Date(row.provider_at).toISOString() : null : row.occurred_at
     if (!at || !inWindow(at, zone, { range: 'today' }, now)) continue
-    if (!reply && !deliveries.some(receipt => receipt.entry_id === row.id && receipt.purpose === 'status_update' && receipt.provider !== 'log_only' && isDeliverySent(receipt))) continue
+    // Direct decisions store no activity channel and notify by email; channel decisions have their own landed/acknowledged proof below.
+    const channel = row.channel ?? (reply ? null : 'email')
+    if ((!reply || row.event_name === 'thread.member_reply' && channel !== 'web') && !deliveries.some(receipt => receipt.entry_id === row.id
+      && receipt.channel === channel && receipt.purpose === (reply ? 'member_reply' : 'status_update') && receipt.provider !== 'log_only'
+      && isDeliverySent(receipt) && !isVisibleDeliveryFailure(receipt))) continue
     const key = reply ? `reply:${row.request_id}` : row.proposal_id ? `change:${row.proposal_id}` : `decision:${row.request_id}`
     const name = thread.guestName ?? thread.participantLabel
     const noun = thread.submissionType === 'stay' ? 'stay' : thread.submissionType === 'contact' ? 'request' : resolveBookingPresentation(thread.submissionType, organization.vertical).noun
@@ -322,7 +328,14 @@ async function completedCards(db: DbClient, organization: DashboardOrganizationR
     SELECT rr.booking_id AS request_id,MIN(rr.first_sent_at) AS first_sent_at FROM review_requests rr
      WHERE rr.organization_id=? AND rr.booking_id IN (SELECT value FROM json_each(?)) AND rr.first_sent_at IS NOT NULL
      GROUP BY rr.organization_id,rr.booking_type,rr.booking_id HAVING MIN(rr.first_sent_at)>=? AND MIN(rr.first_sent_at)<=?`, [organization.id, ids, from, now.toISOString()])
+  const reviewDeliveries = reviews.length ? await queryAll<GuestThreadDeliveryRow & { request_id: string; first_sent_at: string }>(db, `
+    SELECT d.*,rr.booking_id AS request_id,rr.first_sent_at FROM review_requests rr
+      JOIN activity_entries e ON e.request_id=rr.booking_id AND e.event_name='review.requested' AND e.dedupe_key='review-request:' || rr.id
+      JOIN guest_thread_deliveries d ON d.entry_id=e.id AND d.channel='email' AND d.purpose='status_update'
+     WHERE rr.organization_id=? AND rr.booking_id IN (SELECT value FROM json_each(?))`, [organization.id, d1JsonStringSet(reviews.map(row => row.request_id))]) : []
   for (const row of reviews) {
+    if (!reviewDeliveries.some(receipt => receipt.request_id === row.request_id && receipt.first_sent_at === row.first_sent_at
+      && receipt.provider !== 'log_only' && isDeliverySent(receipt) && !isVisibleDeliveryFailure(receipt))) continue
     const thread = byId.get(row.request_id)!
     result.set(`review:${row.request_id}`, threadCard(thread, { id: `completed:review:${row.request_id}`, eyebrow: 'Sent automatically',
       headline: `Review invitation sent to ${thread.guestName ?? thread.participantLabel}`, completedAt: row.first_sent_at,

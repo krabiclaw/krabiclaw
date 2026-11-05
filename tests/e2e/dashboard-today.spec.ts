@@ -63,7 +63,7 @@ test('Upcoming removes a cancelled scheduled reply without a reload and keeps th
     const futureCard = page.locator(`[data-card-id="send-later:${futureMessageId}"]`)
     if (!await futureCard.isVisible()) await page.getByRole('button', { name: 'Load more', exact: true }).click()
     await expect(futureCard).toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath('upcoming-scheduled-reply.png'), fullPage: true })
+    await page.screenshot({ path: testInfo.outputPath('upcoming-scheduled-reply.png'), fullPage: true, animations: 'disabled' })
     // A successful heartbeat proves the existing socket joined the authorized
     // hub before the other-window cancellation publishes its invalidation.
     await socket.waitForEvent('framereceived', { predicate: frame => frame.payload === 'pong', timeout: 30_000 })
@@ -88,9 +88,10 @@ test('Upcoming removes a cancelled scheduled reply without a reload and keeps th
     // Live reconciliation preserves the later windows the owner already opened.
     await expect(futureCard).toBeVisible()
     await page.getByRole('tab', { name: 'Today', exact: true }).click()
+    await expect(page.getByRole('tab', { name: 'Today', exact: true })).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByTestId('today-attention').locator(`[data-card-id="attention:${threadId}"]`)).toBeVisible()
     await expect(page.getByTestId('today-completed').getByText(marker)).toHaveCount(0)
-    await page.screenshot({ path: testInfo.outputPath('today-grouped-work.png'), fullPage: true })
+    await page.screenshot({ path: testInfo.outputPath('today-grouped-work.png'), fullPage: true, animations: 'disabled' })
   } finally {
     try {
       if (messageId && !cancelled) {
@@ -340,7 +341,8 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
         await expect(memberPage.locator(`[data-card-id="reservation:${reservationId}"]`)).toHaveAttribute('href', `${destination}?range=upcoming`)
         await memberPage.getByRole('tab', { name: 'Today', exact: true }).click()
         await expect(memberPage.getByRole('tab', { name: 'Today', exact: true })).toHaveAttribute('aria-selected', 'true')
-        await expect(memberPage.locator(`[data-card-id$=":${reservationId}"]`)).toHaveCount(0)
+        await expect(memberPage.locator(`[data-card-id="reservation:${reservationId}"]`)).toHaveCount(0)
+        await expect(memberPage.locator(`[data-card-id="completed:booking:${reservationId}"]`)).toHaveAttribute('href', destination)
         const openedThread = memberPage.waitForResponse(response => response.request().method() === 'GET'
           && new URL(response.url()).pathname === `${inboxPath}/${reservationId}`)
         expect((await memberPage.goto(`${ORG}/messages/${reservationId}`))?.status()).toBe(200)
