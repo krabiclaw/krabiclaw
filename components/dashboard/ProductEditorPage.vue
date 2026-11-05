@@ -568,9 +568,10 @@ const isMutation = (value: unknown): value is { success: true; product: ProductM
 
 // The product in this scope, read before the level renders. Keyed by location
 // and product, so a scope change reads that location's prices and settings.
-const { data: loaded, error: loadFailure, refresh } = await useAsyncData(
+type ProductEditorRead = { collections: Collection[]; product: Product; previewToken: string | null; publicUrl: string | null; publicUrls: Record<string, string> } | null
+const { data: loaded, error: loadFailure, refresh } = await useAsyncData<ProductEditorRead>(
   () => `dashboard-product:${organizationId}:${locationScope.value ?? 'organization'}:${productId.value}`,
-  async () => {
+  async (): Promise<ProductEditorRead> => {
     if (isNew.value) return null
     const id = locationId.value
     const [collectionResponse, productResponse] = await Promise.all([
@@ -580,8 +581,12 @@ const { data: loaded, error: loadFailure, refresh } = await useAsyncData(
       dashboardApi(id ? `/api/editor/organizations/${organizationId}/locations/${encodeURIComponent(id)}/products/${encodeURIComponent(productId.value)}` : `/api/editor/organizations/${organizationId}/products/${encodeURIComponent(productId.value)}`, { validate: isProductRead }),
     ])
     if (locationScope.value === 'online' && !productResponse.product.booking?.held_online) throw createError({ statusCode: 404, statusMessage: 'This product is not held online' })
-    let previewToken: string | null = null
-    if (canPreview.value && ['stay', 'dish', 'experience', 'service'].includes(productResponse.product.kind)) {
+    // The preview token is site-wide: a writer's re-read keeps the one this
+    // product already has, so a save never waits on minting another.
+    const current: ProductEditorRead | undefined = loaded.value
+    const kept = current?.product.id === productResponse.product.id ? current.previewToken : null
+    let previewToken: string | null = kept
+    if (kept === null && canPreview.value && ['stay', 'dish', 'experience', 'service'].includes(productResponse.product.kind)) {
       const response = await dashboardApi(`/api/editor/organizations/${organizationId}/context`, { validate: isRecord })
       if (!isRecord(response.context) || typeof response.context.previewToken !== 'string' || !response.context.previewToken) throw new Error('The product preview could not be loaded.')
       previewToken = response.context.previewToken
@@ -592,7 +597,7 @@ const { data: loaded, error: loadFailure, refresh } = await useAsyncData(
     getCachedData(cacheKey, nuxtApp, ctx) {
       if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
       if (!nuxtApp.isHydrating) return undefined
-      return nuxtApp.payload.data[cacheKey] as { collections: Collection[]; product: Product; previewToken: string | null; publicUrl: string | null; publicUrls: Record<string, string> } | null | undefined
+      return nuxtApp.payload.data[cacheKey] as ProductEditorRead | undefined
     },
   },
 )
