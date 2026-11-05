@@ -173,7 +173,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     // A saved reply that failed to send does not answer the guest, even
     // though it is now the last message in the ledger.
     const failedReply = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'member', actorUserId: ACTOR, channel: 'email', eventName: 'thread.member_reply', body: 'Your refund is on its way.', occurredAt: '2098-01-04T00:00:00.000Z' })
-    const receipt = await createDeliveryReceipt(db, { entryId: failedReply.id, channel: 'email', provider: 'log_only', purpose: 'member_reply', idempotencyKey: 'cancelled-reply-delivery' })
+    const receipt = await createDeliveryReceipt(db, { entryId: failedReply.id, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'cancelled-reply-delivery' })
     await recordDeliveryOutcome(db, { deliveryId: receipt.id, status: 'failed', error: 'Delivery refused' })
     const stillNeedsReply = await listGuestThreads(db, ORG, { userId: ACTOR, conversationState: 'needs_attention' })
     assert.deepEqual(stillNeedsReply.map(thread => thread.id), [reservationThread])

@@ -19,17 +19,60 @@ import { HTTPError } from 'nitro'
 const SOURCE_GUEST_NAME_SQL = "json_extract(gt.payload_json, '$.guest.name')"
 const REPLY_CHANNEL_SQL = "CASE WHEN EXISTS (SELECT 1 FROM channel_threads ct WHERE ct.request_id = gt.id AND ct.organization_id = gt.organization_id) OR EXISTS (SELECT 1 FROM stays st WHERE st.request_id = gt.id AND st.organization_id = gt.organization_id AND st.owner = 'channel') THEN 'airbnb' ELSE 'email' END"
 
-/** No reply from the business after this guest entry has reached the guest: stored on the web or accepted for delivery. */
-function answeredAfterSql(guestEntry: string): string {
+/** A business response is visible on the web or evidenced by the guest's real delivery/provider message. */
+export function successfulBusinessReplySql(reply: string): string {
+  return `(${reply}.kind = 'message' AND ${reply}.actor_kind = 'member' AND (
+    (${reply}.event_name = 'thread.member_reply' AND (${reply}.channel = 'web' OR EXISTS (
+      SELECT 1 FROM guest_thread_deliveries delivery
+      WHERE delivery.entry_id = ${reply}.id AND delivery.purpose = 'member_reply'
+        AND delivery.provider <> 'log_only' AND NULLIF(TRIM(delivery.provider_message_id), '') IS NOT NULL
+        AND delivery.status IN ('accepted', 'sent', 'delivered', 'read') AND COALESCE(delivery.non_delivery_confirmed, 0) = 0
+    ))) OR (${reply}.event_name = 'channel.message_mirrored' AND ${reply}.channel = 'airbnb'
+      AND NULLIF(TRIM(json_extract(${reply}.payload_json, '$.provider_message_id')), '') IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM guest_thread_deliveries automatic_delivery
+        JOIN activity_entries automatic_entry ON automatic_entry.id = automatic_delivery.entry_id
+        WHERE automatic_entry.request_id = ${reply}.request_id AND automatic_entry.event_name = 'thread.scheduled_message'
+          AND automatic_delivery.provider = 'channex'
+          AND automatic_delivery.provider_message_id = json_extract(${reply}.payload_json, '$.provider_message_id')
+      ))
+  ))`
+}
+
+function providerTimeSql(entry: string): string { return `json_extract(${entry}.payload_json, '$.provider_inserted_at')` }
+function offsetSql(time: string): string { return `(substr(${time}, -1) = 'Z' OR substr(${time}, -6, 1) IN ('+', '-'))` }
+
+/** Preserve microsecond ordering. Naive times are compared only with the same provider's naive clock, never with UTC. */
+function providerClockSql(time: string, absolute: boolean): string {
+  const zoneLength = `(CASE WHEN substr(${time}, -1) = 'Z' THEN 1 WHEN substr(${time}, -6, 1) IN ('+', '-') THEN 6 ELSE 0 END)`
+  const fraction = `substr((CASE WHEN substr(${time}, 20, 1) = '.' THEN substr(${time}, 21, length(${time}) - 20 - ${zoneLength}) ELSE '' END) || '000000000', 1, 9)`
+  const seconds = absolute ? `strftime('%Y-%m-%dT%H:%M:%S', substr(${time}, 1, 19) || CASE WHEN substr(${time}, -1) = 'Z' THEN 'Z' ELSE substr(${time}, -6) END)` : `substr(${time}, 1, 19)`
+  return `(${seconds} || '.' || ${fraction})`
+}
+
+/** The resource's original time decides whether a late-imported reply follows the guest, not its local append sequence. */
+function mirroredAfterSql(reply: string, guestEntry: string): string {
+  const replyTime = providerTimeSql(reply), guestTime = providerTimeSql(guestEntry)
+  return `(${guestEntry}.event_name = 'channel.message_mirrored' AND ${guestEntry}.channel = 'airbnb' AND (
+    (NOT ${offsetSql(replyTime)} AND NOT ${offsetSql(guestTime)} AND ${providerClockSql(replyTime, false)} > ${providerClockSql(guestTime, false)})
+    OR (${offsetSql(replyTime)} AND ${offsetSql(guestTime)} AND ${providerClockSql(replyTime, true)} > ${providerClockSql(guestTime, true)})
+  ) OR (${guestEntry}.event_name IS NOT 'channel.message_mirrored' AND ${offsetSql(replyTime)}
+    AND ${providerClockSql(replyTime, true)} > ${providerClockSql(`${guestEntry}.occurred_at`, true)}))`
+}
+
+/** A specific business response follows this entry by causal local order or original provider chronology. */
+export function businessReplyFollowsSql(reply: string, guestEntry: string): string {
+  return `((${reply}.event_name = 'thread.member_reply' AND ${reply}.sequence > ${guestEntry}.sequence)
+    OR (${reply}.event_name = 'channel.message_mirrored' AND ${mirroredAfterSql(reply, guestEntry)}))`
+}
+
+/** Whether a later successful business response to this guest entry has been recorded. */
+export function businessReplyAfterSql(guestEntry: string): string {
   return `EXISTS (
         SELECT 1 FROM activity_entries reply
         WHERE reply.request_id = ${guestEntry}.request_id
-          AND reply.kind = 'message' AND reply.actor_kind = 'member'
-          AND reply.event_name = 'thread.member_reply' AND reply.sequence > ${guestEntry}.sequence
-          AND (reply.channel = 'web' OR EXISTS (
-            SELECT 1 FROM guest_thread_deliveries delivery
-            WHERE delivery.entry_id = reply.id AND delivery.status IN ('accepted', 'sent', 'delivered', 'read')
-          ))
+          AND ${successfulBusinessReplySql('reply')}
+          AND ${businessReplyFollowsSql('reply', guestEntry)}
       )`
 }
 
@@ -45,24 +88,27 @@ function unansweredGuestMessagesSql(threadId: string, afterCancellation = false)
           AND json_extract(cancelled.payload_json, '$.afterStatus') = 'cancelled'
           AND cancelled.sequence >= guest_message.sequence
       )` : ''}
-      AND NOT ${answeredAfterSql('guest_message')}
+      AND NOT ${businessReplyAfterSql('guest_message')}
   )`
 }
 
 /**
- * When the guest last said something the business has not answered: their
- * latest message, or a contact form they submitted, with no delivered reply
- * after it. A thread absent from the result has nothing unanswered.
+ * The first received guest entry still awaiting a business response.
+ * Further messages do not reset the waiting age. Provider-relative order
+ * establishes which mirrored messages remain unanswered; it does not invent
+ * an absolute received instant for an offset-free provider timestamp. Use the
+ * original provider instant when it has an offset, otherwise local receipt.
  */
-export async function latestUnansweredGuestEntryTimes(db: DbClient, organizationId: string, threadIds: readonly string[]): Promise<Map<string, string>> {
+export async function firstUnansweredGuestEntryTimes(db: DbClient, organizationId: string, threadIds: readonly string[]): Promise<Map<string, string>> {
   const times = new Map<string, string>()
   for (let index = 0; index < threadIds.length; index += 200) {
     const rows = await queryAll<{ request_id: string; occurred_at: string }>(db, `
-      SELECT guest_entry.request_id, MAX(guest_entry.occurred_at) AS occurred_at
+      SELECT guest_entry.request_id, MIN(CASE WHEN guest_entry.event_name = 'channel.message_mirrored' AND ${offsetSql(providerTimeSql('guest_entry'))}
+          THEN strftime('%Y-%m-%dT%H:%M:%fZ', ${providerTimeSql('guest_entry')}) ELSE guest_entry.occurred_at END) AS occurred_at
         FROM activity_entries guest_entry JOIN requests r ON r.id = guest_entry.request_id AND r.organization_id = ?
        WHERE guest_entry.request_id IN (SELECT value FROM json_each(?)) AND guest_entry.actor_kind = 'guest'
          AND (guest_entry.kind = 'message' OR (guest_entry.kind = 'submission' AND r.kind = 'contact'))
-         AND NOT ${answeredAfterSql('guest_entry')}
+         AND NOT ${businessReplyAfterSql('guest_entry')}
        GROUP BY guest_entry.request_id`, [organizationId, d1JsonStringSet(threadIds.slice(index, index + 200))])
     for (const row of rows) times.set(row.request_id, row.occurred_at)
   }
@@ -627,7 +673,13 @@ export async function updateThreadProjectionIfLatestEntry(
 ): Promise<void> {
   await execute(db, `
     UPDATE requests
-    SET conversation_state = ?, resolved_at = CASE WHEN ? = 'resolved' THEN (SELECT occurred_at FROM activity_entries WHERE id=?) ELSE NULL END, updated_at = (SELECT occurred_at FROM activity_entries WHERE id=?)
+    SET conversation_state = CASE WHEN EXISTS (
+        SELECT 1 FROM activity_entries mirrored WHERE mirrored.id = ? AND mirrored.request_id = requests.id AND mirrored.kind = 'message'
+          AND ((mirrored.event_name = 'channel.message_mirrored' AND mirrored.actor_kind IN ('guest', 'member'))
+            OR mirrored.event_name = 'thread.scheduled_message')
+      ) THEN CASE WHEN ${unansweredGuestMessagesSql('requests.id')} THEN 'needs_attention' ELSE 'waiting_on_guest' END ELSE ? END,
+      resolved_at = CASE WHEN ? = 'resolved' THEN (SELECT occurred_at FROM activity_entries WHERE id=?) ELSE NULL END,
+      updated_at = (SELECT occurred_at FROM activity_entries WHERE id=?)
     WHERE id = ?
       AND EXISTS (
         SELECT 1
@@ -642,7 +694,7 @@ export async function updateThreadProjectionIfLatestEntry(
           )
       )
       AND (? = 0 OR NOT ${unansweredGuestMessagesSql('requests.id')})
-  `, [update.conversationState, update.conversationState, entryId, entryId, threadId, entryId, update.preserveUnansweredGuestMessages ? 1 : 0])
+  `, [entryId, update.conversationState, update.conversationState, entryId, entryId, threadId, entryId, update.preserveUnansweredGuestMessages ? 1 : 0])
 }
 
 /**

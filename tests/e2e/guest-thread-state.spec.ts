@@ -652,7 +652,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   expect(reviewCard?.priority).toBe('schedule')
   expect(reviewCard?.to).toBe(`/dashboard/${demoSlug()}/bookings/reservation/${bookingIds[0]}`)
   const due = todayFeed.cards.filter(card => card.priority === 'attention').length
-  await expect(page.getByRole('heading', { name: due ? `You have ${due} ${due === 1 ? 'thing' : 'things'} to do` : 'Your day at a glance', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: `Needs your attention${due ? ` · ${due}` : ''}`, exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Filter activity', exact: true })).toBeVisible()

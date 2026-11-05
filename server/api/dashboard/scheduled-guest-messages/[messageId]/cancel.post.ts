@@ -10,5 +10,5 @@ import { messageText } from '~/server/domain/guest-message-schedule'
 export default defineHandler(async (event) => {
   const { db, env, organization } = await getDashboardMemberContext(event, {})
   const access = await stayAccessFor(memberAccessPrincipal(organization, { env, event }))
-  return jsonResponse({ message: await cancelScheduledGuestMessage(db, access, messageText(getRouterParam(event, 'messageId'), 'messageId', 200)) })
+  return jsonResponse({ message: await cancelScheduledGuestMessage(db, env, access, messageText(getRouterParam(event, 'messageId'), 'messageId', 200)) })
 })

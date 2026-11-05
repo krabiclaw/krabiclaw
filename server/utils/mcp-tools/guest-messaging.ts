@@ -73,10 +73,10 @@ export async function handleGuestMessagingTools(ctx: McpExecutorContext): Promis
       const page = await listMessageTemplates(db, access, window)
       return { templates: page.templates, page_info: mcpPageInfo(window, page.templates.length, page.pagination.hasMore, { resource }) }
     }
-    case 'create_message_template': return { template: await saveMessageTemplate(db, access, null, { title: args.title, body: args.body, schedule: args.schedule }) }
-    case 'update_message_template': return { template: await saveMessageTemplate(db, access, requiredString(args, 'template_id'), { title: args.title, body: args.body, schedule: args.schedule, expectedVersion: args.expected_version }) }
+    case 'create_message_template': return { template: await saveMessageTemplate(db, env, access, null, { title: args.title, body: args.body, schedule: args.schedule }) }
+    case 'update_message_template': return { template: await saveMessageTemplate(db, env, access, requiredString(args, 'template_id'), { title: args.title, body: args.body, schedule: args.schedule, expectedVersion: args.expected_version }) }
     case 'delete_message_template': {
-      await deleteMessageTemplate(db, access, requiredString(args, 'template_id'), args.expected_version)
+      await deleteMessageTemplate(db, env, access, requiredString(args, 'template_id'), args.expected_version)
       return { template_id: requiredString(args, 'template_id'), status: 'deleted' }
     }
     case 'get_guest_messaging_context': {
@@ -96,7 +96,7 @@ export async function handleGuestMessagingTools(ctx: McpExecutorContext): Promis
       return { messages: page.messages, page_info: mcpPageInfo(window, page.messages.length, page.pagination.hasMore, { resource }) }
     }
     case 'cancel_scheduled_guest_message': {
-      const saved = await cancelScheduledGuestMessage(db, access, requiredString(args, 'message_id'))
+      const saved = await cancelScheduledGuestMessage(db, env, access, requiredString(args, 'message_id'))
       return { message: { id: saved.id, status: saved.status } }
     }
     case 'schedule_guest_reply': return { reply: await createSendLaterMessage(db, principal, requiredString(args, 'request_id'), { body: args.message, sendAt: args.send_at }) }

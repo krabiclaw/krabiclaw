@@ -4,7 +4,7 @@ import { isValidInstant, localDateTimeToInstant } from '~/utils/timezone'
 import { guestMessageDueAt, messagingError } from './guest-message-schedule'
 import { templateSchedule, type MessageTemplateRow, type ScheduledGuestMessageRow } from './guest-messaging'
 import { sendScheduledGuestReply, type ReplyOutcome } from './guest-threads/operations'
-import { publishGuestInboxThreadEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { ChannexError } from '~/server/integrations/channex/client'
 
 interface PlanningStay {
@@ -30,6 +30,25 @@ const PLANNING_STAY = `SELECT s.id, s.organization_id, s.product_id, s.request_i
   s.booking_received_at, s.version, s.updated_at, l.timezone, l.updated_at AS timezone_updated_at, c.check_in_time, c.check_in_instructions
   FROM stays s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
   JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id`
+
+/** A scheduled message belongs to its conversation, or its actual stay when no conversation exists. */
+export async function publishScheduledGuestMessageChange(
+  db: DbClient,
+  env: GuestInboxPublicationEnv,
+  row: Pick<ScheduledGuestMessageRow, 'organization_id' | 'product_id' | 'stay_id' | 'request_id' | 'updated_at'>,
+  type: 'thread.changed' | 'entry.appended' = 'thread.changed',
+): Promise<void> {
+  if (row.request_id !== null) {
+    await publishGuestInboxThreadEvent(env, db, { threadId: row.request_id, type })
+    return
+  }
+  const home = await queryFirst<{ location_id: string }>(db, `SELECT c.location_id FROM stays s
+    JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
+    JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
+    WHERE s.organization_id = ? AND s.id = ? AND s.product_id = ?`, [row.organization_id, row.stay_id, row.product_id])
+  if (!home) messagingError(500, 'INVALID_MESSAGE_STAY', 'The scheduled message’s stay or home is missing; open apps could not be updated', 'stayId')
+  await publishStayInvalidation(env, { type: 'stay.changed', organizationId: row.organization_id, productId: row.product_id, locationId: home.location_id, stayId: row.stay_id }, { updated_at: row.updated_at })
+}
 
 function validTimestamp(value: string, field: string): void {
   if (!isValidInstant(value) || new Date(value).toISOString() !== value) messagingError(500, 'INVALID_MESSAGING_DATA', `The stored ${field} timestamp is invalid`, field)
@@ -228,11 +247,12 @@ function sendFailure(outcome: Exclude<ReplyOutcome, { ok: true }>): SendFailure 
   }
 }
 
-async function finishSend(db: DbClient, id: string, values: { status: 'sent' | 'failed' | 'needs_review'; reason: string | null; error_code: string | null; error_field: string | null; entry_id: string | null; sent_at: string | null }): Promise<void> {
+async function finishSend(db: DbClient, env: SendEnv, row: ScheduledGuestMessageRow, values: { status: 'sent' | 'failed' | 'needs_review'; reason: string | null; error_code: string | null; error_field: string | null; entry_id: string | null; sent_at: string | null }): Promise<void> {
   const now = new Date().toISOString()
   const result = await execute(db, `UPDATE scheduled_guest_messages SET status = ?, reason = ?, error_code = ?, error_field = ?, entry_id = ?, sent_at = ?, updated_at = ?
-    WHERE id = ? AND status = 'sending'`, [values.status, values.reason, values.error_code, values.error_field, values.entry_id, values.sent_at, now, id])
+    WHERE id = ? AND status = 'sending'`, [values.status, values.reason, values.error_code, values.error_field, values.entry_id, values.sent_at, now, row.id])
   if (result.meta.changes !== 1) messagingError(409, 'SCHEDULED_MESSAGE_NOT_SENDING', 'The scheduled message outcome could not be recorded because it is no longer sending', 'status')
+  await publishScheduledGuestMessageChange(db, env, { ...row, updated_at: now }, values.entry_id === null ? 'thread.changed' : 'entry.appended')
 }
 
 /**
@@ -249,7 +269,7 @@ async function sendScheduledGuestMessage(db: DbClient, env: SendEnv, row: Pick<S
     [now, now, current.id, current.updated_at])
   if (claim.meta.changes !== 1) return 'not_due'
   if (current.request_id === null) {
-    await finishSend(db, current.id, { status: 'failed', reason: 'The stay has no guest conversation to send through.', error_code: 'STAY_CONVERSATION_REQUIRED', error_field: 'requestId', entry_id: null, sent_at: null })
+    await finishSend(db, env, current, { status: 'failed', reason: 'The stay has no guest conversation to send through.', error_code: 'STAY_CONVERSATION_REQUIRED', error_field: 'requestId', entry_id: null, sent_at: null })
     return 'failed'
   }
   let sent: Awaited<ReturnType<typeof sendScheduledGuestReply>>
@@ -260,18 +280,16 @@ async function sendScheduledGuestMessage(db: DbClient, env: SendEnv, row: Pick<S
     // ChannexError here came from a read before anything was sent.
     const data = error instanceof HTTPError || error instanceof ChannexError ? error.data : null
     if (!data || typeof data !== 'object' || !('code' in data) || typeof data.code !== 'string' || !('field' in data) || typeof data.field !== 'string') throw error
-    await finishSend(db, current.id, { status: 'failed', reason: (error as Error).message, error_code: data.code, error_field: data.field, entry_id: null, sent_at: null })
+    await finishSend(db, env, current, { status: 'failed', reason: (error as Error).message, error_code: data.code, error_field: data.field, entry_id: null, sent_at: null })
     return 'failed'
   }
   if (sent.outcome.ok) {
     if (sent.entryId === null) messagingError(500, 'SCHEDULED_MESSAGE_ENTRY_REQUIRED', 'The scheduled message was sent but its conversation entry could not be read', 'entryId')
-    await finishSend(db, current.id, { status: 'sent', reason: null, error_code: null, error_field: null, entry_id: sent.entryId, sent_at: new Date().toISOString() })
-    await publishGuestInboxThreadEvent(env, db, { threadId: current.request_id, type: 'entry.appended' })
+    await finishSend(db, env, current, { status: 'sent', reason: null, error_code: null, error_field: null, entry_id: sent.entryId, sent_at: new Date().toISOString() })
     return 'sent'
   }
   const failure = sendFailure(sent.outcome)
-  await finishSend(db, current.id, { ...failure, entry_id: sent.entryId, sent_at: null })
-  if (sent.entryId !== null) await publishGuestInboxThreadEvent(env, db, { threadId: current.request_id, type: 'entry.appended' })
+  await finishSend(db, env, current, { ...failure, entry_id: sent.entryId, sent_at: null })
   return failure.status
 }
 

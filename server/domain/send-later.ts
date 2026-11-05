@@ -62,7 +62,14 @@ export async function createSendLaterMessage(db: DbClient, principal: MemberAcce
   const id = crypto.randomUUID()
   await execute(db, `INSERT INTO send_later_messages (id, organization_id, request_id, user_id, body, due_at, status, version, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, 'pending', 1, ?, ?)`, [id, principal.organizationId, thread.id, principal.userId, body, due, now, now])
-  return sendLaterMessage(await ownMessage(db, principal, id))
+  const saved = await ownMessage(db, principal, id)
+  try {
+    await publishGuestInboxThreadEvent(principal.env, db, { threadId: saved.request_id, type: 'thread.changed' })
+  } catch (cause) {
+    throw new HTTPError({ statusCode: 503, message: 'Your reply was scheduled, but open apps could not be updated. Reload before scheduling it again.',
+      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, message_id: saved.id }, cause })
+  }
+  return sendLaterMessage(saved)
 }
 
 /** The author's messages still to send, then those that failed in the last week, optionally for one conversation. */
@@ -82,7 +89,14 @@ export async function updateSendLaterMessage(db: DbClient, principal: MemberAcce
   const result = await execute(db, `UPDATE send_later_messages SET body = ?, due_at = ?, version = version + 1, updated_at = ?
     WHERE id = ? AND user_id = ? AND status = 'pending' AND version = ?`, [body, due, now, current.id, principal.userId, current.version])
   if (result.meta.changes !== 1) messagingError(409, 'SEND_LATER_VERSION_CONFLICT', 'This scheduled message changed; reload it before editing', 'expectedVersion')
-  return sendLaterMessage(await ownMessage(db, principal, current.id))
+  const saved = await ownMessage(db, principal, current.id)
+  try {
+    await publishGuestInboxThreadEvent(principal.env, db, { threadId: saved.request_id, type: 'thread.changed' })
+  } catch (cause) {
+    throw new HTTPError({ statusCode: 503, message: 'Your scheduled reply was changed, but open apps could not be updated. Reload before editing it again.',
+      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, message_id: saved.id, version: saved.version }, cause })
+  }
+  return sendLaterMessage(saved)
 }
 
 export async function cancelSendLaterMessage(db: DbClient, principal: MemberAccessPrincipal, messageId: string, now = new Date().toISOString()) {
@@ -90,7 +104,14 @@ export async function cancelSendLaterMessage(db: DbClient, principal: MemberAcce
   const result = await execute(db, `UPDATE send_later_messages SET status = 'cancelled', reason = 'Cancelled by its author.', version = version + 1, updated_at = ?
     WHERE id = ? AND user_id = ? AND status = 'pending'`, [now, current.id, principal.userId])
   if (result.meta.changes !== 1) messagingError(409, 'SEND_LATER_NOT_PENDING', 'This message has already started sending and can no longer be cancelled', 'status')
-  return sendLaterMessage(await ownMessage(db, principal, current.id))
+  const saved = await ownMessage(db, principal, current.id)
+  try {
+    await publishGuestInboxThreadEvent(principal.env, db, { threadId: saved.request_id, type: 'thread.changed' })
+  } catch (cause) {
+    throw new HTTPError({ statusCode: 503, message: 'Your scheduled reply was cancelled, but open apps could not be updated. Reload to see its saved status.',
+      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, message_id: saved.id }, cause })
+  }
+  return sendLaterMessage(saved)
 }
 
 type SendEnv = CloudflareEnv & Parameters<typeof sendScheduledGuestReply>[1]['env'] & GuestInboxPublicationEnv
@@ -113,10 +134,11 @@ function failure(outcome: Exclude<ReplyOutcome, { ok: true }>): Outcome {
   }
 }
 
-async function finish(db: DbClient, id: string, values: { status: 'sent' | 'failed' | 'needs_review'; reason: string | null; error_code: string | null; error_field: string | null; entry_id: string | null; sent_at: string | null }): Promise<void> {
+async function finish(db: DbClient, env: SendEnv, row: SendLaterMessageRow, values: { status: 'sent' | 'failed' | 'needs_review'; reason: string | null; error_code: string | null; error_field: string | null; entry_id: string | null; sent_at: string | null }): Promise<void> {
   const result = await execute(db, `UPDATE send_later_messages SET status = ?, reason = ?, error_code = ?, error_field = ?, entry_id = ?, sent_at = ?, updated_at = ?
-    WHERE id = ? AND status = 'sending'`, [values.status, values.reason, values.error_code, values.error_field, values.entry_id, values.sent_at, new Date().toISOString(), id])
+    WHERE id = ? AND status = 'sending'`, [values.status, values.reason, values.error_code, values.error_field, values.entry_id, values.sent_at, new Date().toISOString(), row.id])
   if (result.meta.changes !== 1) messagingError(409, 'SEND_LATER_NOT_SENDING', 'The scheduled message outcome could not be recorded because it is no longer sending', 'status')
+  await publishGuestInboxThreadEvent(env, db, { threadId: row.request_id, type: values.entry_id === null ? 'thread.changed' : 'entry.appended' })
 }
 
 /**
@@ -139,7 +161,7 @@ async function sendOne(db: DbClient, env: SendEnv, row: SendLaterMessageRow, now
       await execute(db, `UPDATE send_later_messages SET status = 'pending', started_at = NULL, updated_at = ? WHERE id = ? AND status = 'sending'`, [new Date().toISOString(), row.id])
       throw error
     }
-    await finish(db, row.id, { status: 'failed', reason: error.message, error_code: 'SEND_LATER_ACCESS_REVOKED', error_field: 'userId', entry_id: null, sent_at: null })
+    await finish(db, env, row, { status: 'failed', reason: error.message, error_code: 'SEND_LATER_ACCESS_REVOKED', error_field: 'userId', entry_id: null, sent_at: null })
     return 'failed'
   }
   let sent: Awaited<ReturnType<typeof sendScheduledGuestReply>>
@@ -148,18 +170,16 @@ async function sendOne(db: DbClient, env: SendEnv, row: SendLaterMessageRow, now
   } catch (error) {
     const data = error instanceof HTTPError || error instanceof ChannexError ? error.data : null
     if (!data || typeof data !== 'object' || !('code' in data) || typeof data.code !== 'string' || !('field' in data) || typeof data.field !== 'string') throw error
-    await finish(db, row.id, { status: 'failed', reason: (error as Error).message, error_code: data.code, error_field: data.field, entry_id: null, sent_at: null })
+    await finish(db, env, row, { status: 'failed', reason: (error as Error).message, error_code: data.code, error_field: data.field, entry_id: null, sent_at: null })
     return 'failed'
   }
   if (sent.outcome.ok) {
     if (sent.entryId === null) messagingError(500, 'SEND_LATER_ENTRY_REQUIRED', 'The message was sent but its conversation entry could not be read', 'entryId')
-    await finish(db, row.id, { status: 'sent', reason: null, error_code: null, error_field: null, entry_id: sent.entryId, sent_at: new Date().toISOString() })
-    await publishGuestInboxThreadEvent(env, db, { threadId: row.request_id, type: 'entry.appended' })
+    await finish(db, env, row, { status: 'sent', reason: null, error_code: null, error_field: null, entry_id: sent.entryId, sent_at: new Date().toISOString() })
     return 'sent'
   }
   const outcome = failure(sent.outcome)
-  await finish(db, row.id, { ...outcome, entry_id: sent.entryId, sent_at: null })
-  if (sent.entryId !== null) await publishGuestInboxThreadEvent(env, db, { threadId: row.request_id, type: 'entry.appended' })
+  await finish(db, env, row, { ...outcome, entry_id: sent.entryId, sent_at: null })
   return outcome.status
 }
 

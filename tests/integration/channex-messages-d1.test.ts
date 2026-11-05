@@ -9,11 +9,11 @@ import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { applyChannelBooking, type ChannelBooking } from '../../server/domain/stays.ts'
 import { backfillChannexMessages, mirrorChannexMessageEvent, mirrorChannexThread } from '../../server/domain/guest-threads/channel-messages.ts'
-import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
+import { executeGuestThreadOperation, sendScheduledGuestReply } from '../../server/domain/guest-threads/operations.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
-import { listGuestThreads } from '../../server/domain/guest-threads/repository.ts'
+import { firstUnansweredGuestEntryTimes, listGuestThreads } from '../../server/domain/guest-threads/repository.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
-import { createDeliveryReceipt } from '../../server/domain/guest-threads/deliveries.ts'
+import { createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { getGuestRequest } from '../../server/domain/requests.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import todayRoute from '../../server/api/dashboard/today.get.ts'
@@ -40,6 +40,7 @@ class Provider {
   attachmentNetworkFailure = false
   refuseMessage = false
   airbnbUnavailable = false
+  replyAt = RAW
   sends = 0
   uploads: Array<{ file: string; file_name: string; file_type: string }> = []
   images = new Map<string, Uint8Array<ArrayBuffer>>()
@@ -54,8 +55,8 @@ class Provider {
       relationships: { property: { data: { type: 'property', id: this.propertyId } }, channel: { data: { type: 'channel', id: 'channel' } }, booking: { data: this.bookingId === null ? null : { type: 'booking', id: this.bookingId } } } }
   }
 
-  message(id: string, sender: string, text: string | null, attachments: string[] = []) {
-    return { id, type: 'message', attributes: { sender, message: text, attachments, inserted_at: RAW, updated_at: RAW, meta: sender === 'system' ? { inquiry: true } : null },
+  message(id: string, sender: string, text: string | null, attachments: string[] = [], at = RAW) {
+    return { id, type: 'message', attributes: { sender, message: text, attachments, inserted_at: at, updated_at: at, meta: sender === 'system' ? { inquiry: true } : null },
       relationships: { message_thread: { data: { type: 'message_thread', id: this.threadId } } } }
   }
 
@@ -106,7 +107,7 @@ class Provider {
       if (this.refuseMessage) return Response.json({ errors: { code: 'not_supported', title: 'Message refused' } }, { status: 422 })
       const body = JSON.parse(String(init.body)) as { message: { message?: string; attachment_id?: string } }
       if (body.message.attachment_id) assert.deepEqual(Object.keys(body.message), ['attachment_id'])
-      const sent = this.message(`accepted-${this.sends}`, 'property', body.message.message ?? null, body.message.attachment_id ? [`attachments/${body.message.attachment_id}`] : [])
+      const sent = this.message(`accepted-${this.sends}`, 'property', body.message.message ?? null, body.message.attachment_id ? [`attachments/${body.message.attachment_id}`] : [], this.replyAt)
       this.messages.push(sent)
       this.onSend?.()
       if (this.holdReply) await this.holdReply
@@ -696,4 +697,83 @@ test('an in-flight or interrupted reply never blocks actual provider messages an
     await assert.rejects(executeGuestThreadOperation(db, { ...input, idempotencyKey: 'disconnected-new', body: 'Not attempted' }), code('CHANNEL_PROPERTY_NOT_READY'))
     assert.equal(await db.prepare('SELECT count(*) FROM activity_entries WHERE request_id IS NOT NULL').first('count(*)'), 6, 'failed preflight records no outbound message')
   } finally { release(); globalThis.fetch = realFetch; await runtime.dispose() }
+})
+
+test('customer work follows actual provider replies, keeps the first waiting instant, and survives failed or automatic sends', async () => {
+  const { runtime, db, env } = await boot()
+  const provider = new Provider(), realFetch = globalThis.fetch
+  globalThis.fetch = provider.fetch as typeof fetch
+  try {
+    provider.messages = [provider.message('waiting-guest', 'guest', 'Can we check in early?', [], '2026-10-15T23:12:00.123456')]
+    const mirrored = await mirrorChannexThread(db, env, 'thread', 'property')
+    if (mirrored.status !== 'mirrored') throw new Error('Expected mapped inquiry')
+    const threadId = mirrored.request_id
+    const waiting = () => firstUnansweredGuestEntryTimes(db, ORG, [threadId])
+    const first = await db.prepare("SELECT occurred_at FROM activity_entries WHERE dedupe_key='channex-message:waiting-guest'").first<string>('occurred_at')
+    assert.ok(first)
+    assert.equal((await waiting()).get(threadId), first)
+    assert.equal((await firstUnansweredGuestEntryTimes(db, 'another-organization', [threadId])).size, 0, 'the supplied organization must own the conversation')
+
+    provider.messages.push(provider.message('followup-guest', 'guest', 'We would arrive at noon.', [], '2026-10-15T23:13:00.123456'))
+    await mirrorChannexThread(db, env, 'thread', 'property')
+    assert.equal((await waiting()).get(threadId), first, 'a follow-up does not reset how long this customer has waited')
+
+    // An old provider resource can first become visible during a later pull.
+    provider.messages.unshift(provider.message('historical-host', 'property', 'A previous conversation reply', [], '2026-10-15T23:10:00.123456'))
+    await mirrorChannexThread(db, env, 'thread', 'property')
+    assert.equal((await waiting()).get(threadId), first, 'late-imported history cannot answer a newer guest message')
+    assert.equal(await db.prepare('SELECT conversation_state FROM requests WHERE id=?').bind(threadId).first('conversation_state'), 'needs_attention')
+
+    provider.refuseMessage = true
+    const failed = await executeGuestThreadOperation(db, { threadId, organizationId: ORG, action: 'reply', body: 'An attempted reply', idempotencyKey: 'failed-response', actorUserId: OWNER, env })
+    assert.equal(failed.ok, false)
+    assert.equal((await waiting()).get(threadId), first, 'a failed delivery leaves the guest waiting')
+    provider.refuseMessage = false
+
+    const logged = await appendEntry(db, { threadId, kind: 'message', actorKind: 'member', actorUserId: OWNER,
+      channel: 'email', eventName: 'thread.member_reply', body: 'Logged response only', dedupeKey: 'logged-response-only' })
+    const loggedReceipt = await createDeliveryReceipt(db, { entryId: logged.id, channel: 'email', provider: 'log_only', purpose: 'member_reply', idempotencyKey: 'logged-response-only' })
+    await recordDeliveryOutcome(db, { deliveryId: loggedReceipt.id, status: 'sent', providerMessageId: 'log-only:response' })
+    assert.equal((await waiting()).get(threadId), first, 'a log-only send does not reach the guest')
+    provider.replyAt = '2026-10-15T23:13:30.123456'
+    const automatic = await sendScheduledGuestReply(db, { threadId, organizationId: ORG, body: 'Your scheduled check-in instructions', idempotencyKey: 'automatic-instructions', env })
+    assert.equal(automatic.outcome.ok, true)
+    await mirrorChannexThread(db, env, 'thread', 'property')
+    assert.equal((await waiting()).get(threadId), first, 'a template and its mirrored provider echo are not a response to this question')
+    assert.equal(await db.prepare('SELECT conversation_state FROM requests WHERE id=?').bind(threadId).first('conversation_state'), 'needs_attention')
+
+    provider.messages.push(provider.message('answered-on-airbnb', 'property', 'Yes, noon is fine.', [], '2026-10-15T23:14:00.123456'))
+    await mirrorChannexThread(db, env, 'thread', 'property')
+    assert.equal((await waiting()).has(threadId), false, 'the actual host response on Airbnb clears the outstanding reply')
+    assert.equal(await db.prepare('SELECT conversation_state FROM requests WHERE id=?').bind(threadId).first('conversation_state'), 'waiting_on_guest')
+
+    provider.messages.push(provider.message('new-guest-question', 'guest', 'Can we leave our bags later?', [], '2026-10-15T23:15:00.123456'))
+    await mirrorChannexThread(db, env, 'thread', 'property')
+    const newFirst = await db.prepare("SELECT occurred_at FROM activity_entries WHERE dedupe_key='channex-message:new-guest-question'").first<string>('occurred_at')
+    assert.ok(newFirst)
+    assert.equal((await waiting()).get(threadId), newFirst, 'new guest work reopens after a successful response')
+    provider.messages.push(provider.message('airbnb-agent', 'agent', 'Support has updated the thread.', [], '2026-10-15T23:16:00.123456'))
+    await mirrorChannexThread(db, env, 'thread', 'property')
+    assert.equal((await waiting()).get(threadId), newFirst, 'Airbnb Support is not a business response to the customer')
+
+    provider.replyAt = '2026-10-15T23:17:00.123456'
+    const replied = await executeGuestThreadOperation(db, { threadId, organizationId: ORG, action: 'reply', body: 'Yes, we can store them.', idempotencyKey: 'successful-response', actorUserId: OWNER, env })
+    assert.equal(replied.ok, true)
+    assert.equal((await waiting()).size, 0, 'a provider-accepted reply made through KrabiClaw also clears the work')
+  } finally { globalThis.fetch = realFetch; await runtime.dispose() }
+})
+
+test('explicit provider instants order replies across offsets without losing submillisecond precision', async () => {
+  const { runtime, db, env } = await boot()
+  const provider = new Provider(), realFetch = globalThis.fetch
+  globalThis.fetch = provider.fetch as typeof fetch
+  try {
+    provider.messages = [provider.message('offset-guest', 'guest', 'Are you open?', [], '2026-10-15T23:12:00.123456+07:00')]
+    const mirrored = await mirrorChannexThread(db, env, 'thread', 'property')
+    if (mirrored.status !== 'mirrored') throw new Error('Expected mapped inquiry')
+    assert.deepEqual([...await firstUnansweredGuestEntryTimes(db, ORG, [mirrored.request_id])], [[mirrored.request_id, '2026-10-15T16:12:00.123Z']], 'an explicit original instant supplies the waiting age instead of the later import time')
+    provider.messages.push(provider.message('offset-answer', 'property', 'Yes.', [], '2026-10-15T16:12:00.123457Z'))
+    await mirrorChannexThread(db, env, 'thread', 'property')
+    assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [mirrored.request_id])).size, 0)
+  } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })

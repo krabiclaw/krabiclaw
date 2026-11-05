@@ -201,6 +201,12 @@ test('an assigned staff member can review a future online consultation from Toda
     expect(persisted.booking).toMatchObject({ status: 'confirmed', assignedMemberId: actor.id })
     const completed = await body<TodayFeedPayload>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
     expect(completed.cards.some(card => card.id === `attention:${requestId}`)).toBe(false)
+    // Today stays mounted beside the detail. The actual confirmation clears
+    // its outstanding card through the live canonical-state invalidation.
+    await memberPage.setViewportSize({ width: 1440, height: 900 })
+    await expect(todayPanel).toBeVisible()
+    await expect(attention).toHaveCount(0)
+    await expect(todayPanel.getByRole('heading', { name: 'Needs your attention', exact: true })).toBeVisible()
     await memberPage.clock.setFixedTime(new Date(`${day}T13:00:00.000Z`))
     await memberPage.reload()
     await expect(detail.getByRole('heading', { name: 'Today', exact: true })).toBeVisible()

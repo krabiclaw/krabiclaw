@@ -5,9 +5,10 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { createStay, type StayAccess } from '../../server/domain/stays.ts'
-import { saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
+import { cancelScheduledGuestMessage, deleteMessageTemplate, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
 import { sendDueScheduledGuestMessages } from '../../server/domain/scheduled-guest-messages.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import type { DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 
 // The production cron sends what its plan made due, through each conversation's
 // own address, and records every outcome on the scheduled message itself.
@@ -20,7 +21,14 @@ const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISO
 test('the cron sends due messages, leaves future ones pending and records failures and review outcomes', async () => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'scheduled-messages-proof', compatibilityDate: '2024-11-01',
-    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: `export class Hub {
+      constructor(ctx) { this.storage = ctx.storage }
+      async fetch(request) {
+        if (new URL(request.url).pathname === '/observed') return Response.json(await this.storage.get('events') ?? [])
+        await this.storage.put('events', [...await this.storage.get('events') ?? [], await request.json()])
+        return new Response(null, { status: 204 })
+      }
+    } export default { fetch() { return new Response("ok") } }` } } },
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
     env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'scheduled-messages-proof', exportName: 'Hub' } },
   } }] })
@@ -43,8 +51,8 @@ test('the cron sends due messages, leaves future ones pending and records failur
 
     // Saved before the stays arrive: a welcome five minutes after each new direct
     // reservation, and an arrival note at noon on check-in day.
-    const welcome = await saveMessageTemplate(db, manager, null, { title: 'Welcome', body: 'Thanks for booking the cabin.', schedule: { trigger: 'booking_received', delayMinutes: 5, productIds: [cabin.id] } })
-    const arrival = await saveMessageTemplate(db, manager, null, { title: 'Arrival', body: 'See you today.', schedule: { trigger: 'check_in', offsetDays: 0, localTime: '12:00', productIds: [cabin.id] } })
+    const welcome = await saveMessageTemplate(db, env, manager, null, { title: 'Welcome', body: 'Thanks for booking the cabin.', schedule: { trigger: 'booking_received', delayMinutes: 5, productIds: [cabin.id] } })
+    const arrival = await saveMessageTemplate(db, env, manager, null, { title: 'Arrival', body: 'See you today.', schedule: { trigger: 'check_in', offsetDays: 0, localTime: '12:00', productIds: [cabin.id] } })
     const ana = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'ana', check_in_date: day(3), check_out_date: day(5), adults: 2, guest_name: 'Ana', guest_email: 'ana@example.test', total_minor: 30_000 })
     const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(10), check_out_date: day(11), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 15_000 })
     const cy = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'cy', check_in_date: day(20), check_out_date: day(21), adults: 1, guest_name: 'Cy', guest_email: 'cy@example.test', total_minor: 15_000 })
@@ -107,10 +115,30 @@ test('the cron sends due messages, leaves future ones pending and records failur
     assert.equal(await db.prepare("SELECT count(*) AS n FROM activity_entries WHERE event_name = 'thread.scheduled_message'").first('n'), 2)
 
     // A schedule saved after its event has passed records the miss instead of sending late.
-    const lateNote = await saveMessageTemplate(db, manager, null, { title: 'Pre-arrival', body: 'Your stay is a week away.', schedule: { trigger: 'check_in', offsetDays: -7, localTime: '09:00', productIds: [cabin.id] } })
+    const lateNote = await saveMessageTemplate(db, env, manager, null, { title: 'Pre-arrival', body: 'Your stay is a week away.', schedule: { trigger: 'check_in', offsetDays: -7, localTime: '09:00', productIds: [cabin.id] } })
     const missed = (await planned(ana.id, lateNote.id))!
     assert.deepEqual([missed.status, missed.reason], ['skipped', 'This event was already in the past when the schedule or stay changed.'])
     assert.equal((await planned(cy.id, lateNote.id))?.status, 'pending')
+
+    // Editing and cancelling future automatic work reaches every affected
+    // conversation's open dashboard through the same canonical event.
+    const hub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName(ORG))
+    const publications = async () => await (await hub.fetch('https://hub/observed')).json() as DashboardInvalidation[]
+    let observed = (await publications()).length
+    const changed = await saveMessageTemplate(db, env, manager, lateNote.id, { title: 'Pre-arrival', body: 'Your stay is coming up.', expectedVersion: lateNote.version,
+      schedule: { trigger: 'check_in', offsetDays: -6, localTime: '09:00', productIds: [cabin.id] } })
+    assert.equal((await planned(cy.id, lateNote.id))?.body, 'Your stay is coming up.')
+    assert.deepEqual((await publications()).slice(observed).filter(event => event.type === 'thread.changed').map(event => 'threadId' in event ? event.threadId : null).sort(), [ana, dee, cy, eve].map(stay => stay.request_id).sort())
+    observed = (await publications()).length
+    const cyNote = (await planned(cy.id, lateNote.id))!
+    await cancelScheduledGuestMessage(db, env, manager, cyNote.id!)
+    assert.equal((await planned(cy.id, lateNote.id))?.status, 'cancelled')
+    assert.deepEqual((await publications()).slice(observed).map(event => [event.type, 'threadId' in event ? event.threadId : null]), [['thread.changed', cy.request_id]])
+    observed = (await publications()).length
+    await deleteMessageTemplate(db, env, manager, lateNote.id, changed.version)
+    assert.equal(await db.prepare('SELECT count(*) FROM message_templates WHERE id = ?').bind(lateNote.id).first('count(*)'), 0)
+    assert.deepEqual(await db.prepare('SELECT template_id, status FROM scheduled_guest_messages WHERE id = ?').bind(cyNote.id).first(), { template_id: null, status: 'cancelled' })
+    assert.deepEqual((await publications()).slice(observed).map(event => 'threadId' in event ? event.threadId : null).sort(), [ana, dee, cy, eve].map(stay => stay.request_id).sort())
   } finally {
     await runtime.dispose()
   }
