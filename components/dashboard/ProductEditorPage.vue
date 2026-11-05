@@ -569,9 +569,10 @@ const isMutation = (value: unknown): value is { success: true; product: ProductM
 // The product in this scope, read before the level renders. Keyed by location
 // and product, so a scope change reads that location's prices and settings.
 type ProductEditorRead = { collections: Collection[]; product: Product; previewToken: string | null; publicUrl: string | null; publicUrls: Record<string, string> } | null
+const productReadKey = computed(() => `dashboard-product:${organizationId}:${locationScope.value ?? 'organization'}:${productId.value}`)
 const { data: loaded, error: loadFailure, refresh } = await useAsyncData<ProductEditorRead>(
-  () => `dashboard-product:${organizationId}:${locationScope.value ?? 'organization'}:${productId.value}`,
-  async (): Promise<ProductEditorRead> => {
+  productReadKey,
+  async (nuxtApp): Promise<ProductEditorRead> => {
     if (isNew.value) return null
     const id = locationId.value
     const [collectionResponse, productResponse] = await Promise.all([
@@ -583,7 +584,7 @@ const { data: loaded, error: loadFailure, refresh } = await useAsyncData<Product
     if (locationScope.value === 'online' && !productResponse.product.booking?.held_online) throw createError({ statusCode: 404, statusMessage: 'This product is not held online' })
     // The preview token is site-wide: a writer's re-read keeps the one this
     // product already has, so a save never waits on minting another.
-    const current: ProductEditorRead | undefined = loaded.value
+    const current = nuxtApp.payload.data[productReadKey.value] as ProductEditorRead | undefined
     const kept = current?.product.id === productResponse.product.id ? current.previewToken : null
     let previewToken: string | null = kept
     if (kept === null && canPreview.value && ['stay', 'dish', 'experience', 'service'].includes(productResponse.product.kind)) {

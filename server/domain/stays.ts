@@ -1,11 +1,11 @@
 import { HTTPError } from 'nitro'
 import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevision, parseStoredFormQuestions, type FormAnswerSnapshot, type FormQuestion } from '~/shared/form-questions'
 import { acceptFormAnswers } from '~/server/domain/form-questions'
-import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CALENDAR_DAYS, changeNightPrice, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNEL_LABELS, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CALENDAR_DAYS, changeNightPrice, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNELS, STAY_CHANNEL_LABELS, isChannelManagedStay, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedResponsibilitySql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
-import { organizationEventQuery } from '~/server/utils/organization-events'
+import { organizationEventQuery, type OrganizationEvent } from '~/server/utils/organization-events'
 import { createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
 import { liveHomeSql } from '~/server/utils/billing'
 import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
@@ -32,6 +32,7 @@ import { stayThreadQueries } from '~/server/domain/requests'
 import { ownedBuyerRequest } from '~/server/domain/payments/buyer'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
+import { listingCalendar } from '~/server/integrations/channex/airbnb-listing'
 import { toE164 } from '~/utils/phone'
 import { arrangeProductPhotos, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, type MediaPlacementItem } from '~/server/utils/media-placement'
 import { deleteMediaAsset, getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
@@ -54,7 +55,7 @@ import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } fro
  */
 
 /** Who is asking: managers act on every home; assigned members read the homes they look after. */
-export type StayAccess = { organizationId: string; actorId: string } & ({ manage: true } | { manage: false; userId: string })
+export type StayAccess = { organizationId: string; actorId: string; audit?: OrganizationEvent['context'] } & ({ manage: true } | { manage: false; userId: string })
 type StayMutationEnv = ChannexEnv & GuestInboxPublicationEnv
 
 /** Resolve a member's stay access from their Better Auth role: operations update manages, operations assigned reads assigned homes. */
@@ -1197,7 +1198,7 @@ export async function getStay<A extends StayAccess>(db: DbClient, access: A, sta
     captured_minor: online[0].captured_amount, refunded_minor: online[0].refunded_amount, receipt_url: online[0].receipt_url, created_at: online[0].created_at,
   } : null
   const paid = payments.reduce((sum, payment) => sum + payment.amount_minor, 0) + (onlinePayment ? onlinePayment.captured_minor - onlinePayment.refunded_minor : 0)
-  const status = stay.owner === 'channel' ? null
+  const status = isChannelManagedStay(stay) ? null
     : paid === 0 ? 'unpaid' : paid < stay.total_minor ? 'partial' : paid === stay.total_minor ? 'paid' : 'overpaid'
   return { ...stay, guest_image_url: row.guest_image_url, payments, online_payment: onlinePayment, paid_minor: paid, payment_status: status } as StayDetailView<A>
 }
@@ -1298,6 +1299,38 @@ async function pushNights(db: DbClient, env: ChannexEnv, access: StayAccess, pro
 export async function syncStayCalendar(db: DbClient, env: ChannexEnv, access: StayAccess, productId: string, mapping: ChannexMapping, lease?: DeliveryLease): Promise<ChannelPush> {
   const home = await readStayHome(db, access, productId)
   return pushStayCalendar(db, env, access.organizationId, home, mapping, (from, to) => homeNights(db, access.organizationId, home, from, to), lease)
+}
+
+/** Verify occupied/closed dates against Airbnb itself, rather than trusting an outbound delivery receipt. */
+export async function verifyStayCalendarOccupancy(db: DbClient, env: ChannexEnv, access: StayAccess, productId: string, dates: readonly string[]): Promise<{
+  state: 'verified' | 'needs_attention' | 'not_connected'; checked_dates: string[]; unverified_dates: string[]; mismatches: string[]; detail: string | null
+}> {
+  requireManager(access)
+  const home = await readStayHome(db, access, productId)
+  const requested = [...new Set(dates.map(value => date(value, 'date')))].sort()
+  const mapping = await queryFirst<{ listing_id: string; channel_id: string; enabled: number; import_stage: string; status: string | null; connected_channel_id: string | null }>(db, `
+    SELECT m.listing_id, m.channel_id, m.enabled, m.import_stage, c.status, c.channel_id AS connected_channel_id
+    FROM product_channel_mappings m LEFT JOIN channex_connections c ON c.organization_id = m.organization_id
+    WHERE m.organization_id = ? AND m.product_id = ? AND m.provider = 'channex'`, [access.organizationId, productId])
+  if (!mapping || mapping.status !== 'connected') return { state: 'not_connected', checked_dates: [], unverified_dates: requested, mismatches: [], detail: 'Airbnb is not connected for this home. Its channel availability has not been verified.' }
+  if (mapping.enabled !== 1 || mapping.import_stage !== 'complete' || mapping.channel_id !== mapping.connected_channel_id) return {
+    state: 'needs_attention', checked_dates: [], unverified_dates: requested, mismatches: [], detail: 'Finish connecting this home to its selected Airbnb account before verifying availability.',
+  }
+  const from = homeToday(home.timezone)
+  const to = addDays(from, STAY_CALENDAR_DAYS)
+  const checked = requested.filter(value => value >= from && value < to)
+  const unverified = requested.filter(value => value < from || value >= to)
+  const [actual, local] = await Promise.all([
+    listingCalendar(env, mapping.channel_id, mapping.listing_id, home.timezone),
+    homeNights(db, access.organizationId, home, from, to),
+  ])
+  const actualByDate = new Map(actual.map(night => [night.date, night]))
+  const localByDate = new Map(local.map(night => [night.date, night]))
+  const mismatches = checked.filter(value => actualByDate.get(value)?.availability !== 0 || localByDate.get(value)?.available !== false)
+  return {
+    state: mismatches.length || unverified.length ? 'needs_attention' : 'verified', checked_dates: checked, unverified_dates: unverified, mismatches,
+    detail: mismatches.length ? 'Some occupied or blocked nights are still available in KrabiClaw or Airbnb.' : unverified.length ? `Airbnb read-back covers ${from} through ${addDays(to, -1)}. The other dates have not been verified.` : null,
+  }
 }
 
 /**
@@ -1538,10 +1571,43 @@ function stayFields(input: Record<string, unknown>, home: StayHome): StayFields 
  * offers guests and channels; a stay the host enters is the host's own
  * decision, so those rules do not refuse it. Only another stay does.
  */
-export async function createStay(db: DbClient, env: StayMutationEnv, access: StayAccess, input: Record<string, unknown> & { product_id: string; idempotency_key: string }): Promise<StayDetail & { channel_push: SuccessfulChannelPush | null }> {
+export interface HostawayStaySource {
+  source: 'hostaway'
+  source_id: string
+  row: Record<string, string>
+  fingerprint: string
+  channel?: StayChannel
+  channel_booking_id?: string | null
+}
+
+async function publishCreatedStay(db: DbClient, env: StayMutationEnv, access: StayAccess & { manage: true }, stay: StayDetail): Promise<StayDetail & { channel_push: SuccessfulChannelPush | null }> {
+  await planStayMessages(db, access.organizationId, stay.id)
+  const channelPush = await pushNights(db, env, access, stay.product_id, [[stay.check_in_date, stay.check_out_date]])
+  return completeChannelPush(channelPush, { product_id: stay.product_id, stay_id: stay.id, version: stay.version, ranges: [[stay.check_in_date, stay.check_out_date]] }, async () => {
+    await publishStayChange(env, db, access.organizationId, stay, true)
+    return getStay(db, access, stay.id)
+  })
+}
+
+/** Retry the visibility/delivery of a committed migration using the stay as the host now has it, without restoring stale CSV fields. */
+export async function resumeImportedStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string): Promise<StayDetail & { channel_push: SuccessfulChannelPush | null }> {
+  requireManager(access)
+  const stay = await getStay(db, access, stayId)
+  const receipt = await queryFirst(db, `SELECT id FROM activity_entries WHERE organization_id = ? AND event_name = 'stay.created'
+    AND json_extract(payload_json, '$.entityId') = ? AND json_extract(payload_json, '$.metadata.imported.source') = 'hostaway'`, [access.organizationId, stayId])
+  if (!receipt) fail(422, 'STAY_NOT_IMPORTED', 'This stay has no Hostaway import receipt', 'stay_id')
+  return publishCreatedStay(db, env, access, stay)
+}
+
+export async function createStay(db: DbClient, env: StayMutationEnv, access: StayAccess, input: Record<string, unknown> & { product_id: string; idempotency_key: string }, options?: { imported: HostawayStaySource }): Promise<StayDetail & { channel_push: SuccessfulChannelPush | null }> {
   requireManager(access)
   const key = typeof input.idempotency_key === 'string' ? input.idempotency_key.trim() : ''
   if (!key || key.length > 200) fail(422, 'INVALID_STAY_FIELD', 'idempotency_key must be 1 to 200 characters', 'idempotency_key')
+  const imported = options?.imported
+  if (imported && (imported.source !== 'hostaway' || !imported.source_id || key !== `hostaway:${imported.source_id}` || !imported.fingerprint)) fail(422, 'INVALID_STAY_FIELD', 'An imported stay needs its source reservation, fingerprint and matching idempotency key', 'imported')
+  const channel = imported?.channel ?? 'direct'
+  const channelBookingId = imported?.channel_booking_id ?? null
+  if (!STAY_CHANNELS.includes(channel) || (channel !== 'direct' && !channelBookingId)) fail(422, 'INVALID_STAY_FIELD', 'An imported channel booking needs its actual channel confirmation reference', 'channel_booking_id')
   const home = await readStayHome(db, access, input.product_id)
   const fields = stayFields(input, home)
   // A payment the guest already made is written with the stay, so a stay never exists without it.
@@ -1550,10 +1616,10 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
   // The guest's answers to the home's questions, as the host took them; a retry with other answers is another stay.
   const answered = JSON.stringify(formAnswersFingerprint(input.answers))
   const replay = async () => {
-    const existing = await queryFirst<StayFields & { id: string; product_id: string; answers: string }>(db,
-      `SELECT id, product_id, answers, ${Object.keys(fields).join(', ')} FROM stays WHERE organization_id = ? AND idempotency_key = ?`, [access.organizationId, key])
+    const existing = await queryFirst<StayFields & { id: string; product_id: string; answers: string; channel: StayChannel; channel_booking_id: string | null }>(db,
+      `SELECT id, product_id, answers, channel, channel_booking_id, ${Object.keys(fields).join(', ')} FROM stays WHERE organization_id = ? AND idempotency_key = ?`, [access.organizationId, key])
     if (!existing) return null
-    if (existing.product_id !== home.product_id || Object.entries(fields).some(([field, value]) => existing[field as keyof StayFields] !== value)
+    if (existing.product_id !== home.product_id || existing.channel !== channel || existing.channel_booking_id !== channelBookingId || Object.entries(fields).some(([field, value]) => existing[field as keyof StayFields] !== value)
       || JSON.stringify(formAnswersFingerprint(formAnswerSnapshotsSchema.parse(JSON.parse(existing.answers)))) !== answered) {
       fail(409, 'IDEMPOTENCY_CONFLICT', 'This key belongs to a stay with different saved details. Reload the stay before another change; a create retry does not edit an existing stay.', 'idempotency_key')
     }
@@ -1565,18 +1631,11 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
     return getStay(db, access, existing.id)
   }
   // A replay pushes again, so retrying a create whose push did not land repairs it.
-  const pushed = async (stay: StayDetail) => {
-    await planStayMessages(db, access.organizationId, stay.id)
-    const channelPush = await pushNights(db, env, access, stay.product_id, [[stay.check_in_date, stay.check_out_date]])
-    return completeChannelPush(channelPush, { product_id: stay.product_id, stay_id: stay.id, version: stay.version, ranges: [[stay.check_in_date, stay.check_out_date]] }, async () => {
-      await publishStayChange(env, db, access.organizationId, stay, true)
-      return getStay(db, access, stay.id)
-    })
-  }
+  const pushed = (stay: StayDetail) => publishCreatedStay(db, env, access, stay)
   const earlier = await replay()
   if (earlier) return pushed(earlier)
   // A stay the host takes asks the home's questions as its direct booking does; the host's words are in the site's own language.
-  const answers = await acceptFormAnswers(db, { kind: 'stay', organizationId: access.organizationId, productId: home.product_id }, {
+  const answers = imported ? [] : await acceptFormAnswers(db, { kind: 'stay', organizationId: access.organizationId, productId: home.product_id }, {
     locale: null, answers: input.answers, questionsRevision: input.questions_revision, revisionRequired: false })
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
@@ -1584,14 +1643,15 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
     await executeBatch(db, [
       {
         query: `INSERT INTO stays (id, organization_id, product_id, channel, owner, status, check_in_date, check_out_date, arrival_time, adults, children, infants,
-                  guest_name, guest_surname, guest_email, guest_phone, total_minor, currency, notes, idempotency_key, booking_received_at, created_at, updated_at, created_by, updated_by, answers)
-                VALUES (?, ?, ?, 'direct', 'app', 'confirmed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        params: [id, access.organizationId, home.product_id, fields.check_in_date, fields.check_out_date, fields.arrival_time, fields.adults, fields.children, fields.infants,
-          fields.guest_name, fields.guest_surname, fields.guest_email, fields.guest_phone, fields.total_minor, home.currency, fields.notes, key, now, now, now, access.actorId, access.actorId, JSON.stringify(answers)],
+                  guest_name, guest_surname, guest_email, guest_phone, total_minor, currency, notes, idempotency_key, channel_booking_id, booking_received_at, created_at, updated_at, created_by, updated_by, answers)
+                VALUES (?, ?, ?, ?, 'app', 'confirmed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        params: [id, access.organizationId, home.product_id, channel, fields.check_in_date, fields.check_out_date, fields.arrival_time, fields.adults, fields.children, fields.infants,
+          fields.guest_name, fields.guest_surname, fields.guest_email, fields.guest_phone, fields.total_minor, home.currency, fields.notes, key, channelBookingId, imported ? null : now, now, now, access.actorId, access.actorId, JSON.stringify(answers)],
       },
       ...reconcileNightsQueries(access.organizationId, id),
       ...stayThreadQueries({ organizationId: access.organizationId, stayId: id, now, openedBy: { userId: access.actorId } }),
-      organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.created', entityType: 'stay', entityId: id }),
+      organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.created', entityType: 'stay', entityId: id,
+        context: access.audit, afterState: { ...fields, channel, channel_booking_id: channelBookingId }, ...(imported ? { metadata: { imported } } : {}) }),
       ...(payment ? stayPaymentInsert(access, { id, currency: home.currency, location_id: home.location_id }, payment, `${key}:payment`, now) : []),
     ], { operation: 'Create stay' })
   } catch (error) {
@@ -1608,7 +1668,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
 async function requireAppStay(db: DbClient, access: StayAccess, stayId: string, expectedVersion: unknown): Promise<StayDetail> {
   requireManager(access)
   const stay = await getStay(db, access, stayId)
-  if (stay.owner !== 'app') channelOwned(stay, 'belongs to')
+  if (isChannelManagedStay(stay)) channelOwned(stay, 'belongs to')
   if (stay.status === 'cancelled') fail(409, 'STAY_NOT_EDITABLE', 'This stay is cancelled')
   if (expectedVersion !== stay.version) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
   return stay
@@ -1672,7 +1732,7 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
 export async function cancelStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: { expected_version: unknown; reason?: unknown; authorization_id?: string; financial_writes_allowed?: boolean }): Promise<StayDetail & { channel_push: SuccessfulChannelPush | null }> {
   requireManager(access)
   const current = await getStay(db, access, stayId)
-  if (current.owner !== 'app') channelOwned(current, 'belongs to')
+  if (isChannelManagedStay(current)) channelOwned(current, 'belongs to')
   if (input.expected_version !== current.version) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
   const reason = optionalText(input.reason, 'reason', 500)
   const complete = async (version: number) => {
@@ -1756,7 +1816,7 @@ export async function readGuestStay(db: DbClient, buyerUserId: string, activityI
     getStay(db, { organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, owned.id),
     loadOwnerPictures(db, owned.organization_id, 'product', [owned.product_id], { organizationFallback: false }),
   ])
-  if (stay.user_id !== buyerUserId || stay.owner !== 'app') fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'stay_id')
+  if (stay.user_id !== buyerUserId || isChannelManagedStay(stay)) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'stay_id')
   const cancellation = stay.status !== 'cancelled' && owned.paid_online === 1
     ? (await guestStayCancellation(db, owned.organization_id, owned.id, buyerUserId, new Date().toISOString())).quote : null
   const pinFailure = stay.status === 'confirmed' ? coordinatesFailure(owned) : null
@@ -1879,7 +1939,7 @@ function stayPaymentInsert(access: StayAccess, stay: { id: string; currency: str
 export async function recordStayPayment(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, stayId: string, input: Record<string, unknown>): Promise<{ stay: StayDetail; payment: StayPayment }> {
   requireManager(access)
   const stay = await getStay(db, access, stayId)
-  if (stay.owner !== 'app') channelOwned(stay, 'is paid through')
+  if (isChannelManagedStay(stay)) channelOwned(stay, 'is paid through')
   const payment = stayPaymentFields(input, '', true)
   const key = typeof input.idempotency_key === 'string' ? input.idempotency_key.trim() : ''
   if (!key || key.length > 200) fail(422, 'INVALID_STAY_FIELD', 'idempotency_key must be 1 to 200 characters', 'idempotency_key')
@@ -1929,6 +1989,26 @@ export async function deleteStayPayment(db: DbClient, env: GuestInboxPublication
  * night's current value; `price_minor: null` returns a night to the base
  * price. `reset: true` removes every override in the range instead.
  */
+/** Both snapshots execute inside the calendar write's D1 batch, so concurrent writes cannot contaminate the evidence. */
+function nightAudit(home: StayHome, access: StayAccess, dates: readonly string[], eventType: 'stay.nights_changed' | 'stay.nights_imported', metadata: unknown, receivedNights?: readonly ImportedNight[]) {
+  const id = crypto.randomUUID()
+  const snapshot = {
+    query: `SELECT json_object('defaults', json(?), 'nights', json_group_array(json_object(
+      'date', d.value, 'override', CASE WHEN n.date IS NULL THEN NULL ELSE json_object(
+        'closed', n.closed, 'price_minor', n.price_minor, 'min_stay_arrival', n.min_stay_arrival,
+        'max_stay', n.max_stay, 'closed_to_arrival', n.closed_to_arrival, 'closed_to_departure', n.closed_to_departure,
+        'source', n.source, 'updated_at', n.updated_at, 'updated_by', n.updated_by) END)))
+      FROM json_each(?) d LEFT JOIN product_nights n ON n.organization_id = ? AND n.product_id = ? AND n.date = d.value`,
+    params: [JSON.stringify({ currency: home.currency, base_price_minor: home.base_price_minor, min_nights: home.min_nights, calendar_rules: home.calendar_rules }), JSON.stringify([...dates].sort()), access.organizationId, home.product_id],
+  } satisfies BatchQuery
+  return {
+    before: organizationEventQuery({ id, organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId,
+      eventType, entityType: 'product', entityId: home.product_id, context: access.audit, metadata,
+      beforeStateQuery: receivedNights ? { query: `SELECT json_set((${snapshot.query}), '$.received_nights', json(?))`, params: [...snapshot.params, JSON.stringify(receivedNights)] } : snapshot }),
+    after: { query: `UPDATE activity_entries SET payload_json = json_set(payload_json, '$.afterState', json((${snapshot.query}))) WHERE id = ?`, params: [...snapshot.params, id] },
+  }
+}
+
 export async function setStayNights(db: DbClient, env: StayMutationEnv, access: StayAccess, input: Record<string, unknown> & { product_id: string; from: unknown; to: unknown }): Promise<{ home: StayHome; nights: StayNight[]; stays: Stay[]; channel_push: SuccessfulChannelPush | null }> {
   requireManager(access)
   const unknown = Object.keys(input).find(key => !['organization_id', 'product_id', 'from', 'to', 'weekdays', 'reset', 'closed', 'price_minor', 'price_change_percent', 'min_stay_arrival', 'max_stay', 'closed_to_arrival', 'closed_to_departure'].includes(key))
@@ -1979,10 +2059,14 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, access: 
   const columns = Object.keys(patch)
   const nights = JSON.stringify(dates.map(night => ({ date: night, price_minor: listing.get(night) ?? null })))
   const written = [...columns, ...(percent === null ? [] : ['price_minor'])]
+  const audit = nightAudit(home, access, dates, 'stay.nights_changed', {
+    from, to, reset, fields: written.join(','), settings: patch,
+    ...(weekdays ? { weekdays: weekdays.join(',') } : {}), ...(percent === null ? {} : { price_change_percent: percent }),
+  })
   // A night with no price of its own moves from the listing's price as read above; the batch refuses if the listing changed since.
   const listingGuard = { query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM products WHERE organization_id = ? AND id = ? AND updated_at = ?) THEN NULL ELSE json('Stay listing changed') END", params: [access.organizationId, home.product_id, home.product_updated_at] }
   await executeBatch(db, [
-    ...(percent === null ? [] : [listingGuard]),
+    listingGuard, audit.before,
     reset
       ? { query: 'DELETE FROM product_nights WHERE organization_id = ? AND product_id = ? AND date IN (SELECT json_extract(value, \'$.date\') FROM json_each(?))', params: [access.organizationId, home.product_id, nights] }
       : {
@@ -1993,12 +2077,11 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, access: 
           params: [access.organizationId, home.product_id, now, access.actorId, ...columns.map(column => patch[column]), nights, ...(percent === null ? [] : [percent])],
         },
     ...(percent === null ? [] : [{ query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM product_nights WHERE organization_id = ? AND product_id = ? AND price_minor > 9007199254740991) THEN json('Night price too large') ELSE NULL END", params: [access.organizationId, home.product_id] }]),
-    organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.nights_changed', entityType: 'product', entityId: home.product_id,
-      metadata: { from, to, reset, fields: written.join(','), ...(weekdays ? { weekdays: weekdays.join(',') } : {}), ...(percent === null ? {} : { price_change_percent: percent }) } }),
+    audit.after,
   ], { operation: 'Set stay nights' }).catch(async (cause: unknown) => {
     if (percent !== null && String(cause).includes('Night price too large')) fail(422, 'INVALID_AMOUNT', 'A night’s price would be too large', 'price_change_percent')
-    if (percent !== null && (await readStayHome(db, access, home.product_id)).product_updated_at !== home.product_updated_at) {
-      fail(409, 'STAY_HOME_CHANGED', 'The listing changed while its nights were being priced. Reload the calendar and try again.', 'price_change_percent')
+    if ((await readStayHome(db, access, home.product_id)).product_updated_at !== home.product_updated_at) {
+      fail(409, 'STAY_HOME_CHANGED', 'The listing changed while its nights were being edited. Reload the calendar and try again.', 'product_id')
     }
     throw cause
   })
@@ -2038,7 +2121,11 @@ export async function importStayNights(db: DbClient, env: GuestInboxPublicationE
   if (!nights.length) return
   for (const night of nights) date(night.date, 'date')
   const now = new Date().toISOString()
+  const audit = nightAudit(home, access, nights.map(night => night.date), 'stay.nights_imported', {
+    from: nights[0]!.date, to: nights.at(-1)!.date, nights: nights.length, provider: 'channex',
+  }, nights)
   await executeBatch(db, [
+    audit.before,
     {
       query: `INSERT INTO product_nights (organization_id, product_id, date, closed, price_minor, min_stay_arrival, max_stay, closed_to_arrival, closed_to_departure, source, updated_at, updated_by)
               SELECT ?, ?, json_extract(value, '$.date'), json_extract(value, '$.closed'), json_extract(value, '$.price_minor'), json_extract(value, '$.min_stay_arrival'),
@@ -2054,7 +2141,7 @@ export async function importStayNights(db: DbClient, env: GuestInboxPublicationE
 
       })))],
     },
-    organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.nights_imported', entityType: 'product', entityId: home.product_id, metadata: { from: nights[0]!.date, to: nights.at(-1)!.date, nights: nights.length } }),
+    audit.after,
   ], { operation: 'Import stay nights' })
   await publishStayInvalidation(env, { type: 'nights.changed', organizationId: access.organizationId, locationId: home.location_id, productId: home.product_id, stayId: null }, { updated_at: now })
 }
@@ -2107,15 +2194,17 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   if (booking.check_out_date <= booking.check_in_date) throw new Error(`Channel booking ${booking.external_booking_id} ends before it starts`)
   if (booking.adults < 1) throw new Error(`Channel booking ${booking.external_booking_id} has no adult guest`)
   if (!/^[A-Z]{3}$/.test(booking.currency)) throw new Error(`Channel booking ${booking.external_booking_id} has an invalid currency`)
-  type ChannelStayRow = { id: string; provider_updated_at: string | null; revision_id: string | null; external_booking_id: string }
+  type ChannelStayRow = { id: string; product_id: string; provider_updated_at: string | null; revision_id: string | null; external_booking_id: string | null }
   const currentChannelStay = () => queryFirst<ChannelStayRow>(db,
-    'SELECT id, provider_updated_at, revision_id, external_booking_id FROM stays WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])
+    'SELECT id, product_id, provider_updated_at, revision_id, external_booking_id FROM stays WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])
   // The same reservation under a new provider booking id (a re-import after a
   // new Channex account) is the stay it already is: the revision's write moves
   // it onto the new id, when that revision is newer than the stay.
   const existing = await currentChannelStay() ?? (booking.channel_booking_id === null ? null : await queryFirst<ChannelStayRow>(db,
-    `SELECT id, provider_updated_at, revision_id, external_booking_id FROM stays WHERE organization_id = ? AND channel = ? AND channel_booking_id = ? AND provider = ? AND external_booking_id <> ?`,
+    `SELECT id, product_id, provider_updated_at, revision_id, external_booking_id FROM stays WHERE organization_id = ? AND channel = ? AND channel_booking_id = ?
+      AND ((provider = ? AND external_booking_id <> ?) OR owner = 'app')`,
     [organizationId, booking.channel, booking.channel_booking_id, booking.provider, booking.external_booking_id]))
+  if (existing?.external_booking_id === null && existing.product_id !== productId) fail(409, 'CHANNEL_MIGRATION_HOME_CONFLICT', 'This reservation was imported into a different occupied home. Resolve its property assignment before accepting the channel revision.', 'product_id')
   const reimported = existing && existing.external_booking_id !== booking.external_booking_id ? existing.external_booking_id : null
   const conversation = await queryFirst<{ organization_id: string; product_id: string; request_id: string }>(db,
     'SELECT organization_id, product_id, request_id FROM channel_threads WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])
@@ -2182,7 +2271,12 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   const home = await queryFirst<{ location_id: string }>(db, 'SELECT location_id FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, productId])
   if (!home) fail(404, 'STAY_HOME_NOT_FOUND', 'The channel booking home was not found', 'product_id')
   const now = new Date().toISOString()
-  const write = (overbooked: 0 | 1): BatchQuery[] => [...(reimported === null ? [] : [{
+  const write = (overbooked: 0 | 1): BatchQuery[] => [...(existing?.external_booking_id === null ? [{
+    // An imported OTA confirmation becomes channel-owned when its real revision arrives; keep its one stay and night claims.
+    query: `UPDATE stays SET owner = 'channel', provider = ?, external_booking_id = ? WHERE organization_id = ? AND id = ?
+      AND owner = 'app' AND channel = ? AND channel_booking_id = ? AND product_id = ? AND version = ?`,
+    params: [booking.provider, booking.external_booking_id, organizationId, existing.id, booking.channel, booking.channel_booking_id, previous?.product_id ?? null, previous?.version ?? null],
+  }] : []), ...(reimported === null ? [] : [{
     query: `UPDATE stays SET external_booking_id = ? WHERE organization_id = ? AND id = ? AND provider = ? AND external_booking_id = ?
       AND (provider_updated_at IS NULL OR provider_updated_at < ?)`,
     params: [booking.external_booking_id, organizationId, existing?.id ?? null, booking.provider, reimported, booking.provider_updated_at],
@@ -2242,7 +2336,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
     // Rule 1: another stay holds one of these nights. The channel stay still lands, flagged and holding none.
     writes = await executeBatch(db, write(1), { operation: 'Apply overbooked channel booking' })
   }
-  const changed = writes[reimported === null ? 1 : 2]?.meta.changes
+  const changed = writes[existing?.external_booking_id === null || reimported !== null ? 2 : 1]?.meta.changes
   if (changed !== 0 && changed !== 1) fail(500, 'CHANNEL_REVISION_WRITE_RESULT_REQUIRED', 'The channel revision write did not report its affected row count', 'changes')
   const current = await currentChannelStay()
   if (!current) fail(500, 'CHANNEL_STAY_NOT_READABLE', 'The saved channel booking could not be read', 'external_booking_id')

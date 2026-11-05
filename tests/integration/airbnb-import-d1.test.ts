@@ -397,6 +397,9 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
       if (result.stage === 'complete') break
     }
     assert.deepEqual(stages, ['room', 'rate', 'inventory', 'verify_inventory', 'content', 'draft', 'activated', 'activate', 'reservations', 'messages', 'complete'])
+    const importRequest = await db.prepare("SELECT actor_user_id, payload_json FROM activity_entries WHERE event_name = 'stay.reservations_import_requested' AND json_extract(payload_json, '$.entityId') = ?").bind(productId).first<{ actor_user_id: string; payload_json: string }>()
+    assert.equal(importRequest!.actor_user_id, OWNER)
+    assert.deepEqual(JSON.parse(importRequest!.payload_json).metadata, { provider: 'channex', channel: 'airbnb', listing_id: LISTING, channel_id: 'chan-1', property_id: 'prop-1', receipt: { meta: { message: 'Success' } } })
     // The Channex property carries the mapped type, never Airbnb's category.
     assert.deepEqual(channex.properties.filter(property => property.title === 'Cliff Cabin').map(property => property.property_type), ['holiday_home'])
     // The full sync is one restrictions and one availability call, each logged with Channex's task.

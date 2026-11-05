@@ -66,6 +66,7 @@ import EditorNavigationList, { type EditorNavigationItem } from '~/components/da
 import { INTEGRATIONS, type IntegrationKey } from '~/shared/integrations'
 import { BUSINESS_PLAN_ID, GROWTH_PLAN_ID, STARTER_PLAN_ID } from '~/shared/billing-model'
 import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
+import { organizationRoles } from '~/utils/organization-access'
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
 useSeoMeta({ title: 'Connections | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 const route = useRoute()
@@ -135,9 +136,16 @@ const items = computed<EditorNavigationItem[]>(() => INTEGRATIONS
     }
   }))
 
+const migrationItem = computed<EditorNavigationItem[]>(() => {
+  const organization = dashboard.organization.value
+  const role = organization?.role
+  if (organization?.vertical !== 'lodging' || !role || !(role in organizationRoles) || !organizationRoles[role as keyof typeof organizationRoles].authorize({ operations: ['update'] }).success) return []
+  return [{ id: 'hostaway-migration', label: 'Migrate from Hostaway', summary: 'Move existing stays and check blocked dates', lead: { icon: 'i-lucide-arrow-right-left' }, to: `${base.value}/hostaway-migration` }]
+})
+
 const groups = computed(() => [
   { id: 'sync', label: 'Sync', items: items.value.filter(item => INTEGRATIONS.find(definition => definition.key === item.id)?.group === 'sync') },
-  { id: 'connections', label: 'Connections', items: items.value.filter(item => INTEGRATIONS.find(definition => definition.key === item.id)?.group === 'connection') },
+  { id: 'connections', label: 'Connections', items: [...items.value.filter(item => INTEGRATIONS.find(definition => definition.key === item.id)?.group === 'connection'), ...migrationItem.value] },
 ].filter(group => group.items.length))
 
 provide(integrationsKey, {

@@ -7074,6 +7074,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"csv-parse@npm:^7.0.3":
+  version: 7.0.3
+  resolution: "csv-parse@npm:7.0.3"
+  checksum: 10c0/90d444df5bb14a5531fb87163be5236951a43092934c9ea10e1308cceefdd692c8c0b49f93c616a92a1c9695f371a376268bf45325bb88f60a1328274748cc25
+  languageName: node
+  linkType: hard
+
 "data-urls@npm:^7.0.0":
   version: 7.0.0
   resolution: "data-urls@npm:7.0.0"
@@ -10879,6 +10886,7 @@ __metadata:
     better-sqlite3: "npm:^12.11.1"
     cookie-es: "npm:^3.1.1"
     cross-env: "npm:^10.1.0"
+    csv-parse: "npm:^7.0.3"
     drizzle-kit: "patch:drizzle-kit@npm%3A0.31.10#~/patches/drizzle-kit-npm-0.31.10.patch"
     drizzle-orm: "npm:^0.45.3"
     email-reply-parser: "npm:2.3.9"

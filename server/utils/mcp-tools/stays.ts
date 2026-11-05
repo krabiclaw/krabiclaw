@@ -9,6 +9,7 @@ import { MAX_STAY_BEDS_PER_TYPE, STAY_BED_TYPES, STAY_PHOTO_ROOM_TYPES } from '~
 import { STAY_HOME_ACCESSIBILITY_FEATURES, STAY_ROOM_ACCESSIBILITY_FEATURES } from '~/shared/stay-accessibility'
 import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 import { memberAccessPrincipal } from '~/server/utils/member-access'
+import { organizationEventContext } from '~/server/utils/organization-events'
 import { cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, recordStayPayment, removeStayPhotoRoom, setStayNights, stayAccessFor, updateStay, updateStayHomeAccessibility, updateStayPhotoRoom, STAY_STATUSES, STAY_TURNOVER_FIELDS, type StayAccess, type StayHome, type StayDetail } from '~/server/domain/stays'
 import { MAX_STAY_NIGHTS, STAY_CHANNELS, STAY_PAYMENT_METHODS } from '~/shared/bookings'
 
@@ -234,6 +235,10 @@ export async function handleStaysTools(ctx: McpExecutorContext): Promise<unknown
   const { organization, args, toolName } = ctx
   const { db, env } = organization
   const access = await stayAccessFor(memberAccessPrincipal(organization.membership, { env }))
+  if (ctx.event) access.audit = {
+    ...organizationEventContext(ctx.event, 'mcp', organization.userId, organization.sessionId ? { id: organization.sessionId, impersonatedBy: organization.impersonatedBy } : undefined),
+    tool: toolName, oauth_client_id: organization.oauthClientId ?? null,
+  }
   switch (toolName) {
     case 'list_stays': return { stays: (await listStays(db, access, { from: args.from, to: args.to, productId: args.product_id as string | undefined, includeCancelled: args.include_cancelled === true })).map(stay => stayFields(access, stay, stayListProperties)) }
     case 'get_stay': return { stay: await getStay(db, access, requiredString(args, 'stay_id')) }

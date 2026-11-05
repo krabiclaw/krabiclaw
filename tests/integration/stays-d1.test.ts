@@ -9,7 +9,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
-import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, setStayNights, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
+import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 import { getQuery, H3 } from 'nitro/h3'
 import { createAuth } from '../../server/utils/auth.ts'
@@ -33,13 +33,15 @@ import { loadPublicSocialMedia } from '../../server/utils/public-social-image.ts
 import { arrangeProductPhotos, attachMediaPlacement, removeMediaPlacement, setSingleMediaPlacement } from '../../server/utils/media-placement.ts'
 import { deleteMediaAsset, getMediaAsset } from '../../server/utils/media-asset-manager.ts'
 import { assertAssignedBookingAccess, listOrganizationNotificationMembers, memberAccessPrincipal, resolveMembership, resolveOrganizationMembership } from '../../server/utils/member-access.ts'
-import { listScheduledGuestMessages } from '../../server/domain/guest-messaging.ts'
+import { listScheduledGuestMessages, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
 import { handleStaysTools, STAYS_TOOLS } from '../../server/utils/mcp-tools/stays.ts'
 import type { McpOrganizationContext } from '../../server/utils/mcp-auth.ts'
 import Ajv from 'ajv'
 import { stayPhotoRoomName, type StayPhotoRoom } from '../../shared/stay-photos.ts'
 import { agendaToTodayCard } from '../../shared/dashboard-today.ts'
 import { STAY_HOME_ACCESSIBILITY_FEATURES } from '../../shared/stay-accessibility.ts'
+import { hashPassword } from 'better-auth/crypto'
+import editNightsRoute from '../../server/api/dashboard/stay-homes/[productId]/nights.put.ts'
 
 const ORG = 'org'
 const OWNER = 'owner-user'
@@ -1238,7 +1240,7 @@ test('the host changes only the chosen weekdays and moves each night’s own pri
       { date: '2026-11-07', closed: 1, price_minor: null, min_stay_arrival: 1 },
     ])
     const events = (await db.prepare("SELECT payload_json FROM activity_entries WHERE event_name = 'stay.nights_changed' AND json_extract(payload_json, '$.entityId') = ? ORDER BY rowid DESC LIMIT 1").bind(cabin.id).all<{ payload_json: string }>()).results
-    assert.deepEqual(JSON.parse(events[0]!.payload_json).metadata, { from: '2026-11-01', to: '2026-11-08', reset: false, fields: 'price_minor', weekdays: '4,0', price_change_percent: 5 })
+    assert.deepEqual(JSON.parse(events[0]!.payload_json).metadata, { from: '2026-11-01', to: '2026-11-08', reset: false, fields: 'price_minor', settings: {}, weekdays: '4,0', price_change_percent: 5 })
 
     // Reset clears only the chosen weekday; the rest of the week keeps its settings.
     await write({ reset: true, weekdays: [3] })
@@ -1826,6 +1828,128 @@ test('home location sharing protects every public projection after localization 
     const nowProtected = await loadPublicSocialMedia(db, ORG, 'business_location', ['lake-site'])
     assert.equal(nowProtected.get('lake-site')?.social_image?.url, publicHero)
     assert.equal(await db.prepare("SELECT count(*) FROM media_placements WHERE owner_id = 'lake-site' AND slot = 'social_card' AND status = 'active'").first('count(*)'), 1)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('native calendar writes retain real session and impersonator evidence with atomic night snapshots', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  try {
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
+    const received = [{ date: '2026-11-04', available: false, price_minor: null, min_stay_arrival: 21, max_stay: null, closed_to_arrival: false, closed_to_departure: false }]
+    await importStayNights(db, env, manager, cabin.id, received)
+    const payloads = async (event: string) => (await db.prepare("SELECT actor_user_id, payload_json FROM activity_entries WHERE event_name = ? AND json_extract(payload_json, '$.entityId') = ? ORDER BY rowid").bind(event, cabin.id).all<{ actor_user_id: string; payload_json: string }>()).results.map(row => ({ actor: row.actor_user_id, payload: JSON.parse(row.payload_json) }))
+    const imported = (await payloads('stay.nights_imported'))[0]!.payload
+    assert.deepEqual(imported.beforeState.received_nights, received)
+    assert.equal(imported.beforeState.nights[0].override, null)
+    assert.equal(imported.afterState.nights[0].override.closed, 1)
+
+    const auth = createAuth(env)
+    const password = 'CalendarAuditProof123!'
+    for (const id of [OWNER, OUTSIDER]) await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES (?, ?, 'credential', ?, ?, 0, 0)").bind(`audit-${id}`, id, id, await hashPassword(password)).run()
+    await db.prepare("UPDATE user SET role = 'admin' WHERE id = ?").bind(OUTSIDER).run()
+    const cookie = (response: Response) => [...new Map(response.headers.getSetCookie().map(value => { const pair = value.split(';')[0]!; return [pair.slice(0, pair.indexOf('=')), pair] })).values()].join('; ')
+    const login = async (id: string) => {
+      const response = await auth.api.signInEmail({ body: { email: `${id}@example.test`, password }, asResponse: true })
+      assert.equal(response.status, 200)
+      return cookie(response)
+    }
+    const app = new H3()
+    app.put('/api/dashboard/stay-homes/:productId/nights', editNightsRoute)
+    const put = (sessionCookie: string, minimum: number) => app.request(Object.assign(new Request(`https://proof.example/api/dashboard/stay-homes/${cabin.id}/nights?org=org`, {
+      method: 'PUT', headers: { cookie: sessionCookie, origin: 'https://proof.example', 'content-type': 'application/json', 'user-agent': 'Krabiclaw/25 CalendarAuditProof', 'x-request-id': 'calendar-audit-proof', 'cf-ray': 'calendar-proof-ray' },
+      body: JSON.stringify({ from: '2026-11-04', to: '2026-11-05', min_stay_arrival: minimum }),
+    }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    const ownerCookie = await login(OWNER)
+    const ownerSession = await auth.api.getSession({ headers: { cookie: ownerCookie } })
+    const changed = await put(ownerCookie, 1)
+    assert.equal(changed.status, 200, await changed.text())
+    const first = (await payloads('stay.nights_changed'))[0]!
+    assert.equal(first.actor, OWNER)
+    assert.deepEqual(first.payload.context, { source: 'dashboard', user_id: OWNER, request_id: 'calendar-audit-proof', ray_id: 'calendar-proof-ray', method: 'PUT', path: `/api/dashboard/stay-homes/${cabin.id}/nights`, user_agent: 'Krabiclaw/25 CalendarAuditProof', session_id: ownerSession!.session.id, impersonated_by: null })
+    assert.deepEqual(first.payload.metadata.settings, { min_stay_arrival: 1 })
+    assert.equal(first.payload.beforeState.nights[0].override.min_stay_arrival, 21)
+    assert.equal(first.payload.afterState.nights[0].override.min_stay_arrival, 1)
+    assert.equal(first.payload.afterState.nights[0].override.closed, 1)
+    assert.deepEqual(await db.prepare('SELECT closed, min_stay_arrival FROM product_nights WHERE product_id = ? AND date = ?').bind(cabin.id, '2026-11-04').first(), { closed: 1, min_stay_arrival: 1 })
+
+    const administratorCookie = await login(OUTSIDER)
+    const impersonation = await auth.api.impersonateUser({ body: { userId: OWNER }, headers: { cookie: administratorCookie, origin: 'https://proof.example' }, asResponse: true })
+    assert.equal(impersonation.status, 200, await impersonation.clone().text())
+    const edited = await put(cookie(impersonation), 3)
+    assert.equal(edited.status, 200, await edited.text())
+    const second = (await payloads('stay.nights_changed'))[1]!
+    assert.equal(second.actor, OWNER)
+    assert.equal(second.payload.context.impersonated_by, OUTSIDER)
+    assert.notEqual(second.payload.context.session_id, ownerSession!.session.id)
+    assert.equal(second.payload.beforeState.nights[0].override.min_stay_arrival, 1)
+    assert.equal(second.payload.afterState.nights[0].override.min_stay_arrival, 3)
+
+    // If persisting the final evidence fails, the calendar change and its preliminary audit both roll back.
+    await db.prepare("CREATE TRIGGER refuse_calendar_audit BEFORE UPDATE ON activity_entries WHEN NEW.event_name = 'stay.nights_changed' BEGIN SELECT RAISE(ABORT, 'Audit refused'); END").run()
+    assert.equal((await put(ownerCookie, 4)).status, 500)
+    assert.equal(await db.prepare('SELECT min_stay_arrival FROM product_nights WHERE product_id = ? AND date = ?').bind(cabin.id, '2026-11-04').first('min_stay_arrival'), 3)
+    assert.equal((await payloads('stay.nights_changed')).length, 2)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('migrated unpaid stays occupy nights without a fresh reservation message and OTA revisions adopt the same stay', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  try {
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
+    const template = await saveMessageTemplate(db, env, manager, null, { title: 'Booking received', body: 'Thanks for your reservation.', schedule: { trigger: 'booking_received', delayMinutes: 5, productIds: [cabin.id] } })
+    const offline = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'hostaway:offline', check_in_date: '2027-05-01', check_out_date: '2027-05-04', ...guest }, { imported: { source: 'hostaway', source_id: 'offline', row: { status: 'New', payment: 'Unpaid' }, fingerprint: 'offline-fingerprint', channel: 'direct' } })
+    assert.equal(offline.payment_status, 'unpaid')
+    assert.equal(offline.status, 'confirmed')
+    assert((await readStayCalendar(db, manager, { productId: cabin.id, from: '2027-05-01', to: '2027-05-04' })).nights.every(night => night.stay_id === offline.id && !night.available))
+    const input = { product_id: cabin.id, idempotency_key: 'hostaway:source-1', check_in_date: '2027-06-01', check_out_date: '2027-06-03', ...guest, guest_email: 'ana@example.test' }
+    const source = { source: 'hostaway' as const, source_id: 'source-1', row: { id: 'source-1', payment: 'Unpaid' }, fingerprint: 'source-fingerprint', channel: 'airbnb' as const, channel_booking_id: 'ABB-EXACT-SOURCE' }
+    const imported = await createStay(db, env, manager, input, { imported: source })
+    assert.equal(imported.request_id, null)
+    assert.deepEqual({ channel: imported.channel, owner: imported.owner, status: imported.status, payment: imported.payment_status, paid: imported.paid_minor }, { channel: 'airbnb', owner: 'app', status: 'confirmed', payment: null, paid: 0 })
+    await assert.rejects(updateStay(db, env, manager, imported.id, { expected_version: imported.version, check_out_date: '2027-06-04' }), code('STAY_NOT_EDITABLE'))
+    await assert.rejects(cancelStay(db, env, manager, imported.id, { expected_version: imported.version }), code('STAY_NOT_EDITABLE'))
+    await assert.rejects(recordStayPayment(db, env, manager, imported.id, { amount_minor: 1000, method: 'cash', paid_on: '2027-06-01', idempotency_key: 'should-not-collect' }), code('STAY_NOT_EDITABLE'))
+    assert.equal(await db.prepare('SELECT booking_received_at FROM stays WHERE id = ?').bind(imported.id).first('booking_received_at'), null)
+    assert.deepEqual((await readStayCalendar(db, manager, { productId: cabin.id, from: '2027-06-01', to: '2027-06-03' })).nights.map(night => [night.available, night.stay_id]), [[false, imported.id], [false, imported.id]])
+    assert.deepEqual(await db.prepare('SELECT status, due_at FROM scheduled_guest_messages WHERE stay_id = ? AND template_id = ?').bind(imported.id, template.id).first(), { status: 'skipped', due_at: null })
+    assert.equal((await createStay(db, env, manager, input, { imported: source })).id, imported.id)
+    const audit = await db.prepare("SELECT payload_json FROM activity_entries WHERE event_name = 'stay.created' AND json_extract(payload_json, '$.entityId') = ?").bind(imported.id).first<string>('payload_json')
+    assert.deepEqual(JSON.parse(audit!).metadata.imported, source)
+
+    const booking = { provider: 'channex' as const, external_booking_id: 'actual-channel-reservation', channel_booking_id: source.channel_booking_id, channel: 'airbnb' as const,
+      revision_id: 'actual-channel-revision', provider_updated_at: new Date().toISOString(), cancelled: false, check_in_date: input.check_in_date, check_out_date: input.check_out_date,
+      adults: 2, children: 0, infants: 0, guest_name: guest.guest_name, guest_surname: null, guest_email: input.guest_email, guest_phone: null, total_minor: guest.total_minor, currency: 'USD', imported: true }
+    const adopted = await applyChannelBooking(db, env, ORG, cabin.id, booking)
+    assert.equal(adopted.applied, true)
+    assert.deepEqual({ id: adopted.id, owner: adopted.owner, provider: adopted.provider, overbooked: adopted.overbooked }, { id: imported.id, owner: 'channel', provider: 'channex', overbooked: false })
+    assert.equal(await db.prepare('SELECT count(*) FROM stays WHERE channel_booking_id = ?').bind(source.channel_booking_id).first('count(*)'), 1)
+    assert.deepEqual((await readStayCalendar(db, manager, { productId: cabin.id, from: input.check_in_date, to: input.check_out_date })).nights.map(night => night.stay_id), [imported.id, imported.id])
+    assert.equal((await applyChannelBooking(db, env, ORG, cabin.id, booking)).applied, false)
+    const lake = await home(db, env, { name: 'Lake house', location: 'lake-site' })
+    const moveInput = { ...input, idempotency_key: 'hostaway:source-2', check_in_date: '2027-07-01', check_out_date: '2027-07-04' }
+    const moveSource = { ...source, source_id: 'source-2', channel_booking_id: 'ABB-SOURCE-MOVED' }
+    const beforeMove = await createStay(db, env, manager, moveInput, { imported: moveSource })
+    // A prior manual relocation is an assignment conflict, not permission to free the physically occupied unit.
+    await assert.rejects(applyChannelBooking(db, env, ORG, lake.id, { ...booking, external_booking_id: 'actual-moved-booking', channel_booking_id: moveSource.channel_booking_id, revision_id: 'actual-moved-revision', check_in_date: moveInput.check_in_date, check_out_date: moveInput.check_out_date }), code('CHANNEL_MIGRATION_HOME_CONFLICT'))
+    assert.equal((await getStay(db, manager, beforeMove.id)).owner, 'app')
+    assert.deepEqual((await db.prepare('SELECT product_id, date FROM stay_nights WHERE stay_id = ? ORDER BY date').bind(beforeMove.id).all()).results, ['2027-07-01', '2027-07-02', '2027-07-03'].map(date => ({ product_id: cabin.id, date })))
+    const hub = env.GUEST_INBOX_HUBS!.get(env.GUEST_INBOX_HUBS!.idFromName(ORG))
+    await hub.fetch('https://inbox.test/failure', { method: 'PUT' })
+    const retryInput = { ...input, idempotency_key: 'hostaway:needs-publication', check_in_date: '2027-08-01', check_out_date: '2027-08-03' }
+    await assert.rejects(createStay(db, env, manager, retryInput, { imported: { ...source, source_id: 'needs-publication', channel: 'direct', channel_booking_id: null } }), code('DASHBOARD_PUBLICATION_FAILED'))
+    const committed = await db.prepare('SELECT id FROM stays WHERE organization_id = ? AND idempotency_key = ?').bind(ORG, retryInput.idempotency_key).first<{ id: string }>()
+    assert(committed)
+    await hub.fetch('https://inbox.test/failure', { method: 'DELETE' })
+    await updateStay(db, env, manager, committed.id, { expected_version: 1, guest_name: 'Host corrected name' })
+    const resumed = await resumeImportedStay(db, env, manager, committed.id)
+    assert.equal(resumed.guest_name, 'Host corrected name')
+    assert.equal(resumed.version, 2)
+    assert.equal(await db.prepare('SELECT count(*) FROM stays WHERE idempotency_key = ?').bind(retryInput.idempotency_key).first('count(*)'), 1)
+
   } finally {
     await runtime.dispose()
   }

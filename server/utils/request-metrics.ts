@@ -5,6 +5,7 @@ import { errorChainForTelemetry } from '~/shared/error-telemetry'
 
 export interface RequestDataMetrics {
   requestId: string
+  auditContext?: Record<string, unknown>
   statementCount: number
   batchRoundTrips: number
   rowsRead: number
@@ -373,6 +374,7 @@ export async function flushRequestMetrics(event: HTTPEvent, response: Response) 
     metricHeadersError,
     telemetryErrors: metrics.telemetryErrors,
     requestId: metrics.requestId,
+    ...(metrics.auditContext ? { auditContext: metrics.auditContext } : {}),
     rayId: event.req.headers.get('cf-ray'),
     phases: Object.fromEntries(Object.entries(metrics.phases).map(([name, duration]) => [name, Number(duration.toFixed(2))])),
     d1SqlDurationMs: Number(metrics.d1SqlDurationMs.toFixed(2)),
