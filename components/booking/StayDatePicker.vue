@@ -9,9 +9,9 @@
         :aria-describedby="undefined"
         @open-auto-focus="rememberTrigger"
         @close-auto-focus="restoreTrigger"
-        v-bind="mobile ? {} : { align: 'end', side: 'bottom', sideOffset: 8, collisionPadding: 16 }"
+        v-bind="mobile ? {} : { align: 'end', side: 'bottom', sideOffset: 8, collisionPadding: 16, prioritizePosition: true }"
         class="z-[60] flex flex-col border border-default bg-default p-6 text-default shadow-xl outline-none"
-        :class="mobile ? 'fixed inset-x-0 bottom-0 top-3 rounded-t-2xl' : 'w-[660px] max-w-[calc(100vw-32px)] max-h-[var(--reka-popover-content-available-height)] rounded-2xl'"
+        :class="mobile ? 'fixed inset-x-0 bottom-0 top-3 rounded-t-2xl' : 'w-[660px] max-w-[calc(100vw-32px)] max-h-[calc(100dvh-32px)] rounded-2xl'"
       >
         <DialogTitle v-if="mobile" class="sr-only">{{ t('stay.select_dates') }}</DialogTitle>
         <DialogClose v-if="mobile" class="absolute left-5 top-4 flex size-7 items-center justify-center" :aria-label="t('stay.close_dates')"><span aria-hidden="true">×</span></DialogClose>
