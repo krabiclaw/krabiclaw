@@ -1405,6 +1405,8 @@ test('a member reads a stay at a home they look after as its turnover on every r
 })
 
 test('a business’s site shows a guest the stay its signed link names, from any browser, and nothing else', { timeout: 120_000 }, async (context) => {
+  const duringStay = Date.parse('2026-11-02T19:00:00.000Z')
+  context.mock.timers.enable({ apis: ['Date'], now: duringStay })
   const { runtime, db, env: bindings } = await boot()
   try {
     const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
@@ -1480,7 +1482,7 @@ test('a business’s site shows a guest the stay its signed link names, from any
     assert.equal((await read(ORG)).status, 401)
     // November checkout is 10 am in Denver (17:00 UTC): a past guest must
     // not keep reading this home's current access instructions or Wi-Fi.
-    context.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-04T16:59:59.000Z') })
+    context.mock.timers.setTime(Date.parse('2026-11-04T16:59:59.000Z'))
     try {
       const beforeCheckout = await read(ORG, link)
       assert.equal(beforeCheckout.status, 200)
@@ -1493,7 +1495,7 @@ test('a business’s site shows a guest the stay its signed link names, from any
       assert.equal(departed.home.arrival_guide, null)
       assert(!JSON.stringify(departed).includes(guide.wifi_password))
       assert(!JSON.stringify(departed).includes(guide.check_in_instructions))
-    } finally { context.mock.timers.reset() }
+    } finally { context.mock.timers.setTime(duringStay) }
 
 
     // The mutation response must carry the saved pin on an address-only edit
