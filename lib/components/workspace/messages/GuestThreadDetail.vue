@@ -29,17 +29,20 @@
 
             <p v-else-if="item.type === 'event'" class="my-2 text-center text-xs text-muted">{{ item.text }}</p>
 
-            <section v-else-if="item.type === 'change'" class="mx-auto my-2 w-full max-w-[420px] rounded-2xl bg-elevated p-5 ring ring-default" :aria-labelledby="`change-title-${item.key}`" data-testid="booking-change-request">
+            <section v-else-if="item.type === 'change'" class="mx-auto my-4 max-w-xl rounded-2xl border border-default bg-elevated p-5" :aria-labelledby="`change-title-${item.key}`" data-testid="booking-change-request">
               <h3 :id="`change-title-${item.key}`" class="font-semibold text-highlighted">{{ t('booking.change_review') }}</h3>
-              <p class="mt-1 text-sm text-muted">{{ item.change.requestedBy === 'guest' ? t('booking.change_requested_by_guest', { guest: item.change.guestName, channel: 'Airbnb' }) : t('booking.change_requested_by', { organization: thread.guestName }) }}</p>
-              <dl class="my-3 grid grid-cols-2 gap-3 text-sm">
-                <template v-for="field in changeFields(item.change)" :key="field.label">
-                  <div><dt class="text-xs text-dimmed">{{ field.label }}</dt><dd class="font-medium text-highlighted">{{ field.before }}</dd></div>
-                  <div><dt class="text-xs text-dimmed">{{ t('booking.change_proposed') }}</dt><dd class="font-medium text-highlighted">{{ field.after }}</dd></div>
-                </template>
+              <p class="mt-1 text-sm text-muted">{{ item.change.requestedBy === 'guest' ? t('booking.change_requested_by_guest', { guest: item.change.guestName, channel: 'Airbnb' }) : t('booking.change_requested_by', { organization: currentBusiness }) }}</p>
+              <dl class="mt-4 space-y-4 text-sm">
+                <div v-for="field in changeFields(item.change)" :key="field.label">
+                  <dt class="font-medium text-highlighted">{{ field.label }}</dt>
+                  <dd class="mt-1 grid grid-cols-2 gap-4">
+                    <div><span class="block text-xs text-muted">{{ t('booking.change_before') }}</span><span>{{ field.before }}</span></div>
+                    <div><span class="block text-xs text-muted">{{ t('booking.change_proposed') }}</span><span>{{ field.after }}</span></div>
+                  </dd>
+                </div>
               </dl>
-              <p class="text-sm" :class="item.change.status === 'pending' ? 'text-muted' : 'text-highlighted'" role="status">{{ changeStatus(item.change) }}</p>
-              <div v-if="item.change.status === 'pending' && (personalScope ? item.change.requestedBy === 'business' && !item.change.channel : item.change.requestedBy === 'guest')" class="mt-4 flex gap-2">
+              <p class="mt-4 text-sm" :class="item.change.status === 'pending' ? 'text-muted' : 'text-highlighted'" role="status">{{ changeStatus(item.change) }}</p>
+              <div v-if="item.change.status === 'pending' && (personalScope ? item.change.requestedBy === 'business' && !item.change.channel : item.change.requestedBy === 'guest')" class="mt-4 flex gap-3">
                 <UButton :label="t('booking.change_accept')" :loading="answeringChange?.requestId === item.key && answeringChange.decision === 'accept'" :disabled="answeringChange !== null" @click="answerChange(item.key, 'accept')" />
                 <UButton :label="t('booking.change_decline')" color="neutral" variant="outline" :loading="answeringChange?.requestId === item.key && answeringChange.decision === 'decline'" :disabled="answeringChange !== null" @click="answerChange(item.key, 'decline')" />
               </div>
@@ -156,6 +159,8 @@ const requestingChange = computed(() => props.personalScope && route.query.inten
 const changeRequestSent = ref(false)
 watch(() => `${props.threadId}:${String(route.query.intent)}`, () => { changeRequestSent.value = false })
 const sendAt = ref<string | null>(null)
+// The business that asked for a change: the one whose inbox this is, or, in a guest's own inbox, the one they are writing to.
+const currentBusiness = computed(() => props.personalScope ? thread.value?.guestName : dashboard.organization.value?.name)
 const actionError = ref<string | null>(null)
 const readError = ref<string | null>(null)
 

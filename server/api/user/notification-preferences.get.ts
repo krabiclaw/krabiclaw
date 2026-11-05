@@ -22,8 +22,8 @@ export default defineHandler(async (event) => {
     getNotificationCategoryLabels(db, session.user.id),
     queryFirst<{ error: string | null; updated_at: string }>(db, `SELECT error, updated_at FROM guest_thread_deliveries
       WHERE purpose = 'owner_alert' AND channel = 'email' AND status = 'failed' AND json_extract(email_json, '$.message.to') = ?
-        AND updated_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')
-      ORDER BY updated_at DESC LIMIT 1`, [session.user.email]),
+        AND updated_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days') AND created_at >= ?
+      ORDER BY updated_at DESC LIMIT 1`, [session.user.email, new Date(session.user.createdAt).toISOString()]),
   ])
   return jsonResponse({ preferences, labels, bouncedEmail: bounced ? { address: session.user.email, error: bounced.error, failedAt: bounced.updated_at } : null })
 })

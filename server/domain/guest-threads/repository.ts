@@ -271,11 +271,12 @@ async function inboxWhere(organizationId: string | null, opts: InboxListOptions,
   if (opts.q) {
     const like = `%${opts.q.toLowerCase().replace(/[\\%_]/g, char => `\\${char}`)}%`
     where += ` AND (LOWER(COALESCE(json_extract(gt.payload_json, '$.guest.name'), '')) LIKE ? ESCAPE '\\'
+      OR LOWER(COALESCE(json_extract(gt.payload_json, '$.message'), json_extract(gt.payload_json, '$.notes'), '')) LIKE ? ESCAPE '\\'
       OR LOWER(COALESCE(json_extract(gt.payload_json, '$.participant.title'), '')) LIKE ? ESCAPE '\\'
       OR LOWER(COALESCE(bl.title, '')) LIKE ? ESCAPE '\\'
       OR EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind IN ('message', 'submission')
         AND (LOWER(COALESCE(e.body, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(json_extract(e.payload_json, '$.meta.name'), '')) LIKE ? ESCAPE '\\')))`
-    params.push(like, like, like, like, like)
+    params.push(like, like, like, like, like, like)
   }
   where += ` AND ${HAS_CONVERSATION_SQL}`
   const mailbox = mailboxWhere(opts.mailbox ?? null, now, opts.buyerAudience)

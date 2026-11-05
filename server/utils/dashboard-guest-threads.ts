@@ -118,7 +118,8 @@ async function memberInbox(env: CloudflareEnv, db: DbClient, organizationId: str
     countUnreadInboxThreads(db, organizationId, options),
     unreadTeamThreads(env, db, principal),
   ])
-  return { ...guestThreadListPage(threads, query), unread: { ...guests, all: guests.all + team, team } }
+  // All is the guest and support list; Team is counted on its own line.
+  return { ...guestThreadListPage(threads, query), unread: { ...guests, team } }
 }
 
 async function assertGuestOperations(principal: MemberAccessPrincipal) {

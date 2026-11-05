@@ -1,7 +1,7 @@
 <template>
   <DefineControls>
     <div class="space-y-3">
-      <UInput v-if="searching" v-model="query" icon="i-lucide-search" placeholder="Search messages" aria-label="Search messages" autofocus size="lg" class="w-full" :ui="{ base: 'rounded-full' }" />
+      <UInput v-if="searching && !teamScope" v-model="query" icon="i-lucide-search" placeholder="Search messages" aria-label="Search messages" autofocus size="lg" class="w-full" :ui="{ base: 'rounded-full' }" />
       <InboxFilters v-if="!personalScope" :team="teamScope" :can-read-team="canReadTeam" :can-read-guests="canReadGuests" />
     </div>
   </DefineControls>

@@ -156,9 +156,38 @@ async function mirrorMessagePhotos(db: DbClient, env: ChannelEnv, organizationId
   for (const link of links) {
     const response = await fetch(link)
     if (!response.ok) fail(502, 'CHANNEL_ATTACHMENT_UNAVAILABLE', `Channex answered ${response.status} for a message attachment`, 'attachments')
-    files.push({ filename: new URL(link).pathname.split('/').pop()!, bytes: new Uint8Array(await response.arrayBuffer()) })
+    // A file larger than a message photo is not kept, so it is never read past that size.
+    const bytes = await boundedBody(response, MAX_IMAGE_BYTES)
+    if (bytes) files.push({ filename: new URL(link).pathname.split('/').pop()!, bytes })
   }
   await attachGuestPhotos(db, env, organizationId, entryId, sortGuestFiles(files).photos)
+}
+
+/** The response's body, or null once it is larger than `limit`, read no further than that. */
+async function boundedBody(response: Response, limit: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  const declared = Number(response.headers.get('content-length'))
+  if (Number.isFinite(declared) && declared > limit) {
+    await response.body?.cancel()
+    return null
+  }
+  const chunks: Uint8Array[] = []
+  let total = 0
+  const reader = response.body?.getReader()
+  for (let chunk = reader ? await reader.read() : { done: true as const, value: undefined }; !chunk.done; chunk = await reader!.read()) {
+    total += chunk.value.byteLength
+    if (total > limit) {
+      await reader!.cancel()
+      return null
+    }
+    chunks.push(chunk.value)
+  }
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes
 }
 
 export async function mirrorChannexThread(db: DbClient, env: ChannelEnv, threadId: string, expectedPropertyId: string, assignedBookingId?: string, expectedMessageId?: string): Promise<{ status: 'mirrored'; request_id: string; messages: number } | { status: 'ignored_disconnected' }> {
@@ -252,7 +281,8 @@ export async function mirrorChannexMessageEvent(db: DbClient, env: ChannelEnv, v
   // event just after it (every unbooked conversation with a guest message in
   // production has one, recorded after that message). The inquiry's alert
   // carries the message, so its opening message is told once, there.
-  if (entry.actor_kind === 'guest' && await queryFirst(db, `SELECT 1 FROM channel_threads ct WHERE ct.request_id = ? AND ct.external_booking_id IS NULL
+  // A message of photos alone is not carried by the inquiry's alert, so it keeps its own.
+  if (entry.actor_kind === 'guest' && entry.body?.trim() && await queryFirst(db, `SELECT 1 FROM channel_threads ct WHERE ct.request_id = ? AND ct.external_booking_id IS NULL
       AND NOT EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = ct.request_id AND e.kind = 'message' AND e.actor_kind = 'guest' AND e.sequence < ?)`,
     [entry.request_id, entry.sequence])) return mirrored
   const request = await getGuestRequest(db, mirrored.request_id)

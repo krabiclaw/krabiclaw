@@ -537,7 +537,7 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
     await accountPage.getByTestId(`notification-${alerts[0]!.id}`).click()
     await expect(accountPage).toHaveURL(`${baseURL}/dashboard/account/messages/${activityId}`)
     await expect(accountPage.locator('#dashboard-panel-account-message-thread').getByText('Yes, the lockbox is ready at 4 pm.', { exact: true })).toBeVisible()
-    await accountPage.getByRole('link', { name: 'Show stay', exact: true }).click()
+    await accountPage.getByRole('link', { name: 'Show reservation', exact: true }).click()
     await expect(accountPage).toHaveURL(`${baseURL}/dashboard/account/activity/stay/${activityId}`)
     await page.goto(`/dashboard/${slug}/bookings/stay/${stay.data!.stay.id}`)
 

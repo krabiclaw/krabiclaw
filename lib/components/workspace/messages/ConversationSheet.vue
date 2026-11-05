@@ -28,8 +28,8 @@
           <NuxtLink v-if="details.actions.showReservation && reservationTo" :to="reservationTo" class="border-b border-default py-4 text-base font-medium text-highlighted" @click="open = false">Show reservation</NuxtLink>
           <button v-if="details.actions.archive" type="button" class="border-b border-default py-4 text-left text-base font-medium text-highlighted" :disabled="saving !== null" @click="move('archive')">Archive</button>
           <button v-if="details.actions.unarchive" type="button" class="border-b border-default py-4 text-left text-base font-medium text-highlighted" :disabled="saving !== null" @click="move('unarchive')">Move to Messages</button>
-          <button v-if="details.actions.report" type="button" class="border-b border-default py-4 text-left text-base font-medium text-highlighted" @click="reporting = { block: false }">Report</button>
-          <button v-if="details.actions.block" type="button" class="border-b border-default py-4 text-left text-base font-medium text-error" @click="reporting = { block: true }">Block</button>
+          <button v-if="details.actions.report" type="button" class="border-b border-default py-4 text-left text-base font-medium text-highlighted" :disabled="saving !== null" @click="reporting = { block: false }">Report</button>
+          <button v-if="details.actions.block" type="button" class="border-b border-default py-4 text-left text-base font-medium text-error" :disabled="saving !== null" @click="reporting = { block: true }">Block</button>
           <button v-if="details.actions.unblock" type="button" class="border-b border-default py-4 text-left text-base font-medium text-highlighted" :disabled="saving !== null" @click="move('unblock')">Unblock</button>
         </div>
         <UAlert v-if="moveError" class="mt-3" color="error" variant="soft" :description="moveError" />
@@ -65,11 +65,18 @@ const path = computed(() => `/api/dashboard/organizations/${dashboard.organizati
 const details = ref<ThreadDetails | null>(null)
 const error = ref<unknown>(null)
 // Read when the sheet opens, so it always shows the conversation as it is now.
+let reading = 0
 watch(open, async isOpen => {
   if (!isOpen) return
+  // Only the latest open's answer is shown; an earlier one arriving late is dropped.
+  const read = ++reading
   error.value = null
-  try { details.value = await api(`${path.value}/details`, { validate: isThreadDetails }) }
-  catch (cause) { error.value = cause }
+  try {
+    const answer = await api(`${path.value}/details`, { validate: isThreadDetails })
+    if (read === reading) details.value = answer
+  } catch (cause) {
+    if (read === reading) error.value = cause
+  }
 })
 const allPhotos = ref(false)
 const shownPhotos = computed(() => allPhotos.value ? details.value?.photos ?? [] : details.value?.photos.slice(0, 3) ?? [])
@@ -81,13 +88,15 @@ const moveError = ref<string | null>(null)
 const attemptKeys = new Map<string, string>()
 async function move(transition: 'archive' | 'unarchive' | 'report' | 'block' | 'unblock', reason?: string) {
   // One key per attempt, kept until it succeeds, so a retry after a dropped response is the same request.
-  const idempotencyKey = attemptKeys.get(transition) ?? crypto.randomUUID()
-  attemptKeys.set(transition, idempotencyKey)
+  // One key per attempt at the same request; a report with different words is a new request.
+  const attempt = `${transition}:${reason ?? ''}`
+  const idempotencyKey = attemptKeys.get(attempt) ?? crypto.randomUUID()
+  attemptKeys.set(attempt, idempotencyKey)
   saving.value = transition
   moveError.value = null
   try {
     await api(`${path.value}/operations/${transition}`, { method: 'POST', body: reason === undefined ? { idempotencyKey } : { idempotencyKey, reason }, validate: isThreadDetailResponse })
-    attemptKeys.delete(transition)
+    attemptKeys.delete(attempt)
     reporting.value = null
     open.value = false
     emit('moved', transition)
