@@ -154,7 +154,7 @@ const realtime = useDashboardInvalidations()
 const { locale, t } = useI18n()
 const session = authClient.useSession()
 
-const { data, thread, pending, error, refresh } = await useGuestThread(computed(() => props.threadId), computed(() => props.personalScope))
+const { data, thread, pending, error, refresh, clear } = await useGuestThread(computed(() => props.threadId), computed(() => props.personalScope))
 const threadPath = computed(() => props.personalScope ? `/api/account/messages/${encodeURIComponent(props.threadId)}` : `/api/dashboard/organizations/${dashboard.organizationId.value}/guest-threads/${encodeURIComponent(props.threadId)}`)
 
 const draft = ref('')
@@ -413,6 +413,8 @@ async function retry(messageId: string) {
 watch(realtime.event, (event) => {
   if (props.personalScope || !event) return
   if (event.organizationId !== dashboard.organizationId.value) return
+  // Access changes invalidate the cached identity, including hydration data and in-flight reads.
+  if (event.type === 'access.changed') clear()
   if (event.type === 'access.changed' || ('threadId' in event && event.threadId === props.threadId)) void refresh()
 })
 

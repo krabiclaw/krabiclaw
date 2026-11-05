@@ -18,7 +18,10 @@
         <div class="min-h-0 flex-1 overflow-y-auto pb-6" :class="dashboardGutterClass" :inert="busy">
           <PushAsk v-if="pushAskHome" class="py-6" title="Your site is live" :lede="pushAskLede" @done="router.push(pushAskHome)" />
           <p v-else-if="restoreError" class="py-16 text-sm text-error" role="alert">{{ getErrorMessage(restoreError, 'Your saved answers could not be loaded.') }}</p>
-          <NuxtPage v-else @advance="goNext" @uploading="uploading = $event" />
+          <template v-else>
+            <NuxtPage @advance="goNext" @uploading="uploading = $event" />
+            <UCheckbox v-if="currentStep?.id === 'review' && state.vertical === 'lodging'" v-model="migrateHostaway" class="pb-6" label="Move existing stays from Hostaway after creating my site" />
+          </template>
         </div>
 
         <div v-if="currentStep && !restoreError && !pushAskHome" class="shrink-0 border-t border-default py-3" :class="dashboardGutterClass">
@@ -109,6 +112,7 @@ const state = useOnboardingState()
 const draft = useOnboardingDraft()
 const { steps, indexOf, nextOf, previousOf, resumeStep } = useOnboardingSteps()
 const exiting = ref(false)
+const migrateHostaway = ref(false)
 const uploading = ref(false)
 const busy = computed(() => draft.busy.value || exiting.value || uploading.value)
 onBeforeRouteLeave(() => !draft.busy.value && !uploading.value)
@@ -177,7 +181,9 @@ async function goNext() {
   if (step.action === 'commit') {
     if (!await draft.activate()) return
     const created = state.value.created
-    const home = created?.orgSlug ? `/dashboard/${created.orgSlug}` : '/dashboard'
+    const home = created?.orgSlug
+      ? `/dashboard/${created.orgSlug}${migrateHostaway.value && state.value.vertical === 'lodging' ? '/integrations/hostaway-migration' : ''}`
+      : '/dashboard'
     // The site takes requests from here on, so this is when to offer push — once, where the browser can still be asked.
     // The site exists either way: a browser whose push state cannot be read is reported and not asked.
     await pushSubscription.refresh().catch(error => globalThis.reportError(error))

@@ -12,7 +12,7 @@ import { getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-as
 import { imagePixelSize, MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
 import { getProduct, updateProduct } from '~/server/utils/product-management'
 import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
-import { creationDedupeKey, readCreationRecord } from '~/server/utils/organization-events'
+import { creationDedupeKey, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import type { ProductDetailKey } from '~/shared/product-details'
 import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
@@ -695,7 +695,11 @@ export class AirbnbConnection {
         }
         case 'reservations': {
           await wrote('load_airbnb_reservations')
-          await channexRequest(this.env, `${path}/execute/load_future_reservations`, 'POST', { listing_id: mapping.listing_id })
+          const receipt = await channexRequest(this.env, `${path}/execute/load_future_reservations`, 'POST', { listing_id: mapping.listing_id })
+          // This accepts background work; it is not evidence that every expected guest arrived in the revision feed.
+          await executeBatch(this.db, [organizationEventQuery({ organizationId: this.organizationId, actorId: this.userId,
+            eventType: 'stay.reservations_import_requested', entityType: 'product', entityId: productId,
+            metadata: { provider: 'channex', channel: 'airbnb', listing_id: mapping.listing_id, channel_id: mapping.channel_id, property_id: mapping.property_id, receipt } })], { operation: 'Record Airbnb reservation import request' })
           await save({ import_stage: 'messages' })
           break
         }

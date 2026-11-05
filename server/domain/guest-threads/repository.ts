@@ -23,9 +23,14 @@ import { HTTPError } from 'nitro'
 const SOURCE_GUEST_NAME_SQL = "json_extract(gt.payload_json, '$.guest.name')"
 const REPLY_CHANNEL_SQL = "CASE WHEN EXISTS (SELECT 1 FROM channel_threads ct WHERE ct.request_id = gt.id AND ct.organization_id = gt.organization_id) OR EXISTS (SELECT 1 FROM stays st WHERE st.request_id = gt.id AND st.organization_id = gt.organization_id AND st.owner = 'channel') THEN 'airbnb' ELSE 'email' END"
 
+/** A message with words, a photo or a file; Airbnb records some host actions as messages with none. */
+function messageHasContentSql(entry: string): string {
+  return `(NULLIF(TRIM(${entry}.body), '') IS NOT NULL OR COALESCE(json_array_length(${entry}.payload_json, '$.attachments'), 0) > 0 OR EXISTS (SELECT 1 FROM media_placements mp WHERE mp.owner_type = 'activity_entry' AND mp.owner_id = ${entry}.id AND mp.slot = 'attachments' AND mp.status = 'active'))`
+}
+
 /** A business response is visible on the web or evidenced by the guest's real delivery/provider message. */
 export function successfulBusinessReplySql(reply: string): string {
-  return `(${reply}.kind = 'message' AND ${reply}.actor_kind = 'member' AND (
+  return `(${reply}.kind = 'message' AND ${reply}.actor_kind = 'member' AND ${messageHasContentSql(reply)} AND (
     (${reply}.event_name = 'thread.member_reply' AND (${reply}.channel = 'web' OR EXISTS (
       SELECT 1 FROM guest_thread_deliveries delivery
       WHERE delivery.entry_id = ${reply}.id AND delivery.purpose = 'member_reply'
@@ -285,7 +290,7 @@ const SUPPORT_THREAD_SQL = `(EXISTS (SELECT 1 FROM activity_entries e WHERE e.re
   AND NOT EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND e.actor_kind = 'guest'))`
 
 /** A booking lands as a stay, not as a conversation: a stay is in the inbox once someone has written. */
-const HAS_CONVERSATION_SQL = "(gt.kind <> 'stay' OR EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message'))"
+const HAS_CONVERSATION_SQL = `(gt.kind <> 'stay' OR EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND ${messageHasContentSql('e')}))`
 
 const UNREAD_FOR_MEMBER_SQL = `EXISTS (
         SELECT 1 FROM activity_entries n
@@ -372,9 +377,9 @@ export async function listGuestThreads(
       op.starts_at AS record_starts_at, op.check_in_date AS record_check_in_date, op.check_out_date AS record_check_out_date,
       (SELECT json_extract(e.payload_json, '$.check_in_date') FROM activity_entries e WHERE e.request_id = gt.id AND e.event_name = 'channel.inquiry_received' ORDER BY e.sequence DESC LIMIT 1) AS inquiry_check_in,
       (SELECT json_extract(e.payload_json, '$.check_out_date') FROM activity_entries e WHERE e.request_id = gt.id AND e.event_name = 'channel.inquiry_received' ORDER BY e.sequence DESC LIMIT 1) AS inquiry_check_out,
-      (SELECT e.id FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message'${visible} ORDER BY e.sequence DESC LIMIT 1) AS latest_message_id,
+      (SELECT e.id FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message'${visible} AND ${messageHasContentSql('e')} ORDER BY e.sequence DESC LIMIT 1) AS latest_message_id,
       COALESCE((SELECT substr(COALESCE(json_extract(e.payload_json, '$.provider_inserted_at'), e.occurred_at), 1, 23) FROM activity_entries e
-        WHERE e.request_id = gt.id AND e.kind = 'message'${visible} ORDER BY e.sequence DESC LIMIT 1), substr(gt.created_at, 1, 23)) AS latest_at
+        WHERE e.request_id = gt.id AND e.kind = 'message'${visible} AND ${messageHasContentSql('e')} ORDER BY e.sequence DESC LIMIT 1), substr(gt.created_at, 1, 23)) AS latest_at
     FROM requests gt${OPERATIONAL_RECORD_SQL}
     JOIN organization o ON o.id = gt.organization_id
     LEFT JOIN business_locations bl ON bl.id = gt.location_id

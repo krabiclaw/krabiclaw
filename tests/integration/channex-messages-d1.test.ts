@@ -7,10 +7,11 @@ import { hashPassword } from 'better-auth/crypto'
 import sharp from 'sharp'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { applyChannelBooking, type ChannelBooking } from '../../server/domain/stays.ts'
+import { applyChannelBooking, createStay, type ChannelBooking } from '../../server/domain/stays.ts'
 import { backfillChannexMessages, mirrorChannexMessageEvent, mirrorChannexThread } from '../../server/domain/guest-threads/channel-messages.ts'
 import { executeGuestThreadOperation, sendScheduledGuestReply } from '../../server/domain/guest-threads/operations.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
+import { getInboxThread } from '../../server/domain/guest-threads/inbox.ts'
 import { firstUnansweredGuestEntryTimes, listGuestThreads } from '../../server/domain/guest-threads/repository.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
@@ -90,6 +91,7 @@ class Provider {
         return this.refuseImageRead || !bytes ? new Response('Image unavailable', { status: 404 }) : new Response(bytes)
       }
     }
+    if (method === 'POST' && ['/api/v1/restrictions', '/api/v1/availability'].includes(url.pathname)) return json({ data: [{ id: crypto.randomUUID(), type: 'task' }], meta: { message: 'Success', warnings: [] } })
     if (method === 'GET' && url.pathname === '/api/v1/message_threads') return json({ data: this.empty ? [] : [this.thread()], meta: { total: this.empty ? 0 : 1 } })
     if (method === 'GET' && url.pathname === `/api/v1/message_threads/${this.threadId}`) return json({ data: this.thread() })
     // Bookings reach KrabiClaw as revisions only; a booking read by id is not answered.
@@ -248,6 +250,78 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
+test('empty Channex host actions stay recorded without clearing reply work; a real photo reply clears it', async () => {
+  const { runtime, db, env } = await boot()
+  const provider = new Provider(), realFetch = globalThis.fetch
+  globalThis.fetch = provider.fetch as typeof fetch
+  try {
+    // The shape Channex returned for message c2f68d4e (read 2026-11-05): a host message, message null, no attachments, no meta.
+    const receivedAt = Date.now() - 1000
+    const guestAt = new Date(receivedAt).toISOString()
+    const empty = provider.message('host-action', 'property', null, [], new Date(receivedAt + 1).toISOString())
+    provider.messages = [provider.message('first', 'guest', 'Hello', [], guestAt), empty]
+    assert.deepEqual(await backfillChannexMessages(db, env, 'property', ORG), { threads: 1 })
+    const requestId = await db.prepare("SELECT request_id FROM channel_threads WHERE external_thread_id = 'thread'").first<string>('request_id')
+    assert.ok(requestId)
+    const recorded = await db.prepare("SELECT actor_kind, body FROM activity_entries WHERE dedupe_key = 'channex-message:host-action'").first<{ actor_kind: string; body: string | null }>()
+    assert.deepEqual(recorded, { actor_kind: 'member', body: null })
+
+    assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [requestId])).get(requestId), guestAt)
+    assert.equal(await db.prepare('SELECT conversation_state FROM requests WHERE id=?').bind(requestId).first('conversation_state'), 'needs_attention')
+
+    const password = 'EmptyHostActionProof123!'
+    await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('owner-credential', ?, 'credential', ?, ?, 0, 0)").bind(OWNER, OWNER, await hashPassword(password)).run()
+    const login = await createAuth(env).api.signInEmail({ body: { email: 'owner@example.test', password }, asResponse: true })
+    assert.equal(login.status, 200)
+    const token = login.headers.get('set-auth-token')
+    assert.ok(token)
+    const app = new H3()
+    app.get('/api/dashboard/today', todayRoute)
+    const readToday = async () => {
+      const response = await app.request(Object.assign(new Request('https://proof.example/api/dashboard/today?org=org', { headers: { authorization: `Bearer ${token}` } }),
+        { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+      assert.equal(response.status, 200)
+      return await response.json() as TodayFeedPayload
+    }
+    const afterEmpty = await readToday()
+    assert.equal(afterEmpty.cards.some(card => card.id === `attention:${requestId}`), true)
+    assert.equal(afterEmpty.cards.some(card => card.id === `completed:reply:${requestId}`), false)
+
+    // The conversation reads as the guest's words alone, and the list previews them.
+    const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
+    const thread = (await getInboxThread(db, requestId, ORG, { audience: 'member', userId: OWNER, principal: owner }))!
+    assert.deepEqual(thread.stream.filter(item => item.type === 'message').map(item => item.type === 'message' ? [item.side, item.body] : null), [['guest', 'Hello']])
+    const [row] = await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay', mailbox: 'current' })
+    assert.deepEqual([row!.preview, row!.previewFrom], ['Hello', 'Conversation supplied by Airbnb'])
+
+    // A webhook re-mirror of the same conversation records it once and still succeeds.
+    await mirrorChannexThread(db, env, 'thread', 'property')
+    assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE dedupe_key = 'channex-message:host-action'").first('count(*)'), 1)
+
+    provider.messages.push(provider.message('blank-host-action', 'property', '   ', [], new Date(receivedAt + 2).toISOString()))
+    await mirrorChannexThread(db, env, 'thread', 'property')
+    assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [requestId])).get(requestId), guestAt)
+    const afterBlank = await readToday()
+    assert.equal(afterBlank.cards.some(card => card.id === `attention:${requestId}`), true)
+    assert.equal(afterBlank.cards.some(card => card.id === `completed:reply:${requestId}`), false)
+
+    // A real image-only host reply is downloaded and placed on its message.
+    provider.messages.push(provider.message('host-photo', 'property', null, ['/attachment/file'], new Date(receivedAt + 3).toISOString()))
+    await mirrorChannexThread(db, env, 'thread', 'property')
+    const detail = (await getGuestThreadDetail(db, requestId, ORG))!
+    const photoReply = detail.entries.find(entry => entry.body === null && entry.actorKind === 'member' && entry.attachments.length > 0)
+    assert.ok(photoReply)
+    assert.equal(photoReply.attachments.length, 1)
+    assert.ok(photoReply.attachments[0]!.url.startsWith('https://media.example.test/'))
+    assert.deepEqual(provider.fileReads, ['/attachment/file'])
+    assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [requestId])).size, 0)
+    assert.equal(await db.prepare('SELECT conversation_state FROM requests WHERE id=?').bind(requestId).first('conversation_state'), 'waiting_on_guest')
+    const afterPhoto = await readToday()
+    assert.equal(afterPhoto.cards.some(card => card.id === `attention:${requestId}`), false)
+    assert.equal(afterPhoto.cards.some(card => card.id === `completed:reply:${requestId}`), true)
+  } finally { globalThis.fetch = realFetch; await runtime.dispose() }
+})
+
 test('a message mirrored before photos were stored gets its photo on the next backfill or re-mirror, and keeps one set', async () => {
   const { runtime, db, env } = await boot()
   const provider = new Provider(), realFetch = globalThis.fetch
@@ -307,11 +381,20 @@ test('the inbox exposes every page with a stable tie order and validates paginat
 })
 
 test('booking assignment before or after booking arrival adopts one request and preserves its immutable ledger and receipts', async () => {
-  for (const first of ['conversation', 'booking'] as const) {
+  for (const withImport of [false, true]) for (const first of ['conversation', 'booking'] as const) {
     const { runtime, db, env, productId } = await boot()
     const provider = new Provider(), realFetch = globalThis.fetch
     globalThis.fetch = provider.fetch as typeof fetch
     try {
+      const terms = booking()
+      const imported = withImport ? await createStay(db, env, { organizationId: ORG, actorId: OWNER, manage: true }, {
+        product_id: productId, idempotency_key: 'hostaway:imported-ota', guest_name: 'Actual', guest_surname: 'Guest', guest_email: 'actual@example.test',
+        check_in_date: terms.check_in_date, check_out_date: terms.check_out_date, adults: terms.adults, total_minor: terms.total_minor,
+      }, { imported: { source: 'hostaway', source_id: 'imported-ota', row: { id: 'imported-ota' }, fingerprint: 'imported-ota-fingerprint', channel: terms.channel, channel_booking_id: terms.channel_booking_id } }) : null
+      if (imported) {
+        assert.equal(imported.request_id, null, 'an imported OTA contact does not open a direct conversation')
+        assert.equal(await db.prepare('SELECT count(*) FROM requests').first('count(*)'), 0)
+      }
       provider.bookingId = 'booking'
       let stay = first === 'booking' ? await applyChannelBooking(db, env, ORG, productId, booking()) : null
       if (stay) assert.equal(stay.request_id, null)
@@ -321,6 +404,11 @@ test('booking assignment before or after booking arrival adopts one request and 
       const receipt = await createDeliveryReceipt(db, { entryId: historical.id, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'historical-delivery' })
       stay = await applyChannelBooking(db, env, ORG, productId, { ...booking(), revision_id: 'revision-2', provider_updated_at: '2026-10-16T01:00:00Z' })
       assert.equal(stay.request_id, requestId)
+      if (imported) {
+        assert.equal(stay.id, imported.id, 'the channel revision adopts the imported stay')
+        assert.deepEqual(await db.prepare('SELECT owner, request_id FROM stays WHERE id = ?').bind(imported.id).first(), { owner: 'channel', request_id: requestId })
+      }
+      assert.equal(await db.prepare('SELECT count(*) FROM stays').first('count(*)'), 1)
       assert.equal(await db.prepare('SELECT count(*) FROM requests').first('count(*)'), 1)
       assert.equal(await db.prepare('SELECT entry_id FROM guest_thread_deliveries WHERE id = ?').bind(receipt.id).first('entry_id'), historical.id)
       const detail = (await getGuestThreadDetail(db, requestId, ORG))!

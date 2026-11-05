@@ -185,6 +185,36 @@ end. Locations are not billed on any plan, and a home's location
 is not a second charge. See
 [Plans](../PRODUCT.md#plans) and [live homes](shared-auth-contract.md#34-live-homes).
 
+## Moving existing stays from Hostaway
+
+Lodging onboarding's final review offers **Move existing stays from Hostaway
+after creating my site**. The resulting organization opens its one-time
+migration task under **Connections → Migrate from Hostaway**; the same entry is
+available later to owners and admins with operations-update permission.
+
+The host pauses affected Airbnb listings before connecting or switching the
+channel manager, downloads Hostaway's complete-field reservation CSV, and
+uploads it. The walk confirms column meanings, date and decimal formats, and
+explicit property matches. It includes guests already checked in as well as
+future stays, preserves actual payment state, and shows duplicates and
+conflicts before import. Missing facts require source review rather than
+defaults. Every matched home's manually blocked dates are checked separately;
+a reservation export is not assumed to include them. Homes absent from that
+export can be selected separately for their manual closures.
+The host compares every Hostaway calendar; verification covers only the homes
+and source records explicitly included in the migration.
+
+Import writes the existing stay and night records. Reuploading the source file
+resumes against those records without duplicate stays; no guest records or CSV
+contents are retained in browser storage. The import does not send a new-booking
+confirmation or collect payment. Normal future check-in and checkout message
+schedules still apply; arrival instructions should be reviewed before import.
+The final step distinguishes saved data from
+actual Airbnb calendar readback and shows uncovered dates and mismatches. The
+host keeps listings paused until checks pass, reviews arrival instructions and
+conflicts, and confirms reopening the desired listings in Airbnb. A failed or
+incomplete verification does not mark the move complete.
+
 ## Deleting a tenant
 
 Onboarding creates the site before the owner has finished answering, so leaving

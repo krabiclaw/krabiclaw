@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { visitRefundQueries } from '~/server/domain/payments/visit-refund'
 import { recordBookingCancelled, recordBookingDecision } from '~/server/domain/booking-analytics'
-import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { execute, executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { shouldSendRealEmail } from '~/server/utils/email-delivery'
 import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
 import { canMarkNoShow, getGuestRequest, getThreadOperationalRecord, partySizeIsMinimum, requestActions, requestSummary, type ThreadOperationalRecord } from '~/server/domain/requests'
@@ -24,6 +24,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { platformLocale } from '~/shared/platform-locales'
 import { notifyBuyerThread } from '~/server/utils/notification-center'
 import { formatTimestamp } from '~/utils/timezone'
+import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
 import { getChannelThreadMapping, replyThroughChannex } from './channel-messages'
 import { respondToStayChangeRequest } from './stay-change-requests'
@@ -110,7 +111,7 @@ async function loadThreadContext(
   return { thread, record: await getThreadOperationalRecord(db, thread.id) }
 }
 
-function operationDedupeKey(input: Pick<ExecuteOperationInput, 'threadId' | 'idempotencyKey'>): string {
+export function operationDedupeKey(input: Pick<ExecuteOperationInput, 'threadId' | 'idempotencyKey'>): string {
   return `guest-thread-operation:${input.threadId}:${input.idempotencyKey}`
 }
 
@@ -538,7 +539,7 @@ async function executeReply(
   if (entry && entry.channel !== 'web') {
     const earlier = await getDeliveryById(db, deliveryKey)
     if (!earlier || earlier.entry_id !== entry.id) throw new Error('Reply delivery receipt does not match its ledger entry')
-    if (isDeliverySent(earlier)) {
+    if (isDeliverySent(earlier) && !earlier.error) {
       await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id, { conversationState: 'waiting_on_guest' })
       return successfulOutcome(db, context)
     }
@@ -616,7 +617,7 @@ async function executeReply(
   if (!guestEmail) return { ok: false, status: 409, reason: 'delivery_failed', code: 'GUEST_EMAIL_REQUIRED', field: 'guest.email', message: 'This reply was saved to be emailed, but the guest no longer has an email address.' }
   const delivery = await getDeliveryById(db, deliveryKey)
   if (!delivery || delivery.entry_id !== entry.id) throw new Error('Reply delivery receipt does not match its ledger entry')
-  if (isDeliverySent(delivery)) {
+  if (isDeliverySent(delivery) && !delivery.error) {
     await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id, { conversationState: 'waiting_on_guest' })
     return successfulOutcome(db, context)
   }
@@ -765,7 +766,41 @@ export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOp
   const context = await loadThreadContext(db, input.threadId, input.organizationId)
   if ('ok' in context) return context
 
-  if (input.action === 'reply') return await executeReply(db, context, input)
+  if (input.action === 'reply') {
+    const scheduled = input.idempotencyKey.startsWith('send-later:')
+      ? await queryFirst<{ id: string; status: string; entry_id: string | null; user_id: string; body: string }>(db, `SELECT id, status, entry_id, user_id, body FROM send_later_messages
+        WHERE id = ? AND organization_id = ? AND request_id = ?`,
+      [input.idempotencyKey.slice('send-later:'.length), input.organizationId, input.threadId])
+      : null
+    if (input.idempotencyKey.startsWith('send-later:')) {
+      const original = await findEntryByDedupeKey(db, operationDedupeKey(input))
+      if (!scheduled || !['sending', 'failed', 'needs_review', 'sent'].includes(scheduled.status)
+        || scheduled.body !== (input.body ?? '').trim() || scheduled.user_id !== (original?.actor_user_id ?? input.actorUserId)
+        || (original && (original.request_id !== input.threadId || original.event_name !== 'thread.member_reply'))
+        || (scheduled.entry_id !== null && scheduled.entry_id !== original?.id)) {
+        throw new Error('Reply does not match an already-started scheduled message')
+      }
+    }
+    const outcome = await executeReply(db, context, input)
+    if (outcome.ok && scheduled) {
+      // The original entry owns the author, even when another authorized
+      // member retries it. Finish the same scheduled reply after real delivery.
+      const entry = await findEntryByDedupeKey(db, operationDedupeKey(input))
+      if (!entry || entry.actor_user_id !== scheduled.user_id || entry.body !== scheduled.body) throw new Error('Sent scheduled reply does not match its conversation entry')
+      if (scheduled.status !== 'sent') {
+        const now = new Date().toISOString()
+        const saved = await execute(db, `UPDATE send_later_messages SET status = 'sent', reason = NULL, error_code = NULL, error_field = NULL,
+          entry_id = ?, sent_at = ?, updated_at = ? WHERE id = ? AND status = ? AND (entry_id IS NULL OR entry_id = ?)`,
+        [entry.id, now, now, scheduled.id, scheduled.status, entry.id])
+        if (saved.meta.changes !== 1) {
+          const current = await queryFirst<{ status: string; entry_id: string | null }>(db, 'SELECT status, entry_id FROM send_later_messages WHERE id = ?', [scheduled.id])
+          if (current?.status !== 'sent' || current.entry_id !== entry.id) throw new Error('Scheduled reply changed before its sent outcome was recorded')
+        }
+      }
+      await publishGuestInboxThreadEvent(input.env, db, { threadId: input.threadId, type: 'entry.appended' })
+    }
+    return outcome
+  }
   if (input.action === 'archive' || input.action === 'unarchive') {
     return await executeMailboxTransition(db, context, input, input.action)
   }
@@ -830,18 +865,19 @@ async function executeNoShow(db: DbClient, context: ThreadContext, input: Execut
 }
 
 /**
- * Send a workspace's saved scheduled message through the conversation's own
- * address, with the same ledger entry and delivery receipt as a reply. It has
- * no member actor; the key makes a repeated run find its first attempt.
- */
-/**
  * A reply nobody is sending right now: an automatic message (no author), or a
  * member's send-later message, sent as that member's own reply.
  */
 export async function sendScheduledGuestReply(db: DbClient, input: { threadId: string; organizationId: string; body: string; idempotencyKey: string; actorUserId?: string; env: ExecuteOperationInput['env'] }): Promise<{ outcome: ReplyOutcome; entryId: string | null }> {
-  const context = await loadThreadContext(db, input.threadId, input.organizationId)
-  if ('ok' in context) return { outcome: context, entryId: null }
-  const outcome = await executeReply(db, context, { ...input, action: 'reply', actorUserId: input.actorUserId ?? null })
+  let outcome: OperationOutcome
+  if (input.actorUserId !== undefined) {
+    outcome = await executeGuestThreadOperation(db, { ...input, action: 'reply', actorUserId: input.actorUserId })
+  } else {
+    const context = await loadThreadContext(db, input.threadId, input.organizationId)
+    if ('ok' in context) return { outcome: context, entryId: null }
+    outcome = await executeReply(db, context, { ...input, action: 'reply', actorUserId: null })
+  }
+  if (!outcome.ok && outcome.reason === 'no_guest_email') throw new Error('A conversation reply unexpectedly requested a guest email')
   const entry = await findEntryByDedupeKey(db, operationDedupeKey(input))
   return { outcome, entryId: entry?.id ?? null }
 }

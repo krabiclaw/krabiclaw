@@ -1341,3 +1341,33 @@ offering, never a section. Collection is the model's name and never appears in
 the menu workflow; blog categories classify articles and are not part of the
 catalog. `ProductPresentation` names a kind of item for public pages; plurals
 live there too, because appending `s` produces "dishs".
+
+### Moving lodging occupancy from Hostaway
+
+The organization owns the one-time migration task at
+`O/integrations/hostaway-migration`, reached from Connections and offered at
+lodging onboarding's final review. Owners and admins with operations-update
+permission upload the host's reservation export, confirm column/date/amount
+formats and explicit home matches, review manual blocked dates, and approve
+stays before importing. The task index uses `DashboardIndexPanel`; its focused
+Upload, Columns, Homes, Review and Verification leaves use the existing
+creation walk and `DashboardLeafPanel`. There is no ongoing Hostaway connection.
+
+The existing stay and night operations own the imported records. Reuploading an
+export checks its source reservation identities against saved stays, retains
+host edits, and resumes without duplicates. An unpaid confirmed stay occupies
+nights. Payment receipts require the actual amount, date and method; the importer
+does not invent a payment, send a new-booking confirmation or collect payment.
+Normal future check-in and checkout message schedules still apply.
+
+This concern fixes occupied homes being offered as available when direct stays
+or manual closures were missing after a PMS handover. Airbnb's reservation
+import does not supply Hostaway-only occupancy, so the migration preview must
+compare the export with canonical stays and require an explicit manual-block
+review for every matched home. The host can also select homes absent from the
+reservation export to move their manual closures. A saved import is not channel verification:
+Verification reads actual saved occupancy and connected Airbnb availability,
+names every uncovered date or mismatch, and leaves the handover needing
+attention until those checks pass. Listings remain paused by the host during
+the handover; the host reopens them and confirms that external action after
+verification. The wizard does not claim to pause or reopen listings itself.

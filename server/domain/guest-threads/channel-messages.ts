@@ -289,6 +289,8 @@ export async function mirrorChannexMessageEvent(db: DbClient, env: ChannelEnv, v
   if (!request) fail(500, 'CHANNEL_THREAD_MISSING', 'The mirrored conversation could not be read', 'request_id')
   const summary = await requestSummary(db, request)
   const attachments = (parseEntryPayload(entry)?.attachments as unknown[] | undefined)?.length ?? 0
+  // A message with neither words nor a file says nothing to alert about.
+  if (!entry.body?.trim() && !attachments) return mirrored
   await notifyGuestThreadReply(env, db, {
     organizationId: request.organization_id, locationId: request.location_id,
     threadId: request.id, sourceEntryId: entry.id, submissionType: 'stay', submissionId: request.id,

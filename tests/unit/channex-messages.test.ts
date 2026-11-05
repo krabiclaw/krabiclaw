@@ -84,6 +84,8 @@ test('inquiry system metadata distinguishes absence, null and actual structured 
   assert.throws(() => parseChannexMessage({ ...message, attributes: { ...message.attributes, meta: [] } }, env), invalidField('meta'))
 })
 
+const pick = (parsed: { sender: string; text: string | null; attachments: string[] }) => ({ sender: parsed.sender, text: parsed.text, attachments: parsed.attachments })
+
 test('attachment-only messages preserve absent text and resolve links against the configured API', () => {
   const parsed = parseChannexMessage({ ...message, attributes: {
     ...message.attributes, message: null,
@@ -91,7 +93,8 @@ test('attachment-only messages preserve absent text and resolve links against th
   } }, env)
   assert.equal(parsed.text, null)
   assert.deepEqual(parsed.attachments, ['https://staging.channex.io/api/v1/attachments/photo', 'https://media.example/photo.jpg'])
-  assert.throws(() => parseChannexMessage({ ...message, attributes: { ...message.attributes, message: null } }, env), invalidField('message'))
+  // Channex message c2f68d4e (read 2026-11-05): a host action with neither words nor a file is a message, not an invalid one.
+  assert.deepEqual(pick(parseChannexMessage({ ...message, attributes: { ...message.attributes, sender: 'property', message: null, attachments: [] } }, env)), { sender: 'property', text: null, attachments: [] })
   assert.throws(() => parseChannexMessage({ ...message, attributes: { ...message.attributes, message: undefined, attachments: ['attachments/photo'] } }, env), invalidField('message'))
   assert.throws(() => parseChannexMessage({ ...message, attributes: { ...message.attributes, attachments: null } }, env), invalidField('attachments'))
   for (const url of ['http://media.example/photo', 'https://user:password@media.example/photo']) {
