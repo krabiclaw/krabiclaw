@@ -731,8 +731,8 @@ test('customer work follows actual provider replies, keeps the first waiting ins
     provider.refuseMessage = false
 
     const logged = await appendEntry(db, { threadId, kind: 'message', actorKind: 'member', actorUserId: OWNER,
-      channel: 'airbnb', eventName: 'thread.member_reply', body: 'Logged response only', dedupeKey: 'logged-response-only' })
-    const loggedReceipt = await createDeliveryReceipt(db, { entryId: logged.id, channel: 'airbnb', provider: 'log_only', purpose: 'member_reply', idempotencyKey: 'logged-response-only' })
+      channel: 'email', eventName: 'thread.member_reply', body: 'Logged response only', dedupeKey: 'logged-response-only' })
+    const loggedReceipt = await createDeliveryReceipt(db, { entryId: logged.id, channel: 'email', provider: 'log_only', purpose: 'member_reply', idempotencyKey: 'logged-response-only' })
     await recordDeliveryOutcome(db, { deliveryId: loggedReceipt.id, status: 'sent', providerMessageId: 'log-only:response' })
     assert.equal((await waiting()).get(threadId), first, 'a log-only send does not reach the guest')
     provider.replyAt = '2026-10-15T23:13:30.123456'
