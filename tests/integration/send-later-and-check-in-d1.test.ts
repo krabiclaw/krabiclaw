@@ -11,6 +11,11 @@ import { cancelSendLaterMessage, createSendLaterMessage, listSendLaterMessages, 
 import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import type { DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
+import { requestInsertQueries } from '../../server/domain/requests.ts'
+import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
+import { createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
+import { executeGuestThreadOperation, operationDedupeKey } from '../../server/domain/guest-threads/operations.ts'
+import { creationRequestHash } from '../../server/utils/organization-events.ts'
 
 // Every confirmed stay is sent its home's check-in instructions on its own, and
 // a member's send-later reply goes out as their reply at its time, visible only
@@ -207,6 +212,133 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     assert.deepEqual(await db.prepare('SELECT status, error_code, error_field, entry_id, request_id FROM scheduled_guest_messages WHERE stay_id = ? AND template_id = ?').bind(cy.id, noConversation.id).first(),
       { status: 'failed', error_code: 'STAY_CONVERSATION_REQUIRED', error_field: 'requestId', entry_id: null, request_id: null })
     assert.deepEqual((await publications()).slice(beforeChange).flatMap(event => event.type === 'stay.changed' ? [[event.organizationId, event.locationId, event.productId, event.stayId]] : []), [[ORG, 'cabin-site', cabin.id, cy.id]])
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('a scheduled reply keeps its exact failure and Inbox retry completes the same job without sending twice', async t => {
+  const runtime = new Miniflare({ workers: [{ config: {
+    name: 'send-later-recovery', compatibilityDate: '2024-11-01',
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
+    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'send-later-recovery', exportName: 'Hub' } },
+  } }] })
+  try {
+    const db = await runtime.getD1Database('DB')
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests',
+      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'provider', EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>', RESEND_API_KEY: 're_controlled_http', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    await db.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES (?, 'Org', 'org', 'org', 'USD', 'UTC')").bind(ORG).run()
+    await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
+    for (const [id, role] of [[OWNER, 'owner'], [ADMIN, 'admin']]) {
+      await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, 0, 0)").bind(id, id, `${id}@example.test`).run()
+      await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, ?, 0)").bind(`m-${id}`, ORG, id, role).run()
+    }
+    const now = new Date().toISOString()
+    await db.batch(requestInsertQueries({ id: 'recovery-thread', kind: 'contact', organization_id: ORG, location_id: null, user_id: null, review_id: null,
+      conversation_state: 'needs_attention', resolved_at: null, payload: { guest: { name: 'Test inbox', email: 'delivered@resend.dev', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null },
+      created_at: now, updated_at: now }).map(write => db.prepare(write.query).bind(...write.params)))
+    const owner = memberAccessPrincipal((await resolveMembership(env, { organizationId: ORG, userId: OWNER }))!, { env })
+    const historical = await appendEntry(db, { threadId: 'recovery-thread', kind: 'message', actorKind: 'member', actorUserId: OWNER, channel: 'email', body: 'Old reply', eventName: 'thread.member_reply' })
+    const expired = await createDeliveryReceipt(db, { entryId: historical.id, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'expired-history' })
+    await recordDeliveryOutcome(db, { deliveryId: expired.id, status: 'sent', providerMessageId: 'expired-history' })
+
+    let readbackAvailable = false
+    const posts: Array<{ subject: string; to: string[]; headers?: Record<string, string>; html: string; text: string }> = []
+    const gets: string[] = []
+    t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+      if (init.method === 'GET') {
+        gets.push(url)
+        const sent = url.match(/^https:\/\/api\.resend\.com\/emails\/sent-(\d+)$/u)
+        if (!sent || !readbackAvailable) return Response.json({ statusCode: 404, name: 'not_found', message: 'Email not found' }, { status: 404 })
+        const message = posts[Number(sent[1]) - 1]!
+        return Response.json({ id: `sent-${sent[1]}`, message_id: `<sent-${sent[1]}@resend.dev>`, to: message.to, subject: message.subject, html: message.html, text: message.text, last_event: 'delivered' })
+      }
+      assert.equal(url, 'https://api.resend.com/emails')
+      assert.equal(init.method, 'POST')
+      posts.push(JSON.parse(String(init.body)))
+      return Response.json({ id: `sent-${posts.length}` })
+    })
+    const schedule = (body: string) => createSendLaterMessage(db, owner, 'recovery-thread', { body, sendAt: minutes(1) })
+    const saved = (id: string) => db.prepare('SELECT status, reason, error_code, entry_id, sent_at FROM send_later_messages WHERE id = ?').bind(id).first<{ status: string; reason: string | null; error_code: string | null; entry_id: string | null; sent_at: string | null }>()
+    const retry = (body: string, id: string) => executeGuestThreadOperation(db, { threadId: 'recovery-thread', organizationId: ORG, action: 'reply', actorUserId: ADMIN, body, idempotencyKey: `send-later:${id}`, env })
+
+    // The provider accepts the email, but fresh RFC readback fails. The job
+    // records that uncertainty and its exact entry instead of staying Sending.
+    const reply = await schedule('Your request is handled.')
+    assert.deepEqual(await sendDueSendLaterMessages(db, env, minutes(2)), { sent: 0, failed: 0, needs_review: 1 })
+    const failed = (await saved(reply.id))!
+    assert.equal(failed.status, 'needs_review')
+    assert.equal(failed.reason, 'Resend conversation email readback failed (404 not_found): Email not found')
+    assert.equal(failed.error_code, 'SEND_LATER_DELIVERY_UNCONFIRMED')
+    assert.ok(failed.entry_id)
+    const message = await db.prepare('SELECT actor_user_id, body, dedupe_key FROM activity_entries WHERE id = ?').bind(failed.entry_id).first<{ actor_user_id: string; body: string; dedupe_key: string }>()
+    assert.deepEqual(message, { actor_user_id: OWNER, body: reply.body, dedupe_key: operationDedupeKey({ threadId: reply.threadId, idempotencyKey: `send-later:${reply.id}` }) })
+    assert.equal((await listSendLaterMessages(db, owner, reply.threadId))[0]?.entryId, failed.entry_id)
+    assert.equal(posts.length, 1)
+    assert.equal(posts[0]?.headers?.['In-Reply-To'], undefined, 'missing historical RFC metadata does not produce an invented parent')
+    assert.equal(posts[0]?.headers?.References, undefined)
+    assert.equal(gets.some(url => url.endsWith('/expired-history')), false, 'expired historical provider email is never needed to send a new reply')
+    assert.deepEqual(await sendDueSendLaterMessages(db, env, minutes(3)), { sent: 0, failed: 0, needs_review: 0 })
+    assert.equal(posts.length, 1, 'uncertain acceptance is never automatically resent')
+
+    // Inbox Retry resumes the same receipt's required readback. Another admin
+    // can retry it; ownership remains with the original immutable author.
+    readbackAvailable = true
+    assert.equal((await retry(reply.body, reply.id)).ok, true)
+    const completed = (await saved(reply.id))!
+    assert.deepEqual([completed.status, completed.reason, completed.error_code, completed.entry_id], ['sent', null, null, failed.entry_id])
+    assert.ok(completed.sent_at)
+    assert.equal(await db.prepare('SELECT email_message_id FROM guest_thread_deliveries WHERE entry_id = ?').bind(failed.entry_id).first('email_message_id'), '<sent-1@resend.dev>')
+    assert.deepEqual(await listSendLaterMessages(db, owner, reply.threadId), [], 'completed scheduled work disappears from the author’s outstanding work')
+    assert.equal((await retry(reply.body, reply.id)).ok, true)
+    assert.equal(posts.length, 1)
+    assert.equal(await db.prepare('SELECT count(*) count FROM activity_entries WHERE dedupe_key = ?').bind(message!.dedupe_key).first('count'), 1)
+    await appendEntry(db, { threadId: reply.threadId, kind: 'message', actorKind: 'guest', channel: 'email', body: 'A new question',
+      payloadJson: { email: { from: 'delivered@resend.dev', messageId: '<guest-question@resend.dev>', subject: null } } })
+
+    // A legacy interruption left Sending with no job entry link, but already
+    // wrote the immutable entry and pending receipt. Retry repairs the actual
+    // lifecycle through those same records, with exactly one provider POST.
+    const legacy = await schedule('Legacy scheduled reply.')
+    await db.prepare("UPDATE send_later_messages SET status = 'sending', started_at = ? WHERE id = ?").bind(now, legacy.id).run()
+    const original = await appendEntry(db, { threadId: legacy.threadId, kind: 'message', actorKind: 'member', actorUserId: OWNER, channel: 'email', body: legacy.body, eventName: 'thread.member_reply',
+      dedupeKey: operationDedupeKey({ threadId: legacy.threadId, idempotencyKey: `send-later:${legacy.id}` }), payloadJson: { request_hash: await creationRequestHash({ body: legacy.body, photos: [] }) } })
+    await createDeliveryReceipt(db, { entryId: original.id, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: `guest-thread-email:${legacy.threadId}:send-later:${legacy.id}` })
+    assert.equal((await retry(legacy.body, legacy.id)).ok, true)
+    assert.deepEqual([(await saved(legacy.id))?.status, (await saved(legacy.id))?.entry_id], ['sent', original.id])
+    assert.equal(posts.length, 2)
+    assert.equal(posts[1]?.headers?.['In-Reply-To'], '<guest-question@resend.dev>', 'the latest genuine inbound RFC ID supplies the parent')
+    assert.equal(posts[1]?.headers?.References, '<sent-1@resend.dev> <guest-question@resend.dev>', 'references contain only retained inbound and outbound RFC IDs')
+    assert.equal((await retry(legacy.body, legacy.id)).ok, true)
+    assert.equal(posts.length, 2, 'the original pending receipt sends once and settled retry sends nothing')
+
+    // A retained provider identity and RFC ID already prove physical delivery.
+    // An interrupted dispatcher's saved error still has to clear through that
+    // dispatcher, or Today would keep showing the completed job as attention.
+    await db.prepare("UPDATE guest_thread_deliveries SET error = 'Interrupted after RFC readback' WHERE entry_id = ?").bind(original.id).run()
+    assert.equal((await retry(legacy.body, legacy.id)).ok, true)
+    assert.equal(await db.prepare('SELECT error FROM guest_thread_deliveries WHERE entry_id = ?').bind(original.id).first('error'), null)
+    assert.equal(posts.length, 2)
+
+    const notStarted = await schedule('Not due yet.')
+    await assert.rejects(retry(notStarted.body, notStarted.id), /already-started scheduled message/)
+    await cancelSendLaterMessage(db, owner, notStarted.id)
+    await assert.rejects(retry(notStarted.body, notStarted.id), /already-started scheduled message/)
+    assert.equal(posts.length, 2, 'pending and cancelled scheduled replies cannot be started by Retry')
+
+    // Corrupt recorded RFC metadata fails before dispatch and still links the
+    // actual entry and reason; a later cron cannot silently resend it.
+    await appendEntry(db, { threadId: reply.threadId, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Bad metadata', payloadJson: { email: { from: 'delivered@resend.dev', messageId: 'invalid-rfc-id', subject: 'Question' } } })
+    const invalid = await schedule('Cannot use corrupt metadata.')
+    assert.deepEqual(await sendDueSendLaterMessages(db, env, minutes(2)), { sent: 0, failed: 0, needs_review: 1 })
+    const refused = (await saved(invalid.id))!
+    assert.deepEqual([refused.status, refused.reason, refused.error_code], ['needs_review', 'Received conversation email has invalid threading metadata', 'SEND_LATER_DELIVERY_UNCONFIRMED'])
+    assert.ok(refused.entry_id)
+    assert.equal(await db.prepare('SELECT body FROM activity_entries WHERE id = ?').bind(refused.entry_id).first('body'), invalid.body)
+    assert.deepEqual(await sendDueSendLaterMessages(db, env, minutes(3)), { sent: 0, failed: 0, needs_review: 0 })
+    assert.equal(posts.length, 2)
   } finally {
     await runtime.dispose()
   }

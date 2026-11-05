@@ -4,7 +4,8 @@ import { assertAssignedBookingAccess, memberAccessPrincipal, resolveMembership, 
 import { getGuestRequest } from '~/server/domain/requests'
 import { isValidInstant } from '~/utils/timezone'
 import { messageText, messagingError } from './guest-message-schedule'
-import { sendScheduledGuestReply, type ReplyOutcome } from './guest-threads/operations'
+import { operationDedupeKey, sendScheduledGuestReply, type ReplyOutcome } from './guest-threads/operations'
+import { findEntryByDedupeKey } from './guest-threads/entries'
 import { publishGuestInboxThreadEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { ChannexError } from '~/server/integrations/channex/client'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -134,7 +135,7 @@ function failure(outcome: Exclude<ReplyOutcome, { ok: true }>): Outcome {
   }
 }
 
-async function finish(db: DbClient, env: SendEnv, row: SendLaterMessageRow, values: { status: 'sent' | 'failed' | 'needs_review'; reason: string | null; error_code: string | null; error_field: string | null; entry_id: string | null; sent_at: string | null }): Promise<void> {
+async function finish(db: DbClient, env: SendEnv, row: SendLaterMessageRow, values: { status: 'failed' | 'needs_review'; reason: string | null; error_code: string | null; error_field: string | null; entry_id: string | null; sent_at: null }): Promise<void> {
   const result = await execute(db, `UPDATE send_later_messages SET status = ?, reason = ?, error_code = ?, error_field = ?, entry_id = ?, sent_at = ?, updated_at = ?
     WHERE id = ? AND status = 'sending'`, [values.status, values.reason, values.error_code, values.error_field, values.entry_id, values.sent_at, new Date().toISOString(), row.id])
   if (result.meta.changes !== 1) messagingError(409, 'SEND_LATER_NOT_SENDING', 'The scheduled message outcome could not be recorded because it is no longer sending', 'status')
@@ -144,8 +145,8 @@ async function finish(db: DbClient, env: SendEnv, row: SendLaterMessageRow, valu
 /**
  * Send one due message as its author's own reply. The author must still be a
  * member who can reach the conversation; otherwise it fails visibly. An error
- * with no typed facts leaves the row sending and fails the run: whether the
- * provider accepted it is unknown, so it is never resent automatically.
+ * with no typed facts needs review: whether the provider accepted it is
+ * unknown, so it is never resent automatically.
  */
 async function sendOne(db: DbClient, env: SendEnv, row: SendLaterMessageRow, now: string): Promise<'sent' | 'failed' | 'needs_review' | 'not_due'> {
   const claim = await execute(db, `UPDATE send_later_messages SET status = 'sending', started_at = ?, updated_at = ? WHERE id = ? AND status = 'pending' AND version = ? AND due_at <= ?`,
@@ -169,13 +170,18 @@ async function sendOne(db: DbClient, env: SendEnv, row: SendLaterMessageRow, now
     sent = await sendScheduledGuestReply(db, { threadId: row.request_id, organizationId: row.organization_id, body: row.body, idempotencyKey: `send-later:${row.id}`, actorUserId: row.user_id, env })
   } catch (error) {
     const data = error instanceof HTTPError || error instanceof ChannexError ? error.data : null
-    if (!data || typeof data !== 'object' || !('code' in data) || typeof data.code !== 'string' || !('field' in data) || typeof data.field !== 'string') throw error
-    await finish(db, env, row, { status: 'failed', reason: (error as Error).message, error_code: data.code, error_field: data.field, entry_id: null, sent_at: null })
-    return 'failed'
+    const typed = data && typeof data === 'object' && 'code' in data && typeof data.code === 'string' && 'field' in data && typeof data.field === 'string' ? { code: data.code, field: data.field } : null
+    const entry = await findEntryByDedupeKey(db, operationDedupeKey({ threadId: row.request_id, idempotencyKey: `send-later:${row.id}` }))
+    // A send may already have committed before its publication failed. Keep
+    // the sent outcome; the thrown error still fails the run for the caller.
+    const current = await queryFirst<SendLaterMessageRow>(db, 'SELECT * FROM send_later_messages WHERE id = ?', [row.id])
+    if (current?.status === 'sent' && current.entry_id === entry?.id) throw error
+    const status = typed ? 'failed' : 'needs_review'
+    await finish(db, env, row, { status, reason: error instanceof Error ? error.message : String(error), error_code: typed?.code ?? 'SEND_LATER_DELIVERY_UNCONFIRMED', error_field: typed?.field ?? 'delivery', entry_id: entry?.id ?? null, sent_at: null })
+    return status
   }
   if (sent.outcome.ok) {
     if (sent.entryId === null) messagingError(500, 'SEND_LATER_ENTRY_REQUIRED', 'The message was sent but its conversation entry could not be read', 'entryId')
-    await finish(db, env, row, { status: 'sent', reason: null, error_code: null, error_field: null, entry_id: sent.entryId, sent_at: new Date().toISOString() })
     return 'sent'
   }
   const outcome = failure(sent.outcome)

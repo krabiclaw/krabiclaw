@@ -68,16 +68,16 @@ async function readProviderEmail(db: DbClient, env: ReplyEmailEnv, delivery: Gue
 }
 
 /** Only this request and this recipient can contribute email ancestry. */
-async function conversationEmailParent(db: DbClient, env: ReplyEmailEnv, delivery: GuestThreadDeliveryRow, threadId: string, sequence: number, recipient: string) {
+async function conversationEmailParent(db: DbClient, delivery: GuestThreadDeliveryRow, threadId: string, sequence: number, recipient: string) {
   const candidates = await queryAll<{
     id: string; sequence: number; created_at: string; payload_json: string | null
-    email_json: string | null; email_message_id: string | null; provider: string | null; provider_message_id: string | null
+    email_json: string | null; email_message_id: string | null; provider: string | null
   }>(db, `
-    SELECT e.id, e.sequence, e.created_at, e.payload_json, NULL AS email_json, NULL AS email_message_id, NULL AS provider, NULL AS provider_message_id
+    SELECT e.id, e.sequence, e.created_at, e.payload_json, NULL AS email_json, NULL AS email_message_id, NULL AS provider
     FROM activity_entries e
     WHERE e.request_id = ? AND e.sequence < ? AND e.actor_kind = 'guest' AND e.channel = 'email'
     UNION ALL
-    SELECT d.id, e.sequence, d.created_at, NULL, d.email_json, d.email_message_id, d.provider, d.provider_message_id
+    SELECT d.id, e.sequence, d.created_at, NULL, d.email_json, d.email_message_id, d.provider
     FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
     WHERE e.request_id = ? AND e.sequence <= ? AND d.id <> ?
       AND d.channel = 'email' AND d.purpose <> 'owner_alert'
@@ -92,10 +92,10 @@ async function conversationEmailParent(db: DbClient, env: ReplyEmailEnv, deliver
       const payload: unknown = JSON.parse(candidate.payload_json)
       const email = isRecord(payload) && isRecord(payload.email) ? payload.email : null
       if (!email || typeof email.from !== 'string' || email.from.trim().toLowerCase() !== recipient) continue
-      if (email.messageId === null) continue // A missing RFC ID is not the content hash used for deduplication.
-      if (!isEmailMessageId(email.messageId) || !(email.subject === null || typeof email.subject === 'string')) throw new Error('Received conversation email has invalid threading metadata')
+      if (email.messageId === null || email.messageId === undefined) continue // A missing RFC ID is not the content hash used for deduplication.
+      if (!isEmailMessageId(email.messageId) || !(email.subject === null || email.subject === undefined || typeof email.subject === 'string')) throw new Error('Received conversation email has invalid threading metadata')
       if (typeof email.subject === 'string') knownSubject ??= email.subject
-      parent ??= { subject: email.subject, messageId: email.messageId }
+      parent ??= { subject: email.subject ?? null, messageId: email.messageId }
       references.push(email.messageId)
       continue
     }
@@ -103,25 +103,21 @@ async function conversationEmailParent(db: DbClient, env: ReplyEmailEnv, deliver
     if (snapshot && snapshot.message.to.trim().toLowerCase() !== recipient) continue
     if (snapshot) knownSubject ??= snapshot.message.subject
     if (candidate.provider === 'log_only') continue // No email, and therefore no provider-assigned RFC ID, exists in this mode.
-    let messageId = candidate.email_message_id
-    let subject = snapshot?.message.subject
-    if (!messageId || subject === undefined) {
-      // Older delivery records get their missing metadata from Resend, never
-      // from a guessed confirmation title or a fabricated Message-ID.
-      if (parent) continue
-      const recorded = await getDeliveryById(db, candidate.id)
-      if (!recorded) throw new Error('Prior conversation email delivery disappeared')
-      const email = await readProviderEmail(db, env, recorded)
-      if (!email.to.some(to => to.trim().toLowerCase() === recipient)) continue
-      messageId = email.message_id
-      subject = email.subject
-    }
+    const messageId = candidate.email_message_id
+    // Historical provider email expires. Only retained recipient identity and
+    // genuine RFC metadata can supply ancestry; neither is required to reply.
+    if (!snapshot || messageId === null) continue
+    const subject = snapshot.message.subject
     if (!isEmailMessageId(messageId)) throw new Error('Prior conversation email has an invalid RFC Message-ID')
     knownSubject ??= subject
     parent ??= { subject, messageId }
     references.push(messageId)
   }
-  return parent ? { subject: `Re: ${(parent.subject ?? knownSubject ?? '').replace(/^(?:re:\s*)+/iu, '').replace(/[\r\n]+/gu, ' ').trim()}`.trim(), inReplyTo: parent.messageId, references: [...new Set(references.reverse())] } : null
+  const subject = parent?.subject ?? knownSubject
+  return parent ? {
+    ...(subject === null ? {} : { subject: `Re: ${subject.replace(/^(?:re:\s*)+/iu, '').replace(/[\r\n]+/gu, ' ').trim()}`.trim() }),
+    inReplyTo: parent.messageId, references: [...new Set(references.reverse())],
+  } : null
 }
 
 /** The one receipt-backed email dispatcher, shared by notifications and replies. */
@@ -141,7 +137,7 @@ export async function deliverReceiptEmail(db: DbClient, input: {
         if (delivery.provider === 'resend' && Date.now() - Date.parse(delivery.created_at) >= 24 * 60 * 60 * 1000) {
           throw new Error('This email has no recorded provider identity and is past Resend\'s 24-hour idempotency window. Review its provider delivery before sending again.')
         }
-        const parent = threaded ? await conversationEmailParent(db, input.env, delivery, input.threadId!, entry.sequence!, input.email.to.trim().toLowerCase()) : null
+        const parent = threaded ? await conversationEmailParent(db, delivery, input.threadId!, entry.sequence!, input.email.to.trim().toLowerCase()) : null
         const snapshot: EmailSnapshot = {
           preparedAt: new Date().toISOString(),
           sender: delivery.provider === 'resend' || input.env.EMAIL_FROM?.trim() ? emailSender(input.env, input.email.fromName) : null,
@@ -394,7 +390,7 @@ export async function deliverGuestThreadEmail(
     title: input.subject, message: input.fromName,
     conversation: input.delivery.purpose === 'member_reply' || input.delivery.purpose === 'scheduled_message',
   })
-  if (isDeliverySent(input.delivery)) return input.delivery
+  if (isDeliverySent(input.delivery) && !input.delivery.error) return input.delivery
   return deliverReceiptEmail(db, {
     delivery: input.delivery, env: input.env, threadId: input.submissionId,
     email: {

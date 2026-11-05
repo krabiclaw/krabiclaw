@@ -250,19 +250,42 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
-test('a Channex message with neither words nor a file is recorded and shows nothing, and never refuses the conversation', async () => {
+test('empty Channex host actions stay recorded without clearing reply work; a real photo reply clears it', async () => {
   const { runtime, db, env } = await boot()
   const provider = new Provider(), realFetch = globalThis.fetch
   globalThis.fetch = provider.fetch as typeof fetch
   try {
     // The shape Channex returned for message c2f68d4e (read 2026-11-05): a host message, message null, no attachments, no meta.
-    const empty = provider.message('host-action', 'property', null)
-    provider.messages = [provider.messages[0]!, empty]
+    const receivedAt = Date.now() - 1000
+    const guestAt = new Date(receivedAt).toISOString()
+    const empty = provider.message('host-action', 'property', null, [], new Date(receivedAt + 1).toISOString())
+    provider.messages = [provider.message('first', 'guest', 'Hello', [], guestAt), empty]
     assert.deepEqual(await backfillChannexMessages(db, env, 'property', ORG), { threads: 1 })
     const requestId = await db.prepare("SELECT request_id FROM channel_threads WHERE external_thread_id = 'thread'").first<string>('request_id')
     assert.ok(requestId)
     const recorded = await db.prepare("SELECT actor_kind, body FROM activity_entries WHERE dedupe_key = 'channex-message:host-action'").first<{ actor_kind: string; body: string | null }>()
     assert.deepEqual(recorded, { actor_kind: 'member', body: null })
+
+    assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [requestId])).get(requestId), guestAt)
+    assert.equal(await db.prepare('SELECT conversation_state FROM requests WHERE id=?').bind(requestId).first('conversation_state'), 'needs_attention')
+
+    const password = 'EmptyHostActionProof123!'
+    await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('owner-credential', ?, 'credential', ?, ?, 0, 0)").bind(OWNER, OWNER, await hashPassword(password)).run()
+    const login = await createAuth(env).api.signInEmail({ body: { email: 'owner@example.test', password }, asResponse: true })
+    assert.equal(login.status, 200)
+    const token = login.headers.get('set-auth-token')
+    assert.ok(token)
+    const app = new H3()
+    app.get('/api/dashboard/today', todayRoute)
+    const readToday = async () => {
+      const response = await app.request(Object.assign(new Request('https://proof.example/api/dashboard/today?org=org', { headers: { authorization: `Bearer ${token}` } }),
+        { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+      assert.equal(response.status, 200)
+      return await response.json() as TodayFeedPayload
+    }
+    const afterEmpty = await readToday()
+    assert.equal(afterEmpty.cards.some(card => card.id === `attention:${requestId}`), true)
+    assert.equal(afterEmpty.cards.some(card => card.id === `completed:reply:${requestId}`), false)
 
     // The conversation reads as the guest's words alone, and the list previews them.
     const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
@@ -274,6 +297,28 @@ test('a Channex message with neither words nor a file is recorded and shows noth
     // A webhook re-mirror of the same conversation records it once and still succeeds.
     await mirrorChannexThread(db, env, 'thread', 'property')
     assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE dedupe_key = 'channex-message:host-action'").first('count(*)'), 1)
+
+    provider.messages.push(provider.message('blank-host-action', 'property', '   ', [], new Date(receivedAt + 2).toISOString()))
+    await mirrorChannexThread(db, env, 'thread', 'property')
+    assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [requestId])).get(requestId), guestAt)
+    const afterBlank = await readToday()
+    assert.equal(afterBlank.cards.some(card => card.id === `attention:${requestId}`), true)
+    assert.equal(afterBlank.cards.some(card => card.id === `completed:reply:${requestId}`), false)
+
+    // A real image-only host reply is downloaded and placed on its message.
+    provider.messages.push(provider.message('host-photo', 'property', null, ['/attachment/file'], new Date(receivedAt + 3).toISOString()))
+    await mirrorChannexThread(db, env, 'thread', 'property')
+    const detail = (await getGuestThreadDetail(db, requestId, ORG))!
+    const photoReply = detail.entries.find(entry => entry.body === null && entry.actorKind === 'member' && entry.attachments.length > 0)
+    assert.ok(photoReply)
+    assert.equal(photoReply.attachments.length, 1)
+    assert.ok(photoReply.attachments[0]!.url.startsWith('https://media.example.test/'))
+    assert.deepEqual(provider.fileReads, ['/attachment/file'])
+    assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [requestId])).size, 0)
+    assert.equal(await db.prepare('SELECT conversation_state FROM requests WHERE id=?').bind(requestId).first('conversation_state'), 'waiting_on_guest')
+    const afterPhoto = await readToday()
+    assert.equal(afterPhoto.cards.some(card => card.id === `attention:${requestId}`), false)
+    assert.equal(afterPhoto.cards.some(card => card.id === `completed:reply:${requestId}`), true)
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
