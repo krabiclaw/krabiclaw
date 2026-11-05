@@ -409,9 +409,9 @@ export async function listGuestThreads(
         : row.record_check_in_date && row.record_check_out_date ? stayWhen(row.record_check_in_date, row.record_check_out_date, now, row.time_zone)
           : row.record_starts_at ? `${calendarDate(localDateKey(row.record_starts_at, row.time_zone))}, ${clockTime(row.record_starts_at, row.time_zone)}`
             : row.inquiry_check_in && row.inquiry_check_out ? formatCalendarRange(row.inquiry_check_in, row.inquiry_check_out, 'en-US') : null,
-      preview: message ? messagePreview(message.text, message.photos) : opening?.trim() || 'New conversation',
+      preview: message ? messagePreview(message.text, message.photos) : opening?.trim() ?? '',
       previewFrom: message ? previewFrom(message, { guestName: row.reply_channel === 'airbnb' ? guestName : firstName(guestName), viewerId: opts.userId, buyer: Boolean(opts.buyerAudience), business: row.organization_name })
-        : opts.buyerAudience ? 'You' : firstName(guestName),
+        : !opening?.trim() ? null : opts.buyerAudience ? 'You' : firstName(guestName),
       time: listTime(sentAt, row.time_zone, now),
       unread: unreadIds.has(row.id),
     } satisfies InboxRow

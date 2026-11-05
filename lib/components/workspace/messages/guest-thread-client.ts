@@ -64,7 +64,7 @@ const isCount = (value: unknown) => Number.isSafeInteger(value) && Number(value)
 function isRow(value: unknown): value is InboxRow {
   return isRecord(value) && isText(value.id) && (value.kind === 'guest' || value.kind === 'support')
     && isText(value.guestName) && isText(value.avatarInitial) && (value.channel === 'airbnb' || value.channel === 'direct')
-    && isNullableText(value.home) && isNullableText(value.when) && typeof value.preview === 'string' && isText(value.previewFrom)
+    && isNullableText(value.home) && isNullableText(value.when) && typeof value.preview === 'string' && (value.preview ? isText(value.previewFrom) : value.previewFrom === null)
     && isText(value.time) && typeof value.unread === 'boolean'
 }
 
