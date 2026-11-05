@@ -1900,7 +1900,7 @@ test('migrated unpaid stays occupy nights without a fresh reservation message an
   const { runtime, db, env } = await boot()
   try {
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
-    const template = await saveMessageTemplate(db, manager, null, { title: 'Booking received', body: 'Thanks for your reservation.', schedule: { trigger: 'booking_received', delayMinutes: 5, productIds: [cabin.id] } })
+    const template = await saveMessageTemplate(db, env, manager, null, { title: 'Booking received', body: 'Thanks for your reservation.', schedule: { trigger: 'booking_received', delayMinutes: 5, productIds: [cabin.id] } })
     const offline = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'hostaway:offline', check_in_date: '2027-05-01', check_out_date: '2027-05-04', ...guest }, { imported: { source: 'hostaway', source_id: 'offline', row: { status: 'New', payment: 'Unpaid' }, fingerprint: 'offline-fingerprint', channel: 'direct' } })
     assert.equal(offline.payment_status, 'unpaid')
     assert.equal(offline.status, 'confirmed')
