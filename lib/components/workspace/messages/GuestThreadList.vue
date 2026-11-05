@@ -46,7 +46,7 @@
               <span class="shrink-0">{{ thread.time }}</span>
             </span>
             <span class="block truncate text-base text-highlighted" :class="thread.unread ? 'font-semibold' : 'font-medium'">{{ thread.guestName }}</span>
-            <span class="mt-0.5 line-clamp-2 text-sm" :class="thread.unread ? 'text-default' : 'text-muted'">{{ thread.previewFrom }}: {{ thread.preview }}</span>
+            <span v-if="thread.preview" class="mt-0.5 line-clamp-2 text-sm" :class="thread.unread ? 'text-default' : 'text-muted'">{{ thread.previewFrom }}: {{ thread.preview }}</span>
           </span>
         </NuxtLink>
       </TransitionGroup>

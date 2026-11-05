@@ -260,10 +260,10 @@ export interface InboxRow {
   home: string | null
   /** "Oct 16 – 23", "In 3 days", "Check out tomorrow"; null when the conversation has no dates. */
   when: string | null
-  /** The last message's words, or "Sent a photo". */
+  /** The last message's words, or "Sent a photo"; empty when nobody has written words yet (a booking with no note). */
   preview: string
-  /** "You", or the sender's first name. */
-  previewFrom: string
+  /** "You", or the sender's first name; null when there is no preview. */
+  previewFrom: string | null
   /** The last message's time in the home's timezone: "2:33 PM", "Yesterday", "Mon", "Nov 2". */
   time: string
   unread: boolean
