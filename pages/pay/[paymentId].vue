@@ -138,7 +138,7 @@
             <UButton
               size="xl"
               block
-              :label="review ? t('payment.pay', { amount: paymentMoney(review.total, review.currency) }) : t('payment.confirm')"
+              :label="handoff.stay ? t('payment.pay_to_reserve', { amount: paymentMoney(review ? review.total : handoff.subtotal, handoff.currency) }) : review ? t('payment.pay', { amount: paymentMoney(review.total, review.currency) }) : t('payment.confirm')"
               :loading="working || completing"
               :disabled="!review && !ready"
               class="font-semibold py-3.5 text-base"

@@ -9,7 +9,7 @@
         :aria-describedby="undefined"
         @open-auto-focus="rememberTrigger"
         @close-auto-focus="restoreTrigger"
-        v-bind="mobile ? {} : { align: 'end', side: 'bottom', sideOffset: 8, collisionPadding: 16 }"
+        v-bind="mobile ? {} : { align: 'end', side: 'bottom', sideOffset: 8, collisionPadding: 16, prioritizePosition: true, sticky: 'always' }"
         class="z-[60] flex flex-col border border-default bg-default p-6 text-default shadow-xl outline-none"
         :class="mobile ? 'fixed inset-x-0 bottom-0 top-3 rounded-t-2xl' : 'w-[660px] max-w-[calc(100vw-32px)] max-h-[calc(100dvh-32px)] rounded-2xl'"
       >

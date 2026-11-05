@@ -2367,6 +2367,7 @@ export const review_requests = sqliteTable("review_requests", {
 	booking_type: text().notNull(),
 	booking_id: text().notNull(),
 	token_hash: text().notNull().unique(),
+	token: text(),
 	expires_at: text().notNull(),
 	first_sent_at: text(),
 	reminder_sent_at: text(),
