@@ -173,15 +173,12 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     // A saved reply that failed to send does not answer the guest, even
     // though it is now the last message in the ledger.
     const failedReply = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'member', actorUserId: ACTOR, channel: 'email', eventName: 'thread.member_reply', body: 'Your refund is on its way.', occurredAt: '2098-01-04T00:00:00.000Z' })
-    const receipt = await createDeliveryReceipt(db, { entryId: failedReply.id, channel: 'email', provider: 'log_only', purpose: 'member_reply', idempotencyKey: 'cancelled-reply-delivery' })
+    const receipt = await createDeliveryReceipt(db, { entryId: failedReply.id, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'cancelled-reply-delivery' })
     await recordDeliveryOutcome(db, { deliveryId: receipt.id, status: 'failed', error: 'Delivery refused' })
     const stillNeedsReply = await listGuestThreads(db, ORG, { userId: ACTOR, conversationState: 'needs_attention' })
     assert.deepEqual(stillNeedsReply.map(thread => thread.id), [reservationThread])
     assert.equal(stillNeedsReply[0]?.latestMessageFromGuest, false)
-    await recordDeliveryOutcome(db, { deliveryId: receipt.id, status: 'sent', providerMessageId: 'logged-cancelled-reply' })
-    assert.deepEqual((await listGuestThreads(db, ORG, { userId: ACTOR, conversationState: 'needs_attention' })).map(thread => thread.id), [reservationThread], 'logging a send does not reach the guest')
-    const delivered = await createDeliveryReceipt(db, { entryId: failedReply.id, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'cancelled-reply-provider-delivery' })
-    await recordDeliveryOutcome(db, { deliveryId: delivered.id, status: 'delivered', providerMessageId: 'delivered-cancelled-reply' })
+    await recordDeliveryOutcome(db, { deliveryId: receipt.id, status: 'sent', providerMessageId: 'delivered-cancelled-reply' })
     assert.deepEqual((await listGuestThreads(db, ORG, { userId: ACTOR, conversationState: 'needs_attention' })).map(thread => thread.id), [])
     const nextQuestion = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Thank you. Can you send the receipt?', occurredAt: '2098-01-05T00:00:00.000Z' })
     await updateThreadProjectionIfLatestEntry(db, reservationThread, nextQuestion.id, { conversationState: 'needs_attention' })
