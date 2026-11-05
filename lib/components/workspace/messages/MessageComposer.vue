@@ -65,8 +65,8 @@ export function sameMessagePhotos(left: MessagePhotoDraft[], right: MessagePhoto
 </script>
 <script setup lang="ts">
 import type { DropdownMenuItem } from '@nuxt/ui'
-const props = withDefaults(defineProps<{ disabled?: boolean; sending?: boolean; channel?: 'airbnb' | 'email' | 'team'; placeholder?: string; sendLabel?: string; sendLater?: boolean }>(), { disabled: false, sending: false, channel: 'email', placeholder: 'Write a message…', sendLabel: 'Send message', sendLater: false })
-const emit = defineEmits<{ send: [] }>()
+const props = withDefaults(defineProps<{ disabled?: boolean; sending?: boolean; channel?: 'airbnb' | 'email' | 'team'; placeholder?: string; sendLabel?: string; sendLater?: boolean; suggestionsHidden?: boolean }>(), { disabled: false, sending: false, channel: 'email', placeholder: 'Write a message…', sendLabel: 'Send message', sendLater: false, suggestionsHidden: false })
+const emit = defineEmits<{ send: []; showSuggestions: [] }>()
 const body = defineModel<string>({ required: true })
 const photos = defineModel<MessagePhotoDraft[]>('photos', { required: true })
 /** When the message is sent later: an ISO instant, or null to send now. */
@@ -83,6 +83,8 @@ function addItems(open: () => void): DropdownMenuItem[] {
   return [
     { label: 'Photos', icon: 'i-lucide-image', disabled: photos.value.length >= maxPhotos.value || Boolean(sendAt.value), onSelect: open },
     ...(props.sendLater ? [{ label: 'Send later', icon: 'i-lucide-clock', onSelect: () => { when.value = sendAt.value ? localInput(new Date(sendAt.value)) : localInput(new Date(Date.now() + 3_600_000)); scheduleError.value = ''; scheduling.value = true } }] : []),
+    // Suggested replies that exist but are hidden (dismissed, or put away by typing) come back from here.
+    ...(props.suggestionsHidden ? [{ label: 'Suggested replies', icon: 'i-lucide-sparkles', onSelect: () => emit('showSuggestions') }] : []),
   ]
 }
 function schedule() {

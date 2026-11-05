@@ -101,7 +101,7 @@
         <div v-if="shownSuggestions.length" class="mb-2">
           <div class="mb-2 flex items-center gap-2 text-sm font-semibold text-highlighted">
             <UIcon name="i-lucide-sparkles" class="size-[18px]" />Suggested replies
-            <button type="button" class="ms-auto flex size-6 items-center justify-center" aria-label="Dismiss suggested replies" @click="dismissedFor = latestGuestMessage">
+            <button type="button" class="ms-auto flex size-6 items-center justify-center" aria-label="Dismiss suggested replies" @click="dismissedFor = latestGuestMessage; recalledFor = null">
               <UIcon name="i-lucide-x" class="size-4" />
             </button>
           </div>
@@ -118,7 +118,7 @@
         </p>
 
         <UAlert v-if="requestingChange" class="mb-3" color="info" variant="soft" :description="t(changeRequestSent ? 'booking.change_request_sent' : 'booking.change_request_help')" />
-        <MessageComposer v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :disabled="!thread.composer.available" :sending="sending" :channel="thread.composer.channel" :send-later="!personalScope" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : 'Send reply'" @send="sendReply" />
+        <MessageComposer v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :disabled="!thread.composer.available" :sending="sending" :channel="thread.composer.channel" :send-later="!personalScope" :suggestions-hidden="suggestionsHidden" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : 'Send reply'" @send="sendReply" @show-suggestions="recallSuggestions" />
         <MessagePhotoViewer v-model="viewer" />
         <p v-if="!thread.composer.available" class="mt-2 text-xs text-warning">This guest has no email on file. Once they accept an invite to this conversation, your replies reach their KrabiClaw inbox.</p>
       </div>
@@ -238,7 +238,12 @@ const latestGuestMessage = computed(() => {
   const last = thread.value?.stream.findLast(item => item.type === 'message')
   return last?.type === 'message' && last.side === 'guest' && thread.value?.kind === 'guest' ? last.id : null
 })
-const shownSuggestions = computed(() => draft.value.trim() || dismissedFor.value === latestGuestMessage.value ? [] : suggestions.value)
+// Typing or × puts them away; the composer's + brings them back until the guest writes again.
+const recalledFor = ref<string | null>(null)
+const suggestionsVisible = computed(() => recalledFor.value === latestGuestMessage.value || (!draft.value.trim() && dismissedFor.value !== latestGuestMessage.value))
+const shownSuggestions = computed(() => suggestionsVisible.value ? suggestions.value : [])
+const suggestionsHidden = computed(() => suggestions.value.length > 0 && !suggestionsVisible.value)
+function recallSuggestions() { recalledFor.value = latestGuestMessage.value }
 watch([latestGuestMessage, suggestionsOn, suggestionAttempt], async ([messageId, on]) => {
   suggestions.value = []
   suggestionError.value = null

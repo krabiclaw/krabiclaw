@@ -548,6 +548,57 @@ test('archive and Move to messages file a conversation without reordering the in
   }
 })
 
+test('suggested replies fill the composer, hide while typing or after ×, and come back from +', async ({ page }) => {
+  test.skip(!writable, 'Guest-thread writes require disposable local or preview data')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await loginAs(page.request, baseURL, ownerId)
+  const guestName = `Suggestions ${Date.now()}`
+  await submitContact(page.request, guestName)
+  const threadId = (await loadThreadList(page.request, guestName)).threads[0]!.id
+  // The drafts come from Workers AI, which the E2E server has no binding for; the
+  // composer's behaviour around them is what this covers, so their words are fixed here.
+  const drafts = ['Thanks for writing, we will check and get back to you.', 'Happy to help with that.']
+  await page.route(`**/guest-threads/${threadId}/suggested-reply`, route => route.fulfill({ json: { suggestions: drafts } }))
+  await dismissPreviewToolbar(page)
+  await page.goto(`${baseURL}/dashboard/${organizationSlug()}/messages/${threadId}`)
+
+  const label = page.getByText('Suggested replies', { exact: true })
+  const rows = drafts.map(draft => page.getByRole('button', { name: draft, exact: true }))
+  const field = page.getByRole('textbox', { name: 'Write a message…', exact: true })
+  const plus = page.getByRole('button', { name: 'Add to message', exact: true })
+  const recall = page.getByRole('menuitem', { name: 'Suggested replies' })
+  await expect(label).toBeVisible()
+  for (const row of rows) await expect(row).toBeVisible()
+  // Nothing is pre-written: the field starts empty.
+  await expect(field).toHaveValue('')
+
+  // While shown, + offers no way to show them.
+  await plus.click()
+  await expect(recall).toHaveCount(0)
+  await page.keyboard.press('Escape')
+
+  // Typing puts them away; + brings them back.
+  await field.fill('Let me check')
+  await expect(label).toHaveCount(0)
+  await plus.click()
+  await recall.click()
+  for (const row of rows) await expect(row).toBeVisible()
+
+  // × puts them away too; + brings them back again.
+  await page.getByRole('button', { name: 'Dismiss suggested replies', exact: true }).click()
+  await expect(label).toHaveCount(0)
+  await plus.click()
+  await recall.click()
+  await expect(label).toBeVisible()
+
+  // A tap fills the field and sends nothing.
+  let replies = 0
+  page.on('request', request => { if (request.method() === 'POST' && request.url().includes(`/guest-threads/${threadId}/operations/reply`)) replies += 1 })
+  await rows[1]!.click()
+  await expect(field).toHaveValue(drafts[1]!)
+  expect(replies).toBe(0)
+})
+
 for (const viewport of [
   { name: 'desktop', width: 1440, height: 900 },
   { name: 'mobile', width: 375, height: 812 },
