@@ -100,7 +100,7 @@ function isStreamItem(value: unknown): value is InboxStreamItem {
     && isNullableText(value.label) && isText(value.sentAt) && isNullableText(value.time) && isNullableText(value.body)
     && Array.isArray(value.photos) && value.photos.every(isPhoto)
     && (value.translated === null || (isRecord(value.translated) && typeof value.translated.original === 'string'))
-    && isNullableText(value.receipt)
+    && isNullableText(value.receipt) && typeof value.retryable === 'boolean' && isCount(value.unshownFiles)
 }
 
 export function isThreadDetailResponse(value: unknown): value is { thread: ThreadDetail } {

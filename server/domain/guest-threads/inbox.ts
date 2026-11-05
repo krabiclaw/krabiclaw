@@ -50,6 +50,17 @@ function text(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
+/**
+ * What a message carried that the conversation does not show: an Airbnb
+ * attachment that is not a photo (or not stored yet), or a file a guest sent by
+ * email that is not one.
+ */
+function unshownFiles(entry: GuestThreadEntryViewModel): number {
+  const links = entry.eventName === 'channel.message_mirrored' && Array.isArray(entry.payload?.attachments) ? entry.payload.attachments.length : 0
+  const named = Array.isArray(entry.payload?.unshownFiles) ? entry.payload.unshownFiles.length : 0
+  return Math.max(links - entry.attachments.length, 0) + named
+}
+
 /** The instant a message was said: the provider's time when it has one, else when KrabiClaw recorded it. */
 export function entrySentAt(entry: Pick<GuestThreadEntryViewModel, 'providerTimestamp' | 'occurredAt'>): string {
   return entry.providerTimestamp ? providerInstant(entry.providerTimestamp) : entry.occurredAt
@@ -180,11 +191,11 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date): InboxStreamItem[
     const key = localDateKey(sentAt, timeZone)
     if (key !== day) { items.push({ type: 'day', id: `day:${id}`, label: dayLabel(sentAt, timeZone, now) }); day = key; previous = null }
   }
-  const message = (entry: GuestThreadEntryViewModel, body: string | null, item: Omit<MessageItem, 'type' | 'id' | 'sentAt' | 'time' | 'body' | 'receipt'>) => {
+  const message = (entry: GuestThreadEntryViewModel, body: string | null, item: Omit<MessageItem, 'type' | 'id' | 'sentAt' | 'time' | 'body' | 'receipt' | 'retryable' | 'unshownFiles'>) => {
     const sentAt = entrySentAt(entry)
     place(sentAt, entry.id)
     const run = previous !== null && previous.side === item.side && previous.author === item.author
-    const next: MessageItem = { type: 'message', id: entry.id, sentAt, time: run ? null : clockTime(sentAt, timeZone), body, receipt: null, ...item }
+    const next: MessageItem = { type: 'message', id: entry.id, sentAt, time: run ? null : clockTime(sentAt, timeZone), body, receipt: null, retryable: false, unshownFiles: unshownFiles(entry), ...item }
     items.push(next)
     previous = next
     return next
@@ -242,7 +253,12 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date): InboxStreamItem[
     items.push({ type: 'event', id: entry.id, text: sentence, sentAt: entry.occurredAt })
     previous = null
   }
-  if (newestBusiness && viewer.audience === 'member') newestBusiness.item.receipt = receipt(newestBusiness.entry, facts.guestName)
+  if (newestBusiness && viewer.audience === 'member') {
+    const { item, entry } = newestBusiness
+    item.receipt = receipt(entry, facts.guestName)
+    // A team member's text reply that did not arrive can be sent again under its own key; an automatic or photo reply cannot.
+    item.retryable = item.receipt === 'Not delivered' && entry.eventName === 'thread.member_reply' && !item.photos.length && Boolean(text(item.body))
+  }
   return items
 }
 

@@ -92,6 +92,7 @@ export function formatCalendarDate(value: string, locale: string, options: Intl.
 export function formatCalendarRange(start: string, end: string, locale: string): string {
   assertCalendarDate(start)
   assertCalendarDate(end)
+  if (start > end) throw new Error(`The range ${start} – ${end} ends before it starts`)
   const format = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', calendar: 'gregory', timeZone: 'UTC' })
   const from = new Date(`${start}T00:00:00Z`), to = new Date(`${end}T00:00:00Z`)
   // Intl names both years when they differ; Airbnb's range does not.

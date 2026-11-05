@@ -70,11 +70,14 @@
                   class="max-w-full whitespace-pre-wrap rounded-[18px] px-3.5 py-2.5 text-base [overflow-wrap:anywhere]"
                   :class="[item.mine ? 'rounded-br-md bg-inverted text-inverted' : 'rounded-bl-md bg-elevated text-default', message.sending ? 'opacity-60' : '']"
                 >{{ message.translated && originals.has(message.id) ? message.translated.original : message.body }}</div>
+                <p v-if="message.unshownFiles" class="mx-1 mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+                  <UIcon name="i-lucide-paperclip" class="size-3.5 shrink-0" />{{ message.unshownFiles === 1 ? 'Sent a file that can’t be shown here' : `Sent ${message.unshownFiles} files that can’t be shown here` }}
+                </p>
                 <p v-if="message.translated" class="mx-1 mt-0.5 text-xs text-muted">
                   Translated · <button type="button" class="text-highlighted underline underline-offset-2" @click="toggleOriginal(message.id)">{{ originals.has(message.id) ? 'Show translation' : 'Show original' }}</button>
                 </p>
                 <p v-if="message.receipt" class="mt-0.5 text-xs" :class="message.receipt === 'Not delivered' ? 'text-error' : 'text-muted'">
-                  {{ message.receipt }}<template v-if="message.receipt === 'Not delivered' && !personalScope"> · <button type="button" class="underline underline-offset-2 disabled:opacity-50" :disabled="retrying" @click="retry(message.id)">Try again</button></template>
+                  {{ message.receipt }}<template v-if="message.retryable"> · <button type="button" class="underline underline-offset-2 disabled:opacity-50" :disabled="retrying" @click="retry(message.id)">Try again</button></template>
                 </p>
               </template>
             </div>
@@ -192,7 +195,7 @@ const rows = computed<Row[]>(() => {
   if (attempt.value && sending.value) {
     items.push({
       type: 'message', id: `pending:${attempt.value.key}`, side: mineSide.value, author: 'You', label: null, sentAt: new Date().toISOString(),
-      time: 'Sending', body: attempt.value.body || null, translated: null, receipt: null, sending: true,
+      time: 'Sending', body: attempt.value.body || null, translated: null, receipt: null, retryable: false, unshownFiles: 0, sending: true,
       photos: attempt.value.photos.map((photo, at) => ({ id: `${attempt.value!.key}:${at}`, url: photo.url, thumbnailUrl: photo.url, width: null, height: null })),
     })
   }

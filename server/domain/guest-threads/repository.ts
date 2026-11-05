@@ -377,18 +377,17 @@ type LatestMessage = { actorKind: string; actorUserId: string | null; actorName:
 /** The last message of each listed conversation: who sent it, its words (Airbnb's translation where there is one) and when. */
 async function latestMessages(db: DbClient, ids: string[]): Promise<Map<string, LatestMessage>> {
   if (!ids.length) return new Map()
-  const rows = await queryAll<{ id: string; actor_kind: string; actor_user_id: string | null; actor_name: string | null; event_name: string | null; body: string | null; translated: string | null; provider_inserted_at: string | null; occurred_at: string; photos: number; attachments: number }>(db, `
+  const rows = await queryAll<{ id: string; actor_kind: string; actor_user_id: string | null; actor_name: string | null; event_name: string | null; body: string | null; translated: string | null; provider_inserted_at: string | null; occurred_at: string; photos: number }>(db, `
     SELECT e.id, e.actor_kind, e.actor_user_id, u.name AS actor_name, e.event_name, e.body,
       json_extract(e.payload_json, '$.meta.translated_message') AS translated,
       json_extract(e.payload_json, '$.provider_inserted_at') AS provider_inserted_at, e.occurred_at,
-      (SELECT COUNT(*) FROM media_placements mp WHERE mp.owner_type = 'activity_entry' AND mp.owner_id = e.id AND mp.slot = 'attachments' AND mp.status = 'active') AS photos,
-      COALESCE(json_array_length(e.payload_json, '$.attachments'), 0) AS attachments
+      (SELECT COUNT(*) FROM media_placements mp WHERE mp.owner_type = 'activity_entry' AND mp.owner_id = e.id AND mp.slot = 'attachments' AND mp.status = 'active') AS photos
     FROM activity_entries e LEFT JOIN user u ON u.id = e.actor_user_id
     WHERE e.id IN (SELECT value FROM json_each(?))`, [d1JsonStringSet(ids)])
   return new Map(rows.map(row => [row.id, {
     actorKind: row.actor_kind, actorUserId: row.actor_user_id, actorName: row.actor_name, eventName: row.event_name,
     text: row.actor_kind === 'guest' && row.translated?.trim() ? row.translated : row.body,
-    photos: Math.max(row.photos, row.attachments),
+    photos: row.photos,
     sentAt: row.provider_inserted_at ? providerInstant(row.provider_inserted_at) : row.occurred_at,
   }]))
 }

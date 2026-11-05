@@ -304,8 +304,12 @@ export type InboxStreamItem =
     photos: InboxPhoto[]
     /** The guest's own words when `body` is Airbnb's translation of them. */
     translated: { original: string } | null
+    /** Files the message carried that are not photos the conversation can show, such as a PDF. */
+    unshownFiles: number
     /** On the newest business message only: Sending, Sent, Delivered, Read by <name>, Not delivered. */
     receipt: string | null
+    /** The reply was not delivered and can be sent again as it was (a team member's text reply). */
+    retryable: boolean
   }
   | { type: 'event'; id: string; text: string; sentAt: string }
   | { type: 'change'; id: string; sentAt: string; change: BookingChangeView }
