@@ -5,7 +5,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct, createProductsBatch, getProduct, reconcileProducts, updateProduct } from '../../server/utils/product-management.ts'
-import { cancelStay, createStay, deliverPendingChannelNights, readStayCalendar, releaseLapsedStayHolds, setStayNights, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
+import { cancelStay, createStay, deliverPendingChannelNights, readStayCalendar, releaseLapsedStayHolds, setStayNights, updateStayHome, verifyStayCalendarOccupancy, type StayAccess } from '../../server/domain/stays.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { withDeliveryLease } from '../../server/integrations/channex/ari.ts'
 import { errorChainForTelemetry } from '../../shared/error-telemetry.ts'
@@ -43,6 +43,8 @@ function byNight(values: readonly Value[]): Map<string, Record<string, unknown>>
 }
 
 class FakeChannex {
+  airbnbUnavailable = new Set<string>()
+  calendarFailure = false
   sent: Array<{ path: string; values: Value[] }> = []
   minimums = new Map(['1', '2', '3'].map(id => [`listing-${id}`, 2]))
   channelSettings: Record<string, unknown> = { min_stay_type: 'Arrival' }
@@ -59,6 +61,14 @@ class FakeChannex {
   fetch = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url)
     const path = url.pathname.replace('/api/v1', '') as '/restrictions' | '/availability'
+    if ((init.method ?? 'GET') === 'GET' && String(path) === '/channels/chan-1/action/get_listing_calendar') {
+      if (this.calendarFailure) return Response.json({ errors: { detail: 'Calendar unavailable' } }, { status: 502 })
+      const from = url.searchParams.get('date_from')!
+      return Response.json({ data: { calendar: { listing_id: url.searchParams.get('listing_id'), start_date: from, end_date: url.searchParams.get('date_to'), days: Array.from({ length: 500 }, (_, offset) => {
+        const date = new Date(Date.parse(`${from}T00:00:00Z`) + offset * 86_400_000).toISOString().slice(0, 10)
+        return { date, availability: this.airbnbUnavailable.has(date) ? 'unavailable' : 'available', daily_price: 150, min_nights: 2, max_nights: 700, closed_to_arrival: false, closed_to_departure: false }
+      }) } } })
+    }
     if ((init.method ?? 'GET') === 'GET' && (path as string) === '/channels/chan-1') {
       return Response.json({ data: { id: 'chan-1', type: 'channel', attributes: { channel: 'AirBNB', settings: this.channelSettings, rate_plans: ['1', '2', '3'].map(listing => ({ id: `map-${listing}`, rate_plan_id: `rate-${listing}`, settings: { listing_id: `listing-${listing}` } })) } } })
     }
@@ -914,6 +924,33 @@ test('catalog price and minimum-stay writes use the same channel completion and 
     } })
     assert.equal(disconnected.channel_push, null)
     assert.deepEqual(channex.take(), [])
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('migration verification reads Airbnb availability and refuses missing channel or uncovered dates', { timeout: 120_000 }, async () => {
+  const { runtime, db, env, connected, local } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const dates = [day(2), day(3)]
+    assert.equal((await verifyStayCalendarOccupancy(db, env, manager, connected, dates)).state, 'not_connected')
+    await db.prepare("INSERT INTO channex_connections (organization_id,status,group_id,channel_id,connected_at) VALUES (?, 'connected', 'group-1','chan-1', ?)").bind(ORG, new Date().toISOString()).run()
+    await createStay(db, env, manager, { product_id: connected, idempotency_key: 'migration-verification-stay', check_in_date: day(2), check_out_date: day(4), guest_name: 'Imported guest', adults: 1, total_minor: 30_000 })
+    const mismatch = await verifyStayCalendarOccupancy(db, env, manager, connected, dates)
+    assert.equal(mismatch.state, 'needs_attention')
+    assert.deepEqual(mismatch.mismatches, dates)
+    for (const date of dates) channex.airbnbUnavailable.add(date)
+    assert.deepEqual(await verifyStayCalendarOccupancy(db, env, manager, connected, dates), { state: 'verified', checked_dates: dates, unverified_dates: [], mismatches: [], detail: null })
+    assert.equal((await verifyStayCalendarOccupancy(db, env, manager, local, dates)).state, 'needs_attention')
+    const outside = await verifyStayCalendarOccupancy(db, env, manager, connected, [...dates, day(500)])
+    assert.equal(outside.state, 'needs_attention')
+    assert.deepEqual(outside.unverified_dates, [day(500)])
+    channex.calendarFailure = true
+    await assert.rejects(verifyStayCalendarOccupancy(db, env, manager, connected, dates), /502/)
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()
