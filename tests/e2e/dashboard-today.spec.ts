@@ -89,9 +89,9 @@ test('Upcoming removes a cancelled scheduled reply without a reload and keeps th
     await expect(futureCard).toBeVisible()
     await page.getByRole('tab', { name: 'Today', exact: true }).click()
     await expect(page.getByRole('tab', { name: 'Today', exact: true })).toHaveAttribute('aria-selected', 'true')
-    await expect(page.getByTestId('today-attention').locator(`[data-card-id="attention:${threadId}"]`)).toBeVisible()
+    await expect(page.getByTestId('today-list').locator(`[data-card-id="attention:${threadId}"]`)).toBeVisible()
     await expect(card).toHaveCount(0)
-    await page.screenshot({ path: testInfo.outputPath('today-grouped-work.png'), fullPage: true, animations: 'disabled' })
+    await page.screenshot({ path: testInfo.outputPath('today-work-list.png'), fullPage: true, animations: 'disabled' })
   } finally {
     try {
       if (messageId && !cancelled) {
@@ -146,7 +146,7 @@ test('Upcoming keeps its navigation and loading visible while its real first pag
       expect((await completed).status()).toBe(200)
       await expect(loading).toBeHidden()
       await expect(panel.getByText('Upcoming could not be loaded', { exact: true })).toHaveCount(0)
-      await expect(page.getByRole('heading', { name: 'Your upcoming schedule', exact: true })).toBeVisible()
+      await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toHaveAttribute('aria-selected', 'true')
     } finally {
       release()
       await page.unrouteAll({ behavior: 'wait' })
@@ -205,7 +205,7 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
     expect(denied.status()).toBe(404)
     const memberPage = await memberContext.newPage()
     expect((await memberPage.goto(new URL(ORG, baseURL!).toString()))?.status()).toBe(200)
-    await expect(memberPage.getByText('Nothing needs your attention today', { exact: true })).toBeVisible()
+    await expect(memberPage.getByText('Nothing for today', { exact: true })).toBeVisible()
     await expect(memberPage.getByTestId('today-card')).toHaveCount(0)
   } finally {
     try {
@@ -499,9 +499,11 @@ test('an owner’s priority selects a draft on Today, and Dismiss and Later pers
     const dismissed = page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname.endsWith('/recommendation-feedback'))
     await card.locator('xpath=..').getByRole('button', { name: 'Dismiss', exact: true }).click()
     expect((await dismissed).status()).toBe(200)
+    const upcomingReload = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/today' && new URL(response.url()).searchParams.get('range') === 'upcoming')
     await page.reload()
+    expect((await upcomingReload).status()).toBe(200)
     await waitForNuxtHydration(page)
-    await expect(page.getByRole('heading', { name: 'Your upcoming schedule', exact: true })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toHaveAttribute('aria-selected', 'true')
     await expect(card).toHaveCount(0)
     await page.getByRole('tab', { name: 'Today', exact: true }).click()
     await expect(page.getByTestId('today-priorities')).toBeVisible()

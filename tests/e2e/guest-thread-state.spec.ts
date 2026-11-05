@@ -784,8 +784,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   const reviewCard = todayFeed.cards.find(card => card.id === `reservation:${bookingIds[0]}`)
   expect(reviewCard?.priority).toBe('schedule')
   expect(reviewCard?.to).toBe(`/dashboard/${demoSlug()}/bookings/reservation/${bookingIds[0]}`)
-  const due = todayFeed.cards.filter(card => card.priority === 'attention').length
-  await expect(page.getByRole('heading', { name: `Needs your attention${due ? ` · ${due}` : ''}`, exact: true })).toBeVisible()
+  await expect(page.getByTestId('today-list').locator(`[data-card-id="${reviewCard!.id}"]`)).toHaveAttribute('href', reviewCard!.to)
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Filter activity', exact: true })).toBeVisible()
