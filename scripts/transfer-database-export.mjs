@@ -741,8 +741,15 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
         }
       }
       for (const statement of statements) {
-        const table = statement.match(/CREATE (?:UNIQUE )?INDEX `[^`]+` ON `([^`]+)`/u)?.[1]
-        if (table && added.has(table)) stage.exec(statement)
+        const [, name, table, list] = statement.match(/CREATE (?:UNIQUE )?INDEX `([^`]+)` ON `([^`]+)` \(([^)]*)\)/u) ?? []
+        if (!name || !table) continue
+        if (added.has(table)) { stage.exec(statement); continue }
+        // A table the stage already had gains the baseline's newer indexes on
+        // columns it has: a later composite foreign key names them as its parent key.
+        const exists = stage.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'index' AND name = ?").get(name)
+        const have = new Set(stage.prepare(`SELECT name FROM pragma_table_info(?)`).all(table).map(row => row.name))
+        const wanted = [...list.matchAll(/`([^`]+)`/gu)].map(match => match[1])
+        if (!exists && tableNames(stage).includes(table) && wanted.length && wanted.every(column => have.has(column))) stage.exec(statement)
       }
     }
     // v18 absorbs v17's deployed forward chain (Channex connections, channel
