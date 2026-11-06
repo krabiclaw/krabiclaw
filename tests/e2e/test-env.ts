@@ -44,3 +44,7 @@ export function devLoginHeaders(): Record<string, string> | undefined {
   const secret = process.env.E2E_DEV_ROUTE_SECRET ?? ''
   return secret ? { 'x-dev-route-secret': secret } : undefined
 }
+
+/** The local Worker inherits these provider settings; CI may leave Payments unconfigured. */
+export const paymentsProviderConfigured = ['STRIPE_SECRET_KEY', 'STRIPE_PAYMENTS_METHOD_CONFIGURATION', 'NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY']
+  .every(name => Boolean(process.env[name]))
