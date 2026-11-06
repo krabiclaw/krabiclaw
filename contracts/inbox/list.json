@@ -1,0 +1,29 @@
+{
+  "pagination": {
+    "hasMore": false,
+    "limit": 100,
+    "nextOffset": null,
+    "offset": 0
+  },
+  "threads": [
+    {
+      "avatarInitial": "M",
+      "channel": "airbnb",
+      "guestName": "Mililani",
+      "home": "74 D · Sky",
+      "id": "00000000-0000-4000-8000-000000000017",
+      "kind": "guest",
+      "preview": "Check-in is from 4 PM.",
+      "previewFrom": "You",
+      "time": "12:00 PM",
+      "unread": true,
+      "when": "In 3 days"
+    }
+  ],
+  "unread": {
+    "all": 1,
+    "guests": 1,
+    "support": 0,
+    "team": 0
+  }
+}
