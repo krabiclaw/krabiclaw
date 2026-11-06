@@ -94,6 +94,11 @@ for (const [name, baseURL] of [['Strut', strutBaseURL], ['NCLS', blawbyBaseURL]]
   test(`${name} home → blog → article uses the shared navigation`, async ({ page }) => {
     test.skip(name === 'Strut' && new URL(testBaseUrl()).hostname !== 'krabiclaw.com', 'Strut is a production-only tenant; staging has no Strut organization.')
     expect((await openTenantPage(page, `${baseURL}/`, {}))?.status()).toBe(200)
+    const consent = page.locator('.consent-notice')
+    if (await consent.isVisible()) {
+      await consent.getByRole('button', { name: 'Reject', exact: true }).click()
+      await expect(consent).toBeHidden()
+    }
     await expect(page.locator('footer a[href="/blog"]')).toHaveCount(1)
     const headerLink = page.locator('header nav').first().getByRole('link', { name: 'Blog', exact: true })
     await expect(headerLink).toBeVisible()
