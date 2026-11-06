@@ -1,15 +1,15 @@
-import { ChannexError } from '~/server/integrations/channex/client'
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { fetchWhatsAppMedia, sendWhatsAppText } from '~/server/utils/whatsapp'
 import { attachGuestPhotos, messagePreview, sortGuestFiles, type MessagePhoto } from '~/server/domain/guest-threads/attachments'
-import { advanceDeliveryStatus } from '~/server/domain/guest-threads/deliveries'
+import { advanceDeliveryStatus, isDeliverySent } from '~/server/domain/guest-threads/deliveries'
+import type { GuestThreadDeliveryRow } from '~/server/domain/guest-threads/types'
 import { parseMetaMsisdn } from '~/utils/phone'
 import {
   getWhatsAppWorkspaceState, patchWhatsAppWorkspaceState, type JsonSerializable, } from '~/server/utils/mcp-context'
 import { execute, queryAll, queryFirst } from '~/server/db'
 import { updateThreadProjectionIfLatestEntry } from '~/server/domain/guest-threads/repository'
 import { getGuestRequest, requestSummary } from '~/server/domain/requests'
-import { executeGuestThreadOperation, guestReplyDestination } from '~/server/domain/guest-threads/operations'
+import { executeGuestThreadOperation, guestReplyDestination, operationDedupeKey } from '~/server/domain/guest-threads/operations'
 import { appendEntry, findEntryByDedupeKey } from '~/server/domain/guest-threads/entries'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { notifyGuestThreadReply } from '~/server/utils/notifications'
@@ -215,6 +215,42 @@ async function listRecentGuestDeliveryCandidates(db: D1Database, env: ApiRecord,
     threadId: r.threadId, organizationId: r.organizationId, locationId: r.locationId, label: `${submissionTypeLabel(r.submissionType)} from ${r.guestName}`, }))
 }
 
+type ReplyVerdict = { notice: string; report: unknown | null }
+
+/**
+ * What the manager reads about a reply the operation returned, and whether it is an error to
+ * report. A refusal (4xx) is told in the operation's words, never a reason code; a reply that
+ * may already be with the guest says so; any failure (5xx) is never shown raw.
+ */
+function returnedReplyVerdict(outcome: Awaited<ReturnType<typeof executeGuestThreadOperation>> | { ok: false; status: 404; reason: 'thread_not_found' }): ReplyVerdict {
+  if (outcome.ok) return { notice: REPLY_SENT_CONFIRMATION, report: null }
+  const failure = new Error(`WhatsApp reply ${outcome.reason}${'code' in outcome ? ` ${outcome.code}` : ''}: ${'message' in outcome ? outcome.message : outcome.status}`)
+  if (outcome.reason === 'delivery_failed' && (outcome.code === 'CHANNEL_REPLY_UNCERTAIN' || outcome.code === 'CHANNEL_REPLY_REVIEW_REQUIRED')) {
+    return { notice: REPLY_UNCERTAIN_MESSAGE, report: outcome.status >= 500 ? failure : null }
+  }
+  if (outcome.status >= 500) return { notice: REPLY_FAILED_ALERTED_MESSAGE, report: failure }
+  switch (outcome.reason) {
+    case 'thread_not_found': case 'source_not_found': return { notice: buildReplyFailedMessage('This conversation no longer exists.'), report: null }
+    case 'empty_body': return { notice: buildReplyFailedMessage('Write a message before sending it.'), report: null }
+    case 'missing_idempotency_key': return { notice: REPLY_FAILED_ALERTED_MESSAGE, report: failure }
+    default: return { notice: buildReplyFailedMessage(outcome.message), report: null }
+  }
+}
+
+/**
+ * The same for an error the operation threw. A reply the provider already accepted under this key
+ * may be with the guest whatever failed after; otherwise only a refusal the operation throws by
+ * design (a 4xx with its code) is told as it is, and everything else is reported, not shown.
+ */
+async function thrownReplyVerdict(db: D1Database, error: unknown, threadId: string, idempotencyKey: string): Promise<ReplyVerdict> {
+  const deliveries = await queryAll<GuestThreadDeliveryRow>(db, 'SELECT d.* FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id WHERE e.dedupe_key = ?', [operationDedupeKey({ threadId, idempotencyKey })])
+  if (deliveries.some(delivery => isDeliverySent(delivery) || delivery.provider_message_id !== null)) return { notice: REPLY_UNCERTAIN_MESSAGE, report: error }
+  if (error instanceof HTTPError && error.status >= 400 && error.status < 500 && typeof (error.data as { code?: unknown } | undefined)?.code === 'string') {
+    return { notice: buildReplyFailedMessage(error.message), report: null }
+  }
+  return { notice: REPLY_FAILED_ALERTED_MESSAGE, report: error }
+}
+
 // Issue #293 Section C direct-reply routing contract, applied only to messages from a
 // resolveUser-verified platform user (managers). Handles all I/O (lookups,
 // authorization, sends, channel-state persistence) around the pure decision function in
@@ -381,51 +417,32 @@ async function routeManagerWhatsAppMessage(
         userId: opts.userId,
         env,
       })
-      let result: Awaited<ReturnType<typeof executeGuestThreadOperation>> | { ok: false; status: 404; reason: 'thread_not_found' }
-      try {
-        result = actorMemberId
-          ? await executeGuestThreadOperation(db, {
-              threadId: pendingState.threadId,
-              organizationId: pendingState.organizationId,
-              action: 'reply',
-              actorUserId: opts.userId,
-              body: pendingState.replyBody,
-              env,
-              idempotencyKey: `whatsapp:${opts.messageId}:reply`,
-            })
-          : { ok: false as const, status: 404 as const, reason: 'thread_not_found' as const }
-      } catch (error) {
-        // Only the refusals the operation throws by design (a 4xx with its code) are told as they are.
-        // Anything else, a provider or invariant failure, is never shown raw: the manager reads a fixed
-        // notice and the error is reported. A notice that also fails keeps both.
-        const refusal = error instanceof HTTPError && error.status >= 400 && error.status < 500 && typeof (error.data as { code?: unknown } | undefined)?.code === 'string'
-        if (refusal) {
-          await tellAndClear(buildReplyFailedMessage(error.message), 'Failed to send WhatsApp reply refusal')
-          return
-        }
-        const code = (error instanceof HTTPError || error instanceof ChannexError) ? (error.data as { code?: unknown } | undefined)?.code : undefined
-        try {
-          await tellAndClear(code === 'CHANNEL_RECEIPT_INVALID' || code === 'CHANNEL_REPLY_UNCERTAIN' ? REPLY_UNCERTAIN_MESSAGE : REPLY_FAILED_ALERTED_MESSAGE, 'Failed to send WhatsApp reply outcome')
-        } catch (noticeError) {
-          throw new AggregateError([error, noticeError], 'The reply failed and the manager could not be told', { cause: noticeError })
-        }
-        throw error
+      const idempotencyKey = `whatsapp:${opts.messageId}:reply`
+      const attempt = actorMemberId
+        ? await executeGuestThreadOperation(db, { threadId: pendingState.threadId, organizationId: pendingState.organizationId, action: 'reply', actorUserId: opts.userId, body: pendingState.replyBody, env, idempotencyKey })
+          .then(outcome => ({ outcome }), (error: unknown) => ({ error }))
+        : { outcome: { ok: false as const, status: 404 as const, reason: 'thread_not_found' as const } }
+      const verdict = 'error' in attempt
+        ? await thrownReplyVerdict(db, attempt.error, pendingState.threadId, idempotencyKey)
+        : returnedReplyVerdict(attempt.outcome)
+      if ('outcome' in attempt && attempt.outcome.ok) await publishGuestInboxThreadEvent(env, db, { threadId: attempt.outcome.thread.id, type: 'thread.changed' })
+      // The manager is told, then the pending reply is cleared; an error to report fails the
+      // webhook after both, with the reply's own error as the cause telemetry follows.
+      const told = await sendWhatsAppText(env, opts.toPhone, verdict.notice).then(
+        result => result.success ? null : new Error(result.error || 'Failed to send WhatsApp reply outcome'), (error: unknown) => error)
+      const cleared = told ? null : await clearPending().then(() => null, (error: unknown) => error)
+      if (verdict.report === null) {
+        if (told) throw told
+        if (cleared) throw cleared
+        return
       }
-      if (result.ok) {
-        await publishGuestInboxThreadEvent(env, db, { threadId: result.thread.id, type: 'thread.changed' })
-        await tellAndClear(REPLY_SENT_CONFIRMATION, 'Failed to send WhatsApp reply confirmation')
-      } else if (result.reason === 'delivery_failed' && result.code === 'CHANNEL_REPLY_UNCERTAIN') {
-        await tellAndClear(REPLY_UNCERTAIN_MESSAGE, 'Failed to send WhatsApp reply outcome')
-      } else {
-        // The reply operation's own reason: a conversation that changed since it was offered says why.
-        await tellAndClear(buildReplyFailedMessage('message' in result ? result.message : result.reason), 'Failed to send WhatsApp reply refusal')
-      }
-      return
+      if (told) throw new AggregateError([verdict.report, told], 'The reply failed and the manager could not be told', { cause: verdict.report })
+      if (cleared) throw new AggregateError([verdict.report, cleared], 'The reply failed; the manager was told, but the pending reply could not be cleared', { cause: verdict.report })
+      throw verdict.report
     }
-    // Non-affirmative reply: drop the pending confirmation without sending, then treat
-    // this message as an independent fresh dispatch (issue #293: "clear the pending
-    // state... let normal routing resume for that message").
-    await clearPending()
+    // Non-affirmative reply: the pending confirmation is dropped and this message is
+    // dispatched fresh (issue #293). The state is written with the redispatch's own
+    // notice below, after it is sent, so a refused notice leaves the message to redeliver.
   } else if (pendingState.kind === 'disambiguate') {
     const decision = decideWhatsAppReplyRouting({
       hasQuotedContext: false,
@@ -470,7 +487,7 @@ async function routeManagerWhatsAppMessage(
       })
       return
     }
-    await clearPending()
+    // Not a pick: dispatched fresh below, its state written after its notice is sent.
   } else {
     // collect_reply: any non-empty text becomes the reply body, moving to confirm_send.
     // Reauthorize before reading the conversation, as the pick and the send do.
@@ -551,7 +568,7 @@ async function routeManagerWhatsAppMessage(
     }
     case 'prompt_quote_notification':
     default: {
-      await sendOrThrow(PROMPT_QUOTE_NOTIFICATION_MESSAGE, 'Failed to send WhatsApp routing prompt')
+      await tellAndClear(PROMPT_QUOTE_NOTIFICATION_MESSAGE, 'Failed to send WhatsApp routing prompt')
       return
     }
   }

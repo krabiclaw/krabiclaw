@@ -946,10 +946,10 @@ test('explicit provider instants order replies across offsets without losing sub
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
-// A WhatsApp reply to an Airbnb conversation that fails inside the reply operation, by a
-// provider error or an invariant the operation throws, is never shown raw: the manager reads
-// a fixed notice, the pending reply is cleared, and the error fails the webhook to be reported.
-test('a WhatsApp reply the operation throws on tells the manager a fixed notice and reports the error', async () => {
+// A WhatsApp reply to an Airbnb conversation that fails, whether the reply operation throws or
+// returns the failure, is never shown raw: the manager reads a fixed notice (or that it may have
+// reached the guest), the pending reply is cleared, and the failure fails the webhook to be reported.
+test('a failed WhatsApp reply tells the manager a fixed notice and reports the failure', async () => {
   const { runtime, db, env: base } = await boot()
   const provider = new Provider(), realFetch = globalThis.fetch
   const sent: string[] = []
@@ -983,20 +983,35 @@ test('a WhatsApp reply the operation throws on tells the manager a fixed notice 
     }
     const pending = async () => (await getWhatsAppWorkspaceState(db, OWNER))?.pending_confirmation ?? null
 
-    for (const mode of ['channex', 'invariant'] as const) {
+    const alerted = 'Reply not sent. The team has been alerted.'
+    const mayHaveReached = 'This reply may have reached the guest. Check the conversation before sending again.'
+    // Each failure: how it is made, the webhook status it reports with, the exact messages the manager
+    // receives for that YES, and how many writes reached Airbnb.
+    const cases = [
+      // Channex answers with an HTML error page: a ChannexError the operation throws before writing.
+      { mode: 'channex', status: 502, notices: [alerted], writes: 0 },
+      // Channex names a property that is not the home's: the operation's own 502 invariant.
+      { mode: 'invariant', status: 502, notices: [alerted], writes: 0 },
+      // Airbnb refuses the message: a returned failure, never told in Channex's words.
+      { mode: 'refused', status: 500, notices: [alerted], writes: 1 },
+      // Airbnb took the message but the connection ended: it may be with the guest.
+      { mode: 'uncertain', status: 500, notices: [mayHaveReached], writes: 1 },
+    ] as const
+    for (const { mode, status, notices, writes } of cases) {
       failure = null
-      provider.propertyId = 'property'
-      assert.equal((await write('We have two spots', 'meta-alert')).status, 200)
+      Object.assign(provider, { propertyId: 'property', refuseMessage: false, uncertain: false })
+      assert.equal((await write(`Reply for ${mode}`, 'meta-alert')).status, 200)
       assert.equal(sent.at(-1), 'This reply will be sent through Airbnb. Reply YES to send.')
-      // Channex answers with an HTML error page (a ChannexError), or names a property that is not the
-      // home's (the operation's own 502 invariant HTTPError).
       if (mode === 'channex') failure = 'channex'
-      else provider.propertyId = 'another-property'
+      if (mode === 'invariant') provider.propertyId = 'another-property'
+      if (mode === 'refused') provider.refuseMessage = true
+      if (mode === 'uncertain') provider.uncertain = true
+      const [sentBefore, writesBefore] = [sent.length, provider.sends]
       const confirmed = await write('YES')
-      assert.equal(confirmed.status, 502, `${mode}: the error fails the webhook with its own status, to be reported`)
-      assert.equal(sent.at(-1), 'Reply not sent. The team has been alerted.', `${mode}: no raw text reaches the manager`)
+      assert.equal(confirmed.status, status, `${mode}: the failure fails the webhook, to be reported`)
+      assert.deepEqual(sent.slice(sentBefore), notices, `${mode}: exactly these messages reach the manager, and nothing raw`)
       assert.equal(await pending(), null, `${mode}: the pending reply is cleared`)
-      assert.equal(provider.sends, 0, `${mode}: nothing reached Airbnb`)
+      assert.equal(provider.sends - writesBefore, writes, `${mode}: writes that reached Airbnb`)
     }
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })

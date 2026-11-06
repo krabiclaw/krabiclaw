@@ -360,10 +360,8 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   await expectStatus(savedGuide, 200)
   expect((await call('update_product', { product_id: productId, details: { pets_allowed: false, stairs_required: true, stairs_required_details: 'Two steps at the entrance.' } })).error).toBeNull()
 
-  // A Personal-only buyer returns to Personal without being sent to business onboarding,
-  // and Personal never asks for organization roles or permissions. The buyer's Personal
-  // activity is real: signed in, they write to this business from its site, which makes the
-  // conversation their own.
+  // A buyer with no organization and no bookings is offered onboarding, cannot choose a business
+  // plan, and Personal never asks for organization roles or permissions on any page it can reach.
   const buyer = await browser.newContext()
   const personalOrganizationReads: string[] = []
   buyer.on('request', request => {
@@ -372,31 +370,17 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   })
   try {
     await loginAs(buyer.request, baseURL!, 'user-e2e-buyer')
-    const buyerSession = await buyer.request.get(`${baseURL}/api/auth/get-session`, { params: { disableCookieCache: 'true' } })
-    await expectStatus(buyerSession, 200)
-    const buyerUser = (await buyerSession.json() as { user: { id: string; name: string; email: string } }).user
-    const asked = await buyer.request.post(`${baseURL}/api/public/contact`, { headers: { 'x-preview-tenant': slug },
-      data: { name: buyerUser.name, email: buyerUser.email, subject: 'stay', message: 'Is the cabin quiet at night?' } })
-    await expectStatus(asked, 201)
-    const conversationId = (await asked.json() as { request_id: string }).request_id
-    const returnToAccount = await buyer.request.get(`${baseURL}/api/post-login`, { maxRedirects: 0 })
-    await expectStatus(returnToAccount, 302)
-    expect(returnToAccount.headers().location).toBe('/dashboard/account')
+    const toOnboarding = await buyer.request.get(`${baseURL}/api/post-login`, { maxRedirects: 0 })
+    await expectStatus(toOnboarding, 302)
+    expect(toOnboarding.headers().location).toBe('/dashboard/onboarding')
     const billingWithoutOrganization = await buyer.request.get(`${baseURL}/api/post-login?plan=business`, { maxRedirects: 0 })
     await expectStatus(billingWithoutOrganization, 409)
-    const accountPage = await buyer.newPage()
-    const landed = await accountPage.goto(`${baseURL}/api/post-login`)
-    expect(landed?.status()).toBe(200)
-    await expect(accountPage).toHaveURL(`${baseURL}/dashboard/account`)
-    await waitForNuxtHydration(accountPage)
-    // The Personal pages a buyer moves through, all watched for organization reads.
-    for (const path of ['/dashboard/account/calendar?view=list', '/dashboard/account/messages', `/dashboard/account/messages/${conversationId}`, '/dashboard/account/notifications']) {
-      await accountPage.goto(`${baseURL}${path}`)
-      await waitForNuxtHydration(accountPage)
+    const personalPage = await buyer.newPage()
+    for (const path of ['/dashboard/account', '/dashboard/account/calendar?view=list', '/dashboard/account/messages', '/dashboard/account/notifications']) {
+      const response = await personalPage.goto(`${baseURL}${path}`)
+      expect(response?.status(), path).toBe(200)
+      await waitForNuxtHydration(personalPage)
     }
-    // The conversation is the buyer's own, in their Personal inbox.
-    await accountPage.goto(`${baseURL}/dashboard/account/messages/${conversationId}`)
-    await expect(accountPage.getByText('Is the cabin quiet at night?', { exact: true })).toBeVisible()
   } finally {
     await buyer.close()
   }

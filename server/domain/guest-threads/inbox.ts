@@ -185,7 +185,7 @@ function eventSentence(entry: GuestThreadEntryViewModel, facts: ThreadFacts, vie
 }
 
 /** Builds the stream: day headers, runs of messages with one time each, events as sentences, change requests. */
-function stream(facts: ThreadFacts, viewer: Viewer, now: Date): InboxStreamItem[] {
+function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean): InboxStreamItem[] {
   const { raw, timeZone } = facts
   const items: InboxStreamItem[] = []
   let day: string | null = null
@@ -268,8 +268,9 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date): InboxStreamItem[
   if (newestBusiness && viewer.audience === 'member') {
     const { item, entry } = newestBusiness
     item.receipt = receipt(entry, facts.guestName)
-    // A team member's text reply that did not arrive can be sent again under its own key; an automatic or photo reply cannot.
-    item.retryable = item.receipt === 'Not delivered' && entry.eventName === 'thread.member_reply' && !item.photos.length && Boolean(text(item.body))
+    // A team member's text reply that did not arrive can be sent again under its own key, where the reply
+    // operation can still send (`guestReplyDestination`); an automatic or photo reply cannot.
+    item.retryable = canReply && item.receipt === 'Not delivered' && entry.eventName === 'thread.member_reply' && !item.photos.length && Boolean(text(item.body))
   }
   return items
 }
@@ -299,7 +300,8 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
   const raw = await rawThread(db, threadId, organizationId, viewer)
   if (!raw) return null
   const facts = await threadFacts(db, raw, organizationId, now)
-  const items = stream(facts, viewer, now)
+  const replyComposer = await composer(db, raw.id, organizationId, viewer, facts.channel)
+  const items = stream(facts, viewer, now, replyComposer.available)
   const record = raw.operationalRecord
   return {
     id: raw.id,
@@ -316,7 +318,7 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
     activityPath: raw.activityPath,
     stream: items,
     pending: viewer.audience === 'member' ? await pendingMessages(db, raw.id, organizationId, viewer.principal, facts.timeZone, now.toISOString()) : [],
-    composer: await composer(db, raw.id, organizationId, viewer, facts.channel),
+    composer: replyComposer,
   }
 }
 
