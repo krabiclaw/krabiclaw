@@ -56,10 +56,17 @@ export function openingSentence(facts: OpeningFacts): string {
   return [`${lead} ${who}.`, ...answers].join('\n')
 }
 
+/** Where the opening's own insert sits in `openingMessageQueries`. */
+const OPENING_INSERT = 2
+
 /**
- * The opening messages, appended after the thread's submission in the batch
- * that writes it, and only where that thread was written. Their dedupe keys
- * make a replay of the creation, or the one-time backfill, write them once.
+ * The opening messages, placed directly after the thread's first entry (its
+ * submission) in the ledger's sequence, which is the order every reader uses.
+ * In the batch that writes the thread nothing follows that entry yet; a thread
+ * written before them (the one-time backfill) has its later entries moved up to
+ * make room, in two steps so `activity_entries_request_sequence_unique` holds
+ * after each row. Everything is gated on the opening's dedupe key, so a replay
+ * of the creation, or of the backfill, writes and moves nothing.
  */
 export function openingMessageQueries(input: {
   /** The thread by its id, or a stay's thread when the batch that opens it chooses the id. */
@@ -67,19 +74,30 @@ export function openingMessageQueries(input: {
   body: string; note: string | null; guestUserId: string | null; at: string
 }): BatchQuery[] {
   const scope = 'requestId' in input.target
-    ? { key: `request:${input.target.requestId}`, where: 'id = ?', params: [input.target.requestId] }
-    : { key: `stay:${input.target.stayId}`, where: 'id = (SELECT request_id FROM stays WHERE id = ? AND organization_id = ?)', params: [input.target.stayId, input.target.organizationId] }
-  const entry = (key: string, actor: 'system' | 'guest', userId: string | null, body: string, eventName: string): BatchQuery => ({
-    query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, body, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
-      SELECT ?, id, 'message', 'request', ?, ?, 'web', ?, ?, '{}', ?, COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id = requests.id), 0) + 1, ?, ?
-        FROM requests WHERE ${scope.where}
-      ON CONFLICT(dedupe_key) DO NOTHING`,
-    params: [crypto.randomUUID(), actor, userId, body, eventName, key, input.at, input.at, ...scope.params],
-  })
+    ? { key: `request:${input.target.requestId}`, thread: '?', params: [input.target.requestId] }
+    : { key: `stay:${input.target.stayId}`, thread: '(SELECT request_id FROM stays WHERE id = ? AND organization_id = ?)', params: [input.target.stayId, input.target.organizationId] }
   const note = input.note?.trim() ? input.note.trim() : null
+  const room = note ? 2 : 1
+  const openingKey = `${scope.key}:opening`
+  const unwritten = 'NOT EXISTS (SELECT 1 FROM activity_entries WHERE dedupe_key = ?)'
+  const first = `(SELECT MIN(sequence) FROM activity_entries WHERE request_id = ${scope.thread})`
+  // Clear of any sequence a thread has, then back down by the room the messages take.
+  const ASIDE = 1_000_000_000
+  const entry = (key: string, offset: number, actor: 'system' | 'guest', userId: string | null, body: string, eventName: string): BatchQuery => ({
+    query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, body, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
+      SELECT ?, id, 'message', 'request', ?, ?, 'web', ?, ?, '{}', ?, ${first} + ${offset}, ?, ?
+        FROM requests WHERE id = ${scope.thread} AND ${unwritten}
+      ON CONFLICT(dedupe_key) DO NOTHING`,
+    params: [crypto.randomUUID(), actor, userId, body, eventName, key, ...scope.params, input.at, input.at, ...scope.params, key],
+  })
   return [
-    entry(`${scope.key}:opening`, 'system', null, input.body, OPENING_EVENT),
-    ...(note ? [entry(`${scope.key}:guest-note`, 'guest', input.guestUserId, note, GUEST_NOTE_EVENT)] : []),
+    // OPENING_INSERT counts these two.
+    { query: `UPDATE activity_entries SET sequence = sequence + ${ASIDE}
+        WHERE request_id = ${scope.thread} AND sequence > ${first} AND ${unwritten}`, params: [...scope.params, ...scope.params, openingKey] },
+    { query: `UPDATE activity_entries SET sequence = sequence - ${ASIDE - room}
+        WHERE request_id = ${scope.thread} AND sequence > ${ASIDE}`, params: scope.params },
+    entry(openingKey, 1, 'system', null, input.body, OPENING_EVENT),
+    ...(note ? [entry(`${scope.key}:guest-note`, 2, 'guest', input.guestUserId, note, GUEST_NOTE_EVENT)] : []),
   ]
 }
 
@@ -89,8 +107,9 @@ export function openingMessageQueries(input: {
  * reservation and booking threads on production opened empty on 2026-11-06).
  * The facts come from the record and the guest's submission, the same
  * `openingSentence` creation uses; the messages are dated at the thread's
- * creation, so the inbox draws them first. Airbnb stays are left alone, and a
- * thread that already has its opening is skipped by its dedupe key.
+ * creation and placed after its submission, before everything said since.
+ * Airbnb stays are left alone, and a thread that already has its opening is
+ * skipped by its dedupe key.
  */
 export async function backfillOpeningMessages(db: DbClient, organizationId?: string): Promise<{ written: number; skipped: number }> {
   const threads = await queryAll<{ id: string; kind: 'reservation' | 'booking' | 'stay'; organization_id: string; location_id: string | null; user_id: string | null; created_at: string; payload_json: string; vertical: string | null; location_title: string | null }>(db, `
@@ -130,9 +149,10 @@ export async function backfillOpeningMessages(db: DbClient, organizationId?: str
         facts = { kind: 'booking', ...common, vertical: thread.vertical, productTitle: record.product_name, partySize: record.party_size, placeTitle: thread.location_title }
       }
     }
-    const results = await executeBatch(db, openingMessageQueries({ target: { requestId: thread.id }, body: openingSentence(facts), note, guestUserId: thread.user_id, at: thread.created_at }),
-      { operation: 'Backfill conversation opening' })
-    if (Number(results[0]?.meta.changes ?? 0) === 1) written += 1
+    const queries = openingMessageQueries({ target: { requestId: thread.id }, body: openingSentence(facts), note, guestUserId: thread.user_id, at: thread.created_at })
+    const results = await executeBatch(db, queries, { operation: 'Backfill conversation opening' })
+    // The opening's own insert, after the two moves that make room for it.
+    if (Number(results[OPENING_INSERT]?.meta.changes ?? 0) === 1) written += 1
     else skipped += 1
   }
   return { written, skipped }

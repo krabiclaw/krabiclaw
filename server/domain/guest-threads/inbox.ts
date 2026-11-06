@@ -216,12 +216,7 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date): InboxStreamItem[
   }
 
   let newestBusiness: { item: MessageItem; entry: GuestThreadEntryViewModel } | null = null
-  // In the order things were said and done, by each one's own instant; the ledger's
-  // sequence breaks ties. A conversation's opening messages written after the fact
-  // (the one-time backfill) are dated at its creation and so still open it.
-  const ordered = raw.entries.map((entry, index) => ({ entry, index, at: entry.kind === 'message' ? entrySentAt(entry) : entry.occurredAt }))
-    .sort((a, b) => a.at.localeCompare(b.at) || a.index - b.index).map(item => item.entry)
-  for (const entry of ordered) {
+  for (const entry of raw.entries) {
     if (entry.kind === 'submission') {
       // A contact form's words open its conversation: what the guest wrote, then
       // their answers. A reservation, booking or stay opens with real messages

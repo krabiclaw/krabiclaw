@@ -53,20 +53,34 @@ test('a reservation opens with its own message and the guest note, written once,
     await reservation('new', 'Window seat if possible', { body: sentence })
     assert.deepEqual(await messages('new'), [['guest', sentence], ['guest', 'Window seat if possible']])
 
-    // Created before: it opened empty; the backfill writes the same messages once, first in the conversation.
-    await reservation('old', null)
-    assert.deepEqual(await messages('old'), [])
-    await db.prepare(`INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, event_name, body, payload_json, dedupe_key, sequence, occurred_at, created_at)
-      VALUES ('review', 'old', 'operation', 'request', 'system', 'review.requested', 'Review invitation sent', '{}', 'review-old', 2, '2026-11-05T00:00:00.000Z', '2026-11-05T00:00:00.000Z')`).run()
+    // Created before: it opened with nothing but its submission, then the business and the guest wrote.
+    // The backfill places the opening and the note right after the submission, ahead of everything said since,
+    // and the conversation's latest message is still the guest's reply.
+    await reservation('old', 'Window seat if possible')
+    await db.batch([
+      db.prepare(`INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, event_name, body, payload_json, dedupe_key, sequence, occurred_at, created_at)
+        VALUES ('review', 'old', 'operation', 'request', 'system', 'review.requested', 'Review invitation sent', '{}', 'review-old', 2, '2026-11-03T12:00:00.000Z', '2026-11-03T12:00:00.000Z')`),
+      db.prepare(`INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, channel, body, payload_json, dedupe_key, sequence, occurred_at, created_at)
+        VALUES ('reply', 'old', 'message', 'request', 'guest', 'email', 'Running ten minutes late', '{}', 'reply-old', 3, '2026-11-04T06:50:00.000Z', '2026-11-04T06:50:00.000Z')`),
+    ])
+    assert.deepEqual(await messages('old'), [['guest', 'Running ten minutes late']])
     assert.deepEqual(await backfillOpeningMessages(db, ORG), { written: 1, skipped: 0 })
+    const ledger = async () => (await db.prepare("SELECT sequence, COALESCE(event_name, kind) AS what FROM activity_entries WHERE request_id = 'old' ORDER BY sequence").all()).results
+    const placed = [
+      { sequence: 1, what: 'submission' }, { sequence: 2, what: 'thread.opening' }, { sequence: 3, what: 'thread.guest_note' },
+      { sequence: 4, what: 'review.requested' }, { sequence: 5, what: 'message' },
+    ]
+    assert.deepEqual(await ledger(), placed)
     const stream = (await getInboxThread(db, 'old', ORG, viewer, new Date('2026-11-05T00:00:00.000Z')))!.stream
-    assert.deepEqual(stream.filter(item => item.type !== 'day').map(item => item.type === 'message' ? item.body : item.type === 'event' ? item.text : item.type), [sentence, 'Review invitation sent'])
+    assert.deepEqual(stream.filter(item => item.type !== 'day').map(item => item.type === 'message' ? item.body : item.type === 'event' ? item.text : item.type),
+      [sentence, 'Window seat if possible', 'Review invitation sent', 'Running ten minutes late'])
+    // A second run writes and moves nothing.
     assert.deepEqual(await backfillOpeningMessages(db, ORG), { written: 0, skipped: 0 })
-    // In the list (past: it ended and nothing is unread) the opening is the guest's message, under the guest's name.
+    assert.deepEqual(await ledger(), placed)
+    // In the list (past: both ended, nothing unread, nobody wrote after) the reply is still the preview and its
+    // time still orders the conversation ahead of the one whose newest message is its opening.
     const rows = await listGuestThreads(db, ORG, { userId: OWNER, mailbox: 'past' }, new Date('2026-11-05T00:00:00.000Z'))
-    const listed = rows.find(row => row.id === 'old')
-    assert.deepEqual(listed && [listed.previewFrom, listed.preview], ['Filip', sentence])
-    assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE request_id = 'old' AND event_name = 'thread.opening'").first('count(*)'), 1)
+    assert.deepEqual(rows.map(row => [row.id, row.previewFrom, row.preview]), [['old', 'Filip', 'Running ten minutes late'], ['new', 'Filip', 'Window seat if possible']])
   } finally {
     await runtime.dispose()
   }
