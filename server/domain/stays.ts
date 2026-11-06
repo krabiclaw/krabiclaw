@@ -29,6 +29,7 @@ import type { ChannexEnv } from '~/server/integrations/channex/client'
 import { completeChannelPush, configureStayCalendar, deliverStayNights, pushAirbnbListingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type AirbnbListingSettings, type ChannelPushCompletion, type ChannexMapping, type DeliveryLease } from '~/server/integrations/channex/ari'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 import { stayThreadQueries } from '~/server/domain/requests'
+import { openingMessageQueries, openingSentence } from '~/server/domain/guest-threads/opening'
 import { ownedBuyerRequest } from '~/server/domain/payments/buyer'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
@@ -2608,7 +2609,7 @@ export interface CheckoutStay {
  * claims go, the stay takes the same nights (failing the batch on a night
  * someone else now holds), and its guest conversation opens.
  */
-export function stayFromCheckoutQueries(input: { organizationId: string; locationId: string; stayId: string; holdId: string; paymentId: string; buyerUserId: string | null; now: string; stay: CheckoutStay }): BatchQuery[] {
+export function stayFromCheckoutQueries(input: { organizationId: string; locationId: string; stayId: string; holdId: string; paymentId: string; buyerUserId: string | null; now: string; stay: CheckoutStay; homeTitle: string }): BatchQuery[] {
   const { quote, guest } = input.stay
   return [
     { query: 'DELETE FROM stay_nights WHERE hold_id = ?', params: [input.holdId] },
@@ -2624,6 +2625,10 @@ export function stayFromCheckoutQueries(input: { organizationId: string; locatio
     organizationEventQuery({ organizationId: input.organizationId, locationId: input.locationId, actorId: null, eventType: 'stay.created', entityType: 'stay', entityId: input.stayId, metadata: { channel: 'direct', payment_id: input.paymentId }, onlyIfPreviousChangedOneRow: true }),
     ...reconcileNightsQueries(input.organizationId, input.stayId),
     ...stayThreadQueries({ organizationId: input.organizationId, stayId: input.stayId, now: input.now, openedBy: 'guest' }),
+    // The stay's own message opens its conversation, then the guest's note.
+    ...openingMessageQueries({ target: { stayId: input.stayId, organizationId: input.organizationId }, at: input.now, guestUserId: input.buyerUserId, note: guest.notes,
+      body: openingSentence({ kind: 'stay', homeTitle: input.homeTitle, checkIn: quote.check_in_date, checkOut: quote.check_out_date, guests: quote.adults + quote.children,
+        guestName: guest.name, guestPhone: guest.phone, answers: guest.answers ?? [] }) }),
   ]
 }
 

@@ -5,11 +5,10 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { threadPayloadForGuest, requestInsertQueries, cancelBookingRequest, getGuestRequest, getThreadOperationalRecord } from '../../server/domain/requests.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
-import { countUnreadInboxThreads, listGuestThreads, listOrganizationGuestThreads, updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
+import { countUnreadInboxThreads, listGuestThreads, listOrganizationGuestThreads, mailboxTransitionQueries, updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
 import { getInboxThreadDetails } from '../../server/domain/guest-threads/inbox.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
-import { resolveGuestThreadMailbox } from '../../server/domain/guest-threads/mailbox.ts'
 import { claimReservation, requireLocationReservationConfig, upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
 import { CapacityUnavailableError, claimSessionCapacity, setBookingStatus } from '../../server/utils/availability.ts'
 import { buildCanonicalNotificationInsert } from '../../server/utils/notification-center.ts'
@@ -222,48 +221,9 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
   }
 })
 
-/**
- * Current and Past, the way Airbnb files them: by when the occurrence ENDS,
- * or by a member's archive. Fixed instants, so the boundary is exact.
- */
-test('a thread is Current until its occurrence ends or a member archives it', () => {
-  const dinner = { ends_at: '2026-09-11T21:00:00.000Z' } // 19:00–21:00
-  const live = { archived_at: null, blocked_at: null }
-  const at = (now: string) => resolveGuestThreadMailbox(live, dinner, now)
-  assert.equal(at('2026-09-11T18:59:00.000Z').mailbox, 'current', 'before it starts')
-  assert.equal(at('2026-09-11T19:01:00.000Z').mailbox, 'current', 'once it has started')
-  assert.equal(at('2026-09-11T20:59:00.000Z').mailbox, 'current', 'while it is being served')
-  assert.deepEqual(at('2026-09-11T21:01:00.000Z'), {
-    mailbox: 'past', manuallyArchived: false, occurrenceEnded: true, canArchive: false, canUnarchive: false,
-  }, 'once it has ended')
-
-  // A session is the same clock: its end, not its start.
-  const session = { ends_at: '2026-09-12T09:00:00.000Z' }
-  assert.equal(resolveGuestThreadMailbox(live, session, '2026-09-12T08:00:00.000Z').mailbox, 'current')
-  assert.equal(resolveGuestThreadMailbox(live, session, '2026-09-12T09:00:01.000Z').mailbox, 'past')
-
-  // A blocked guest's thread is Blocked, archived or not, until unblocked; the guest never sees it.
-  const blocked = { archived_at: null, blocked_at: '2026-09-11T10:00:00.000Z' }
-  assert.deepEqual(resolveGuestThreadMailbox(blocked, dinner, '2026-09-11T18:00:00.000Z'), {
-    mailbox: 'blocked', manuallyArchived: false, occurrenceEnded: false, canArchive: false, canUnarchive: false,
-  })
-  assert.equal(resolveGuestThreadMailbox(blocked, dinner, '2026-09-11T18:00:00.000Z', 'buyer').mailbox, 'current')
-
-  // A direct message has no occurrence and is Current until archived.
-  assert.deepEqual(resolveGuestThreadMailbox(live, null, '2126-01-01T00:00:00.000Z'), {
-    mailbox: 'current', manuallyArchived: false, occurrenceEnded: false, canArchive: true, canUnarchive: false,
-  })
-  const archived = { archived_at: '2026-09-11T10:00:00.000Z', blocked_at: null }
-  assert.deepEqual(resolveGuestThreadMailbox(archived, null, '2026-09-11T11:00:00.000Z'), {
-    mailbox: 'past', manuallyArchived: true, occurrenceEnded: false, canArchive: false, canUnarchive: true,
-  })
-  // Archived before it ended, then it ended: Past for good.
-  assert.deepEqual(resolveGuestThreadMailbox(archived, dinner, '2026-09-11T22:00:00.000Z'), {
-    mailbox: 'past', manuallyArchived: true, occurrenceEnded: true, canArchive: false, canUnarchive: false,
-  })
-})
-
-test('archive and unarchive file a conversation without touching its booking, state or activity order', { timeout: 120_000 }, async () => {
+test('archive and unarchive file a conversation without touching its booking, state or activity order', { timeout: 120_000 }, async (t) => {
+  // Contacts go Past after 30 quiet days, so the clock is fixed at NOW, ten days after the oldest one.
+  t.mock.timers.enable({ apis: ['Date'], now: new Date(NOW) })
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'guest-thread-mailbox-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
@@ -352,16 +312,17 @@ test('archive and unarchive file a conversation without touching its booking, st
       'an ended occurrence is Past whether or not it was archived, and cannot be moved back',
     )
     for (const id of await ids('current')) assert.deepEqual(await filing(id), { archive: true, unarchive: false }, id)
-    // The unread counts beside the inbox are the Current mailbox's: a guest who wrote about an ended dinner is in Past, not counted.
-    // Each message is written at its conversation's own activity time, so the order above holds.
+    // A guest who writes about a dinner that has ended brings it back to Current, unread and counted; the counts are Current's only.
+    // Each message is written at its conversation's own activity time.
     for (const [id, at] of [['future', '2026-09-02T00:00:00.000Z'], ['ended', '2026-09-04T00:00:00.000Z']] as const) {
       const message = await appendEntry(db, { threadId: id, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Is parking nearby?', occurredAt: at })
       const alert = buildCanonicalNotificationInsert({ scope: 'organization', organizationId: ORG, title: 'Message', template: 'guest.reply', sourceEntryId: message.id }, `alert-${id}`)
       await db.prepare(alert.query).bind(...alert.params).run()
     }
-    assert.deepEqual(await ids('current'), ['newest', 'booking-future', 'ongoing', 'future', 'contact'])
-    assert.deepEqual([await ids('current', true), await ids('past', true)], [['future'], ['ended']])
-    assert.deepEqual(await countUnreadInboxThreads(db, ORG, { userId: ACTOR }), { all: 1, guests: 1, support: 0 })
+    const CURRENT = ['newest', 'booking-future', 'ended', 'ongoing', 'future', 'contact']
+    assert.deepEqual(await ids('current'), CURRENT)
+    assert.deepEqual([await ids('current', true), await ids('past', true)], [['ended', 'future'], []])
+    assert.deepEqual(await countUnreadInboxThreads(db, ORG, { userId: ACTOR }), { all: 2, guests: 2, support: 0 })
 
     // Archive a future reservation: Past at once, with who and when, and
     // nothing about the reservation, the conversation state or the order moves.
@@ -381,7 +342,7 @@ test('archive and unarchive file a conversation without touching its booking, st
     assert.equal((await ids('current')).includes('future'), false)
     assert.equal((await ids('past')).includes('future'), true)
     assert.deepEqual(await filing('future'), { archive: false, unarchive: true })
-    assert.deepEqual(await countUnreadInboxThreads(db, ORG, { userId: ACTOR }), { all: 0, guests: 0, support: 0 }, 'an archived conversation leaves the Current count')
+    assert.deepEqual(await countUnreadInboxThreads(db, ORG, { userId: ACTOR }), { all: 1, guests: 1, support: 0 }, 'an archived conversation leaves the Current count')
 
     // The same key again later changes nothing: not the time, not the actor, not the ledger.
     assert.equal((await operate('future', 'archive', 'archive-future')).ok, true)
@@ -402,9 +363,9 @@ test('archive and unarchive file a conversation without touching its booking, st
     assert.equal(await entries('future', 'thread.unarchived'), 1)
     assert.deepEqual(await row('future'), { ...before, archived_at: null, archived_by_user_id: null })
     assert.deepEqual(await recordRow('future'), reservationBefore)
-    assert.deepEqual(await ids('current'), ['newest', 'booking-future', 'ongoing', 'future', 'contact'])
+    assert.deepEqual(await ids('current'), CURRENT)
     assert.deepEqual(await filing('future'), { archive: true, unarchive: false })
-    assert.deepEqual(await countUnreadInboxThreads(db, ORG, { userId: ACTOR }), { all: 1, guests: 1, support: 0 })
+    assert.deepEqual(await countUnreadInboxThreads(db, ORG, { userId: ACTOR }), { all: 2, guests: 2, support: 0 })
     assert.equal((await operate('future', 'unarchive', 'unarchive-future')).ok, true)
     assert.equal(await entries('future', 'thread.unarchived'), 1)
 
@@ -420,14 +381,21 @@ test('archive and unarchive file a conversation without touching its booking, st
     assert.equal((await operate('contact', 'unarchive', 'unarchive-contact')).ok, true)
     assert.equal((await ids('current')).includes('contact'), true)
 
-    // Ended occurrences cannot be moved back, archived or not, and nothing is written.
+    // An ended occurrence the rule files in Past cannot be moved back, and nothing is written.
     const endedBefore = await row('ended-archived')
     const refused = await operate('ended-archived', 'unarchive', 'unarchive-ended')
     assert.deepEqual(refused, { ok: false, status: 409, reason: 'invalid_transition', message: 'This conversation is past because its booking has ended' })
     assert.deepEqual(await row('ended-archived'), endedBefore)
     assert.equal(await entries('ended-archived', 'thread.unarchived'), 0)
-    const endedArchive = await operate('ended', 'archive', 'archive-ended')
-    assert.equal(endedArchive.ok ? null : endedArchive.status, 409)
+    // The write itself refuses too, for a move whose check passed before the rule filed the thread in Past.
+    const raced = await db.batch(mailboxTransitionQueries({ transition: 'unarchive', threadId: 'ended-archived', organizationId: ORG, actorUserId: ACTOR, entryId: 'raced', dedupeKey: 'raced-unarchive', now: NOW })
+      .map(query => db.prepare(query.query).bind(...(query.params ?? []))))
+    assert.deepEqual(raced.map(result => result.meta.changes), [0, 0])
+    assert.deepEqual(await row('ended-archived'), endedBefore)
+    // One the guest wrote about after it ended is Current: it can be archived and moved back like any other.
+    assert.equal((await operate('ended', 'archive', 'archive-ended')).ok, true)
+    assert.deepEqual([(await ids('past')).includes('ended'), await filing('ended')], [true, { archive: false, unarchive: true }])
+    assert.equal((await operate('ended', 'unarchive', 'unarchive-ended-current')).ok, true)
     assert.equal((await row('ended'))?.archived_at, null)
 
     // Another organization cannot reach the thread at all.
@@ -436,7 +404,7 @@ test('archive and unarchive file a conversation without touching its booking, st
     assert.equal((await row('booking-future'))?.archived_at, null)
 
     // Nothing above moved the inbox order.
-    assert.deepEqual(await ids('current'), ['newest', 'booking-future', 'ongoing', 'future', 'contact'])
+    assert.deepEqual(await ids('current'), CURRENT)
   } finally {
     clearTimeout(deadline)
     await runtime.dispose()
