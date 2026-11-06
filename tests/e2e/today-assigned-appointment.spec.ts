@@ -198,9 +198,12 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     const persisted = await body<{ booking: { status: string; assignedMemberId: string } }>(
       await page.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
     expect(persisted.booking).toMatchObject({ status: 'confirmed', assignedMemberId: actor.id })
-    // Confirming the consultation gives the member no new Today work for it: it is the Calendar's.
+    // Confirming the consultation is the review its booking asked for: that task is done, by the member who
+    // confirmed it, and nothing else is left on Today for it; the visit itself is the Calendar's.
     const after = await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
-    expect(after.tasks.flatMap(section => section.tasks).filter(task => task.requestId === requestId)).toEqual([])
+    expect(after.tasks.flatMap(section => section.tasks.map(task => ({ section: section.id, task }))).filter(item => item.task.requestId === requestId)).toEqual([{ section: 'done', task: expect.objectContaining({
+      kind: 'booking_review', status: 'done', person: expect.objectContaining({ name: 'You', you: true }), outcome: expect.objectContaining({ closedBy: 'You' }),
+    }) }])
     await memberPage.setViewportSize({ width: 1440, height: 900 })
     await expect(todayPanel).toBeVisible()
     await memberPage.clock.setFixedTime(new Date(`${day}T13:00:00.000Z`))
