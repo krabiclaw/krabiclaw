@@ -1,3 +1,4 @@
+import { opportunityDoneQuery } from '~/server/domain/tasks'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { blogEditorPath } from '~/server/utils/dashboard-links'
 import { HTTPError } from 'nitro';
@@ -698,6 +699,7 @@ export async function createBlogPost(
       ...await contentBlockPlacementQueries(db, canonicalBlocks, placementScope, now),
       organizationEventQuery({ organizationId, actorId: authorId, eventType: 'article.created', entityType: 'article', entityId: id,
         metadata: { request_hash: requestHash, evidence_basis: 'persisted_change', public_visibility: 'unverified' }, dedupeKey }),
+      opportunityDoneQuery(organizationId, ['article.create'], organizationId, now),
     ]
   } catch (error) {
     if (HTTPError.isError(error)) throw new HTTPError({ cause: error, body: error.body,
@@ -783,7 +785,8 @@ export async function updateBlogLifecycle(
     beforeState: { status: source.status, updated_at: source.updated_at },
     afterState: { status: 'published', published_at: source.published_at ?? committedAt, updated_at: committedAt },
     metadata: { evidence_basis: 'persisted_change', public_visibility: 'unverified' }, onlyIfPreviousChangedOneRow: true }),
-  publicResourceCacheInvalidationQuery(organizationId, 'article-publication')])
+  publicResourceCacheInvalidationQuery(organizationId, 'article-publication'),
+  opportunityDoneQuery(organizationId, ['article.publish', 'article.update'], source.id, committedAt)])
   if (Number(result?.meta.changes ?? 0) !== 1) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Article was updated by another writer' })
   }

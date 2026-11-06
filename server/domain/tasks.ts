@@ -545,6 +545,15 @@ export async function listTaskAssignees(db: DbClient, viewer: TaskViewer): Promi
   ]
 }
 
+/** A task as an alert to one of its people tells it: the member projection, with no guest's full name or contact. */
+export async function describeTaskForAlert(db: DbClient, organizationId: string, taskId: string, recipientUserId: string): Promise<{ eyebrow: string; title: string; detail: string | null; locationId: string | null }> {
+  const row = await queryFirst<TaskRow>(db, 'SELECT * FROM tasks WHERE organization_id = ? AND id = ?', [organizationId, taskId])
+  if (!row) throw new Error(`Task ${taskId} is not in organization ${organizationId}`)
+  const viewer = { principal: { organizationId, userId: recipientUserId } as MemberAccessPrincipal, manage: false, memberId: '' }
+  const view = present(row, viewer, await loadContext(db, viewer, [row]), new Date())
+  return { eyebrow: view.eyebrow, title: view.title, detail: view.detail, locationId: row.location_id }
+}
+
 export async function getTask(db: DbClient, viewer: TaskViewer, taskId: string, now = new Date()): Promise<TaskView> {
   const row = await readTaskRow(db, viewer, taskId)
   return present(row, viewer, await loadContext(db, viewer, [row]), now)
