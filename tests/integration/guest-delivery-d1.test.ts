@@ -17,7 +17,6 @@ import { createProduct, getProduct, updateProduct } from '../../server/utils/pro
 import { buildPublicResourceCacheKey } from '../../server/utils/public-resource-cache.ts'
 import { PUBLIC_CACHE_REVISION_SQL } from '../../server/utils/edge-cache.ts'
 import { cancelStay, createStay, getStay } from '../../server/domain/stays.ts'
-import { claimGuestThreadInvite, createGuestThreadInvite } from '../../server/domain/guest-threads/invites.ts'
 import { buildBuyerRequestActivityUrl } from '../../server/utils/dashboard-notification-links.ts'
 import { memberAccessPrincipal, organizationAdapter, resolveMembership } from '../../server/utils/member-access.ts'
 import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
@@ -517,10 +516,10 @@ test('a failed stay cancellation email retries its recorded content after displa
     const stay = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'stay-cancellation-email', check_in_date: '2098-10-01', check_out_date: '2098-10-03',
       adults: 2, guest_name: 'Ana', guest_email: 'guest@provider-proof.com', total_minor: 30000 })
     assert(stay.request_id)
-    assert.equal(await buildBuyerRequestActivityUrl(env,db,{organizationId:access.organizationId,threadId:stay.request_id}),null,'a host-entered stay has no buyer management link before it is claimed')
+    assert.equal(await buildBuyerRequestActivityUrl(env,db,{organizationId:access.organizationId,threadId:stay.request_id}),null,'a host-entered stay has no buyer management link')
+    // A stay its guest bought belongs to their account, as a captured checkout's conversion leaves it.
     const signed=await createAuth(env).api.signInAnonymous({headers:new Headers(),returnHeaders:true})
-    const invite=await createGuestThreadInvite(db,env,{organizationId:access.organizationId,threadId:stay.request_id,actorUserId:access.actorId})
-    assert.equal((await claimGuestThreadInvite(db,{token:new URL(invite.url).pathname.split('/').at(-1)!,userId:signed.response!.user.id})).thread_id,stay.request_id)
+    await db.batch([db.prepare('UPDATE stays SET user_id=? WHERE id=?').bind(signed.response!.user.id,stay.id),db.prepare('UPDATE requests SET user_id=? WHERE id=?').bind(signed.response!.user.id,stay.request_id)])
     await cancelStay(db, env, access, stay.id, { expected_version: stay.version })
     assert.equal((await getStay(db, access, stay.id)).status, 'cancelled')
     await assert.rejects(notifyStayCancelled(env, db, access.organizationId, stay.id, 'host', 0), (error: AggregateError) => {

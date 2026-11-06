@@ -117,10 +117,7 @@ export default defineHandler(async (event) => {
     if (outcome.reason === 'invalid_transition') {
       return jsonResponse({ error: outcome.message, code: 'INVALID_TRANSITION', field: 'action' }, { status: 409 })
     }
-    if (outcome.reason === 'no_guest_email') {
-      return jsonResponse({ error: 'This guest has no email on file', code: 'NO_GUEST_EMAIL', field: 'guest.email' }, { status: 400 })
-    }
-    if (outcome.reason === 'guest_invite_required') {
+    if (outcome.reason === 'guest_unreachable') {
       return jsonResponse({ error: outcome.message, code: outcome.code, field: outcome.field }, { status: outcome.status })
     }
     if (outcome.reason === 'empty_body') {

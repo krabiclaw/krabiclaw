@@ -51,15 +51,12 @@ export type OperationOutcome =
   | SuccessfulOperationOutcome
   | { ok: false; status: 404; reason: 'thread_not_found' | 'source_not_found' }
   | { ok: false; status: 409; reason: 'invalid_transition'; message: string }
-  | { ok: false; status: 400; reason: 'no_guest_email' }
   | { ok: false; status: 400; reason: 'empty_body' }
-  | { ok: false; status: 409; reason: 'guest_invite_required'; code: 'GUEST_INVITE_REQUIRED'; field: 'request_id'; message: string }
+  | { ok: false; status: 409; reason: 'guest_unreachable'; code: 'GUEST_UNREACHABLE'; field: 'request_id'; message: string }
   | { ok: false; status: 400; reason: 'missing_idempotency_key' }
   | { ok: false; status: 400; reason: 'invalid_photo'; message: string }
   | { ok: false; status: 409 | 502; reason: 'delivery_failed'; code: string; field: string; message: string; mutation_applied?: true; operation_completed?: false; request_id?: string; record?: ThreadOperationalRecord; retry_with_same_idempotency_key?: boolean; provider_error?: ChannexError['data'] }
 
-/** A reply never asks for a guest email; a stay without one asks for an invite. */
-export type ReplyOutcome = Exclude<OperationOutcome, { reason: 'no_guest_email' }>
 type NotFoundOutcome = Extract<OperationOutcome, { status: 404 }>
 
 export type ExecuteOperationInput = {
@@ -449,13 +446,12 @@ async function executeSourceMutation(
   const plan = sourceMutationPlan(context, input.action)
   if (!plan) return conflict(`"${input.action}" is not a valid action for the current state`)
   const summary = await requestSummary(db, context.thread)
-  if (plan.requiresNotification && !summary.guestEmail) {
-    return { ok: false, status: 400, reason: 'no_guest_email' }
-  }
 
   const entryId = crypto.randomUUID()
   const deliveryId = deliveryDedupeKey(input)
   const now = new Date().toISOString()
+  // A reservation or booking always has its guest's email (requests.ts `guest`); one without is broken data.
+  if (plan.requiresNotification && !summary.guestEmail) throw new Error(`${plan.kind} conversation ${context.thread.id} has no guest email`)
   const email = plan.requiresNotification && summary.guestEmail
     ? await renderStatusUpdate(input.env, db, context, plan.action, summary.guestEmail, summary.locationTitle)
     : null
@@ -469,7 +465,7 @@ async function executeSourceMutation(
     ...refundPlan.queries,
   ]
   if (plan.afterStatus === 'cancelled') queries.push(revokeReviewRequestQuery(plan.kind, context.thread.id, entryId, now))
-  if (plan.requiresNotification && summary.guestEmail) {
+  if (plan.requiresNotification) {
     queries.push(deliveryReceiptQuery(context, input, entryId, deliveryId, now))
   }
 
@@ -498,7 +494,7 @@ async function executeReply(
   db: DbClient,
   context: ThreadContext,
   input: ReplyInput,
-): Promise<ReplyOutcome> {
+): Promise<OperationOutcome> {
   const body = (input.body ?? '').trim()
   const photoInput = input.photos ?? []
   const photoCount = Array.isArray(photoInput) ? photoInput.length : photoInput.sourceIds.length
@@ -647,11 +643,12 @@ async function executeReply(
 /**
  * Where a reply goes besides the thread. A conversation with a guest email is
  * emailed there, a direct stay using its current contact. One without reaches
- * the guest's account inbox once the guest has joined it through an invite,
- * and is emailed too when that account has a verified email; null means the
- * account inbox alone. Without either there is nowhere to reply to.
+ * the guest's account inbox when the guest has one (a stay they bought), and
+ * is emailed too when that account has a verified email; null means the
+ * account inbox alone. Without either there is nowhere to reply to, and the
+ * conversation shows no composer.
  */
-async function replyRecipient(db: DbClient, context: ThreadContext): Promise<string | null | NotFoundOutcome | Extract<OperationOutcome, { reason: 'guest_invite_required' }>> {
+async function replyRecipient(db: DbClient, context: ThreadContext): Promise<string | null | NotFoundOutcome | Extract<OperationOutcome, { reason: 'guest_unreachable' }>> {
   let guestEmail = context.thread.payload.guest.email
   if (context.thread.kind === 'stay') {
     const stay = await queryFirst<{ guest_email: string | null }>(db, 'SELECT guest_email FROM stays WHERE organization_id = ? AND request_id = ?', [context.thread.organization_id, context.thread.id])
@@ -660,7 +657,7 @@ async function replyRecipient(db: DbClient, context: ThreadContext): Promise<str
   }
   if (guestEmail) return guestEmail
   if (context.thread.user_id === null) {
-    return { ok: false, status: 409, reason: 'guest_invite_required', code: 'GUEST_INVITE_REQUIRED', field: 'request_id', message: 'This guest has no email on file. Invite them to the conversation first.' }
+    return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'request_id', message: 'This guest has no email or KrabiClaw account to reply to.' }
   }
   const account = await queryFirst<{ email: string }>(db, 'SELECT email FROM user WHERE id = ? AND "emailVerified" = 1 AND COALESCE("isAnonymous", 0) = 0', [context.thread.user_id])
   return account?.email ?? null
@@ -870,7 +867,7 @@ async function executeNoShow(db: DbClient, context: ThreadContext, input: Execut
  * A reply nobody is sending right now: an automatic message (no author), or a
  * member's send-later message, sent as that member's own reply.
  */
-export async function sendScheduledGuestReply(db: DbClient, input: { threadId: string; organizationId: string; body: string; idempotencyKey: string; actorUserId?: string; env: ExecuteOperationInput['env'] }): Promise<{ outcome: ReplyOutcome; entryId: string | null }> {
+export async function sendScheduledGuestReply(db: DbClient, input: { threadId: string; organizationId: string; body: string; idempotencyKey: string; actorUserId?: string; env: ExecuteOperationInput['env'] }): Promise<{ outcome: OperationOutcome; entryId: string | null }> {
   let outcome: OperationOutcome
   if (input.actorUserId !== undefined) {
     outcome = await executeGuestThreadOperation(db, { ...input, action: 'reply', actorUserId: input.actorUserId })
@@ -879,7 +876,6 @@ export async function sendScheduledGuestReply(db: DbClient, input: { threadId: s
     if ('ok' in context) return { outcome: context, entryId: null }
     outcome = await executeReply(db, context, { ...input, action: 'reply', actorUserId: null })
   }
-  if (!outcome.ok && outcome.reason === 'no_guest_email') throw new Error('A conversation reply unexpectedly requested a guest email')
   const entry = await findEntryByDedupeKey(db, operationDedupeKey(input))
   return { outcome, entryId: entry?.id ?? null }
 }

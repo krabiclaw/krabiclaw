@@ -179,7 +179,8 @@ async function listRecentGuestDeliveryCandidates(db: D1Database, env: ApiRecord,
     JOIN activity_entries e ON e.id = d.entry_id
     JOIN requests gt ON gt.id = e.request_id
     JOIN member m ON m.organizationId = gt.organization_id AND m.userId = ? AND m.role IN ('owner', 'admin')
-    WHERE d.channel = 'whatsapp' AND d.created_at > ?
+    -- A reply from WhatsApp is emailed, so only conversations with a guest email are offered.
+    WHERE d.channel = 'whatsapp' AND d.created_at > ? AND COALESCE(TRIM(json_extract(gt.payload_json, '$.guest.email')), '') <> ''
     GROUP BY gt.id
     ORDER BY createdAt DESC
     LIMIT 25
@@ -396,11 +397,7 @@ async function routeManagerWhatsAppMessage(
 
       const chosenThread = await getGuestRequest(db, chosen.threadId, chosen.organizationId)
       const chosenGuestEmail = chosenThread?.payload.guest.email ?? null
-      if (!chosenGuestEmail) {
-        await clearPending()
-        await sendWhatsAppText(env, opts.toPhone, 'That guest has no email on file, so a reply cannot be sent.')
-        return
-      }
+      if (!chosenGuestEmail) throw new Error(`WhatsApp reply candidate ${chosen.threadId} has no guest email`)
       const guestEmailMasked = maskEmailForDisplay(chosenGuestEmail)
       const newState: PendingWhatsAppReplyState = {
         kind: 'collect_reply',

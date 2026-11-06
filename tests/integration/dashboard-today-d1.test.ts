@@ -25,7 +25,6 @@ import { cancelScheduledGuestMessage, saveMessageTemplate } from '../../server/d
 import { cancelSendLaterMessage, createSendLaterMessage, sendDueSendLaterMessages } from '../../server/domain/send-later.ts'
 import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 import { sendReviewRequestForBooking } from '../../server/utils/review-request-delivery.ts'
-import { claimGuestThreadInvite, createGuestThreadInvite } from '../../server/domain/guest-threads/invites.ts'
 import { createTableReservation } from '../../server/domain/table-reservations.ts'
 import { upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
 import { applyResendEmailEvent, deliverReceiptEmail } from '../../server/domain/guest-threads/deliveries.ts'
@@ -408,13 +407,16 @@ test('Today reads actual scheduled work and review outcomes: cancellation and su
     assert.equal((await read('upcoming')).cards.some(card => card.id === `reservation:${reservationId}`), false)
     const ended = await createStay(db, env, access, { product_id: homeId, idempotency_key: 'ended-stay', check_in_date: localDateAt(new Date(now - 5 * DAY), ZONE),
       check_out_date: localDateAt(new Date(now - 2 * DAY), ZONE), adults: 1, guest_name: 'Rhea', guest_email: 'rhea@provider-proof.com', total_minor: 45_000 })
+    // Stays their guest bought belong to the guest's account, as a captured checkout's conversion leaves them.
     const guest = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
-    const invite = await createGuestThreadInvite(db, env, { organizationId: ORG, threadId: ended.request_id!, actorUserId: OWNER })
-    await claimGuestThreadInvite(db, { token: new URL(invite.url).pathname.split('/').at(-1)!, userId: guest.response!.user.id })
+    const ownedByGuest = (stay: { id: string; request_id: string | null }) => db.batch([
+      db.prepare('UPDATE stays SET user_id = ? WHERE id = ?').bind(guest.response!.user.id, stay.id),
+      db.prepare('UPDATE requests SET user_id = ? WHERE id = ?').bind(guest.response!.user.id, stay.request_id),
+    ])
+    await ownedByGuest(ended)
     const justEnded = await createStay(db, env, access, { product_id: homeId, idempotency_key: 'just-ended-stay', check_in_date: localDateAt(new Date(now - DAY), ZONE),
       check_out_date: localDateAt(new Date(now), ZONE), adults: 1, guest_name: 'Rhea', guest_email: 'rhea@provider-proof.com', total_minor: 15_000 })
-    const freshInvite = await createGuestThreadInvite(db, env, { organizationId: ORG, threadId: justEnded.request_id!, actorUserId: OWNER })
-    await claimGuestThreadInvite(db, { token: new URL(freshInvite.url).pathname.split('/').at(-1)!, userId: guest.response!.user.id })
+    await ownedByGuest(justEnded)
     const futureReview = (await read('upcoming')).cards.find(card => card.id === `review-invitation:${justEnded.request_id}`)
     assert.equal(futureReview, undefined, 'Healthy review dispatch stays in the scheduler')
     const dueReviewId = `review-invitation:${ended.request_id}`

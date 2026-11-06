@@ -4,7 +4,7 @@ import { assertAssignedBookingAccess, memberAccessPrincipal, resolveMembership, 
 import { getGuestRequest } from '~/server/domain/requests'
 import { isValidInstant } from '~/utils/timezone'
 import { messageText, messagingError } from './guest-message-schedule'
-import { operationDedupeKey, sendScheduledGuestReply, type ReplyOutcome } from './guest-threads/operations'
+import { operationDedupeKey, sendScheduledGuestReply, type OperationOutcome } from './guest-threads/operations'
 import { findEntryByDedupeKey } from './guest-threads/entries'
 import { publishGuestInboxThreadEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { ChannexError } from '~/server/integrations/channex/client'
@@ -118,11 +118,11 @@ export async function cancelSendLaterMessage(db: DbClient, principal: MemberAcce
 type SendEnv = CloudflareEnv & Parameters<typeof sendScheduledGuestReply>[1]['env'] & GuestInboxPublicationEnv
 type Outcome = { status: 'failed' | 'needs_review'; reason: string; error_code: string; error_field: string }
 
-function failure(outcome: Exclude<ReplyOutcome, { ok: true }>): Outcome {
+function failure(outcome: Exclude<OperationOutcome, { ok: true }>): Outcome {
   switch (outcome.reason) {
     case 'thread_not_found': return { status: 'failed', reason: 'The conversation no longer exists.', error_code: 'THREAD_NOT_FOUND', error_field: 'threadId' }
     case 'source_not_found': return { status: 'failed', reason: 'The conversation’s booking no longer exists.', error_code: 'SOURCE_NOT_FOUND', error_field: 'threadId' }
-    case 'guest_invite_required': return { status: 'failed', reason: 'The guest has no email and has not joined the conversation through an invite.', error_code: outcome.code, error_field: outcome.field }
+    case 'guest_unreachable': return { status: 'failed', reason: outcome.message, error_code: outcome.code, error_field: outcome.field }
     case 'empty_body': return { status: 'failed', reason: 'The message has no text.', error_code: 'EMPTY_MESSAGE', error_field: 'body' }
     case 'missing_idempotency_key': return { status: 'failed', reason: 'The send had no idempotency key.', error_code: 'MISSING_IDEMPOTENCY_KEY', error_field: 'idempotencyKey' }
     case 'invalid_photo': return { status: 'failed', reason: outcome.message, error_code: 'INVALID_PHOTO', error_field: 'photos' }

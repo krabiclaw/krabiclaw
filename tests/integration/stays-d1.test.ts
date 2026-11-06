@@ -21,7 +21,6 @@ import accountStayRoute from '../../server/api/account/stays/[activityId].get.ts
 import paymentReturnRoute from '../../server/api/public/payments/[paymentId]/return.post.ts'
 import { tokenHash } from '../../server/domain/payments/buyer.ts'
 import { createLocation, updateLocation } from '../../server/utils/location-management.ts'
-import { claimGuestThreadInvite, createGuestThreadInvite } from '../../server/domain/guest-threads/invites.ts'
 import publicLocationsRoute from '../../server/api/public/locations.get.ts'
 import publicLocationRoute from '../../server/api/public/locations/[slug].get.ts'
 import publicPageRoute from '../../server/api/public/page.get.ts'
@@ -1498,8 +1497,8 @@ test('a business’s site shows a guest the stay its signed link names, from any
     await updateStayHome(env, db, manager, cabin.id, guide)
     await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { details_mode: 'merge', details: { pets_allowed: false, stairs_required: true, stairs_required_details: 'Two steps at the entrance.' } } })
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'site-stay', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest, guest_email: 'ana@example.com' })
-    // A manual, pay-on-arrival stay is confirmed before collecting money. Its
-    // existing guest invite gives the Better Auth guest their own stay.
+    // A manual, pay-on-arrival stay is confirmed before collecting money. The
+    // Better Auth guest who bought it owns it, as a captured checkout leaves it.
     const signIn = async () => {
       const signed = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
       return { id: signed.response!.user.id, cookie: signed.headers.getSetCookie().map(value => value.split(';')[0]).join('; ') }
@@ -1507,9 +1506,10 @@ test('a business’s site shows a guest the stay its signed link names, from any
     const booker = await signIn()
     const otherGuest = await signIn()
     assert(stay.request_id)
-    const invite = await createGuestThreadInvite(db, env, { organizationId: ORG, threadId: stay.request_id, actorUserId: OWNER })
-    const token = new URL(invite.url).pathname.split('/').at(-1)!
-    assert.equal((await claimGuestThreadInvite(db, { token, userId: booker.id })).thread_id, stay.request_id)
+    await db.batch([
+      db.prepare('UPDATE stays SET user_id = ? WHERE id = ?').bind(booker.id, stay.id),
+      db.prepare('UPDATE requests SET user_id = ? WHERE id = ?').bind(booker.id, stay.request_id),
+    ])
     // The guest's stay is read by its activity ID: its conversation's, as the account reads it.
     const activityId = stay.request_id ?? stay.id
     // The link the confirmation email and the paid return carry, signed with the site's secret.
