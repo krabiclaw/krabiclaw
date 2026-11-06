@@ -151,97 +151,71 @@ never changes it.
 
 ### Today and Upcoming
 
-Today is the viewer's current work and booked activity. Upcoming is the same
-card list for future occurrences and preparation tied to real dates. Both use
-the existing `TodayAgendaCard` presentation: one small time or status line,
-headline, location or context, image and badge, with the entire card a link.
-An undated task states its status rather than inventing an appointment time.
+Business Today and Upcoming are a single column of actionable goals and
+opportunities. They do not duplicate Calendar's booked activity. Today shows
+current customer work, delivery/publication failures and continuously selected
+growth opportunities. Upcoming shows explicitly planned or deferred work at its
+action time. Passive reservations, ongoing stays and healthy background sends
+remain in their canonical Calendar, Inbox and automation surfaces.
 
-Today and Upcoming each render one list in the canonical server order, without
-category headings, separate groups or hosting accordions. Today puts due work
-and dated activity first, then optional work, then ongoing hosting context so
-it cannot displace an action from the first page. Item status and time stay on
-the item. Priority controls sit below the list without a category wrapper.
-Completed work leaves the shared action feed and consumes none of its display
-or pagination budget. Work is due when a recorded fact makes it so: a
-booking awaiting the owner's decision, an unanswered guest message about a live
-(pending or confirmed, not yet ended) commitment, an unanswered message or
-contact form from the last seven days, a failed or uncertain scheduled send,
-a failed review invitation, or a failed publication. Inbox state
-alone is not due work: an older unanswered inquiry with no live commitment
-stays in Messages and is not mandatory on Today.
+The server supplies every card's required `presentation.type` in the shared
+Today contract. `TodayAgendaCard` renders that selection without choosing a
+business policy itself:
 
-Optional work comes only from capabilities Today can recognise as finished —
-replying to a guest (`guest_thread.reply`) and publishing a blog draft
-(`article.publish`) — and only when the owner has a reason for it: an active
-priority whose words the work shares, their own earlier choice to do it, or a
-deferral that has come due. At most three are shown; a day with no such work
-shows none. Analytics, advertising, plan offers, photos and social shares do not
-earn a card by existing.
+- `minimal`: an ordinary customer reply, with a short horizontal composition;
+- `compact`: existing draft/gap work or a delivery/publication failure;
+- `detailed`: a pending customer decision or existing content tied to an explicit
+  owner goal, with centered artwork and a prominent title;
+- `opportunity`: new growth work or a prerequisite such as connecting a channel.
 
-Owners and admins state priorities on Today; they are `organization_goals`.
-Every suggested card carries its reason and, for owners and admins, the
-evidence revision it was suggested on. "I'll do this", "Later", "Dismiss" and
-"Correct" save `recommendation_feedback` against that evidence and the matched
-priority. A current dismissal or correction removes the card without touching
-the conversation or article; a deferral moves it to its chosen day, where
-Upcoming shows it at that action time ahead of the occurrence it prepares for.
-When the evidence, the priority or the deferral date changes, the decision no
-longer applies and the card returns with the reason it returned. Upcoming
-orders by action time, then occurrence time, and the page keeps the server's
-order.
+The geometry, typography hierarchy, radii and shadows come from the extracted
+Airbnb Detailed, Condensed, Minimal and Opportunity components. KrabiClaw keeps
+its own font, icons and actual tenant images. Airbnb's private backend selection
+policy was not extracted; the above policy is KrabiClaw's explicit selection.
+Cards are whole links to the existing action/detail/editor. There are no
+category sections, repeated navigation chevrons, inline editors or completed
+history. A small options menu exposes the supporting reason and existing
+accept/defer/dismiss/correct feedback. Business goals remain editable below the
+list in a collapsed disclosure. Both views keep the server order.
 
-Assigned service members see only their own authorized appointments and related
-work. Lodging members see only
-the arrivals and departures at homes assigned to them through Better Auth
-members or teams. Owners and admins also see guests currently staying, between
-their arrival and departure days; these are not extra cleanings for assigned
-members. A departure notes when another noncancelled stay at that same home
-arrives on its checkout date.
+Growth comes from `readBusinessRecommendations`: the organization's vertical,
+explicit owner strategy, canonical content, native analytics, connected provider
+results and actual bookable capacity. Missing measurements never mean zero
+customers. Blog/social opportunities remain available with little history.
+Draft publication, article distribution and payment/calendar prerequisites lead
+to their existing editors/settings. Eligibility is continuous, with no midnight
+release, game rewards or new task ledger.
 
-The card is an entrance to its data owner, never a second editor or task
-database. A reply opens its conversation; a decision opens its booking; a
-draft opens its article; a failed publication opens its publishing controls.
+Existing `organization_goals` and evidence-bound `recommendation_feedback` stay
+canonical. A dismissal/correction suppresses that evidence; a deferral moves the
+card to its chosen time. Source/goal changes or an elapsed deferral reconcile
+eligibility. Feedback never completes or mutates the underlying conversation,
+article or automation. Assigned members retain their canonical authorization;
+Calendar and Inbox continue to show authorized booking activity.
 
-Current domain state determines whether work remains outstanding. Reading a
-notification does not complete it; several notifications for one concern make
-one card. Resolved work disappears, while unresolved work survives midnight.
-A successful business reply, including a property reply mirrored from Airbnb,
-or a published draft is recognised on the next read. A delayed mirror of an old
-reply cannot answer a newer guest message, and a scheduled check-in template
-does not answer an unrelated question. Waiting age starts at the first still
-unanswered guest message, rather than restarting for every follow-up.
+Current domain state clears work: a successful business reply, including a
+mirrored property reply, or publication removes its card on the next read. A
+scheduled template cannot answer an unrelated guest question. Reading a
+notification cannot finish work. Failures remain actionable until their
+canonical outcome changes. Review invitations and scheduled correspondence run
+without an owner task when healthy; schedulers, capture and delivery records
+remain intact.
 
-Upcoming includes actual pending scheduled communications and delayed replies,
-with their due time and automatic or member responsibility, alongside booked
-activity and explicitly deferred work. A sent, cancelled or superseded schedule
-no longer appears as future work. Failed and uncertain sends belong in Today
-until their canonical state changes; reading an alert does not clear them.
-An eligible unsent automatic review invitation is scheduled work; it does not
-ask the owner to perform an action that only the automation currently owns.
-Booking occurrences retain their own location's timezone. Future bookings
-needing a decision belong in Today now and retain their actual booking date.
+The page re-reads on relevant dashboard invalidations, including
+`business.changed` after source writes, focus, due instants and the existing
+visible-page minute boundary. Provider/analytics failures remain visible.
+Personal-account Today/Upcoming continue to project the personal agenda with
+compact cards; this is separate from the business goal feed.
 
-Canonical conversation, booking and delivery records retain completed outcomes.
-The shared Today action feed excludes finished work for every consumer,
-including web and native. Clients render that projection rather than filtering
-completion history independently. A successful reply or scheduled send clears
-its action; a failed or uncertain outcome remains actionable. A booking's
-actual current or future visit remains on its agenda after the decision is
-finished. Completed work cannot push a current action behind Load more.
-Today re-reads on relevant dashboard invalidations, when the page regains focus,
-and when time passing makes an existing due item or day boundary current.
-
-Stay cards read the canonical agenda and open `O/bookings/stay/:stayId`.
-Booked activity opens beneath Today: desktop keeps the agenda beside the
+Calendar stay cards read the canonical agenda and open `O/bookings/stay/:stayId`.
+Booked activity uses the existing detail layout: desktop keeps the agenda beside the
 bounded, vertical record summary; below the pane breakpoint the record is one
 screen and Close returns to the same range and filters. Calendar and Messages
 use the same detail components inside their existing context. Record summaries
 begin with guest identity, without a resource cover. Resource photography
 belongs to its catalog and website surfaces.
-The existing stay domain owns homes, assignments, nights and payments; Today
-projects its arrivals and departures rather than creating a lodging service or
-second lifecycle. Assigned members' cards show the guest's first name, party size, home,
+The existing stay domain owns homes, assignments, nights and payments; Calendar
+projects its arrivals and departures. Assigned members' agenda cards show the guest's first name, party size, home,
 location and check-in or checkout time. Access to each stay and its conversation
 is authorized by the existing member or team assignment. Owners receive stay
 conversation work through the same guest inbox as other booked activity.

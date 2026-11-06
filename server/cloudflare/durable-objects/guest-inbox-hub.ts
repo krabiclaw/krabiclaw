@@ -47,7 +47,7 @@ async function canReceive(env: GuestInboxHubEnv, attachment: InboxSocketAttachme
   if (attachment.organizationId !== event.organizationId) return false
   // Scope changes carry no resource or person identity. Former assignees must
   // learn to re-read too, even though resource events no longer reach them.
-  if (event.type === 'access.changed') return true
+  if (event.type === 'access.changed' || event.type === 'business.changed') return true
   if (event.type === 'team_thread.access_ended') {
     if (event.targetUserId !== attachment.userId) return false
     // An old keyed retry must not evict someone who has since been re-added.

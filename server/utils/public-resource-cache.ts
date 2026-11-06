@@ -3,6 +3,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { purgeOrganizationKvCache } from '~/server/utils/edge-cache'
 import { syncOrganizationSearchIndex } from '~/server/utils/public-search'
 import { isNonProductionHost, normalizeHost } from '~/server/utils/tenant-hosts'
+import { publishBusinessInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 
 // KV read-through cache for public shell and page resource queries.
 // Mirrors edge-cache.ts's HTML cache shape, but keyed by organizationId + resource
@@ -263,7 +264,7 @@ export async function purgePublicResourceCacheNow(
   env: unknown,
   organizationId: string,
 ): Promise<void> {
-  const maybeEnv = env as {
+  const maybeEnv = env as GuestInboxPublicationEnv & {
     DB?: DbClient
     ORGANIZATION_CACHE?: KVNamespace
     NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN?: string
@@ -286,4 +287,5 @@ export async function purgePublicResourceCacheNow(
     execute(db, invalidation.query, invalidation.params),
     purgeOrganizationCaches(db, kv, organizationId, maybeEnv.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN),
   ])
+  await publishBusinessInvalidation(maybeEnv, organizationId)
 }

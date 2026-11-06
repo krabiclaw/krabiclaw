@@ -156,9 +156,10 @@ export function usePostEditor(organizationId: string, locationId: Ref<string | n
     const res = await dashboardApi<{ post: ApiRecord }>(`/api/editor/organizations/${organizationId}/posts/${postId}`, { validate: isPostResponse })
     return res.post
   }
-  async function reload(postId: string): Promise<ApiRecord> {
+  async function reload(postId: string, preserveEdits = false): Promise<ApiRecord> {
     const post = await read(postId)
-    loadFrom(post)
+    if (preserveEdits && isDirty.value) record.value = post
+    else loadFrom(post)
     return post
   }
 
@@ -250,9 +251,7 @@ export function usePostEditor(organizationId: string, locationId: Ref<string | n
       await dashboardApi(`/api/editor/organizations/${organizationId}/post-publications/${publicationId}/reconcile`, {
         method: 'POST', body: {}, validate: (value): value is ApiRecord => isRecord(value),
       })
-      const current = await read(postId)
-      if (isDirty.value) record.value = current
-      else loadFrom(current)
+      await reload(postId, true)
       return true
     } catch (err) {
       error.value = getErrorMessage(err, 'Failed to check the publication')

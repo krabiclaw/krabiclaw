@@ -42,7 +42,12 @@ export interface AccessInvalidation extends DashboardInvalidationBase {
   type: 'access.changed'
 }
 
-export type DashboardInvalidation = GuestThreadInvalidation | NotificationInvalidation | StayInvalidation | TeamThreadInvalidation | TeamThreadAccessEnded | AccessInvalidation
+/** Source work changed; each viewer re-reads its own authorized business scope. */
+export interface BusinessInvalidation extends DashboardInvalidationBase {
+  type: 'business.changed'
+}
+
+export type DashboardInvalidation = GuestThreadInvalidation | NotificationInvalidation | StayInvalidation | TeamThreadInvalidation | TeamThreadAccessEnded | AccessInvalidation | BusinessInvalidation
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -54,7 +59,7 @@ export function isDashboardInvalidation(value: unknown): value is DashboardInval
     || typeof value.organizationId !== 'string' || !value.organizationId
     || typeof value.occurredAt !== 'string' || !value.occurredAt) return false
 
-  if (value.type === 'access.changed') return Object.keys(value).every(key => ['type', 'eventId', 'organizationId', 'occurredAt'].includes(key))
+  if (value.type === 'access.changed' || value.type === 'business.changed') return Object.keys(value).every(key => ['type', 'eventId', 'organizationId', 'occurredAt'].includes(key))
   if (value.type === 'team_thread.changed') return typeof value.teamThreadId === 'string' && Boolean(value.teamThreadId)
   if (value.type === 'team_thread.access_ended') return typeof value.teamThreadId === 'string' && Boolean(value.teamThreadId)
     && typeof value.targetUserId === 'string' && Boolean(value.targetUserId)

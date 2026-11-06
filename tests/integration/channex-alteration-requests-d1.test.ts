@@ -11,6 +11,7 @@ import { mirrorChannexThread } from '../../server/domain/guest-threads/channel-m
 import { runAlterationRequestFeed } from '../../server/domain/guest-threads/stay-change-requests.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
+import { firstUnansweredGuestEntryTimes } from '../../server/domain/guest-threads/repository.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import todayRoute from '../../server/api/dashboard/today.get.ts'
 import type { TodayFeedPayload } from '../../shared/dashboard-today.ts'
@@ -105,7 +106,7 @@ async function boot() {
     name: 'alteration-requests-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
-    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, MEDIA_BUCKET: { type: 'r2' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'alteration-requests-proof', exportName: 'Hub' } },
+    env: { DB: { type: 'd1' }, AI: { type: 'ai' }, ORGANIZATION_CACHE: { type: 'kv' }, MEDIA_BUCKET: { type: 'r2' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'alteration-requests-proof', exportName: 'Hub' } },
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
@@ -187,7 +188,8 @@ test('a guest change request lands once in the stay conversation, survives a rel
       after: { whenLabel: 'Jan 10, 2027 – Jan 14, 2027', partySize: 3, totalLabel: '$600.00', assignedMemberId: null, assignedMemberName: null },
     })
     assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-13', adults: 2, total_minor: 45_000, version: 1 })
-    assert.deepEqual((await today()).cards.map(card => card.id), [`attention:${stay.request_id}`])
+    const growthCardIds = ['recommendation:post.create:org', 'recommendation:social.connect:org', 'recommendation:article.create:org']
+    assert.deepEqual((await today()).cards.map(card => card.id), [`attention:${stay.request_id}`, ...growthCardIds])
 
     // A member who cannot change stays is refused before Channex hears anything.
     await assert.rejects(answer(db, env, stay.request_id, request!.id, 'accept_change', false), (error: unknown) => (error as { data?: { code?: string } }).data?.code === 'STAY_ROLE_REQUIRED')
@@ -200,17 +202,21 @@ test('a guest change request lands once in the stay conversation, survives a rel
     // Airbnb's confirmed revision is the change: landed and acknowledged, the stay now as the guest asked.
     assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-14', adults: 3, total_minor: 60_000, version: 2 })
     assert.deepEqual(channex.acked, ['rev-1', 'rev-2'])
-    const answered = (await getGuestThreadDetail(db, stay.request_id, ORG))!.entries.find(entry => entry.id === request!.id)!.bookingChange!
+    assert.equal(await db.prepare('SELECT conversation_state FROM requests WHERE id = ?').bind(stay.request_id).first('conversation_state'), 'needs_attention')
+    assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [stay.request_id])).has(stay.request_id), true)
+    const answeredThread = (await getGuestThreadDetail(db, stay.request_id, ORG))!
+    assert.equal(answeredThread.conversationState, 'needs_attention', 'the inbox preserves the separate unanswered message after a booking decision')
+    const answered = answeredThread.entries.find(entry => entry.id === request!.id)!.bookingChange!
     assert.equal(answered.status, 'accepted')
     // The accepted change is recorded above; the guest's separate unanswered
     // message remains the only action, rather than adding completion history.
-    assert.deepEqual((await today()).cards.map(card => card.id), [`attention:${stay.request_id}`])
+    assert.deepEqual((await today()).cards.map(card => card.id), [`attention:${stay.request_id}`, ...growthCardIds])
 
     // Answering again, or the feed seeing it resolved, changes nothing and sends nothing to Channex.
     assert.equal((await answer(db, env, stay.request_id, request!.id, 'accept_change')).ok, true)
     assert.deepEqual(await runAlterationRequestFeed(db, env), { recorded: 0, reconciled: 0 })
     assert.equal(channex.resolutions.length, 1)
-    assert.deepEqual((await today()).cards.map(card => card.id), [`attention:${stay.request_id}`])
+    assert.deepEqual((await today()).cards.map(card => card.id), [`attention:${stay.request_id}`, ...growthCardIds])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

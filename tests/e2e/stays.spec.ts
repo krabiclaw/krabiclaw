@@ -179,7 +179,12 @@ test('a responsible home team reads its stays as turnovers on every surface unti
     const today = await memberContext.request.get(api('today'))
     await expectStatus(today, 200)
     const todayBody = await today.json() as import('../../shared/dashboard-today').TodayFeedPayload
-    expect(todayBody.cards.map(card => card.id)).toContain(`stay:${stay.id}:arrival`)
+    expect(todayBody.cards).toEqual([])
+    const memberAgenda = await memberContext.request.get(api(`agenda?from=${localDay(0)}&to=${localDay(3)}`))
+    await expectStatus(memberAgenda, 200)
+    const memberAgendaBody = await memberAgenda.json() as { items: Array<{ id: string; stayId: string }> }
+    expect(memberAgendaBody.items.find(item => item.id === `stay:${stay.id}:arrival`)).toMatchObject({ stayId: stay.id })
+    expect(leaks(memberAgendaBody)).toEqual([])
     expect(leaks(todayBody)).toEqual([])
     // The guest's conversation, scheduled messages, money and changes are the managers'.
     await expectStatus(await memberContext.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${stay.request_id}`), 404)
@@ -282,14 +287,11 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
   const overlap = await call('create_stay', { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 1, guest_name: 'Bo', total_minor: 100_00, idempotency_key: `${slug}-b` })
   expect(overlap.error).toContain('Another stay or a linked calendar already holds one of these nights')
 
-  // Today lists the arrival and opens the stay.
-  await page.goto(`/dashboard/${slug}`)
-  // Today's card names the guest by first name and the moment: arriving, at the home's check-in time.
-  const arrival = page.getByRole('link', { name: /3:00\sPM Ana arrives today with 2 guests/ })
-  await expect(arrival).toHaveAttribute('href', `/dashboard/${slug}/bookings/stay/${stay.data!.stay.id}`)
-  const [cardTelemetry] = await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/telemetry' && response.request().postDataJSON()?.action === 'today_card_click'), arrival.click()])
-  await expectStatus(cardTelemetry, 200)
-  expect(new URL(cardTelemetry.url()).searchParams.get('org')).toBe(slug)
+  // Calendar owns arrival/departure activity; Today is the actionable quest feed.
+  await page.goto(`/dashboard/${slug}/calendar?view=list`)
+  const arrival = page.locator(`a[href="/dashboard/${slug}/calendar/${checkIn}/stay/${stay.data!.stay.id}"]`)
+  await expect(arrival).toContainText('Ana')
+  await arrival.click()
   await expect(page.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
 
   await page.getByRole('textbox', { name: 'Amount (THB)' }).fill('100')
@@ -3614,7 +3616,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
 })
 
 for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
-  test(concern === 'arrival-guide' ? 'a host authors a private arrival guide and public house rules with scoped access' : 'a cleaner sees only assigned-home arrivals and departures on Today and Upcoming', async ({ page, browser, baseURL }) => {
+  test(concern === 'arrival-guide' ? 'a host authors a private arrival guide and public house rules with scoped access' : 'an assigned member sees only assigned-home arrivals and departures in Calendar', async ({ page, browser, baseURL }) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates local stays and uses disposable actors')
   await loginAs(page.request, baseURL!, 'user-e2e-lodging-host')
@@ -4387,14 +4389,18 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expectStatus(todayResponse, 200)
       const today = await todayResponse.json() as import('../../shared/dashboard-today').TodayFeedPayload
       const arrivalPath = `/dashboard/${slug}/bookings/stay/${stays[0]!.id}`
-      expect(today.cards).toEqual([expect.objectContaining({ id: `stay:${stays[0]!.id}:arrival`, to: arrivalPath, priority: 'schedule', bookingKind: 'stay',
-        headline: 'Ana arrives today with 2 guests', description: 'Assigned Cabin', locationId: homes[0]!.location_id })])
+      expect(today.cards).toEqual([])
       expect(today.locations.map(location => location.id)).toEqual([homes[0]!.location_id])
       const upcomingResponse = await cleaner.request.get(api('today'), { params: { range: 'upcoming', from: localDay(1), to: localDay(7) } })
       await expectStatus(upcomingResponse, 200)
-      const upcoming = await upcomingResponse.json() as import('../../shared/dashboard-today').TodayFeedPayload
-      expect(upcoming.cards).toEqual([expect.objectContaining({ id: `stay:${stays[0]!.id}:departure`, to: arrivalPath, priority: 'schedule', bookingKind: 'stay',
-        headline: 'Ana leaves in 2 days with 2 guests', description: 'Assigned Cabin', locationId: homes[0]!.location_id })])
+      expect((await upcomingResponse.json() as import('../../shared/dashboard-today').TodayFeedPayload).cards).toEqual([])
+      const assignedAgendaResponse = await cleaner.request.get(api('agenda'), { params: { from: localDay(0), to: localDay(7) } })
+      await expectStatus(assignedAgendaResponse, 200)
+      const assignedAgenda = await assignedAgendaResponse.json() as { items: Array<{ id: string; to: string; stayId: string; locationId: string; resourceTitle: string }> }
+      expect(assignedAgenda.items).toEqual([
+        expect.objectContaining({ id: `stay:${stays[0]!.id}:arrival`, to: arrivalPath, stayId: stays[0]!.id, resourceTitle: 'Assigned Cabin', locationId: homes[0]!.location_id }),
+        expect.objectContaining({ id: `stay:${stays[0]!.id}:departure`, to: arrivalPath, stayId: stays[0]!.id, resourceTitle: 'Assigned Cabin', locationId: homes[0]!.location_id }),
+      ])
       const denied = await cleaner.request.get(api(`stays/${stays[1]!.id}`))
       expect(denied.status()).toBe(404)
       const deniedLocation = await cleaner.request.get(api('today'), { params: { locationId: homes[1]!.location_id } })
@@ -4416,18 +4422,19 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       })
       await cleanerPage.setViewportSize({ width: 390, height: 844 })
       expect((await cleanerPage.goto(`/dashboard/${slug}`))?.status()).toBe(200)
-      const arrival = cleanerPage.getByTestId('today-card')
-      await expect(arrival).toHaveCount(1)
-      await expect(arrival).toHaveAttribute('href', arrivalPath)
+      await expect(cleanerPage.getByTestId('today-card')).toHaveCount(0)
+      await cleanerPage.goto(`/dashboard/${slug}/calendar?view=list`)
+      const arrival = cleanerPage.locator(`a[href="/dashboard/${slug}/calendar/${localDay(0)}/stay/${stays[0]!.id}"]`)
+      await expect(arrival).toContainText('Ana')
       await arrival.click()
       await expect(cleanerPage.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
       await expect(cleanerPage.getByRole('button', { name: 'Cancel stay', exact: true })).toHaveCount(0)
       await expect(cleanerPage.getByRole('button', { name: 'Record payment', exact: true })).toHaveCount(0)
       await cleanerPage.goto(`/dashboard/${slug}?range=upcoming`)
-      const departure = cleanerPage.getByTestId('today-card')
-      await expect(departure).toHaveCount(1)
-      await expect(departure).toContainText('Ana leaves in 2 days with 2 guests')
-      await expect(departure).toHaveAttribute('href', `${arrivalPath}?range=upcoming`)
+      await expect(cleanerPage.getByTestId('today-card')).toHaveCount(0)
+      await cleanerPage.goto(`/dashboard/${slug}/calendar?view=list`)
+      const departure = cleanerPage.locator(`a[href="/dashboard/${slug}/calendar/${localDay(2)}/stay/${stays[0]!.id}"]`)
+      await expect(departure).toContainText('Ana')
       await departure.click()
       await expect(cleanerPage.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
 

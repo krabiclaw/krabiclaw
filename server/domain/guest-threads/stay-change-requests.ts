@@ -69,7 +69,7 @@ async function recordOutcome(db: DbClient, env: AnswerEnv, entry: GuestThreadEnt
     body: actorUserId ? answer.host : proposal.initiated_by === 'guest' ? answer.guest : answer.airbnb,
     payloadJson: { requestId: entry.id, outcome },
   })
-  await updateThreadProjectionIfLatestEntry(db, entry.request_id, decision.id, { conversationState: 'resolved' })
+  await updateThreadProjectionIfLatestEntry(db, entry.request_id, decision.id, { conversationState: 'resolved', preserveUnansweredGuestMessages: true })
   await publishGuestInboxThreadEvent(env, db, { threadId: entry.request_id, type: 'thread.changed' })
 }
 

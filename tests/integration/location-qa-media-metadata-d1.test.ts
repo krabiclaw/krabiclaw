@@ -27,8 +27,9 @@ const NOW = '2026-09-28T00:00:00.000Z'
 async function boot() {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'location-qa-media-metadata-proof', compatibilityDate: '2024-11-01',
-    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
-    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' } },
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
+    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'location-qa-media-metadata-proof', exportName: 'Hub' } },
   } }] })
   const db = await runtime.getD1Database('DB')
   const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))

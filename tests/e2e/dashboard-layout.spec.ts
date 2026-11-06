@@ -1578,7 +1578,15 @@ test.describe('dashboard pane hierarchy', () => {
     const last = cards.last()
     await expect(last).toContainText(feed.cards.at(-1)!.headline)
     const finalBody = (await body.boundingBox())!
-    // The owner's priority control follows the list.
+    // Business goals now end the list as a collapsed disclosure. Check both
+    // states against the same panel boundary; the old always-visible form is gone.
+    const goals = panel.getByTestId('today-priorities')
+    await expect(goals.locator(':scope > summary')).toBeInViewport({ ratio: 1 })
+    const disclosure = (await goals.boundingBox())!
+    expect(finalBody.y + finalBody.height - disclosure.y - disclosure.height).toBeCloseTo(16, 0)
+    await goals.locator(':scope > summary').click()
+    await page.mouse.wheel(0, await body.evaluate(element => element.scrollHeight))
+    await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
     const priorityForm = panel.getByTestId('today-priorities').locator('form')
     await expect(priorityForm).toBeInViewport({ ratio: 1 })
     const finalItem = (await priorityForm.boundingBox())!

@@ -109,18 +109,22 @@ function unansweredGuestMessagesSql(threadId: string, afterCancellation = false)
  * an absolute received instant for an offset-free provider timestamp. Use the
  * original provider instant when it has an offset, otherwise local receipt.
  */
-export async function firstUnansweredGuestEntryTimes(db: DbClient, organizationId: string, threadIds: readonly string[]): Promise<Map<string, string>> {
+export async function firstUnansweredGuestEntryTimes(db: DbClient, organizationId: string, threadIds: readonly string[], needsResponse: (text: string, receivedAt: string) => boolean = () => true): Promise<Map<string, string>> {
   const times = new Map<string, string>()
   for (let index = 0; index < threadIds.length; index += 200) {
-    const rows = await queryAll<{ request_id: string; occurred_at: string }>(db, `
-      SELECT guest_entry.request_id, MIN(CASE WHEN guest_entry.event_name = 'channel.message_mirrored' AND ${offsetSql(providerTimeSql('guest_entry'))}
-          THEN strftime('%Y-%m-%dT%H:%M:%fZ', ${providerTimeSql('guest_entry')}) ELSE guest_entry.occurred_at END) AS occurred_at
+    const rows = await queryAll<{ request_id: string; occurred_at: string; body: string | null }>(db, `
+      SELECT guest_entry.request_id, CASE WHEN guest_entry.kind = 'submission' THEN json_extract(r.payload_json, '$.message') ELSE guest_entry.body END AS body, CASE WHEN guest_entry.event_name = 'channel.message_mirrored' AND ${offsetSql(providerTimeSql('guest_entry'))}
+          THEN strftime('%Y-%m-%dT%H:%M:%fZ', ${providerTimeSql('guest_entry')}) ELSE guest_entry.occurred_at END AS occurred_at
         FROM activity_entries guest_entry JOIN requests r ON r.id = guest_entry.request_id AND r.organization_id = ?
        WHERE guest_entry.request_id IN (SELECT value FROM json_each(?)) AND guest_entry.actor_kind = 'guest'
          AND (guest_entry.kind = 'message' OR (guest_entry.kind = 'submission' AND r.kind = 'contact'))
          AND NOT ${businessReplyAfterSql('guest_entry')}
-       GROUP BY guest_entry.request_id`, [organizationId, d1JsonStringSet(threadIds.slice(index, index + 200))])
-    for (const row of rows) times.set(row.request_id, row.occurred_at)
+       ORDER BY guest_entry.occurred_at, guest_entry.id`, [organizationId, d1JsonStringSet(threadIds.slice(index, index + 200))])
+    for (const row of rows) {
+      if (!needsResponse(row.body ?? '', row.occurred_at)) continue
+      const previous = times.get(row.request_id)
+      if (!previous || row.occurred_at < previous) times.set(row.request_id, row.occurred_at)
+    }
   }
   return times
 }

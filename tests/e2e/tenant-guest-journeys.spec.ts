@@ -338,11 +338,11 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const todayBeforePayload = await todayBefore.json() as TodayFeedPayload
     expect(todayBeforePayload.cards.some(card => card.id === `attention:${body.booking_id}`)).toBe(false)
     const day = persistedBooking.bookingDate
-    const isUpcoming = day > todayBeforePayload.resolvedAt.slice(0, 10)
-    const scheduleParams = isUpcoming ? { org: wheel.slug, range: 'upcoming', from: day, to: day } : { org: wheel.slug }
-    const scheduleBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: scheduleParams })
+    // Calendar owns confirmed commitments; quests do not repeat its agenda.
+    const scheduleParams = { org: wheel.slug, from: day, to: day }
+    const scheduleBefore = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })
     expect(scheduleBefore.status(), await scheduleBefore.text()).toBe(200)
-    expect((await scheduleBefore.json() as TodayFeedPayload).cards.map(card => card.id)).toContain(`booking:${body.booking_id}`)
+    expect((await scheduleBefore.json() as { items: Array<{ id: string }> }).items.map(item => item.id)).toContain(`booking:${body.booking_id}`)
     const cancelURL = `${baseURL}/api/public/booking-requests/${body.booking_id}/cancel`
     const authHeaders = { ...headers, Authorization: `Bearer ${body.cancellation_token}` }
     const receiptURL = cancelURL.replace(/\/cancel$/, '')
@@ -366,9 +366,9 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const cancelEntries = cancelledLedger.entries.filter(entry => entry.event === 'booking.cancel')
     expect(cancelEntries).toHaveLength(1)
     expect(thread.stream.filter(item => item.type === 'event' && item.id === cancelEntries[0]!.id)).toMatchObject([{ text: expect.stringMatching(/ canceled the booking$/) }])
-    const scheduleAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: scheduleParams })
+    const scheduleAfter = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })
     expect(scheduleAfter.status(), await scheduleAfter.text()).toBe(200)
-    expect((await scheduleAfter.json() as TodayFeedPayload).cards.some(card => card.id === `booking:${body.booking_id}`)).toBe(false)
+    expect((await scheduleAfter.json() as { items: Array<{ id: string }> }).items.some(item => item.id === `booking:${body.booking_id}`)).toBe(false)
     expect((await request.post(cancelURL, {
       headers: { ...headers, Authorization: 'Bearer invalid-cancellation-token' },
     })).status()).toBe(404)
