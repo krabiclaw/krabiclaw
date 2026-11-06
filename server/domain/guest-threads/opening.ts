@@ -197,8 +197,11 @@ async function bookedVisit(db: DbClient, thread: BackfillThread): Promise<{ fact
   const guestName = (before.guest?.name ?? payload.guest?.name)?.trim()
   if (!guestName) throw new Error(`Conversation ${thread.id} has no guest name`)
   const place = asked.locationId ? await queryFirst<{ title: string }>(db, 'SELECT title FROM business_locations WHERE id = ? AND organization_id = ?', [asked.locationId, thread.organization_id]) : null
+  if (asked.locationId && !place) throw new Error(`Conversation ${thread.id} was booked at location ${asked.locationId}, which does not exist`)
   const common = { guestName, guestPhone: before.guest?.phone === undefined ? payload.guest?.phone ?? null : before.guest.phone, answers: payload.answers ?? [], startsAt: asked.startsAt, timezone: asked.timezone, partySize: asked.partySize }
-  const note = before.notes === undefined ? payload.notes ?? null : before.notes
+  // The submission always records its note, null when the guest left none.
+  const note = before.notes === undefined ? payload.notes : before.notes
+  if (note === undefined) throw new Error(`Conversation ${thread.id} does not record the guest's note`)
   if (thread.kind === 'reservation') {
     if (!place) throw new Error(`Reservation conversation ${thread.id} has no location`)
     // "4+" as asked. A change the guest accepted, or a move, sets the submission's flag

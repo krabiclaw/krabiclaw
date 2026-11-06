@@ -122,6 +122,14 @@ test('a reservation opens with its own message and the guest note, written once,
     await db.prepare("UPDATE activity_entries SET payload_json = ? WHERE id = 'accept'")
       .bind(JSON.stringify({ before: { recordKind: 'reservation', partySize: 2, partySizeIsMinimum: false, timezone: 'Asia/Bangkok', locationId: 'loc', productId: null } })).run()
     await assert.rejects(backfillOpeningMessages(db, ORG), /Conversation unrecorded has a change that does not record the time and party it was booked with/)
+    // Nor one whose submission has lost its note field, or whose place no longer exists: neither opens as if absent.
+    await db.prepare("UPDATE activity_entries SET payload_json = ? WHERE id = 'accept'")
+      .bind(JSON.stringify({ before: { recordKind: 'reservation', startsAt: '2026-11-04T05:00:00.000Z', partySize: 2, partySizeIsMinimum: false, timezone: 'Asia/Bangkok', locationId: 'loc', productId: null } })).run()
+    await db.prepare("UPDATE requests SET payload_json = json_remove(payload_json, '$.notes') WHERE id = 'unrecorded'").run()
+    await assert.rejects(backfillOpeningMessages(db, ORG), /Conversation unrecorded does not record the guest's note/)
+    await db.prepare("UPDATE requests SET payload_json = json_set(payload_json, '$.notes', json('null')) WHERE id = 'unrecorded'").run()
+    await db.prepare("UPDATE activity_entries SET payload_json = json_set(payload_json, '$.before.locationId', 'gone') WHERE id = 'accept'").run()
+    await assert.rejects(backfillOpeningMessages(db, ORG), /Conversation unrecorded was booked at location gone, which does not exist/)
   } finally {
     await runtime.dispose()
   }
