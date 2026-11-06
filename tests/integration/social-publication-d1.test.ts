@@ -695,12 +695,20 @@ test('publication: one result, one external post per target, and no blind resend
       await assert.rejects(reconcilePostPublication(env, 'org-a', String(current.id), null), (error: unknown) => HTTPError.isError(error) && error.status === 409)
       t.mock.timers.tick(CLAIM_STALE_MS + 1)
       assert.equal((await getPost(db, env, 'org-a', stalled.post.id))!.publications[0]!.can_reconcile, true)
+      // A renewal wins the first expiry CAS, but is stale again by this read.
+      const stamp = await db.prepare('SELECT updated_at FROM post_publications WHERE id=?').bind(current.id).first<string>('updated_at')
+      const renewed = new Date(new Date(stamp!).getTime() + 1).toISOString()
+      await db.prepare(`CREATE TRIGGER renew_stalled_claim BEFORE UPDATE OF state ON post_publications
+        WHEN OLD.id = '${current.id}' AND OLD.state = 'publishing' AND NEW.state = 'unknown' AND OLD.updated_at = '${stamp}'
+        BEGIN UPDATE post_publications SET updated_at = '${renewed}' WHERE id = OLD.id; SELECT RAISE(IGNORE); END`).run()
+      t.mock.timers.tick(CLAIM_STALE_MS + 1)
       assert.equal((await reconcilePostPublication(env, 'org-a', String(current.id), null)).state, 'published')
       const confirmed = (await getPost(db, env, 'org-a', stalled.post.id))!.publications[0]!
       assert.equal(confirmed.can_reconcile, false)
       assert.equal(confirmed.provider_post_id, null, 'Instagram container PUBLISHED is confirmed even before its media ID is recovered')
       assert.equal((await recommendations()).recommendations.some(item => item.operation === 'post.publish' && item.subjectId === stalled.post.id), false)
     } finally {
+      await db.prepare('DROP TRIGGER IF EXISTS renew_stalled_claim').run()
       meta.instagramResponseGate = null
       releaseFinal()
       await stalledPublish

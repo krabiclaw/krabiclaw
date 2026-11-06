@@ -133,6 +133,14 @@ test('Today continuously selects useful growth and customer work, preserves feed
     const originalReplay = await call<{ goal: { id: string } }>('POST', `/api/organizations/${ORG}/goals`, { ...originalGoalRequest, strategy: null }, 201)
     assert.equal(originalReplay.goal.id, originalGoal.goal.id)
     await call('PATCH', `/api/organizations/${ORG}/goals/${originalGoal.goal.id}`, { revision: originalGoal.goal.revision, status: 'archived' })
+    const { goal: adsGoal } = await call<{ goal: { id: string; revision: string } }>('POST', `/api/organizations/${ORG}/goals`, {
+      idempotencyKey: 'ads-focus', intent: 'Grow direct bookings through article ads', strategy: { channels: ['google_ads'] },
+    }, 201)
+    const adsFeed = await today()
+    assert.equal(adsFeed.cards.find(card => card.decision?.operation === 'google_ads.connect')?.decision?.goalId, adsGoal.id)
+    assert.equal(adsFeed.cards.find(card => card.decision?.operation === 'article.create')?.decision?.goalId, adsGoal.id)
+    assert.equal(adsFeed.cards.find(card => card.decision?.operation === 'google_ads.connect')?.to, '/dashboard/org/integrations')
+    await call('PATCH', `/api/organizations/${ORG}/goals/${adsGoal.id}`, { revision: adsGoal.revision, status: 'archived' })
     const { goal: paymentFocus } = await call<{ goal: { id: string; revision: string } }>('POST', `/api/organizations/${ORG}/goals`, {
       idempotencyKey: 'payment-focus', intent: 'Accept payment for direct bookings', strategy: { channels: [], payments: true },
     }, 201)
@@ -143,6 +151,10 @@ test('Today continuously selects useful growth and customer work, preserves feed
     // Real customer questions and promotional outreach must not be treated alike.
     await contactThread(db, 'old-inquiry', 'Can I reserve a kayak trip for tomorrow?', new Date(now - 20 * DAY).toISOString())
     await contactThread(db, 'recent-inquiry', 'Is the cabin pet friendly? We would bring a small dog.', new Date(now - 60 * 60_000).toISOString())
+    await contactThread(db, 'seo-question', 'Do your consultations cover SEO services agreements?', new Date(now - 60_000).toISOString())
+    await contactThread(db, 'invoice-question', 'Could you send an invoice for my booking on January 6, 2020?', new Date(now - 20 * DAY).toISOString())
+    const thanks = await appendEntry(db, { threadId: 'recent-inquiry', kind: 'message', actorKind: 'guest', channel: 'web', body: 'Thanks', dedupeKey: 'question-followed-by-thanks' })
+    await updateThreadProjectionIfLatestEntry(db, 'recent-inquiry', thanks.id, { conversationState: 'needs_attention' })
     await contactThread(db, 'promotional-inquiry', 'Could we feature your place on Tourist? It costs nothing. Send us your discounts and we will list your business.', new Date(now - 30 * 60_000).toISOString())
     await contactThread(db, 'future-dated-inquiry', `Can I book a cabin for January 6, ${new Date(now).getUTCFullYear() + 1}?`, new Date(now - 20 * DAY).toISOString())
     await contactThread(db, 'expired-dated-inquiry', `Can I book a cabin for January 6, ${new Date(now).getUTCFullYear() - 1}?`, new Date(now - 20 * DAY).toISOString())
@@ -165,6 +177,21 @@ test('Today continuously selects useful growth and customer work, preserves feed
     let feed = await today()
     assert.deepEqual(feed.priorities, [])
     assert.ok(ids(feed).includes('attention:recent-inquiry'))
+    assert.ok(ids(feed).includes('attention:seo-question'))
+    assert.ok(ids(feed).includes('attention:invoice-question'))
+    await db.prepare('UPDATE organization SET analytics_data_start_at=? WHERE id=?').bind(new Date(now - DAY).toISOString(), ORG).run()
+    await db.prepare('ALTER TABLE analytics_events RENAME TO unavailable_analytics_events').run()
+    try {
+      const unavailable = await today()
+      assert.ok(unavailable.cards.some(card => card.id === 'attention:recent-inquiry'))
+      assert.ok(unavailable.cards.some(card => card.decision?.operation === 'article.publish'))
+      assert.match(unavailable.recommendationIssues.join(' '), /analytics_events/)
+      assert.ok(unavailable.cards.some(card => card.reason?.includes('Website traffic measurement is currently unavailable.')))
+    } finally {
+      await db.prepare('ALTER TABLE unavailable_analytics_events RENAME TO analytics_events').run()
+      await db.prepare('UPDATE organization SET analytics_data_start_at=NULL WHERE id=?').bind(ORG).run()
+    }
+
     assert.equal(find(feed, 'attention:recent-inquiry')?.presentation.type, 'minimal')
     assert.equal(feed.cards.find(card => card.decision?.operation === 'article.publish' && card.decision.subjectId === sourdough.id)?.presentation.type, 'compact')
     assert.equal(find(feed, `attention:${stayThread}`)?.priority, 'attention', 'age alone does not hide a message about a live stay')
@@ -468,6 +495,27 @@ test('Today reads actual scheduled work and review outcomes: cancellation and su
     const tomorrow = await read()
     assert.equal(tomorrow.cards.find(card => card.id === `send-later:${failure.id}`)?.priority, 'attention', 'an unresolved send failure survives midnight')
     assert.equal(tomorrow.cards.some(card => card.id === dueReviewId), false, 'a sent invitation does not become pending work again on the next day')
+    // This isolated fixture now exercises the restaurant's actual slot policy.
+    await db.prepare("UPDATE organization SET vertical='restaurant' WHERE id=?").bind(ORG).run()
+    const opportunity = (await read()).cards.find(card => card.decision?.operation === 'post.create' && card.decision.subjectId.startsWith('["reservation"'))!
+    assert.ok(opportunity, 'Actual remaining reservation capacity provides one promotion opportunity')
+    const { current: _firstCurrent, goalId: _firstGoal, goalRevision: _firstGoalRevision, ...opportunityDecision } = opportunity.decision!
+    const dismiss = await call('PUT', `/api/organizations/${ORG}/recommendation-feedback`, { ...opportunityDecision, decision: 'dismiss' })
+    assert.ok(dismiss)
+    t.mock.timers.tick(Date.parse((JSON.parse(opportunity.decision!.subjectId) as string[])[2]!) - Date.now() + 1_000)
+    const replacement = (await read()).cards.find(card => card.decision?.operation === 'post.create')!
+    assert.ok(replacement)
+    assert.notEqual(replacement.decision!.subjectId, opportunity.decision!.subjectId)
+    assert.equal(replacement.actionAt, null)
+    const { current: _nextCurrent, goalId: _nextGoal, goalRevision: _nextGoalRevision, ...replacementDecision } = replacement.decision!
+    const deferredSlot = await call('PUT', `/api/organizations/${ORG}/recommendation-feedback`, { ...replacementDecision, decision: 'defer', deferUntil: new Date(Date.now() + 2 * DAY).toISOString() })
+    assert.ok(deferredSlot)
+    t.mock.timers.tick(Date.parse((JSON.parse(replacement.decision!.subjectId) as string[])[2]!) - Date.now() + 1_000)
+    const afterDeferredSlot = (await read()).cards.find(card => card.decision?.operation === 'post.create')!
+    assert.ok(afterDeferredSlot)
+    assert.notEqual(afterDeferredSlot.decision!.subjectId, replacement.decision!.subjectId)
+    assert.equal(afterDeferredSlot.actionAt, null, 'Deferring one slot does not defer the next slot')
+
   } finally {
     await runtime.dispose()
     t.mock.timers.reset()

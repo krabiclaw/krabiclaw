@@ -494,16 +494,35 @@ test('continuous recommendations follow explicit strategy, feedback and actual p
     await priorities.getByText('Business goals', { exact: true }).click()
 
     // The owner chooses channels explicitly; unrelated intent wording is not a relevance algorithm.
+    // Lose the acknowledgement after the actual goal and invalidation commit.
+    await page.route(`**/api/organizations/${organizationId}/goals`, async route => {
+      const committed = await route.fetch()
+      expect(committed.status(), await committed.text()).toBe(201)
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'The goal was saved but its acknowledgement was lost', data: { committed: true } }) })
+    }, { times: 1 })
     const goalSaved = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/organizations/${organizationId}/goals`)
+
     const intent = `Help prospective guests choose us ${marker}`
     await priorities.getByRole('textbox', { name: 'New priority', exact: true }).fill(intent)
     await priorities.getByText('Choose related work (optional)', { exact: true }).click()
     await priorities.getByRole('checkbox', { name: 'Blog articles', exact: true }).check()
     await priorities.getByRole('checkbox', { name: 'Social posts', exact: true }).check()
     await priorities.getByRole('button', { name: 'Add', exact: true }).click()
-    const saved = await goalSaved
+    const lost = await goalSaved
+    expect(lost.status()).toBe(503)
+    await expect(priorities.getByRole('textbox', { name: 'New priority', exact: true })).toHaveValue(intent)
+    const committedGoals = (await readToday()).priorities!.filter(value => value.intent === intent)
+    expect(committedGoals).toHaveLength(1)
+    goal = committedGoals[0]!
+    const retried = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/organizations/${organizationId}/goals`)
+    await priorities.getByRole('button', { name: 'Add', exact: true }).click()
+    const saved = await retried
     expect(saved.status(), await saved.text()).toBe(201)
+    expect(saved.request().postDataJSON().idempotencyKey).toBe(lost.request().postDataJSON().idempotencyKey)
+    expect((await readToday()).priorities!.filter(value => value.intent === intent)).toHaveLength(1)
+
     goal = (await saved.json() as { goal: { id: string; revision: string } }).goal
+    expect(goal.id).toBe(committedGoals[0]!.id)
     const savedFeed = await readToday()
     expect(savedFeed.priorities?.find(value => value.id === goal!.id)?.strategy).toMatchObject({ channels: ['blog', 'social'] })
     await expect(priorities.getByTestId('today-priority')).toContainText([intent])

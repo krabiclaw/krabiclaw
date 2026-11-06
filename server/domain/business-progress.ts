@@ -270,14 +270,22 @@ async function marketingPages(db: DbClient, principal: MemberAccessPrincipal, or
   const issues: string[] = [], pages: MarketingPage[] = []
   const endDate = localDateAt(now, organization.timezone), startDate = addLocalDays(endDate, -27)
   let nativeSessions: number | null = null
+  let nativeUnavailable = false
   if (organization.analytics_data_start_at) {
-    const report = await queryOrganizationAnalytics(db, { organizationId: principal.organizationId, mode: 'breakdown', startDate, endDate,
-      dimensions: ['page_path'], metrics: ['sessions'], filters: { kind: 'pageview' }, sort: { metric: 'sessions', direction: 'desc' },
-      limit: 30, now, cursorSecret: principal.env.BETTER_AUTH_SECRET })
-    nativeSessions = Number((report.totals.sessions as { value: number }).value)
-    for (const row of report.rows) {
-      const dimensions = row.dimensions as Record<string, unknown>, metrics = row.metrics as Record<string, unknown>
-      if (typeof dimensions.page_path === 'string') pages.push({ path: dimensions.page_path, count: Number(metrics.sessions), source: 'recorded website sessions' })
+    try {
+      const report = await queryOrganizationAnalytics(db, { organizationId: principal.organizationId, mode: 'breakdown', startDate, endDate,
+        dimensions: ['page_path'], metrics: ['sessions'], filters: { kind: 'pageview' }, sort: { metric: 'sessions', direction: 'desc' },
+        limit: 30, now, cursorSecret: principal.env.BETTER_AUTH_SECRET })
+      nativeSessions = Number((report.totals.sessions as { value: number }).value)
+      for (const row of report.rows) {
+        const dimensions = row.dimensions as Record<string, unknown>, metrics = row.metrics as Record<string, unknown>
+        if (typeof dimensions.page_path === 'string') pages.push({ path: dimensions.page_path, count: Number(metrics.sessions), source: 'recorded website sessions' })
+      }
+    } catch (error) {
+      nativeUnavailable = true
+      nativeSessions = null
+      pages.length = 0
+      issues.push(`Website performance could not be read: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
   for (const provider of ['google_ads', 'google_search_console'] as const) {
@@ -312,7 +320,7 @@ async function marketingPages(db: DbClient, principal: MemberAccessPrincipal, or
       issues.push(`${provider === 'google_ads' ? 'Google Ads' : 'Search Console'} performance could not be read: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
-  return { pages, nativeSessions, issues }
+  return { pages, nativeSessions, nativeUnavailable, issues }
 }
 
 /** Current source facts select the next useful step. There is no daily reset, task ledger,
@@ -346,7 +354,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
   const marketing = await marketingPages(db, principal, organization, now, enabled('google_ads') || Boolean(await readIntegration(db, organizationId, 'google_ads')))
   const issues = marketing.issues
   const base = `/dashboard/${encodeURIComponent(organization.slug)}`
-  const context = marketing.nativeSessions === null ? 'Website traffic measurement has not started.'
+  const context = marketing.nativeSessions === null ? marketing.nativeUnavailable ? 'Website traffic measurement is currently unavailable.' : 'Website traffic measurement has not started.'
     : `${marketing.nativeSessions} recorded website sessions in the current 28-day window; this does not include off-platform customers.`
   const articles = documents.filter(document => document.kind === 'article'), drafts = articles.filter(document => document.status === 'draft')
   const posts = documents.filter(document => document.kind === 'social_post')
@@ -375,11 +383,15 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
   if (canWrite && enabled('blog')) {
     for (const draft of drafts) offer('article.publish', draft.id, draft.title ? `Finish “${draft.title}”` : 'Finish your blog draft',
       `An existing blog draft can become the next useful article.${organization.vertical === 'service' ? ' Complete legal review before publishing.' : ''} ${context}`,
-      blogEditorPath(organization.slug, draft.id), 70, { goal: goalFor('blog'), locationId: draft.location_id, recency: draft.updated_at, icon: 'i-lucide-file-pen-line' })
+      blogEditorPath(organization.slug, draft.id), 70, { goal: goalFor('blog') ?? goalFor('google_ads'), locationId: draft.location_id, recency: draft.updated_at, icon: 'i-lucide-file-pen-line' })
     if (!drafts.length) offer('article.create', organizationId, `Start a blog about ${topic}`,
       `Build useful content for ${organization.name}.${leading && pageEvidence(leading.slug).length ? ` This offering already has recorded website interest.` : ' This is a new content opportunity, not a measured winning topic.'} ${context}`,
-      blogCreatePath(organization.slug), 40, { goal: goalFor('blog'), productId: leading?.id ?? null, icon: 'i-lucide-file-plus' })
+      blogCreatePath(organization.slug), 40, { goal: goalFor('blog') ?? goalFor('google_ads'), productId: leading?.id ?? null, icon: 'i-lucide-file-plus' })
   }
+  const adsGoal = goalFor('google_ads')
+  if (adsGoal && canOperate && !await readIntegration(db, organizationId, 'google_ads')) offer('google_ads.connect', organizationId,
+    'Connect Google Ads to your marketing goal', 'Connect the existing Google Ads integration to measure which articles your ads bring customers to.',
+    `${base}/integrations`, 100, { goal: adsGoal, icon: 'i-logos-google-ads' })
   let canPreparePost = false
   if (canWrite && enabled('social')) {
     let connections: Awaited<ReturnType<typeof getSocialConnections>> | null = null
@@ -456,7 +468,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
   if (canOperate && organization.vertical === 'lodging') {
     const today = localDateAt(now, organization.timezone)
     const gaps = await readStayGapCandidates(db, await stayAccessFor(principal), { from: addLocalDays(today, -1), to: addLocalDays(today, 31) })
-    for (const gap of gaps.filter(gap => gap.from >= today && (!input.locationId || gap.locationId === input.locationId))) offer('stay.gap', gap.productId,
+    for (const gap of gaps.filter(gap => !input.locationId || gap.locationId === input.locationId)) offer('stay.gap', JSON.stringify([gap.productId, gap.from, gap.to]),
       gap.bookable ? `Fill the ${gap.nights}-night gap at ${gap.name}` : `Review the ${gap.nights}-night gap at ${gap.name}`,
       `${gap.from} to ${gap.to}.${gap.bookable ? ' The saved rules allow this length; promote it if it fits your business.' : ` ${gap.restriction}`}`,
       `${base}/calendar?${new URLSearchParams({ product_id: gap.productId, date: gap.from, month: gap.from.slice(0, 7) })}`, 95,
@@ -465,7 +477,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
     const sessions = await listSessions(db, { organizationId, locationId: input.locationId, fromInstant: now.toISOString(), toInstant: new Date(now.getTime() + 7 * 86_400_000).toISOString() })
     const open = sessions.find(session => session.remaining !== null && session.remaining > 0 && !session.is_full)
     const product = open && products.find(product => product.id === open.product_id)
-    if (open && product && canWrite && enabled('social') && canPreparePost) offer('post.create', organizationId,
+    if (open && product && canWrite && enabled('social') && canPreparePost) offer('post.create', JSON.stringify(['session', product.id, open.id]),
       `Promote the next ${organization.vertical === 'service' ? 'consultation availability' : `“${product.name}” session`}`,
       `${formatTimestamp(open.starts_at, 'en', open.timezone, { dateStyle: 'medium', timeStyle: 'short' })}: ${open.remaining} recorded ${organization.vertical === 'service' ? 'consultation openings remain' : 'places remain in this session'}. External bookings are not established by this count.`,
       postEditorPath(organization.slug, 'new', input.locationId), 85, { productId: product.id, goal: goalFor('social'), locationId: open.location_id, recency: open.starts_at, icon: 'i-lucide-ticket' })
@@ -475,14 +487,14 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
     for (const location of locations) {
       const available = await listReservationSlots(db, { organizationId, locationId: location.id, date: localDateAt(now, location.timezone) })
       const slot = available.slots.find(slot => slot.starts_at > now.toISOString() && !slot.is_closed && !slot.is_full && slot.remaining !== null && slot.remaining > 0)
-      if (slot && canWrite && enabled('social') && canPreparePost) offer('post.create', organizationId, 'Give customers a reason to book a table',
+      if (slot && canWrite && enabled('social') && canPreparePost) offer('post.create', JSON.stringify(['reservation', location.id, slot.starts_at]), 'Give customers a reason to book a table',
         `A recorded reservation slot still has capacity at ${formatTimestamp(slot.starts_at, 'en', location.timezone, { hour: 'numeric', minute: '2-digit' })}. Feature a current dish, special or event with the reservation link. Walk-ins and physical table occupancy are not measured by this slot.`,
         postEditorPath(organization.slug, 'new', location.id), 85, { goal: goalFor('social'), locationId: location.id, icon: 'i-lucide-camera' })
     }
   }
   const unique = new Map<string, Candidate>()
   for (const candidate of candidates) {
-    const key = `${candidate.operation}:${candidate.subjectId}`, previous = unique.get(key)
+    const key = candidate.operation === 'post.create' ? 'post.create' : candidate.operation === 'stay.gap' ? `stay.gap:${candidate.productId}` : `${candidate.operation}:${candidate.subjectId}`, previous = unique.get(key)
     if (!previous || candidate.rank > previous.rank) unique.set(key, candidate)
   }
   const ranked = [...unique.values()].sort((a, b) => Number(Boolean(b.goal)) - Number(Boolean(a.goal)) || b.rank - a.rank || b.recency.localeCompare(a.recency) || a.subjectId.localeCompare(b.subjectId))

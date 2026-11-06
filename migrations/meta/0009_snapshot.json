@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d927a2bd-1875-4052-b4ca-d013586b6e5b",
+  "id": "fc13cd56-c952-4fa8-8ab2-673f09037086",
   "prevId": "d57cb76b-43c9-4e90-a5cf-23dd39ec768b",
   "tables": {
     "account": {
@@ -14794,7 +14794,7 @@
       "checkConstraints": {
         "recommendation_feedback_operation_check": {
           "name": "recommendation_feedback_operation_check",
-          "value": "operation IN ('article.create', 'article.update', 'article.publish', 'article.distribute', 'post.create', 'post.publish', 'social.connect', 'payments.connect', 'product.payment', 'stay.gap', 'guest_thread.reply') AND length(trim(subject_id)) > 0"
+          "value": "operation IN ('article.create', 'article.update', 'article.publish', 'article.distribute', 'post.create', 'post.publish', 'social.connect', 'google_ads.connect', 'payments.connect', 'product.payment', 'stay.gap', 'guest_thread.reply') AND length(trim(subject_id)) > 0"
         },
         "recommendation_feedback_revision_check": {
           "name": "recommendation_feedback_revision_check",

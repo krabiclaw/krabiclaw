@@ -31,7 +31,7 @@ export const BUSINESS_OUTCOME_EVENTS = [
 export type BusinessOutcomeEvent = typeof BUSINESS_OUTCOME_EVENTS[number]
 export const BUSINESS_PROGRESS_OPERATIONS = [
   'article.create', 'article.update', 'article.publish', 'article.distribute',
-  'post.create', 'post.publish', 'social.connect', 'payments.connect', 'product.payment', 'stay.gap', 'guest_thread.reply',
+  'post.create', 'post.publish', 'social.connect', 'google_ads.connect', 'payments.connect', 'product.payment', 'stay.gap', 'guest_thread.reply',
 ] as const
 export type BusinessProgressOperation = typeof BUSINESS_PROGRESS_OPERATIONS[number]
 
@@ -118,6 +118,11 @@ export interface BusinessProgressReference {
     kind: 'social_connection'
     entitled: boolean
     channels: Array<{ channel: string; connected: boolean; targetId: string | null; revision: string | null; problems: string[] }>
+  } | {
+    kind: 'google_ads_connection'
+    connected: boolean
+    targetId: string | null
+    revision: string | null
   } | {
     kind: 'payment_setup'
     missing: string[]

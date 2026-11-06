@@ -52,12 +52,13 @@ const OPTIONAL_LIMIT = 3
  * unsolicited promotion and expired dated requests; an English keyword is not required. */
 function asksForBusinessResponse(text: string, receivedAt: string, now: Date, zone: string): boolean {
   const value = text.trim()
-  if (!value || /^(?:thank(?:s| you)(?: so much)?|ok(?:ay)?|great|perfect|see you|sounds good)[!.,\s🙂😊]*$/iu.test(value)) return false
-  if (/\b(?:feature your (?:place|business)|backlinks?|sponsored post|seo services|promote your business|lead generation|marketing services)\b/iu.test(value)) return false
+  if (/^(?:thank(?:s| you)(?: so much)?|ok(?:ay)?|great|perfect|see you|sounds good)[!.,\s🙂😊]*$/iu.test(value)) return false
+  if (/\b(?:(?:can|could|may) (?:we|i) feature your (?:place|business)|(?:we|i) (?:offer|provide|sell) (?:backlinks?|seo|marketing|lead generation)|promote your business (?:with|on))\b/iu.test(value)) return false
+  const newDatedRequest = /^(?:(?:hi|hello)[,!.\s]+)?(?:(?:can|could|may) (?:i|we)|(?:i|we)(?:'d| would)? (?:like|want|need|hope|plan) to|looking to|interested in)\s+(?:make (?:a )?(?:booking|reservation)|(?:book|reserve|visit|attend|join)\b)/iu.test(value)
   const age = now.getTime() - Date.parse(receivedAt)
-  if (age > 2 * 86_400_000 && /\b(?:tonight|tomorrow|today)\b/iu.test(value) && /\b(?:reserv|book|class|visit)/iu.test(value)) return false
+  if (age > 2 * 86_400_000 && /\b(?:tonight|tomorrow|today)\b/iu.test(value) && newDatedRequest) return false
   const dated = value.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b/iu)
-  if (dated && /\b(?:reserv|book|class|visit)/iu.test(value)) {
+  if (dated && newDatedRequest) {
     const date = new Date(`${dated[1]} ${dated[2]}, ${dated[3]} 23:59:59 GMT`)
     if (Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) < localDateAt(now, zone)) return false
   }
@@ -76,14 +77,14 @@ interface Work {
   recency: string
 }
 
-function threadWork(thread: GuestThreadListItemViewModel, unansweredAt: string | undefined, organization: DashboardOrganizationRow, zone: string, now: Date): Work | null {
+function threadWork(thread: GuestThreadListItemViewModel, unansweredAt: string | undefined, organization: DashboardOrganizationRow, zone: string): Work | null {
   if (thread.manuallyArchived || thread.mailbox === 'blocked') return null
   if (thread.guestName !== null && (typeof thread.guestName !== 'string' || !thread.guestName.trim())) throw new Error(`Guest name is missing for request ${thread.id}`)
   const conversation = thread.guestName === null
   const bookingKind = thread.submissionType === 'contact' || conversation && thread.operationalStatus === null ? null : thread.submissionType
   const pending = bookingKind === 'booking' && thread.operationalStatus === 'pending' && thread.mailbox === 'current'
   if (!pending && !unansweredAt) return null
-  if (!pending && (thread.conversationState === 'resolved' || !asksForBusinessResponse(thread.preview?.text ?? '', unansweredAt!, now, zone))) return null
+  if (!pending && (thread.conversationState === 'resolved')) return null
   const noun = bookingKind === 'stay' ? 'stay' : bookingKind ? resolveBookingPresentation(bookingKind, organization.vertical).noun : null
   // A conversation without a recorded guest identity is described without inventing one.
   const name = thread.guestName ?? 'The guest'
@@ -311,8 +312,8 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
     canDecide && ownerScope ? readBusinessRecommendations(db, principal, { now, locationId: input.locationId }) : null,
   ])
   const inputs = plan?.inputs ?? (canDecide ? await readRecommendationDecisionInputs(db, principal) : null)
-  const unanswered = await firstUnansweredGuestEntryTimes(db, organization.id, records.map(thread => thread.id))
-  const threads = records.map(thread => threadWork(thread, unanswered.get(thread.id), organization, zone, now)).filter((work): work is Work => work !== null)
+  const unanswered = await firstUnansweredGuestEntryTimes(db, organization.id, records.map(thread => thread.id), (text, receivedAt) => asksForBusinessResponse(text, receivedAt, now, zone))
+  const threads = records.map(thread => threadWork(thread, unanswered.get(thread.id), organization, zone)).filter((work): work is Work => work !== null)
   const [messages, reviews, deliveryFailures] = await Promise.all([
     messageCards(db, organization, records, input, zone, organizationWide && await roleAllows({ ...organization, permissions: { operations: ['update'] } })),
     organizationWide && await roleAllows({ ...organization, permissions: { operations: ['update'] } }) ? reviewCards(db, organization, records, input, now, env) : [],
@@ -367,7 +368,7 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
     const current = feedback?.applicability.current ? feedback : null
     const existingWork = operation === 'article.publish' || operation === 'post.publish' || operation === 'stay.gap'
     const presentation: TodayCard['presentation'] = { type: existingWork ? goal && operation !== 'stay.gap' ? 'detailed' : 'compact' : 'opportunity' }
-    const shown = card({ presentation, id: `recommendation:${operation}:${subjectId}`, to: recommendation.to, priority: 'opportunity',
+    const shown = card({ presentation, id: `recommendation:${operation}:${encodeURIComponent(subjectId)}`, to: recommendation.to, priority: 'opportunity',
       eyebrow: goal?.intent ?? '', headline: recommendation.headline, imageUrl: recommendationPictures.get(subjectId)?.imageUrl ?? null,
       reason: [feedback && !current ? resurfacedBecause(feedback, { operation, subjectId }, zone) : null, recommendation.reason].filter(Boolean).join(' '), imageIcon: recommendation.icon,
       locationId: recommendation.locationId, productId: recommendation.productId,

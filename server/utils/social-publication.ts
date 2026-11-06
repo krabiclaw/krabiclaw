@@ -945,13 +945,15 @@ export async function publishPost(
 // ── Reconciliation ────────────────────────────────────────────────────────
 
 async function expirePublicationClaim(db: DbClient, organizationId: string, publication: PublicationRecord): Promise<PublicationRecord> {
-  if (publication.state !== 'publishing' || !isPublicationOutcomeUncertain(publication)) return publication
-  await execute(db, `UPDATE post_publications SET state = 'unknown', attempt_id = NULL, error_code = 'final_unconfirmed',
+  while (publication.state === 'publishing' && isPublicationOutcomeUncertain(publication)) {
+    await execute(db, `UPDATE post_publications SET state = 'unknown', attempt_id = NULL, error_code = 'final_unconfirmed',
       error_message = 'The call that was publishing this stopped before it confirmed the result', updated_at = ?
     WHERE id = ? AND organization_id = ? AND state = 'publishing' AND updated_at = ?`, [nowIso(), publication.id, organizationId, publication.updated_at])
-  const current = await readPublication(db, organizationId, { id: publication.id })
-  if (!current) throw new HTTPError({ statusCode: 404, statusMessage: 'Publication not found' })
-  return current
+    const current = await readPublication(db, organizationId, { id: publication.id })
+    if (!current) throw new HTTPError({ statusCode: 404, statusMessage: 'Publication not found' })
+    publication = current
+  }
+  return publication
 }
 
 /**

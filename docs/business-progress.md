@@ -62,12 +62,18 @@ ordinary marketing opportunities. No model call or game economy is introduced.
 
 Feedback operations name canonical capabilities: `article.update`,
 `article.publish`, `article.create`, `post.create`, `post.publish`,
-`article.distribute`, `social.connect`, `payments.connect`, `product.payment`,
+`article.distribute`, `social.connect`, `google_ads.connect`, `payments.connect`, `product.payment`,
 `stay.gap` and `guest_thread.reply`. Organization-level creation/setup operations
 reference the exact organization, existing content operations reference their
-article/post, and product operations reference their exact product. A future
-article or post is never assigned a fabricated subject ID. References authorize
+article/post, and product payment operations reference their exact product. Availability work
+references its recorded session, location/slot, or home/date interval. Echo the
+opaque `subjectId` returned by the server when saving feedback; it names that
+source opportunity, never a fabricated future article or post. References authorize
 the source and derive their evidence revision from its real state.
+
+Google Ads setup reuses the existing Integrations flow. Its feedback operation
+is needed because selecting an unconnected Ads strategy previously produced no
+related action; social/payment feedback cannot describe a Google Ads connection.
 
 Recommendations are continuously eligible, not a daily assignment batch. A
 publication can remove its publishing action and make distribution available

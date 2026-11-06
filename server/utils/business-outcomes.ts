@@ -16,6 +16,11 @@ import { articleCollectionOf } from '~/server/utils/content/publishing'
 import { getSocialConnections } from '~/server/utils/social-publication'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
 import { getProduct } from '~/server/utils/product-management'
+import { readIntegration } from '~/server/utils/organization-integrations'
+import { getSessionAvailability } from '~/server/utils/availability'
+import { listReservationSlots } from '~/server/utils/reservations'
+import { readStayGapCandidates, stayAccessFor } from '~/server/domain/stays'
+import { addLocalDays, localDateAt } from '~/utils/timezone'
 
 interface OutcomeEntry {
   source_table: BusinessOutcome['source']['table']
@@ -280,18 +285,28 @@ export async function readBusinessProgressReference(
     throw new HTTPError({ statusCode: 400, message: 'An explicit supported operation and subjectId are required', data: { code: 'INVALID_PROGRESS_REFERENCE', field: 'subjectId' } })
   }
   const missing = () => new HTTPError({ statusCode: 404, message: 'Progress subject not found', data: { code: 'PROGRESS_SUBJECT_NOT_FOUND', field: 'subjectId' } })
+  const coordinates = (): [string, string, string] => {
+    let value: unknown
+    try { value = JSON.parse(input.subjectId) } catch (error) { if (error instanceof SyntaxError) throw missing(); throw error }
+    if (!Array.isArray(value) || value.length !== 3 || value.some(part => typeof part !== 'string' || !part)) throw missing()
+    return value as [string, string, string]
+  }
   const result = async (evidence: BusinessProgressReference['evidence'], sources: unknown = evidence): Promise<BusinessProgressReference> => ({
     ...input, evidence, evidenceRevision: await creationRequestHash({ operation: input.operation, subjectId: input.subjectId, sources }),
   })
-  if (['article.create', 'post.create', 'social.connect', 'payments.connect'].includes(input.operation)) {
-    if (input.subjectId !== principal.organizationId) throw missing()
-    const organization = await queryFirst<{ updated_at: string; slug: string }>(db, 'SELECT updated_at, slug FROM organization WHERE id = ?', [input.subjectId])
+  if (['article.create', 'post.create', 'social.connect', 'google_ads.connect', 'payments.connect'].includes(input.operation)) {
+    if (input.subjectId !== principal.organizationId && input.operation !== 'post.create') throw missing()
+    const organization = await queryFirst<{ updated_at: string; slug: string }>(db, 'SELECT updated_at, slug FROM organization WHERE id = ?', [principal.organizationId])
     if (!organization) throw missing()
     if (input.operation === 'social.connect') {
       const social = await getSocialConnections(principal.env, principal.organizationId, { dashboardBase: `/dashboard/${encodeURIComponent(organization.slug)}` })
       const channels = social.channels.map(channel => ({ channel: channel.channel, connected: channel.connected, targetId: channel.target_id,
         revision: channel.connection_revision, problems: channel.problems.map(problem => problem.code) }))
       return result({ kind: 'social_connection', entitled: !channels.some(channel => channel.problems.includes('growth_plan_required')), channels })
+    }
+    if (input.operation === 'google_ads.connect') {
+      const integration = await readIntegration(db, principal.organizationId, 'google_ads')
+      return result({ kind: 'google_ads_connection', connected: integration !== null, targetId: integration?.target_id ?? null, revision: integration?.revision ?? null })
     }
     if (input.operation === 'payments.connect') {
       const setup = await readStripeCheckoutSetup(db, principal.organizationId, principal.env)
@@ -300,13 +315,30 @@ export async function readBusinessProgressReference(
       { missing: setup.missing, account: setup.connected ? { id: setup.connected.id, status: setup.connected.status,
         cardPaymentsStatus: setup.connected.cardPaymentsStatus, requirements: setup.connected.requirements, livemode: setup.connected.livemode } : null })
     }
+    let availability: unknown = null
+    if (input.operation === 'post.create' && input.subjectId !== principal.organizationId) {
+      const [kind, resourceId, occurrence] = coordinates()
+      if (kind === 'session') {
+        const session = await getSessionAvailability(db, principal.organizationId, resourceId, occurrence)
+        if (session.status !== 'scheduled' || session.starts_at <= new Date().toISOString() || session.remaining === null || session.remaining < 1 || session.is_full) throw missing()
+        availability = session
+      } else if (kind === 'reservation') {
+        const location = await queryFirst<{ timezone: string }>(db, 'SELECT timezone FROM business_locations WHERE id=? AND organization_id=?', [resourceId, principal.organizationId])
+        if (!location || !Number.isFinite(Date.parse(occurrence)) || occurrence <= new Date().toISOString()) throw missing()
+        const slots = await listReservationSlots(db, { organizationId: principal.organizationId, locationId: resourceId, date: localDateAt(new Date(occurrence), location.timezone) })
+        const slot = slots.slots.find(slot => slot.starts_at === occurrence)
+        if (!slot || slot.is_closed || slot.is_full || slot.remaining === null || slot.remaining < 1) throw missing()
+        availability = slot
+      } else throw missing()
+    }
     const kind = input.operation === 'article.create' ? 'article' : 'social_post'
     const [documents, media] = await Promise.all([
       queryAll<{ id: string; kind: string; status: string | null; updatedAt: string }>(db,
         `SELECT id, kind, status, updated_at AS updatedAt FROM content_documents WHERE organization_id = ? AND row_role = 'root' AND kind = ? ORDER BY id`, [principal.organizationId, kind]),
       queryAll<{ id: string; updatedAt: string }>(db, "SELECT id, updated_at AS updatedAt FROM media_assets WHERE organization_id = ? AND status = 'active' ORDER BY id", [principal.organizationId]),
     ])
-    return result({ kind: 'organization', updatedAt: organization.updated_at, documents, media })
+    const evidence = { kind: 'organization' as const, updatedAt: organization.updated_at, documents, media }
+    return result(evidence, availability ? { ...evidence, availability } : evidence)
   }
   if (input.operation === 'post.publish') {
     const post = await queryFirst<{ id: string; status: string | null; updated_at: string } & Record<string, unknown>>(db,
@@ -319,7 +351,9 @@ export async function readBusinessProgressReference(
     return result({ kind: 'post', status: post.status, updatedAt: post.updated_at, publications }, { post, publications, media: [...media.values()].flat() })
   }
   if (input.operation === 'product.payment' || input.operation === 'stay.gap') {
-    const product = await queryFirst<{ id: string; kind: string; updated_at: string }>(db, 'SELECT id, kind, updated_at FROM products WHERE id = ? AND organization_id = ?', [input.subjectId, principal.organizationId])
+    const interval = input.operation === 'stay.gap' ? coordinates() : null
+    const productId = interval ? interval[0] : input.subjectId
+    const product = await queryFirst<{ id: string; kind: string; updated_at: string }>(db, 'SELECT id, kind, updated_at FROM products WHERE id = ? AND organization_id = ?', [productId, principal.organizationId])
     if (!product) throw missing()
     if (input.operation === 'product.payment') {
       const [configuration, catalog] = await Promise.all([
@@ -334,6 +368,9 @@ export async function readBusinessProgressReference(
     const configuration = await queryFirst<{ updated_at: string } & Record<string, unknown>>(db,
       'SELECT product_id, location_id, min_nights, calendar_rules, updated_at FROM product_stay_configs WHERE product_id = ? AND organization_id = ?', [product.id, principal.organizationId])
     if (!configuration) throw missing()
+    const gap = (await readStayGapCandidates(db, await stayAccessFor(principal), { from: addLocalDays(interval![1], -1), to: addLocalDays(interval![2], 1) }))
+      .find(gap => gap.productId === product.id && gap.from === interval![1] && gap.to === interval![2])
+    if (!gap) throw missing()
     const [overrides, claims, pushes] = await Promise.all([
       queryAll(db, 'SELECT * FROM product_nights WHERE product_id = ? AND organization_id = ? ORDER BY date', [product.id, principal.organizationId]),
       queryAll(db, `SELECT n.date,n.stay_id,n.hold_id,n.calendar_link_id,h.status AS hold_status,h.expires_at,
@@ -342,7 +379,7 @@ export async function readBusinessProgressReference(
         WHERE n.product_id = ? AND n.organization_id = ? ORDER BY n.date`, [product.id, principal.organizationId]),
       queryAll(db, 'SELECT * FROM channel_night_pushes WHERE product_id = ? AND organization_id = ? ORDER BY date', [product.id, principal.organizationId]),
     ])
-    return result({ kind: 'stay_home', updatedAt: product.updated_at, configurationUpdatedAt: configuration.updated_at }, { product, configuration, overrides, claims, pushes })
+    return result({ kind: 'stay_home', updatedAt: product.updated_at, configurationUpdatedAt: configuration.updated_at }, { product, configuration, overrides, claims, pushes, gap })
   }
   if (input.operation === 'article.update' || input.operation === 'article.publish' || input.operation === 'article.distribute') {
     const document = await queryFirst<{ id: string; status: string | null; updated_at: string } & Record<string, unknown>>(db, `

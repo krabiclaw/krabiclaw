@@ -6,7 +6,7 @@
       </UTooltip>
       <DashboardResourceLocalization :organization-id="organizationId" resource-type="content_document" :resource-id="String(post.id)" :resource-label="String(post.title || 'Post')" :fields="postLocalizationFields" :language-settings-path="organizationLocalizationSettingsPath" :disabled="busy" />
     </template>
-    <UAlert v-if="loadError || editor.error.value || actionError" class="mb-6" color="error" title="Post could not be completed" :description="loadError || editor.error.value || actionError || ''" />
+    <UAlert v-if="loadError || editor.error.value || actionError || publicationReadError" class="mb-6" color="error" title="Post could not be completed" :description="loadError || editor.error.value || actionError || publicationReadError || ''" />
     <div v-if="!loadError" class="grid items-start gap-10 lg:grid-cols-2">
       <fieldset :disabled="busy || unconfirmedCreation" :inert="busy || unconfirmedCreation || undefined" class="min-w-0 space-y-8">
         <PostMediaFields v-model:media="editor.form.media" :organization-id="organizationId" />
@@ -181,6 +181,21 @@ const committing = ref(false)
 const busy = computed(() => committing.value || editor.saving.value || editor.publishing.value)
 const unconfirmedCreation = computed(() => isNew && draft.value.submitted && !post.value)
 const actionError = ref('')
+const publicationReadError = ref('')
+let publicationTimer: ReturnType<typeof setInterval> | undefined
+async function refreshPublicationState() {
+  if (!post.value || busy.value || document.visibilityState !== 'visible') return
+  try {
+    await editor.reload(String(post.value.id), true)
+    publicationReadError.value = ''
+  } catch (cause) { publicationReadError.value = getErrorMessage(cause, 'Publication status could not be read') }
+}
+onMounted(() => { publicationTimer = setInterval(() => {
+  if (Array.isArray(post.value?.publications) && post.value.publications.some((publication: ApiRecord) => publication.state === 'publishing' || publication.state === 'preparing')) void refreshPublicationState()
+}, 15_000) })
+onBeforeUnmount(() => { if (publicationTimer) clearInterval(publicationTimer) })
+useEventListener(import.meta.client ? window : undefined, 'focus', refreshPublicationState)
+
 const validationError = computed(() => {
   try {
     parsePostInput({ title: editor.form.title, body: editor.form.body, call_to_action: editor.form.callToAction, location_id: editor.form.location_id, media: editor.form.media.map(item => ({ asset_id: item.asset_id, slot: item.slot })) }, 'create')

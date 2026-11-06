@@ -1252,9 +1252,16 @@ export async function readStayGapCandidates(db: DbClient, access: StayAccess, in
       if (!before?.stay_id || !departure?.stay_id) continue
       const stayed = nights.slice(start, index)
       if ([...stayed, departure].some(night => night.channel?.state === 'pending' || night.channel?.state === 'needs_review')) continue
-      const restriction = stayNightRestriction(stayed, departure)
+      if (stayed[0]!.date < homeToday(home.timezone)) continue
+      let restriction: string | null = null
+      try {
+        await quoteStay(db, access.organizationId, home, { check_in_date: stayed[0]!.date, check_out_date: departure.date, adults: 1 })
+      } catch (error) {
+        if (!(error instanceof HTTPError) || error.statusCode < 400 || error.statusCode >= 500) throw error
+        restriction = error.message
+      }
       gaps.push({ productId: home.product_id, name: home.name, locationId: home.location_id,
-        from: stayed[0]!.date, to: departure.date, nights: stayed.length, bookable: restriction === null, restriction: restriction?.message ?? null })
+        from: stayed[0]!.date, to: departure.date, nights: stayed.length, bookable: restriction === null, restriction })
     }
   }
   return gaps.sort((a, b) => a.from.localeCompare(b.from) || a.productId.localeCompare(b.productId))

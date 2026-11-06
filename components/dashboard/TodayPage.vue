@@ -27,7 +27,7 @@
         </template>
       </UAlert>
 
-      <UAlert v-if="decisionError" class="mb-6" color="error" variant="soft" title="Your choice was not saved" :description="getErrorMessage(decisionError, 'The request failed')" />
+      <UAlert v-if="decisionError" class="mb-6" color="error" variant="soft" title="Your choice could not be completed" :description="getErrorMessage(decisionError, 'The request failed')" />
       <UAlert v-if="todayData?.recommendationIssues.length && !activeError" class="mb-6" color="warning" variant="soft" title="Some performance data could not be loaded" :description="todayData.recommendationIssues.join(' ')" />
 
       <ul v-if="visibleItems.length && !activeError" class="mx-auto w-full max-w-3xl space-y-4" role="list" data-testid="today-list">
@@ -304,14 +304,18 @@ async function changePriorities(busy: string, request: () => Promise<unknown>) {
   await refreshToday()
 }
 
+const priorityRequest = ref<{ signature: string; idempotencyKey: string } | null>(null)
 async function addPriority() {
   const intent = priorityDraft.value.trim()
   if (!intent) return
   const strategy: BusinessGoalStrategy | null = priorityChannels.value.length || priorityPayments.value || priorityAvailability.value
     ? { channels: [...priorityChannels.value], payments: priorityPayments.value, availability: priorityAvailability.value }
     : null
-  await changePriorities('new', () => applicationFetch(`${organizationApi.value}/goals`, { method: 'POST', validate: isSavedGoal, body: { idempotencyKey: crypto.randomUUID(), intent, strategy } }))
+  const signature = JSON.stringify({ intent, strategy })
+  if (priorityRequest.value?.signature !== signature) priorityRequest.value = { signature, idempotencyKey: crypto.randomUUID() }
+  await changePriorities('new', () => applicationFetch(`${organizationApi.value}/goals`, { method: 'POST', validate: isSavedGoal, body: { idempotencyKey: priorityRequest.value!.idempotencyKey, intent, strategy } }))
   if (!decisionError.value) {
+    priorityRequest.value = null
     priorityDraft.value = ''
     priorityChannels.value = []
     priorityPayments.value = false

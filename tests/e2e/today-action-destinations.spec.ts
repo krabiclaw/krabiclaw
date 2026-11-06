@@ -436,6 +436,13 @@ test('a prepared article photo post preserves concurrent media and publishes onl
     await expect(caption.locator('fieldset img').nth(1)).toHaveAttribute('src', concurrentPhoto.public_url)
     await expect(caption.locator('fieldset img').nth(1)).toBeVisible()
     await expect(caption.getByRole('checkbox', { name: 'Publish to Website', exact: true })).toBeChecked()
+    const unsavedCaption = `${publishedCaption} Still editing.`
+    await caption.getByRole('textbox', { name: 'Caption', exact: true }).fill(unsavedCaption)
+    const publicationRefresh = page.waitForResponse(response => new URL(response.url()).pathname === postPath && response.request().method() === 'GET')
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    expect((await publicationRefresh).status()).toBe(200)
+    await expect(caption.getByRole('textbox', { name: 'Caption', exact: true })).toHaveValue(unsavedCaption)
+    await caption.getByRole('textbox', { name: 'Caption', exact: true }).fill(publishedCaption)
     const posted = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/posts/${postId}/publish` && response.request().method() === 'POST')
     await caption.getByRole('button', { name: 'Publish', exact: true }).click()
     const postedResponse = await posted

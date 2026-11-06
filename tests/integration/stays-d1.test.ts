@@ -10,6 +10,7 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
 import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayGapCandidates, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
+import { readBusinessRecommendations, saveRecommendationFeedback } from '../../server/domain/business-progress.ts'
 import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 import { getQuery, H3 } from 'nitro/h3'
@@ -1291,7 +1292,7 @@ test('the multi-calendar reads every home the caller looks after, each night as 
   }
 })
 
-test('gap recommendations follow live listing state, effective night rules and actual stay claims', { timeout: 120_000 }, async () => {
+test('gap recommendations follow live listing state, effective night rules and actual stay claims', { timeout: 120_000 }, async t => {
   const { runtime, db, env } = await boot()
   try {
     const cabin = await home(db, env, { name: 'Gap cabin', location: 'cabin-site' })
@@ -1319,6 +1320,38 @@ test('gap recommendations follow live listing state, effective night rules and a
     await cancelStay(db, env, manager, filled.id, { expected_version: filled.version, reason: 'Guest cancelled' })
     assert.deepEqual(await read(), [gap], 'cancellation frees the same bounded gap')
 
+    // Base-price eligibility is the quote's own rule, even with priced overrides.
+    await setStayNights(db, env, manager, { product_id: cabin.id, from: gap.from, to: gap.to, price_minor: 15_000 })
+    const offering = await getProduct(db, ORG, cabin.id)
+    const variant = offering.variants[0]!
+    const base = variant.prices[0]!
+    await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { variants: [{ id: variant.id, prices: [{ id: base.id, active: false }] }] } }), { status: 409, data: { code: 'STAY_BOOKING_INCOMPLETE', field: 'variants.prices', missing: ['variants.prices'] } })
+    assert.deepEqual(await read(), [gap], 'The canonical product writer prevents removing the active nightly price from a published home')
+
+    await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'gap-third-boundary', check_in_date: '2027-05-08', check_out_date: '2027-05-10', ...guest })
+    const membership = await resolveMembership(env, { organizationId: ORG, userId: OWNER })
+    assert.ok(membership)
+    const principal = memberAccessPrincipal(membership, { env })
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2027-05-03T12:00:00.000Z') })
+    const firstGap = (await readBusinessRecommendations(db, principal)).recommendations.find(item => item.operation === 'stay.gap')!
+    assert.ok(firstGap)
+    assert.equal(firstGap.subjectId, JSON.stringify([cabin.id, gap.from, gap.to]))
+    await saveRecommendationFeedback(db, principal, { operation: firstGap.operation, subjectId: firstGap.subjectId, evidenceRevision: firstGap.reference.evidenceRevision, decision: 'dismiss' })
+    assert.equal((await readBusinessRecommendations(db, principal)).recommendations.some(item => item.operation === 'stay.gap'), false)
+    t.mock.timers.tick(2 * 86_400_000)
+    const nextGap = (await readBusinessRecommendations(db, principal)).recommendations.find(item => item.operation === 'stay.gap')!
+    assert.ok(nextGap)
+    assert.equal(nextGap.subjectId, JSON.stringify([cabin.id, '2027-05-06', '2027-05-08']))
+    assert.equal(nextGap.feedback, null, 'A prior interval’s dismissal never suppresses this home’s next gap')
+    t.mock.timers.reset()
+
+    // The organization is still on May 3 in Denver; this home's day is May 4.
+    await updateLocation(db, ORG, 'cabin-site', { timezone: 'Asia/Bangkok' }, OWNER, env)
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2027-05-03T20:00:00.000Z') })
+    assert.deepEqual(await read(), [], 'An interval that passed locally is not promoted')
+    await assert.rejects(quoteStay(db, ORG, await readStayHome(db, manager, cabin.id), { check_in_date: gap.from, check_out_date: gap.to, adults: 1 }), { data: { code: 'STAY_CHECK_IN_PAST', field: 'check_in_date', today: '2027-05-04' } })
+    t.mock.timers.reset()
+
     await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: false, actor: { actorId: OWNER } })
     assert.deepEqual(await read(), [], 'withdrawing the listing clears its growth recommendation')
     await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } })
@@ -1326,6 +1359,7 @@ test('gap recommendations follow live listing state, effective night rules and a
     assert.deepEqual(await read(), [], 'an inactive home is not promoted even when its publication remains saved')
     assert.deepEqual((await readStayCalendar(db, manager, { productId: cabin.id, ...window })).stays.map(stay => stay.id), [first.id, second.id], 'listing eligibility does not delete existing stays')
   } finally {
+    t.mock.timers.reset()
     await runtime.dispose()
   }
 })
