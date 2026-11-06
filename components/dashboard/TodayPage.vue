@@ -4,9 +4,12 @@
       <UButton v-if="canAddStay" :to="`/dashboard/${encodeURIComponent(orgSlug)}/bookings/stay/new`" icon="i-lucide-plus" color="neutral" variant="ghost" aria-label="Add stay" />
     </template>
 
-    <div class="mx-auto w-full max-w-3xl">
-      <div class="quest-tabs mb-6 flex gap-3 py-4" role="tablist" aria-label="Work view">
-        <button v-for="item in ranges" :key="item.value" type="button" role="tab" :aria-selected="range === item.value" :tabindex="range === item.value ? 0 : -1" :data-testid="`today-range-${item.value}`" class="quest-tab" @click="range = item.value" @keydown="onRangeKeydown">{{ item.label }}</button>
+    <div class="mx-auto w-full max-w-[848px]">
+      <div class="mb-7 flex items-center justify-center gap-3 py-2">
+        <div class="tog" role="tablist" aria-label="Work view">
+          <button v-for="item in ranges" :key="item.value" type="button" role="tab" :aria-selected="range === item.value" :tabindex="range === item.value ? 0 : -1" :data-testid="`today-range-${item.value}`" @click="range = item.value" @keydown="onRangeKeydown">{{ item.label }}</button>
+        </div>
+        <button v-if="canCreate" type="button" class="add" aria-label="Add task" data-testid="today-add-task" @click="createOpen = true"><UIcon name="i-lucide-plus" class="size-4" /></button>
       </div>
 
       <UAlert v-if="loadError" class="mb-6" color="error" variant="soft" :title="`${range === 'today' ? 'Today' : 'Upcoming'} could not be loaded`" :description="getErrorMessage(loadError, 'The request failed')">
@@ -25,22 +28,25 @@
       <!-- The business's stored tasks and opportunities. -->
       <template v-else-if="business">
         <UAlert v-if="business.opportunityIssues.length" class="mb-6" color="warning" variant="soft" title="Some performance data could not be loaded" :description="business.opportunityIssues.join(' ')" />
-        <section v-for="section in business.tasks" :key="section.id" class="mb-6" :data-testid="`today-section-${section.id}`">
-          <h2 class="mb-2.5 text-sm font-semibold text-muted">{{ section.title }}</h2>
-          <ul class="space-y-2.5" role="list" data-testid="today-list">
-            <li v-for="task in section.tasks" :key="task.id">
-              <TodayTaskCard :task="task" :assignees="business.assignees" :busy="taskBusy[task.id] ?? null" @open="openTask" @complete="complete" @assign="assign" />
-            </li>
-          </ul>
-        </section>
-        <section v-if="business.opportunities.length" class="mb-6" data-testid="today-opportunities">
-          <h2 class="mb-2.5 text-sm font-semibold text-muted">Opportunities</h2>
-          <ul class="space-y-2.5" role="list">
-            <li v-for="opportunity in business.opportunities" :key="opportunity.id">
-              <TodayOpportunityCard :opportunity="opportunity" :busy="opportunityBusy[opportunity.id] ?? null" @accept="accept" @dismiss="dismiss" @defer="defer" />
-            </li>
-          </ul>
-        </section>
+        <!-- Open work, then Opportunities full width, then Done (or Upcoming's days). -->
+        <template v-for="part in parts" :key="part.key">
+          <template v-if="part.section">
+            <h2 v-if="part.section.title" class="wh2">{{ part.section.title }}<small v-if="part.section.subtitle">{{ part.section.subtitle }}</small></h2>
+            <ul :class="part.section.id === 'open' ? 'wtasks' : 'wgrid'" role="list" :data-testid="`today-section-${part.section.id}`">
+              <li v-for="task in part.section.tasks" :key="task.id" :class="{ 'is-photo': task.face === 'photo' && part.section.id === 'open' }">
+                <TaskCard :task="task" :assignees="business.assignees" :busy="taskBusy[task.id] !== undefined" @open="openTask(task)" @complete="complete(task)" @reopen="reopen(task)" @assign="person => assign(task, person)" />
+              </li>
+            </ul>
+          </template>
+          <template v-else>
+            <h2 class="wh2">Opportunities</h2>
+            <ul class="wgrid" role="list" data-testid="today-opportunities">
+              <li v-for="opportunity in business.opportunities" :key="opportunity.id">
+                <TaskCard :opportunity="opportunity" :busy="opportunityBusy[opportunity.id] !== undefined" @accept="accept(opportunity)" @dismiss="dismiss(opportunity)" @defer="until => defer(opportunity, until)" />
+              </li>
+            </ul>
+          </template>
+        </template>
         <p v-if="!business.tasks.length && !business.opportunities.length && !pending" class="text-sm text-muted" data-testid="today-empty">{{ range === 'today' ? 'Nothing to do today' : 'Nothing planned yet' }}</p>
 
         <details v-if="canManage && range === 'today'" class="mt-8" role="group" aria-label="Your priority" data-testid="today-priorities">
@@ -76,15 +82,16 @@
       </div>
     </div>
 
-    <TodayTaskSheet v-if="!personalScope && organizationId" v-model:open="sheetOpen" :task="openedTask" :organization-id="organizationId" @changed="taskChanged" />
+    <TodayTaskSheet v-if="!personalScope && organizationId" v-model:open="sheetOpen" :task="openedTask" :organization-id="organizationId" :assignees="business?.assignees ?? []" @changed="taskChanged" />
+    <TodayTaskCreate v-if="canCreate && organizationId" v-model:open="createOpen" :organization-id="organizationId" :assignees="business?.assignees ?? []" @created="taskChanged" />
   </DashboardIndexPanel>
 </template>
 
 <script setup lang="ts">
 import TodayAgendaCard from './TodayAgendaCard.vue'
-import TodayTaskCard from './TodayTaskCard.vue'
+import TaskCard from './TaskCard.vue'
 import TodayTaskSheet from './TodayTaskSheet.vue'
-import TodayOpportunityCard from './TodayOpportunityCard.vue'
+import TodayTaskCreate from './TodayTaskCreate.vue'
 import { getErrorMessage } from '~/utils/errors'
 import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayFeedPayload } from '~/shared/dashboard-today'
 import type { AgendaPayload } from '~/server/utils/dashboard-agenda'
@@ -115,6 +122,8 @@ const roleAllows = (permissions: Parameters<typeof authClient.organization.check
 }
 const canAddStay = computed(() => !props.personalScope && hasFeature('stays') && roleAllows({ operations: ['update'] }))
 const canManage = computed(() => !props.personalScope && roleAllows({ task: ['assign'] }))
+const canCreate = computed(() => !props.personalScope && roleAllows({ task: ['create'] }))
+const createOpen = ref(false)
 
 const range = computed<Range>({
   get: () => route.query.range === 'upcoming' ? 'upcoming' : 'today',
@@ -145,6 +154,13 @@ const { data, pending, error: loadError, refresh } = await useAsyncData(
   },
 )
 const business = computed(() => data.value?.business ?? null)
+const parts = computed(() => {
+  const sections = business.value?.tasks ?? []
+  const open = sections.filter(section => section.id === 'open'), rest = sections.filter(section => section.id !== 'open')
+  return [...open.map(section => ({ key: section.id, section })),
+    ...(business.value?.opportunities.length ? [{ key: 'opportunities', section: null }] : []),
+    ...rest.map(section => ({ key: section.id, section }))]
+})
 const visits = computed(() => data.value?.visits ?? [])
 
 // The task sheet; `?task=` opens it, which is where an alert's link lands.
@@ -169,7 +185,7 @@ watch(sheetOpen, (isOpen) => {
 async function taskChanged() { await refresh() }
 
 const actionError = ref<unknown>(null)
-const taskBusy = ref<Record<string, 'assign' | 'complete'>>({})
+const taskBusy = ref<Record<string, 'assign' | 'complete' | 'reopen'>>({})
 const opportunityBusy = ref<Record<string, 'accept' | 'later'>>({})
 const tasksApi = computed(() => `/api/organizations/${encodeURIComponent(organizationId ?? '')}`)
 
@@ -187,6 +203,7 @@ async function act<T extends Record<string, string>>(busy: Ref<T>, id: string, s
   }
 }
 const complete = (task: TaskView) => act(taskBusy, task.id, 'complete', () => applicationFetch(`${tasksApi.value}/tasks/${encodeURIComponent(task.id)}/complete`, { method: 'POST', validate: isTaskResult, body: {} }))
+const reopen = (task: TaskView) => act(taskBusy, task.id, 'reopen', () => applicationFetch(`${tasksApi.value}/tasks/${encodeURIComponent(task.id)}/reopen`, { method: 'POST', validate: isTaskResult, body: { expectedVersion: task.version } }))
 const assign = (task: TaskView, person: TaskPerson | null) => act(taskBusy, task.id, 'assign', () => applicationFetch(`${tasksApi.value}/tasks/${encodeURIComponent(task.id)}`, { method: 'PATCH', validate: isTaskResult,
   body: { expectedVersion: task.version, assignedMemberId: person?.type === 'member' ? person.id : null, assignedTeamId: person?.type === 'team' ? person.id : null } }))
 const isOpportunityResult = (value: unknown): value is { opportunity: { id: string } } => isRecord(value) && isRecord(value.opportunity) && typeof value.opportunity.id === 'string'
@@ -271,7 +288,18 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.quest-tab { height: 40px; padding: 0 18px; border-radius: 9999px; font-size: 14px; font-weight: 500; box-shadow: inset 0 0 0 1px var(--ui-border); color: var(--ui-text-highlighted); }
-.quest-tab[aria-selected="true"] { background: var(--ui-bg-inverted); color: var(--ui-text-inverted); box-shadow: none; }
-.quest-tab:focus-visible { outline: 2px solid var(--ui-text-highlighted); outline-offset: 4px; }
+.tog { display: flex; width: 340px; max-width: 100%; padding: 4px; border-radius: 999px; background: var(--ui-bg-elevated); }
+.tog button { flex: 1; height: 32px; border-radius: 999px; font-size: 15px; font-weight: 500; color: var(--ui-text-highlighted); }
+.tog button[aria-selected="true"] { background: var(--ui-bg); font-weight: 600; box-shadow: 0 1px 4px rgb(0 0 0 / 14%); }
+.tog button:focus-visible, .add:focus-visible { outline: 2px solid var(--ui-text-highlighted); outline-offset: 2px; }
+.add { display: flex; flex: none; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; background: var(--ui-bg-elevated); color: var(--ui-text-highlighted); }
+.wh2 { margin: 28px 2px 16px; font-size: 22px; line-height: 28px; font-weight: 700; letter-spacing: -.02em; color: var(--ui-text-highlighted); }
+.wh2 small { margin-left: 8px; font-size: 15px; line-height: 20px; font-weight: 400; letter-spacing: 0; color: var(--ui-text-muted); }
+.wtasks { display: grid; grid-template-columns: 1fr 1fr; grid-auto-flow: row dense; gap: 20px; align-items: start; }
+.wtasks > li { display: flex; }
+.wtasks > li > * { flex: 1; }
+/* A photo card spans two compact rows beside them. */
+.wtasks > li.is-photo { grid-row: span 2; }
+.wgrid { display: grid; gap: 20px; }
+@media (max-width: 767px) { .wtasks { grid-template-columns: 1fr; gap: 12px; } .wtasks > li.is-photo { grid-row: auto; } .wgrid { gap: 12px; } }
 </style>

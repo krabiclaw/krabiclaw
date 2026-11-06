@@ -24,10 +24,11 @@ interface OpportunityRow {
   decision_note: string | null; decided_at: string | null; decided_by_user_id: string | null; created_at: string; updated_at: string
 }
 
+/** An opportunity as the insight face of the `.tc` card draws it. */
 export interface OpportunityView {
   id: string
-  /** What part of the business it is about: "Calendar", "Website". */
-  eyebrow: string
+  /** What part of the business, and where: "Calendar · 45B", "Website". */
+  statusLine: string
   title: string
   detail: string
   icon: string
@@ -83,8 +84,8 @@ async function select(db: DbClient, principal: MemberAccessPrincipal, input: { n
   return { plan, rows, changed: results.some(result => (result.meta.changes ?? 0) > 0) }
 }
 
-function view(row: OpportunityRow, item: BusinessRecommendation): OpportunityView {
-  return { id: row.id, eyebrow: AREA[item.operation], title: item.headline, detail: item.reason, icon: item.icon, path: item.to, productId: item.productId, locationId: item.locationId }
+function view(row: OpportunityRow, item: BusinessRecommendation, homes: Map<string, string>): OpportunityView {
+  return { id: row.id, statusLine: [AREA[item.operation], item.productId ? homes.get(item.productId) ?? null : null].filter(Boolean).join(' · '), title: item.headline, detail: item.reason, icon: item.icon, path: item.to, productId: item.productId, locationId: item.locationId }
 }
 
 /** The open opportunities available now, in the selector's order. */
@@ -94,10 +95,13 @@ export async function listOpportunities(db: DbClient, principal: MemberAccessPri
   const { plan, rows, changed } = await select(db, principal, { now, locationId: input.locationId })
   if (changed) await publishBusinessInvalidation(principal.env as CloudflareEnv, principal.organizationId)
   const byKey = new Map(rows.filter(row => row.available_at === null || row.available_at <= now.toISOString()).map(row => [rowKey(row), row]))
+  const productIds = [...new Set(plan.recommendations.flatMap(item => item.productId && item.operation === 'stay.gap' ? [item.productId] : []))]
+  const homes = new Map((await queryAll<{ id: string; name: string }>(db, 'SELECT id, name FROM products WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))',
+    [principal.organizationId, JSON.stringify(productIds)])).map(product => [product.id, product.name]))
   return {
     opportunities: plan.recommendations.flatMap(item => {
       const row = byKey.get(recommendationKey(item))
-      return row ? [view(row, item)] : []
+      return row ? [view(row, item, homes)] : []
     }),
     issues: plan.issues,
   }

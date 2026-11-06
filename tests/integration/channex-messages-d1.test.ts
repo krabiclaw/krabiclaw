@@ -43,10 +43,10 @@ async function todayOutline(db: D1Database, today: TodayPayload) {
 const openReplies = (db: D1Database, threadId: string) => db.prepare(`SELECT t.organization_id, e.dedupe_key AS entry FROM tasks t JOIN activity_entries e ON t.dedupe_key = 'guest_reply:' || t.subject_id || ':' || e.id
   WHERE t.kind = 'guest_reply' AND t.subject_type = 'request' AND t.subject_id = ? AND t.status = 'open' ORDER BY e.sequence`).bind(threadId).all<{ organization_id: string; entry: string }>().then(rows => rows.results)
 const waitingOn = async (db: D1Database, threadId: string) => (await openReplies(db, threadId)).map(row => row.entry)
-/** The reply tasks on Today as the owner reads them at `now`: conversation and eyebrow ("Reply · asked 1d ago"). */
+/** The reply tasks on Today as the owner reads them at `now`: conversation and status line ("Asked 1d ago · home"). */
 async function replyEyebrows(db: D1Database, env: CloudflareEnv, now: Date) {
   const viewer = await taskViewer(db, memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env }))
-  return (await listTasks(db, viewer, parseTaskListQuery({}), now)).sections.flatMap(section => section.tasks).filter(task => task.kind === 'guest_reply').map(task => [task.requestId, task.eyebrow])
+  return (await listTasks(db, viewer, parseTaskListQuery({}), now)).sections.flatMap(section => section.tasks).filter(task => task.kind === 'guest_reply').map(task => [task.requestId, task.statusLine])
 }
 const GROWTH = ['post.create', 'social.connect', 'article.create']
 const code = (expected: string) => (error: unknown) => (error as { data?: { code?: string } }).data?.code === expected
@@ -238,11 +238,11 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     // recorded conversation title without inventing a guest identity.
     const today = await readToday()
     const replies = today.tasks.flatMap(section => section.tasks).filter(task => task.kind === 'guest_reply')
-    assert.deepEqual(replies.map(task => ({ status: task.status, title: task.title, detail: task.detail, path: task.path, action: task.action, requestId: task.requestId, stayId: task.stayId, startsAt: task.startsAt, dueAt: task.dueAt, icon: task.icon })), [{
+    assert.deepEqual(replies.map(task => ({ status: task.status, title: task.title, detail: task.detail, path: task.path, action: task.action, requestId: task.requestId, stayId: task.stayId, startsAt: task.startsAt, dueAt: task.dueAt, avatar: task.avatar })), [{
       status: 'open', title: 'Conversation supplied by Airbnb', detail: 'Hello', path: `/dashboard/org/messages/${rows[0]!.id}`, action: { type: 'open', label: 'Reply', path: `/dashboard/org/messages/${rows[0]!.id}` },
-      requestId: rows[0]!.id, stayId: null, startsAt: null, dueAt: null, icon: 'i-lucide-message-circle',
+      requestId: rows[0]!.id, stayId: null, startsAt: null, dueAt: null, avatar: { initial: 'C', tone: 'warm' },
     }])
-    assert.match(replies[0]!.eyebrow, /^Reply · asked .+$/)
+    assert.match(replies[0]!.statusLine!, /^Asked .+$/)
     const afterToday = (await getGuestThreadDetail(db, rows[0]!.id, ORG))!
     assert.deepEqual([afterToday.guestName, afterToday.guestEmail, afterToday.guestPhone, afterToday.operationalRecord], [null, null, null, null])
     assert.equal(await db.prepare('SELECT count(*) FROM stays').first('count(*)'), 0)
@@ -941,7 +941,7 @@ test('explicit provider instants order replies across offsets without losing sub
     if (mirrored.status !== 'mirrored') throw new Error('Expected mapped inquiry')
     assert.deepEqual(await waitingOn(db, mirrored.request_id), ['channex-message:offset-guest'])
     // Asked at 2026-10-15T16:12:00.123Z by its explicit offset; read exactly a day later it is a day old, however recently it was imported.
-    assert.deepEqual(await replyEyebrows(db, env, new Date('2026-10-16T16:12:00.123Z')), [[mirrored.request_id, 'Reply · asked 1d ago']], 'an explicit original instant supplies the waiting age instead of the later import time')
+    assert.deepEqual(await replyEyebrows(db, env, new Date('2026-10-16T16:12:00.123Z')), [[mirrored.request_id, 'Asked 1d ago · Cabin']], 'an explicit original instant supplies the waiting age instead of the later import time')
     provider.messages.push(provider.message('offset-answer', 'property', 'Yes.', [], '2026-10-15T16:12:00.123457Z'))
     await mirrorChannexThread(db, env, 'thread', 'property')
     assert.deepEqual(await waitingOn(db, mirrored.request_id), [])

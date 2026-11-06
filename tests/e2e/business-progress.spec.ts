@@ -171,7 +171,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
       return opportunities.filter(opportunity => opportunity.path === blogPath)
     }
     const offered = await draftOpportunities()
-    expect(offered).toEqual([expect.objectContaining({ eyebrow: 'Website', title: `Finish “${edited.title}”`, detail: expect.stringContaining('Complete legal review before publishing.') })])
+    expect(offered).toEqual([expect.objectContaining({ statusLine: 'Website', title: `Publish “${edited.title}”`, detail: expect.stringContaining('Complete legal review before publishing.') })])
     const dismissal = { note: 'Do not publish this guide. An attorney must review the consultation instructions first.' }
     expect(await responseBody(await request.post(`${api}/opportunities/${offered[0]!.id}/dismiss`, { data: dismissal }))).toEqual({ opportunity: { id: offered[0]!.id, status: 'dismissed' } })
     // A decision is made once: neither a second dismissal nor an accept changes it.
@@ -192,7 +192,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     expect(changedReference.reference.evidenceRevision).not.toBe(reference.evidenceRevision)
     // Changed evidence is a new opportunity; the dismissal of the old evidence does not hide it.
     const reoffered = await draftOpportunities()
-    expect(reoffered).toEqual([expect.objectContaining({ title: `Finish “${edited.title}”` })])
+    expect(reoffered).toEqual([expect.objectContaining({ title: `Publish “${edited.title}”` })])
     expect(reoffered[0]!.id).not.toBe(offered[0]!.id)
     // A deferral hides it until its time, on the real clock, and then it returns unchanged.
     const until = new Date(Date.now() + 5_000).toISOString()
@@ -201,7 +201,7 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     await expect.poll(draftOpportunities, { timeout: 15_000 }).toEqual(reoffered)
     // Accepting makes it the owner's task, due today, recorded as business activity.
     const { task: acceptedTask } = await responseBody<{ task: TaskView }>(await request.post(`${api}/opportunities/${reoffered[0]!.id}/accept`, { data: {} }), 201)
-    expect(acceptedTask).toMatchObject({ kind: 'opportunity', status: 'open', title: `Finish “${edited.title}”`, assignee: { type: 'member', you: true }, dueAt: expect.any(String) })
+    expect(acceptedTask).toMatchObject({ kind: 'opportunity', status: 'open', title: `Publish “${edited.title}”`, assignee: { type: 'member', you: true }, dueAt: expect.any(String) })
     expect(await draftOpportunities()).toEqual([])
     const listedTasks = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'list_tasks', args: { organization_id: organization.id, range: 'today', kind: 'opportunity' } })
     expect(listedTasks.status(), await listedTasks.text()).toBe(200)

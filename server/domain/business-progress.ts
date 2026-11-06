@@ -7,7 +7,7 @@ import type { BusinessProgressOperation, BusinessProgressReference } from '~/sha
 import { businessGoalStrategySchema, createBusinessGoalSchema, updateBusinessGoalSchema, type BusinessGoal, type BusinessGoalStrategy } from '~/shared/business-progress'
 import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { queryOrganizationAnalytics } from '~/server/utils/analytics-query'
-import { addLocalDays, formatTimestamp, localDateAt } from '~/utils/timezone'
+import { addLocalDays, formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
 import { articleSocialPostPath, blogCreatePath, blogEditorPath, postEditorPath, productEditorPath } from '~/server/utils/dashboard-links'
 import { listSessions } from '~/server/utils/availability'
 import { listReservationSlots } from '~/server/utils/reservations'
@@ -140,6 +140,9 @@ export interface BusinessRecommendation {
   reference: BusinessProgressReference
 }
 
+const NIGHT_WORDS = ['', 'One night', 'Two nights', 'Three nights', 'Four nights', 'Five nights', 'Six nights', 'Seven nights']
+const nightsBetween = (nights: number) => NIGHT_WORDS[nights] ?? `${nights} nights`
+
 interface MarketingPage { path: string; count: number; source: string }
 interface RecommendationDocument {
   id: string; kind: string; title: string | null; slug: string | null; status: string | null
@@ -263,8 +266,9 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
   const topic = leading ? `“${leading.name}”` : organization.vertical === 'service' ? 'a question prospective clients ask'
     : organization.vertical === 'lodging' ? 'a useful local stay or travel topic' : organization.vertical === 'experience' ? 'what guests can expect from a class' : 'your food, drinks or next event'
   if (canWrite && enabled('blog')) {
-    for (const draft of drafts) offer('article.publish', draft.id, draft.title ? `Finish “${draft.title}”` : 'Finish your blog draft',
-      `An existing blog draft can become the next useful article.${organization.vertical === 'service' ? ' Complete legal review before publishing.' : ''} ${context}`,
+    const since = (instant: string) => formatTimestamp(instant, 'en', organization.timezone, now.getTime() - Date.parse(instant) < 6 * 86_400_000 ? { weekday: 'long' } : { month: 'short', day: 'numeric' })
+    for (const draft of drafts) offer('article.publish', draft.id, draft.title ? `Publish “${draft.title}”` : 'Publish your blog draft',
+      `Your draft has been ready since ${since(draft.updated_at)}.${organization.vertical === 'service' ? ' Complete legal review before publishing.' : ''}`,
       blogEditorPath(organization.slug, draft.id), 70, { goal: goalFor('blog') ?? goalFor('google_ads'), locationId: draft.location_id, recency: draft.updated_at, icon: 'i-lucide-file-pen-line' })
     if (!drafts.length) offer('article.create', organizationId, `Start a blog about ${topic}`,
       `Build useful content for ${organization.name}.${leading && pageEvidence(leading.slug).length ? ` This offering already has recorded website interest.` : ' This is a new content opportunity, not a measured winning topic.'} ${context}`,
@@ -351,8 +355,8 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
     const today = localDateAt(now, organization.timezone)
     const gaps = await readStayGapCandidates(db, await stayAccessFor(principal), { from: addLocalDays(today, -1), to: addLocalDays(today, 31) })
     for (const gap of gaps.filter(gap => !input.locationId || gap.locationId === input.locationId)) offer('stay.gap', JSON.stringify([gap.productId, gap.from, gap.to]),
-      gap.bookable ? `Fill the ${gap.nights}-night gap at ${gap.name}` : `Review the ${gap.nights}-night gap at ${gap.name}`,
-      `${gap.from} to ${gap.to}.${gap.bookable ? ' The saved rules allow this length; promote it if it fits your business.' : ` ${gap.restriction}`}`,
+      `${formatCalendarRange(gap.from, gap.to, 'en-US')} is open`,
+      `${nightsBetween(gap.nights)} between stays.${gap.bookable ? ' Your rules allow this length; promote it if it fits.' : ` ${gap.restriction}`}`,
       `${base}/calendar?${new URLSearchParams({ product_id: gap.productId, date: gap.from, month: gap.from.slice(0, 7) })}`, 95,
       { goal: goalFor('availability'), locationId: gap.locationId, productId: gap.productId, recency: gap.from, icon: 'i-lucide-calendar-range' })
   } else if (canOperate && (organization.vertical === 'experience' || organization.vertical === 'service')) {

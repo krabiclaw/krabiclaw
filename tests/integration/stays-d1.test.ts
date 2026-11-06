@@ -1395,15 +1395,15 @@ test('members see only the homes they look after and change nothing; a home with
     // The cleaner's Today is the turnover tasks at the homes they look after.
     const cleanerTasks = async (now: string) => (await listTasks(db, await taskViewer(db, memberAccessPrincipal(cleanerMembership!, { env })), parseTaskListQuery({}), new Date(now)))
       .sections.flatMap(section => section.tasks).map(task => [task.kind, task.stayId, task.detail])
-    assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'No next guests yet']])
+    assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out']])
     const next = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'next', check_in_date: '2026-11-03', check_out_date: '2026-11-05', ...guest })
     const turnover = await cleanerToday('2026-11-03T18:00:00.000Z')
     const departure = turnover.items.find(item => item.stayId === cabinStay.id)!
     assert.equal(departure.stayMoment, 'turnover')
-    assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Next guests arrive 4:00 PM · 2 guests']])
+    assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out · Ana in']])
     await cancelStay(db, env, manager, next.id, { expected_version: next.version })
     assert.equal((await cleanerToday('2026-11-03T18:00:00.000Z')).items.find(item => item.stayId === cabinStay.id)!.stayMoment, 'departure')
-    assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'No next guests yet']])
+    assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out']])
     assert.deepEqual((await listStays(db, cleaner, { from: '2026-11-01', to: '2026-11-30' })).map(stay => stay.id), [cabinStay.id])
     assert.deepEqual(await listStays(db, outsider, { from: '2026-11-01', to: '2026-11-30' }), [])
     assert.equal((await getStay(db, cleaner, cabinStay.id)).id, cabinStay.id)

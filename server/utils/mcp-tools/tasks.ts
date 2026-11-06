@@ -11,14 +11,16 @@ const instant = { type: 'string', format: 'date-time', description: 'An instant 
 const person = { type: 'object', properties: { type: { type: 'string', enum: ['member', 'team'] }, id: text, name: text, initial: text, you: { type: 'boolean' } }, required: ['type', 'id', 'name', 'initial', 'you'] }
 const task = { type: 'object', properties: {
   id: text, kind: { type: 'string', enum: [...TASK_KINDS] }, status: { type: 'string', enum: ['open', 'done', 'skipped', 'cancelled'] }, version: { type: 'integer' },
-  eyebrow: text, title: text, detail: nullableText, assignee: { anyOf: [person, { type: 'null' }] },
+  face: { type: 'string', enum: ['photo', 'compact'] }, tag: nullableText, imageUrl: nullableText, avatar: { type: ['object', 'null'] },
+  statusLine: nullableText, title: text, when: nullableText, detail: nullableText, error: nullableText, note: nullableText,
+  person: { anyOf: [person, { type: 'null' }] }, assignee: { anyOf: [person, { type: 'null' }] }, sheet: { type: 'object' },
   startsAt: nullableText, dueAt: nullableText, timezone: text, notes: nullableText,
-  outcome: { type: ['object', 'null'] }, action: { type: 'object' }, path: nullableText,
+  outcome: { type: ['object', 'null'] }, action: { type: ['object', 'null'] }, path: nullableText,
   productId: nullableText, locationId: nullableText, stayId: nullableText, requestId: nullableText,
   can: { type: 'object', properties: { complete: { type: 'boolean' }, skip: { type: 'boolean' }, reopen: { type: 'boolean' }, assign: { type: 'boolean' }, edit: { type: 'boolean' } }, required: ['complete', 'skip', 'reopen', 'assign', 'edit'] },
-}, required: ['id', 'kind', 'status', 'version', 'eyebrow', 'title', 'detail', 'assignee', 'startsAt', 'dueAt', 'timezone', 'notes', 'outcome', 'action', 'path', 'productId', 'locationId', 'stayId', 'requestId', 'can'] }
+}, required: ['id', 'kind', 'status', 'version', 'face', 'tag', 'imageUrl', 'avatar', 'statusLine', 'title', 'when', 'detail', 'error', 'note', 'person', 'assignee', 'sheet', 'startsAt', 'dueAt', 'timezone', 'notes', 'outcome', 'action', 'path', 'productId', 'locationId', 'stayId', 'requestId', 'can'] }
 const taskResult = { type: 'object', properties: { task }, required: ['task'] }
-const opportunity = { type: 'object', properties: { id: text, eyebrow: text, title: text, detail: text, icon: text, path: text, productId: nullableText, locationId: nullableText }, required: ['id', 'eyebrow', 'title', 'detail', 'icon', 'path', 'productId', 'locationId'] }
+const opportunity = { type: 'object', properties: { id: text, statusLine: text, title: text, detail: text, icon: text, path: text, productId: nullableText, locationId: nullableText }, required: ['id', 'statusLine', 'title', 'detail', 'icon', 'path', 'productId', 'locationId'] }
 const assignee = {
   assigned_member_id: { type: ['string', 'null'], description: 'A Better Auth member id from list_tasks assignees; null to unassign.' },
   assigned_team_id: { type: ['string', 'null'], description: 'A Better Auth team id from list_tasks assignees. Give a member or a team, not both.' },
@@ -27,7 +29,7 @@ const assignee = {
 export const TASK_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'list_tasks', domain: 'tasks', minimumRole: 'member', description: 'Read Today or Upcoming as stored tasks: turnovers, guest questions awaiting a reply, scheduled messages that did not send, accepted opportunities and tasks people added. Today is open work starting or due today or earlier plus what was done today; Upcoming is later open work by day. A member sees the tasks given to them or their team and the turnovers at homes they look after. assignees lists who a manager can give work to.',
     inputSchema: { range: { type: 'string', enum: ['today', 'upcoming'] }, assignee: { type: 'string', description: 'me, all, or a member id.' }, location_id: { ...text, minLength: 1 }, status: { type: 'string', enum: ['open', 'done', 'skipped', 'cancelled'] }, kind: { type: 'string', enum: [...TASK_KINDS] } },
-    outputSchema: { type: 'object', properties: { sections: { type: 'array', items: { type: 'object', properties: { id: text, title: text, tasks: { type: 'array', items: task } }, required: ['id', 'title', 'tasks'] } }, assignees: { type: 'array', items: person }, resolvedAt: text }, required: ['sections', 'assignees', 'resolvedAt'] },
+    outputSchema: { type: 'object', properties: { sections: { type: 'array', items: { type: 'object', properties: { id: text, title: nullableText, subtitle: nullableText, tasks: { type: 'array', items: task } }, required: ['id', 'title', 'subtitle', 'tasks'] } }, assignees: { type: 'array', items: person }, resolvedAt: text }, required: ['sections', 'assignees', 'resolvedAt'] },
   }),
   organizationTool({ name: 'create_task', domain: 'tasks', minimumRole: 'admin', description: 'Add a task someone has to do, optionally at a home or location, with a window and an assignee. The assignee is told by their own notification settings. Reuse the same idempotency_key for an identical retry.',
     inputSchema: { title: { ...text, minLength: 1, maxLength: 200 }, notes: { ...text, maxLength: 5000 }, starts_at: instant, due_at: instant, ...assignee, product_id: { ...text, minLength: 1 }, location_id: { ...text, minLength: 1 }, idempotency_key: { ...text, minLength: 1, maxLength: 200 } }, required: ['title', 'idempotency_key'],

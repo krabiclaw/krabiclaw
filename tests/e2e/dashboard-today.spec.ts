@@ -407,7 +407,7 @@ test('opportunities follow explicit strategy, the owner’s decisions and actual
     }
 
     const beforeGoal = await draftOpportunity()
-    expect(beforeGoal, 'A real draft is useful marketing before the owner saves a matching priority').toMatchObject({ eyebrow: 'Website', title: `Finish “${title}”`, icon: 'i-lucide-file-pen-line' })
+    expect(beforeGoal, 'A real draft is useful marketing before the owner saves a matching priority').toMatchObject({ statusLine: 'Website', title: `Publish “${title}”`, icon: 'i-lucide-file-pen-line' })
     expect(beforeGoal!.detail).not.toContain('Your strategy')
 
     // The owner chooses channels explicitly; unrelated intent wording is not a relevance algorithm.
@@ -419,7 +419,7 @@ test('opportunities follow explicit strategy, the owner’s decisions and actual
     expect((await readGoals()).find(value => value.id === goal!.id)?.strategy).toMatchObject({ channels: ['blog', 'social'] })
     // The strategy is now the opportunity's reason, recorded as a new opportunity for the new goal.
     const withGoal = await draftOpportunity()
-    expect(withGoal).toMatchObject({ eyebrow: 'Website', title: `Finish “${title}”`, detail: expect.stringContaining(`Your strategy: ${intent}`) })
+    expect(withGoal).toMatchObject({ statusLine: 'Website', title: `Publish “${title}”`, detail: expect.stringContaining(`Your strategy: ${intent}`) })
     expect(withGoal!.id).not.toBe(beforeGoal!.id)
 
     // Later: set aside until tomorrow; it leaves Today while it waits.
@@ -443,7 +443,7 @@ test('opportunities follow explicit strategy, the owner’s decisions and actual
     }
     const firstEdit = await edit(article.updated_at, 'Our supper club returns with a seasonal dinner menu.')
     const afterEdit = await draftOpportunity()
-    expect(afterEdit).toMatchObject({ title: `Finish “${title}”`, detail: expect.stringContaining(`Your strategy: ${intent}`) })
+    expect(afterEdit).toMatchObject({ title: `Publish “${title}”`, detail: expect.stringContaining(`Your strategy: ${intent}`) })
     expect(afterEdit!.id).not.toBe(withGoal!.id)
 
     // Dismiss: gone while the evidence is unchanged, and a decided opportunity cannot be decided again.
@@ -466,8 +466,8 @@ test('opportunities follow explicit strategy, the owner’s decisions and actual
     const taskRead = await page.request.get(`${tasksApi}/tasks/${acceptedTask.id}`)
     expect(taskRead.status(), await taskRead.text()).toBe(200)
     expect((await taskRead.json() as { task: TaskView }).task).toMatchObject({
-      id: acceptedTask.id, kind: 'opportunity', status: 'open', eyebrow: 'Accepted opportunity', title: `Finish “${title}”`,
-      assignee: { type: 'member', name: 'You', you: true }, dueAt: expect.any(String), action: { type: 'complete' },
+      id: acceptedTask.id, kind: 'opportunity', status: 'open', statusLine: 'Accepted opportunity', title: `Publish “${title}”`,
+      assignee: { type: 'member', name: 'You', you: true }, dueAt: expect.any(String), action: { type: 'complete', label: 'Done' },
       can: { complete: true, skip: true, reopen: false, assign: true, edit: true },
     })
     expect((await readToday()).tasks.find(section => section.id === 'open')?.tasks.map(task => task.id)).toContain(acceptedTask.id)
@@ -483,7 +483,7 @@ test('opportunities follow explicit strategy, the owner’s decisions and actual
       status: 'done', outcome: { note: null, photos: [], closedAt: expect.any(String), closedBy: null }, can: { complete: false, skip: false, reopen: false },
     })
     expect(await draftOpportunity()).toBeUndefined()
-    const next = after.opportunities.find(value => ['Website', 'Social'].includes(value.eyebrow) && !value.title.startsWith('Finish “'))
+    const next = after.opportunities.find(value => ['Website', 'Social'].includes(value.statusLine) && !value.title.startsWith('Publish “'))
     expect(next, 'Publication makes the next useful growth action available').toBeDefined()
   } finally {
     try {

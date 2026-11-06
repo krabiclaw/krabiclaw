@@ -4423,14 +4423,14 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const upcoming = await upcomingResponse.json() as BusinessToday
       expect(upcoming.tasks.map(section => section.id)).toEqual([localDay(2)])
       expect(upcoming.tasks[0]!.tasks).toEqual([expect.objectContaining({
-        kind: 'turnover', status: 'open', title: 'Assigned Cabin', detail: 'No next guests yet', stayId: stays[0]!.id, requestId: null, path: null,
-        productId: assignedHome.product_id, locationId: assignedHome.location_id, dueAt: null, outcome: null, action: { type: 'complete' },
+        kind: 'turnover', status: 'open', title: 'Assigned Cabin', detail: 'Ana out', stayId: stays[0]!.id, requestId: null, path: null,
+        productId: assignedHome.product_id, locationId: assignedHome.location_id, dueAt: null, outcome: null, action: { type: 'complete', label: 'Done' },
         assignee: { type: 'member', id: memberId, name: 'You', initial: expect.any(String), you: true },
         can: { complete: true, skip: true, reopen: false, assign: false, edit: false },
       })])
       const turnover = upcoming.tasks[0]!.tasks[0]!
-      // A member's turnover names the home and the next arrival, never the guests.
-      for (const guest of ['Ana', 'Private', 'Silva']) expect(JSON.stringify(upcoming)).not.toContain(guest)
+      // A member's turnover names the guests by first name, as their turnover projection does; never a surname or private detail.
+      for (const guest of ['Private', 'Silva']) expect(JSON.stringify(upcoming)).not.toContain(guest)
       const assignedAgendaResponse = await cleaner.request.get(api('agenda'), { params: { from: localDay(0), to: localDay(7) } })
       await expectStatus(assignedAgendaResponse, 200)
       const assignedAgenda = await assignedAgendaResponse.json() as { items: Array<{ id: string; to: string; stayId: string; locationId: string; resourceTitle: string }> }

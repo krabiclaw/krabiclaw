@@ -165,14 +165,26 @@ Business Today and Upcoming show two stored things
   it aside until a time. A manager sees them; a member never does.
 
 `GET /api/dashboard/today` returns `{ tasks, opportunities, assignees,
-resolvedAt }` as server-formatted view models, which the web page and the app
-render as they come. `TodayTaskCard` is one task: kind and time, the place or
-person, one line of context, the assignee, and Done — or, for a reply or a
-failed message, a button that opens it, since it closes when its subject does.
-`TodayTaskSheet` holds Skip, the note and photos, and Reopen.
-`TodayOpportunityCard` has Accept and Not now. Arrivals and bookings stay in
-Calendar. Today lists open work starting or due today, then what was done
-today; Upcoming lists later open work by day.
+resolvedAt }`. Every string a card or sheet shows is in that view model, so the
+web page and the app draw the same response and compose no text.
+
+`TaskCard` is the one Today card (`.tc`, design system
+`project/components/TodayTasks`), with three faces. A **photo** card is a
+turnover or a task at a home, ending in Done. A **compact** card is a failed
+message, a reply, or a task without a home; it has an avatar and a grey pill
+that opens its subject, because it closes when that subject does. An
+**insight** card is an opportunity, with a white Accept and an underlined Not
+now. Black is Done and nothing else. A finished task shows a filled check that
+undoes Done. An error line states only what our record knows; it never blames a
+provider or asks for a guest email.
+
+Owner Today orders failed deliveries, then turnovers, then replies, in two
+columns on web. Opportunities follow full width, then Done. A member sees only
+their own tasks and Done. A round + beside Today/Upcoming adds a task
+(`TodayTaskCreate`). `TodayTaskSheet` follows Airbnb's reservation detail: a
+Checkout | Check-in split, Assigned with Change, "What you found", then Skip and
+Done. Upcoming groups by day ("Tomorrow · Sat, Nov 7"). Arrivals and bookings
+stay in Calendar.
 
 The page re-reads on `business.changed`, `stay.changed` and conversation
 invalidations. Opening a task (`?task=`) reads its alerts. Business goals stay
