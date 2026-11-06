@@ -3,7 +3,6 @@ import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, t
 import { assertRoleAllows, assignedGuestThreadScope, assignedResponsibilitySql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
-import { businessReplyAfterSql, successfulBusinessReplySql } from '~/server/domain/guest-threads/repository'
 import { discardMessagePhotos, listMessagePhotos, messagePhotoPlacements, uploadMessagePhotos, MessagePhotoRejection, type MessagePhoto } from '~/server/domain/guest-threads/attachments'
 import { firstName } from '~/server/domain/guest-threads/presentation'
 import { guestConversationPath } from '~/server/utils/dashboard-links'
@@ -131,55 +130,6 @@ export async function turnoverTaskQueries(db: DbClient, input: { organizationId:
     })
   }
   return queries
-}
-
-/** The guest entry a reply task is about: a message, or a contact form's own words. */
-const GUEST_QUESTION_SQL = `guest_entry.actor_kind = 'guest' AND (guest_entry.kind = 'message' OR (guest_entry.kind = 'submission' AND r.kind = 'contact'))`
-/** A cancelled booking, reservation or stay answers what the guest asked before it. */
-const CANCELLED_AFTER_SQL = `(EXISTS (SELECT 1 FROM bookings record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= guest_entry.occurred_at)
-  OR EXISTS (SELECT 1 FROM reservations record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= guest_entry.occurred_at)
-  OR EXISTS (SELECT 1 FROM stays record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= guest_entry.occurred_at))`
-
-/**
- * The reply tasks for one conversation as its ledger now stands: the task for
- * an answered question closes (done, by whoever replied), an archived or
- * blocked conversation's closes (cancelled), and the first question still
- * unanswered opens one. A failed scheduled message the business has since
- * answered in person is done too.
- */
-export function conversationTaskQueries(requestId: string, now: string): BatchQuery[] {
-  const entryOf = `substr(tasks.dedupe_key, length('guest_reply:' || tasks.subject_id || ':') + 1)`
-  return [{
-    query: `UPDATE tasks SET status = CASE WHEN r.archived_at IS NOT NULL OR r.blocked_at IS NOT NULL THEN 'cancelled' ELSE 'done' END,
-        closed_at = ?, version = tasks.version + 1, updated_at = ?,
-        closed_by_user_id = CASE WHEN r.archived_at IS NOT NULL THEN r.archived_by_user_id WHEN r.blocked_at IS NOT NULL THEN NULL ELSE (
-          SELECT reply.actor_user_id FROM activity_entries reply JOIN activity_entries guest_entry ON guest_entry.id = ${entryOf}
-          WHERE reply.request_id = r.id AND ${successfulBusinessReplySql('reply')} AND reply.sequence > guest_entry.sequence ORDER BY reply.sequence LIMIT 1) END
-      FROM requests r
-      WHERE tasks.kind = 'guest_reply' AND tasks.subject_type = 'request' AND tasks.subject_id = ? AND tasks.status = 'open' AND r.id = tasks.subject_id
-        AND (r.archived_at IS NOT NULL OR r.blocked_at IS NOT NULL OR NOT EXISTS (
-          SELECT 1 FROM activity_entries guest_entry WHERE guest_entry.id = ${entryOf}
-            AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}))`,
-    params: [now, now, requestId],
-  }, {
-    query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, location_id, timezone, status, dedupe_key, version, created_at, updated_at)
-      SELECT ?, r.organization_id, 'guest_reply', 'request', r.id, r.location_id, COALESCE(l.timezone, o.timezone), 'open', 'guest_reply:' || r.id || ':' || guest_entry.id, 1, ?, ?
-        FROM requests r JOIN organization o ON o.id = r.organization_id
-        LEFT JOIN business_locations l ON l.organization_id = r.organization_id AND l.id = r.location_id
-        JOIN activity_entries guest_entry ON guest_entry.request_id = r.id
-       WHERE r.id = ? AND r.archived_at IS NULL AND r.blocked_at IS NULL AND ${GUEST_QUESTION_SQL}
-         AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}
-         AND NOT EXISTS (SELECT 1 FROM tasks open_reply WHERE open_reply.kind = 'guest_reply' AND open_reply.subject_type = 'request' AND open_reply.subject_id = r.id AND open_reply.status = 'open')
-       ORDER BY guest_entry.sequence LIMIT 1
-      ON CONFLICT (dedupe_key) DO NOTHING`,
-    params: [crypto.randomUUID(), now, now, requestId],
-  }, {
-    query: `UPDATE tasks SET status = 'done', closed_at = ?, closed_by_user_id = NULL, version = version + 1, updated_at = ?
-      WHERE kind = 'message_delivery' AND status = 'open' AND subject_type = 'scheduled_guest_message' AND subject_id IN (
-        SELECT m.id FROM scheduled_guest_messages m WHERE m.request_id = ? AND EXISTS (
-          SELECT 1 FROM activity_entries reply WHERE reply.request_id = m.request_id AND ${successfulBusinessReplySql('reply')} AND reply.occurred_at > m.updated_at))`,
-    params: [now, now, requestId],
-  }]
 }
 
 /** A scheduled message that failed or needs review is someone's work until it is sent, cancelled or skipped. */

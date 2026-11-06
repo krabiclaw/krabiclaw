@@ -1,4 +1,3 @@
-import { conversationTaskQueries } from '~/server/domain/tasks'
 import { openingMessageQueries } from '~/server/domain/guest-threads/opening'
 import { z } from 'zod'
 import { HTTPError } from 'nitro'
@@ -455,7 +454,7 @@ export async function cancelBookingRequest(db: DbClient, input: {
       params: [crypto.randomUUID(), input.id, `${record.kind}.cancel`, JSON.stringify({ action: 'cancel', beforeStatus: record.status, afterStatus: 'cancelled', operational_booking_id: record.id, request_id: input.id, ...(input.buyerUserId ? { actor_user_id: input.buyerUserId } : {}) }), `${record.kind}:${record.id}:guest-cancel`, input.id, input.now, input.now],
     },
     ...refund.queries,
-    ...conversationTaskQueries(input.id, input.now),
+    ...(await import('~/server/domain/guest-threads/repository')).conversationTaskQueries(input.id, input.now),
   ], { operation: 'Cancel booking request' })
 
   const row = (consumed?.results?.[0] ?? null) as Record<string, unknown> | null

@@ -1,6 +1,6 @@
 import type { H3Event } from 'nitro'
 import { requestInsertQueries, getGuestRequest } from '~/server/domain/requests'
-import { conversationTaskQueries } from '~/server/domain/tasks'
+import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import { acceptFormAnswers, readFormQuestions } from '~/server/domain/form-questions'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { isLegalPracticeSite } from '~/utils/site-routing'
