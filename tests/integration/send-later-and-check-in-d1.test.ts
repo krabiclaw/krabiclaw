@@ -237,7 +237,7 @@ test('a scheduled reply keeps its exact failure and Inbox retry completes the sa
     }
     const now = new Date().toISOString()
     await db.batch(requestInsertQueries({ id: 'recovery-thread', kind: 'contact', organization_id: ORG, location_id: null, user_id: null, review_id: null,
-      conversation_state: 'needs_attention', resolved_at: null, payload: { guest: { name: 'Test inbox', email: 'delivered@resend.dev', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null },
+      payload: { guest: { name: 'Test inbox', email: 'delivered@resend.dev', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null },
       created_at: now, updated_at: now }).map(write => db.prepare(write.query).bind(...write.params)))
     const owner = memberAccessPrincipal((await resolveMembership(env, { organizationId: ORG, userId: OWNER }))!, { env })
     const historical = await appendEntry(db, { threadId: 'recovery-thread', kind: 'message', actorKind: 'member', actorUserId: OWNER, channel: 'email', body: 'Old reply', eventName: 'thread.member_reply' })

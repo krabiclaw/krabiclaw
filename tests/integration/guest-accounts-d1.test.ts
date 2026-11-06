@@ -19,7 +19,7 @@ test('a verified account gathers the guest identities that used only its email, 
       ['guest-shared', 'anon-3@customers.krabiclaw.local', 0, 1], ['guest-sam', 'anon-4@customers.krabiclaw.local', 0, 1],
     ]
     for (const [id, email, verified, anonymous] of users) await db.prepare('INSERT INTO user(id,name,email,"emailVerified","isAnonymous") VALUES(?,?,?,?,?)').bind(id, id, email, verified, anonymous).run()
-    const request = (id: string, organization: string, user: string, email: string, kind = 'booking') => db.prepare(`INSERT INTO requests(id,kind,organization_id,user_id,conversation_state,payload_json,created_at,updated_at) VALUES(?,?,?,?,'needs_attention',?,?,?)`)
+    const request = (id: string, organization: string, user: string, email: string, kind = 'booking') => db.prepare(`INSERT INTO requests(id,kind,organization_id,user_id,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`)
       .bind(id, kind, organization, user, JSON.stringify({ guest: { name: 'Jane', email, phone: null }, ...(kind === 'contact' ? { message: 'Hello' } : {}) }), NOW, NOW).run()
     await request('pottery-booking', 'pottery', 'guest-pottery', 'jane@example.com')
     await request('pottery-question', 'pottery', 'guest-pottery', 'JANE@example.com', 'contact')

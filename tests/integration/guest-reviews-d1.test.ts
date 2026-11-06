@@ -85,8 +85,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     const name = (requestId: unknown) => Object.keys(T).find(key => T[key] === requestId)
     const thread = async (key: string, kind: 'reservation' | 'booking' | 'stay', userId: string, locationId: string | null, name: string) => {
       const id = T[key] ??= crypto.randomUUID()
-      const writes = requestInsertQueries({ id, kind, organization_id: 'org', location_id: locationId, user_id: userId, review_id: null, conversation_state: 'resolved', resolved_at: now,
-        // A stay's conversation carries only its guest; a booking's or reservation's carries the thread's own facts too.
+      const writes = requestInsertQueries({ id, kind, organization_id: 'org', location_id: locationId, user_id: userId, review_id: null, // A stay's conversation carries only its guest; a booking's or reservation's carries the thread's own facts too.
         payload: kind === 'stay' ? { guest: { name, email: `${key}@guests.example`, phone: '+66812345678' } } : threadPayloadForGuest({ name, email: `${key}@guests.example`, phone: '+66812345678' }),
         created_at: now, updated_at: now } as Parameters<typeof requestInsertQueries>[0])
       await db.batch(writes.map(write => db.prepare(write.query).bind(...(write.params ?? []))))
@@ -242,7 +241,7 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
           const incomplete = await invitation()
           assert.equal(incomplete.sent, false, boundary)
           // Drizzle reports the failed completion query as the outer error.
-          assert.match(incomplete.error!, boundary === 'unsent' ? /controlled unsent failure/ : boundary === 'persistence' ? /Failed query:[\s\S]*SET first_sent_at/ : boundary === 'preparation' ? /Failed query:[\s\S]*INSERT INTO guest_thread_deliveries/ : boundary === 'acceptance-write' ? /Failed query:[\s\S]*provider_message_id/ : /publication|503|invalidation/i)
+          assert.match(incomplete.error!, boundary === 'unsent' ? /controlled unsent failure/ : boundary === 'persistence' ? /Failed query:[\s\S]*SET first_sent_at/ : boundary === 'preparation' ? /Failed query:[\s\S]*INSERT INTO guest_thread_deliveries/ : boundary === 'acceptance-write' ? /controlled acceptance persistence failure/ : /publication|503|invalidation/i)
           assert.deepEqual(await db.prepare('SELECT first_sent_at, send_count, last_error IS NOT NULL AS failed FROM review_requests WHERE id = ?').bind(incomplete.requestId).first(), { first_sent_at: null, send_count: 0, failed: 1 })
           const retainedRequest = await db.prepare('SELECT token, token_hash, expires_at FROM review_requests WHERE id = ?').bind(incomplete.requestId).first()
           if (boundary === 'preparation') await db.prepare('DROP TRIGGER fail_review_preparation').run()

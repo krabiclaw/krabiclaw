@@ -253,6 +253,8 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
   const requestIds = ids(row => row.subject_type === 'request' ? row.subject_id : null)
   const messageIds = ids(row => row.subject_type === 'scheduled_guest_message' ? row.subject_id : null)
   const productIds = ids(row => row.product_id)
+  // Stay writers load this module; the conversation repository is loaded when a view is drawn.
+  const { guestEntryAskedAtSql } = await import('~/server/domain/guest-threads/repository')
   const [organization, members, teams, products, pictures, stays, requests, messages, photos] = await Promise.all([
     queryFirst<{ slug: string }>(db, 'SELECT slug FROM organization WHERE id = ?', [organizationId]),
     queryAll<{ id: string; userId: string; name: string }>(db, 'SELECT m.id, m.userId, u.name FROM member m JOIN user u ON u.id = m.userId WHERE m.organizationId = ?', [organizationId]),
@@ -265,7 +267,7 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
       SELECT r.id, COALESCE(json_extract(r.payload_json, '$.guest.name'), json_extract(r.payload_json, '$.participant.title')) AS guest,
         (SELECT CASE WHEN e.kind = 'submission' THEN json_extract(r.payload_json, '$.message') ELSE e.body END FROM activity_entries e JOIN tasks t ON t.subject_id = r.id AND t.kind = 'guest_reply'
           WHERE e.id = substr(t.dedupe_key, length('guest_reply:' || r.id || ':') + 1) ORDER BY t.created_at DESC LIMIT 1) AS preview,
-        (SELECT e.occurred_at FROM activity_entries e JOIN tasks t ON t.subject_id = r.id AND t.kind = 'guest_reply'
+        (SELECT ${guestEntryAskedAtSql('e')} FROM activity_entries e JOIN tasks t ON t.subject_id = r.id AND t.kind = 'guest_reply'
           WHERE e.id = substr(t.dedupe_key, length('guest_reply:' || r.id || ':') + 1) ORDER BY t.created_at DESC LIMIT 1) AS asked_at
       FROM requests r WHERE r.organization_id = ? AND r.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(requestIds)]),
     queryAll<{ id: string; template_title: string; reason: string | null; request_id: string | null; stay_id: string }>(db,

@@ -84,7 +84,7 @@ async function paidReservation(db: D1Database, env: CloudflareEnv, cutoff: numbe
  await db.prepare("INSERT INTO business_locations(id,organization_id,slug,title,status,timezone,opening_hours) VALUES('dining',?,'dining','Dining','active','UTC',?)").bind(ORG, JSON.stringify({ periods: [{ open: { day: 0, hour: 0, minute: 0 } }] })).run()
  // A later change to the business's current policy cannot change terms already accepted at Checkout.
  await upsertLocationReservationConfig(db, { organizationId: ORG, locationId: 'dining', patch: { slot_capacity: 1, free_cancellation_until_minutes: 2880 }, actorId: 'verified', env })
- const opening = { id: 'deposit-request', kind: 'reservation' as const, organization_id: ORG, location_id: 'dining', user_id: 'verified', review_id: null, conversation_state: 'needs_attention' as const, resolved_at: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com', phone: '+12025550123' }), cancellation: { token_hash: 'deposit-token-hash', expires_at: '2100-01-01T00:00:00.000Z', used_at: null } }, created_at: NOW, updated_at: NOW }
+ const opening = { id: 'deposit-request', kind: 'reservation' as const, organization_id: ORG, location_id: 'dining', user_id: 'verified', review_id: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com', phone: '+12025550123' }), cancellation: { token_hash: 'deposit-token-hash', expires_at: '2100-01-01T00:00:00.000Z', used_at: null } }, created_at: NOW, updated_at: NOW }
  await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
  const terms = { policy_type: 'reservation', free_cancellation_until_minutes: cutoff, reschedule_allowed: true, reschedule_cutoff_minutes: null, deposit_required: true, deposit_amount: 10000, deposit_currency: 'USD', deposit_tax_behavior: 'exclusive' }
  await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,location_id,currency,amount,tax_amount,captured_amount,state,stripe_payment_intent_id,stripe_charge_id,price_snapshot_json,created_at,updated_at) VALUES('deposit',?,'verified','acct_seller',0,'reservation','dining','USD',10000,500,10500,'captured','pi_deposit','ch_deposit',?,?,?)").bind(ORG, JSON.stringify({ title: 'Dining reservation deposit', reservation: terms }), NOW, NOW).run()
@@ -229,7 +229,7 @@ test('MCP paid booking cancellation and rejection hand off without preparing mon
   const { db, runtime } = await boot()
   try {
    await db.prepare("INSERT INTO member(id,organizationId,userId,role) VALUES('owner',?,'verified','owner')").bind(ORG).run()
-   const opening = { id: 'paid-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', review_id: null, conversation_state: 'needs_attention' as const, resolved_at: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@example.com' }), created_at: NOW, updated_at: NOW }
+   const opening = { id: 'paid-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', review_id: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@example.com' }), created_at: NOW, updated_at: NOW }
    await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
    const booking = await claimSessionCapacity(db, { organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'guest', requestId: opening.id })
    await payable(db, 'paid')
@@ -502,7 +502,7 @@ test('a payment back on the business’s site claims for that site’s buyer and
   await db.prepare("INSERT INTO business_locations(id,organization_id,slug,title,status,timezone,opening_hours) VALUES('dining',?,'dining','Dining','active','UTC',?)").bind(ORG, JSON.stringify({ periods: [{ open: { day: 0, hour: 0, minute: 0 } }] })).run()
   await upsertLocationReservationConfig(db, { organizationId: ORG, locationId: 'dining', patch: { slot_capacity: 1 }, actorId: 'verified', env })
   const receipt = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET, 'deposit-request')
-  const opening = { id: 'deposit-request', kind: 'reservation' as const, organization_id: ORG, location_id: 'dining', user_id: 'guest', review_id: null, conversation_state: 'waiting_on_guest' as const, resolved_at: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com', phone: '+12025550123' }), cancellation: { token_hash: await hashReservationCancelToken(receipt.token), expires_at: receipt.expiresAt, used_at: null } }, created_at: NOW, updated_at: NOW }
+  const opening = { id: 'deposit-request', kind: 'reservation' as const, organization_id: ORG, location_id: 'dining', user_id: 'guest', review_id: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com', phone: '+12025550123' }), cancellation: { token_hash: await hashReservationCancelToken(receipt.token), expires_at: receipt.expiresAt, used_at: null } }, created_at: NOW, updated_at: NOW }
   await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
   const terms = { policy_type: 'reservation', free_cancellation_until_minutes: null, reschedule_allowed: true, reschedule_cutoff_minutes: null, deposit_required: true, deposit_amount: 10000, deposit_currency: 'USD', deposit_tax_behavior: 'exclusive' }
   await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,location_id,currency,amount,price_snapshot_json,created_at,updated_at) VALUES('deposit',?,?,'acct_seller',0,'reservation','dining','USD',10000,?,?,?)").bind(ORG, 'guest', JSON.stringify({ title: 'Dining reservation deposit', reservation: terms }), NOW, NOW).run()
@@ -598,7 +598,7 @@ test('a payment back on the business’s site claims for that site’s buyer and
 
 test('buyer Activity groups exact owned visits and immutable orders without manufacturing conversations', {timeout:120000},async()=>{
  const {db,runtime}=await boot();try{
-  const opening={id:'booking-request',kind:'booking' as const,organization_id:ORG,location_id:null,user_id:'verified',review_id:null,conversation_state:'needs_attention' as const,resolved_at:null,payload:threadPayloadForGuest({name:'Verified',email:'verified@example.com',notes:'My booking note',ipHash:'private-ip-hash'}),created_at:NOW,updated_at:NOW}
+  const opening={id:'booking-request',kind:'booking' as const,organization_id:ORG,location_id:null,user_id:'verified',review_id:null,payload:threadPayloadForGuest({name:'Verified',email:'verified@example.com',notes:'My booking note',ipHash:'private-ip-hash'}),created_at:NOW,updated_at:NOW}
   await db.batch(requestInsertQueries(opening).map(write=>db.prepare(write.query).bind(...write.params)))
   const booking=await claimSessionCapacity(db,{organizationId:ORG,productId:'product',sessionId:'session',productVariantId:'variant',partySize:1,userId:'verified',requestId:opening.id})
   assert.notEqual(booking.bookingId,opening.id)
@@ -643,20 +643,20 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
 test('buyer conversations hide merchant facts and preserve public unread receipts and immutable reply retries', {timeout:120000},async()=>{
  const {db,runtime}=await boot();try{
   const env={...await runtime.getBindings<CloudflareEnv>(),BETTER_AUTH_SECRET:'local-proof-secret-long-enough-for-auth',BETTER_AUTH_URL:'https://proof.example',STRIPE_SECRET_KEY:'sk_test_local_d1_no_stripe_requests',NUXT_PUBLIC_PLATFORM_DOMAIN:'https://proof.example',EMAIL_REPLY_SECRET:'local-reply-proof',EMAIL_DELIVERY_MODE:'log_only',WHATSAPP_DELIVERY_MODE:'log_only'}
-  const opening=requestInsertQueries({id:'buyer-conversation',kind:'contact',organization_id:ORG,location_id:null,user_id:'verified',review_id:null,conversation_state:'needs_attention',resolved_at:null,payload:{guest:{name:'Verified',email:'verified@example.com',phone:null},subject:'Sandbox conversation',message:'My question',consent_at:null,ip_hash:'private-ip-hash'},created_at:NOW,updated_at:NOW})
+  const opening=requestInsertQueries({id:'buyer-conversation',kind:'contact',organization_id:ORG,location_id:null,user_id:'verified',review_id:null,payload:{guest:{name:'Verified',email:'verified@example.com',phone:null},subject:'Sandbox conversation',message:'My question',consent_at:null,ip_hash:'private-ip-hash'},created_at:NOW,updated_at:NOW})
   await db.batch(opening.map(write=>db.prepare(write.query).bind(...write.params)))
   const publicReply=await appendEntry(db,{threadId:'buyer-conversation',kind:'message',actorKind:'member',actorUserId:'other',channel:'web',eventName:'thread.member_reply',body:'Public host reply',payloadJson:{provider_secret:'private-diagnostic'},dedupeKey:'public-host-reply'})
   const capture=await appendEntry(db,{threadId:'buyer-conversation',kind:'operation',actorKind:'system',eventName:'payment.payment_captured',body:'Payment received',payloadJson:{stripe_charge_id:'private-charge'},dedupeKey:'public-capture'})
   const internal=await appendEntry(db,{threadId:'buyer-conversation',kind:'message',actorKind:'member',actorUserId:'other',channel:'system',body:'Internal staff note',dedupeKey:'internal-note'})
   const dispute=await appendEntry(db,{threadId:'buyer-conversation',kind:'operation',actorKind:'system',eventName:'payment.dispute_created',body:'Merchant dispute diagnostic',payloadJson:{stripe_dispute_id:'private-dispute'},dedupeKey:'merchant-dispute'})
-  await db.prepare("UPDATE requests SET archived_at=?,archived_by_user_id='other',conversation_state='resolved',resolved_at=? WHERE id='buyer-conversation'").bind(NOW,NOW).run()
+  await db.prepare("UPDATE requests SET archived_at=?,archived_by_user_id='other' WHERE id='buyer-conversation'").bind(NOW).run()
   const view=await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'verified'})
   assert(view)
   assert.deepEqual(view.entries.filter(entry=>entry.kind!=='submission').map(entry=>entry.id),[publicReply.id,capture.id])
   assert(view.entries.every(entry=>(entry.actorUserId===null||(entry.actorKind==='guest'&&entry.actorUserId==='verified'))&&entry.deliveries.length===0))
   assert.deepEqual(view.deliveryFailures,[])
   assert.deepEqual(view.availableActions,[])
-  assert.equal(view.conversationState,null)
+  assert.equal(view.needsReply,false,'whether the business owes a reply is merchant state')
   assert.equal(view.manuallyArchived,false)
   assert.equal(view.archivedByUserId,null)
   const secrets=['private-ip-hash','private-diagnostic','private-charge','private-dispute','Internal staff note','Merchant dispute diagnostic']
@@ -691,13 +691,16 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   const ownReplyView=await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'verified'})
   assert.equal(ownReplyView?.entries.find(entry=>entry.id===message.id)?.actorUserId,'verified')
   assert(ownReplyView?.entries.every(entry=>entry.actorUserId===null||(entry.actorKind==='guest'&&entry.actorUserId==='verified')))
-  const projection=await db.prepare("SELECT updated_at,conversation_state FROM requests WHERE id='buyer-conversation'").first()
-  assert.equal(projection?.updated_at,message.occurred_at)
+  // The conversation's projection: its inbox order and its reply tasks.
+  const projectionOf=async()=>({updated_at:await db.prepare("SELECT updated_at FROM requests WHERE id='buyer-conversation'").first<string>('updated_at'),
+   tasks:(await db.prepare("SELECT dedupe_key,status,version FROM tasks WHERE subject_type='request' AND subject_id='buyer-conversation' ORDER BY dedupe_key").all()).results})
+  const projection=await projectionOf()
+  assert.equal(projection.updated_at,message.occurred_at)
   const notices=(await db.prepare("SELECT * FROM activity_entries WHERE kind='notification' AND parent_id=?").bind(message.id).all()).results
   assert.equal(notices.length,1)
   await receiveGuestWebReply(env,input)
   assert.deepEqual((await db.prepare("SELECT * FROM activity_entries WHERE request_id='buyer-conversation' ORDER BY sequence").all()).results,ledger)
-  assert.deepEqual(await db.prepare("SELECT updated_at,conversation_state FROM requests WHERE id='buyer-conversation'").first(),projection)
+  assert.deepEqual(await projectionOf(),projection)
   assert.deepEqual((await db.prepare("SELECT * FROM activity_entries WHERE kind='notification' AND parent_id=?").bind(message.id).all()).results,notices)
   await assert.rejects(()=>receiveGuestWebReply(env,{...input,body:'Changed message'}),error=>error instanceof HTTPError&&error.statusCode===409)
   await assert.rejects(()=>receiveGuestWebReply(env,{...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===404)
@@ -714,7 +717,7 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   assert(historicalNullView?.entries.every(entry=>entry.actorUserId===null))
   await assert.rejects(()=>receiveGuestWebReply(env,input),error=>error instanceof HTTPError&&error.statusCode===404)
   assert.deepEqual((await db.prepare("SELECT * FROM activity_entries WHERE request_id='buyer-conversation' ORDER BY sequence").all()).results,retained)
-  assert.deepEqual(await db.prepare("SELECT updated_at,conversation_state FROM requests WHERE id='buyer-conversation'").first(),projection)
+  assert.deepEqual(await projectionOf(),projection)
   assert.deepEqual((await db.prepare("SELECT * FROM activity_entries WHERE kind='notification' AND parent_id=?").bind(message.id).all()).results,notices)
  }finally{await runtime.dispose()}
 })
@@ -933,7 +936,7 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
   try {
     const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
     await payable(db, 'ach-payment')
-    const opening = { id: 'ach-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', review_id: null, conversation_state: 'needs_attention' as const, resolved_at: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@example.com' }), created_at: NOW, updated_at: NOW }
+    const opening = { id: 'ach-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', review_id: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@example.com' }), created_at: NOW, updated_at: NOW }
     await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
     await db.prepare("UPDATE payment_checkout_holds SET request_id=? WHERE payment_id='ach-payment'").bind(opening.id).run()
     const originalFetch = globalThis.fetch

@@ -75,6 +75,12 @@ export function businessReplyFollowsSql(reply: string, guestEntry: string): stri
 }
 
 /** Whether a later successful business response to this guest entry has been recorded. */
+/** When the guest asked: the provider's own instant for a mirrored message that carries an offset, otherwise when it was recorded. */
+export function guestEntryAskedAtSql(entry: string): string {
+  return `CASE WHEN ${entry}.event_name = 'channel.message_mirrored' AND ${offsetSql(providerTimeSql(entry))}
+    THEN strftime('%Y-%m-%dT%H:%M:%fZ', ${providerTimeSql(entry)}) ELSE ${entry}.occurred_at END`
+}
+
 export function businessReplyAfterSql(guestEntry: string): string {
   return `EXISTS (
         SELECT 1 FROM activity_entries reply
@@ -606,8 +612,9 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
             AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}))`,
     params: [now, now, requestId],
   }, {
-    query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, location_id, timezone, status, dedupe_key, version, created_at, updated_at)
-      SELECT ?, r.organization_id, 'guest_reply', 'request', r.id, r.location_id, COALESCE(l.timezone, o.timezone), 'open', 'guest_reply:' || r.id || ':' || guest_entry.id, 1, ?, ?
+    query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, timezone, status, dedupe_key, version, created_at, updated_at)
+      SELECT ?, r.organization_id, 'guest_reply', 'request', r.id, (SELECT s.product_id FROM stays s WHERE s.request_id = r.id AND s.organization_id = r.organization_id),
+        r.location_id, COALESCE(l.timezone, o.timezone), 'open', 'guest_reply:' || r.id || ':' || guest_entry.id, 1, ?, ?
         FROM requests r JOIN organization o ON o.id = r.organization_id
         LEFT JOIN business_locations l ON l.organization_id = r.organization_id AND l.id = r.location_id
         JOIN activity_entries guest_entry ON guest_entry.request_id = r.id

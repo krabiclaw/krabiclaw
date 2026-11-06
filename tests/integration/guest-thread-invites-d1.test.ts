@@ -108,8 +108,8 @@ test('a host invites a phone-only guest into their conversation and replies reac
     const replies = () => db.prepare(`SELECT e.channel, e.body, (SELECT COUNT(*) FROM guest_thread_deliveries d WHERE d.entry_id = e.id) AS deliveries
       FROM activity_entries e WHERE e.request_id = ? AND e.event_name = 'thread.member_reply' ORDER BY e.sequence`).bind(deeThread).all().then(result => result.results)
     assert.deepEqual(await replies(), [{ channel: 'web', body: 'The gate code is 1234.', deliveries: 0 }])
-    assert.equal(await db.prepare('SELECT conversation_state FROM requests WHERE id = ?').bind(deeThread).first('conversation_state'), 'waiting_on_guest')
-    assert.equal((await getGuestThreadDetail(db, deeThread, ORG))?.guestAccountLinked, true)
+    const hostView = await getGuestThreadDetail(db, deeThread, ORG)
+    assert.deepEqual([hostView?.needsReply, hostView?.guestAccountLinked], [false, true], 'the business owes no reply after its own')
     const guestView = (userId: string) => getGuestThreadDetail(db, deeThread, ORG, { buyerUserId: userId })
     assert.deepEqual((await guestView('anon-a'))?.entries.filter(entry => entry.eventName === 'thread.member_reply').map(entry => entry.body), ['The gate code is 1234.'])
     const [unread] = await listGuestThreads(db, null, { userId: 'anon-a', buyerAudience: true, unreadOnly: true })
@@ -162,8 +162,8 @@ test('a host invites a phone-only guest into their conversation and replies reac
     assert.deepEqual(await holders(gus.request_id!), { request_user: 'bob', stay_user: 'bob' })
 
     // Only a stay kept in KrabiClaw is handed over this way.
-    await db.prepare(`INSERT INTO requests (id, kind, organization_id, location_id, conversation_state, payload_json, created_at, updated_at)
-      VALUES ('contact-1', 'contact', ?, 'cabin-site', 'needs_attention', ?, '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`)
+    await db.prepare(`INSERT INTO requests (id, kind, organization_id, location_id, payload_json, created_at, updated_at)
+      VALUES ('contact-1', 'contact', ?, 'cabin-site', ?, '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`)
       .bind(ORG, JSON.stringify({ guest: { name: 'Hal', email: 'hal@example.test', phone: null }, message: 'Hello' })).run()
     await assert.rejects(createGuestThreadInvite(db, env, { organizationId: ORG, threadId: 'contact-1', actorUserId: OWNER }), refused(409, 'GUEST_INVITE_UNSUPPORTED', 'request_id'))
     await assert.rejects(createGuestThreadInvite(db, env, { organizationId: 'other-org', threadId: deeThread, actorUserId: OWNER }), refused(404, 'THREAD_NOT_FOUND', 'request_id'))

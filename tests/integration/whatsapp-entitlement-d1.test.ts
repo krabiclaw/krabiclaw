@@ -88,7 +88,7 @@ test('organization messaging entitlement fences Meta calls while preserving noti
       for (const organizationId of ['free', 'paid']) {
         const id = `contact-${organizationId}`
         const now = new Date().toISOString()
-        await db.batch(requestInsertQueries({ id, kind: 'contact', organization_id: organizationId, location_id: null, user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null, payload: { guest: { name: 'Guest', email: 'guest@proof.example', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null }, created_at: now, updated_at: now }).map(write => db.prepare(write.query).bind(...write.params)))
+        await db.batch(requestInsertQueries({ id, kind: 'contact', organization_id: organizationId, location_id: null, user_id: null, review_id: null, payload: { guest: { name: 'Guest', email: 'guest@proof.example', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null }, created_at: now, updated_at: now }).map(write => db.prepare(write.query).bind(...write.params)))
         const before = metaCalls
         await notifyContactSubmitted(providerEnv, db, { organizationId, organizationName: organizationId, vertical: 'restaurant', locationId: null, contactId: id, guestName: 'Guest', email: 'guest@proof.example', subject: null, message: 'Hello' })
         assert.equal(metaCalls - before, organizationId === 'paid' ? 1 : 0)
