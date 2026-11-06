@@ -57,9 +57,9 @@ CREATE TABLE `tasks` (
 	FOREIGN KEY (`organization_id`,`location_id`) REFERENCES `business_locations`(`organization_id`,`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`organization_id`,`opportunity_id`) REFERENCES `opportunities`(`organization_id`,`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`organization_id`,`assigned_team_id`) REFERENCES `team`(`organizationId`,`id`) ON UPDATE no action ON DELETE no action,
-	CONSTRAINT "tasks_kind_check" CHECK(kind IN ('turnover', 'guest_reply', 'message_delivery', 'review_reply', 'opportunity', 'custom')
+	CONSTRAINT "tasks_kind_check" CHECK(kind IN ('turnover', 'guest_reply', 'message_delivery', 'opportunity', 'custom')
     AND (subject_type IS NULL) = (subject_id IS NULL)
-    AND (subject_type IS NULL OR subject_type IN ('stay', 'request', 'scheduled_guest_message', 'review', 'article', 'post', 'product'))
+    AND (subject_type IS NULL OR subject_type IN ('stay', 'request', 'scheduled_guest_message', 'article', 'post', 'product'))
     AND (kind <> 'custom' OR subject_type IS NULL)
     AND ((kind = 'opportunity') = (opportunity_id IS NOT NULL))),
 	CONSTRAINT "tasks_text_check" CHECK((title IS NULL OR length(trim(title)) BETWEEN 1 AND 200) AND (kind NOT IN ('custom', 'opportunity') OR title IS NOT NULL)
