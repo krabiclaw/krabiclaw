@@ -586,7 +586,8 @@ export const CANCELLED_AFTER_SQL = `(EXISTS (SELECT 1 FROM bookings record WHERE
  * The reply tasks for one conversation as its ledger now stands: the task for
  * an answered question closes (done, by whoever replied), an archived or
  * blocked conversation's closes (cancelled), and the first question still
- * unanswered opens one. A failed scheduled message the business has since
+ * unanswered opens one — or reopens its task when the conversation was
+ * unarchived or a reply turned out not to be delivered. A person's Skip stays. A failed scheduled message the business has since
  * answered in person is done too.
  */
 /** The reply tasks (server/domain/tasks.ts) for one conversation, for the batch that changes it. */
@@ -614,7 +615,8 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
          AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}
          AND NOT EXISTS (SELECT 1 FROM tasks open_reply WHERE open_reply.kind = 'guest_reply' AND open_reply.subject_type = 'request' AND open_reply.subject_id = r.id AND open_reply.status = 'open')
        ORDER BY guest_entry.sequence LIMIT 1
-      ON CONFLICT (dedupe_key) DO NOTHING`,
+      ON CONFLICT (dedupe_key) DO UPDATE SET status = 'open', closed_at = NULL, closed_by_user_id = NULL, version = tasks.version + 1, updated_at = excluded.updated_at
+        WHERE tasks.status IN ('done', 'cancelled')`,
     params: [crypto.randomUUID(), now, now, requestId],
   }, {
     query: `UPDATE tasks SET status = 'done', closed_at = ?, closed_by_user_id = NULL, version = version + 1, updated_at = ?
