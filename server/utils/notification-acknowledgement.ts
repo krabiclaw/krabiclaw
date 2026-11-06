@@ -63,6 +63,12 @@ export async function acknowledgeThreadNotifications(
   )
 }
 
+/** Opening a task reads the alerts that sent its people to it. */
+export async function acknowledgeTaskNotifications(db: DbClient, userId: string, organizationId: string, taskId: string): Promise<number> {
+  return await acknowledgeVisibleNotifications(db, { userId, whereSql: 'n.organization_id = ? AND n.target_user_id = ?', whereParams: [organizationId, userId] },
+    "n.event_name IN ('task_assigned', 'task_starting') AND json_extract(n.payload_json, '$.deep_link') LIKE ?", [`%?task=${encodeURIComponent(taskId)}`])
+}
+
 /** Explicit buyer read receipt on existing public conversation facts, scoped to the current owner. */
 export async function acknowledgeBuyerThreadEntries(db:DbClient,userId:string,threadId:string,entryIds:string[]):Promise<number> {
  const visible=(await listThreadEntries(db,threadId)).filter(isBuyerVisibleThreadEntry).filter(entry=>entryIds.includes(entry.id)).map(entry=>entry.id)

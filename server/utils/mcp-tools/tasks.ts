@@ -1,0 +1,108 @@
+import { memberAccessPrincipal } from '~/server/utils/member-access'
+import { closeTask, createTask, listTaskAssignees, listTasks, parseTaskListQuery, taskViewer, updateTask, TASK_KINDS } from '~/server/domain/tasks'
+import { acceptOpportunity, deferOpportunity, dismissOpportunity, listOpportunities } from '~/server/domain/opportunities'
+import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
+import { HTTPError } from 'nitro'
+import { chatgptFileInput, organizationTool, type McpToolDefinition } from './shared'
+import { NOT_HANDLED, optionalString, requiredString, resolveUserUploadedMediaFile, toolFileReference, type McpExecutorContext } from './execution'
+
+const text = { type: 'string' }, nullableText = { type: ['string', 'null'] }
+const instant = { type: 'string', format: 'date-time', description: 'An instant with Z or a numeric offset.' }
+const person = { type: 'object', properties: { type: { type: 'string', enum: ['member', 'team'] }, id: text, name: text, initial: text, you: { type: 'boolean' } }, required: ['type', 'id', 'name', 'initial', 'you'] }
+const task = { type: 'object', properties: {
+  id: text, kind: { type: 'string', enum: [...TASK_KINDS] }, status: { type: 'string', enum: ['open', 'done', 'skipped', 'cancelled'] }, version: { type: 'integer' },
+  eyebrow: text, title: text, detail: nullableText, assignee: { anyOf: [person, { type: 'null' }] },
+  startsAt: nullableText, dueAt: nullableText, timezone: text, notes: nullableText,
+  outcome: { type: ['object', 'null'] }, action: { type: 'object' }, path: nullableText,
+  productId: nullableText, locationId: nullableText, stayId: nullableText, requestId: nullableText,
+  can: { type: 'object', properties: { complete: { type: 'boolean' }, skip: { type: 'boolean' }, reopen: { type: 'boolean' }, assign: { type: 'boolean' }, edit: { type: 'boolean' } }, required: ['complete', 'skip', 'reopen', 'assign', 'edit'] },
+}, required: ['id', 'kind', 'status', 'version', 'eyebrow', 'title', 'detail', 'assignee', 'startsAt', 'dueAt', 'timezone', 'notes', 'outcome', 'action', 'path', 'productId', 'locationId', 'stayId', 'requestId', 'can'] }
+const taskResult = { type: 'object', properties: { task }, required: ['task'] }
+const opportunity = { type: 'object', properties: { id: text, eyebrow: text, title: text, detail: text, icon: text, path: text, productId: nullableText, locationId: nullableText }, required: ['id', 'eyebrow', 'title', 'detail', 'icon', 'path', 'productId', 'locationId'] }
+const assignee = {
+  assigned_member_id: { type: ['string', 'null'], description: 'A Better Auth member id from list_tasks assignees; null to unassign.' },
+  assigned_team_id: { type: ['string', 'null'], description: 'A Better Auth team id from list_tasks assignees. Give a member or a team, not both.' },
+}
+
+export const TASK_TOOLS: McpToolDefinition[] = [
+  organizationTool({ name: 'list_tasks', domain: 'tasks', minimumRole: 'member', description: 'Read Today or Upcoming as stored tasks: turnovers, guest questions awaiting a reply, scheduled messages that did not send, accepted opportunities and tasks people added. Today is open work starting or due today or earlier plus what was done today; Upcoming is later open work by day. A member sees the tasks given to them or their team and the turnovers at homes they look after. assignees lists who a manager can give work to.',
+    inputSchema: { range: { type: 'string', enum: ['today', 'upcoming'] }, assignee: { type: 'string', description: 'me, all, or a member id.' }, location_id: { ...text, minLength: 1 }, status: { type: 'string', enum: ['open', 'done', 'skipped', 'cancelled'] }, kind: { type: 'string', enum: [...TASK_KINDS] } },
+    outputSchema: { type: 'object', properties: { sections: { type: 'array', items: { type: 'object', properties: { id: text, title: text, tasks: { type: 'array', items: task } }, required: ['id', 'title', 'tasks'] } }, assignees: { type: 'array', items: person }, resolvedAt: text }, required: ['sections', 'assignees', 'resolvedAt'] },
+  }),
+  organizationTool({ name: 'create_task', domain: 'tasks', minimumRole: 'admin', description: 'Add a task someone has to do, optionally at a home or location, with a window and an assignee. The assignee is told by their own notification settings. Reuse the same idempotency_key for an identical retry.',
+    inputSchema: { title: { ...text, minLength: 1, maxLength: 200 }, notes: { ...text, maxLength: 5000 }, starts_at: instant, due_at: instant, ...assignee, product_id: { ...text, minLength: 1 }, location_id: { ...text, minLength: 1 }, idempotency_key: { ...text, minLength: 1, maxLength: 200 } }, required: ['title', 'idempotency_key'],
+    outputSchema: taskResult,
+  }),
+  organizationTool({ name: 'update_task', domain: 'tasks', minimumRole: 'admin', description: 'Reassign, reschedule or edit the notes of an open task. Pass expected_version from list_tasks; a newer version is refused so another change is not overwritten. A new assignee is told.',
+    inputSchema: { task_id: { ...text, minLength: 1 }, expected_version: { type: 'integer', minimum: 1 }, ...assignee, starts_at: { type: ['string', 'null'], format: 'date-time' }, due_at: { type: ['string', 'null'], format: 'date-time' }, notes: { type: ['string', 'null'], maxLength: 5000 }, title: { ...text, minLength: 1, maxLength: 200, description: 'Only for a task someone added or an accepted opportunity.' } }, required: ['task_id', 'expected_version'],
+    outputSchema: taskResult,
+  }),
+  organizationTool({ name: 'complete_task', domain: 'tasks', minimumRole: 'member', description: 'Mark a task done, with what you found and an optional photo. A guest reply or a failed message is done when the reply goes out or the message is fixed, so it cannot be completed here.',
+    inputSchema: { task_id: { ...text, minLength: 1 }, note: { ...text, maxLength: 5000 }, file: { ...chatgptFileInput, description: 'Optional photo of the finished work.' } }, required: ['task_id'],
+    outputSchema: taskResult,
+  }),
+  organizationTool({ name: 'skip_task', domain: 'tasks', minimumRole: 'member', description: 'Skip a task, saying why.',
+    inputSchema: { task_id: { ...text, minLength: 1 }, note: { ...text, minLength: 1, maxLength: 5000 } }, required: ['task_id', 'note'],
+    outputSchema: taskResult,
+  }),
+  organizationTool({ name: 'list_opportunities', domain: 'tasks', minimumRole: 'admin', description: 'Read what the business could do now, found from its own records: drafts to finish, posts to share, calendar gaps, payment setup. Each is recorded against its evidence; accept, dismiss or defer it by id.',
+    inputSchema: { location_id: { ...text, minLength: 1 } },
+    outputSchema: { type: 'object', properties: { opportunities: { type: 'array', items: opportunity }, issues: { type: 'array', items: text } }, required: ['opportunities', 'issues'] },
+  }),
+  organizationTool({ name: 'accept_opportunity', domain: 'tasks', minimumRole: 'admin', description: 'Take on an opportunity: it becomes a task, given to you and due today unless you say otherwise. Refused when what it was based on has changed; read list_opportunities again.',
+    inputSchema: { opportunity_id: { ...text, minLength: 1 }, ...assignee, due_at: { type: ['string', 'null'], format: 'date-time' } }, required: ['opportunity_id'],
+    outputSchema: taskResult,
+  }),
+  organizationTool({ name: 'dismiss_opportunity', domain: 'tasks', minimumRole: 'admin', description: 'Decline an opportunity, optionally saying why. It returns only when its evidence changes.',
+    inputSchema: { opportunity_id: { ...text, minLength: 1 }, note: { ...text, minLength: 1, maxLength: 2000 } }, required: ['opportunity_id'],
+    outputSchema: { type: 'object', properties: { opportunity: { type: 'object', properties: { id: text, status: { const: 'dismissed' } }, required: ['id', 'status'] } }, required: ['opportunity'] },
+  }),
+  organizationTool({ name: 'defer_opportunity', domain: 'tasks', minimumRole: 'admin', description: 'Set an opportunity aside until a time; it returns then if it still applies.',
+    inputSchema: { opportunity_id: { ...text, minLength: 1 }, until: instant }, required: ['opportunity_id', 'until'],
+    outputSchema: { type: 'object', properties: { opportunity: { type: 'object', properties: { id: text, availableAt: text }, required: ['id', 'availableAt'] } }, required: ['opportunity'] },
+  }),
+]
+
+const assigneeBody = (args: Record<string, unknown>) => ({
+  ...(args.assigned_member_id !== undefined ? { assignedMemberId: args.assigned_member_id } : {}),
+  ...(args.assigned_team_id !== undefined ? { assignedTeamId: args.assigned_team_id } : {}),
+})
+
+export async function handleTaskTools(ctx: McpExecutorContext): Promise<unknown> {
+  const { toolName, args, organization } = ctx
+  if (!TASK_TOOLS.some(tool => tool.name === toolName)) return NOT_HANDLED
+  const { db, env } = organization
+  const principal = memberAccessPrincipal(organization.membership, { env, event: ctx.event })
+  switch (toolName) {
+    case 'list_tasks': {
+      const viewer = await taskViewer(db, principal)
+      const query = parseTaskListQuery({ range: args.range, assignee: args.assignee, locationId: args.location_id, status: args.status, kind: args.kind })
+      const [list, assignees] = await Promise.all([listTasks(db, viewer, query), listTaskAssignees(db, viewer)])
+      return { ...list, assignees }
+    }
+    case 'create_task': {
+      const result = await createTask(db, await taskViewer(db, principal), { title: args.title, notes: args.notes, startsAt: args.starts_at, dueAt: args.due_at, ...assigneeBody(args),
+        productId: args.product_id, locationId: args.location_id, idempotencyKey: args.idempotency_key })
+      return { task: result.task }
+    }
+    case 'update_task':
+      return { task: await updateTask(db, await taskViewer(db, principal), requiredString(args, 'task_id'), { expectedVersion: args.expected_version, ...assigneeBody(args),
+        ...(args.starts_at !== undefined ? { startsAt: args.starts_at } : {}), ...(args.due_at !== undefined ? { dueAt: args.due_at } : {}),
+        ...(args.notes !== undefined ? { notes: args.notes } : {}), ...(args.title !== undefined ? { title: args.title } : {}) }) }
+    case 'complete_task':
+    case 'skip_task': {
+      const file = args.file === undefined ? null : toolFileReference(args.file, 'file')
+      const photos = file ? await (async () => {
+        const resolved = await resolveUserUploadedMediaFile(file, MAX_IMAGE_BYTES)
+        if (resolved.kind !== 'image') throw new HTTPError({ statusCode: 422, statusMessage: 'A task accepts only photos', data: { code: 'INVALID_PHOTO', field: 'file' } })
+        return [{ bytes: resolved.buffer, filename: resolved.filename }]
+      })() : []
+      return { task: await closeTask(db, await taskViewer(db, principal), requiredString(args, 'task_id'), { status: toolName === 'complete_task' ? 'done' : 'skipped', note: args.note, photos, env }) }
+    }
+    case 'list_opportunities': return await listOpportunities(db, principal, { locationId: optionalString(args, 'location_id') ?? undefined })
+    case 'accept_opportunity': return { task: await acceptOpportunity(db, principal, requiredString(args, 'opportunity_id'), { ...assigneeBody(args), ...(args.due_at !== undefined ? { dueAt: args.due_at } : {}) }) }
+    case 'dismiss_opportunity': return { opportunity: await dismissOpportunity(db, principal, requiredString(args, 'opportunity_id'), { note: args.note }) }
+    case 'defer_opportunity': return { opportunity: await deferOpportunity(db, principal, requiredString(args, 'opportunity_id'), { until: args.until }) }
+    default: return NOT_HANDLED
+  }
+}

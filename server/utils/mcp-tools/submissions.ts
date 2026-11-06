@@ -142,7 +142,7 @@ export async function handleSubmissionsTools(ctx: McpExecutorContext): Promise<u
         actorUserId: organization.userId, idempotencyKey: requiredString(args, 'idempotency_key'), env: organization.env, financialWritesAllowed: false })
       if (outcome.ok || outcome.reason === 'delivery_failed') await publishGuestInboxThreadEvent(organization.env, organization.db, { threadId: requestId, type: 'thread.changed' })
       const saved = await readConversation(ctx, requestId)
-      return renderStructuredResponse({ outcome: outcome.ok ? { ok: true } : outcome, conversation: { request_id: saved.request_id, state: saved.state, archived: saved.archived, updated_at: saved.updated_at } }, undefined, undefined, !outcome.ok)
+      return renderStructuredResponse({ outcome: outcome.ok ? { ok: true } : outcome, conversation: { request_id: saved.request_id, needs_reply: saved.needs_reply, archived: saved.archived, updated_at: saved.updated_at } }, undefined, undefined, !outcome.ok)
     }
     case "list_table_reservations": {
       const reservationFilter = {

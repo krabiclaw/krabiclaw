@@ -289,7 +289,7 @@ interface Context {
   teams: Map<string, string>
   users: Map<string, string>
   products: Map<string, { name: string; imageUrl: string | null }>
-  stays: Map<string, { guest_name: string | null; adults: number; children: number; check_in_date: string; check_out_date: string; request_id: string | null }>
+  stays: Map<string, { id: string; guest_name: string | null; adults: number; children: number; check_in_date: string; check_out_date: string; request_id: string | null }>
   arrivals: Map<string, { guest_name: string | null; adults: number; children: number } | null>
   requests: Map<string, { guest: string; preview: string | null; asked_at: string | null }>
   messages: Map<string, { title: string; reason: string | null; request_id: string | null; stay_id: string }>
