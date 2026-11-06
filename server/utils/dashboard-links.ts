@@ -112,8 +112,8 @@ export function blogCreatePath(orgSlug: string): string {
 }
 
 /** Prepare a draft from this article; opening it never publishes anything. */
-export function articleFacebookPostPath(orgSlug: string, articleId: string, locationId?: string | null): string {
-  const query = new URLSearchParams({ article_id: articleId, channel: 'facebook' })
+export function articleSocialPostPath(orgSlug: string, articleId: string, channel: 'facebook' | 'instagram' | 'discord', locationId?: string | null): string {
+  const query = new URLSearchParams({ article_id: articleId, channel })
   if (locationId) query.set('location_id', locationId)
   return `${organizationBase(orgSlug)}/website/posts/new?${query}`
 }

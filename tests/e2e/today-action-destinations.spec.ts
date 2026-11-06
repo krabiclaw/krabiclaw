@@ -5,7 +5,7 @@ import { seededSiteHeaders, seededSiteURL } from './test-env'
 import { seededTenant } from './seed/manifest'
 import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
-import { articleFacebookPostPath, blogCreatePath, insightsPath } from '../../server/utils/dashboard-links'
+import { articleSocialPostPath, blogCreatePath, insightsPath } from '../../server/utils/dashboard-links'
 import { addLocalDays, localDateAt } from '../../utils/timezone'
 
 const orgSlug = 'ember-slice-demo'
@@ -285,7 +285,17 @@ test('a prepared article photo post preserves concurrent media and publishes onl
       if (request.method() === 'POST' && new URL(request.url()).pathname.startsWith(`${editor}/posts`)) postWrites.push(new URL(request.url()).pathname)
     })
     await page.setViewportSize({ width: 1440, height: 900 })
-    expect((await page.goto(articleFacebookPostPath(orgSlug, articleId)))?.status()).toBe(200)
+    for (const channel of ['instagram', 'discord'] as const) {
+      expect((await page.goto(articleSocialPostPath(orgSlug, articleId, channel)))?.status()).toBe(200)
+      await waitForNuxtHydration(page)
+      const prepared = page.locator('#dashboard-panel-post')
+      await expect(prepared.getByRole('textbox', { name: 'Caption', exact: true })).toHaveValue(`${title}\n\n${excerpt}`)
+      await expect(prepared.getByRole('textbox', { name: 'Link destination', exact: true })).toHaveValue(articleUrl)
+      await prepared.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/posts?article_id=${articleId}&channel=${channel}`)
+    }
+    expect(postWrites).toEqual([])
+    expect((await page.goto(articleSocialPostPath(orgSlug, articleId, 'facebook')))?.status()).toBe(200)
     await waitForNuxtHydration(page)
     const caption = page.locator('#dashboard-panel-post')
     await expect(caption.getByRole('textbox', { name: 'Caption', exact: true })).toHaveValue(`${title}\n\n${excerpt}`)
@@ -294,7 +304,7 @@ test('a prepared article photo post preserves concurrent media and publishes onl
     // created just to attach its photo or review its destinations.
     await caption.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/posts?article_id=${articleId}&channel=facebook`)
-    expect((await page.goto(articleFacebookPostPath(orgSlug, articleId)))?.status()).toBe(200)
+    expect((await page.goto(articleSocialPostPath(orgSlug, articleId, 'facebook')))?.status()).toBe(200)
     await waitForNuxtHydration(page)
     await expect(caption.getByRole('textbox', { name: 'Caption', exact: true })).toHaveValue(`${title}\n\n${excerpt}`)
     await caption.getByText('Add a photo or video', { exact: true }).click()

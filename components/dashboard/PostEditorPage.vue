@@ -90,7 +90,8 @@ const editor = usePostEditor(organizationId, scopeLocationId)
 const { locations: organizationLocations } = await useOrganizationLocations()
 const sourceArticleId = typeof route.query.article_id === 'string' && route.query.article_id.trim() ? route.query.article_id : null
 if (route.query.article_id !== undefined && !sourceArticleId) throw createError({ statusCode: 400, statusMessage: 'An article ID is required' })
-if (route.query.channel !== undefined && route.query.channel !== 'facebook') throw createError({ statusCode: 400, statusMessage: 'Unsupported prepared channel' })
+const preparedChannel = route.query.channel
+if (preparedChannel !== undefined && (typeof preparedChannel !== 'string' || !['facebook', 'instagram', 'discord'].includes(preparedChannel))) throw createError({ statusCode: 400, statusMessage: 'Unsupported prepared channel' })
 const { data: sourceArticle, error: sourceError } = await useAsyncData(`post-source-article:${organizationId}:${sourceArticleId ?? ''}`, async () => {
   if (!isNew || !sourceArticleId) return null
   const response = await dashboardApi(`/api/editor/organizations/${organizationId}/blog/${encodeURIComponent(sourceArticleId)}`, { validate: isBlogPostResponse })
@@ -120,7 +121,7 @@ function initialDraft() {
     selected: [] as Array<'organization' | SocialChannel>,
   }
 }
-const draftKey = `post-draft:${organizationId}:${scopeLocationId.value ?? ''}:${sourceArticleId ?? ''}`
+const draftKey = `post-draft:${organizationId}:${scopeLocationId.value ?? ''}:${sourceArticleId ?? ''}:${preparedChannel ?? ''}`
 const draft = useState(draftKey, initialDraft)
 if (isNew) {
   if (draft.value.created_id) await editor.reload(draft.value.created_id)
@@ -169,11 +170,11 @@ const rows = computed(() => {
       tone: state === 'published' ? 'text-success' : state === 'failed' || state === 'unknown' ? 'text-warning' : 'text-muted',
       detail: outcome(channel.channel)?.message ?? (publication?.message ? String(publication.message) : null) ?? (publication?.local_content_changed ? 'The post changed here after it was sent; the external post was not edited.' : null),
       url: typeof publication?.public_url === 'string' ? publication.public_url : null,
-      reconcileId: state === 'unknown' ? String(publication!.id) : null, connectUrl: channel.connected ? null : channel.connect_url,
+      reconcileId: publication?.can_reconcile ? String(publication.id) : null, connectUrl: channel.connected ? null : channel.connect_url,
     }
   })]
 })
-if (isNew && route.query.channel === 'facebook' && !selected.value.length && rows.value.find(row => row.channel === 'facebook')?.selectable) selected.value = ['facebook']
+if (isNew && preparedChannel && !selected.value.length && rows.value.find(row => row.channel === preparedChannel)?.selectable) selected.value = [preparedChannel as SocialChannel]
 watch(() => JSON.stringify(connections.value?.channels.map(channel => [channel.channel, channel.target_id, channel.connection_revision, channel.connected, channel.problems])), () => { selected.value = selected.value.filter(channel => channel === 'organization') })
 function toggle(channel: 'organization' | SocialChannel, checked: boolean) { selected.value = checked ? [...new Set([...selected.value, channel])] : selected.value.filter(item => item !== channel) }
 const committing = ref(false)
@@ -242,7 +243,7 @@ async function cancel() {
   await navigateTo(level.to.value)
 }
 onBeforeRouteLeave(to => !busy.value || Boolean(post.value && to.path === level.path.value.replace(/\/new$/, `/${String(post.value.id)}`)))
-onBeforeRouteUpdate(to => !busy.value || to.path === route.path && to.query.article_id === route.query.article_id && to.query.location_id === route.query.location_id || Boolean(post.value && to.path === level.path.value.replace(/\/new$/, `/${String(post.value.id)}`)))
+onBeforeRouteUpdate(to => !busy.value || to.path === route.path && to.query.article_id === route.query.article_id && to.query.location_id === route.query.location_id && to.query.channel === route.query.channel || Boolean(post.value && to.path === level.path.value.replace(/\/new$/, `/${String(post.value.id)}`)))
 onUnmounted(() => { if (isNew && !draft.value.submitted) clearNuxtState(draftKey) })
 const viewUrl = computed(() => {
   const value = post.value?.status === 'published' ? post.value.canonical_url : post.value?.preview_url

@@ -4,6 +4,7 @@
 import { onResponse } from 'nitro/h3'
 import type { DbClient } from '~/server/db'
 import { purgeOrganizationCaches } from '~/server/utils/public-resource-cache'
+import { publishBusinessInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 
 const EDITOR_ORGANIZATIONS_PREFIX = '/api/editor/organizations/'
 
@@ -18,7 +19,7 @@ export default onResponse(async (response, event) => {
   const organizationId = params && typeof params.organizationId === 'string' ? params.organizationId : undefined
   if (!organizationId) throw new Error('Organization ID is required to invalidate a successful dashboard write')
 
-  const runtimeEnv = request.runtime?.cloudflare?.env as {
+  const runtimeEnv = request.runtime?.cloudflare?.env as GuestInboxPublicationEnv & {
     DB?: DbClient
     ORGANIZATION_CACHE?: KVNamespace
     NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN?: string
@@ -27,5 +28,6 @@ export default onResponse(async (response, event) => {
   if (!kv || !runtimeEnv?.DB) throw new Error('ORGANIZATION_CACHE and DB bindings are required to purge site caches after a dashboard write')
 
   await purgeOrganizationCaches(runtimeEnv.DB, kv, organizationId, runtimeEnv.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)
+  await publishBusinessInvalidation(runtimeEnv, organizationId)
   return response
 })

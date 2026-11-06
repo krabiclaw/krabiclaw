@@ -12,7 +12,7 @@
     @click="onCardClick"
   >
     <div class="min-w-0 flex-1">
-      <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold text-highlighted">
+      <div v-if="item.eyebrow" class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold text-highlighted">
         <span>{{ item.eyebrow }}</span>
       </div>
       <p class="mt-1 text-base font-semibold leading-snug text-highlighted">

@@ -33,6 +33,7 @@
       </UAlert>
 
       <UAlert v-if="decisionError" class="mb-6" color="error" variant="soft" title="Your choice was not saved" :description="getErrorMessage(decisionError, 'The request failed')" />
+      <UAlert v-if="todayData?.recommendationIssues.length && !activeError" class="mb-6" color="warning" variant="soft" title="Some performance data could not be loaded" :description="todayData.recommendationIssues.join(' ')" />
 
       <ul v-if="visibleItems.length && !activeError" class="space-y-4" role="list" data-testid="today-list">
         <li v-for="item in visibleItems" :key="item.id">
@@ -45,13 +46,26 @@
       <div v-if="!personalScope && activeRange === 'today' && !activeError && priorities" class="mt-8" role="group" aria-label="Your priority" data-testid="today-priorities">
         <ul v-if="priorities.length" class="mb-4 space-y-2">
           <li v-for="goal in priorities" :key="goal.id" class="flex items-start justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2" data-testid="today-priority">
-            <span class="min-w-0 text-sm text-highlighted">{{ goal.intent }}</span>
+            <div class="min-w-0 text-sm">
+              <span class="text-highlighted">{{ goal.intent }}</span>
+              <p v-if="goal.strategy" class="mt-1 text-muted">{{ strategyDescription(goal.strategy) }}</p>
+            </div>
             <UButton size="xs" color="neutral" variant="ghost" icon="i-lucide-x" :aria-label="`Remove priority: ${goal.intent}`" :loading="priorityBusy === goal.id" :disabled="priorityBusy !== null" @click="removePriority(goal)" />
           </li>
         </ul>
-        <form class="flex gap-2" @submit.prevent="addPriority">
-          <UInput v-model="priorityDraft" class="flex-1" :maxlength="2000" required placeholder="What should the business focus on now?" aria-label="New priority" />
-          <UButton type="submit" color="neutral" variant="soft" label="Add" :loading="priorityBusy === 'new'" :disabled="priorityBusy !== null || !priorityDraft.trim()" />
+        <form class="space-y-3" @submit.prevent="addPriority">
+          <div class="flex gap-2">
+            <UInput v-model="priorityDraft" class="flex-1" :maxlength="2000" required placeholder="What should the business focus on now?" aria-label="New priority" />
+            <UButton type="submit" color="neutral" variant="soft" label="Add" :loading="priorityBusy === 'new'" :disabled="priorityBusy !== null || !priorityDraft.trim()" />
+          </div>
+          <details>
+            <summary class="cursor-pointer text-sm text-muted">Choose related work (optional)</summary>
+            <div class="mt-3 flex flex-wrap gap-x-5 gap-y-3">
+              <UCheckbox v-for="channel in strategyChannels" :key="channel.value" :model-value="priorityChannels.includes(channel.value)" :label="channel.label" @update:model-value="togglePriorityChannel(channel.value, $event === true)" />
+              <UCheckbox v-model="priorityPayments" label="Accept payments" />
+              <UCheckbox v-model="priorityAvailability" label="Booking availability" />
+            </div>
+          </details>
         </form>
       </div>
 
@@ -80,6 +94,7 @@ import type { AgendaItem, AgendaPayload } from '~/server/utils/dashboard-agenda'
 import { useDashboardTelemetry } from '~/composables/useDashboardTelemetry'
 import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
+import type { BusinessGoalStrategy } from '~/shared/business-progress'
 
 useSeoMeta({ title: 'Today | KrabiClaw', robots: 'noindex, nofollow' })
 
@@ -146,6 +161,14 @@ const upcomingHorizon = computed(() => resolvedAt.value ? addDays(resolvedAt.val
 const todayCards = computed(() => todayData.value?.cards ?? [])
 const priorities = computed(() => props.personalScope ? null : todayData.value?.priorities ?? null)
 const priorityDraft = ref('')
+const strategyChannels: Array<{ value: BusinessGoalStrategy['channels'][number]; label: string }> = [
+  { value: 'blog', label: 'Blog articles' },
+  { value: 'social', label: 'Social posts' },
+  { value: 'google_ads', label: 'Google Ads' },
+]
+const priorityChannels = ref<BusinessGoalStrategy['channels']>([])
+const priorityPayments = ref(false)
+const priorityAvailability = ref(false)
 const priorityBusy = ref<string | null>(null)
 const decisionError = ref<unknown>(null)
 const visibleItems = computed(() => (activeRange.value === 'today' ? todayCards.value.slice(0, todayVisibleCount.value) : upcomingItems.value).map(cardWithContext))
@@ -278,8 +301,25 @@ async function changePriorities(busy: string, request: () => Promise<unknown>) {
 async function addPriority() {
   const intent = priorityDraft.value.trim()
   if (!intent) return
-  await changePriorities('new', () => applicationFetch(`${organizationApi.value}/goals`, { method: 'POST', validate: isSavedGoal, body: { idempotencyKey: crypto.randomUUID(), intent } }))
-  if (!decisionError.value) priorityDraft.value = ''
+  const strategy: BusinessGoalStrategy | null = priorityChannels.value.length || priorityPayments.value || priorityAvailability.value
+    ? { channels: [...priorityChannels.value], payments: priorityPayments.value, availability: priorityAvailability.value }
+    : null
+  await changePriorities('new', () => applicationFetch(`${organizationApi.value}/goals`, { method: 'POST', validate: isSavedGoal, body: { idempotencyKey: crypto.randomUUID(), intent, strategy } }))
+  if (!decisionError.value) {
+    priorityDraft.value = ''
+    priorityChannels.value = []
+    priorityPayments.value = false
+    priorityAvailability.value = false
+  }
+}
+
+function togglePriorityChannel(channel: BusinessGoalStrategy['channels'][number], selected: boolean) {
+  priorityChannels.value = selected ? [...new Set([...priorityChannels.value, channel])] : priorityChannels.value.filter(value => value !== channel)
+}
+
+function strategyDescription(strategy: BusinessGoalStrategy): string {
+  return [...strategyChannels.filter(channel => strategy.channels.includes(channel.value)).map(channel => channel.label),
+    ...(strategy.payments ? ['Accept payments'] : []), ...(strategy.availability ? ['Booking availability'] : [])].join(' · ')
 }
 
 async function removePriority(goal: TodayPriority) {
@@ -340,7 +380,7 @@ watch(todayData, async (data) => {
 watch(realtime.event, event => {
   if (event?.type === 'thread.created' || event?.type === 'thread.changed' || event?.type === 'notification.created'
     || event?.type === 'entry.appended' || event?.type === 'delivery.changed' || event?.type === 'access.changed'
-    || event?.type === 'stay.changed' || event?.type === 'nights.changed') void refreshAgenda()
+    || event?.type === 'stay.changed' || event?.type === 'nights.changed' || event?.type === 'business.changed') void refreshAgenda()
 })
 watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refreshAgenda() })
 

@@ -5,18 +5,19 @@ import { getDashboardMemberContext, type DashboardOrganizationRow } from '~/serv
 import { memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
 import { firstUnansweredGuestEntryTimes, listOrganizationGuestThreads } from '~/server/domain/guest-threads/repository'
 import type { GuestThreadDeliveryRow, GuestThreadListItemViewModel } from '~/server/domain/guest-threads/types'
-import { readRecommendationDecisionInputs, readRecommendationDecisions } from '~/server/domain/business-progress'
+import { readBusinessRecommendations, readRecommendationDecisionInputs, readRecommendationDecisions } from '~/server/domain/business-progress'
 import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayDecision, type TodayFeedPayload } from '~/shared/dashboard-today'
-import type { BusinessGoal, RecommendationFeedback, RecommendationFeedbackView } from '~/shared/business-progress'
+import type { RecommendationFeedback, RecommendationFeedbackView } from '~/shared/business-progress'
 import type { BusinessProgressOperation } from '~/shared/business-outcomes'
 import { formatTimestamp, isValidInstant, localDateAt } from '~/utils/timezone'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
-import { blogEditorPath, bookingEditorPath, guestConversationPath, postEditorPath } from '~/server/utils/dashboard-links'
+import { bookingEditorPath, guestConversationPath, postEditorPath } from '~/server/utils/dashboard-links'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { isDeliverySent, isVisibleDeliveryFailure } from '~/server/domain/guest-threads/deliveries'
 import { getReviewBookingContext, reviewInvitationDue, type ReviewBookingType } from '~/server/utils/review-requests'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { wantsNotification } from '~/server/domain/notification-preferences'
+import { isPublicationOutcomeUncertain } from '~/shared/posts'
 
 export interface TodayFeedQuery {
   range: 'today' | 'upcoming'
@@ -44,14 +45,24 @@ function card(input: Pick<TodayCard, 'id' | 'to' | 'eyebrow' | 'headline' | 'pri
     actionAt: null, completedAt: null, reason: null, decision: null, ...input }
 }
 
-/**
- * A guest who wrote within this long and has had no reply is waiting on the
- * business now. An older unanswered message is history unless a live booking,
- * the owner's priority or the owner's own decision makes it current again.
- */
-const RECENT_GUEST_ENTRY_MS = 7 * 86_400_000
-/** Optional work is offered sparingly and only with a reason; a day with none shows none. */
+/** A display budget per read, replenished as source work changes. */
 const OPTIONAL_LIMIT = 3
+
+/** Canonical unanswered state establishes waiting. Exclude only known acknowledgements,
+ * unsolicited promotion and expired dated requests; an English keyword is not required. */
+function asksForBusinessResponse(text: string, receivedAt: string, now: Date, zone: string): boolean {
+  const value = text.trim()
+  if (!value || /^(?:thank(?:s| you)(?: so much)?|ok(?:ay)?|great|perfect|see you|sounds good)[!.,\s🙂😊]*$/iu.test(value)) return false
+  if (/\b(?:feature your (?:place|business)|backlinks?|sponsored post|seo services|promote your business|lead generation|marketing services)\b/iu.test(value)) return false
+  const age = now.getTime() - Date.parse(receivedAt)
+  if (age > 2 * 86_400_000 && /\b(?:tonight|tomorrow|today)\b/iu.test(value) && /\b(?:reserv|book|class|visit)/iu.test(value)) return false
+  const dated = value.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b/iu)
+  if (dated && /\b(?:reserv|book|class|visit)/iu.test(value)) {
+    const date = new Date(`${dated[1]} ${dated[2]}, ${dated[3]} 23:59:59 GMT`)
+    if (Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) < localDateAt(now, zone)) return false
+  }
+  return true
+}
 
 /** One piece of work the records support, before the owner's priorities and decisions are applied. */
 interface Work {
@@ -62,8 +73,6 @@ interface Work {
   obligation: string | null
   /** The recorded fact optional work stands on. */
   fact: string
-  /** The words the owner's priority is compared with. */
-  text: string
   recency: string
 }
 
@@ -74,14 +83,14 @@ function threadWork(thread: GuestThreadListItemViewModel, unansweredAt: string |
   const bookingKind = thread.submissionType === 'contact' || conversation && thread.operationalStatus === null ? null : thread.submissionType
   const pending = bookingKind === 'booking' && thread.operationalStatus === 'pending' && thread.mailbox === 'current'
   if (!pending && !unansweredAt) return null
+  if (!pending && (thread.conversationState === 'resolved' || !asksForBusinessResponse(thread.preview?.text ?? '', unansweredAt!, now, zone))) return null
   const noun = bookingKind === 'stay' ? 'stay' : bookingKind ? resolveBookingPresentation(bookingKind, organization.vertical).noun : null
   // A conversation without a recorded guest identity is described without inventing one.
   const name = thread.guestName ?? 'The guest'
   const live = noun !== null && thread.occurrenceAt !== null && thread.mailbox === 'current' && (thread.operationalStatus === 'pending' || thread.operationalStatus === 'confirmed')
-  const waited = unansweredAt ? now.getTime() - Date.parse(unansweredAt) : null
   const obligation = pending ? `${name} is waiting for you to accept or decline their ${noun}${thread.whenLabel ? ` for ${thread.whenLabel}` : ''}.`
     : live ? `${name} has an unanswered message about their ${noun}${thread.whenLabel ? ` for ${thread.whenLabel}` : ''}.`
-      : waited !== null && waited <= RECENT_GUEST_ENTRY_MS ? `${name} wrote ${formatTimestamp(unansweredAt!, 'en', zone, { weekday: 'long', hour: 'numeric', minute: '2-digit' })} and has no reply yet.`
+      : thread.needsAttention ? `${name} has a message awaiting a business response since ${formatTimestamp(unansweredAt!, 'en', zone, { dateStyle: 'medium' })}.`
         : null
   return {
     card: card({
@@ -97,22 +106,21 @@ function threadWork(thread: GuestThreadListItemViewModel, unansweredAt: string |
     subject: pending ? null : { operation: 'guest_thread.reply', subjectId: thread.id },
     obligation,
     fact: `${name} has had no reply since ${formatTimestamp(unansweredAt ?? thread.lastActivityAt, 'en', zone, { dateStyle: 'medium' })}.`,
-    text: [thread.guestName, thread.participantLabel, thread.locationLabel, thread.preview?.text].filter(Boolean).join(' '),
     recency: unansweredAt ?? thread.lastActivityAt,
   }
 }
 
-async function publicationCards(db: DbClient, organization: DashboardOrganizationRow, locationId?: string): Promise<TodayCard[]> {
-  const rows = await queryAll<{ id: string; title: string | null; location_id: string | null; channel: string; error_message: string | null }>(db, `
-    SELECT p.id,p.title,p.location_id,publication.channel,publication.error_message
+async function publicationCards(db: DbClient, organization: DashboardOrganizationRow, now: Date, locationId?: string): Promise<TodayCard[]> {
+  const rows = await queryAll<{ id: string; title: string | null; location_id: string | null; channel: string; error_message: string | null; state: string; updated_at: string }>(db, `
+    SELECT p.id,p.title,p.location_id,publication.channel,publication.error_message,publication.state,publication.updated_at
       FROM post_publications publication JOIN content_documents p ON p.id=publication.post_id AND p.organization_id=publication.organization_id
-     WHERE publication.organization_id=? AND publication.state IN ('failed','unknown')
+     WHERE publication.organization_id=? AND publication.state IN ('failed','unknown','publishing')
        ${locationId ? 'AND p.location_id=?' : ''} ORDER BY publication.updated_at,p.id,publication.channel`, [organization.id, ...(locationId ? [locationId] : [])])
   const pictures = await loadOwnerPictures(db, organization.id, 'content_document', rows.map(row => row.id))
   const grouped = new Map<string, typeof rows>()
-  for (const row of rows) grouped.set(row.id, [...(grouped.get(row.id) ?? []), row])
+  for (const row of rows.filter(row => row.state === 'failed' || isPublicationOutcomeUncertain(row, now.getTime()))) grouped.set(row.id, [...(grouped.get(row.id) ?? []), row])
   return [...grouped].map(([id, failures]) => card({
-    id: `publication:${id}`, to: `${postEditorPath(organization.slug, id)}/publishing`, priority: 'attention', eyebrow: 'Publishing needs attention',
+    id: `publication:${id}`, to: postEditorPath(organization.slug, id), priority: 'attention', eyebrow: 'Publishing needs attention',
     headline: failures[0]!.title ? `Finish publishing “${failures[0]!.title}”` : 'Finish publishing your post',
     description: failures.map(row => `${row.channel === 'facebook' ? 'Facebook' : row.channel === 'instagram' ? 'Instagram' : 'Discord'}${row.error_message ? `: ${row.error_message}` : ''}`).join(' · '),
     imageUrl: pictures.get(id)?.imageUrl ?? null, imageIcon: 'i-lucide-send', locationId: failures[0]!.location_id,
@@ -191,6 +199,7 @@ async function messageCards(db: DbClient, organization: DashboardOrganizationRow
     if (sent && (!isValidInstant(row.sent_at) || !row.entry_id)) throw new Error(`Sent message ${row.id} has no completion record`)
     const unconfirmed = sent && row.entry_channel !== 'web' && !deliveries.some(receipt => receipt.provider !== 'log_only' && isDeliverySent(receipt))
     const failed = row.status === 'failed' || row.status === 'needs_review' || Boolean(deliveryFailure) || unconfirmed
+    if (row.automatic && !failed && input.range === 'today') return []
     const failureReason = row.reason ?? deliveryFailure?.error ?? (unconfirmed ? 'No successful delivery is recorded for this message.' : null)
     if (!row.automatic && row.user_id !== organization.userId && !sent) return []
     if (sent && !failed) return []
@@ -258,6 +267,7 @@ async function reviewCards(db: DbClient, organization: DashboardOrganizationRow,
     if (!reviewInvitationDue(context, new Date(Math.max(now.getTime(), Date.parse(due)))) || !context.guest_email || !context.organization_public_url || !context.user_id
       || !await wantsNotification(db, context.user_id, 'review_requests', 'email')) continue
     const failure = failures.find(row => row.booking_id === thread.id)?.last_error
+    if (!failure && input.range === 'today') continue
     if (failure ? input.range !== 'today' : !inWindow(due, context.visit_timezone, input, now, true)) continue
     result.push(threadCard(thread, { id: `review-invitation:${thread.id}`, priority: failure ? 'attention' : 'schedule',
       eyebrow: failure ? 'Review invitation needs attention' : due > now.toISOString() ? 'Automatic review invitation scheduled' : 'Automatic review invitation pending',
@@ -268,63 +278,20 @@ async function reviewCards(db: DbClient, organization: DashboardOrganizationRow,
   return result
 }
 
-/** Blog drafts: finished when published, which the next read observes from the article itself. */
-async function draftWorks(db: DbClient, organization: DashboardOrganizationRow, zone: string, locationId?: string): Promise<Work[]> {
-  const rows = await queryAll<{ id: string; title: string | null; summary: string | null; location_id: string | null; updated_at: string }>(db, `
-    SELECT id,title,summary,location_id,updated_at FROM content_documents
-     WHERE organization_id=? AND row_role='root' AND kind='article' AND status='draft' AND (metadata_json ->> '$.collection')='blog'
-       ${locationId ? 'AND location_id=?' : ''} ORDER BY updated_at DESC,id LIMIT 100`, [organization.id, ...(locationId ? [locationId] : [])])
-  const pictures = await loadOwnerPictures(db, organization.id, 'content_document', rows.map(row => row.id))
-  return rows.map(row => ({
-    card: card({ id: `draft:${row.id}`, to: blogEditorPath(organization.slug, row.id), priority: 'opportunity', eyebrow: 'Draft article',
-      headline: row.title ? `Finish and publish “${row.title}”` : 'Finish and publish your draft article', description: row.summary,
-      imageUrl: pictures.get(row.id)?.imageUrl ?? null, imageIcon: 'i-lucide-file-pen-line', locationId: row.location_id }),
-    subject: { operation: 'article.publish', subjectId: row.id },
-    obligation: null,
-    fact: `Saved as a draft, last edited ${formatTimestamp(row.updated_at, 'en', zone, { dateStyle: 'medium' })}.`,
-    text: [row.title, row.summary].filter(Boolean).join(' '),
-    recency: row.updated_at,
-  }))
-}
-
-const STOP_WORDS = new Set(('the and for with our your you this that these those next last week weeks month today tomorrow more most less get make help '
-  + 'finish keep start about from into have has had will want need all any new who what when where which there their them they are was were been '
-  + 'being can could should would please also just only very than then some out off over its not but how why each every other such our ours us '
-  + 'we me my mine him her his hers one two three day days time now soon still again done do does did').split(' '))
-
-function stem(word: string) {
-  const base = word.replace(/['’]s$/, '')
-  if (base.length > 4 && base.endsWith('ies')) return `${base.slice(0, -3)}y`
-  if (base.length > 4 && /(?:ss|x|ch|sh)es$/.test(base)) return base.slice(0, -2)
-  if (base.length > 5 && base.endsWith('ing')) return base.slice(0, -3)
-  if (base.length > 4 && base.endsWith('ed')) return base.slice(0, -2)
-  if (base.length > 3 && base.endsWith('s') && !base.endsWith('ss')) return base.slice(0, -1)
-  return base.length > 3 && base.endsWith('e') ? base.slice(0, -1) : base
-}
-
-function terms(text: string) {
-  return new Set((text.toLowerCase().match(/[\p{L}\p{N}'’]+/gu) ?? []).filter(word => !STOP_WORDS.has(word)).map(stem).filter(word => word.length > 2 && !STOP_WORDS.has(word)))
-}
-
-/** The active priority whose own words this work shares most, if any. */
-function priorityFor(goals: BusinessGoal[], text: string) {
-  const words = terms(text)
-  let best: { goal: BusinessGoal; score: number } | null = null
-  for (const goal of goals) {
-    const score = [...terms(`${goal.intent} ${goal.constraints ?? ''}`)].filter(word => words.has(word)).length
-    if (score > 0 && (!best || score > best.score)) best = { goal, score }
-  }
-  return best
-}
-
 const DECIDED: Record<RecommendationFeedback['decision'], string> = { accept: 'chose to do', dismiss: 'dismissed', defer: 'set aside', correct: 'corrected' }
 
 function resurfacedBecause(feedback: RecommendationFeedbackView, subject: Work['subject'], zone: string) {
   const when = formatTimestamp(feedback.revision, 'en', zone, { dateStyle: 'medium' })
   const reasons = feedback.applicability.reasons
+  const changed = subject?.operation === 'guest_thread.reply' ? 'There is new activity in this conversation'
+    : subject?.operation.startsWith('article.') ? 'This draft changed'
+      : subject?.operation.startsWith('post.') ? 'The post or its source content changed'
+        : subject?.operation === 'stay.gap' ? 'The calendar changed'
+          : subject?.operation === 'social.connect' ? 'The social connection changed'
+            : 'The source facts changed'
   return [
     reasons.includes('defer_elapsed') ? `You set this aside until ${formatTimestamp(feedback.deferUntil!, 'en', zone, { dateStyle: 'medium', timeStyle: 'short' })}.` : null,
-    reasons.includes('evidence_changed') ? `${subject?.operation === 'guest_thread.reply' ? 'There is new activity in this conversation' : 'This draft changed'} since you ${DECIDED[feedback.decision]} it on ${when}.` : null,
+    reasons.includes('evidence_changed') ? `${changed} since you ${DECIDED[feedback.decision]} it on ${when}.` : null,
     reasons.includes('goal_changed') || reasons.includes('goal_archived') ? `The priority you ${DECIDED[feedback.decision]} this under has changed.` : null,
   ].filter(Boolean).join(' ')
 }
@@ -354,12 +321,12 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
   const availableKinds = agenda.availableKinds.filter((kind): kind is 'reservation' | 'booking' | 'stay' => kind === 'reservation' || kind === 'booking' || kind === 'stay')
   const locations = agenda.locations
 
-  const [records, drafts, failures, inputs] = await Promise.all([
+  const [records, failures, plan] = await Promise.all([
     (organization.vertical !== 'lodging' || organizationWide) ? threadRecords(db, organization, principal, input) : [],
-    ownerScope && canDecide && await roleAllows({ ...organization, permissions: { content: ['update'] } }) ? draftWorks(db, organization, zone, input.locationId) : [],
-    input.range === 'today' && ownerScope && await roleAllows({ ...organization, permissions: { content: ['publish'] } }) ? publicationCards(db, organization, input.locationId) : [],
-    canDecide ? readRecommendationDecisionInputs(db, principal) : null,
+    input.range === 'today' && ownerScope && await roleAllows({ ...organization, permissions: { content: ['publish'] } }) ? publicationCards(db, organization, now, input.locationId) : [],
+    canDecide && ownerScope ? readBusinessRecommendations(db, principal, { now, locationId: input.locationId }) : null,
   ])
+  const inputs = plan?.inputs ?? (canDecide ? await readRecommendationDecisionInputs(db, principal) : null)
   const unanswered = await firstUnansweredGuestEntryTimes(db, organization.id, records.map(thread => thread.id))
   const threads = records.map(thread => threadWork(thread, unanswered.get(thread.id), organization, zone, now)).filter((work): work is Work => work !== null)
   const [messages, reviews, deliveryFailures] = await Promise.all([
@@ -368,12 +335,12 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
     input.range === 'today' ? deliveryAttentionCards(db, organization, records, unanswered) : [],
   ])
   const goals = inputs?.goals.filter(goal => goal.status === 'active') ?? []
-  const works = [...threads, ...drafts].map(work => ({ ...work, match: priorityFor(goals, work.text) }))
+  const works = threads
   // Evidence is read only for work that could be shown: due work, work the
   // owner's priority names, and work the owner has already decided about.
   // Upcoming shows only work the owner planned for a later day.
   const considered = (work: typeof works[number]) => Boolean(inputs && work.subject
-    && (inputs.decided(work.subject).length || input.range === 'today' && (work.obligation || work.match)))
+    && (inputs.decided(work.subject).length || input.range === 'today' && work.obligation))
   const decisions = inputs && await readRecommendationDecisions(db, principal, inputs, works.filter(considered).map(work => work.subject!), now)
 
   const due: TodayCard[] = [], planned: TodayCard[] = [], optional: Array<{ card: TodayCard; rank: number[] }> = []
@@ -384,11 +351,10 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
     const feedback = entry?.feedback ?? null
     const current = feedback?.applicability.current ? feedback : null
     if (current && (current.decision === 'dismiss' || current.decision === 'correct')) continue
-    const goal = work.match?.goal ?? null
     const decision: TodayDecision | null = entry && work.subject ? {
       operation: work.subject.operation, subjectId: work.subject.subjectId, evidenceRevision: entry.reference.evidenceRevision,
-      goalId: goal?.id ?? null, goalRevision: goal?.revision ?? null,
-      revision: entry.saved.find(saved => saved.evidenceRevision === entry.reference.evidenceRevision && saved.goalId === (goal?.id ?? null) && saved.goalRevision === (goal?.revision ?? null))?.revision ?? null,
+      goalId: null, goalRevision: null,
+      revision: entry.saved.find(saved => saved.evidenceRevision === entry.reference.evidenceRevision && saved.goalId === null && saved.goalRevision === null)?.revision ?? null,
       current: current && { decision: current.decision, note: current.note, deferUntil: current.deferUntil },
     } : null
     const reason = [
@@ -396,7 +362,6 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
       current?.decision === 'accept' ? 'You chose to do this.' : null,
       current?.decision === 'defer' ? `You set this aside until ${formatTimestamp(current.deferUntil!, 'en', zone, { dateStyle: 'medium', timeStyle: 'short' })}.` : null,
       work.obligation ?? work.fact,
-      goal ? `It supports your priority “${goal.intent}”${goal.targetAt ? `, due ${formatTimestamp(goal.targetAt, 'en', zone, { dateStyle: 'medium' })}` : ''}.` : null,
       feedback?.note ? `Your note: “${feedback.note}”` : null,
     ].filter(Boolean).join(' ')
     const shown = { ...work.card, reason, decision }
@@ -409,13 +374,31 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
     if (input.range !== 'today') continue
     if (work.obligation) { due.push(shown); continue }
     const elapsed = feedback?.applicability.reasons.includes('defer_elapsed') ?? false
-    if (!ownerScope || !(current?.decision === 'accept' || goal || elapsed)) continue
-    optional.push({ card: shown, rank: [current?.decision === 'accept' ? 1 : 0, elapsed ? 1 : 0, work.match?.score ?? 0, Date.parse(work.recency)] })
+    if (!ownerScope || !(current?.decision === 'accept' || elapsed)) continue
+    optional.push({ card: shown, rank: [current?.decision === 'accept' ? 1 : 0, elapsed ? 1 : 0, 0, Date.parse(work.recency)] })
   }
-  const priorities = inputs ? goals.map(goal => ({ id: goal.id, intent: goal.intent, constraints: goal.constraints, targetAt: goal.targetAt, revision: goal.revision })) : null
+  for (const [index, recommendation] of (plan?.recommendations ?? []).entries()) {
+    const { operation, subjectId, goal, feedback, reference } = recommendation
+    const current = feedback?.applicability.current ? feedback : null
+    const shown = card({ id: `recommendation:${operation}:${subjectId}`, to: recommendation.to, priority: 'opportunity',
+      eyebrow: '', headline: recommendation.headline,
+      reason: [feedback && !current ? resurfacedBecause(feedback, { operation, subjectId }, zone) : null, recommendation.reason].filter(Boolean).join(' '), imageIcon: recommendation.icon,
+      locationId: recommendation.locationId, productId: recommendation.productId,
+      decision: { operation, subjectId, evidenceRevision: reference.evidenceRevision, goalId: goal?.id ?? null, goalRevision: goal?.revision ?? null,
+        revision: recommendation.feedbackRevision, current: current && { decision: current.decision, note: current.note, deferUntil: current.deferUntil } } })
+    if (recommendation.actionAt) {
+      const day = localDateAt(new Date(recommendation.actionAt), zone)
+      if (input.range === 'today' ? day <= today : day > today && day >= input.from! && day <= input.to!) {
+        planned.push({ ...shown, priority: 'schedule', actionAt: recommendation.actionAt,
+          eyebrow: formatTimestamp(recommendation.actionAt, 'en', zone, { dateStyle: 'medium', timeStyle: 'short' }) })
+      }
+    } else if (input.range === 'today') optional.push({ card: shown, rank: [current?.decision === 'accept' ? 1 : 0, 0, 1000 - index, 0] })
+  }
+  const recommendationIssues = plan?.issues ?? []
+  const priorities = inputs ? goals.map(goal => ({ id: goal.id, intent: goal.intent, constraints: goal.constraints, targetAt: goal.targetAt, strategy: goal.strategy, revision: goal.revision })) : null
   if (input.range === 'upcoming') {
     const when = (item: TodayCard) => item.actionAt ?? item.occurrenceAt ?? ''
-    return todayFeedSchema.parse({ cards: [...scheduleCards, ...messages, ...reviews, ...planned].sort((a, b) => when(a).localeCompare(when(b)) || a.id.localeCompare(b.id)), availableKinds, locations, resolvedAt, priorities })
+    return todayFeedSchema.parse({ cards: [...scheduleCards, ...messages, ...reviews, ...planned].sort((a, b) => when(a).localeCompare(when(b)) || a.id.localeCompare(b.id)), availableKinds, locations, resolvedAt, priorities, recommendationIssues })
   }
   const handledRequests = new Set(due.map(item => item.id.slice(item.id.indexOf(':') + 1)))
   const byRank = (a: typeof optional[number], b: typeof optional[number]) => {
@@ -428,5 +411,5 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
   const rank = (item: TodayCard) => item.priority === 'attention' ? 0 : item.priority === 'opportunity' ? 2
     : item.bookingKind === 'stay' && item.occurrenceAt === null && item.actionAt === null ? 3 : 1
   cards.sort((a, b) => rank(a) - rank(b))
-  return todayFeedSchema.parse({ cards, availableKinds, locations, resolvedAt, priorities })
+  return todayFeedSchema.parse({ cards, availableKinds, locations, resolvedAt, priorities, recommendationIssues })
 }

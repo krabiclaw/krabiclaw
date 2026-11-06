@@ -7,9 +7,15 @@ import { assertOrganizationWideAccess, type MemberAccessPrincipal } from '~/serv
 import { readMediaPlacements } from '~/server/utils/media-asset-manager'
 import { creationRequestHash } from '~/server/utils/organization-events'
 import { isRecord } from '~/server/utils/type-guards'
-import { BUSINESS_ACTIVITY_EVENTS, BUSINESS_MEASUREMENT_EVENTS, BUSINESS_OUTCOME_EVENTS, type BusinessOutcome, type BusinessOutcomeEvent, type BusinessOutcomePage, type BusinessProgressOperation, type BusinessProgressReference } from '~/shared/business-outcomes'
+import { BUSINESS_ACTIVITY_EVENTS, BUSINESS_MEASUREMENT_EVENTS, BUSINESS_OUTCOME_EVENTS, BUSINESS_PROGRESS_OPERATIONS, type ArticleDistribution, type BusinessOutcome, type BusinessOutcomeEvent, type BusinessOutcomePage, type BusinessProgressOperation, type BusinessProgressReference, type RecommendationPublication } from '~/shared/business-outcomes'
 import { CONVERSION_EVENT_CATALOG, type ConversionValue, type OrganizationConversionEventName } from '~/utils/organization-conversion-events'
 import type { AttributionTouch } from '~/utils/analytics-attribution'
+import { resolvePublicTenantOrigin } from '~/server/utils/public-base'
+import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
+import { articleCollectionOf } from '~/server/utils/content/publishing'
+import { getSocialConnections } from '~/server/utils/social-publication'
+import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
+import { getProduct } from '~/server/utils/product-management'
 
 interface OutcomeEntry {
   source_table: BusinessOutcome['source']['table']
@@ -232,6 +238,37 @@ export async function listBusinessOutcomes(
   }
 }
 
+async function recommendationPublications(db: DbClient, organizationId: string, postIds: string[]): Promise<Array<RecommendationPublication & { postId: string }>> {
+  if (!postIds.length) return []
+  return queryAll(db, `SELECT id, post_id AS postId, channel, state, provider_post_id AS providerPostId,
+    published_at AS publishedAt, updated_at AS updatedAt FROM post_publications
+    WHERE organization_id = ? AND post_id IN (SELECT value FROM json_each(?)) ORDER BY post_id, channel, id`,
+  [organizationId, d1JsonStringSet(postIds)])
+}
+
+/** Existing post CTA URLs associate a prepared social post with its article; only provider receipts prove distribution. */
+export async function readArticleDistribution(db: DbClient, principal: MemberAccessPrincipal, articleId: string): Promise<ArticleDistribution> {
+  await assertOrganizationWideAccess(db, principal)
+  const article = await queryFirst<{ slug: string | null; metadata_json: string }>(db,
+    "SELECT slug, metadata_json FROM content_documents WHERE id = ? AND organization_id = ? AND kind = 'article' AND row_role = 'root'", [articleId, principal.organizationId])
+  if (!article) throw new HTTPError({ statusCode: 404, message: 'Article not found' })
+  const origin = await resolvePublicTenantOrigin(db, principal.env, principal.organizationId)
+  if (!origin || !article.slug) return { url: null, posts: [] }
+  const metadata = JSON.parse(article.metadata_json) as { collection?: unknown }
+  const url = new URL(tenantBlogPostPath(article.slug, articleCollectionOf(metadata.collection)), origin).toString()
+  const candidates = await queryAll<{ id: string; status: string | null; updatedAt: string; targetUrl: string }>(db,
+    `SELECT id, status, updated_at AS updatedAt, json_extract(metadata_json, '$.call_to_action.url') AS targetUrl
+      FROM content_documents WHERE organization_id = ? AND kind = 'social_post' AND row_role = 'root'
+      AND json_type(metadata_json, '$.call_to_action.url') = 'text' ORDER BY id`, [principal.organizationId])
+  const articleUrl = new URL(url)
+  const posts = candidates.filter(post => {
+    const target = new URL(post.targetUrl)
+    return target.origin === articleUrl.origin && target.pathname === articleUrl.pathname
+  }).map(({ targetUrl: _targetUrl, ...post }) => post)
+  const publications = await recommendationPublications(db, principal.organizationId, posts.map(post => post.id))
+  return { url, posts: posts.map(post => ({ ...post, publications: publications.filter(publication => publication.postId === post.id) })) }
+}
+
 /** A correction/deferral is about explicit current evidence, never a permanent suppression of a resource. */
 export async function readBusinessProgressReference(
   db: DbClient,
@@ -239,11 +276,75 @@ export async function readBusinessProgressReference(
   input: { operation: BusinessProgressOperation; subjectId: string },
 ): Promise<BusinessProgressReference> {
   await assertOrganizationWideAccess(db, principal)
-  if (typeof input.subjectId !== 'string' || !input.subjectId.trim() || !['article.update', 'article.publish', 'guest_thread.reply'].includes(input.operation)) {
+  if (typeof input.subjectId !== 'string' || !input.subjectId.trim() || !(BUSINESS_PROGRESS_OPERATIONS as readonly string[]).includes(input.operation)) {
     throw new HTTPError({ statusCode: 400, message: 'An explicit supported operation and subjectId are required', data: { code: 'INVALID_PROGRESS_REFERENCE', field: 'subjectId' } })
   }
   const missing = () => new HTTPError({ statusCode: 404, message: 'Progress subject not found', data: { code: 'PROGRESS_SUBJECT_NOT_FOUND', field: 'subjectId' } })
-  if (input.operation !== 'guest_thread.reply') {
+  const result = async (evidence: BusinessProgressReference['evidence'], sources: unknown = evidence): Promise<BusinessProgressReference> => ({
+    ...input, evidence, evidenceRevision: await creationRequestHash({ operation: input.operation, subjectId: input.subjectId, sources }),
+  })
+  if (['article.create', 'post.create', 'social.connect', 'payments.connect'].includes(input.operation)) {
+    if (input.subjectId !== principal.organizationId) throw missing()
+    const organization = await queryFirst<{ updated_at: string; slug: string }>(db, 'SELECT updated_at, slug FROM organization WHERE id = ?', [input.subjectId])
+    if (!organization) throw missing()
+    if (input.operation === 'social.connect') {
+      const social = await getSocialConnections(principal.env, principal.organizationId, { dashboardBase: `/dashboard/${encodeURIComponent(organization.slug)}` })
+      const channels = social.channels.map(channel => ({ channel: channel.channel, connected: channel.connected, targetId: channel.target_id,
+        revision: channel.connection_revision, problems: channel.problems.map(problem => problem.code) }))
+      return result({ kind: 'social_connection', entitled: !channels.some(channel => channel.problems.includes('growth_plan_required')), channels })
+    }
+    if (input.operation === 'payments.connect') {
+      const setup = await readStripeCheckoutSetup(db, principal.organizationId, principal.env)
+      return result({ kind: 'payment_setup', missing: setup.missing,
+        account: setup.connected ? { status: setup.connected.status, cardPaymentsStatus: setup.connected.cardPaymentsStatus, updatedAt: setup.connected.updatedAt } : null },
+      { missing: setup.missing, account: setup.connected ? { id: setup.connected.id, status: setup.connected.status,
+        cardPaymentsStatus: setup.connected.cardPaymentsStatus, requirements: setup.connected.requirements, livemode: setup.connected.livemode } : null })
+    }
+    const kind = input.operation === 'article.create' ? 'article' : 'social_post'
+    const [documents, media] = await Promise.all([
+      queryAll<{ id: string; kind: string; status: string | null; updatedAt: string }>(db,
+        `SELECT id, kind, status, updated_at AS updatedAt FROM content_documents WHERE organization_id = ? AND row_role = 'root' AND kind = ? ORDER BY id`, [principal.organizationId, kind]),
+      queryAll<{ id: string; updatedAt: string }>(db, "SELECT id, updated_at AS updatedAt FROM media_assets WHERE organization_id = ? AND status = 'active' ORDER BY id", [principal.organizationId]),
+    ])
+    return result({ kind: 'organization', updatedAt: organization.updated_at, documents, media })
+  }
+  if (input.operation === 'post.publish') {
+    const post = await queryFirst<{ id: string; status: string | null; updated_at: string } & Record<string, unknown>>(db,
+      "SELECT id, title, slug, summary, metadata_json, status, visibility, published_at, updated_at FROM content_documents WHERE id = ? AND organization_id = ? AND kind = 'social_post' AND row_role = 'root'", [input.subjectId, principal.organizationId])
+    if (!post) throw missing()
+    const [publications, media] = await Promise.all([
+      recommendationPublications(db, principal.organizationId, [post.id]),
+      readMediaPlacements(db, { organizationId: principal.organizationId, ownerType: 'content_document', ownerIds: [post.id] }),
+    ])
+    return result({ kind: 'post', status: post.status, updatedAt: post.updated_at, publications }, { post, publications, media: [...media.values()].flat() })
+  }
+  if (input.operation === 'product.payment' || input.operation === 'stay.gap') {
+    const product = await queryFirst<{ id: string; kind: string; updated_at: string }>(db, 'SELECT id, kind, updated_at FROM products WHERE id = ? AND organization_id = ?', [input.subjectId, principal.organizationId])
+    if (!product) throw missing()
+    if (input.operation === 'product.payment') {
+      const [configuration, catalog] = await Promise.all([
+        queryFirst<{ online_payment_required: number; updated_at: string }>(db,
+          'SELECT online_payment_required, updated_at FROM product_booking_configs WHERE product_id = ? AND organization_id = ?', [product.id, principal.organizationId]),
+        getProduct(db, principal.organizationId, product.id),
+      ])
+      return result({ kind: 'product', updatedAt: product.updated_at, paymentRequired: configuration ? configuration.online_payment_required === 1 : null,
+        configurationUpdatedAt: configuration?.updated_at ?? null }, { product, configuration, variants: catalog.variants })
+    }
+    if (product.kind !== 'stay') throw missing()
+    const configuration = await queryFirst<{ updated_at: string } & Record<string, unknown>>(db,
+      'SELECT product_id, location_id, min_nights, calendar_rules, updated_at FROM product_stay_configs WHERE product_id = ? AND organization_id = ?', [product.id, principal.organizationId])
+    if (!configuration) throw missing()
+    const [overrides, claims, pushes] = await Promise.all([
+      queryAll(db, 'SELECT * FROM product_nights WHERE product_id = ? AND organization_id = ? ORDER BY date', [product.id, principal.organizationId]),
+      queryAll(db, `SELECT n.date,n.stay_id,n.hold_id,n.calendar_link_id,h.status AS hold_status,h.expires_at,
+        CASE WHEN h.status = 'active' AND h.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now') THEN 1 ELSE 0 END AS hold_active
+        FROM stay_nights n LEFT JOIN payment_checkout_holds h ON h.id=n.hold_id AND h.organization_id=n.organization_id
+        WHERE n.product_id = ? AND n.organization_id = ? ORDER BY n.date`, [product.id, principal.organizationId]),
+      queryAll(db, 'SELECT * FROM channel_night_pushes WHERE product_id = ? AND organization_id = ? ORDER BY date', [product.id, principal.organizationId]),
+    ])
+    return result({ kind: 'stay_home', updatedAt: product.updated_at, configurationUpdatedAt: configuration.updated_at }, { product, configuration, overrides, claims, pushes })
+  }
+  if (input.operation === 'article.update' || input.operation === 'article.publish' || input.operation === 'article.distribute') {
     const document = await queryFirst<{ id: string; status: string | null; updated_at: string } & Record<string, unknown>>(db, `
       SELECT id, title, slug, summary, status, visibility, published_at, seo_keywords, metadata_json, updated_at
       FROM content_documents WHERE id = ? AND organization_id = ? AND kind = 'article' AND row_role = 'root'
@@ -262,8 +363,9 @@ export async function readBusinessProgressReference(
     const evidence = {
       kind: 'article' as const, status: document.status, updatedAt: document.updated_at, activityEntryId: activity?.id ?? null,
       media: media.map(item => ({ placementId: item.placement_id, assetId: item.asset_id, assetUpdatedAt: item.updated_at })),
+      ...(input.operation === 'article.distribute' ? { distribution: await readArticleDistribution(db, principal, document.id) } : {}),
     }
-    return { ...input, evidenceRevision: await creationRequestHash({ operation: input.operation, document, blocks, categories, media, activityEntryId: evidence.activityEntryId }), evidence }
+    return { ...input, evidenceRevision: await creationRequestHash({ operation: input.operation, document, blocks, categories, media, activityEntryId: evidence.activityEntryId, ...(evidence.distribution ? { distribution: evidence.distribution } : {}) }), evidence }
   }
   const request = await getGuestRequest(db, input.subjectId, principal.organizationId)
   if (!request) throw missing()

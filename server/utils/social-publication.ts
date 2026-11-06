@@ -5,7 +5,7 @@ import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { getPost, postPayloadFingerprint, type Post, type PostMedia } from '~/server/utils/post-management'
-import { providerCaption } from '~/shared/posts'
+import { CLAIM_STALE_MS, isPublicationOutcomeUncertain, isPublicationPreparationResumable, providerCaption } from '~/shared/posts'
 import { MetaGraphError } from '~/server/utils/meta-graph'
 import { buildImageUrl } from '~/server/utils/cloudflare-images'
 import {
@@ -43,9 +43,6 @@ import {
  * chosen channel. Discord answers with the message it saved, and the
  * publication's nonce makes a repeated create return that same message.
  */
-
-/** A preparation claim older than this belongs to an invocation that is gone. */
-export const CLAIM_STALE_MS = 60_000
 
 export type SocialChannel = 'facebook' | 'instagram' | 'discord'
 export const SOCIAL_CHANNELS: readonly SocialChannel[] = ['facebook', 'instagram', 'discord']
@@ -885,19 +882,13 @@ export async function publishPost(
     // An invocation that died after its final call began left `publishing`
     // behind; once its claim is stale that is an unconfirmed final call, and
     // only reconciliation may say what became of it.
-    if (record?.state === 'publishing' && Date.parse(record.updated_at) < Date.now() - CLAIM_STALE_MS) {
-      await execute(db, `UPDATE post_publications SET state = 'unknown', attempt_id = NULL, error_code = 'final_unconfirmed',
-          error_message = 'The call that was publishing this stopped before it confirmed the result', updated_at = ?
-        WHERE id = ? AND state = 'publishing' AND updated_at = ?`, [nowIso(), record.id, record.updated_at])
-      record = await readPublication(db, organizationId, { id: record.id })
-      if (!record) throw new HTTPError({ statusCode: 404, statusMessage: 'Publication not found' })
-    }
+    if (record) record = await expirePublicationClaim(db, organizationId, record)
     if (record && record.provider_target_id !== target.target_id) {
       outcomes.push({ channel: target.channel, target_id: target.target_id, status: 'failed', publication_id: record.id, code: 'target_conflict',
         message: `This post's ${target.channel} publication is to ${record.provider_target_id}; a post is published to one ${target.channel} target. Create a new post for another.` })
       continue
     }
-    if (record && record.state !== 'failed' && !(record.state === 'preparing' && record.attempt_id === null) && !(record.state === 'preparing' && Date.parse(record.updated_at) < Date.now() - CLAIM_STALE_MS)) {
+    if (record && record.state !== 'failed' && !isPublicationPreparationResumable(record)) {
       outcomes.push(receipt(record))
       continue
     }
@@ -953,6 +944,16 @@ export async function publishPost(
 
 // ── Reconciliation ────────────────────────────────────────────────────────
 
+async function expirePublicationClaim(db: DbClient, organizationId: string, publication: PublicationRecord): Promise<PublicationRecord> {
+  if (publication.state !== 'publishing' || !isPublicationOutcomeUncertain(publication)) return publication
+  await execute(db, `UPDATE post_publications SET state = 'unknown', attempt_id = NULL, error_code = 'final_unconfirmed',
+      error_message = 'The call that was publishing this stopped before it confirmed the result', updated_at = ?
+    WHERE id = ? AND organization_id = ? AND state = 'publishing' AND updated_at = ?`, [nowIso(), publication.id, organizationId, publication.updated_at])
+  const current = await readPublication(db, organizationId, { id: publication.id })
+  if (!current) throw new HTTPError({ statusCode: 404, statusMessage: 'Publication not found' })
+  return current
+}
+
 /**
  * Reads the provider for one publication and records what it proves. It never
  * publishes, and it takes no one's word that something is published: a
@@ -961,8 +962,12 @@ export async function publishPost(
  */
 export async function reconcilePostPublication(env: CloudflareEnv, organizationId: string, publicationId: string, providerPostId: string | null) {
   const db = env.DB as DbClient
-  const publication = await readPublication(db, organizationId, { id: publicationId })
+  let publication = await readPublication(db, organizationId, { id: publicationId })
   if (!publication) throw new HTTPError({ statusCode: 404, statusMessage: 'Publication not found' })
+  publication = await expirePublicationClaim(db, organizationId, publication)
+  if (publication.state === 'publishing' || publication.state === 'preparing' && !isPublicationPreparationResumable(publication)) {
+    throw new HTTPError({ statusCode: 409, statusMessage: 'This publication is still being prepared by another call; wait for its result' })
+  }
   if (providerPostId && publication.provider_post_id && providerPostId !== publication.provider_post_id) {
     throw new HTTPError({ statusCode: 409, statusMessage: `This publication is ${publication.provider_post_id}; ${providerPostId} is a different ${publication.channel} post` })
   }

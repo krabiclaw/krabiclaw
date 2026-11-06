@@ -4,18 +4,19 @@ import { formatTimestamp, localDateAt } from '~/utils/timezone'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { STAY_CHANNELS } from '~/shared/bookings'
 import type { BusinessGoal, RecommendationFeedback } from '~/shared/business-progress'
+import { businessGoalStrategySchema, businessProgressReferenceSchema } from '~/shared/business-progress'
 
 /** What the caller can decide about one suggested piece of work, bound to the evidence it was suggested on. */
 const todayDecisionSchema = z.object({
-  operation: z.enum(['article.update', 'article.publish', 'guest_thread.reply']), subjectId: z.string(), evidenceRevision: z.string(),
+  operation: businessProgressReferenceSchema.shape.operation, subjectId: z.string(), evidenceRevision: z.string(),
   goalId: z.string().nullable(), goalRevision: z.string().nullable(),
   /** The revision of the caller's saved decision under exactly this evidence and goal; null when a decision would be new. */
   revision: z.string().nullable(),
   current: z.object({ decision: z.enum(['accept', 'dismiss', 'defer', 'correct']), note: z.string().nullable(), deferUntil: z.string().nullable() }).nullable(),
 })
 export type TodayDecision = z.infer<typeof todayDecisionSchema>
-const todayPrioritySchema = z.object({ id: z.string(), intent: z.string(), constraints: z.string().nullable(), targetAt: z.string().nullable(), revision: z.string() })
-export type TodayPriority = Pick<BusinessGoal, 'id' | 'intent' | 'constraints' | 'targetAt' | 'revision'>
+const todayPrioritySchema = z.object({ id: z.string(), intent: z.string(), constraints: z.string().nullable(), targetAt: z.string().nullable(), strategy: businessGoalStrategySchema.nullable(), revision: z.string() })
+export type TodayPriority = Pick<BusinessGoal, 'id' | 'intent' | 'constraints' | 'targetAt' | 'strategy' | 'revision'>
 export type TodayDecisionInput = Pick<RecommendationFeedback, 'decision' | 'note' | 'deferUntil'>
 
 export const todayCardSchema = z.object({
@@ -43,6 +44,7 @@ export const todayFeedSchema = z.object({
   resolvedAt: z.string(),
   /** The owner's active priorities; null when the caller cannot author them. */
   priorities: z.array(todayPrioritySchema).nullable(),
+  recommendationIssues: z.array(z.string()),
 })
 export interface TodayFeedPayload {
   cards: TodayCard[]
@@ -50,6 +52,7 @@ export interface TodayFeedPayload {
   locations: AgendaLocation[]
   resolvedAt: string
   priorities: TodayPriority[] | null
+  recommendationIssues: string[]
 }
 
 /** One projection for business and personal Today, including future agenda windows. */

@@ -30,6 +30,9 @@ import { createTableReservation } from '../../server/domain/table-reservations.t
 import { upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
 import { applyResendEmailEvent, deliverReceiptEmail } from '../../server/domain/guest-threads/deliveries.ts'
 import type { GuestThreadDeliveryRow } from '../../server/domain/guest-threads/types.ts'
+import { createPost, getPost } from '../../server/utils/post-management.ts'
+import { publishPost } from '../../server/utils/social-publication.ts'
+import { createSystemSubdomain } from '../../server/utils/domains.ts'
 
 const ORG = 'org', OWNER = 'owner', ZONE = 'America/Denver'
 const DAY = 86_400_000
@@ -74,7 +77,7 @@ async function boot() {
     await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
       VALUES ('location', ?, 'cabin', 'Cabin', 'active', ?, ?, ?)`).bind(ORG, ZONE, now, now).run()
     const env = { ...await runtime.getBindings<CloudflareEnv>(), MEDIA_BASE_URL: 'https://media.example.test', BETTER_AUTH_SECRET: 'dashboard-today-proof-secret-long-enough-for-auth',
-      BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests',
+      BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests',
       EMAIL_REPLY_SECRET: 'local-reply-proof', PREVIEW_SECRET: 'dashboard-today-preview-secret', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     const home = await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
       kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
@@ -109,7 +112,7 @@ async function contactThread(db: D1Database, id: string, message: string, create
     created_at: createdAt, updated_at: createdAt }).map(write => db.prepare(write.query).bind(...write.params)))
 }
 
-test('Today and Upcoming select work from obligations, the owner’s priority and their decisions, and stop once the canonical operation completes', async t => {
+test('Today continuously selects useful growth and customer work, preserves feedback and clears canonical completions', async t => {
   const { runtime, db, env, homeId, call } = await boot()
   try {
     const now = Date.now()
@@ -118,9 +121,22 @@ test('Today and Upcoming select work from obligations, the owner’s priority an
     const ids = (feed: TodayFeedPayload) => feed.cards.map(card => card.id)
     const find = (feed: TodayFeedPayload, id: string) => feed.cards.find(card => card.id === id)
 
-    // An old question with no booking behind it, and a question asked an hour ago.
-    await contactThread(db, 'old-inquiry', 'Is there parking near the kayak launch for the Saturday kayak trip?', new Date(now - 20 * DAY).toISOString())
+    const cold = await today()
+    assert.deepEqual(cold.priorities, [])
+    assert.ok(cold.cards.some(card => card.decision?.operation === 'article.create' && card.decision.subjectId === ORG), 'a business can start useful marketing without a saved goal or prior content')
+    const { goal: paymentFocus } = await call<{ goal: { id: string; revision: string } }>('POST', `/api/organizations/${ORG}/goals`, {
+      idempotencyKey: 'payment-focus', intent: 'Accept payment for direct bookings', strategy: { channels: [], payments: true },
+    }, 201)
+    const withPaymentFocus = await today()
+    assert.ok(withPaymentFocus.cards.some(card => card.decision?.operation === 'article.create'), 'a payment goal prioritizes setup without disabling ongoing marketing')
+    await call('PATCH', `/api/organizations/${ORG}/goals/${paymentFocus.id}`, { revision: paymentFocus.revision, status: 'archived' })
+
+    // Real customer questions and promotional outreach must not be treated alike.
+    await contactThread(db, 'old-inquiry', 'Can I reserve a kayak trip for tomorrow?', new Date(now - 20 * DAY).toISOString())
     await contactThread(db, 'recent-inquiry', 'Is the cabin pet friendly? We would bring a small dog.', new Date(now - 60 * 60_000).toISOString())
+    await contactThread(db, 'promotional-inquiry', 'Could we feature your place on Tourist? It costs nothing. Send us your discounts and we will list your business.', new Date(now - 30 * 60_000).toISOString())
+    await contactThread(db, 'future-dated-inquiry', `Can I book a cabin for January 6, ${new Date(now).getUTCFullYear() + 1}?`, new Date(now - 20 * DAY).toISOString())
+    await contactThread(db, 'expired-dated-inquiry', `Can I book a cabin for January 6, ${new Date(now).getUTCFullYear() - 1}?`, new Date(now - 20 * DAY).toISOString())
     // An equally old unanswered message about a stay that has not happened yet.
     const checkIn = localDateAt(new Date(now + 10 * DAY), ZONE), checkOut = localDateAt(new Date(now + 12 * DAY), ZONE)
     const manager: StayAccess = { organizationId: ORG, actorId: OWNER, manage: true }
@@ -133,56 +149,59 @@ test('Today and Upcoming select work from obligations, the owner’s priority an
     const category = await createArticleCategory(db, { organizationId: ORG, collection: 'blog', name: 'Guides', actorId: OWNER })
     const draft = async (key: string, title: string, excerpt: string) => (await createBlogPost(db as unknown as D1Database, OWNER, { idempotency_key: key, title, excerpt, category_id: category.id,
       content_blocks: [{ type: 'markdown', data: { markdown: excerpt, editor_mode: 'rich' } }] }, { organization_id: ORG }, env)).post as { id: string; updated_at: string }
-    const kayak = await draft('kayak', 'Kayak trip packing list', 'What to bring on our Saturday kayak trip.')
     const sourdough = await draft('sourdough', 'Sourdough breakfast guide', 'How our sourdough breakfast is baked each morning.')
     const historyBefore = (await getGuestThreadDetail(db, 'recent-inquiry', ORG))!.entries.length
 
-    // Without a priority: obligations only, with the fact that makes each due.
+    // Growth is available before the owner authors a priority; source state makes it useful.
     let feed = await today()
     assert.deepEqual(feed.priorities, [])
     assert.ok(ids(feed).includes('attention:recent-inquiry'))
-    assert.match(find(feed, 'attention:recent-inquiry')!.reason!, /^Rhea wrote .* and has no reply yet\.$/)
     assert.equal(find(feed, `attention:${stayThread}`)?.priority, 'attention', 'age alone does not hide a message about a live stay')
-    assert.match(find(feed, `attention:${stayThread}`)!.reason!, /unanswered message about their stay/)
-    assert.equal(ids(feed).some(id => id.endsWith(':old-inquiry')), false, 'an old inquiry with no commitment is not work because the guest wrote last')
-    assert.equal(ids(feed).some(id => id.startsWith('draft:')), false, 'a draft is not work merely because it exists')
-    assert.equal(feed.cards.filter(card => card.priority === 'opportunity').length, 0)
+    assert.equal(find(feed, 'attention:promotional-inquiry'), undefined, 'promotional outreach is not a waiting customer obligation')
+    assert.equal(find(feed, 'attention:old-inquiry'), undefined, 'a request for tomorrow from twenty days ago does not establish a current obligation')
+    assert.equal(find(feed, 'attention:future-dated-inquiry')?.priority, 'attention', 'an explicitly future year remains a live customer request despite its age')
+    assert.equal(find(feed, 'attention:expired-dated-inquiry'), undefined, 'an explicitly expired booking date does not establish a current obligation')
+    assert.ok(feed.cards.some(card => card.decision?.operation === 'article.publish' && card.decision.subjectId === sourdough.id), 'an existing draft provides a next marketing action without a keyword-matched priority')
 
-    // A priority makes the work it names worth doing, and says why.
-    const { goal: kayakGoal } = await call<{ goal: { id: string; revision: string } }>('POST', `/api/organizations/${ORG}/goals`, { idempotencyKey: 'kayak-goal', intent: 'Fill the remaining places on Saturday’s kayak trip' }, 201)
-    const currentStay = await createStay(db, env, manager, { product_id: homeId, idempotency_key: 'current-stay',
-      check_in_date: localDateAt(new Date(now - DAY), ZONE), check_out_date: localDateAt(new Date(now + DAY), ZONE), adults: 1, guest_name: 'Mara', total_minor: 15_000 })
+    // Owner strategy is explicit and survives a different intent wording.
+    const { goal: breakfastGoal } = await call<{ goal: { id: string; revision: string } }>('POST', `/api/organizations/${ORG}/goals`, {
+      idempotencyKey: 'breakfast-goal', intent: 'Help prospective guests discover why they should stay here', strategy: { channels: ['blog'] },
+    }, 201)
     feed = await today()
-    assert.deepEqual(feed.priorities?.map(priority => priority.id), [kayakGoal.id])
-    assert.deepEqual(feed.cards.filter(card => card.priority === 'opportunity').map(card => card.id).sort(), [`draft:${kayak.id}`, 'reply:old-inquiry'].sort())
-    assert.ok(ids(feed).indexOf(`stay:${currentStay.id}:current`) > ids(feed).indexOf(`draft:${kayak.id}`), 'ongoing hosting context cannot displace an actionable item in the flat list')
-    assert.ok(ids(feed).indexOf(`stay:${currentStay.id}:current`) > ids(feed).indexOf('reply:old-inquiry'))
-    assert.match(find(feed, 'reply:old-inquiry')!.reason!, /Olive has had no reply since .*It supports your priority “Fill the remaining places on Saturday’s kayak trip”\./)
-    assert.deepEqual(find(feed, `draft:${kayak.id}`)!.decision, { operation: 'article.publish', subjectId: kayak.id, evidenceRevision: find(feed, `draft:${kayak.id}`)!.decision!.evidenceRevision,
-      goalId: kayakGoal.id, goalRevision: kayakGoal.revision, revision: null, current: null })
-
-    // Changing the priority changes the optional work.
-    await call('PATCH', `/api/organizations/${ORG}/goals/${kayakGoal.id}`, { revision: kayakGoal.revision, status: 'archived' })
-    await call('POST', `/api/organizations/${ORG}/goals`, { idempotencyKey: 'bread-goal', intent: 'Promote our sourdough breakfast' }, 201)
-    feed = await today()
-    assert.deepEqual(feed.cards.filter(card => card.priority === 'opportunity').map(card => card.id), [`draft:${sourdough.id}`])
+    assert.deepEqual(feed.priorities?.map(priority => priority.id), [breakfastGoal.id])
+    assert.deepEqual(feed.priorities?.[0]?.strategy, { channels: ['blog'] })
+    const selectedDraft = feed.cards.find(card => card.decision?.operation === 'article.publish' && card.decision.subjectId === sourdough.id)
+    assert.ok(selectedDraft)
+    assert.equal(selectedDraft.decision!.goalId, breakfastGoal.id, 'the chosen channel binds the actual work to the owner strategy without a shared-word score')
+    assert.equal(selectedDraft.decision!.goalRevision, breakfastGoal.revision)
 
     // A dismissal survives fresh reads and leaves the work's own record untouched.
-    const sourdoughCard = find(feed, `draft:${sourdough.id}`)!
+    const sourdoughCard = feed.cards.find(card => card.decision?.operation === 'article.publish' && card.decision.subjectId === sourdough.id)!
     const decide = (card: TodayCard, decision: string, extra: Record<string, unknown> = {}) => call<{ feedback: { id: string; decision: string } }>('PUT', `/api/organizations/${ORG}/recommendation-feedback`, {
       operation: card.decision!.operation, subjectId: card.decision!.subjectId, evidenceRevision: card.decision!.evidenceRevision, revision: card.decision!.revision, decision,
       ...(card.decision!.goalId ? { goalId: card.decision!.goalId, goalRevision: card.decision!.goalRevision } : {}), ...extra,
     })
     await decide(sourdoughCard, 'dismiss')
-    assert.equal(ids(await today()).includes(`draft:${sourdough.id}`), false)
-    assert.equal(ids(await today()).includes(`draft:${sourdough.id}`), false)
+    assert.equal((await today()).cards.some(card => card.decision?.operation === 'article.publish' && card.decision.subjectId === sourdough.id), false)
+    assert.equal((await today()).cards.some(card => card.decision?.operation === 'article.publish' && card.decision.subjectId === sourdough.id), false)
     const stored = await db.prepare('SELECT status, updated_at FROM content_documents WHERE id = ?').bind(sourdough.id).first<{ status: string; updated_at: string }>()
     assert.deepEqual(stored, { status: 'draft', updated_at: sourdough.updated_at })
+
+    // A decision about one authored strategy does not suppress a different strategy's work.
+    const { goal: secondGoal } = await call<{ goal: { id: string; revision: string } }>('POST', `/api/organizations/${ORG}/goals`, {
+      idempotencyKey: 'second-blog-goal', intent: 'Explain our breakfast options before guests book', strategy: { channels: ['blog'] },
+    }, 201)
+    const underSecondGoal = (await today()).cards.find(card => card.decision?.operation === 'article.publish' && card.decision.subjectId === sourdough.id)
+    assert.ok(underSecondGoal, 'the first strategy dismissal does not decide the same draft for another strategy')
+    assert.equal(underSecondGoal.decision!.goalId, secondGoal.id)
+    await call('PATCH', `/api/organizations/${ORG}/goals/${secondGoal.id}`, { revision: secondGoal.revision, status: 'archived' })
+    assert.equal((await today()).cards.some(card => card.decision?.operation === 'article.publish' && card.decision.subjectId === sourdough.id), false,
+      'the original strategy dismissal still applies when that strategy becomes active again')
 
     // New evidence brings it back with the reason it returned.
     const edited = await updateBlogPost(db as unknown as D1Database, sourdough.id, { excerpt: 'How our sourdough breakfast loaves are baked before sunrise.', expected_updated_at: sourdough.updated_at }, ORG, OWNER, env) as { post: { updated_at: string } }
     feed = await today()
-    assert.match(find(feed, `draft:${sourdough.id}`)!.reason!, /^This draft changed since you dismissed it on /)
+    assert.match(feed.cards.find(card => card.decision?.operation === 'article.publish' && card.decision.subjectId === sourdough.id)!.reason!, /since you dismissed it on /)
 
     // Preparation planned for a later day appears on that day, ahead of the stay it precedes.
     const recentCard = find(feed, 'attention:recent-inquiry')!
@@ -205,9 +224,9 @@ test('Today and Upcoming select work from obligations, the owner’s priority an
     const response = await executeGuestThreadOperation(db, { threadId: stayThread, organizationId: ORG, action: 'reply', body: 'Check-in opens at 4pm.', actorUserId: OWNER, idempotencyKey: 'stay-reply', env: { ...env, ...provider.configuration } })
     assert.equal(response.ok, true, JSON.stringify(response))
     feed = await today()
-    assert.equal(ids(feed).includes(`draft:${sourdough.id}`), false)
+    assert.equal(feed.cards.some(card => card.decision?.operation === 'article.publish' && card.decision.subjectId === sourdough.id), false)
     assert.equal(ids(feed).includes(`attention:${stayThread}`), false)
-    assert.equal(feed.cards.filter(card => card.priority === 'opportunity').length, 0, 'with nothing worth doing, no optional work is invented')
+    assert.ok(feed.cards.some(card => card.priority === 'opportunity'), 'finishing one action makes further useful growth available in the same session')
 
     // A physically accepted reply answers the guest, but its own recorded completion error still needs attention.
     const receipt = (await db.prepare(`SELECT d.* FROM guest_thread_deliveries d JOIN activity_entries e ON e.id=d.entry_id
@@ -358,9 +377,8 @@ test('Today reads actual scheduled work and review outcomes: cancellation and su
     assert.equal(futureReview.priority, 'schedule')
     assert.equal(localDateAt(new Date(futureReview.actionAt!), ZONE), localDateAt(new Date(now + DAY), ZONE))
     assert.equal((await read()).cards.some(card => card.id === futureReview.id), false)
-    const dueReview = (await read()).cards.find(card => card.id === `review-invitation:${ended.request_id}`)
-    assert.ok(dueReview)
-    assert.equal(dueReview.priority, 'schedule', 'automatic work with no failure is not an invented owner action')
+    const dueReviewId = `review-invitation:${ended.request_id}`
+    assert.equal((await read()).cards.some(card => card.id === dueReviewId), false, 'healthy automatic work runs in the background without an owner action card')
     const ordered = (await read()).cards
     const firstScheduled = ordered.findIndex(card => card.priority === 'schedule')
     assert.ok(firstScheduled > 0)
@@ -371,10 +389,10 @@ test('Today reads actual scheduled work and review outcomes: cancellation and su
     const visit = await db.prepare('SELECT first_sent_at,send_count FROM review_requests WHERE booking_id=?').bind(ended.request_id).first<{ first_sent_at: string; send_count: number }>()
     assert.equal(visit?.send_count, 1)
     feed = await read()
-    assert.equal(feed.cards.some(card => card.id === dueReview.id), false)
+    assert.equal(feed.cards.some(card => card.id === dueReviewId), false)
     assert.ok(visit?.first_sent_at)
     await assert.rejects(sendReviewRequestForBooking(providerEnv, db, 'stay', ended.request_id!), /not due a review invitation/)
-    assert.equal((await read()).cards.some(card => card.id === dueReview.id), false)
+    assert.equal((await read()).cards.some(card => card.id === dueReviewId), false)
     assert.equal(provider.sent.size, 3, 'two scheduled sends and one invitation reached the controlled provider')
 
     const reviewReceipt = (await db.prepare(`SELECT d.* FROM guest_thread_deliveries d JOIN activity_entries e ON e.id=d.entry_id
@@ -434,9 +452,29 @@ test('Today reads actual scheduled work and review outcomes: cancellation and su
     t.mock.timers.tick(DAY)
     const tomorrow = await read()
     assert.equal(tomorrow.cards.find(card => card.id === `send-later:${failure.id}`)?.priority, 'attention', 'an unresolved send failure survives midnight')
-    assert.equal(tomorrow.cards.some(card => card.id === dueReview.id), false, 'a sent invitation does not become pending work again on the next day')
+    assert.equal(tomorrow.cards.some(card => card.id === dueReviewId), false, 'a sent invitation does not become pending work again on the next day')
   } finally {
     await runtime.dispose()
     t.mock.timers.reset()
   }
+})
+
+test('publishing a real post clears its recommendation and leaves further useful work available immediately', async () => {
+  const { runtime, db, env, call } = await boot()
+  try {
+    await createSystemSubdomain(env, db, ORG, ORG)
+    const { post } = await createPost(db, env, ORG, { idempotencyKey: 'cabins-seasonal-post', post: {
+      title: 'A quiet mountain weekend', body: 'Our cabin has space for a quiet mountain weekend. Explore the home and its current dates.',
+    } }, OWNER)
+    const before = await call<TodayFeedPayload>('GET', `/api/dashboard/today?org=${ORG}`)
+    assert.ok(before.cards.some(card => card.decision?.operation === 'post.publish' && card.decision.subjectId === post.id), 'the saved post is a specific unfinished action')
+    const publication = await publishPost(env, ORG, post.id, { expectedUpdatedAt: post.updated_at, targets: [{ channel: 'organization' }] }, OWNER)
+    assert.equal(publication.ok, true, JSON.stringify(publication))
+    const persisted = await getPost(db, env, ORG, post.id)
+    assert.equal(persisted?.status, 'published')
+    assert.ok(persisted?.canonical_url, 'the website publication is readable at its real public address')
+    const after = await call<TodayFeedPayload>('GET', `/api/dashboard/today?org=${ORG}`)
+    assert.equal(after.cards.some(card => card.decision?.operation === 'post.publish' && card.decision.subjectId === post.id), false)
+    assert.ok(after.cards.some(card => card.priority === 'opportunity'), 'a completed post does not impose a next-day gate on other business growth')
+  } finally { await runtime.dispose() }
 })

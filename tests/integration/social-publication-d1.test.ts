@@ -27,9 +27,10 @@ import deletionStatus from '../../server/api/integrations/meta/data-deletion.get
 import { createBlogPost, getBlogPost } from '../../server/utils/content/publishing.ts'
 import { fetchTransformedImageAsDataUri } from '../../server/utils/og-image/fetch-image.ts'
 import { renderOgImagePng } from '../../server/utils/og-image/render.ts'
-import { PostValidationError, POST_TITLE_MAX } from '../../shared/posts.ts'
+import { CLAIM_STALE_MS, PostValidationError, POST_TITLE_MAX } from '../../shared/posts.ts'
 import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
 import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
+import { readBusinessRecommendations } from '../../server/domain/business-progress.ts'
 
 /**
  * Publication, channel management and erasure against real local D1, with Meta and
@@ -60,6 +61,7 @@ class FakeMeta {
   igFeed: Array<Record<string, unknown>> = []
   igResponses = new Map<string, unknown>()
   assignedPageResponses = new Map<string, unknown>([['', { data: [{ id: PAGE, name: 'Krabi Claw', access_token: 'page-token' }] }]])
+  instagramResponseGate: ((request: SeenRequest) => Promise<void>) | null = null
 
   fault(kind: Fault['kind'], match: Fault['match'], times = 1) { this.faults.push({ kind, match, times }) }
   sent(predicate: (request: SeenRequest) => boolean) { return this.requests.filter(predicate) }
@@ -92,7 +94,11 @@ class FakeMeta {
       video.uploaded = true
       return json({ success: true })
     }
-    if (url.hostname === 'graph.instagram.com') return this.instagram(method, url.pathname.replace('/v23.0/', ''), url.searchParams, body)
+    if (url.hostname === 'graph.instagram.com') {
+      const response = this.instagram(method, url.pathname.replace('/v23.0/', ''), url.searchParams, body)
+      if (this.instagramResponseGate) await this.instagramResponseGate(request)
+      return response
+    }
     throw new Error(`Unexpected request ${method} ${url}`)
   }
 
@@ -377,7 +383,7 @@ test('AVIF article and Post pictures render through native Images and retries co
   }
 })
 
-test('publication: one result, one external post per target, and no blind resend under any fault', async () => {
+test('publication: one result, one external post per target, and no blind resend under any fault', async t => {
   const { runtime, db, env, cardless, meta, run, asset, restore } = await setUp()
   try {
     await run("INSERT INTO user (id, name, email) VALUES ('publisher', 'Publisher', 'publisher@proof.example')")
@@ -385,6 +391,11 @@ test('publication: one result, one external post per target, and no blind resend
     const membership = await resolveMembership(env, { organizationId: 'org-a', userId: 'owner' })
     assert.ok(membership)
     const progress = () => listBusinessOutcomes(db, memberAccessPrincipal(membership, { env }), { limit: 100 })
+    const recommendations = async () => {
+      const plan = await readBusinessRecommendations(db, memberAccessPrincipal(membership, { env }))
+      assert.deepEqual(plan.issues, [], 'normal connected-provider reads must not silently turn into unavailable performance or status')
+      return plan
+    }
     await asset('a1', 'image/jpeg')
     await asset('a2', 'image/jpeg')
     await asset('a3', 'image/png')
@@ -515,6 +526,8 @@ test('publication: one result, one external post per target, and no blind resend
 
     // Definite rejection before the native draft: failed, then the corrected retry publishes once.
     const third = await create('key-3', { body: 'Rejected first', media: [{ asset_id: 'a1', slot: 'cover' }] })
+    assert.equal((await recommendations()).recommendations.some(item => item.operation === 'post.publish' && item.subjectId === third.post.id), true,
+      'the actual draft is available before it has any provider publication')
     meta.fault('reject', request => request.path.endsWith(`${PAGE}/photos`))
     const rejected = await publishPost(env, 'org-a', third.post.id, { expectedUpdatedAt: third.post.updated_at, targets: [targets.facebook()] }, 'owner')
     assert.deepEqual([rejected.ok, rejected.outcomes[0]!.status, rejected.outcomes[0]!.code], [false, 'failed', 'provider_rejected'])
@@ -524,6 +537,9 @@ test('publication: one result, one external post per target, and no blind resend
     const retried = await publishPost(env, 'org-a', third.post.id, { expectedUpdatedAt: third.post.updated_at, targets: [targets.facebook()] }, 'publisher')
     assert.equal(retried.outcomes[0]!.status, 'published')
     await publishedOnMeta(third.post.id, 'facebook')
+    assert.equal((await getPost(db, env, 'org-a', third.post.id))!.status, 'draft', 'external publication does not publish the website draft')
+    assert.equal((await recommendations()).recommendations.some(item => item.operation === 'post.publish' && item.subjectId === third.post.id), false,
+      'the confirmed Facebook receipt clears sharing work even while the independent website draft remains')
     const retryInitiator = await db.prepare(`SELECT a.actor_user_id FROM post_publications p JOIN activity_entries a ON a.id = p.initiating_activity_id
       WHERE p.post_id = ? AND p.channel = 'facebook'`).bind(third.post.id).first<{ actor_user_id: string }>()
     assert.equal(retryInitiator?.actor_user_id, 'publisher')
@@ -619,6 +635,82 @@ test('publication: one result, one external post per target, and no blind resend
     assert.equal(meta.sent(request => request.path.endsWith('media_publish')).length, publishesBeforeWait + 3)
     assert.equal(meta.publishNotReady, 0)
     await publishedOnMeta(notReadyYet.post.id, 'instagram')
+
+    // A live preparation is already running. A released, confirmed-unpublished
+    // container is work the owner can resume; the real publication then clears it.
+    const resumable = await create('key-resumable-preparation', { media: [{ asset_id: 'a1', slot: 'cover' }] })
+    let preparationObserved!: () => void, releasePreparation!: () => void
+    const observedPreparation = new Promise<void>(resolve => { preparationObserved = resolve })
+    const preparationResponse = new Promise<void>(resolve => { releasePreparation = resolve })
+    meta.instagramResponseGate = async request => {
+      if (request.method !== 'GET' || !request.query.get('fields')?.includes('status_code')) return
+      meta.instagramResponseGate = null
+      preparationObserved()
+      await preparationResponse
+    }
+    meta.fault('reject', request => request.path.endsWith('media_publish'))
+    const preparing = publishPost(env, 'org-a', resumable.post.id, { expectedUpdatedAt: resumable.post.updated_at, targets: [targets.instagram()] }, 'owner')
+    try {
+      await observedPreparation
+      const active = await db.prepare('SELECT state, attempt_id FROM post_publications WHERE post_id=?').bind(resumable.post.id).first<{ state: string; attempt_id: string | null }>()
+      assert.equal(active?.state, 'preparing')
+      assert.ok(active?.attempt_id)
+      assert.equal((await recommendations()).recommendations.some(item => item.operation === 'post.publish' && item.subjectId === resumable.post.id), false,
+        'a live publisher is not duplicated as owner work')
+    } finally {
+      meta.instagramResponseGate = null
+      releasePreparation()
+      await preparing
+    }
+    const refusedPreparation = await preparing
+    assert.equal(refusedPreparation.outcomes[0]!.code, 'provider_rejected')
+    const resumableId = refusedPreparation.outcomes[0]!.publication_id!
+    assert.equal((await reconcilePostPublication(env, 'org-a', resumableId, null)).state, 'preparing')
+    assert.deepEqual(await db.prepare('SELECT state, attempt_id FROM post_publications WHERE id=?').bind(resumableId).first(), { state: 'preparing', attempt_id: null })
+    assert.equal((await recommendations()).recommendations.some(item => item.operation === 'post.publish' && item.subjectId === resumable.post.id), true,
+      'canonical reconciliation makes released preparation available to finish')
+    assert.equal((await publishPost(env, 'org-a', resumable.post.id, { expectedUpdatedAt: resumable.post.updated_at, targets: [targets.instagram()] }, 'owner')).outcomes[0]!.status, 'published')
+    await publishedOnMeta(resumable.post.id, 'instagram')
+    assert.equal((await recommendations()).recommendations.some(item => item.operation === 'post.publish' && item.subjectId === resumable.post.id), false)
+
+    // Instagram accepts the final call while its answer is delayed. The actual
+    // clock expires that claim; reconciliation reads the real accepted media.
+    const stalled = await create('key-stalled-final', { media: [{ asset_id: 'a2', slot: 'cover' }] })
+    let finalObserved!: () => void, releaseFinal!: () => void
+    const observedFinal = new Promise<void>(resolve => { finalObserved = resolve })
+    const finalResponse = new Promise<void>(resolve => { releaseFinal = resolve })
+    meta.instagramResponseGate = async request => {
+      if (request.method !== 'POST' || !request.path.endsWith('media_publish')) return
+      meta.instagramResponseGate = null
+      finalObserved()
+      await finalResponse
+    }
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() })
+    const stalledPublish = publishPost(env, 'org-a', stalled.post.id, { expectedUpdatedAt: stalled.post.updated_at, targets: [targets.instagram()] }, 'owner')
+    try {
+      await observedFinal
+      const current = (await getPost(db, env, 'org-a', stalled.post.id))!.publications[0]!
+      assert.equal(current.state, 'publishing')
+      assert.equal(current.can_reconcile, false)
+      await assert.rejects(reconcilePostPublication(env, 'org-a', String(current.id), null), (error: unknown) => HTTPError.isError(error) && error.status === 409)
+      t.mock.timers.tick(CLAIM_STALE_MS + 1)
+      assert.equal((await getPost(db, env, 'org-a', stalled.post.id))!.publications[0]!.can_reconcile, true)
+      assert.equal((await reconcilePostPublication(env, 'org-a', String(current.id), null)).state, 'published')
+      const confirmed = (await getPost(db, env, 'org-a', stalled.post.id))!.publications[0]!
+      assert.equal(confirmed.can_reconcile, false)
+      assert.equal(confirmed.provider_post_id, null, 'Instagram container PUBLISHED is confirmed even before its media ID is recovered')
+      assert.equal((await recommendations()).recommendations.some(item => item.operation === 'post.publish' && item.subjectId === stalled.post.id), false)
+    } finally {
+      meta.instagramResponseGate = null
+      releaseFinal()
+      await stalledPublish
+      t.mock.timers.reset()
+    }
+    assert.equal((await stalledPublish).outcomes[0]!.code, 'claim_lost')
+    const stalledReceipt = await db.prepare('SELECT provider_handles_json FROM post_publications WHERE post_id=?').bind(stalled.post.id).first<{ provider_handles_json: string }>()
+    const stalledContainer = JSON.parse(stalledReceipt!.provider_handles_json) as { container_id: string }
+    assert.equal(meta.igContainers.get(stalledContainer.container_id)?.status, 'PUBLISHED')
+    assert.equal([...meta.igMedia.values()].some(media => media.container === stalledContainer.container_id), true)
 
     // An expired container is a definite non-publication; the next call prepares new ones.
     const expiring = await create('key-expire', { media: [{ asset_id: 'a2', slot: 'cover' }] })

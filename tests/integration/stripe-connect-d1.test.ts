@@ -18,6 +18,10 @@ import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import connectStartRoute from '../../server/api/dashboard/connect/index.post.ts'
 import connectStatusRoute from '../../server/api/dashboard/connect/status.post.ts'
 import { processStripeWebhookEvent } from '../../server/utils/stripe-webhook-events.ts'
+import { createProduct, getProduct } from '../../server/utils/product-management.ts'
+import { setProductBookingConfig } from '../../server/utils/availability.ts'
+import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
+import { readBusinessRecommendations } from '../../server/domain/business-progress.ts'
 
 async function withD1(run: (db: D1Database) => Promise<void>) {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -122,7 +126,7 @@ test('Connect callback URLs are built only from the configured platform origin a
   assert.throws(() => buildAppPayoutsOnboardingUrls('http://krabiclaw.com'), /HTTPS/)
 })
 
-test('the iPhone app starts Stripe payouts onboarding on the dashboard Connect route with its bearer session', async t => {
+test('Stripe onboarding recommendations follow real account readiness and clear when paid booking is enabled', async t => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'payouts-app-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
@@ -133,13 +137,28 @@ test('the iPhone app starts Stripe payouts onboarding on the dashboard Connect r
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     const env = {
       ...await runtime.getBindings<CloudflareEnv>(), DB: db, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth',
-      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test', STRIPE_SECRET_KEY: 'sk_test_payouts', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
+      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test', STRIPE_SECRET_KEY: 'sk_test_payouts', NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: 'pk_test_payouts', STRIPE_PAYMENTS_METHOD_CONFIGURATION: 'pmc_payouts', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
     } as CloudflareEnv
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
-      VALUES ('org', 'Cliff Stays', 'cliff', 'cliff', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'UTC')`).run()
+      VALUES ('org', 'Cliff Classes', 'cliff', 'cliff', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'experience', '2026-10-15T00:00:00.000Z', 'UTC')`).run()
     await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('owner', 'Owner', 'owner@example.test', 1, 0, 0)").run()
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('m-owner', 'org', 'owner', 'owner', 0)").run()
     await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('a-owner', 'owner', 'credential', 'owner', ?, 0, 0)").bind(await hashPassword('PayoutsProof123!')).run()
+    await db.prepare("UPDATE organization SET stripeCustomerId='cus_payouts' WHERE id='org'").run()
+    await db.prepare(`INSERT INTO subscription(id,plan,referenceId,status,seats,stripeCustomerId,stripeSubscriptionId,billingInterval)
+      VALUES('sub','business','org','active',1,'cus_payouts','sub_payouts','month')`).run()
+    const paid = await createProduct(db, { organizationId: 'org', actor: { actorId: 'owner' }, env,
+      product: { kind: 'experience', name: 'Wheel Class', variants: [{ name: 'Default', prices: [{ currency: 'USD', unit_amount: 5000 }] }] } })
+    const free = await createProduct(db, { organizationId: 'org', actor: { actorId: 'owner' }, env,
+      product: { kind: 'experience', name: 'Free Studio Tour', variants: [{ name: 'Default', prices: [{ currency: 'USD', unit_amount: 0 }] }] } })
+    for (const product of [paid, free]) await setProductBookingConfig(db, { organizationId: 'org', productId: product.id, actorId: 'owner', env,
+      patch: { duration_minutes: 120, default_capacity: 8, confirmation_mode: 'instant', online_payment_required: false } })
+    const membership = await resolveMembership(env, { organizationId: 'org', userId: 'owner' })
+    assert.ok(membership)
+    const principal = memberAccessPrincipal(membership, { env })
+    const recommendations = async () => (await readBusinessRecommendations(db, principal)).recommendations
+    assert.deepEqual((await recommendations()).filter(item => item.operation === 'payments.connect').map(item => item.subjectId), ['org'])
+    assert.equal((await recommendations()).some(item => item.operation === 'product.payment'), false)
     const app = new H3()
     app.post('/api/dashboard/connect', connectStartRoute)
     app.post('/api/dashboard/connect/status', connectStatusRoute)
@@ -176,6 +195,14 @@ test('the iPhone app starts Stripe payouts onboarding on the dashboard Connect r
         return Response.json(account)
       }
       if (method === 'GET' && url.pathname === '/v2/core/accounts/acct_payouts') return Response.json(account)
+      if (method === 'GET' && url.pathname === '/v1/subscriptions/sub_payouts') return Response.json({ id: 'sub_payouts', object: 'subscription', customer: 'cus_payouts', livemode: false,
+        items: { object: 'list', data: [
+          { id: 'si_business', price: { id: 'price_business', product: { id: 'prod_business', metadata: { plan_id: 'business' } }, currency: 'usd', billing_scheme: 'per_unit', unit_amount: 14900, recurring: { interval: 'month', usage_type: 'licensed' } } },
+          ...[['captured_volume', '0.014'], ['stripe_cost', '1']].map(([family, amount]) => ({ id: `si_${family}`, price: { id: `price_${family}`, product: { id: `prod_${family}`, metadata: { product_family: family } }, currency: 'usd', billing_scheme: 'per_unit', unit_amount_decimal: amount, recurring: { interval: 'month', usage_type: 'metered' } } })),
+        ] } })
+      if (method === 'GET' && url.pathname === '/v1/tax/settings') return Response.json({ status: 'inactive' })
+      if (method === 'GET' && url.pathname === '/v1/tax/registrations') return Response.json({ data: [] })
+      if (method === 'GET' && url.pathname === '/v1/payment_method_configurations') return Response.json({ data: [{ id: 'pmc_connected', parent: 'pmc_payouts', active: true }], has_more: false })
       if (method === 'POST' && url.pathname === '/v2/core/account_links') {
         links.push(JSON.parse(String(request instanceof Request ? await request.text() : init?.body)) as Record<string, unknown>)
         return Response.json({ object: 'v2.core.account_link', account: 'acct_payouts', url: 'https://connect.stripe.com/d/setup/e/acct_payouts/abc', expires_at: '2026-10-24T00:00:00.000Z', use_case: {} })
@@ -210,6 +237,22 @@ test('the iPhone app starts Stripe payouts onboarding on the dashboard Connect r
       const status = await call('/status', app_)
       assert.equal(status.status, 200)
       assert.deepEqual((status.body.account as { requirements: unknown }).requirements, [{ awaitingActionFrom: 'user', deadlineStatus: 'currently_due', description: 'Provide a bank account for payouts', errors: [] }])
+      account.requirements.entries = []
+      const pending = await call('/status', app_)
+      assert.equal(pending.status, 200)
+      assert.equal((pending.body.account as { status: string }).status, 'pending_review')
+      const waiting = await recommendations()
+      assert.equal(waiting.some(item => item.operation === 'payments.connect' || item.operation === 'product.payment'), false, 'Stripe review is not another owner setup task')
+      account.configuration.merchant.capabilities.card_payments.status = 'active'
+      const ready = await call('/status', app_)
+      assert.equal(ready.status, 200)
+      assert.equal((ready.body.account as { status: string }).status, 'ready')
+      const enabledPayments = await recommendations()
+      assert.equal(enabledPayments.some(item => item.operation === 'payments.connect'), false)
+      assert.deepEqual(enabledPayments.filter(item => item.operation === 'product.payment').map(item => item.subjectId), [paid.id], 'only the actually priced experience should require advance payment')
+      await setProductBookingConfig(db, { organizationId: 'org', productId: paid.id, actorId: 'owner', env, patch: { online_payment_required: true } })
+      assert.equal((await getProduct(db, 'org', paid.id)).booking?.online_payment_required, true, 'ordinary catalog read observes the saved payment setting')
+      assert.equal((await recommendations()).some(item => item.operation === 'product.payment'), false, 'actual booking configuration clears payment work on the next read without a day boundary')
     } finally { fetchMock.mock.restore() }
   } finally {
     await runtime.dispose()

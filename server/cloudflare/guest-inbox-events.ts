@@ -89,6 +89,18 @@ export async function publishAccessInvalidation(env: GuestInboxPublicationEnv, i
   }
 }
 
+/** Carries no business facts; clients must read their current authorized projection. */
+export async function publishBusinessInvalidation(env: GuestInboxPublicationEnv, organizationId: string): Promise<void> {
+  try {
+    await publishDashboardInvalidation(env, {
+      eventId: crypto.randomUUID(), type: 'business.changed', organizationId, occurredAt: new Date().toISOString(),
+    })
+  } catch (cause) {
+    throw new HTTPError({ statusCode: 503, message: 'The change was saved, but open dashboards could not be updated. Reload before retrying.',
+      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, organization_id: organizationId }, cause })
+  }
+}
+
 export async function publishStayInvalidation(
   env: GuestInboxPublicationEnv,
   input: Omit<StayInvalidation, 'eventId' | 'occurredAt'>,

@@ -165,22 +165,26 @@ the item. Priority controls sit below the list without a category wrapper.
 Completed work leaves the shared action feed and consumes none of its display
 or pagination budget. Work is due when a recorded fact makes it so: a
 booking awaiting the owner's decision, an unanswered guest message about a live
-(pending or confirmed, not yet ended) commitment, an unanswered message or
-contact form from the last seven days, a failed or uncertain scheduled send,
-a failed review invitation, or a failed publication. Inbox state
-alone is not due work: an older unanswered inquiry with no live commitment
-stays in Messages and is not mandatory on Today.
+(pending or confirmed, not yet ended) commitment, a current customer enquiry
+requiring a business response, a failed or uncertain scheduled send, a failed
+review invitation, or a failed publication. Promotional outreach, simple
+acknowledgements and expired dated enquiries do not become urgent work merely
+because the guest wrote last.
 
-Optional work comes only from capabilities Today can recognise as finished —
-replying to a guest (`guest_thread.reply`) and publishing a blog draft
-(`article.publish`) — and only when the owner has a reason for it: an active
-priority whose words the work shares, their own earlier choice to do it, or a
-deferral that has come due. At most three are shown; a day with no such work
-shows none. Analytics, advertising, plan offers, photos and social shares do not
-earn a card by existing.
+Growth work comes from the canonical `readBusinessRecommendations` domain read.
+It uses the organization's one vertical, explicit owner strategy, real content
+in progress, native analytics, available provider results and actual bookable
+capacity. Blog and social opportunities remain available with little history;
+a missing measurement never becomes a claim of no customers. An existing draft
+can lead to publication, a published article to social distribution, and a
+payment or calendar prerequisite to its existing settings. These are
+continuously eligible actions, with no midnight release or completion reset.
+The server applies current completion evidence and feedback before selecting
+the manageable list; the frontend does not invent its own selector or history.
 
 Owners and admins state priorities on Today; they are `organization_goals`.
-Every suggested card carries its reason and, for owners and admins, the
+Optional related-work controls record strategy channels and payment/availability
+choices explicitly; authored text stays intact. Every suggested card carries its reason and, for owners and admins, the
 evidence revision it was suggested on. "I'll do this", "Later", "Dismiss" and
 "Correct" save `recommendation_feedback` against that evidence and the matched
 priority. A current dismissal or correction removes the card without touching
@@ -217,8 +221,10 @@ with their due time and automatic or member responsibility, alongside booked
 activity and explicitly deferred work. A sent, cancelled or superseded schedule
 no longer appears as future work. Failed and uncertain sends belong in Today
 until their canonical state changes; reading an alert does not clear them.
-An eligible unsent automatic review invitation is scheduled work; it does not
-ask the owner to perform an action that only the automation currently owns.
+An eligible unsent automatic review invitation is future background work on
+Upcoming. A healthy automatic send due today does not occupy an owner action
+card. Its scheduler and capture records remain intact; a real failure becomes
+actionable.
 Booking occurrences retain their own location's timezone. Future bookings
 needing a decision belong in Today now and retain their actual booking date.
 
@@ -229,8 +235,11 @@ completion history independently. A successful reply or scheduled send clears
 its action; a failed or uncertain outcome remains actionable. A booking's
 actual current or future visit remains on its agenda after the decision is
 finished. Completed work cannot push a current action behind Load more.
-Today re-reads on relevant dashboard invalidations, when the page regains focus,
-and when time passing makes an existing due item or day boundary current.
+Today re-reads on relevant dashboard invalidations, including content-free
+`business.changed` after successful source writes, when the page regains focus,
+and at due instants or the existing visible-page minute boundary. Date labels
+place agenda occurrences; they do not gate business progression. Provider and
+analytics failures remain visible through the recommendation issue alert.
 
 Stay cards read the canonical agenda and open `O/bookings/stay/:stayId`.
 Booked activity opens beneath Today: desktop keeps the agenda beside the

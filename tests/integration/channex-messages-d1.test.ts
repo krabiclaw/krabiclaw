@@ -139,7 +139,7 @@ async function boot() {
     name: 'channel-messages-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
-    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, MEDIA_BUCKET: { type: 'r2' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'channel-messages-proof', exportName: 'Hub' } },
+    env: { DB: { type: 'd1' }, AI: { type: 'ai' }, ORGANIZATION_CACHE: { type: 'kv' }, MEDIA_BUCKET: { type: 'r2' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'channel-messages-proof', exportName: 'Hub' } },
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
@@ -225,7 +225,7 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
       id: `attention:${rows[0]!.id}`, headline: 'Review conversation: Conversation supplied by Airbnb', reason: today.cards[0]!.reason, to: `/dashboard/org/messages/${rows[0]!.id}`,
       bookingKind: null, stayId: null, productId, occurrenceAt: null, timeZone: null, imageIcon: 'i-lucide-message-circle',
     }])
-    assert.match(today.cards[0]!.reason!, /^The guest wrote .* and has no reply yet\.$/)
+    assert.match(today.cards[0]!.reason!, /^The guest has a message awaiting a business response since .+\.$/)
     const afterToday = (await getGuestThreadDetail(db, rows[0]!.id, ORG))!
     assert.deepEqual([afterToday.guestName, afterToday.guestEmail, afterToday.guestPhone, afterToday.operationalRecord], [null, null, null, null])
     assert.equal(await db.prepare('SELECT count(*) FROM stays').first('count(*)'), 0)
@@ -284,7 +284,8 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
       return await response.json() as TodayFeedPayload
     }
     const afterEmpty = await readToday()
-    assert.deepEqual(afterEmpty.cards.map(card => card.id), [`attention:${requestId}`])
+    const growthCardIds = ['recommendation:post.create:org', 'recommendation:social.connect:org', 'recommendation:article.create:org']
+    assert.deepEqual(afterEmpty.cards.map(card => card.id), [`attention:${requestId}`, ...growthCardIds])
 
     // The conversation reads as the guest's words alone, and the list previews them.
     const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
@@ -301,7 +302,7 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
     await mirrorChannexThread(db, env, 'thread', 'property')
     assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [requestId])).get(requestId), guestAt)
     const afterBlank = await readToday()
-    assert.deepEqual(afterBlank.cards.map(card => card.id), [`attention:${requestId}`])
+    assert.deepEqual(afterBlank.cards.map(card => card.id), [`attention:${requestId}`, ...growthCardIds])
 
     // A real image-only host reply is downloaded and placed on its message.
     provider.messages.push(provider.message('host-photo', 'property', null, ['/attachment/file'], new Date(receivedAt + 3).toISOString()))
@@ -315,7 +316,7 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
     assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [requestId])).size, 0)
     assert.equal(await db.prepare('SELECT conversation_state FROM requests WHERE id=?').bind(requestId).first('conversation_state'), 'waiting_on_guest')
     const afterPhoto = await readToday()
-    assert.deepEqual(afterPhoto.cards, [])
+    assert.deepEqual(afterPhoto.cards.map(card => card.id), growthCardIds, 'the real photo reply clears only its attention card; useful growth opportunities remain')
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
