@@ -1,9 +1,9 @@
 # Business progress foundation
 
-This contract records owner intent, useful work and recommendation feedback.
-The dashboard's Today and Upcoming views read continuous business recommendations
-from `readBusinessRecommendations` and apply the caller's feedback (see Today
-and Upcoming in `DESIGN.md`). Booky
+This contract records owner intent and useful work. The dashboard's Today and
+Upcoming views read stored tasks and opportunities (`server/domain/tasks.ts`,
+`server/domain/opportunities.ts`; see Today and Upcoming in `DESIGN.md`). The
+opportunities come from `readBusinessRecommendations`. Booky
 Boo can consume the same domain operations when its presentation reaches
 parity; none of these records require lodging.
 
@@ -24,16 +24,18 @@ authenticated actor in the same D1 batch as the change. Equivalent saves preserv
 the document revision and produce no additional article outcome. Historical
 actor attribution is reported only when it was recorded.
 
-`recommendation_feedback` stores one person's acceptance, dismissal, deferral or
-correction of a specified operation against specified evidence. It is not a
-task, a completion claim, permission to execute, or a permanent suppression of a
-conversation. Audit entries preserve edits to goals and feedback.
+`opportunities` records each thing the selector found at its evidence revision
+and the business's decision about it: accepted (with its one task), dismissed
+(with the owner's note) or deferred (`available_at`). New evidence is a new
+opportunity; the old open one becomes superseded. `tasks` is work someone has to
+do, with an assignee, a window and who closed it; completing, skipping and
+accepting are audit entries here, so they count as business activity.
 
 Article activity is recorded by ordinary CMS/MCP writes; reply evidence comes
-from the existing conversation activity and delivery receipts. Goals and feedback
-are collected only through explicit submissions to their APIs: Today's priority
-disclosure creates and archives goals, and each card's options menu saves feedback against
-the evidence revision and goal revision the card was selected with. No
+from the existing conversation activity and delivery receipts. Goals and
+decisions are collected only through explicit submissions to their APIs:
+Today's priority disclosure creates and archives goals, and an opportunity's
+Accept and Not now record the decision against the evidence it was found on. No
 recommendation impression, exposure, usefulness, effort saved or achieved
 business goal is established by these records.
 
@@ -49,9 +51,10 @@ functions enforce the same access rules as the HTTP routes.
 | --- | --- |
 | `POST /goals` | Create with `idempotencyKey`, `intent`, optional `constraints`, `targetAt` and `strategy`. Returns `{goal}` and 201, including an identical retry. Reusing the key for another request returns 409. |
 | `PATCH /goals/:goalId` | Edit authored fields or `status`, supplying the current `revision`. Returns `{goal}`. A stale edit returns 409. |
-| `GET /progress?limit=50&offset=0` | Read goals, the caller's feedback and a page of canonical outcomes. Outcome `pagination` and `feedbackPagination` each describe their own page. Limit is 1–100. |
+| `GET /progress?limit=50&offset=0` | Read goals and a page of canonical outcomes. Limit is 1–100. |
 | `GET /progress/reference?operation=article.update&subjectId=...` | Read `{reference}` for an explicit operation and canonical subject ID. Returns 404 for an absent or foreign subject. |
-| `PUT /recommendation-feedback` | Save `{operation, subjectId, evidenceRevision, decision}` with optional `note`, `deferUntil`, `goalId`, `goalRevision`, and edit `revision`. Returns `{feedback}`. |
+| `GET /opportunities`, `POST /opportunities/:id/accept`, `/dismiss`, `/defer` | Read open opportunities and decide one; see `server/domain/opportunities.ts`. Accept returns the new `{task}`. |
+| `GET /tasks`, `POST /tasks`, `PATCH /tasks/:id`, `POST /tasks/:id/complete`, `/skip`, `/reopen`, `/read` | Stored work; see `server/domain/tasks.ts`. |
 
 The experimental `POST /api/organizations/:organizationId/recommendations/preview`
 endpoint has been removed and returns 404. `readBusinessRecommendations` reads
@@ -67,13 +70,13 @@ Feedback operations name canonical capabilities: `article.update`,
 reference the exact organization, existing content operations reference their
 article/post, and product payment operations reference their exact product. Availability work
 references its recorded session, location/slot, or home/date interval. Echo the
-opaque `subjectId` returned by the server when saving feedback; it names that
+opaque `subjectId` returned by the server with each opportunity; it names that
 source opportunity, never a fabricated future article or post. References authorize
 the source and derive their evidence revision from its real state.
 
-Google Ads setup reuses the existing Integrations flow. Its feedback operation
+Google Ads setup reuses the existing Integrations flow. Its opportunity operation
 is needed because selecting an unconnected Ads strategy previously produced no
-related action; social/payment feedback cannot describe a Google Ads connection.
+related action; a social or payment opportunity cannot describe a Google Ads connection.
 
 Recommendations are continuously eligible, not a daily assignment batch. A
 publication can remove its publishing action and make distribution available
@@ -100,33 +103,17 @@ All dates and revisions use UTC ISO instants with milliseconds. `null` means an
 optional authored value is absent. Actor identity comes from the authenticated
 session, never the request body.
 
-## Evidence and feedback lifecycle
+## Evidence and decisions
 
-Read a reference before asking for feedback and send its `evidenceRevision`
-back unchanged. Article evidence includes current document content, categories
-and attributed activity. Conversation evidence includes the latest actual guest
-activity and member reply, canonical commitment state, conversation state and
-reply receipts. An old unanswered status alone is not a new obligation. Reading
-a reference does not decide whether a reply is appropriate now.
-
-An optional `goalId` and `goalRevision` must be supplied together and name an
-active goal in the same organization. This binds the feedback to that particular
-goal; editing another goal does not invalidate it. Feedback without a named goal
-is independent of goals. A correction requires a note. A new deferral requires
-a future `deferUntil`; other decisions cannot carry a deferral date.
-
-Exact feedback retries preserve the same ID and revision. Changing a decision
-requires its current revision. Stale evidence or a changed/archived named goal
-returns 409 before saving. A source can change concurrently with a feedback
-write, so applicability is always evaluated again when progress is read.
-
-The read reports `applicability.current` and explicit reasons:
-`evidence_changed`, `subject_missing`, `goal_changed`, `goal_archived` or
-`defer_elapsed`. Historical feedback stays intact. Consumers must
-reassess changed evidence and interpret the person's decision; this API does
-not remove inbox history. Today is the consumer that hides work under a current
-dismissal, correction or deferral and resurfaces it, with its reason, once the
-decision no longer applies.
+An opportunity is recorded against the `evidenceRevision` of its reference
+(`GET /progress/reference`). Article evidence includes current document content,
+categories and attributed activity. Conversation evidence includes the latest
+actual guest activity and member reply, canonical commitment state and reply
+receipts. A decision applies to that revision only: when the evidence changes,
+the selector records a new opportunity and the old open one is superseded.
+Accepting re-reads the selector and is refused with 409 when the evidence has
+moved on. Whether the business owes a guest a reply is an open `guest_reply`
+task, opened and closed by the conversation's own writes.
 
 ## What progress proves
 
