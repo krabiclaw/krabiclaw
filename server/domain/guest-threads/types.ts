@@ -4,7 +4,7 @@ import type { GuestThreadMailbox } from './mailbox'
 import type { StayChannel } from '~/shared/bookings'
 import type { BookingChangeView } from './booking-changes'
 
-export type GuestThreadEntryKind = 'submission' | 'message' | 'operation' | 'assignment' | 'resolution'
+export type GuestThreadEntryKind = 'submission' | 'message' | 'operation' | 'assignment'
 export type GuestThreadActorKind = 'guest' | 'member' | 'system'
 export type GuestThreadChannel = 'web' | 'email' | 'whatsapp' | 'airbnb' | 'system'
 export type GuestThreadSubmissionType = 'contact' | 'reservation' | 'booking' | 'stay'

@@ -65,7 +65,7 @@ export async function listBusinessOutcomes(
       FROM activity_entries a LEFT JOIN requests r ON r.id = a.request_id AND a.scope_kind = 'request'
       WHERE a.event_name IN (SELECT value FROM json_each(?)) AND (
         (a.scope_kind = 'organization' AND a.organization_id = ? AND a.kind = 'audit') OR
-        (a.scope_kind = 'request' AND r.organization_id = ? AND a.kind IN ('message', 'operation', 'resolution'))
+        (a.scope_kind = 'request' AND r.organization_id = ? AND a.kind IN ('message', 'operation'))
       )
       AND COALESCE(json_extract(a.payload_json, '$.metadata.operation'), '') <> 'unchanged'
       -- Captures/refunds have one financial fact, in analytics. A conversation
