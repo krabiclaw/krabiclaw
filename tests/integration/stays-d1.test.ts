@@ -9,7 +9,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
-import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayGapCandidates, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
+import { addStayHomePhoto, applyChannelBooking, cancelStay, cancelStayAsGuest, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayGapCandidates, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
 import { readBusinessProgressReference } from '../../server/utils/business-outcomes.ts'
 import { readBusinessRecommendations, saveRecommendationFeedback } from '../../server/domain/business-progress.ts'
 import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
@@ -44,6 +44,7 @@ import { agendaToTodayCard } from '../../shared/dashboard-today.ts'
 import { STAY_HOME_ACCESSIBILITY_FEATURES } from '../../shared/stay-accessibility.ts'
 import { hashPassword } from 'better-auth/crypto'
 import editNightsRoute from '../../server/api/dashboard/stay-homes/[productId]/nights.put.ts'
+import { buyStay } from './support/stay-checkout.ts'
 
 const ORG = 'org'
 const OWNER = 'owner-user'
@@ -1489,6 +1490,8 @@ test('a business’s site shows a guest the stay its signed link names, from any
   const { runtime, db, env: bindings } = await boot()
   try {
     const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+    // The guest's notices are written in the business's source language.
+    await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
     const address = { regionCode: 'US', addressLines: ['12 Test Road', 'Apartment 4', 'East building'], languageCode: 'en', locality: 'Boulder', sublocality: 'North Boulder', administrativeArea: 'Colorado', postalCode: '80301' }
     const location = { address, latitude: 40.014984, longitude: -105.270546, maps_url: 'https://maps.google.com/?cid=123456' }
@@ -1496,20 +1499,15 @@ test('a business’s site shows a guest the stay its signed link names, from any
     const guide = { check_in_method: 'lockbox' as const, check_in_instructions: 'Use the garden lockbox.', wifi_network: 'Cabin guests', wifi_password: 'private-cabin-wifi', directions: 'Use the east entrance.', house_manual: 'Keep the gate closed.', checkout_instructions: [{ task: 'return_keys' as const, details: 'Leave keys in the box.' }] }
     await updateStayHome(env, db, manager, cabin.id, guide)
     await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { details_mode: 'merge', details: { pets_allowed: false, stairs_required: true, stairs_required_details: 'Two steps at the entrance.' } } })
-    const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'site-stay', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest, guest_email: 'ana@example.com' })
-    // A manual, pay-on-arrival stay is confirmed before collecting money. The
-    // Better Auth guest who bought it owns it, as a captured checkout leaves it.
+    // The guest bought the stay on the site: the captured checkout's conversion makes it theirs.
     const signIn = async () => {
       const signed = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
       return { id: signed.response!.user.id, cookie: signed.headers.getSetCookie().map(value => value.split(';')[0]).join('; ') }
     }
     const booker = await signIn()
     const otherGuest = await signIn()
-    assert(stay.request_id)
-    await db.batch([
-      db.prepare('UPDATE stays SET user_id = ? WHERE id = ?').bind(booker.id, stay.id),
-      db.prepare('UPDATE requests SET user_id = ? WHERE id = ?').bind(booker.id, stay.request_id),
-    ])
+    const stay = await buyStay(db, { id: 'site-stay', organizationId: ORG, productId: cabin.id, locationId: 'cabin-site', timezone: 'America/Denver', checkIn: '2026-11-01', checkOut: '2026-11-04', adults: 2,
+      nightlyMinor: 15_000, currency: 'USD', buyerUserId: booker.id, guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null } })
     // The guest's stay is read by its activity ID: its conversation's, as the account reads it.
     const activityId = stay.request_id ?? stay.id
     // The link the confirmation email and the paid return carry, signed with the site's secret.
@@ -1534,7 +1532,8 @@ test('a business’s site shows a guest the stay its signed link names, from any
     const body = await own.json() as GuestStay
     const { location: guestLocation, arrival_guide: arrivalGuide, house_rules: rules, safety, ...guestHome } = body.home
     assert.deepEqual({ organization_id: body.organization_id, id: body.stay.id, email: body.stay.guest_email, policy: body.stay.cancellation_policy, dates: [body.stay.check_in_date, body.stay.check_out_date], home: guestHome, cancellation: body.cancellation },
-      { organization_id: ORG, id: stay.id, email: 'ana@example.com', policy: null, dates: ['2026-11-01', '2026-11-04'], home: { name: 'Cabin', organization_name: 'Org', check_in_time: '16:00', check_out_time: '10:00', image_url: null }, cancellation: null })
+      { organization_id: ORG, id: stay.id, email: 'ana@example.com', policy: 'moderate', dates: ['2026-11-01', '2026-11-04'], home: { name: 'Cabin', organization_name: 'Org', check_in_time: '16:00', check_out_time: '10:00', image_url: null },
+        cancellation: { policy: 'moderate', paid_minor: 45_000, refund_minor: 7_500, currency: 'USD' } })
     assert.deepEqual(arrivalGuide, { product_id: cabin.id, ...guide })
     const midStay = await listAgenda(db, { buyerUserId: booker.id }, { from: '2026-11-02', to: '2026-11-02', kinds: ['stay'] })
     assert.deepEqual(midStay.items.map(item => ({ kind: item.kind, title: item.title, requestId: item.requestId, to: item.to, startsAt: item.startsAt, endsAt: item.endsAt })), [
@@ -1550,13 +1549,18 @@ test('a business’s site shows a guest the stay its signed link names, from any
     assert.equal(new URL(guestLocation.maps_url).origin, 'https://maps.google.com')
     assert.equal(new URL(guestLocation.maps_url).searchParams.get('q'), '40.014984,-105.270546')
     assert.equal(new URL(guestLocation.maps_url).searchParams.has('cid'), false)
-    assert.deepEqual({ status: body.stay.status, payment: body.stay.payment_status, paid: body.stay.paid_minor }, { status: 'confirmed', payment: 'unpaid', paid: 0 })
+    assert.deepEqual({ status: body.stay.status, payment: body.stay.payment_status, paid: body.stay.paid_minor }, { status: 'confirmed', payment: 'paid', paid: 45_000 })
     const account = await accountRead(booker.cookie)
     assert.equal(account.status, 200)
     assert.equal(account.headers.get('cache-control'), 'private, no-store')
     assert.deepEqual((await account.json() as GuestStay).home.location, guestLocation)
     assert.equal((await accountRead(otherGuest.cookie)).status, 404)
     assert.equal((await accountRead()).status, 401)
+    // Better Auth owns the guest's portrait: the host reads it through the account the stay belongs to.
+    assert.equal((await getStay(db, manager, stay.id)).guest_image_url, null)
+    const portraitUrl = 'https://proof.example/platform/apple-touch-icon.png'
+    await createAuth(env).api.updateUser({ headers: new Headers({ cookie: booker.cookie }), body: { image: portraitUrl } })
+    assert.equal((await getStay(db, manager, stay.id)).guest_image_url, portraitUrl)
     assert.equal((await read('another-org', link)).status, 404)
     assert.equal((await read(ORG, otherLink)).status, 404)
     assert.equal((await read(ORG)).status, 401)
@@ -1633,7 +1637,17 @@ test('a business’s site shows a guest the stay its signed link names, from any
       for (const exact of [address.addressLines[0]!, String(location.latitude), String(location.longitude), location.maps_url]) assert(!JSON.stringify(pending).includes(exact))
     }
     await db.prepare("UPDATE stays SET status = 'confirmed' WHERE id = ?").bind(stay.id).run()
-    await cancelStay(db, env, manager, stay.id, { expected_version: stay.version })
+    // The guest cancels: the moderate policy refunds what it allows through Stripe,
+    // and the cancelled stay stops disclosing where it is on either read.
+    const realFetch = globalThis.fetch
+    context.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(request instanceof Request ? request.url : String(request))
+      if (url.origin !== 'https://api.stripe.com') return realFetch(request, init)
+      assert.equal(`${init?.method} ${url.pathname}`, 'POST /v1/refunds')
+      const form = new URLSearchParams(String(init?.body))
+      return Response.json({ id: 're_site_stay', object: 'refund', amount: Number(form.get('amount') ?? 45_000), currency: 'usd', status: 'succeeded', payment_intent: form.get('payment_intent'), reason: form.get('reason'), metadata: { krabiclaw_refund_id: form.get('metadata[krabiclaw_refund_id]') } })
+    })
+    assert.equal((await cancelStayAsGuest(db, { ...env, STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as never, ORG, stay.id, booker.id)).refund_minor, 7_500)
     for (const response of [await read(ORG, link), await accountRead(booker.cookie)]) {
       assert.equal(response.status, 200)
       const cancelled = await response.json() as GuestStay
@@ -1669,15 +1683,14 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     const checkoutSigned = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
     const checkoutGuest = checkoutSigned.response!.user.id
     const checkoutCookie = checkoutSigned.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
-    // The stay a captured checkout made, as its conversion leaves it: the hold converted to it, the payment captured for it.
-    const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'checkout:stay-pay', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest, guest_email: 'ana@example.com' })
-    await db.prepare("UPDATE stays SET user_id = ?, cancellation_policy = 'moderate' WHERE id = ?").bind(checkoutGuest, stay.id).run()
+    // The checkout as Stripe's capture finds it: the payment captured, its hold not yet converted. The return
+    // reconciles the payment, which runs the real conversion that makes the checkout guest's stay.
     const nightly = ['2026-11-01', '2026-11-02', '2026-11-03'].map(date => ({ date, price_minor: 15_000 }))
     const purchase = { product_id: cabin.id, location_id: 'cabin-site', timezone: 'America/Denver', check_in_date: '2026-11-01', check_out_date: '2026-11-04', adults: 2, children: 0, infants: 0, total_minor: 45_000, currency: 'USD', cancellation_policy: 'moderate', nightly, guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null } }
     await db.prepare(`INSERT INTO payments (id, organization_id, buyer_user_id, stripe_account_id, livemode, subject_type, subject_id, location_id, currency, amount, captured_amount, state, stripe_payment_intent_id, price_snapshot_json, created_at, updated_at)
-      VALUES ('stay-pay', ?, ?, 'acct_seller', 0, 'stay', ?, 'cabin-site', 'USD', 45000, 45000, 'captured', 'pi_stay-pay', ?, ?, ?)`).bind(ORG, checkoutGuest, stay.id, JSON.stringify({ title: 'Cabin', quantity: 1, price: { unit_amount: 45_000, currency: 'USD' }, method_configuration_id: 'pmc_test', stay: purchase }), NOW, NOW).run()
+      VALUES ('stay-pay', ?, ?, 'acct_seller', 0, 'stay', NULL, 'cabin-site', 'USD', 45000, 45000, 'captured', 'pi_stay-pay', ?, ?, ?)`).bind(ORG, checkoutGuest, JSON.stringify({ title: 'Cabin', quantity: 1, price: { unit_amount: 45_000, currency: 'USD' }, method_configuration_id: 'pmc_test', stay: purchase }), NOW, NOW).run()
     await db.prepare(`INSERT INTO payment_checkout_holds (id, organization_id, product_id, location_id, timezone, buyer_user_id, payment_id, quantity, amount, currency, starts_at, ends_at, status, converted_stay_id, expires_at, created_at)
-      VALUES ('stay-hold', ?, ?, 'cabin-site', 'America/Denver', ?, 'stay-pay', 2, 45000, 'USD', '2026-11-01', '2026-11-04', 'converted', ?, '2099-01-01T00:00:00.000Z', ?)`).bind(ORG, cabin.id, checkoutGuest, stay.id, NOW).run()
+      VALUES ('stay-hold', ?, ?, 'cabin-site', 'America/Denver', ?, 'stay-pay', 2, 45000, 'USD', '2026-11-01', '2026-11-04', 'active', NULL, '2099-01-01T00:00:00.000Z', ?)`).bind(ORG, cabin.id, checkoutGuest, NOW).run()
     const claim = crypto.randomUUID() + crypto.randomUUID()
     await db.prepare("INSERT INTO payment_attempts (id, payment_id, idempotency_key, stripe_payment_intent_id, return_token, status, expires_at, created_at, updated_at) VALUES ('a:stay-pay', 'stay-pay', 'checkout:stay', 'pi_stay-pay', ?, 'open', '2099-01-01T00:00:00.000Z', ?, ?)").bind(claim, NOW, NOW).run()
     await db.prepare("INSERT INTO payment_claims (token_hash, payment_id, expires_at) VALUES (?, 'stay-pay', '2099-01-01T00:00:00.000Z')").bind(await tokenHash(claim)).run()
@@ -1699,12 +1712,14 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     app.get('/api/account/stays/:activityId', accountStayRoute)
     const call = (path: string, init: RequestInit = {}, headers: Record<string, string> = { cookie }) => app.request(Object.assign(new Request(`https://org.proof.example${path}`, { ...init, headers: { ...headers, 'content-type': 'application/json' } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
 
-    const activityId = stay.request_id ?? stay.id
+    const back = await call('/api/public/payments/stay-pay/return', { method: 'POST', body: JSON.stringify({ claim }) })
+    assert.equal(back.status, 200)
+    const stay = (await db.prepare("SELECT s.id, s.request_id FROM stays s JOIN payment_checkout_holds h ON h.converted_stay_id = s.id WHERE h.id = 'stay-hold'").first<{ id: string; request_id: string }>())!
+    assert.ok(stay, 'The return converted the checkout into its stay')
+    const activityId = stay.request_id
     // The stay is read by its signed link, not by a browser's session: none, or a forged one, opens nothing.
     assert.equal((await call(`/api/public/guest-stays/${activityId}`)).status, 401)
     assert.equal((await call(`/api/public/guest-stays/${activityId}`, {}, { authorization: 'Bearer forged' })).status, 404)
-    const back = await call('/api/public/payments/stay-pay/return', { method: 'POST', body: JSON.stringify({ claim }) })
-    assert.equal(back.status, 200)
     const returned = await back.json() as { state: string; kind: string; activity_id: string; receipt_token: string }
     assert.deepEqual({ state: returned.state, kind: returned.kind, activity_id: returned.activity_id }, { state: 'paid', kind: 'stay', activity_id: activityId })
     assert.equal(typeof returned.receipt_token, 'string')
@@ -1712,8 +1727,7 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     // The claim moved the stay, its payment and its hold to the browser that paid.
     assert.deepEqual(await db.prepare("SELECT (SELECT user_id FROM stays WHERE id = ?) AS stay, (SELECT buyer_user_id FROM payments WHERE id = 'stay-pay') AS payment, (SELECT buyer_user_id FROM payment_checkout_holds WHERE id = 'stay-hold') AS hold").bind(stay.id).first(), { stay: buyer, payment: buyer, hold: buyer })
     // The confirmation page reads the stay its link names, here from a browser with no session at all, as
-    // the emailed link is opened. What was paid and the policy come from the conversion seeded above
-    // (conversion is covered by its own tests); this checks the receipt read shows them.
+    // the emailed link is opened. What was paid and the policy come from the conversion the return ran.
     const read = await call(`/api/public/guest-stays/${activityId}`, {}, { authorization: `Bearer ${returned.receipt_token}` })
     assert.equal(read.status, 200)
     const body = await read.json() as GuestStay
