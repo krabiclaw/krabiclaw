@@ -20,8 +20,7 @@ import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import todayRoute from '../../server/api/dashboard/today.get.ts'
 import type { TodayFeedPayload } from '../../shared/dashboard-today.ts'
 import { guestThreadListPage, parseGuestThreadListQuery } from '../../server/utils/dashboard-guest-threads.ts'
-import { assertAssignedBookingAccess, memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
-import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
+import { assertAssignedBookingAccess, memberAccessPrincipal } from '../../server/utils/member-access.ts'
 
 const ORG = 'org', OWNER = 'owner'
 const NOW = '2026-10-16T00:00:00.000Z'
@@ -201,8 +200,8 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     assert.deepEqual(detail.entries[1]!.attachments.map(item => [item.id, item.url]), [[photo.id, photo.public_url]])
     assert.equal(detail.entries.some(entry => entry.attachments.some(item => item.url.startsWith('https://channex.test/'))), false, 'no Channex link reaches the conversation')
     assert.notEqual(detail.entries[0]!.occurredAt, RAW)
-    // The actual imported inquiry has no guest identity or linked stay. Today
-    // displays its recorded conversation title without inventing either one.
+    // The imported inquiry remains in the inbox without an invented guest
+    // identity, linked stay or separate Today task.
     const password = 'ChannelInquiryProof123!'
     await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('owner-credential', ?, 'credential', ?, ?, 0, 0)").bind(OWNER, OWNER, await hashPassword(password)).run()
     const login = await createAuth(env).api.signInEmail({ body: { email: 'owner@example.test', password }, asResponse: true })
@@ -217,17 +216,12 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
       assert.equal(response.status, 200)
       return await response.json() as TodayFeedPayload
     }
-    // The inquiry arrived just now and has no reply: it is due. Today shows its
-    // recorded conversation title without inventing a guest identity.
     const today = await readToday()
-    assert.deepEqual(today.cards.filter(card => card.priority === 'attention').map(card => ({ id: card.id, headline: card.headline, reason: card.reason, to: card.to, bookingKind: card.bookingKind,
-      stayId: card.stayId, productId: card.productId, occurrenceAt: card.occurrenceAt, timeZone: card.timeZone, imageIcon: card.imageIcon })), [{
-      id: `attention:${rows[0]!.id}`, headline: 'Review conversation: Conversation supplied by Airbnb', reason: today.cards[0]!.reason, to: `/dashboard/org/messages/${rows[0]!.id}`,
-      bookingKind: null, stayId: null, productId, occurrenceAt: null, timeZone: null, imageIcon: 'i-lucide-message-circle',
-    }])
-    assert.match(today.cards[0]!.reason!, /^The guest wrote .* and has no reply yet\.$/)
+    assert.deepEqual(today.cards, [], 'an unbooked inquiry does not create a Today task')
     const afterToday = (await getGuestThreadDetail(db, rows[0]!.id, ORG))!
     assert.deepEqual([afterToday.guestName, afterToday.guestEmail, afterToday.guestPhone, afterToday.operationalRecord], [null, null, null, null])
+    assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [rows[0]!.id])).get(rows[0]!.id), detail.entries[0]!.occurredAt)
+    assert.equal((await getGuestRequest(db, rows[0]!.id, ORG))!.conversation_state, 'needs_attention')
     assert.equal(await db.prepare('SELECT count(*) FROM stays').first('count(*)'), 0)
     // An Airbnb conversation is the stay's guest conversation: owners and admins open it; a member does not, even one responsible for the home.
     const principal = (userId: string, role: string) => memberAccessPrincipal({ userId, organizationId: ORG, role }, { env })
@@ -250,7 +244,7 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
-test('empty Channex host actions stay recorded without clearing reply work; a real photo reply clears it', async () => {
+test('empty Channex host actions do not answer the guest; an image-only reply does, without an inferred Today task', async () => {
   const { runtime, db, env } = await boot()
   const provider = new Provider(), realFetch = globalThis.fetch
   globalThis.fetch = provider.fetch as typeof fetch
@@ -284,7 +278,7 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
       return await response.json() as TodayFeedPayload
     }
     const afterEmpty = await readToday()
-    assert.deepEqual(afterEmpty.cards.map(card => card.id), [`attention:${requestId}`])
+    assert.deepEqual(afterEmpty.cards, [], 'an unanswered inquiry remains in Messages without a Today task')
 
     // The conversation reads as the guest's words alone, and the list previews them.
     const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
@@ -301,7 +295,10 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
     await mirrorChannexThread(db, env, 'thread', 'property')
     assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [requestId])).get(requestId), guestAt)
     const afterBlank = await readToday()
-    assert.deepEqual(afterBlank.cards.map(card => card.id), [`attention:${requestId}`])
+    assert.deepEqual(afterBlank.cards, [])
+    assert.equal((await getGuestRequest(db, requestId, ORG))!.conversation_state, 'needs_attention')
+    const afterBlankThread = (await getInboxThread(db, requestId, ORG, { audience: 'member', userId: OWNER, principal: owner }))!
+    assert.deepEqual(afterBlankThread.stream.filter(item => item.type === 'message').map(item => item.type === 'message' ? [item.side, item.body] : null), [['guest', 'Hello']])
 
     // A real image-only host reply is downloaded and placed on its message.
     provider.messages.push(provider.message('host-photo', 'property', null, ['/attachment/file'], new Date(receivedAt + 3).toISOString()))
@@ -496,9 +493,6 @@ test('replies use actual provider receipts once; an uncertain write remains visi
   let releaseRetry: (() => void) | undefined
   globalThis.fetch = provider.fetch as typeof fetch
   try {
-    const membership = await resolveMembership(env, { organizationId: ORG, userId: OWNER })
-    assert.ok(membership)
-    const principal = memberAccessPrincipal(membership, { env })
     const result = await mirrorChannexThread(db, env, 'thread', 'property')
     assert.equal(result.status, 'mirrored')
     if (result.status !== 'mirrored') throw new Error('Expected mapped inquiry')
@@ -540,10 +534,6 @@ test('replies use actual provider receipts once; an uncertain write remains visi
     assert.ok(refusedEntry)
     assert.deepEqual(await db.prepare('SELECT status, provider_message_id, non_delivery_confirmed FROM guest_thread_deliveries WHERE entry_id = ?').bind(refusedEntry.id).first(),
       { status: 'failed', provider_message_id: null, non_delivery_confirmed: 1 })
-    const refusedProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
-    assert.deepEqual(refusedProgress?.verification, { status: 'failed', basis: 'provider_acceptance', receipts: [{
-      id: `guest-thread-channex:${result.request_id}:certain-refusal`, channel: 'airbnb', provider: 'channex', status: 'failed', providerMessageId: null, nonDeliveryConfirmed: true,
-    }] })
     provider.refuseMessage = false
     const started = new Promise<void>(resolve => { provider.onSend = resolve })
     provider.holdReply = new Promise<void>(resolve => { releaseRetry = resolve })
@@ -551,9 +541,6 @@ test('replies use actual provider receipts once; an uncertain write remains visi
     await started
     assert.deepEqual(await db.prepare('SELECT status, error, non_delivery_confirmed FROM guest_thread_deliveries WHERE entry_id = ?').bind(refusedEntry.id).first(),
       { status: 'sending', error: null, non_delivery_confirmed: null }, 'claiming the retry atomically clears the previous attempt’s non-delivery proof')
-    const sendingProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
-    assert.deepEqual([sendingProgress?.verification.status, sendingProgress?.verification.receipts.map(receipt => [receipt.status, receipt.nonDeliveryConfirmed])],
-      ['unconfirmed', [['sending', null]]])
     releaseRetry!()
     const recovered = await recovering
     provider.holdReply = undefined
@@ -570,9 +557,6 @@ test('replies use actual provider receipts once; an uncertain write remains visi
     assert.deepEqual(await db.prepare(`SELECT d.status, d.provider_message_id, d.error, d.non_delivery_confirmed FROM guest_thread_deliveries d
       JOIN activity_entries a ON a.id = d.entry_id WHERE a.dedupe_key = ?`).bind(`guest-thread-operation:${result.request_id}:certain-refusal`).first(),
       { status: 'accepted', provider_message_id: 'accepted-4', error: null, non_delivery_confirmed: 0 })
-    const recoveredProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
-    assert.deepEqual([recoveredProgress?.verification.status, recoveredProgress?.verification.receipts.map(receipt => [receipt.status, receipt.providerMessageId, receipt.nonDeliveryConfirmed])],
-      ['verified', [['accepted', 'accepted-4', false]]])
 
     // A Channex 422 carrying an upstream Airbnb 500 does not prove refusal.
     provider.airbnbUnavailable = true
@@ -606,9 +590,6 @@ test('replies use actual provider receipts once; an uncertain write remains visi
       assert.deepEqual([blocked.status, blocked.code, blocked.retry_with_same_idempotency_key], [409, 'CHANNEL_REPLY_REVIEW_REQUIRED', false])
       assert.deepEqual(await db.prepare('SELECT status, non_delivery_confirmed FROM guest_thread_deliveries WHERE id = ?').bind(oldReceipt.id).first(),
         { status: 'failed', non_delivery_confirmed: proof })
-      const oldProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === oldEntry.id)
-      assert.deepEqual([oldProgress?.verification.status, oldProgress?.verification.receipts.map(receipt => [receipt.status, receipt.nonDeliveryConfirmed])],
-        ['unconfirmed', [['failed', proof === null ? null : false]]])
     }
     assert.equal(provider.sends, 5, 'neither an old-writer null nor explicit negative proof permits another provider call')
   } finally { releaseRetry?.(); globalThis.fetch = realFetch; await runtime.dispose() }

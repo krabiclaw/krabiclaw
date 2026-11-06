@@ -6,7 +6,7 @@ import { SEED_SUBDOMAINS } from './manifest.ts'
 // opened in a real browser so the site itself records the pageviews and
 // offering views, then starts a booking or consultation and writes in through the public
 // contact form. Insights
-// and the Today feed read these as they read any guest's.
+// and Messages read these as they read any guest's.
 export async function seedTraffic(baseURL: string, manifest: SeedManifest) {
   // Seeded visits are counted: the browser runs without the automation flag the collector skips.
   const browser = await chromium.launch({ args: ['--disable-blink-features=AutomationControlled'] })
@@ -32,8 +32,7 @@ export async function seedTraffic(baseURL: string, manifest: SeedManifest) {
             : { event_name: 'consultation_cta_click', stage: 'schedule_navigation', page_path: '/services/family' }
         const started = await context.request.post('/api/public/conversion-events', { data: { ...intent, event_id: crypto.randomUUID() } })
         if (started.status() !== 201) throw new Error(`Recording ${tenant.name}'s ${intent.event_name} answered ${started.status()} ${await started.text()}`)
-        // Guests write in. The restaurant's guests ask about Brooklyn, so its
-        // Today has unanswered messages at that location whatever the hour.
+        // Guests write in through the same contact flow used by Messages.
         const questions = key === 'restaurant'
           ? ['Can we bring a birthday cake?', 'Is the patio heated in the evening?', 'Do you have a gluten-free crust?', 'Can a party of eight sit together?']
               .map((question, index) => ({ name: `Seed Guest ${index + 1}`, message: question, location_id: tenant.locations.brooklyn!.id }))
