@@ -133,7 +133,7 @@ KrabiClaw helps restaurants, experience operators, law firms and lodging hosts b
 **Founder motivation**
 
 ```text
-KrabiClaw exists so restaurants, experience operators, law firms and lodging hosts can keep a polished website current without wrestling with a traditional CMS. Owners manage real website content, bookings, stays, nightly prices, inquiries, products, experiences, media-library assets and analytics through compatible MCP clients, including Claude and ChatGPT, while the dashboard and assistant use the same permissioned business data. Additional languages use manually authored content and follow the plan's entitlements.
+KrabiClaw exists so restaurants, experience operators, law firms and lodging hosts can keep a polished website current without wrestling with a traditional CMS. Owners manage real website content, bookings, stays, nightly prices, inquiries, products, experiences, media-library assets and analytics through compatible MCP clients, including Claude and ChatGPT, while the dashboard and assistant use the same permissioned business data. Manually authored translations in all supported languages are available on every plan without a translation-count limit.
 ```
 
 ## Calendar release content

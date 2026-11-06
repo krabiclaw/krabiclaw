@@ -746,7 +746,7 @@ export async function prepareTenantPageCreate(db: DbClient, input: TenantPageCre
   })
   const metadata = metadataForInput(effectiveData, locale, path)
   const blocks = normalizeTenantPageBlocks(effectiveData.blocks)
-  await assertTenantPageSupport(input.env, db, input.organizationId, effectiveData, blocks)
+  await assertTenantPageSupport(input.env, db, input.organizationId, effectiveData, blocks, { checkCustomPageEntitlement: !existingPage })
   const pageId = existingPage?.id ?? effectiveData.id ?? crypto.randomUUID()
   const variantId = existingPage ? effectiveData.id ?? crypto.randomUUID() : pageId
   const now = new Date().toISOString()

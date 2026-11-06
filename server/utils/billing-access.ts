@@ -12,8 +12,8 @@ import { getPlanEntitlements, type EntitlementsMap } from '~/server/utils/billin
  * whose `periodEnd` has not passed. No qualifying row means `free`: the absence
  * of a subscription, not a substituted source. Two qualifying rows is corrupt
  * state and throws SUBSCRIPTION_STATE_INVALID, because picking one would hide
- * the corruption; callers that serve other organizations too (scheduled
- * scans, public locale checks) refuse that organization and go on.
+ * the corruption; scheduled scans that serve other organizations too refuse
+ * that organization and go on.
  */
 export const FREE_PLAN = 'free'
 export const SUBSCRIPTION_STATE_INVALID = 'SUBSCRIPTION_STATE_INVALID'

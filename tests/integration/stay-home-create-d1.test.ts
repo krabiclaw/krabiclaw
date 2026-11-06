@@ -338,7 +338,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     }
     const barn = await hosted('Barn')
     const shed = await hosted('Shed')
-    const homeLimit = { status: 402, error: 'Basic includes 1 live home. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 1, covered: 1 } }
+    const homeLimit = { status: 402, error: 'Basic includes 1 live home.', code: 'HOME_LIMIT', homes: { used: 1, covered: 1 } }
     assert.deepEqual(refusal(await call(owner, 'PATCH', { published: true }, barn.product_id)), homeLimit)
     // Taking the cabin off the site frees the one place for the barn.
     assert.equal((await edit(owner, { published: false })).status, 200)

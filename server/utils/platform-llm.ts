@@ -177,6 +177,7 @@ export function renderContentBlocksForLlm(blocks: LlmContentBlock[]) {
     if (block.data.status === 'inactive' || block.data.render_enabled === false) return ''
     if (block.type === 'heading') return `${'#'.repeat(Math.max(1, Math.min(6, block.level || 2)))} ${String(block.data.text || '').trim()}`
     if (block.type === 'markdown') return String(block.data.markdown || '').trim()
+    if (block.type === 'media_text') return [block.data.title ? `## ${literalMarkdown(block.data.title)}` : '', literalMarkdown(block.data.body)].filter(Boolean).join('\n\n')
     if (block.type === 'divider') return '---'
     if (block.type === 'faq') return serializeFaqMarkdown(block)
     if (block.type === 'how_to') return serializeHowToMarkdown(block)

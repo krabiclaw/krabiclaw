@@ -5,6 +5,9 @@ import { cloudflareEnv, textResponse } from '~/server/utils/api-response'
 import { getCachedPlans, type EnvWithOrganizationCache, type Plan } from '~/server/utils/billing-plans'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
 import { BASIC_HOMES, BUSINESS_PLAN_ID, homePrice, nextHomePrice, PAYMENTS_FEE, pricingNotice, SERVICES } from '~/shared/billing-model'
+import { PRICING_COMPARISON, comparisonValue } from '~/shared/pricing-comparison'
+import { getPublishedTenantPage } from '~/server/utils/content/pages'
+import { renderContentBlocksForLlm } from '~/server/utils/platform-llm'
 
 export function renderPlansMarkdown(plans: Plan[]): string {
   const betaSpotsLeft = plans.find(plan => plan.betaSpotsLeft !== undefined)?.betaSpotsLeft ?? 0
@@ -50,6 +53,14 @@ export function renderPlansMarkdown(plans: Plan[]): string {
     lines.push('')
   }
 
+  lines.push('## Compare the details', '', `| Feature | ${plans.map(plan => plan.name).join(' | ')} |`,
+    `| --- | ${plans.map(() => '---').join(' | ')} |`)
+  for (const group of PRICING_COMPARISON) {
+    for (const row of group.rows) {
+      lines.push(`| ${row.label} ${row.detail} | ${plans.map(plan => comparisonValue(row, plan.id)).join(' | ')} |`)
+    }
+  }
+  lines.push('')
   lines.push('## Add-ons')
   lines.push('Services from KrabiClaw\'s own people, added to a paid plan from Plan and billing.')
   for (const service of [SERVICES.managed_ads, SERVICES.strategy]) {
@@ -79,8 +90,15 @@ export default defineHandler(async (event) => {
     })
   }
 
-  const plans = await getCachedPlans(env as EnvWithOrganizationCache, useRuntimeConfig().app.buildId)
+  const organizationId = event.context.organizationId as string | undefined
+  if (!env.db || !organizationId) throw new HTTPError({ statusCode: 503, statusMessage: 'Pricing website is unavailable' })
+  const [plans, page] = await Promise.all([
+    getCachedPlans(env as EnvWithOrganizationCache, useRuntimeConfig().app.buildId),
+    getPublishedTenantPage(env.db, organizationId, '/pricing'),
+  ])
+  if (!page) throw new HTTPError({ statusCode: 404, statusMessage: 'Pricing page was not found' })
   // The beta spots left change as businesses subscribe, so a copy is kept no longer than the page's own.
   setHeader(event, 'cache-control', 'public, max-age=300')
-  return textResponse(renderPlansMarkdown(plans), {}, 'text/markdown; charset=utf-8')
+  const content = renderContentBlocksForLlm(page.blocks.map(block => ({ ...block, level: block.level ?? null })))
+  return textResponse(`${renderPlansMarkdown(plans)}\n${content}\n`, {}, 'text/markdown; charset=utf-8')
 })

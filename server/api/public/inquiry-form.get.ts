@@ -2,7 +2,7 @@ import { defineHandler } from 'nitro'
 import { getQuery } from 'nitro/h3'
 import { readPublicInquiryForm } from '~/server/domain/form-questions'
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
-import { assertExactCanonicalLocale, assertPublicOrganizationLanguageEntitlement, getPersistedSourceLocale } from '~/server/utils/localization'
+import { assertExactCanonicalLocale, assertPublicOrganizationLanguage, getPersistedSourceLocale } from '~/server/utils/localization'
 
 /** The inquiry form this site asks visitors to fill in, in the language they read the site in. */
 export default defineHandler(async (event) => {
@@ -13,6 +13,6 @@ export default defineHandler(async (event) => {
   if (!db) return jsonResponse({ error: 'Database not available' }, { status: 500 })
   const requested = getQuery(event).locale
   const locale = requested === undefined ? (await getPersistedSourceLocale(db, organizationId)).locale : assertExactCanonicalLocale(requested)
-  const language = await assertPublicOrganizationLanguageEntitlement(env, db, organizationId, locale)
+  const language = await assertPublicOrganizationLanguage(db, organizationId, locale)
   return jsonResponse({ success: true, ...await readPublicInquiryForm(db, organizationId, language.locale) }, { headers: { 'cache-control': 'private, no-store' } })
 })

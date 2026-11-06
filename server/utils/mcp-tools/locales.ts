@@ -53,14 +53,14 @@ const localizationObject = { oneOf: [
 export const LOCALES_TOOLS: McpToolDefinition[] = [
   organizationTool({
     name: 'add_organization_language',
-    description: 'Add a website language for private authoring. Requires the website’s language entitlement. A new language starts disabled; an existing language keeps its publication status and translations while its stored label is refreshed from the platform catalog.',
+    description: 'Add a supported website language for private authoring. A new language starts disabled; an existing language keeps its publication status and translations while its stored label is refreshed from the platform catalog.',
     domain: 'locales', minimumRole: 'admin', inputSchema: { locale: { type: 'string', enum: PLATFORM_LOCALES.map(item => item.locale) } },
     required: ['locale'],
     outputSchema: { type: 'object', properties: { locales: { type: 'array', items: organizationLocaleObject } }, required: ['locales'], additionalProperties: false },
   }),
   organizationTool({
     name: 'publish_organization_language',
-    description: 'Publish an added website language’s authored translations on public routes. Requires the website’s language entitlement and a translated homepage. Missing translations remain unavailable; the source language is unchanged.',
+    description: 'Publish an added website language’s authored translations after translating its homepage. Legal Services sites also require a translated organization name and consultation call-to-action label. Missing translations remain unavailable; the source language is unchanged.',
     domain: 'locales', minimumRole: 'admin', inputSchema: { locale: { type: 'string', enum: PLATFORM_LOCALES.map(item => item.locale) } },
     required: ['locale'],
     outputSchema: { type: 'object', properties: { locales: { type: 'array', items: organizationLocaleObject } }, required: ['locales'], additionalProperties: false },

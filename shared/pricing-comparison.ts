@@ -1,11 +1,5 @@
 import { getPlanEntitlements } from '../server/utils/billing-entitlements'
-import { PLATFORM_LOCALES } from './platform-locales'
 import { BASIC_HOMES, homePrice, isKnownRecurringPlan, PAYMENTS_FEE } from './billing-model'
-
-const ADDITIONAL_LANGUAGE_NAMES = new Intl.ListFormat('en', { type: 'conjunction' }).format(
-  PLATFORM_LOCALES.filter(({ locale }) => locale !== 'en')
-    .map(({ locale }) => new Intl.DisplayNames('en', { type: 'language' }).of(locale)!),
-)
 
 // Reviewed comparison copy, not Stripe's paid marketing_features. Source ownership
 // and unresolved policies are recorded in docs/design/pricing/implementation-plan.md.
@@ -66,8 +60,8 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
     { id: 'places.onboarding', label: 'Initial Google Places import', detail: 'Import a selected business snapshot during onboarding.', included: 'Included' },
     { id: 'places.refresh', label: 'Google Places re-import', detail: 'Connect a selected Place and explicitly refresh its details.', entitlement: 'google_places' },
     { id: 'places.refresh', label: 'Weekly Google review refresh', detail: 'Scheduled review and rating refresh for connected Places; not continuous synchronization of all business details.', entitlement: 'google_places' },
-    { id: 'content.locales', label: 'English source website', detail: 'Source content remains available while additional languages are authored.', included: 'Included' },
-    { id: 'content.additional-locales', label: 'Additional website languages', detail: `Manually author and publish ${ADDITIONAL_LANGUAGE_NAMES}; no automatic translation.`, entitlement: 'additional_languages' },
+    { id: 'content.locales', label: 'Source website language', detail: 'Source content remains available while additional languages are authored.', included: 'Included' },
+    { id: 'content.additional-locales', label: 'Website translations', detail: 'Manually author and publish translations in all supported languages; no automatic translation.', included: 'Included' },
   ] },
   { title: 'Help', rows: [
     { id: 'support.docs-help', label: 'Documentation and help form', detail: 'Browse the docs or contact us through the platform help form.', included: 'Included' },
