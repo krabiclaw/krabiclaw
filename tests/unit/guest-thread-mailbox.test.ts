@@ -20,8 +20,13 @@ test('an unread alert or a guest message after the end keeps an ended conversati
   assert.deepEqual([wroteAfter.mailbox, wroteAfter.canArchive], ['current', true])
 })
 
-test('an occurrence still ahead is Current', () => {
+test('an occurrence is Current until its end, not its start', () => {
   assert.equal(resolveGuestThreadMailbox(open, { ends_at: '2026-11-09T00:00:00.000Z' }, NOW, quiet).mailbox, 'current')
+  const dinner = { ends_at: '2026-11-06T12:30:00.000Z' }
+  assert.equal(resolveGuestThreadMailbox(open, dinner, '2026-11-06T12:29:00.000Z', quiet).mailbox, 'current')
+  assert.deepEqual(resolveGuestThreadMailbox(open, dinner, '2026-11-06T12:31:00.000Z', quiet), {
+    mailbox: 'past', manuallyArchived: false, pastByRule: true, canArchive: false, canUnarchive: false,
+  })
 })
 
 test('a contact with no occurrence is Past after 30 days without a message, and Current before', () => {
@@ -36,6 +41,8 @@ test('archived is Past; it can be moved back only where the rule would not keep 
   assert.equal(resolveGuestThreadMailbox(archived, ended, NOW, quiet).canUnarchive, false)
 })
 
-test('a blocked guest is in Blocked whatever the rule says', () => {
-  assert.equal(resolveGuestThreadMailbox({ archived_at: null, blocked_at: NOW }, ended, NOW, { ...quiet, unreadForViewer: true }).mailbox, 'blocked')
+test('a blocked guest is in Blocked whatever the rule says; the guest never sees it', () => {
+  const blocked = { archived_at: null, blocked_at: NOW }
+  assert.equal(resolveGuestThreadMailbox(blocked, ended, NOW, { ...quiet, unreadForViewer: true }).mailbox, 'blocked')
+  assert.equal(resolveGuestThreadMailbox(blocked, { ends_at: '2026-11-09T00:00:00.000Z' }, NOW, quiet, 'buyer').mailbox, 'current')
 })
