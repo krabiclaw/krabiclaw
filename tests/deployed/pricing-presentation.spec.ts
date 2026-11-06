@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { openTenantPage, waitForNuxtHydration } from '../e2e/helpers'
 import { testBaseUrl } from '../e2e/test-env'
+import { markdownToPlainText } from '../../utils/markdown'
 
 // What the plans say about beta pricing follows the live count of beta spots left.
 function betaPricing(spotsLeft: number) {
@@ -126,7 +127,10 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   expect(markdownText).toContain('Direct stay booking with online payment')
   expect(markdownText).not.toMatch(/rental unit/i)
   expect(markdownText).toContain('| Website translations Manually author and publish translations in all supported languages; no automatic translation. | Included | Included | Included |')
-  expect(markdownText).toContain(document.page.blocks.find((block: { id: string }) => block.id === '73e77624-9f28-4ff0-abc9-224bd75a2407').data.body)
+  const pricingBody = document.page.blocks.find((block: { id: string }) => block.id === '73e77624-9f28-4ff0-abc9-224bd75a2407').data.body
+  expect(pricingBody).toEqual(expect.any(String))
+  expect(pricingBody.trim()).not.toBe('')
+  expect(markdownToPlainText(markdownText)).toContain(pricingBody)
   const sharedPrimary = page.getByRole('link', { name: 'Start free', exact: true }).first()
   const primaryColors = await sharedPrimary.evaluate(element => {
     const style = getComputedStyle(element)

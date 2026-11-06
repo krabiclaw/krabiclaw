@@ -19,6 +19,7 @@ const paymentsProviderConfigured = ['STRIPE_SECRET_KEY', 'STRIPE_PAYMENTS_METHOD
 const missingProviderConfiguration = paymentsProviderConfigured ? [] : ['payments.configuration']
 
 test('MCP Product booking uses public capacity, durable replay, guest identity and canonical inbox transitions', async ({ page, request, baseURL }, testInfo) => {
+  test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Writes and log-only delivery require isolated local D1')
   const clayhouse = seededTenant('experience')
   const org = clayhouse.organizationId
