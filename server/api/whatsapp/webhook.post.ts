@@ -153,7 +153,7 @@ async function replyDestination(db: D1Database, threadId: string, organizationId
 }
 
 async function resolveQuotedDelivery(
-  db: D1Database, env: ApiRecord, providerMessageId: string, phone: string, ): Promise<QuotedDeliveryMatch | null> {
+  db: D1Database, env: ApiRecord, providerMessageId: string, phone: string, ): Promise<QuotedDeliveryMatch | { refused: string } | null> {
   const thread = await queryFirst<{
     request_id: string
     organization_id: string
@@ -173,8 +173,9 @@ async function resolveQuotedDelivery(
     phone, organizationId: thread.organization_id })
   if (!authorized) return null
 
+  // The manager chose this conversation: one that cannot be replied to says why, never another in its place.
   const reply = await replyDestination(db, thread.request_id, thread.organization_id)
-  if ('refused' in reply) return null
+  if ('refused' in reply) return reply
   return { threadId: thread.request_id, organizationId: thread.organization_id, locationId: thread.location_id, destination: reply.destination }
 }
 
@@ -249,24 +250,29 @@ async function routeManagerWhatsAppMessage(
   async function resolveFreshDispatch(): Promise<{
     quotedDeliveryMatch: 'authorized_thread_found' | 'unmatched' | null
     quotedDelivery: QuotedDeliveryMatch | null
+    quotedRefusal: string | null
     recentDeliveryCount: number
     recentCandidates: DisambiguationCandidate[]
   }> {
     let quotedDelivery: QuotedDeliveryMatch | null = null
+    let quotedRefusal: string | null = null
     let quotedDeliveryMatch: 'authorized_thread_found' | 'unmatched' | null = null
     if (hasQuotedContext) {
-      quotedDelivery = await resolveQuotedDelivery(db, env, contextId!, opts.toPhone)
+      const quoted = await resolveQuotedDelivery(db, env, contextId!, opts.toPhone)
+      if (quoted && 'refused' in quoted) quotedRefusal = quoted.refused
+      else quotedDelivery = quoted
       quotedDeliveryMatch = quotedDelivery ? 'authorized_thread_found' : 'unmatched'
     }
 
     let recentCandidates: DisambiguationCandidate[] = []
-    if (!quotedDelivery) {
+    if (!quotedDelivery && quotedRefusal === null) {
       recentCandidates = await listRecentGuestDeliveryCandidates(db, env, opts.userId)
     }
 
     return {
       quotedDeliveryMatch,
       quotedDelivery,
+      quotedRefusal,
       recentDeliveryCount: recentCandidates.length,
       recentCandidates,
     }
@@ -274,6 +280,11 @@ async function routeManagerWhatsAppMessage(
 
   if (!pendingState) {
     const fresh = await resolveFreshDispatch()
+    if (fresh.quotedRefusal !== null) {
+      await clearPending()
+      await sendOrThrow(buildReplyFailedMessage(fresh.quotedRefusal), 'Failed to send WhatsApp reply refusal')
+      return
+    }
 
     const decision = decideWhatsAppReplyRouting({
       hasQuotedContext,
@@ -387,7 +398,12 @@ async function routeManagerWhatsAppMessage(
         const data = error instanceof HTTPError || error instanceof ChannexError ? error.data : null
         const refused = data && typeof data === 'object' && 'code' in data && typeof data.code === 'string'
         const message = error instanceof Error ? error.message : String(error)
-        await sendOrThrow(refused ? buildReplyFailedMessage(message) : `Your reply may not have been sent: ${message}. Check the conversation in KrabiClaw.`, 'Failed to send WhatsApp reply outcome')
+        // Only a refusal's message is written for the manager; anything else is reported, not shown.
+        try {
+          await sendOrThrow(refused ? buildReplyFailedMessage(message) : 'Your reply may not have been sent. Check the conversation in KrabiClaw.', 'Failed to send WhatsApp reply outcome')
+        } catch (sendError) {
+          throw refused ? sendError : new AggregateError([error, sendError], 'The reply failed and the manager could not be told', { cause: error })
+        }
         if (refused) return
         throw error
       }
@@ -480,6 +496,11 @@ async function routeManagerWhatsAppMessage(
 
   // Cancelled confirm_send/disambiguate above — redispatch this same message fresh.
   const fresh = await resolveFreshDispatch()
+  if (fresh.quotedRefusal !== null) {
+    await clearPending()
+    await sendOrThrow(buildReplyFailedMessage(fresh.quotedRefusal), 'Failed to send WhatsApp reply refusal')
+    return
+  }
 
   const decision = decideWhatsAppReplyRouting({
     hasQuotedContext,

@@ -207,7 +207,8 @@ test('a WhatsApp reply offers the conversations the inbox can write to and refus
     // Each guest wrote, and the owner was alerted on WhatsApp about each.
     for (const [stay, name] of [[ana, 'ana'], [bo, 'bo'], [dee, 'dee']] as const) {
       const entry = await appendEntry(db, { threadId: stay.request_id!, kind: 'message', actorKind: 'guest', channel: 'email', body: `Hi from ${name}`, dedupeKey: `guest-${name}` })
-      await createDeliveryReceipt(db, { entryId: entry.id, channel: 'whatsapp', provider: 'meta', purpose: 'owner_alert', idempotencyKey: `alert-${name}` })
+      const alert = await createDeliveryReceipt(db, { entryId: entry.id, channel: 'whatsapp', provider: 'meta', purpose: 'owner_alert', idempotencyKey: `alert-${name}` })
+      await recordDeliveryOutcome(db, { deliveryId: alert.id, status: 'sent', providerMessageId: `meta-alert-${name}` })
     }
     const sent: string[] = []
     globalThis.fetch = async (input, init) => {
@@ -218,8 +219,8 @@ test('a WhatsApp reply offers the conversations the inbox can write to and refus
     const app = new H3()
     app.post('/api/whatsapp/webhook', whatsappWebhook)
     let inbound = 0
-    const write = async (text: string) => {
-      const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ value: { messages: [{ id: `wamid-${++inbound}`, from: '66812345678', type: 'text', text: { body: text } }] } }] }] })
+    const write = async (text: string, quoting?: string) => {
+      const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ value: { messages: [{ id: `wamid-${++inbound}`, from: '66812345678', type: 'text', text: { body: text }, ...(quoting && { context: { id: quoting } }) }] } }] }] })
       const response = await app.request(Object.assign(new Request('https://proof.example/api/whatsapp/webhook', {
         method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': `sha256=${createHmac('sha256', 'whatsapp-secret').update(body).digest('hex')}` }, body,
       }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
@@ -229,7 +230,10 @@ test('a WhatsApp reply offers the conversations the inbox can write to and refus
     const pending = async () => (await getWhatsAppWorkspaceState(db, 'owner'))?.pending_confirmation
     const pick = (list: string, name: string) => list.split('\n').find(line => line.endsWith(`from ${name}`))!.split('.')[0]!
 
-    // Dee is never offered: there is nothing to reply to her through.
+    // Quoting Dee's alert names her conversation: it cannot be replied to, and the manager is told why, not offered another.
+    assert.equal(await write('Hello Dee', 'meta-alert-dee'), 'Reply not sent: This guest has no email or KrabiClaw account to reply to.')
+    assert.equal(await pending(), null)
+    // Dee is never offered either: there is nothing to reply to her through.
     const offered = await write('Can I reply?')
     assert.match(offered, /Reply to which\?/u)
     assert.match(offered, /from Ana/u)
