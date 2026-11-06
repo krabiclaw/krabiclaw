@@ -45,7 +45,7 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   for (const plan of await teamAvailability.locator('td').all()) await expect(plan).toContainText('Included')
   await expect(comparison.locator('.kc-pricing-comparison__included svg').first()).toBeVisible()
   const languages = comparison.locator('tr[data-feature-id="content.additional-locales"]')
-  await expect(languages.locator('td .sr-only')).toHaveText(['Not included', 'Included', 'Included'])
+  await expect(languages.locator('td .sr-only')).toHaveText(['Included', 'Included', 'Included'])
   const payments = comparison.locator('tr[data-feature-id="payments.acceptance"]')
   await expect(payments.locator('td .sr-only')).toHaveText(['Not included', 'Not included', 'Included'])
   for (const id of ['stays.listings', 'stays.calendar', 'stays.guest-messaging', 'app.ios']) {
@@ -125,6 +125,8 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   expect(markdownText).toContain('Business websites for restaurants, experiences, law firms and lodging')
   expect(markdownText).toContain('Direct stay booking with online payment')
   expect(markdownText).not.toMatch(/rental unit/i)
+  expect(markdownText).toContain('| Website translations Manually author and publish translations in all supported languages; no automatic translation. | Included | Included | Included |')
+  expect(markdownText).toContain(document.page.blocks.find((block: { id: string }) => block.id === '73e77624-9f28-4ff0-abc9-224bd75a2407').data.body)
   const sharedPrimary = page.getByRole('link', { name: 'Start free', exact: true }).first()
   const primaryColors = await sharedPrimary.evaluate(element => {
     const style = getComputedStyle(element)
