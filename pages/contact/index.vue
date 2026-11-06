@@ -1,5 +1,5 @@
 <template>
-  <NuxtLayout :name="template.layout">
+  <NuxtLayout :name="site.layout">
     <TenantContact v-if="legalPractice" />
 
     <!-- Brand contact page (tenant sites only — the platform marketing contact page was retired in favor of /help) -->
@@ -78,8 +78,8 @@ import TenantInquiryForm from '~/components/tenant/TenantInquiryForm.vue'
 definePageMeta({ layout: false })
 
 const { previewAuthorized, organization } = useTenantOrganization()
-const { template } = organization
-const isPlatform = organization.template.slug === 'platform'
+const { site } = organization
+const isPlatform = organization.site.slug === 'platform'
 if (isPlatform) throw createError({ statusCode: 404 })
 // A legal practice's contact page is its authored page; a venue's is this form and its branches.
 const legalPractice = isLegalPractice(organization.vertical)

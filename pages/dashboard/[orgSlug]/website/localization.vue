@@ -2,11 +2,11 @@
   <DashboardIndexPanel
     id="organization-localization"
     title="Languages"
-    lead="English is the permanent source language. Growth includes every available language at no extra cost."
+    lead="Author and publish translations in any supported language."
   >
     <template #right>
       <UDropdownMenu v-if="enableableCatalogOptions.length && !loadError" :items="addLanguageItems">
-        <UButton label="Add language" icon="i-lucide-plus" color="neutral" variant="ghost" :disabled="busy || Boolean(validationMessage)" />
+        <UButton label="Add language" icon="i-lucide-plus" color="neutral" variant="ghost" :disabled="busy" />
       </UDropdownMenu>
     </template>
     <UAlert v-if="actionError" class="mb-6" color="error" variant="soft" :description="actionError" />
@@ -44,7 +44,6 @@
         <p v-else class="mt-3 text-sm text-muted">Every source field with content has a translation.</p>
       </section>
       <UAlert v-if="progressError" class="mt-6" color="error" variant="soft" :description="progressError" />
-      <p v-if="enableableCatalogOptions.length && validationMessage" class="mt-6 text-sm text-muted">{{ validationMessage }}</p>
     </template>
   </DashboardIndexPanel>
 </template>
@@ -55,11 +54,11 @@ definePageMeta({ layout: 'dashboard' })
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 
 interface Language { locale: string; label: string; is_source: number | boolean; status: 'published' | 'disabled' }
-interface LocalizationSettings { effective_plan: string; languages: Language[]; available_catalogs: Array<{ locale: string; label: string; direction: string }> }
+interface LocalizationSettings { languages: Language[]; available_catalogs: Array<{ locale: string; label: string; direction: string }> }
 interface LocalizationProgress { locale: string; completed: number; total: number; opportunities: Array<{ id: string; label: string; completed: number; total: number; path: string }> }
 
 const isLocalizationSettings = (value: unknown): value is LocalizationSettings =>
-  isRecord(value) && typeof value.effective_plan === 'string' && Array.isArray(value.languages)
+  isRecord(value) && Array.isArray(value.languages)
   && value.languages.every(language => isRecord(language) && typeof language.locale === 'string' && Boolean(language.locale.trim())
     && typeof language.label === 'string' && Boolean(language.label.trim())
     && (typeof language.is_source === 'boolean' || language.is_source === 0 || language.is_source === 1)
@@ -103,7 +102,6 @@ const actionError = ref<string | null>(null)
 const enableableCatalogOptions = computed(() => (settings.value?.available_catalogs ?? [])
   .filter(catalog => !settings.value?.languages.some(language => language.locale === catalog.locale))
   .map(catalog => ({ label: catalog.label, value: catalog.locale })))
-const validationMessage = computed(() => settings.value?.effective_plan !== 'growth' ? 'A Growth subscription is required.' : null)
 const addLanguageItems = computed(() => enableableCatalogOptions.value.map(option => ({
   label: option.label,
   onSelect: () => enableLanguage(option.value),
@@ -132,7 +130,7 @@ async function mutate(path: string, method: 'POST' | 'DELETE', body?: Record<str
   }
 }
 async function enableLanguage(locale: string) {
-  if (busy.value || validationMessage.value) return
+  if (busy.value) return
   const catalog = settings.value?.available_catalogs.find(candidate => candidate.locale === locale)
   if (!catalog) throw new Error('The selected language is unavailable.')
   await mutate(`${localesPath}/${encodeURIComponent(catalog.locale)}/add`, 'POST', { label: catalog.label })

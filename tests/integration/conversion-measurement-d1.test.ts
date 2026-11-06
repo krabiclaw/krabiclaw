@@ -5,7 +5,7 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { handleStripeGa4Event, withdrawStripeGaIdentifiers } from '../../server/utils/stripe-ga4.ts'
 import { claimZarazPageview, finishZarazPageview, deliverViaMeasurementProtocol, readGa4Delivery } from '../../server/utils/ga4-delivery.ts'
-import { PLATFORM_TEMPLATE } from '../../utils/template-registry.ts'
+import { PLATFORM_SITE } from '../../utils/site-routing.ts'
 import { originatingOwnerId, recordAndDeliverConversion, recordOrganizationConversionEvent as recordAt, type OrganizationConversionInput } from '../../server/utils/organization-conversions.ts'
 import { findStripeGa4CheckoutAttribution } from '../../server/utils/stripe-ga4-intents.ts'
 import { getAnalyticsReport } from '../../server/utils/analytics-report.ts'
@@ -407,7 +407,7 @@ test('the Stripe handler records every paid subscription invoice and refund once
   try {
     const timezone = '{}'
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, status, onboarding_status, default_currency, timezone) VALUES
-      ('org-platform', 'p', 'p', 'p', ?, ?, 'active', 'active', 'USD', 'Asia/Bangkok')`).bind(timezone, PLATFORM_TEMPLATE.themeId).run()
+      ('org-platform', 'p', 'p', 'p', ?, ?, 'active', 'active', 'USD', 'Asia/Bangkok')`).bind(timezone, PLATFORM_SITE.themeId).run()
     await db.prepare(`INSERT INTO organization_integrations (id, organization_id, provider, account_id, target_id, target_name, measurement_id, revision) VALUES ('ga-platform', 'org-platform', 'google_analytics', 'google-account', '1', 'Platform', 'G-TEST', 'r1')`).run()
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone) VALUES ('org-customer', 'c', 'c', 'c', ?, 'USD', 'Asia/Bangkok')`).bind(timezone).run()
     await db.prepare(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('d1', 'org-platform', 'platform.example', 'subdomain', 'canonical', 'active')`).run()
@@ -485,7 +485,7 @@ test('Stripe payments keep exact line totals, checkout attribution after expiry,
   try {
     const timezone = '{}'
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, status, onboarding_status, default_currency, timezone) VALUES
-      ('org-platform', 'p', 'p', 'p', ?, ?, 'active', 'active', 'USD', 'Asia/Bangkok')`).bind(timezone, PLATFORM_TEMPLATE.themeId).run()
+      ('org-platform', 'p', 'p', 'p', ?, ?, 'active', 'active', 'USD', 'Asia/Bangkok')`).bind(timezone, PLATFORM_SITE.themeId).run()
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone) VALUES ('org-customer', 'c', 'c', 'c', ?, 'USD', 'Asia/Bangkok')`).bind(timezone).run()
     for (const id of ['user-a', 'user-b']) await db.prepare(`INSERT INTO user (id, name, email) VALUES (?, ?, ?)`).bind(id, id, `${id}@example.com`).run()
     await db.prepare(`INSERT INTO member (id, "organizationId", "userId", role, "createdAt") VALUES ('m-a', 'org-customer', 'user-a', 'owner', 1000)`).run()
@@ -606,7 +606,7 @@ test('a completed onboarding emails each operator once, with a link to that cust
     return Response.json({ id: `email-${sent.length}` })
   })
   try {
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, theme_id, status, default_currency, timezone) VALUES ('org-platform', 'KrabiClaw', 'krabiclaw', 'www', ?, 'active', 'USD', 'Asia/Bangkok')`).bind(PLATFORM_TEMPLATE.themeId).run()
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, theme_id, status, default_currency, timezone) VALUES ('org-platform', 'KrabiClaw', 'krabiclaw', 'www', ?, 'active', 'USD', 'Asia/Bangkok')`).bind(PLATFORM_SITE.themeId).run()
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, status, default_currency, timezone) VALUES ('org-customer', 'Clay Corner', 'clay-corner', 'clay-corner', 'active', 'USD', 'Asia/Bangkok')`).run()
     await db.prepare(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('dom-1', 'org-customer', 'clay-corner.krabiclaw.com', 'system', 'canonical', 'active')`).run()
     await db.prepare(`INSERT INTO user (id, name, email) VALUES ('user-owner', 'Mina Park', 'mina@clay-corner.com')`).run()

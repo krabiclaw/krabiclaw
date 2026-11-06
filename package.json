@@ -9,6 +9,7 @@
   "scripts": {
     "build": "cross-env NODE_OPTIONS=--max-old-space-size=6144 nuxi build --preset=cloudflare-module && node patch.cjs && node scripts/check-generated-worker.mjs",
     "channex:webhook": "node --experimental-strip-types --import ./tests/unit/support/register-aliases.mjs scripts/channex-webhook.ts",
+    "db:openings": "node --experimental-strip-types --import ./tests/unit/support/register-aliases.mjs scripts/backfill-opening-messages.ts",
     "resend:product-news:sync": "node --env-file-if-exists=.env --experimental-strip-types --import ./tests/unit/support/register-aliases.mjs scripts/sync-resend-product-news.ts",
     "ai-search:sync": "node --experimental-strip-types scripts/ai-search-sync.ts",
     "ai-search:sync:prod": "node --experimental-strip-types scripts/ai-search-sync.ts --base-url https://krabiclaw.com",
@@ -25,6 +26,8 @@
     "quality": "yarn lint:data-loading && yarn cloudflare:resources && yarn lint:email-previews && yarn lint:notification-parity && yarn lint:vue-sfc && yarn platform-locales:check && yarn typecheck && yarn lint",
     "lint:data-loading": "node scripts/check-data-loading-guardrails.mjs",
     "test": "yarn test:unit && yarn test:d1 && yarn test:e2e",
+    "contracts": "node --experimental-strip-types --import ./tests/unit/support/register-aliases.mjs --test tests/contracts/*.test.ts",
+    "contracts:write": "CONTRACTS_WRITE=1 yarn contracts",
     "test:unit": "node --experimental-strip-types --import ./tests/unit/support/register-aliases.mjs --test tests/unit/**/*.test.ts",
     "test:unit:file": "node --experimental-strip-types --import ./tests/unit/support/register-aliases.mjs --test",
     "test:d1": "node --experimental-strip-types --import ./tests/unit/support/register-aliases.mjs --test tests/integration/*-d1.test.ts",

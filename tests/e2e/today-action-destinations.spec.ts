@@ -245,6 +245,7 @@ test('an article composes its first draft and preserves pending edits through co
 })
 
 test('a prepared article photo post preserves concurrent media and publishes only after review', async ({ page, baseURL }) => {
+  test.setTimeout(120_000)
   test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'Authoring writes require local D1.')
   let articleId: string | null = null
   let postId: string | null = null

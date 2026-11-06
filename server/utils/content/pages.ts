@@ -30,9 +30,9 @@ import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-reso
 import { buildSingleMediaPlacementQueries, insertInitialMediaPlacements, hydrateMediaAssetRefs } from '~/server/utils/media-asset-manager'
 import { isSingleMediaPlacement } from '~/shared/media-placement-contract'
 import { getMediaPlacements } from '~/server/utils/media-placement'
-import { loadOrganizationTemplate } from '~/server/utils/content/publishing'
-import { templateAllowsPageDocumentAt, templatePageDocumentPaths } from '~/shared/tenant-page-paths'
-import type { PublicTemplateDefinition } from '~/utils/template-registry'
+import { loadOrganizationSite } from '~/server/utils/content/publishing'
+import { siteAllowsPageDocumentAt, sitePageDocumentPaths } from '~/shared/tenant-page-paths'
+import type { PublicSiteDefinition } from '~/utils/site-routing'
 import { CLAIMED_PUBLIC_ROUTES } from '#claimed-public-routes'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import { creationRequestHash, organizationEventQuery } from '~/server/utils/organization-events'
@@ -133,8 +133,8 @@ function metadataForInput(input: TenantPageEditorInput, locale: string, path: st
  * page KrabiClaw publishes about itself (#903).
  */
 async function organizationMayHoldCustomPages(env: CloudflareEnv, db: DbClient, organizationId: string): Promise<boolean> {
-  const { template } = await loadOrganizationTemplate(db, organizationId)
-  if (template.slug === 'platform') return true
+  const { site } = await loadOrganizationSite(db, organizationId)
+  if (site.slug === 'platform') return true
   return await hasOrganizationEntitlement(env, organizationId, 'custom_pages')
 }
 
@@ -310,19 +310,19 @@ async function resolveLocale(db: DbClient, organizationId: string, locale?: stri
 
 export async function assertTenantPagePathAvailable(
   db: DbClient,
-  input: { organizationId: string; locale: string; path: string; template: PublicTemplateDefinition; excludeVariantId?: string | null; allowOwnedRedirectVariantId?: string | null },
+  input: { organizationId: string; locale: string; path: string; site: PublicSiteDefinition; excludeVariantId?: string | null; allowOwnedRedirectVariantId?: string | null },
 ) {
   const sourceLocale = await resolveLocale(db, input.organizationId)
   const path = normalizeTenantPagePath(input.path)
-  // One rule, from one declaration: the template renders a document here, or
-  // nothing claims the path and the template's catch-all renders it. The hand
+  // One rule, from one declaration: the site renders a document here, or
+  // nothing claims the path and the site's catch-all renders it. The hand
   // lists this replaced named routes that had been deleted and reserved routes
   // that do read a document.
-  if (!templateAllowsPageDocumentAt(input.template, CLAIMED_PUBLIC_ROUTES, path)) {
+  if (!siteAllowsPageDocumentAt(input.site, CLAIMED_PUBLIC_ROUTES, path)) {
     conflict('This path is reserved by a platform or product route')
   }
   // A venue's location overview may carry an authored page; it needs its location.
-  const locationPath = (input.template.pageDocuments.patterns ?? []).includes('/locations/:slug()') ? /^\/locations\/([^/]+)$/.exec(path) : null
+  const locationPath = (input.site.pageDocuments.patterns ?? []).includes('/locations/:slug()') ? /^\/locations\/([^/]+)$/.exec(path) : null
   if (locationPath && !await queryFirst(db, 'SELECT id FROM business_locations WHERE organization_id = ? AND slug = ? LIMIT 1', [input.organizationId, locationPath[1]!])) {
     notFound('The location for this page was not found')
   }
@@ -396,7 +396,7 @@ export async function listTenantPages(db: DbClient, organizationId: string, opts
   // Whether each page may be removed is decided here, by the same rule
   // deleteTenantPage enforces, so the list and the endpoint cannot disagree and
   // the dashboard never offers a remove control the server would refuse.
-  const { template } = await loadOrganizationTemplate(db, organizationId)
+  const { site } = await loadOrganizationSite(db, organizationId)
   return rows.map(row => ({
     id: row.id,
     page_id: row.page_id,
@@ -410,7 +410,7 @@ export async function listTenantPages(db: DbClient, organizationId: string, opts
     // The product this page belongs to, read off its source page. A bound page
     // is edited from its product; the relationship, not its path, says so.
     product_id: row.product_id,
-    removable: !templatePageDocumentPaths(template).includes(normalizeTenantPagePath(row.path)),
+    removable: !sitePageDocumentPaths(site).includes(normalizeTenantPagePath(row.path)),
   }))
 }
 
@@ -473,7 +473,7 @@ export async function createTenantPagesBatch(
   },
 ) {
   const locale = await resolveLocale(db, input.organizationId)
-  const { template } = await loadOrganizationTemplate(db, input.organizationId)
+  const { site } = await loadOrganizationSite(db, input.organizationId)
   const localeRow = await queryFirst<{ is_source: number } | null>(db, `
     SELECT is_source FROM organization_locales WHERE organization_id = ? AND locale = ? LIMIT 1
   `, [input.organizationId, locale])
@@ -506,14 +506,14 @@ export async function createTenantPagesBatch(
     if (existingPaths.has(path)) continue
     if (requestedPaths.has(path)) conflict('A batch contains duplicate tenant-page paths')
     requestedPaths.add(path)
-    if (!templateAllowsPageDocumentAt(template, CLAIMED_PUBLIC_ROUTES, path)) {
+    if (!siteAllowsPageDocumentAt(site, CLAIMED_PUBLIC_ROUTES, path)) {
       conflict('This path is reserved by a platform or product route')
     }
     if (redirectPaths.has(path)) conflict('A tenant redirect already owns this path')
 
     const pageType = data.pageType ?? 'custom'
     if (pageType === 'system' && pageInput.trustedSystemPage !== true) {
-      badRequest('System pages are managed by the site template')
+      badRequest('System pages are managed by the site')
     }
     const effectiveData: TenantPageEditorInput = { ...data, locale, path, pageType }
     const metadata = metadataForInput(effectiveData, locale, path)
@@ -735,18 +735,18 @@ export async function prepareTenantPageCreate(db: DbClient, input: TenantPageCre
     ...(existingPage ? { pageType: existingPage.page_type, recipe: existingPage.recipe } : {}),
   }
   const existingSystemPage = existingPage?.page_type === 'system'
-  if (effectiveData.pageType === 'system' && !input.trustedSystemPage && !existingSystemPage) badRequest('System pages are managed by the site template')
-  const { template } = await loadOrganizationTemplate(db, input.organizationId)
+  if (effectiveData.pageType === 'system' && !input.trustedSystemPage && !existingSystemPage) badRequest('System pages are managed by the site')
+  const { site } = await loadOrganizationSite(db, input.organizationId)
   const path = await assertTenantPagePathAvailable(db, {
     organizationId: input.organizationId,
     locale,
     path: input.data.path,
-    template,
+    site,
     excludeVariantId: input.pathOwnerDeletedInSameBatch,
   })
   const metadata = metadataForInput(effectiveData, locale, path)
   const blocks = normalizeTenantPageBlocks(effectiveData.blocks)
-  await assertTenantPageSupport(input.env, db, input.organizationId, effectiveData, blocks)
+  await assertTenantPageSupport(input.env, db, input.organizationId, effectiveData, blocks, { checkCustomPageEntitlement: !existingPage })
   const pageId = existingPage?.id ?? effectiveData.id ?? crypto.randomUUID()
   const variantId = existingPage ? effectiveData.id ?? crypto.randomUUID() : pageId
   const now = new Date().toISOString()
@@ -809,10 +809,10 @@ export async function createTenantPage(db: DbClient, input: TenantPageCreateInpu
  * prepareContentDocumentDeletion clears the placements and redirects that point
  * at them by owner_id first, because those carry no foreign key of their own.
  *
- * A page the site's template renders is not the owner's to remove: deleting it
+ * A page the shared site renderer requires is not the owner's to remove: deleting it
  * would leave a route with nothing to show. That is the same declaration the
  * writer checks before creating a page, not a second rule about page_type — a
- * dead row the template no longer maps, like the /locations/main every site used
+ * dead row the site no longer maps, like the /locations/main every site used
  * to be seeded with, is deletable precisely because nothing renders it.
  */
 export async function prepareTenantPageDelete(db: DbClient, variantId: string, input: { scope: TenantPageScope; expectedUpdatedAt: string }) {
@@ -822,12 +822,12 @@ export async function prepareTenantPageDelete(db: DbClient, variantId: string, i
   if (!document) throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant page content document not found' })
   if (document.updated_at !== input.expectedUpdatedAt) conflict('Tenant page content was updated by another writer')
 
-  const { template } = await loadOrganizationTemplate(db, row.organization_id)
-  // Only a page the template guarantees is refused. A subtree it serves as
+  const { site } = await loadOrganizationSite(db, row.organization_id)
+  // Only a page the site guarantees is refused. A subtree it serves as
   // documents, Blawby's /services/, holds pages an owner or a Product made,
   // and they delete like any other.
-  if (templatePageDocumentPaths(template).includes(normalizeTenantPagePath(row.path))) {
-    conflict("This page is one the organization's template renders, so it cannot be deleted")
+  if (sitePageDocumentPaths(site).includes(normalizeTenantPagePath(row.path))) {
+    conflict("This page is one the organization's site renders, so it cannot be deleted")
   }
 
   // A page another page links to cannot simply go. `page_grid` renders its

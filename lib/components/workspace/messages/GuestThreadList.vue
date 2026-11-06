@@ -62,31 +62,22 @@
         </div>
       </div>
 
-      <div v-if="data?.pagination.hasMore" class="flex justify-center py-3">
+      <div v-if="page?.pagination.hasMore" class="flex justify-center py-3">
         <UButton color="neutral" variant="ghost" :loading="loadingMore" :disabled="pending" @click="loadMore">Load more conversations</UButton>
       </div>
 
-      <div v-if="data && threads.length === 0" class="py-14 text-center">
+      <div v-if="page && threads.length === 0" class="py-14 text-center">
         <p class="text-base font-medium text-highlighted">{{ emptyTitle }}</p>
         <p class="mt-1 text-sm text-muted">{{ emptyDescription }}</p>
       </div>
 
       <!-- Airbnb's own: a full-bleed row at the foot of the list. Past conversations are a place you go to. -->
       <NuxtLink
-        v-if="data"
+        v-if="page"
         :to="{ path: listRoute, query: pastOnly || blockedOnly ? withoutArchived : { ...route.query, archived: '' } }"
         class="-mx-4 mt-2 flex items-center justify-between gap-3 border-t border-default px-4 py-4 text-sm font-medium text-highlighted transition hover:bg-elevated/60 sm:-mx-6 sm:px-6"
       >
         <span>{{ pastOnly || blockedOnly ? 'Current conversations' : 'Past conversations' }}</span>
-        <UIcon name="i-lucide-chevron-right" class="size-4 shrink-0 text-muted" />
-      </NuxtLink>
-      <!-- Blocked guests are reached from Past: they are out of every list until unblocked. -->
-      <NuxtLink
-        v-if="data && pastOnly && !personalScope"
-        :to="{ path: listRoute, query: { ...withoutArchived, blocked: '' } }"
-        class="-mx-4 flex items-center justify-between gap-3 border-t border-default px-4 py-4 text-sm font-medium text-highlighted transition hover:bg-elevated/60 sm:-mx-6 sm:px-6"
-      >
-        <span>Blocked guests</span>
         <UIcon name="i-lucide-chevron-right" class="size-4 shrink-0 text-muted" />
       </NuxtLink>
     </div>
@@ -146,7 +137,7 @@ const emptyTitle = computed(() => search.value || kind.value || unreadOnly.value
 const emptyDescription = computed(() => {
   if (search.value) return `Nothing matched “${search.value}”.`
   if (blockedOnly.value) return 'Guests you block appear here until you unblock them.'
-  if (pastOnly.value) return 'Conversations move here when their stay or booking ends, or when you archive them.'
+  if (pastOnly.value) return 'Conversations move here when you archive them, when their stay or booking has ended and you have read them, or after 30 days without a message.'
   return props.personalScope ? 'Your conversations with businesses will appear here.' : 'When a guest writes, the conversation appears here.'
 })
 
@@ -213,6 +204,10 @@ async function loadWindow(pages: number, scope: string, signal: AbortSignal): Pr
     }
   }
 }
+// Which list the rows on screen belong to. A refresh of the same list keeps
+// its rows; a different list (another mailbox, filter or search) shows the
+// loading state until its own rows arrive, never the previous list's.
+const rowsKey = ref(listKey.value)
 const { data, pending, error: threadsError, refresh } = await useAsyncData<ThreadListPage>(listKey, async (_app, { signal }) => {
   pageController?.abort()
   nextPageError.value = null
@@ -221,12 +216,15 @@ const { data, pending, error: threadsError, refresh } = await useAsyncData<Threa
   const { page, fetched } = await loadWindow(loadedPages, scope, signal)
   if (scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
   loadedPages = fetched
+  rowsKey.value = scope
   return page
 }, {
   server: !props.personalScope,
   getCachedData(cacheKey, nuxtApp, ctx) {
     if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
-    return nuxtApp.payload.data[cacheKey] as ThreadListPage | undefined
+    const cached = nuxtApp.payload.data[cacheKey] as ThreadListPage | undefined
+    if (cached) rowsKey.value = cacheKey
+    return cached
   },
 })
 
@@ -237,7 +235,8 @@ if (import.meta.client) {
     }
   })
 }
-const threads = computed(() => data.value?.threads ?? [])
+const page = computed(() => rowsKey.value === listKey.value ? data.value ?? null : null)
+const threads = computed(() => page.value?.threads ?? [])
 
 async function loadMore() {
   const before = data.value
@@ -273,8 +272,11 @@ useIntervalFn(()=>{if(props.personalScope&&documentVisibility.value==='visible')
 
 // The newest thread, for the index above to open into its second column on
 // arrival. The list only says which; whether there is a column is the shell's.
-watch([threads, openThreadId], ([rows, open]) => {
+// While a list loads there is none: the rows on screen may be another
+// mailbox's, and the shell must not keep one of them to open.
+watch([threads, openThreadId, pending], ([rows, open, loading]) => {
   if (open) return
+  if (loading) { emit('first', null); return }
   const first = rows[0]
   emit('first', first ? { path: threadRoute(first), query: route.query } : null)
 }, { immediate: true })

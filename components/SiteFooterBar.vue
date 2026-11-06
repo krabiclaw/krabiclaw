@@ -99,7 +99,7 @@ const year = new Date().getFullYear()
 // can attribute the visit to the site and theme that sent it.
 const platformOrigin = useRuntimeConfig().public.siteUrl
 const requestHost = useRequestURL().host
-const themeSlug = organization.template.slug
+const themeSlug = organization.site.slug
 const poweredByUrl = themeSlug && themeSlug !== 'platform'
   ? `${platformOrigin}/?${new URLSearchParams({ utm_source: requestHost, utm_medium: 'referral', utm_campaign: 'powered_by', utm_content: themeSlug })}`
   : null

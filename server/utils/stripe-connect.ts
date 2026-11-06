@@ -428,7 +428,7 @@ async function checkoutReadiness(db: DbClient, env: CloudflareEnv, organizationI
   // Payments fees are billed only in the platform's mode, on the business's
   // subscription; a demo's test-mode payments carry none.
   if (setup.livemode === platformLivemode(env) && !(await paymentsUsage(db, env, organizationId)).configured) {
-    return { ready: false as const, statusCode: 409, statusMessage: 'Your plan subscription does not bill Payments fees yet. Choose Business in Plan before accepting online payments', handoff: { ...handoff, missing: [...handoff.missing, 'payments.billing'] } }
+    return { ready: false as const, statusCode: 409, statusMessage: 'Your plan subscription does not bill Payments fees yet.', handoff: { ...handoff, missing: [...handoff.missing, 'payments.billing'] } }
   }
   const saved = setup.connected!
   const keys = paymentsStripeKeys(env, setup.livemode!)!

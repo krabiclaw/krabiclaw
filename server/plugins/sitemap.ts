@@ -4,7 +4,6 @@ import { PUBLIC_CONTENT_SECTION_QUERIES, PUBLIC_CONTENT_SECTIONS, productCatalog
 import { publicLocationHomeSlugSql, publicLocationSql } from '~/server/utils/public-locations'
 import type { PublicSiteSection } from '~/utils/public-resource-contracts'
 import { publicTenantPageSql } from '~/server/utils/content/pages'
-import { isSubscriptionStateInvalid } from '~/server/utils/billing-access'
 import type { SitemapUrlInput } from '#sitemap/types'
 
 import { definePlugin, HTTPError } from 'nitro'
@@ -15,8 +14,8 @@ import { isDemoOrganization } from '~/shared/demo'
 import { ARTICLE_COLLECTIONS, collectionCategoryPath, isArticleCollection } from '~/utils/article-collections'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
-import { resolvePublicTemplate } from '~/utils/template-registry'
-import { assertOrganizationLanguageEntitlement } from '~/server/utils/localization'
+import { resolvePublicSite } from '~/utils/site-routing'
+import { assertOrganizationLanguage } from '~/server/utils/localization'
 import { listOrganizationProducts } from '~/server/utils/product-management'
 
 // A collection path that is a section is listed only when the section has something on it.
@@ -41,8 +40,8 @@ async function listPublishedTenantSitemapPages(db: DbClient, organizationId: str
 }
 
 /**
- * A site's listed articles, on every template, the index of each collection
- * that has one (the blog at its template's prefix, the docs at /docs), and
+ * A site's listed articles, on every site, the index of each collection
+ * that has one (the blog at its site's prefix, the docs at /docs), and
  * each category page that lists at least one of them. KrabiClaw's site and
  * every customer's read the same queries.
  */
@@ -92,7 +91,7 @@ export default definePlugin((nitroApp) => {
     ctx.sources = []
   })
 
-  /** The organization's listed, published short posts and their feed, on every template. */
+  /** The organization's listed, published short posts and their feed, on every site. */
   const socialPostEntries = async (db: DbClient, organizationId: string): Promise<SitemapEntry[]> => {
     const posts = await queryAll<{ slug: string; updated_at: string }>(db, `SELECT slug, updated_at FROM content_documents
       WHERE organization_id = ? AND kind = 'social_post' AND row_role = 'root' AND status = 'published' AND visibility = 'listed'
@@ -158,7 +157,7 @@ export default definePlugin((nitroApp) => {
       return
     }
 
-    const template = resolvePublicTemplate({ themeId: organization.theme_id, vertical: organization.vertical })
+    const site = resolvePublicSite({ themeId: organization.theme_id})
     const productPresentation = resolveProductPresentation(organization.vertical)
     const publicProducts = await listOrganizationProducts(db, { organizationId, publishedOnly: true, env })
     const publicProductIds = JSON.stringify(publicProducts.map(product => product.id))
@@ -171,13 +170,9 @@ export default definePlugin((nitroApp) => {
     `, [organizationId])
     for (const candidate of localizedLocales) {
       try {
-        await assertOrganizationLanguageEntitlement(env, db, candidate.organization_id, candidate.locale)
+        await assertOrganizationLanguage(db, candidate.organization_id, candidate.locale)
       } catch (error) {
-        if (error instanceof HTTPError && ['LANGUAGE_ENTITLEMENT_REQUIRED', 'LANGUAGE_NOT_ENABLED', 'LANGUAGE_NOT_PUBLISHED', 'PLATFORM_LOCALE_UNAVAILABLE'].includes(error.data?.code)) continue
-        if (isSubscriptionStateInvalid(error)) {
-          console.error('organization_subscription_state_invalid', { organizationId: candidate.organization_id, locale: candidate.locale })
-          continue
-        }
+        if (error instanceof HTTPError && ['LANGUAGE_NOT_ENABLED', 'LANGUAGE_NOT_PUBLISHED', 'PLATFORM_LOCALE_UNAVAILABLE'].includes(error.data?.code)) continue
         throw error
       }
       const [resources, pages] = await Promise.all([
@@ -280,7 +275,7 @@ export default definePlugin((nitroApp) => {
     const sections = publicSections(organization.vertical, productCatalogRows(publicProducts), contentRows,
       locations.some(location => Number(location.has_reservations) === 1))
 
-    entries.push(...template.sitemap.exactPaths
+    entries.push(...site.sitemap.exactPaths
       .filter(loc => !(loc in SECTION_PATHS) || sections.site[SECTION_PATHS[loc]!])
       .map(loc => ({ loc })))
     for (const item of catalogNavigation(organization.vertical, sections.site)) entries.push({ loc: item.path })

@@ -17,9 +17,9 @@ import { previewSecretOf, resolvePreviewAuthorization } from '~/server/utils/pre
 import { isNonProductionHost } from '~/server/utils/tenant-hosts'
 import { recordRequestPhase } from '~/server/utils/request-metrics'
 import { isPublicShellPayload } from '~/utils/public-resource-contracts'
-import { assertExactCanonicalLocale, assertPublicOrganizationLanguageEntitlement } from '~/server/utils/localization'
+import { assertExactCanonicalLocale, assertPublicOrganizationLanguage } from '~/server/utils/localization'
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { isLegalPracticeSite } from '~/utils/template-registry'
+import { isLegalPracticeSite } from '~/utils/site-routing'
 import {
   indexStoredPublicLocalizations,
   projectExactLocalizedResource,
@@ -90,10 +90,10 @@ export async function loadPublicShellSource(
   ])
   const shellQueries: BatchQuery[] = []
   const shellIndexes = appendPublicShellQueries(shellQueries, organization.id)
-  // The entitlement, the shell rows and the bookable experiences depend on the
+  // The language, the shell rows and the bookable experiences depend on the
   // site alone; they were three sequential round trips on every cold shell.
   const [
-    entitlement,
+    language,
     shellResults,
     experiences,
     sourceConsultation,
@@ -102,7 +102,7 @@ export async function loadPublicShellSource(
     verification,
     localizedRows,
   ] = await Promise.all([
-    assertPublicOrganizationLanguageEntitlement(env, db, organization.id, locale ?? sourceLocale),
+    assertPublicOrganizationLanguage(db, organization.id, locale ?? sourceLocale),
     executeBatch(db, shellQueries),
     listOrganizationProducts(db, { organizationId: organization.id, kind: 'experience', publishedOnly: true, env }),
     // Only a legal practice books consultations; a venue's site has no schedule page.
@@ -131,7 +131,7 @@ export async function loadPublicShellSource(
   }
 
   const pageLinks = publishedPages
-    .filter(page => page.path !== '/schedule' || canSchedule)
+    .filter(page => page.path !== '/blog' && (page.path !== '/schedule' || canSchedule))
     .map(page => ({ id: page.id, path: page.path, title: page.title }))
 
   if (experiences.length && !pageLinks.some(page => page.path === '/experiences')) {
@@ -151,13 +151,13 @@ export async function loadPublicShellSource(
       localizations,
     })),
     count: shellResults[shellIndexes.locations]?.results?.length ?? 0,
-    platformMessages: entitlement.platform_messages,
+    platformMessages: language.platform_messages,
   }
   if (locale && locale !== sourceLocale) {
-    if (!entitlement.platform_messages) {
+    if (!language.platform_messages) {
       throw new HTTPError({ statusCode: 500, statusMessage: 'Published platform locale messages are unavailable' })
     }
-    payload.platformMessages = entitlement.platform_messages
+    payload.platformMessages = language.platform_messages
     // The shell reads the site and its locations; neither carries details,
     // so no definition is in scope here.
     const organizationLocalization = localizations?.find(item => item.resourceType === 'organization' && item.resourceId === organizationId)

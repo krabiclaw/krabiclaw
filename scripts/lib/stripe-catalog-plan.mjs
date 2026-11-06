@@ -13,11 +13,11 @@ export const CATALOG_PLAN_SCHEMA_VERSION = 14
 export const CATALOG_APPLY_JOURNAL_SCHEMA_VERSION = 1
 export const CATALOG_APPLY_JOURNAL_KIND = 'stripe-catalog-apply-journal'
 export const CATALOG_PLAN_KIND = 'stripe-catalog-plan'
-export const OFFERED_PLAN_IDS = Object.freeze([...NEW_SALE_PAID_PLAN_IDS, ...BILLING_METER_KEYS, 'site_language', 'strategy'])
+export const OFFERED_PLAN_IDS = Object.freeze([...NEW_SALE_PAID_PLAN_IDS, ...BILLING_METER_KEYS, 'strategy'])
 export const RETIRED_PLAN_IDS = Object.freeze(['commerce', 'marketing', 'managed', 'seo_accelerator'])
 export const RETIRED_ADDON_TYPES = Object.freeze(['translation', 'seasonal', 'gbp_setup'])
-// The former rental-unit and location product families are retired: live homes use the homes meter, and locations are not billed.
-export const RETIRED_PRODUCT_FAMILIES = Object.freeze(['rental_units', 'locations'])
+// Live homes use the homes meter; locations and manually localized languages are not billed.
+export const RETIRED_PRODUCT_FAMILIES = Object.freeze(['rental_units', 'locations', 'site_language'])
 export const CATALOG_PLAN_SCOPES = Object.freeze(['full', 'offers-only', 'retirement-only'])
 export const STRIPE_CATALOG_REQUEST_TIMEOUT_MS = 10_000
 const SUPPORTED_OPERATION_TYPES = new Set([
@@ -98,15 +98,6 @@ export const PLAN_DEFINITIONS = Object.freeze([
     highlighted: false,
     features: [],
   })),
-  {
-    name: 'Site Language',
-    description: 'One manually localized language for one Growth site.',
-    planId: 'site_language',
-    productFamily: 'site_language',
-    amountCents: 500,
-    highlighted: false,
-    features: [],
-  },
   {
     // A service KrabiClaw's people perform, added to a business's plan subscription as its own item.
     name: 'SEO and marketing strategy',
@@ -281,20 +272,13 @@ export async function readCatalogSnapshot(readAdapter, { accountMode = 'unknown'
       .map(normalizePrice)
       .sort((a, b) => a.id.localeCompare(b.id))
   }
-  // Catalog archival must preserve every existing contract, including plans
-  // no longer sold. Keep their prices, quantities and renewal terms signed.
-  const planProductIds = new Set(products
-    .filter(product => [...NEW_SALE_PAID_PLAN_IDS, ...RETIRED_PLAN_IDS].includes(productPlanId(product)))
-    .map(product => product.id))
+  // Catalog archival must preserve every existing contract, including standalone
+  // add-ons and services. Keep their prices, quantities and renewal terms signed.
   const subscriptions = []
-  if (planProductIds.size > 0) {
-    for (const subscription of await listAll(readAdapter.subscriptions.list.bind(readAdapter.subscriptions), { status: 'all', limit: 100 })) {
-      if (CLOSED_SUBSCRIPTION_STATUSES.has(subscription.status)) continue
-      const items = subscription.items?.data ?? []
-      if (subscription.items?.has_more) throw new Error(`Stripe subscription ${subscription.id} has more items than one page.`)
-      if (!items.some(item => planProductIds.has(typeof item.price?.product === 'string' ? item.price.product : item.price?.product?.id))) continue
-      subscriptions.push(normalizeSubscription(subscription))
-    }
+  for (const subscription of await listAll(readAdapter.subscriptions.list.bind(readAdapter.subscriptions), { status: 'all', limit: 100 })) {
+    if (CLOSED_SUBSCRIPTION_STATUSES.has(subscription.status)) continue
+    if (subscription.items?.has_more) throw new Error(`Stripe subscription ${subscription.id} has more items than one page.`)
+    subscriptions.push(normalizeSubscription(subscription))
   }
   subscriptions.sort((a, b) => a.id.localeCompare(b.id))
   return { accountId, accountMode, products, pricesByProduct, subscriptions, meters: meters.map(normalizeMeter).sort((a, b) => a.id.localeCompare(b.id)) }
@@ -417,8 +401,8 @@ function existingProductNeedsUpdate(existing, definition, priceRef, imageSha256)
 }
 
 /**
- * The exact monthly price an offered definition sells at. A plan, a service
- * and Site Language are flat unit prices; a metered definition is the
+ * The exact monthly price an offered definition sells at. A plan or service
+ * has a flat unit price; a metered definition is the
  * monthly price on its meter (`meter` is its id, or the reference to the meter
  * this plan creates): a decimal amount per reported unit.
  */
@@ -511,7 +495,7 @@ function productCatalogId(product) {
   const family = typeof product?.metadata?.product_family === 'string'
     ? product.metadata.product_family.trim().toLowerCase()
     : ''
-  if (family === 'site_language' || BILLING_METER_KEYS.includes(family)) return family
+  if (BILLING_METER_KEYS.includes(family)) return family
   // A service product is named by its `service` key; the family only groups them.
   if (family === 'services') return typeof product?.metadata?.service === 'string' ? product.metadata.service.trim() : ''
   return ''

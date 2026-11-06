@@ -1,12 +1,12 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:764d03d3a0d5194258109d0d43ab6487db17f8b5388275c11d1b147538a1c6a2",
-  "documentationFingerprint": "sha256:7c8586e58379957341f98b862da3eefb4df8d1b91f48076c66a3d2d408d32e65",
+  "fingerprint": "sha256:695eba4dfe89f7718e01ea4b18a80c1c9efc160b3338538b25fc6fcba084e971",
+  "documentationFingerprint": "sha256:dfc4d92a1f922d10c4d43e69dd597e2bceeca7539efa0e0aec8a3fa18d7c146d",
   "tools": [
     {
       "name": "add_organization_language",
       "title": "Add organization language",
-      "description": "Add a website language for private authoring. Requires the website’s language entitlement. A new language starts disabled; an existing language keeps its publication status and translations while its stored label is refreshed from the platform catalog.",
+      "description": "Add a supported website language for private authoring. A new language starts disabled; an existing language keeps its publication status and translations while its stored label is refreshed from the platform catalog.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -19480,7 +19480,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
+        "destructiveHint": false,
         "openWorldHint": true,
         "readOnlyHint": false,
         "title": "Create Google Ads search campaign"
@@ -20044,7 +20044,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
@@ -20291,7 +20291,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
         "title": "Create message template"
@@ -25290,7 +25290,7 @@
                 "type": "string"
               },
               "recipe": {
-                "description": "The template section this page fills, or null for a page that fills none. Send the recipe from the last read unless you are changing it; an omitted recipe is not kept.",
+                "description": "The site section this page fills, or null for a page that fills none. Send the recipe from the last read unless you are changing it; an omitted recipe is not kept.",
                 "type": [
                   "string",
                   "null"
@@ -28790,7 +28790,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
@@ -36843,7 +36843,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
@@ -41873,7 +41873,7 @@
     {
       "name": "delete_site_page",
       "title": "Delete site page",
-      "description": "Delete the selected site page or translation. Deleting a translation removes that translation; deleting the source locale removes the page and every translation with it, and the response names the locales that went. A page the site template renders cannot be deleted, because its route would then have nothing to show.",
+      "description": "Delete the selected site page or translation. Deleting a translation removes that translation; deleting the source locale removes the page and every translation with it, and the response names the locales that went. A required site page cannot be deleted, because its route would then have nothing to show.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -72772,7 +72772,7 @@
     {
       "name": "publish_organization_language",
       "title": "Publish organization language",
-      "description": "Publish an added website language’s authored translations on public routes. Requires the website’s language entitlement and a translated homepage. Missing translations remain unavailable; the source language is unchanged.",
+      "description": "Publish an added website language’s authored translations after translating its homepage. Legal Services sites also require a translated organization name and consultation call-to-action label. Missing translations remain unavailable; the source language is unchanged.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -73057,7 +73057,7 @@
     {
       "name": "publish_website",
       "title": "Publish website",
-      "description": "Publish a saved website draft, select it as your workspace and notify KrabiClaw operators by email. Finish any returned missing fields before retrying.",
+      "description": "Publish a saved website draft, select it as your workspace and notify KrabiClaw operators by email. Finish any returned missing fields before retrying. Repeating a completed publication can resend the operator email.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -73174,7 +73174,7 @@
       },
       "annotations": {
         "destructiveHint": true,
-        "idempotentHint": true,
+        "idempotentHint": false,
         "openWorldHint": true,
         "readOnlyHint": false,
         "title": "Publish website"
@@ -99222,7 +99222,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
         "title": "Schedule guest reply"
@@ -99427,7 +99427,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
@@ -122332,7 +122332,7 @@
             ]
           },
           "recipe": {
-            "description": "The template section this page fills, or null for a page that fills none. Send the recipe from the last read unless you are changing it; an omitted recipe is not kept.",
+            "description": "The site section this page fills, or null for a page that fills none. Send the recipe from the last read unless you are changing it; an omitted recipe is not kept.",
             "type": [
               "string",
               "null"
@@ -127129,7 +127129,7 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:ae4d41ae341faf5a382fdec03c6048f96f4aaca1b3aa1a99da4fd9fe9c41d9e6",
+        "create_product": "sha256:eda9b539f7bc13fa334ffe44b23c401133640cb949c0c9556b8ae28ddf79c7c0",
         "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
@@ -127185,7 +127185,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:ae4d41ae341faf5a382fdec03c6048f96f4aaca1b3aa1a99da4fd9fe9c41d9e6",
+        "create_product": "sha256:eda9b539f7bc13fa334ffe44b23c401133640cb949c0c9556b8ae28ddf79c7c0",
         "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
@@ -127220,7 +127220,7 @@
         "reply_to_guest": "sha256:28402ef75ec3f1464c60ffbaa91a3781f96f9764994e56b2c7362dbd26eefb80",
         "request_product_booking_change": "sha256:d09a9c88466237aff04465bbcffa219f28e197cfad0cb4fdd99f41484343d400",
         "request_table_reservation_change": "sha256:71868f28cc9f329b1f44276ae0a223c487c789f4682c3bb8f3a09b96fde9e2dd",
-        "send_team_message": "sha256:3865f5f6aeadf25e330b9adf73caece28d6e9044984bdad3bef64eb3f47f0ee7",
+        "send_team_message": "sha256:b9f715f29f98d627cd0e5fa89f873b5623e13d5ba0867cc7dba69216ba886f97",
         "start_team_conversation": "sha256:b297eb76fda6a481f0246ee8c6c39d5481ebe9379dd979ecee747b54c67f0492",
         "update_team_group": "sha256:e58436da6c0b45816e909c58d6ff9265c364e410a5c5edf696a7c6085bb3f6cb"
       }
@@ -127242,7 +127242,7 @@
         "remove_media": "sha256:70c3ad05014d52e9ce95b1a4363d6ab8b23b0d1ffd37c31b03a3da6684d49943",
         "reorder_media": "sha256:2ba6530e10b65684d8efd9d9543c6e3a62e760a988d7a876abe7962ff0fb7e75",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_site_page": "sha256:59cdde1aa4d584134607413f633453123521abe519087d8322525faa96f98bfb"
+        "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
       }
     },
     {
@@ -127273,7 +127273,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:ae4d41ae341faf5a382fdec03c6048f96f4aaca1b3aa1a99da4fd9fe9c41d9e6",
+        "create_product": "sha256:eda9b539f7bc13fa334ffe44b23c401133640cb949c0c9556b8ae28ddf79c7c0",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
@@ -127282,11 +127282,11 @@
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
-        "publish_website": "sha256:939b1ce7c3fd387584cc132ae36ef88ea13eb064617de0ba0764e5a81f572f3f",
+        "publish_website": "sha256:6ba702a3293b004e38bcc734ff0b74c3073caaeb12cd831f0f78ddec1a1efaa4",
         "save_website_draft": "sha256:6a7e9c21393133afa96ef5bd80d3ca08ced43fc89e669394496d8d4785ed82ab",
         "update_menu": "sha256:cd6ae334587cddc89c052c08d9f30ce9855bd0394c95eb87d69378a393068269",
         "update_organization_settings": "sha256:7191c77fc0ed6eb5ce818283be58acb26679a8cf793cbba600dccb694e8051a6",
-        "update_site_page": "sha256:59cdde1aa4d584134607413f633453123521abe519087d8322525faa96f98bfb"
+        "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
       }
     },
     {
@@ -127328,7 +127328,7 @@
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
         "update_product": "sha256:a6f1e84c2f216c0cf5f12ff3c680f5227a03b34c951caf3cf75f9d5580ca7372",
-        "update_site_page": "sha256:59cdde1aa4d584134607413f633453123521abe519087d8322525faa96f98bfb"
+        "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
       }
     },
     {

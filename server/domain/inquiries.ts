@@ -2,7 +2,7 @@ import type { H3Event } from 'nitro'
 import { requestInsertQueries, getGuestRequest } from '~/server/domain/requests'
 import { acceptFormAnswers, readFormQuestions } from '~/server/domain/form-questions'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
-import { isLegalPracticeSite } from '~/utils/template-registry'
+import { isLegalPracticeSite } from '~/utils/site-routing'
 import { execute, executeBatch, queryFirst, type DbClient } from '~/server/db'
 import { cleanString, cloudflareEnv } from '~/server/utils/api-response'
 import { notifyContactSubmitted, raiseSettledFailures } from '~/server/utils/notifications'
@@ -10,7 +10,7 @@ import { DEFAULT_EMAIL_DAILY_LIMIT as EMAIL_DAILY_LIMIT, DEFAULT_IP_HOURLY_LIMIT
 import { resolveContactSubmissionAssignment } from '~/server/utils/contact-assignment'
 import { measurementOutcome, readPageEventId, recordOrganizationConversionEvent } from '~/server/utils/organization-conversions'
 import { ensureInteractionUser, type CloudflareEnv } from '~/server/utils/auth'
-import { assertExactCanonicalLocale, assertPublicOrganizationLanguageEntitlement, getPersistedSourceLocale } from '~/server/utils/localization'
+import { assertExactCanonicalLocale, assertPublicOrganizationLanguage, getPersistedSourceLocale } from '~/server/utils/localization'
 import { formAnswersFingerprint } from '~/shared/form-questions'
 import { toE164 } from '~/utils/phone'
 
@@ -94,7 +94,7 @@ export async function createInquiry(event: H3Event, input: { organizationId: str
   if (!organization) return result({ error: 'Organization not found' }, 404)
   const sourceLocale = await getPersistedSourceLocale(db, organizationId)
   const locale = body.locale === undefined ? sourceLocale.locale : assertExactCanonicalLocale(body.locale)
-  const language = await assertPublicOrganizationLanguageEntitlement(env, db, organizationId, locale)
+  const language = await assertPublicOrganizationLanguage(db, organizationId, locale)
 
   const requiresConsent = isLegalPracticeSite({ themeId: organization.theme_id, vertical: organization.vertical })
   const consentAcknowledged = body.consent === true

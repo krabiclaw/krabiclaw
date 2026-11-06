@@ -245,7 +245,7 @@ export function homeLimit(used: number): CapacityRefusal {
   return {
     status: 402,
     data: {
-      error: `Basic includes ${BASIC_HOMES} live home. Choose Growth or Business in Billing to add more.`,
+      error: `Basic includes ${BASIC_HOMES} live home.`,
       code: 'HOME_LIMIT',
       homes: { used, covered: BASIC_HOMES },
     },

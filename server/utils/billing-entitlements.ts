@@ -19,7 +19,6 @@ export function getPlanEntitlements(plan: string): EntitlementsMap {
     managed_service: false,
     messaging: false,
     review_requests: false,
-    additional_languages: false,
     google_ads_management: false,
     calendar_sync: false,
     channel_sync: false,
@@ -45,7 +44,6 @@ export function getPlanEntitlements(plan: string): EntitlementsMap {
         managed_service: true,
         messaging: true,
         review_requests: true,
-        additional_languages: true,
       }
     default:
       return base

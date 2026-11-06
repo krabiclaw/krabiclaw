@@ -162,7 +162,7 @@ export async function refreshMemberBusy(db: DbClient, env: CloudflareEnv, member
  const now=new Date().toISOString(), until=new Date(Date.parse(now)+94*86400000).toISOString()
  try {
   // A selection kept after the plan lapsed fails closed, visibly: availability waits until the sync is back on or turned off.
-  if(!await hasOrganizationEntitlement(env,row.organization_id,'calendar_sync')) throw new Error('Google Calendar sync comes with the Business plan; turn it off or upgrade to keep checking this calendar')
+  if(!await hasOrganizationEntitlement(env,row.organization_id,'calendar_sync')) throw new Error('Google Calendar sync requires the Business plan; disconnect this busy calendar to stop checking it')
   const member=await queryFirst<{userId:string}>(db,'SELECT userId FROM member WHERE id=? AND organizationId=?',[memberId,row.organization_id])
   if(!member) throw new Error('Member is no longer connected')
   await requireIntegrationAccount(env,row.calendar_account_id,{userId:member.userId,currentAccountId:null,providerId:'google',scopes:MEMBER_BUSY_SCOPES})

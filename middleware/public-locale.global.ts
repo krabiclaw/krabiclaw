@@ -1,6 +1,6 @@
 import { splitLocalePrefix } from '~/utils/tenant-locale-path'
 import { platformLocale } from '~/shared/platform-locales'
-import { TENANT_NON_INDEXABLE_EXACT_PATHS } from '~/utils/template-registry'
+import { TENANT_NON_INDEXABLE_EXACT_PATHS } from '~/utils/site-routing'
 
 export default defineNuxtRouteMiddleware(async (to) => {
   const state = useState<string>('public-locale', () => 'en')
@@ -67,7 +67,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
   const event = useRequestEvent()
   const organizationId = event?.context.organizationId as string | null | undefined
   if (!event || !organizationId) return
-  const [{ cloudflareEnv }, { queryFirst }, { assertPublicOrganizationLanguageEntitlement, getPersistedSourceLocale }] = await Promise.all([
+  const [{ cloudflareEnv }, { queryFirst }, { assertPublicOrganizationLanguage, getPersistedSourceLocale }] = await Promise.all([
     import('~/server/utils/api-response'),
     import('~/server/db'),
     import('~/server/utils/localization'),
@@ -98,11 +98,11 @@ export default defineNuxtRouteMiddleware(async (to) => {
      LIMIT 1
   `, [organizationId, candidate])
   if (!locale) throw createError({ statusCode: 404, statusMessage: 'Language is not enabled for this organization' })
-  const entitlement = await assertPublicOrganizationLanguageEntitlement(env, db, organizationId, locale.locale)
-  if (!entitlement.platform_messages) {
+  const language = await assertPublicOrganizationLanguage(db, organizationId, locale.locale)
+  if (!language.platform_messages) {
     throw createError({ statusCode: 503, statusMessage: 'Published platform locale messages are unavailable' })
   }
-  const messages = entitlement.platform_messages
+  const messages = language.platform_messages
   state.value = locale.locale
   useState<Record<string, string> | null>('platform-locale-messages', () => null).value = messages
   setAppLocale(locale.locale, messages)

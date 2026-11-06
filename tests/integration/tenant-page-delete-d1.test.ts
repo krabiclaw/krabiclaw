@@ -37,7 +37,7 @@ test('deleting a tenant page takes its translations, placements and redirects', 
         path, title: id,
       }, [{ id: id + '-body', type: 'markdown', data: { markdown: id, editor_mode: 'rich' } }])
 
-    // An unclaimed path no template maps: /our-story renders through the
+    // An unclaimed path the route table does not claim: /our-story renders through the
     // catch-all, so it is the owner's page and theirs to remove.
     await page('story', '/our-story', 'en')
     await page('story-th', '/our-story', 'th', 'story')
@@ -98,7 +98,7 @@ test('deleting a tenant page takes its translations, placements and redirects', 
   }
 })
 
-test('a translation deletes alone, and a page the template renders does not delete at all', { timeout: 60_000 }, async () => {
+test('a translation deletes alone, and a required site page does not delete at all', { timeout: 60_000 }, async () => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'tenant-page-delete-scope-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
@@ -122,7 +122,7 @@ test('a translation deletes alone, and a page the template renders does not dele
       }, [])
     await page('story', '/our-story', 'en')
     await page('story-th', '/our-story', 'th', 'story')
-    // /about is one the saya template renders, so its route would have nothing
+    // /about is a required shared site page, so its route would have nothing
     // to show without it.
     await page('about', '/about', 'en')
 
@@ -141,7 +141,7 @@ test('a translation deletes alone, and a page the template renders does not dele
 
     await assert.rejects(
       deleteTenantPage(db, 'about', { scope, expectedUpdatedAt: await stamp('about'), env }),
-      /organization's template renders/,
+      /organization's site renders/,
     )
   } finally {
     await runtime.dispose()

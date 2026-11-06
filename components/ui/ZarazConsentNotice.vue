@@ -55,7 +55,7 @@ onBeforeUnmount(() => document.removeEventListener('zarazConsentAPIReady', showN
 </script>
 
 <style scoped>
-.consent-notice { position: fixed; inset: auto 0 0; z-index: 50; padding: 12px; display: flex; justify-content: center; }
+.consent-notice { position: fixed; inset: auto 0 0; z-index: 40; padding: 12px; display: flex; justify-content: center; }
 .consent-banner { position: relative; display: flex; align-items: center; gap: 16px; width: 100%; max-width: 1024px; padding: 16px 52px 16px 20px; border: 1px solid var(--ui-border); border-radius: 16px; background: var(--ui-bg-elevated); color: var(--ui-text); box-shadow: 0 8px 32px #0003; font-size: 14px; }
 .consent-copy { flex: 1; min-width: 0; margin: 0; line-height: 1.5; }
 .consent-copy a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }

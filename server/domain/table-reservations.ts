@@ -1,4 +1,5 @@
 import { getGuestRequest, getThreadOperationalRecord, requestInsertQueries, threadPayloadForGuest, type BookingOperator } from '~/server/domain/requests'
+import { openingSentence } from '~/server/domain/guest-threads/opening'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { execute, queryFirst, type DbClient } from '~/server/db'
 import { cleanString, cloudflareEnv } from '~/server/utils/api-response'
@@ -16,7 +17,7 @@ import {
   ReservationUnavailableError,
 } from '~/server/utils/reservations'
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { assertExactCanonicalLocale, assertPublicOrganizationLanguageEntitlement } from '~/server/utils/localization'
+import { assertExactCanonicalLocale, assertPublicOrganizationLanguage } from '~/server/utils/localization'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import { createPaymentCheckout } from '~/server/domain/payments/checkout'
 import { paidOnline } from '~/server/domain/payments'
@@ -157,7 +158,7 @@ export async function createTableReservation(event: H3Event, input: {
     })
     return creationResult({ success: true, status: 'checkout', replayed: true, ...checkout }, { status: 200 })
   }
-  await assertPublicOrganizationLanguageEntitlement(env, db, organizationId, locale)
+  await assertPublicOrganizationLanguage(db, organizationId, locale)
   const policy = await requireLocationReservationConfig(db, { organizationId, locationId: resolvedLocationId })
   // Checked and frozen before any table or deposit: a deposit checkout's thread carries them.
   const answers = await acceptFormAnswers(db, { kind: 'reservation', organizationId, locationId: resolvedLocationId }, { locale, answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })
@@ -222,6 +223,12 @@ export async function createTableReservation(event: H3Event, input: {
   payload.provenance = { source: operator?.source ?? 'website', external_reference: operator?.externalReference ?? null, actor_user_id: operator?.userId ?? null,
     idempotency_key: idempotencyKey, fingerprint, guest_acknowledgement: operator?.guestAcknowledgement ?? true, creation_kind: requiresDeposit ? 'checkout' : 'ordinary', creation_status: 'confirmed', followups_completed: false }
   payload.cancellation = { token_hash: cancellationTokenHash, expires_at: cancellation.expiresAt, used_at: null }
+  // The reservation's own message opens its conversation, stated where it is.
+  const place = await queryFirst<{ title: string }>(db, 'SELECT title FROM business_locations WHERE id = ? AND organization_id = ?', [resolvedLocationId, organizationId])
+  if (!place) throw new HTTPError({ statusCode: 404, message: 'The reservation location does not exist' })
+  if (!slot) throw new Error('A reservation has no selected time')
+  const opening = { body: openingSentence({ kind: 'reservation', guestName: payload.guest.name ?? name, guestPhone: payload.guest.phone, answers: payload.answers,
+    partySize, partySizeIsMinimum: guests.endsWith('+'), startsAt: slot.starts_at, timezone: availability.timezone, placeTitle: place.title }) }
 
   if (requiresDeposit) {
     if (!env.STRIPE_SECRET_KEY || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) return creationResult({ error: 'Payments provider configuration is incomplete', code: 'payments_unavailable' }, { status: 503 })
@@ -233,7 +240,7 @@ export async function createTableReservation(event: H3Event, input: {
       origin: operator ? null : { request: event.req, pageEventId: readPageEventId(body.page_event_id) },
       following: paymentId => requestInsertQueries({ id, kind: 'reservation', organization_id: organizationId, location_id: resolvedLocationId,
         user_id: userId, review_id: null, conversation_state: 'waiting_on_guest', resolved_at: null, payload, created_at: now, updated_at: now,
-      }, { query: "SELECT 1 FROM payment_checkout_holds WHERE payment_id = ? AND status = 'active'", params: [paymentId] }),
+      }, { query: "SELECT 1 FROM payment_checkout_holds WHERE payment_id = ? AND status = 'active'", params: [paymentId] }, opening),
     })
     return creationResult({ success: true, status: 'checkout', ...checkout }, { status: 201 })
   }
@@ -253,7 +260,7 @@ export async function createTableReservation(event: H3Event, input: {
         id, kind: 'reservation', organization_id: organization.id,
         location_id: resolvedLocationId, user_id: userId, review_id: null,
         conversation_state: 'needs_attention', resolved_at: null, payload, created_at: now, updated_at: now,
-      }, { query: 'SELECT 1 FROM reservations WHERE id = ?', params: [reservationId] }), {
+      }, { query: 'SELECT 1 FROM reservations WHERE id = ?', params: [reservationId] }, opening), {
         query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, actor_user_id, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
           SELECT ?, ?, 'operation', 'request', ?, ?, 'reservation.created', json_object('operational_reservation_id', id, 'afterStatus', status), ?,
             COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id = ?), 0) + 1, ?, ? FROM reservations WHERE id = ? AND EXISTS (SELECT 1 FROM requests WHERE id = ?)`,

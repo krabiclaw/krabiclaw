@@ -19,6 +19,7 @@ import { resolveProductPresentation } from '~/utils/product-presentation'
 import { blogEditorPath, brandEditorPath, collectionEditorPath, locationEditorPath, pageEditorPath, postEditorPath, productEditorPath, qaEditorPath } from '~/server/utils/dashboard-links'
 import type { PublicSearchTypeFilter } from '~/server/utils/platform-search-types'
 import { renderContentBlocksForLlm } from '~/server/utils/platform-llm'
+import { markdownToPlainText } from '~/utils/markdown'
 import { articleCategoryNameSql } from '~/server/utils/content/article-categories'
 
 const AI_SEARCH_CUSTOM_METADATA: AiSearchConfig['custom_metadata'] = [
@@ -126,7 +127,7 @@ async function renderBodiesByDocument(db: DbClient, rows: ContentBlockBodyRow[] 
     blocks.set(key, items)
   }
   return new Map(await Promise.all([...blocks].map(async ([key, items]) => [key,
-    renderContentBlocksForLlm(await resolveMcpDocumentationBlocks(db, key, items)),
+    markdownToPlainText(renderContentBlocksForLlm(await resolveMcpDocumentationBlocks(db, key, items))),
   ] as const)))
 }
 

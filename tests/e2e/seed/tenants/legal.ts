@@ -1,6 +1,6 @@
 import type { CreateTenant } from '../seed.ts'
 import { SEED_SUBDOMAINS, type SeedTenant } from '../manifest.ts'
-import { everyDay, publishProfile, recordProduct, seedLocation, seedMedia, setWorkingHours, toolFor } from './common.ts'
+import { seedArticle, everyDay, publishProfile, recordProduct, seedLocation, seedMedia, setWorkingHours, toolFor } from './common.ts'
 
 const ATTORNEY_ID = 'user-e2e-ncls-owner'
 
@@ -95,6 +95,9 @@ export async function seedLegal(createTenant: CreateTenant): Promise<SeedTenant>
       data: { title: 'Talk to an attorney', description: 'Request a free consultation about your situation.', label: 'Request a consultation', url: '/schedule' },
       media: [{ asset_id: officeImage.id, slot: 'featured' }],
     })
+    const { category } = await tool<{ category: { id: string } }>('create_article_category', { collection: 'blog', name: 'Client guides' })
+    await tool('create_site_page', { path: '/blog', title: 'Legal guides', summary: 'Practical information from our legal team.', blocks: [] })
+    await seedArticle(tool, category.id, 'Preparing for your legal consultation', 'Bring the documents relevant to your matter and a list of questions for your attorney. Our legal team will explain the next steps during your consultation.')
     return tenant
   } finally { await owner.dispose() }
 }

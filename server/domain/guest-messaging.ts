@@ -8,6 +8,7 @@ import { isValidInstant } from '~/utils/timezone'
 import { messageListPage, messageText, messagingError, parseGuestMessageSchedule, type GuestMessageSchedule, type MessageListQuery } from './guest-message-schedule'
 import { CHECK_IN_MESSAGE_TITLE, planTemplateMessages, publishScheduledGuestMessageChange } from './scheduled-guest-messages'
 import type { GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { requireStays } from '~/server/utils/cms-capabilities'
 
 export interface MessageTemplateRow {
   id: string
@@ -74,6 +75,7 @@ export function messageTemplate(row: MessageTemplateRow): MessageTemplate {
 }
 
 export async function listMessageTemplates(db: DbClient, access: StayAccess, query: MessageListQuery) {
+  await requireStays(db, access.organizationId)
   const rows = await queryAll<MessageTemplateRow>(db, 'SELECT * FROM message_templates WHERE organization_id = ? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?',
     [access.organizationId, query.limit + 1, query.offset])
   const page = messageListPage(rows.map(messageTemplate), query)
@@ -89,6 +91,7 @@ export async function getMessageTemplate(db: DbClient, organizationId: string, t
 /** A full write names the message's text and its schedule; every automatic message has one. */
 export async function saveMessageTemplate(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, templateId: string | null, value: unknown, now = new Date().toISOString()): Promise<MessageTemplate> {
   manager(access)
+  await requireStays(db, access.organizationId)
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['title', 'body', 'schedule', 'expectedVersion'].includes(key))) {
     messagingError(422, 'INVALID_MESSAGING_FIELD', 'Provide title, body, schedule and the current expectedVersion when editing an automatic message', 'template')
   }
@@ -139,6 +142,7 @@ export async function saveMessageTemplate(db: DbClient, env: GuestInboxPublicati
 
 export async function deleteMessageTemplate(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, templateId: string, expectedVersion: unknown, now = new Date().toISOString()): Promise<void> {
   manager(access)
+  await requireStays(db, access.organizationId)
   const version = expectedTemplateVersion(expectedVersion)
   const current = await getMessageTemplate(db, access.organizationId, templateId)
   if (version !== current.version) messagingError(409, 'MESSAGE_TEMPLATE_VERSION_CONFLICT', 'This automatic message changed; reload it before deleting', 'expectedVersion')
@@ -216,6 +220,7 @@ export function scheduledGuestMessage(row: ScheduledGuestMessageRow) {
 /** Scheduled messages are guest correspondence: managers read them; a member looking after a home reads its stays as turnovers. */
 export async function listScheduledGuestMessages(db: DbClient, access: StayAccess, query: MessageListQuery, requestId: string | null) {
   if (!access.manage) messagingError(403, 'MESSAGING_ROLE_REQUIRED', 'Only workspace managers can read scheduled guest messages', 'permissions.operations.update')
+  await requireStays(db, access.organizationId)
   if (requestId !== null && !await getGuestRequest(db, requestId, access.organizationId)) {
     messagingError(404, 'THREAD_NOT_FOUND', 'This conversation is not in the workspace', 'requestId')
   }
@@ -230,6 +235,7 @@ export async function listScheduledGuestMessages(db: DbClient, access: StayAcces
 
 export async function cancelScheduledGuestMessage(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, messageId: string, now = new Date().toISOString()) {
   manager(access)
+  await requireStays(db, access.organizationId)
   const results = await executeBatch(db, [{ query: "UPDATE scheduled_guest_messages SET status = 'cancelled', reason = 'Cancelled by a workspace manager.', updated_at = ? WHERE id = ? AND organization_id = ? AND status = 'pending'", params: [now, messageId, access.organizationId] },
     organizationEventQuery({ organizationId: access.organizationId, actorId: access.actorId, eventType: 'scheduled_message.cancelled', entityType: 'scheduled_guest_message', entityId: messageId, onlyIfPreviousChangedOneRow: true })], { operation: 'Cancel scheduled message' })
   const current = await queryFirst<ScheduledGuestMessageRow>(db, 'SELECT * FROM scheduled_guest_messages WHERE organization_id = ? AND id = ?', [access.organizationId, messageId])

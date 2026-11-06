@@ -440,16 +440,16 @@ async function loadMailbox(request: APIRequestContext, mailbox: Mailbox) {
 }
 
 /**
- * A Past conversation nobody archived: its booking ended, so it offers neither
- * Archive nor Move to Messages. The experience seed has one; a run's own
- * archived contacts are Past too, and they offer Move to Messages.
+ * A Past conversation nobody archived: its booking ended and the owner has read
+ * it, so it offers neither Archive nor Move to Messages. The experience seed has
+ * one; a run's own archived contacts are Past too, and they offer Move to Messages.
  */
 async function endedConversation(request: APIRequestContext) {
   for (const thread of (await loadMailbox(request, 'past')).byId) {
     const actions = await loadThreadActions(request, thread.id)
     if (!actions.archive && !actions.unarchive) return thread
   }
-  throw new Error('The experience seed includes a booking that has ended, and no Past conversation is one')
+  throw new Error('The experience seed includes a booking that has ended and been read, and no Past conversation is one')
 }
 
 async function submitContact(request: APIRequestContext, guestName: string) {

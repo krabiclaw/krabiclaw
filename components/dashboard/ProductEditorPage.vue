@@ -89,7 +89,8 @@
     <UAlert v-if="arrivalTab && arrivalError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Arrival guide could not be loaded" :description="arrivalError" />
     <p v-if="arrivalTab && !arrivalHome && !arrivalError" role="status" class="w-full text-base text-muted">Loading arrival guide…</p>
     <!-- What this home costs on the plan, from the quote the write is decided by: included, billed, or past what Basic includes. -->
-    <UAlert v-if="homeQuoteError" class="mb-6 w-full" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(homeQuoteError, 'The plan could not be read')" />
+    <p v-if="homeQuotePending" role="status" class="mb-6 w-full text-sm text-muted">Loading home cost…</p>
+    <UAlert v-else-if="homeQuoteError" class="mb-6 w-full" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(homeQuoteError, 'The plan could not be read')" />
     <p v-else-if="homeBilling" data-testid="home-billing-line" class="mb-6 w-full text-sm text-muted">
       {{ homeBilling.text }}
       <NuxtLink v-if="homeBilling.billing" :to="homeBilling.billing" class="font-medium text-highlighted underline">Plan and billing</NuxtLink>
@@ -338,6 +339,8 @@ export interface ProductEditor {
   photoError: Ref<string | null>
   saveLabel: Ref<string>
   saveDisabled: Ref<boolean>
+  homeQuotePending: ComputedRef<boolean>
+  homeQuoteError: Readonly<Ref<unknown>>
   propertyTypeErrors: ComputedRef<Record<string, string>>
   setPrimaryImage: (assetId: string | null) => Promise<void>
   /** The photos after the cover, in order, and an empty row while one is being chosen. */
@@ -783,10 +786,11 @@ const editVersion = ref<string | null>(null)
  * `product`, not the form. A failed re-read fails the write that asked for it.
  */
 async function reload() {
+  const wasStay = product.value?.kind === 'stay'
   await refresh()
   if (loadFailure.value) throw loadFailure.value
   if (product.value) editVersion.value = product.value.updated_at
-  await Promise.all([refreshCatalog(), refreshHomeQuote()])
+  await Promise.all([refreshCatalog(), ...(wasStay !== (product.value?.kind === 'stay') ? [dashboard.refresh()] : [])])
 }
 
 // ── The weekly schedule ─────────────────────────────────
@@ -860,9 +864,10 @@ const form = reactive(draft.value)
 // home's is its share of the homes billed now.
 const homeQuoted = computed(() => !isNew.value && product.value?.kind === 'stay')
 const homeLive = computed(() => product.value?.stay?.live === true)
-const { quote: homeQuote, quoteError: homeQuoteError, refreshQuote: refreshHomeQuote } = await useHomesQuote(organizationId, () => homeLive.value ? 0 : 1, () => homeQuoted.value && !arrivalTab.value)
+const { quote: homeQuote, quoteError: homeQuoteError, quotePending: homeQuotePending } = useHomesQuote(organizationId, () => homeLive.value ? 0 : 1, () => homeQuoted.value && !arrivalTab.value)
 const homeBilling = computed<{ text: string; billing?: string } | null>(() => {
   if (isNew.value && form.kind === 'stay') return { text: 'A new home is a free draft until it is published or synced with Airbnb.' }
+  if (!homeQuoted.value || arrivalTab.value) return null
   const quote = homeQuote.value
   if (!quote) return null
   if (!quote.adding.allowed) return { text: `Basic includes ${quote.homes.included} live ${quote.homes.included === 1 ? 'home' : 'homes'}. Choose Growth or Business to publish this one.`, billing: `/dashboard/${String(route.params.orgSlug)}/billing` }
@@ -1747,7 +1752,11 @@ const sectionUnchanged = computed(() => {
 
 const creationNoun = computed(() => form.kind === 'service' ? 'practice area' : itemLabel.value.toLowerCase())
 const newTitle = computed(() => newRecordLabels(creationNoun.value).title)
-const saveDisabled = computed(() => saving.value || (isNew.value
+const saveDisabled = computed(() => saving.value
+  || (homeQuoted.value && !homeLive.value && editorKey.value === 'publication'
+    && form.active && ((form.published && !published.value) || product.value?.active === false)
+    && (homeQuotePending.value || Boolean(homeQuoteError.value) || !homeQuote.value))
+  || (isNew.value
   ? !createdProductId.value && (!form.kind || !form.name.trim() || Boolean(creationPriceError.value) || form.kind === 'stay' && (stayIncomplete() || Boolean(locationsError.value)))
   : !product.value || Boolean(loadError.value) || editVersion.value !== product.value.updated_at || !sectionValid.value || sectionUnchanged.value && !saveError.value))
 const pageTitle = computed(() => isNew.value ? newTitle.value : (experienceEditor.value ? product.value?.name : form.name) || itemLabel.value)
@@ -1856,7 +1865,8 @@ async function commit(concern?: ProductConcern) {
         const members = collectionProductIds(createCollectionId.value)
         await setCollectionProducts(createCollectionId.value, members.includes(createdId) ? members : [...members, createdId], members)
       }
-      await refreshCatalog()
+      // A business's first stay product gives it `stays`, which the dashboard context carries.
+      await Promise.all([refreshCatalog(), ...(form.kind === 'stay' && !dashboard.hasFeature('stays') ? [dashboard.refresh()] : [])])
       // The record it became, not the `new` form it was, so Back from a saved
       // product goes to Catalog and never to an empty Add screen.
       const destinationLocationId = form.kind === 'stay' ? form.stay_location_id : id
@@ -2396,6 +2406,8 @@ provide(productEditorKey, {
   photoError,
   saveLabel,
   saveDisabled,
+  homeQuotePending,
+  homeQuoteError,
   propertyTypeErrors,
   setPrimaryImage,
   galleryRows,

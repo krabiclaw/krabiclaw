@@ -30,7 +30,7 @@ import { PUBLIC_SUPPORT_FAQ_ENTRIES } from '~/utils/public-support'
 definePageMeta({ layout: 'standalone' })
 
 // A page about the business: its image is the organization's.
-const { social_image: organizationSocialImage, template: organizationTemplate } = useTenantOrganization().organization
+const { social_image: organizationSocialImage, site: organizationTemplate } = useTenantOrganization().organization
 if (organizationTemplate.slug !== 'platform') throw createError({ statusCode: 404, statusMessage: 'Page not found', fatal: true })
 useSocialMetadata({
   path: '/help',

@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { isLegalPracticeSite, PLATFORM_THEME_ID, resolvePublicTemplate } from '~/utils/template-registry'
+import { isLegalPracticeSite, PLATFORM_THEME_ID, resolvePublicSite } from '~/utils/site-routing'
 import { getPublicCompliance, getPublicConsultationSettings } from '~/server/utils/professional-services'
 import { deleteConfig, getConfig, setConfig } from '~/server/utils/organization-config'
 import { createSystemSubdomain, isSystemSubdomainSpent } from '~/server/utils/domains'
@@ -127,7 +127,7 @@ export async function loadSettingsPayload(
   }
 
   const siteConfig = await getConfig(db, organizationId)
-  const template = resolvePublicTemplate({ themeId: updatedOrganization.theme_id, vertical: updatedOrganization.vertical }).slug
+  const site = resolvePublicSite({ themeId: updatedOrganization.theme_id}).slug
   const [compliance, consultation] = isLegalPracticeSite({ vertical: updatedOrganization.vertical, themeId: updatedOrganization.theme_id })
     ? await Promise.all([getPublicCompliance(db, organizationId), getPublicConsultationSettings(db, organizationId)])
     : [null, null]
@@ -138,7 +138,7 @@ export async function loadSettingsPayload(
   return {
     id: updatedOrganization.id,
     subdomain: updatedOrganization.subdomain,
-    theme: template,
+    theme: site,
     status: updatedOrganization.status,
 
     public_url: updatedOrganization.public_url ? tenantOrganizationOrigin({
@@ -189,8 +189,8 @@ export async function loadSettingsPayload(
     // The website's booking switch exists only where consultation settings do.
     consultation_mode: consultation?.mode ?? updatedOrganization.consultation_mode,
     ...(consultation ? { address_visibility: compliance?.address_visibility ?? 'hidden' } : {}),
-    palette: template !== 'platform' ? resolveSitePalette(siteConfig.palette) : null,
-    palette_source: template !== 'platform' ? (siteConfig.palette ? 'custom' : 'default') : null,
+    palette: site !== 'platform' ? resolveSitePalette(siteConfig.palette) : null,
+    palette_source: site !== 'platform' ? (siteConfig.palette ? 'custom' : 'default') : null,
     font_preset: resolveOrganizationFontPreset(siteConfig.font_preset),
     // A choice the site has not made reads as absent: the Default applies.
     ...parseSiteRecipe(siteConfig),
@@ -311,7 +311,7 @@ async function attemptOrganizationUpdate(
     if (updates[key] !== undefined) settingsPatch.config = { ...(settingsPatch.config as Record<string, unknown> | undefined), [key]: updates[key] }
   }
   // Resolved to a whole palette by updateOrganizationSettingsFields; null removes
-  // it (json_patch deletes a key patched with null), returning to the template's.
+  // it (json_patch deletes a key patched with null), returning to the site's.
   if (updates.palette !== undefined) settingsPatch.config = { ...(settingsPatch.config as Record<string, unknown> | undefined), palette: updates.palette }
   if (updates.address_visibility !== undefined) settingsPatch.compliance = { address_visibility: updates.address_visibility }
   // The inquiry questions are replaced whole, and only over the list the caller read.

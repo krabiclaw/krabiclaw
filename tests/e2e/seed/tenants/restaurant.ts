@@ -1,6 +1,6 @@
 import type { CreateTenant } from '../seed.ts'
 import { SEED_SUBDOMAINS, type SeedTenant } from '../manifest.ts'
-import { everyDay, publishProfile, recordProduct, seedLocation, seedMedia, toolFor } from './common.ts'
+import { seedArticle, everyDay, publishProfile, recordProduct, seedLocation, seedMedia, toolFor } from './common.ts'
 
 // Ember & Slice is KrabiClaw's fictional pizzeria: two New York locations with
 // table reservations, a menu and a kitchen blog.
@@ -134,6 +134,7 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     }
 
     const { category } = await tool<{ category: { id: string; name: string } }>('create_article_category', { collection: 'blog', name: 'Kitchen', description: 'Notes from the kitchen' })
+    await seedArticle(tool, category.id, 'From the Ember & Slice kitchen', 'Our Brooklyn kitchen prepares seasonal dishes for our neighbours. Explore the menu and contact our team to plan your visit.')
     tenant.categories.kitchen = { id: category.id, name: category.name }
     const { category: specials } = await tool<{ category: { id: string; name: string } }>('create_article_category', { collection: 'blog', name: 'Specials', description: 'This week\'s specials' })
     tenant.categories.specials = { id: specials.id, name: specials.name }

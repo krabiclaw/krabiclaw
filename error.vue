@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-default px-6 py-12" :class="organization ? `${organization.template.slug}-theme` : 'platform-theme'" :style="paletteStyle" :data-font-preset="fontPreset">
+  <div class="min-h-screen flex items-center justify-center bg-default px-6 py-12" :class="organization ? `${organization.site.slug}-theme` : 'platform-theme'" :style="paletteStyle" :data-font-preset="fontPreset">
     <div class="w-full max-w-sm text-center">
       <div v-if="organization" class="mb-6 flex justify-center">
         <SiteLogo :alt="organization.name" size="md" loading="eager">
@@ -54,7 +54,7 @@ const isGone = computed(() => errorStatusCode.value === 410)
 // retains the already resolved identity of a known site, including hydration.
 const tenantContext = useState<TenantContext | undefined>('tenant-context', () => props.error.tenantContext)
 const organization = tenantContext.value?.organization
-const isPlatform = organization?.template.slug === 'platform'
+const isPlatform = organization?.site.slug === 'platform'
 const { fontPreset, paletteStyle } = usePublicSiteBrand(organization ?? null)
 const route = useRoute()
 

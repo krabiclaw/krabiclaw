@@ -39,7 +39,7 @@ export default defineHandler(async (event) => {
     const orgIds = organization.map((org: ApiValue) => org.id)
 
     const organizations = await queryAll(db, `
-      SELECT id, theme_id, name, slug, subdomain,
+      SELECT id, theme_id, name, slug, subdomain, vertical,
              (SELECT domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active' AND type = 'custom') AS custom_domain, status, "createdAt" AS created_at, updated_at,
              onboarding_status
       FROM organization

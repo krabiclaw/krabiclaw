@@ -270,7 +270,7 @@ provider-owned; this foundation does not edit pricing or synchronize marketing.
 ## Implementation context
 
 - [MCP contract](docs/mcp.md) and `server/utils/mcp-tools/index.ts` define the public tool surface.
-- `utils/template-registry.ts` owns customer template routing and presentation.
+- `utils/site-routing.ts` owns shared customer-site routing. `utils/template-marketing.ts` contains starting-design marketing copy only.
 - `server/domain/requests.ts` and `server/domain/guest-threads/` own guest activity and delivery receipts.
 - [Testing strategy](docs/testing-strategy.md) defines proof at real runtime boundaries.
 - [Local development](docs/local-development.md) defines the current Worker setup.

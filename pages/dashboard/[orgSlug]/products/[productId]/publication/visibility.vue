@@ -1,5 +1,6 @@
 <template>
-  <DashboardLeafPanel id="product-visibility" :title="isStay ? 'Listing status' : 'Status'" :lead="isStay ? undefined : `Choose whether ${legal ? 'clients' : 'customers'} can see this offering on your website.`" :saving="p.saving.value" :disabled="p.saveDisabled.value || (!p.saveError.value && p.form.published === p.published.value)" :save-label="p.saveLabel.value" :error="p.loadError.value || p.saveError.value || ''" :desktop-cancel="isStay" @cancel="p.revert" @save="p.save(level.to.value ?? undefined, 'publication-visibility')">
+  <DashboardLeafPanel id="product-visibility" :title="isStay ? 'Listing status' : 'Status'" :lead="isStay ? undefined : `Choose whether ${legal ? 'clients' : 'customers'} can see this offering on your website.`" :saving="p.saving.value" :disabled="p.saveDisabled.value || (!p.saveError.value && p.form.published === p.published.value)" :save-label="p.saveLabel.value" :error="p.loadError.value || p.saveError.value || (p.homeQuoteError.value ? getErrorMessage(p.homeQuoteError.value, 'The plan could not be read') : '')" :desktop-cancel="isStay" @cancel="p.revert" @save="p.save(level.to.value ?? undefined, 'publication-visibility')">
+    <p v-if="p.homeQuotePending.value" role="status" class="mb-6 text-sm text-muted">Loading home cost…</p>
     <URadioGroup
       v-if="isStay && !p.loadError.value"
       v-model="status"

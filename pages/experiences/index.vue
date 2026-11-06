@@ -1,5 +1,5 @@
 <template>
-  <NuxtLayout :name="template.layout">
+  <NuxtLayout :name="site.layout">
     <TenantPublicPage v-if="isPlatform" path="/experiences" />
     <TenantExperienceCatalog v-else />
   </NuxtLayout>
@@ -8,6 +8,6 @@
 <script setup lang="ts">
 definePageMeta({ layout: false })
 
-const { template } = useTenantOrganization().organization
-const isPlatform = template.slug === 'platform'
+const { site } = useTenantOrganization().organization
+const isPlatform = site.slug === 'platform'
 </script>

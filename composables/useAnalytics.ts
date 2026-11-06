@@ -91,8 +91,8 @@ async function postAuthenticatedInteraction(payload: Record<string, unknown>): P
 }
 
 export const useAnalytics = () => {
-  const { template } = useTenantOrganization().organization
-  const isPlatform = template.slug === 'platform'
+  const { site } = useTenantOrganization().organization
+  const isPlatform = site.slug === 'platform'
   const nuxtApp = useNuxtApp()
 
   const trackEvent = (eventName: AnalyticsEventName, input: AnalyticsEventInput = {}) => {

@@ -1,13 +1,14 @@
+import { ARTICLE_COLLECTIONS } from '../utils/article-collections'
 // Whether a site may hold a tenant page document at a path.
 //
-// One rule, over the two things that decide it: what the site's template maps to
+// One rule, over the two things that decide it: what the shared site definition maps to
 // a page document, and what the route table already claims. It replaced six
 // hand-maintained lists that disagreed with each other — the last disagreement
 // left six NCLS pages uneditable for two months, because pages/services/ was
 // deleted and a reserved list was not.
 
 import type { ClaimedRoute } from '../build/claimed-public-routes'
-import type { PublicTemplateDefinition } from '../utils/template-registry'
+import type { PublicSiteDefinition } from '../utils/site-routing'
 
 /**
  * Does a route pattern cover this concrete path?
@@ -46,32 +47,25 @@ export function isClaimedPublicPath(claims: readonly ClaimedRoute[], path: strin
   return claims.some(claim => patternMatchesPath(claim, path))
 }
 
-/** Paths where this template renders a tenant page document. */
-export function templatePageDocumentPaths(template: PublicTemplateDefinition): string[] {
-  return [...new Set([...Object.values(template.pageDocuments.recipes), ...template.pageDocuments.paths])]
+/** Paths where this site renders a tenant page document. */
+export function sitePageDocumentPaths(site: PublicSiteDefinition): string[] {
+  return [...new Set([...Object.values(site.pageDocuments.recipes), ...site.pageDocuments.paths])]
 }
 
-export function templateRendersPageDocumentAt(template: PublicTemplateDefinition, path: string): boolean {
-  return templatePageDocumentPaths(template).includes(path)
-    || (template.pageDocuments.patterns ?? []).some(pattern => patternMatchesPath({ pattern, subtree: false }, path))
-    || template.pageDocuments.prefixes.some(prefix => path.startsWith(prefix))
+export function siteRendersPageDocumentAt(site: PublicSiteDefinition, path: string): boolean {
+  // Article indexes read optional authored titles and summaries on every site.
+  return Object.values(ARTICLE_COLLECTIONS).some(collection => collection.pathPrefix === path)
+    || sitePageDocumentPaths(site).includes(path)
+    || (site.pageDocuments.patterns ?? []).some(pattern => patternMatchesPath({ pattern, subtree: false }, path))
+    || site.pageDocuments.prefixes.some(prefix => path.startsWith(prefix))
 }
 
-/**
- * A site may hold a page document at a path when its template renders one
- * there, or when the template reaches unclaimed paths through
- * pages/[...tenantPath].vue and nothing claims this one.
- *
- * Reaching the catch-all is a template property, not a universal one: the
- * catch-all throws 404 for platform sites, so the platform template can hold no
- * tenant page at all until its own renderer reads page documents.
- */
-export function templateAllowsPageDocumentAt(
-  template: PublicTemplateDefinition,
+/** A document is writable where the shared renderer reads it, or on an unclaimed path. */
+export function siteAllowsPageDocumentAt(
+  site: PublicSiteDefinition,
   claims: readonly ClaimedRoute[],
   path: string,
 ): boolean {
-  if (templateRendersPageDocumentAt(template, path)) return true
-  if (!template.pageDocuments.catchAll) return false
+  if (siteRendersPageDocumentAt(site, path)) return true
   return !isClaimedPublicPath(claims, path)
 }

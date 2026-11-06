@@ -10,7 +10,8 @@
     <div class="pb-10">
       <p v-if="!dashboard.canUpdateBilling.value && owner" class="mb-6 text-sm text-muted" data-testid="billing-owner-line">{{ owner }} is the owner and changes the plan and billing.</p>
       <UAlert v-if="billingError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(billingError, 'Failed to load billing')" />
-      <UAlert v-if="homesError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(homesError, 'Homes could not be loaded')" />
+      <p v-if="homesPending" role="status" class="mb-6 text-sm text-muted">Loading home cost…</p>
+      <UAlert v-else-if="homesError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(homesError, 'Homes could not be loaded')" />
       <UAlert v-if="servicesError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(servicesError, 'Services could not be loaded')" />
       <UAlert v-if="methodsError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(methodsError, 'Payment methods could not be loaded')" />
       <UAlert v-if="ownerError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(ownerError, 'The owner could not be loaded')" />
@@ -59,7 +60,7 @@ const { formatExactDateTime } = useHumanTime()
 const { plans, formatPrice, formatRecurring } = await usePlans()
 
 const organizationId = useDashboardOrganizationId()
-const [{ billing, billingError, refreshBilling }, { services, servicesError }, { methods, methodsError }, { quote: homes, quoteError: homesError, refreshQuote: refreshHomes }] = await Promise.all([
+const [{ billing, billingError, refreshBilling }, { services, servicesError }, { methods, methodsError }, { quote: homes, quoteError: homesError, quotePending: homesPending, refreshQuote: refreshHomes }] = await Promise.all([
   useOrganizationBilling(), useOrganizationServices(), usePaymentMethods(), useHomesQuote(organizationId, 0),
 ])
 
@@ -139,7 +140,7 @@ const firstLeaf = computed(() => !dashboard.canUpdateBilling.value ? null : chan
 // charged nothing for them, so the row says so.
 const homesRow = computed<EditorNavigationItem | null>(() => {
   const current = homes.value
-  if (!current || (!current.homes.used && !current.homes.drafts && dashboard.organization.value?.vertical !== 'lodging')) return null
+  if (!current || !dashboard.hasFeature('stays')) return null
   const counted = `${current.homes.used} live · ${current.homes.drafts} ${current.homes.drafts === 1 ? 'draft' : 'drafts'}`
   const summary = current.homes.limit !== null
     ? `${counted} · This plan includes ${current.homes.limit}`

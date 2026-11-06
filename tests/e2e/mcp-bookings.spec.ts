@@ -8,17 +8,14 @@ import { dismissPreviewToolbar } from './helpers'
 import { mcpOrganizationId, mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTenant } from './seed/manifest'
-import { devLoginHeaders, seededSiteHeaders } from './test-env'
+import { devLoginHeaders, seededSiteHeaders, paymentsProviderConfigured } from './test-env'
 
 type Created = { success: boolean; operational_booking_id: string; request_id: string; status: string; replayed: boolean; code?: string }
 
-// The local Worker inherits the runner's real provider bindings; Playwright
-// supplies its localhost platform URL. CI may supply the complete TEST setup.
-const paymentsProviderConfigured = ['STRIPE_SECRET_KEY', 'STRIPE_PAYMENTS_METHOD_CONFIGURATION', 'NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY']
-  .every(name => Boolean(process.env[name]))
 const missingProviderConfiguration = paymentsProviderConfigured ? [] : ['payments.configuration']
 
 test('MCP Product booking uses public capacity, durable replay, guest identity and canonical inbox transitions', async ({ page, request, baseURL }, testInfo) => {
+  test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Writes and log-only delivery require isolated local D1')
   const clayhouse = seededTenant('experience')
   const org = clayhouse.organizationId

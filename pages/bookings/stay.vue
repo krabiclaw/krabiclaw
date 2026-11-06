@@ -1,5 +1,5 @@
 <template>
-  <NuxtLayout :name="template.layout">
+  <NuxtLayout :name="site.layout">
   <div class="min-h-screen bg-default text-default">
     <div v-if="pending" class="flex min-h-screen items-center justify-center">
       <TenantIcon name="arrow-path" class="size-12 animate-spin text-muted" />
@@ -67,7 +67,7 @@ useResponseHeader('cache-control').value = 'private, no-store'
 const { locale, localePath, t } = useI18n()
 const route = useRoute()
 const { organization } = useTenantOrganization()
-const { template } = organization
+const { site } = organization
 const copy = computed(() => getVerticalCopy(organization.vertical, locale.value))
 
 type ManagedGuestStay = GuestStay & { manage_url: string | null }
