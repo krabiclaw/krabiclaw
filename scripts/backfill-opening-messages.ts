@@ -5,8 +5,8 @@
 // formatting), so this is the migration for the rows already there.
 // Idempotent: a conversation that has its opening is skipped.
 //
-//   node --experimental-strip-types --import ./tests/unit/support/register-aliases.mjs scripts/backfill-opening-messages.ts --staging
-//   node --experimental-strip-types --import ./tests/unit/support/register-aliases.mjs scripts/backfill-opening-messages.ts --production
+//   yarn db:openings --staging
+//   yarn db:openings --production
 import { parseArgs } from 'node:util'
 import { Miniflare } from 'miniflare'
 import { startRemoteProxySession, unstable_readConfig } from 'wrangler'
