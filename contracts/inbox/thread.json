@@ -1,0 +1,186 @@
+{
+  "thread": {
+    "activityPath": null,
+    "avatarInitial": "M",
+    "channel": "airbnb",
+    "composer": {
+      "available": true,
+      "channel": "airbnb"
+    },
+    "guestName": "Mililani",
+    "home": "74 D · Sky",
+    "id": "00000000-0000-4000-8000-000000000017",
+    "kind": "guest",
+    "pending": [
+      {
+        "body": "Enjoy your stay!",
+        "cancellable": true,
+        "id": "00000000-0000-4000-8000-000000000044",
+        "label": "Enjoy your stay!",
+        "sendAt": "2026-11-08T23:00:00.000Z",
+        "source": "later",
+        "time": "Sun, Nov 8, 4:00 PM"
+      }
+    ],
+    "recordId": "00000000-0000-4000-8000-000000000007",
+    "recordKind": "stay",
+    "recordTitle": "Reservation",
+    "stream": [
+      {
+        "id": "day:00000000-0000-4000-8000-000000000021",
+        "label": "Yesterday",
+        "type": "day"
+      },
+      {
+        "author": "Mililani",
+        "body": "In winter, can we park on the street?",
+        "id": "00000000-0000-4000-8000-000000000021",
+        "label": null,
+        "photos": [],
+        "receipt": null,
+        "retryable": false,
+        "sentAt": "2026-11-04T18:16:00.000Z",
+        "side": "guest",
+        "time": "11:16 AM",
+        "translated": {
+          "original": "¿En invierno dejan aparcar en la calle?"
+        },
+        "type": "message",
+        "unshownFiles": 0
+      },
+      {
+        "author": "Mililani",
+        "body": null,
+        "id": "00000000-0000-4000-8000-000000000022",
+        "label": null,
+        "photos": [
+          {
+            "height": 3,
+            "id": "00000000-0000-4000-8000-000000000023",
+            "thumbnailUrl": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000023.avif",
+            "url": "https://media.example.test/organizations/org-contract/media/00000000-0000-4000-8000-000000000023.avif",
+            "width": 4
+          }
+        ],
+        "receipt": null,
+        "retryable": false,
+        "sentAt": "2026-11-04T18:17:00.000Z",
+        "side": "guest",
+        "time": null,
+        "translated": null,
+        "type": "message",
+        "unshownFiles": 0
+      },
+      {
+        "author": "You",
+        "body": "Yes, the street facing downhill is easiest.",
+        "id": "00000000-0000-4000-8000-000000000027",
+        "label": null,
+        "photos": [],
+        "receipt": null,
+        "retryable": false,
+        "sentAt": "2026-11-04T18:23:00.000Z",
+        "side": "business",
+        "time": "11:23 AM",
+        "translated": null,
+        "type": "message",
+        "unshownFiles": 0
+      },
+      {
+        "author": "Mililani",
+        "body": "Thank you! What time is check-in?",
+        "id": "00000000-0000-4000-8000-000000000028",
+        "label": null,
+        "photos": [],
+        "receipt": null,
+        "retryable": false,
+        "sentAt": "2026-11-04T18:31:00.000Z",
+        "side": "guest",
+        "time": "11:31 AM",
+        "translated": null,
+        "type": "message",
+        "unshownFiles": 0
+      },
+      {
+        "id": "day:automatic-contract",
+        "label": "Today",
+        "type": "day"
+      },
+      {
+        "author": "Skyler · Automatic",
+        "body": "Your door code is 1106. Garage D is unlocked.",
+        "id": "automatic-contract",
+        "label": "Check-in instructions",
+        "photos": [],
+        "receipt": null,
+        "retryable": false,
+        "sentAt": "2026-11-05T19:00:00.000Z",
+        "side": "business",
+        "time": "12:00 PM",
+        "translated": null,
+        "type": "message",
+        "unshownFiles": 0
+      },
+      {
+        "change": {
+          "after": {
+            "assignedMemberId": null,
+            "assignedMemberName": null,
+            "partySize": 2,
+            "totalLabel": "$900.00",
+            "whenLabel": "Nov 8, 2026 – Nov 14, 2026"
+          },
+          "before": {
+            "assignedMemberId": null,
+            "assignedMemberName": null,
+            "partySize": 2,
+            "totalLabel": "$600.00",
+            "whenLabel": "Nov 8, 2026 – Nov 12, 2026"
+          },
+          "channel": "airbnb",
+          "guestName": "Mililani Garcia",
+          "locale": "en",
+          "locationTitle": "74 D · Sky",
+          "noun": "stay",
+          "originalLocationTitle": "74 D · Sky",
+          "requestedBy": "guest",
+          "status": "pending",
+          "type": "stay",
+          "vertical": "lodging"
+        },
+        "id": "00000000-0000-4000-8000-000000000036",
+        "sentAt": "2026-11-05T19:00:00.000Z",
+        "type": "change"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000041",
+        "sentAt": "2026-11-05T19:00:00.000Z",
+        "text": "You archived this conversation",
+        "type": "event"
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000042",
+        "sentAt": "2026-11-05T19:00:00.000Z",
+        "text": "You moved this conversation back to Messages",
+        "type": "event"
+      },
+      {
+        "author": "You",
+        "body": "Check-in is from 4 PM.",
+        "id": "00000000-0000-4000-8000-000000000043",
+        "label": null,
+        "photos": [],
+        "receipt": "Not delivered",
+        "retryable": true,
+        "sentAt": "2026-11-05T19:00:00.000Z",
+        "side": "business",
+        "time": "12:00 PM",
+        "translated": null,
+        "type": "message",
+        "unshownFiles": 0
+      }
+    ],
+    "translated": true,
+    "when": "In 3 days"
+  }
+}

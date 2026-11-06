@@ -43,6 +43,7 @@ jobs:
       - run: yarn test:unit
       - run: yarn test:d1
       - run: yarn mcp:catalog
+      - run: yarn contracts
       - run: yarn chatgpt:submission:check
       - run: yarn lint:migrations
       - run: yarn lint:schema-drift

@@ -100,7 +100,8 @@ async function unreadTeamThreads(env: CloudflareEnv, db: DbClient, principal: Me
 }
 
 /** The inbox list and its unread counts for a member whose access is resolved. */
-async function memberInbox(env: CloudflareEnv, db: DbClient, organizationId: string, principal: MemberAccessPrincipal, query: DashboardGuestThreadListQuery): Promise<InboxListPage & { unread: InboxUnreadCounts }> {
+/** The inbox list response the dashboard routes return; the contract fixtures in contracts/inbox are generated from it. */
+export async function memberInbox(env: CloudflareEnv, db: DbClient, organizationId: string, principal: MemberAccessPrincipal, query: DashboardGuestThreadListQuery): Promise<InboxListPage & { unread: InboxUnreadCounts }> {
   const options = {
     limit: (query.limit ?? 100) + 1,
     offset: query.offset ?? 0,
