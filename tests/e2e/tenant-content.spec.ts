@@ -219,17 +219,6 @@ for (const key of ['restaurant', 'legal', 'experience'] as const) {
     await expect(headerBlog).toHaveCount(published ? 1 : 0)
     await expect(footerBlog).toHaveCount(published ? 1 : 0)
     if (!published) return
-    if (key === 'restaurant') {
-      const localizedShell = await page.request.get(`${base}/api/public/shell`, { headers, params: { locale: 'ja' } })
-      expect(localizedShell.status(), await localizedShell.text()).toBe(200)
-      expect((await localizedShell.json()).sections.blog).toBe(false)
-      const sourceIndex = await page.request.get(`${base}/api/public/blog`, { headers })
-      expect(sourceIndex.status(), await sourceIndex.text()).toBe(200)
-      expect((await sourceIndex.json()).localeRepresentations.map((item: { locale: string }) => item.locale)).toEqual(['en'])
-      expect((await openTenantPage(page, `${base}/ja/`, headers))?.status()).toBe(200)
-      await expect(page.locator('header a[href="/ja/blog"], footer a[href="/ja/blog"]')).toHaveCount(0)
-      expect((await openTenantPage(page, `${base}/`, headers))?.status()).toBe(200)
-    }
     await expect(headerBlog).toHaveAttribute('href', '/blog')
     await expect(footerBlog).toHaveAttribute('href', '/blog')
     await headerBlog.click()

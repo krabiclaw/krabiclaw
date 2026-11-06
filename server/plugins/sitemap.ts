@@ -1,4 +1,3 @@
-import { getSourceLocale } from '~/server/utils/organization-locales'
 import type { ProductKind } from '~/shared/product-details'
 import { catalogNavigation, locationSurfacePath, productSurfaceOf, presentationForProduct, resolveProductPresentation } from '~/utils/product-presentation'
 import { PUBLIC_CONTENT_SECTION_QUERIES, PUBLIC_CONTENT_SECTIONS, productCatalogRows, publicContentSectionRows, publicSections, type PublicContentSectionRow } from '~/server/utils/public-shell-query'
@@ -160,10 +159,7 @@ export default definePlugin((nitroApp) => {
 
     const site = resolvePublicSite({ themeId: organization.theme_id})
     const productPresentation = resolveProductPresentation(organization.vertical)
-    const [publicProducts, sourceLocale] = await Promise.all([
-      listOrganizationProducts(db, { organizationId, publishedOnly: true, env }),
-      getSourceLocale(db, organizationId),
-    ])
+    const publicProducts = await listOrganizationProducts(db, { organizationId, publishedOnly: true, env })
     const publicProductIds = JSON.stringify(publicProducts.map(product => product.id))
 
     const localizedLocales = await queryAll<{ locale: string; organization_id: string }>(db, `
@@ -272,7 +268,7 @@ export default definePlugin((nitroApp) => {
       ),
       listSitemapArticleEntries(db, organizationId),
       listPublishedTenantSitemapPages(db, organizationId),
-      Promise.all(PUBLIC_CONTENT_SECTIONS.map(async section => [section, await queryAll<PublicContentSectionRow>(db, PUBLIC_CONTENT_SECTION_QUERIES[section], section === 'blog' ? [sourceLocale, organizationId] : [organizationId])] as const))
+      Promise.all(PUBLIC_CONTENT_SECTIONS.map(async section => [section, await queryAll<PublicContentSectionRow>(db, PUBLIC_CONTENT_SECTION_QUERIES[section], [organizationId])] as const))
         .then(entries => new Map(entries)).then(rows => publicContentSectionRows(section => rows.get(section)!)),
     ])
     // The sections the site's navigation offers, from the same flags.
