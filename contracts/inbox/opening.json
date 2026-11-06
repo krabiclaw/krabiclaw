@@ -1,0 +1,58 @@
+{
+  "thread": {
+    "activityPath": null,
+    "avatarInitial": "A",
+    "channel": "direct",
+    "composer": {
+      "available": true,
+      "channel": "email"
+    },
+    "guestName": "Ana Ruiz",
+    "home": "74 D · Sky",
+    "id": "00000000-0000-4000-8000-000000000047",
+    "kind": "guest",
+    "pending": [],
+    "recordId": "site-stay",
+    "recordKind": "stay",
+    "recordTitle": "Reservation",
+    "stream": [
+      {
+        "id": "day:00000000-0000-4000-8000-000000000050",
+        "label": "Today",
+        "type": "day"
+      },
+      {
+        "author": "Ana Ruiz",
+        "body": "74 D · Sky from Fri, Nov 20 to Mon, Nov 23 for 2 guests. Ana Ruiz, +1 303 555 0123.",
+        "id": "00000000-0000-4000-8000-000000000050",
+        "label": null,
+        "photos": [],
+        "receipt": null,
+        "retryable": false,
+        "sentAt": "2026-11-05T19:00:00.000Z",
+        "side": "guest",
+        "time": "12:00 PM",
+        "translated": null,
+        "type": "message",
+        "unshownFiles": 0
+      },
+      {
+        "author": "Ana Ruiz",
+        "body": "We arrive late, around 9 PM.",
+        "id": "00000000-0000-4000-8000-000000000051",
+        "label": null,
+        "photos": [],
+        "receipt": null,
+        "retryable": false,
+        "sentAt": "2026-11-05T19:00:00.000Z",
+        "side": "guest",
+        "time": null,
+        "translated": null,
+        "type": "message",
+        "unshownFiles": 0
+      }
+    ],
+    "translated": false,
+    "when": "Nov 20 – 23"
+  }
+}

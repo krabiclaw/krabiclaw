@@ -2,7 +2,7 @@ import { buyerRequestActivityPath } from '~/server/domain/payments/buyer'
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { getGuestRequest, getThreadOperationalRecord, requestSummary, requestActions, stayPreview } from '~/server/domain/requests'
 import { formatOperationalStatusLabel } from './status-labels'
-import { resolveGuestThreadMailbox } from './mailbox'
+import { readMailboxActivity, resolveGuestThreadMailbox } from './mailbox'
 import { listThreadEntries, parseEntryPayload, isBuyerVisibleThreadEntry } from './entries'
 import { isDeliverySent, isVisibleDeliveryFailure, listThreadDeliveries } from './deliveries'
 import { listMessagePhotos } from './attachments'
@@ -32,6 +32,8 @@ export async function getGuestThreadDetail(
   threadId: string,
   organizationId: string,
   audience?: { buyerUserId: string },
+  /** The member reading it, whose unread alerts keep an ended conversation Current; null reads none. */
+  viewerUserId?: string | null,
 ): Promise<GuestThreadDetailViewModel | null> {
   const now = new Date().toISOString()
   const thread = await getGuestRequest(db, threadId, organizationId, undefined, audience?.buyerUserId)
@@ -119,7 +121,8 @@ export async function getGuestThreadDetail(
   })
 
   const summary = await requestSummary(db, thread, record)
-  const mailbox = resolveGuestThreadMailbox(thread, record, now, audience?'buyer':'member')
+  // A member's unread alerts keep an ended conversation in Current for them; a guest's inbox reads no member alerts.
+  const mailbox = resolveGuestThreadMailbox(thread, record, now, await readMailboxActivity(db, thread.id, audience ? null : viewerUserId ?? null), audience?'buyer':'member')
 
   return {
     id: thread.id,
@@ -200,6 +203,8 @@ function actorLabel(entry: GuestThreadEntryRow, mirrored: boolean, actorNames: M
   // The host's Airbnb messages are the business's side, whoever typed them on Airbnb.
   if (mirrored) return entry.actor_kind === 'system' ? 'Airbnb' : entry.actor_kind === 'member' ? business : null
   if (entry.event_name === 'thread.scheduled_message') return 'Scheduled message'
+  // The booking's own message, written with the record: no one on the team said it.
+  if (entry.event_name === 'thread.opening') return null
   if (entry.actor_user_id) {
     const name = actorNames.get(entry.actor_user_id)
     if (!name?.trim()) throw new HTTPError({ statusCode: 500, message: 'The entry actor has no account name', data: { code: 'INVALID_GUEST_THREAD_ENTRY', field: 'actor_user_id', entry_id: entry.id } })

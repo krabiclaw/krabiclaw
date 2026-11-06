@@ -1,3 +1,4 @@
+import { openingMessageQueries } from '~/server/domain/guest-threads/opening'
 import { z } from 'zod'
 import { HTTPError } from 'nitro'
 import { guestReservationRefundQueries } from '~/server/domain/payments/visit-refund'
@@ -235,7 +236,12 @@ export async function getThreadOperationalRecord(db: DbClient, requestId: string
  *
  * A new thread has not been archived or blocked by anyone, so it carries neither state.
  */
-export function requestInsertQueries(request: Omit<GuestRequest, 'archived_at' | 'archived_by_user_id' | 'blocked_at'>, claimedBy?: BatchQuery): BatchQuery[] {
+/**
+ * A guest thread and its submission, and, for a reservation or booking, the
+ * messages that open its conversation: the booking's own sentence (`opening`,
+ * from `openingSentence`) and the guest's note.
+ */
+export function requestInsertQueries(request: Omit<GuestRequest, 'archived_at' | 'archived_by_user_id' | 'blocked_at'>, claimedBy?: BatchQuery, opening?: { body: string }): BatchQuery[] {
   const provenance = (request.kind === 'booking' || request.kind === 'reservation') && 'provenance' in request.payload ? request.payload.provenance : undefined
   const values = [request.id, request.kind, request.organization_id, request.location_id, request.user_id, request.review_id,
     request.conversation_state, request.resolved_at, JSON.stringify(request.payload), request.created_at, request.updated_at]
@@ -250,7 +256,8 @@ export function requestInsertQueries(request: Omit<GuestRequest, 'archived_at' |
     query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, payload_json, dedupe_key, sequence, occurred_at, created_at)
       SELECT ?, id, 'submission', 'request', ?, ?, ?, json_object('kind', kind), ?, 1, created_at, created_at FROM requests WHERE id = ? AND changes() = 1`,
     params: [crypto.randomUUID(), provenance?.actor_user_id ? 'member' : 'guest', provenance?.actor_user_id ?? request.user_id, provenance?.actor_user_id ? 'system' : 'web', `request:${request.id}:submission`, request.id],
-  }, publicResourceCacheInvalidationQuery(request.organization_id, 'guest-thread-create')]
+  }, ...(opening ? openingMessageQueries({ target: { requestId: request.id }, body: opening.body, note: 'notes' in request.payload ? request.payload.notes : null, guestUserId: request.user_id, at: request.created_at }) : []),
+  publicResourceCacheInvalidationQuery(request.organization_id, 'guest-thread-create')]
 }
 
 /**

@@ -1,5 +1,20 @@
-export default defineNuxtPlugin(() => {
+export default defineNuxtPlugin((nuxtApp) => {
   const route = useRoute()
+
+  if (import.meta.client && 'serviceWorker' in navigator) {
+    usePwaInstall()
+    watch(
+      () => route.path.startsWith('/dashboard'),
+      (inDashboard) => {
+        if (inDashboard) {
+          void navigator.serviceWorker.register('/sw.js', { scope: '/dashboard/' }).catch((error) => {
+            nuxtApp.callHook('vue:error', error, null, 'dashboard-service-worker-registration')
+          })
+        }
+      },
+      { immediate: true },
+    )
+  }
 
   useHead(() => {
     if (!route.path.startsWith('/dashboard')) return {}

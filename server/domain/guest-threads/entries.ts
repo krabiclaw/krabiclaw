@@ -177,7 +177,7 @@ export const BUYER_OPERATION_EVENTS = [
 /** Guest-visible facts; staff diagnostics and financial disputes have no buyer audience. */
 export function isBuyerVisibleThreadEntry(entry:GuestThreadEntryRow):boolean {
  return entry.kind==='submission'
-  || (entry.kind==='message'&&((entry.actor_kind==='guest'&&['web','email','whatsapp'].includes(entry.channel??''))||(entry.actor_kind==='member'&&entry.event_name==='thread.member_reply')||(entry.actor_kind==='system'&&entry.event_name==='thread.scheduled_message')))
+  || (entry.kind==='message'&&((entry.actor_kind==='guest'&&['web','email','whatsapp'].includes(entry.channel??''))||(entry.actor_kind==='member'&&entry.event_name==='thread.member_reply')||(entry.actor_kind==='system'&&(entry.event_name==='thread.scheduled_message'||entry.event_name==='thread.opening'))))
   || (entry.kind==='operation'&&(BUYER_OPERATION_EVENTS as readonly string[]).includes(entry.event_name??''))
 }
 /** The same public activity vocabulary, with per-user canonical acknowledgement rows. */
