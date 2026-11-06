@@ -147,7 +147,7 @@ SELECT \`id\`, \`organization_id\`, \`operation\`, \`subject_id\`, \`evidence_re
 FROM (SELECT *, row_number() OVER (PARTITION BY \`organization_id\`, \`operation\`, \`subject_id\`, \`evidence_revision\`, coalesce(\`goal_id\`, '') ORDER BY \`updated_at\` DESC, \`id\` DESC) AS \`latest\` FROM \`recommendation_feedback\`)
 WHERE \`latest\` = 1;
 INSERT INTO \`tasks\` (\`id\`, \`organization_id\`, \`kind\`, \`subject_type\`, \`subject_id\`, \`product_id\`, \`opportunity_id\`, \`title\`, \`assigned_member_id\`, \`timezone\`, \`status\`, \`dedupe_key\`, \`version\`, \`created_by_user_id\`, \`created_at\`, \`updated_at\`)
-SELECT lower(hex(randomblob(16))), o.\`organization_id\`, 'opportunity',
+SELECT 'opportunity-task:' || o.\`id\`, o.\`organization_id\`, 'opportunity',
   CASE WHEN o.\`operation\` IN ('article.update', 'article.publish', 'article.distribute') THEN 'article' WHEN o.\`operation\` = 'post.publish' THEN 'post'
     WHEN o.\`operation\` = 'product.payment' AND p.\`id\` IS NOT NULL THEN 'product' WHEN o.\`operation\` = 'stay.gap' AND p.\`id\` IS NOT NULL THEN 'product'
     WHEN o.\`operation\` = 'guest_thread.reply' THEN 'request' END,

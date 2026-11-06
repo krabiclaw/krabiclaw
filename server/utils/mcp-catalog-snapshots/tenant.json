@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:0bd6374402f58a13a61a4562bc8c50ff8c7bd340208f9ad8c2fb9a9de78868ee",
-  "documentationFingerprint": "sha256:2d735f286679387716894591811c8f7aa18d9473c4f38337698623fbb8f601b5",
+  "fingerprint": "sha256:d68117d580ebbbd1f5c87aba4d16c4c13de327e818bd0bd7b02c3e558e0a7a08",
+  "documentationFingerprint": "sha256:cd3575fbf800ce897283fa93b87baaa6e7b66c00928a260e7b7291aebb7919a2",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -54,7 +54,10 @@
           "task": {
             "properties": {
               "action": {
-                "type": "object"
+                "type": [
+                  "object",
+                  "null"
+                ]
               },
               "assignee": {
                 "anyOf": [
@@ -92,6 +95,12 @@
                   {
                     "type": "null"
                   }
+                ]
+              },
+              "avatar": {
+                "type": [
+                  "object",
+                  "null"
                 ]
               },
               "can": {
@@ -133,11 +142,27 @@
                   "null"
                 ]
               },
-              "eyebrow": {
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "face": {
+                "enum": [
+                  "photo",
+                  "compact"
+                ],
                 "type": "string"
               },
               "id": {
                 "type": "string"
+              },
+              "imageUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "kind": {
                 "enum": [
@@ -150,6 +175,12 @@
                 "type": "string"
               },
               "locationId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
                 "type": [
                   "string",
                   "null"
@@ -173,6 +204,44 @@
                   "null"
                 ]
               },
+              "person": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "productId": {
                 "type": [
                   "string",
@@ -184,6 +253,9 @@
                   "string",
                   "null"
                 ]
+              },
+              "sheet": {
+                "type": "object"
               },
               "startsAt": {
                 "type": [
@@ -200,7 +272,19 @@
                 ],
                 "type": "string"
               },
+              "statusLine": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "stayId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tag": {
                 "type": [
                   "string",
                   "null"
@@ -214,6 +298,12 @@
               },
               "version": {
                 "type": "integer"
+              },
+              "when": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -221,10 +311,19 @@
               "kind",
               "status",
               "version",
-              "eyebrow",
+              "face",
+              "tag",
+              "imageUrl",
+              "avatar",
+              "statusLine",
               "title",
+              "when",
               "detail",
+              "error",
+              "note",
+              "person",
               "assignee",
+              "sheet",
               "startsAt",
               "dueAt",
               "timezone",
@@ -247,7 +346,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
         "title": "Accept opportunity"
@@ -13898,7 +13997,10 @@
           "task": {
             "properties": {
               "action": {
-                "type": "object"
+                "type": [
+                  "object",
+                  "null"
+                ]
               },
               "assignee": {
                 "anyOf": [
@@ -13936,6 +14038,12 @@
                   {
                     "type": "null"
                   }
+                ]
+              },
+              "avatar": {
+                "type": [
+                  "object",
+                  "null"
                 ]
               },
               "can": {
@@ -13977,11 +14085,27 @@
                   "null"
                 ]
               },
-              "eyebrow": {
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "face": {
+                "enum": [
+                  "photo",
+                  "compact"
+                ],
                 "type": "string"
               },
               "id": {
                 "type": "string"
+              },
+              "imageUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "kind": {
                 "enum": [
@@ -13994,6 +14118,12 @@
                 "type": "string"
               },
               "locationId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
                 "type": [
                   "string",
                   "null"
@@ -14017,6 +14147,44 @@
                   "null"
                 ]
               },
+              "person": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "productId": {
                 "type": [
                   "string",
@@ -14028,6 +14196,9 @@
                   "string",
                   "null"
                 ]
+              },
+              "sheet": {
+                "type": "object"
               },
               "startsAt": {
                 "type": [
@@ -14044,7 +14215,19 @@
                 ],
                 "type": "string"
               },
+              "statusLine": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "stayId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tag": {
                 "type": [
                   "string",
                   "null"
@@ -14058,6 +14241,12 @@
               },
               "version": {
                 "type": "integer"
+              },
+              "when": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -14065,10 +14254,19 @@
               "kind",
               "status",
               "version",
-              "eyebrow",
+              "face",
+              "tag",
+              "imageUrl",
+              "avatar",
+              "statusLine",
               "title",
+              "when",
               "detail",
+              "error",
+              "note",
+              "person",
               "assignee",
+              "sheet",
               "startsAt",
               "dueAt",
               "timezone",
@@ -14092,7 +14290,7 @@
       },
       "annotations": {
         "destructiveHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "readOnlyHint": false,
         "title": "Complete task"
       },
@@ -37625,7 +37823,10 @@
           "task": {
             "properties": {
               "action": {
-                "type": "object"
+                "type": [
+                  "object",
+                  "null"
+                ]
               },
               "assignee": {
                 "anyOf": [
@@ -37663,6 +37864,12 @@
                   {
                     "type": "null"
                   }
+                ]
+              },
+              "avatar": {
+                "type": [
+                  "object",
+                  "null"
                 ]
               },
               "can": {
@@ -37704,11 +37911,27 @@
                   "null"
                 ]
               },
-              "eyebrow": {
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "face": {
+                "enum": [
+                  "photo",
+                  "compact"
+                ],
                 "type": "string"
               },
               "id": {
                 "type": "string"
+              },
+              "imageUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "kind": {
                 "enum": [
@@ -37721,6 +37944,12 @@
                 "type": "string"
               },
               "locationId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
                 "type": [
                   "string",
                   "null"
@@ -37744,6 +37973,44 @@
                   "null"
                 ]
               },
+              "person": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "productId": {
                 "type": [
                   "string",
@@ -37755,6 +38022,9 @@
                   "string",
                   "null"
                 ]
+              },
+              "sheet": {
+                "type": "object"
               },
               "startsAt": {
                 "type": [
@@ -37771,7 +38041,19 @@
                 ],
                 "type": "string"
               },
+              "statusLine": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "stayId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tag": {
                 "type": [
                   "string",
                   "null"
@@ -37785,6 +38067,12 @@
               },
               "version": {
                 "type": "integer"
+              },
+              "when": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -37792,10 +38080,19 @@
               "kind",
               "status",
               "version",
-              "eyebrow",
+              "face",
+              "tag",
+              "imageUrl",
+              "avatar",
+              "statusLine",
               "title",
+              "when",
               "detail",
+              "error",
+              "note",
+              "person",
               "assignee",
+              "sheet",
               "startsAt",
               "dueAt",
               "timezone",
@@ -37818,7 +38115,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
@@ -69188,9 +69485,6 @@
                 "detail": {
                   "type": "string"
                 },
-                "eyebrow": {
-                  "type": "string"
-                },
                 "icon": {
                   "type": "string"
                 },
@@ -69212,13 +69506,16 @@
                     "null"
                   ]
                 },
+                "statusLine": {
+                  "type": "string"
+                },
                 "title": {
                   "type": "string"
                 }
               },
               "required": [
                 "id",
-                "eyebrow",
+                "statusLine",
                 "title",
                 "detail",
                 "icon",
@@ -69238,7 +69535,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": false,
@@ -72442,11 +72739,20 @@
                 "id": {
                   "type": "string"
                 },
+                "subtitle": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "tasks": {
                   "items": {
                     "properties": {
                       "action": {
-                        "type": "object"
+                        "type": [
+                          "object",
+                          "null"
+                        ]
                       },
                       "assignee": {
                         "anyOf": [
@@ -72484,6 +72790,12 @@
                           {
                             "type": "null"
                           }
+                        ]
+                      },
+                      "avatar": {
+                        "type": [
+                          "object",
+                          "null"
                         ]
                       },
                       "can": {
@@ -72525,11 +72837,27 @@
                           "null"
                         ]
                       },
-                      "eyebrow": {
+                      "error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "face": {
+                        "enum": [
+                          "photo",
+                          "compact"
+                        ],
                         "type": "string"
                       },
                       "id": {
                         "type": "string"
+                      },
+                      "imageUrl": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
                       "kind": {
                         "enum": [
@@ -72542,6 +72870,12 @@
                         "type": "string"
                       },
                       "locationId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "note": {
                         "type": [
                           "string",
                           "null"
@@ -72565,6 +72899,44 @@
                           "null"
                         ]
                       },
+                      "person": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "initial": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "enum": [
+                                  "member",
+                                  "team"
+                                ],
+                                "type": "string"
+                              },
+                              "you": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "id",
+                              "name",
+                              "initial",
+                              "you"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
                       "productId": {
                         "type": [
                           "string",
@@ -72576,6 +72948,9 @@
                           "string",
                           "null"
                         ]
+                      },
+                      "sheet": {
+                        "type": "object"
                       },
                       "startsAt": {
                         "type": [
@@ -72592,7 +72967,19 @@
                         ],
                         "type": "string"
                       },
+                      "statusLine": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
                       "stayId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "tag": {
                         "type": [
                           "string",
                           "null"
@@ -72606,6 +72993,12 @@
                       },
                       "version": {
                         "type": "integer"
+                      },
+                      "when": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       }
                     },
                     "required": [
@@ -72613,10 +73006,19 @@
                       "kind",
                       "status",
                       "version",
-                      "eyebrow",
+                      "face",
+                      "tag",
+                      "imageUrl",
+                      "avatar",
+                      "statusLine",
                       "title",
+                      "when",
                       "detail",
+                      "error",
+                      "note",
+                      "person",
                       "assignee",
+                      "sheet",
                       "startsAt",
                       "dueAt",
                       "timezone",
@@ -72635,12 +73037,16 @@
                   "type": "array"
                 },
                 "title": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               },
               "required": [
                 "id",
                 "title",
+                "subtitle",
                 "tasks"
               ],
               "type": "object"
@@ -103859,7 +104265,10 @@
           "task": {
             "properties": {
               "action": {
-                "type": "object"
+                "type": [
+                  "object",
+                  "null"
+                ]
               },
               "assignee": {
                 "anyOf": [
@@ -103897,6 +104306,12 @@
                   {
                     "type": "null"
                   }
+                ]
+              },
+              "avatar": {
+                "type": [
+                  "object",
+                  "null"
                 ]
               },
               "can": {
@@ -103938,11 +104353,27 @@
                   "null"
                 ]
               },
-              "eyebrow": {
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "face": {
+                "enum": [
+                  "photo",
+                  "compact"
+                ],
                 "type": "string"
               },
               "id": {
                 "type": "string"
+              },
+              "imageUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "kind": {
                 "enum": [
@@ -103955,6 +104386,12 @@
                 "type": "string"
               },
               "locationId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
                 "type": [
                   "string",
                   "null"
@@ -103978,6 +104415,44 @@
                   "null"
                 ]
               },
+              "person": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "productId": {
                 "type": [
                   "string",
@@ -103989,6 +104464,9 @@
                   "string",
                   "null"
                 ]
+              },
+              "sheet": {
+                "type": "object"
               },
               "startsAt": {
                 "type": [
@@ -104005,7 +104483,19 @@
                 ],
                 "type": "string"
               },
+              "statusLine": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "stayId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tag": {
                 "type": [
                   "string",
                   "null"
@@ -104019,6 +104509,12 @@
               },
               "version": {
                 "type": "integer"
+              },
+              "when": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -104026,10 +104522,19 @@
               "kind",
               "status",
               "version",
-              "eyebrow",
+              "face",
+              "tag",
+              "imageUrl",
+              "avatar",
+              "statusLine",
               "title",
+              "when",
               "detail",
+              "error",
+              "note",
+              "person",
               "assignee",
+              "sheet",
               "startsAt",
               "dueAt",
               "timezone",
@@ -128589,7 +129094,10 @@
           "task": {
             "properties": {
               "action": {
-                "type": "object"
+                "type": [
+                  "object",
+                  "null"
+                ]
               },
               "assignee": {
                 "anyOf": [
@@ -128627,6 +129135,12 @@
                   {
                     "type": "null"
                   }
+                ]
+              },
+              "avatar": {
+                "type": [
+                  "object",
+                  "null"
                 ]
               },
               "can": {
@@ -128668,11 +129182,27 @@
                   "null"
                 ]
               },
-              "eyebrow": {
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "face": {
+                "enum": [
+                  "photo",
+                  "compact"
+                ],
                 "type": "string"
               },
               "id": {
                 "type": "string"
+              },
+              "imageUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "kind": {
                 "enum": [
@@ -128685,6 +129215,12 @@
                 "type": "string"
               },
               "locationId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
                 "type": [
                   "string",
                   "null"
@@ -128708,6 +129244,44 @@
                   "null"
                 ]
               },
+              "person": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "productId": {
                 "type": [
                   "string",
@@ -128719,6 +129293,9 @@
                   "string",
                   "null"
                 ]
+              },
+              "sheet": {
+                "type": "object"
               },
               "startsAt": {
                 "type": [
@@ -128735,7 +129312,19 @@
                 ],
                 "type": "string"
               },
+              "statusLine": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "stayId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tag": {
                 "type": [
                   "string",
                   "null"
@@ -128749,6 +129338,12 @@
               },
               "version": {
                 "type": "integer"
+              },
+              "when": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -128756,10 +129351,19 @@
               "kind",
               "status",
               "version",
-              "eyebrow",
+              "face",
+              "tag",
+              "imageUrl",
+              "avatar",
+              "statusLine",
               "title",
+              "when",
               "detail",
+              "error",
+              "note",
+              "person",
               "assignee",
+              "sheet",
               "startsAt",
               "dueAt",
               "timezone",

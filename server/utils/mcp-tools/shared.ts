@@ -1026,13 +1026,14 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   update_google_ads_campaign: { ...D, openWorldHint: true },
   list_tasks: R,
   // Tells the assignee by their own notification settings.
-  create_task: { ...W, openWorldHint: true, idempotentHint: true },
+  create_task: { ...D, openWorldHint: true, idempotentHint: true },
   update_task: { ...D, openWorldHint: true },
-  complete_task: D,
+  // Can download an optional photo from a host-supplied URL.
+  complete_task: { ...D, openWorldHint: true },
   skip_task: D,
-  // Records what the selector found against its evidence; a repeat records nothing new.
-  list_opportunities: { ...W, idempotentHint: true },
-  accept_opportunity: { ...W, openWorldHint: true },
+  // Records what the selector found against its evidence and supersedes what changed; a repeat records nothing new.
+  list_opportunities: { ...D, idempotentHint: true },
+  accept_opportunity: { ...D, openWorldHint: true },
   dismiss_opportunity: D,
   defer_opportunity: D,
 } as const satisfies Record<string, McpToolAnnotations>

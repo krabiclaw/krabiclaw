@@ -12,7 +12,7 @@
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": true,
-        "destructiveHint": false
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Records the decision and creates the opportunity's task.",
@@ -167,7 +167,7 @@
     "complete_task": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
@@ -384,7 +384,7 @@
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": true,
-        "destructiveHint": false
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Persists a new task in the selected workspace and notifies its assignee.",
@@ -1152,7 +1152,7 @@
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
-        "destructiveHint": false
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Records what the business could do against its current evidence; a repeat records nothing new.",

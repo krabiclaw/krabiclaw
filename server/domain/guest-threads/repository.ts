@@ -277,6 +277,7 @@ async function inboxWhere(organizationId: string | null, opts: ListGuestThreadsO
   if (opts.locationId) { where += ' AND gt.location_id = ?'; params.push(opts.locationId) }
   if (opts.assignedMemberId) { where += ' AND op.assigned_member_id = ?'; params.push(opts.assignedMemberId) }
   if (opts.type) { where += ' AND gt.kind = ?'; params.push(opts.type) }
+  if (opts.needsReply) where += ` AND ${OPEN_REPLY_TASK_SQL}`
   if (opts.kind) where += ` AND ${opts.kind === 'support' ? '' : 'NOT '}${SUPPORT_THREAD_SQL}`
   if (opts.q) {
     const like = `%${opts.q.toLowerCase().replace(/[\\%_]/g, char => `\\${char}`)}%`
@@ -583,10 +584,10 @@ async function listUnreadThreadIds(db: DbClient, threadIds: string[], userId: st
 
 /** The guest entry a reply task is about: a message, or a contact form's own words. */
 export const GUEST_QUESTION_SQL = `guest_entry.actor_kind = 'guest' AND (guest_entry.kind = 'message' OR (guest_entry.kind = 'submission' AND r.kind = 'contact'))`
-/** A cancelled booking, reservation or stay answers what the guest asked before it. */
-export const CANCELLED_AFTER_SQL = `(EXISTS (SELECT 1 FROM bookings record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= guest_entry.occurred_at)
-  OR EXISTS (SELECT 1 FROM reservations record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= guest_entry.occurred_at)
-  OR EXISTS (SELECT 1 FROM stays record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= guest_entry.occurred_at))`
+/** A cancelled booking, reservation or stay answers what the guest asked before it, by when the guest asked it. */
+export const CANCELLED_AFTER_SQL = `(EXISTS (SELECT 1 FROM bookings record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= ${guestEntryAskedAtSql('guest_entry')})
+  OR EXISTS (SELECT 1 FROM reservations record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= ${guestEntryAskedAtSql('guest_entry')})
+  OR EXISTS (SELECT 1 FROM stays record WHERE record.request_id = guest_entry.request_id AND record.status = 'cancelled' AND record.cancelled_at >= ${guestEntryAskedAtSql('guest_entry')}))`
 
 /**
  * The reply tasks for one conversation as its ledger now stands: the task for
@@ -620,6 +621,8 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
         JOIN activity_entries guest_entry ON guest_entry.request_id = r.id
        WHERE r.id = ? AND r.archived_at IS NULL AND r.blocked_at IS NULL AND ${GUEST_QUESTION_SQL}
          AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}
+         -- A question a person skipped stays skipped; the next unanswered one is still work.
+         AND NOT EXISTS (SELECT 1 FROM tasks skipped WHERE skipped.dedupe_key = 'guest_reply:' || r.id || ':' || guest_entry.id AND skipped.status = 'skipped')
          AND NOT EXISTS (SELECT 1 FROM tasks open_reply WHERE open_reply.kind = 'guest_reply' AND open_reply.subject_type = 'request' AND open_reply.subject_id = r.id AND open_reply.status = 'open')
        ORDER BY guest_entry.sequence LIMIT 1
       ON CONFLICT (dedupe_key) DO UPDATE SET status = 'open', closed_at = NULL, closed_by_user_id = NULL, version = tasks.version + 1, updated_at = excluded.updated_at
