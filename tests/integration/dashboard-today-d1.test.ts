@@ -502,14 +502,21 @@ test('Today reads actual scheduled work and review outcomes: cancellation and su
     const { current: _firstCurrent, goalId: _firstGoal, goalRevision: _firstGoalRevision, ...opportunityDecision } = opportunity.decision!
     const dismiss = await call('PUT', `/api/organizations/${ORG}/recommendation-feedback`, { ...opportunityDecision, decision: 'dismiss' })
     assert.ok(dismiss)
+    for (const range of ['today', 'upcoming']) assert.equal((await read(range)).cards.some(card => card.decision?.operation === 'post.create' && card.decision.subjectId === opportunity.decision!.subjectId), false, 'The dismissed occurrence clears immediately through the feed')
     t.mock.timers.tick(Date.parse((JSON.parse(opportunity.decision!.subjectId) as string[])[2]!) - Date.now() + 1_000)
     const replacement = (await read()).cards.find(card => card.decision?.operation === 'post.create')!
     assert.ok(replacement)
     assert.notEqual(replacement.decision!.subjectId, opportunity.decision!.subjectId)
     assert.equal(replacement.actionAt, null)
     const { current: _nextCurrent, goalId: _nextGoal, goalRevision: _nextGoalRevision, ...replacementDecision } = replacement.decision!
-    const deferredSlot = await call('PUT', `/api/organizations/${ORG}/recommendation-feedback`, { ...replacementDecision, decision: 'defer', deferUntil: new Date(Date.now() + 2 * DAY).toISOString() })
+    const slotDeferUntil = new Date(Date.now() + 2 * DAY).toISOString()
+    const deferredSlot = await call('PUT', `/api/organizations/${ORG}/recommendation-feedback`, { ...replacementDecision, decision: 'defer', deferUntil: slotDeferUntil })
     assert.ok(deferredSlot)
+    assert.equal((await read()).cards.some(card => card.decision?.subjectId === replacement.decision!.subjectId), false)
+    const plannedSlot = (await read('upcoming')).cards.find(card => card.decision?.operation === 'post.create' && card.decision.subjectId === replacement.decision!.subjectId)!
+    assert.ok(plannedSlot, 'The saved deferral appears in Upcoming before time advances')
+    assert.equal(plannedSlot.actionAt, slotDeferUntil)
+    assert.deepEqual(plannedSlot.decision!.current, { decision: 'defer', deferUntil: slotDeferUntil, note: null })
     t.mock.timers.tick(Date.parse((JSON.parse(replacement.decision!.subjectId) as string[])[2]!) - Date.now() + 1_000)
     const afterDeferredSlot = (await read()).cards.find(card => card.decision?.operation === 'post.create')!
     assert.ok(afterDeferredSlot)

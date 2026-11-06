@@ -19,8 +19,8 @@ import { getProduct } from '~/server/utils/product-management'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { getSessionAvailability } from '~/server/utils/availability'
 import { listReservationSlots } from '~/server/utils/reservations'
-import { readStayGapCandidates, stayAccessFor } from '~/server/domain/stays'
-import { addLocalDays, localDateAt } from '~/utils/timezone'
+import { MAX_HOMES_CALENDAR_DAYS, readStayGapCandidates, stayAccessFor } from '~/server/domain/stays'
+import { addLocalDays, isValidCalendarDate, localDateAt } from '~/utils/timezone'
 
 interface OutcomeEntry {
   source_table: BusinessOutcome['source']['table']
@@ -352,6 +352,8 @@ export async function readBusinessProgressReference(
   }
   if (input.operation === 'product.payment' || input.operation === 'stay.gap') {
     const interval = input.operation === 'stay.gap' ? coordinates() : null
+    if (interval && (!isValidCalendarDate(interval[1]) || !isValidCalendarDate(interval[2]) || interval[2] <= interval[1]
+      || (Date.parse(interval[2]) - Date.parse(interval[1])) / 86_400_000 + 2 > MAX_HOMES_CALENDAR_DAYS)) throw missing()
     const productId = interval ? interval[0] : input.subjectId
     const product = await queryFirst<{ id: string; kind: string; updated_at: string }>(db, 'SELECT id, kind, updated_at FROM products WHERE id = ? AND organization_id = ?', [productId, principal.organizationId])
     if (!product) throw missing()
@@ -368,7 +370,9 @@ export async function readBusinessProgressReference(
     const configuration = await queryFirst<{ updated_at: string } & Record<string, unknown>>(db,
       'SELECT product_id, location_id, min_nights, calendar_rules, updated_at FROM product_stay_configs WHERE product_id = ? AND organization_id = ?', [product.id, principal.organizationId])
     if (!configuration) throw missing()
-    const gap = (await readStayGapCandidates(db, await stayAccessFor(principal), { from: addLocalDays(interval![1], -1), to: addLocalDays(interval![2], 1) }))
+    const from = addLocalDays(interval![1], -1), to = addLocalDays(interval![2], 1)
+    if (!isValidCalendarDate(from) || !isValidCalendarDate(to)) throw missing()
+    const gap = (await readStayGapCandidates(db, await stayAccessFor(principal), { from, to }))
       .find(gap => gap.productId === product.id && gap.from === interval![1] && gap.to === interval![2])
     if (!gap) throw missing()
     const [overrides, claims, pushes] = await Promise.all([

@@ -305,7 +305,7 @@ export interface StayNight {
 
 const MAX_LIST_DAYS = 400
 /** Every home's nights at once: three months, a window a multi-calendar pages through. */
-const MAX_HOMES_CALENDAR_DAYS = 92
+export const MAX_HOMES_CALENDAR_DAYS = 92
 const MAX_CALENDAR_BYTES = 2_000_000
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
