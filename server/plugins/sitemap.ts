@@ -4,7 +4,6 @@ import { PUBLIC_CONTENT_SECTION_QUERIES, PUBLIC_CONTENT_SECTIONS, productCatalog
 import { publicLocationHomeSlugSql, publicLocationSql } from '~/server/utils/public-locations'
 import type { PublicSiteSection } from '~/utils/public-resource-contracts'
 import { publicTenantPageSql } from '~/server/utils/content/pages'
-import { isSubscriptionStateInvalid } from '~/server/utils/billing-access'
 import type { SitemapUrlInput } from '#sitemap/types'
 
 import { definePlugin, HTTPError } from 'nitro'
@@ -16,7 +15,7 @@ import { ARTICLE_COLLECTIONS, collectionCategoryPath, isArticleCollection } from
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
 import { resolvePublicTemplate } from '~/utils/template-registry'
-import { assertOrganizationLanguageEntitlement } from '~/server/utils/localization'
+import { assertOrganizationLanguage } from '~/server/utils/localization'
 import { listOrganizationProducts } from '~/server/utils/product-management'
 
 // A collection path that is a section is listed only when the section has something on it.
@@ -171,13 +170,9 @@ export default definePlugin((nitroApp) => {
     `, [organizationId])
     for (const candidate of localizedLocales) {
       try {
-        await assertOrganizationLanguageEntitlement(env, db, candidate.organization_id, candidate.locale)
+        await assertOrganizationLanguage(db, candidate.organization_id, candidate.locale)
       } catch (error) {
-        if (error instanceof HTTPError && ['LANGUAGE_ENTITLEMENT_REQUIRED', 'LANGUAGE_NOT_ENABLED', 'LANGUAGE_NOT_PUBLISHED', 'PLATFORM_LOCALE_UNAVAILABLE'].includes(error.data?.code)) continue
-        if (isSubscriptionStateInvalid(error)) {
-          console.error('organization_subscription_state_invalid', { organizationId: candidate.organization_id, locale: candidate.locale })
-          continue
-        }
+        if (error instanceof HTTPError && ['LANGUAGE_NOT_ENABLED', 'LANGUAGE_NOT_PUBLISHED', 'PLATFORM_LOCALE_UNAVAILABLE'].includes(error.data?.code)) continue
         throw error
       }
       const [resources, pages] = await Promise.all([

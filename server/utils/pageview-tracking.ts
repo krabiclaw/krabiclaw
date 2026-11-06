@@ -97,7 +97,7 @@ async function publishedTranslatedLocales(db: AppDb, organizationId: string): Pr
 /**
  * Whether this is a valid public route of the organization, and what it identifies. A localized
  * visit is validated by the same authoritative resolver the public site serves it with (published
- * locale, entitlement, published representation); a source-language visit by its published
+ * locale and published representation); a source-language visit by its published
  * document, its published product route, or a code-owned route of the theme. Anything else — an
  * unpublished representation, an unsupported locale, an entity of another tenant — is not a public
  * page and yields null. The path is never rewritten to make a lookup succeed.

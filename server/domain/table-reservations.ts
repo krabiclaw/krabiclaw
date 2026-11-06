@@ -16,7 +16,7 @@ import {
   ReservationUnavailableError,
 } from '~/server/utils/reservations'
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { assertExactCanonicalLocale, assertPublicOrganizationLanguageEntitlement } from '~/server/utils/localization'
+import { assertExactCanonicalLocale, assertPublicOrganizationLanguage } from '~/server/utils/localization'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import { createPaymentCheckout } from '~/server/domain/payments/checkout'
 import { paidOnline } from '~/server/domain/payments'
@@ -157,7 +157,7 @@ export async function createTableReservation(event: H3Event, input: {
     })
     return creationResult({ success: true, status: 'checkout', replayed: true, ...checkout }, { status: 200 })
   }
-  await assertPublicOrganizationLanguageEntitlement(env, db, organizationId, locale)
+  await assertPublicOrganizationLanguage(db, organizationId, locale)
   const policy = await requireLocationReservationConfig(db, { organizationId, locationId: resolvedLocationId })
   // Checked and frozen before any table or deposit: a deposit checkout's thread carries them.
   const answers = await acceptFormAnswers(db, { kind: 'reservation', organizationId, locationId: resolvedLocationId }, { locale, answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })

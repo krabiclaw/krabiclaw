@@ -46,7 +46,7 @@ import { resolvePublicTemplate } from '~/utils/template-registry'
 import { isPublicSourceRouteRoot } from '~/shared/public-locale-routes'
 import { templateRendersPageDocumentAt } from '~/shared/tenant-page-paths'
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { assertPublicOrganizationLanguageEntitlement } from '~/server/utils/localization'
+import { assertPublicOrganizationLanguage } from '~/server/utils/localization'
 import {
   loadExactPublicLocalizations,
   projectExactLocalizedCollection,
@@ -309,7 +309,7 @@ async function loadPublicPageSource(
   options.signal?.throwIfAborted();
 
   const orgId = organization.id;
-  const language = await assertPublicOrganizationLanguageEntitlement(env, db, orgId, locale ?? sourceLocale)
+  const language = await assertPublicOrganizationLanguage(db, orgId, locale ?? sourceLocale)
   const localizedLocale = language.source ? null : language.locale
   let publicLocalizations: ExactPublicLocalization[] = []
   if (localizedLocale) {

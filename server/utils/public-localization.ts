@@ -10,7 +10,7 @@ import { PRODUCT_DETAIL_FIELDS, projectStayAlarmDetails, type ProductKind } from
 import { isStayAmenityAnswers } from '~/shared/stay-listing'
 import { HTTPError } from 'nitro'
 import { queryAll, type DbClient } from '~/server/db'
-import { assertPublicOrganizationLanguageEntitlement } from '~/server/utils/localization'
+import { assertPublicOrganizationLanguage } from '~/server/utils/localization'
 import { isRecord } from '~/server/utils/type-guards'
 import { formQuestionLocalizationSchema, localizeFormQuestions, type FormQuestion } from '~/shared/form-questions'
 
@@ -32,13 +32,13 @@ export interface ExactPublicLocalization {
 }
 
 export async function loadExactPublicLocalizations(
-  env: CloudflareEnv,
+  _env: CloudflareEnv,
   db: DbClient,
   organizationId: string,
   locale: string,
 ): Promise<ExactPublicLocalization[]> {
-  const entitlement = await assertPublicOrganizationLanguageEntitlement(env, db, organizationId, locale)
-  if (entitlement.source) throw new HTTPError({ statusCode: 404, statusMessage: 'Primary-language routes are unprefixed' })
+  const language = await assertPublicOrganizationLanguage(db, organizationId, locale)
+  if (language.source) throw new HTTPError({ statusCode: 404, statusMessage: 'Primary-language routes are unprefixed' })
   const rows = await queryAll<StoredPublicLocalizationRow>(db, `
     SELECT rl.resource_type, rl.resource_id, rl.locale, rl.values_json, rl.route_path, p.kind AS product_kind
       FROM resource_localizations rl

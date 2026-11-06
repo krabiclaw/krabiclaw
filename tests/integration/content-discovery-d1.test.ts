@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
+import { HTTPError } from 'nitro'
 import * as schema from '../../server/db/schema.ts'
 import { createContentDocumentWithBlocks, updateContentDocument } from '../../server/utils/content/documents.ts'
 import { buildPlatformKnowledgeDocuments, buildTenantBlogDocuments } from '../../server/utils/public-search.ts'
@@ -10,9 +11,10 @@ import { getPublishedBlogPost, listPublishedArticles } from '../../server/utils/
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { createDb } from '../../server/db/index.ts'
 import { recordTenantPageview, resolvePublicPageIdentity } from '../../server/utils/pageview-tracking.ts'
-import { putResourceLocalization, resolveLocalizedPublicRoute } from '../../server/utils/localization.ts'
+import { putLocalizationForAuthoring, putResourceLocalization, resolveLocalizedPublicRoute } from '../../server/utils/localization.ts'
+import { getPublishedTenantPage } from '../../server/utils/content/pages.ts'
 import { createProduct, setProductLocation } from '../../server/utils/product-management.ts'
-import { disableOrganizationLanguage } from '../../server/utils/organization-languages.ts'
+import { addOrganizationLanguage, disableOrganizationLanguage, publishOrganizationLanguage } from '../../server/utils/organization-languages.ts'
 
 test('public discovery resolves translations through current publication owners', { timeout: 60_000 }, async () => {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -70,8 +72,8 @@ test('public discovery resolves translations through current publication owners'
     assert.deepEqual((await listPublishedArticles(db, env, 'platform', 'blog', 'en')).map(row => row.id), ['news'])
     assert.equal((await getPublishedBlogPost(db, 'platform', 'docs', 'guide', 'en', env))?.id, 'guide')
     assert.equal(await getPublishedBlogPost(db, 'platform', 'blog', 'guide', 'en', env), null)
-    // A translated list is readable only where the language is published on a Growth site.
-    await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, periodEnd) VALUES ('sub-tenant','growth','tenant','active',4102444800)").run()
+    // The same authored translations and public discovery work without a subscription.
+    assert.equal(await db.prepare("SELECT count(*) AS count FROM subscription WHERE referenceId = 'tenant'").first<number>('count'), 0)
     await db.prepare("INSERT INTO user (id,name,email) VALUES ('discovery-owner','Discovery owner','discovery@example.test')").run()
     for (const [id, org, slug, status] of [
       ['branch', 'tenant', 'branch', 'active'], ['empty', 'tenant', 'empty', 'active'],
@@ -96,6 +98,36 @@ test('public discovery resolves translations through current publication owners'
     // require a published representation. The collector stores the actual visit.
     const identityInput = { organizationId: 'tenant', requestedLocale: null, themeId: 'tenant-theme-v1', vertical: 'restaurant' }
     const officeInput = { ...identityInput, vertical: 'service' }
+    // Basic sites add, author, publish and revise a language through the same
+    // writers. Only authored content and publication state control visibility.
+    await addOrganizationLanguage(createDb(db), env, { organizationId: 'tenant', locale: 'ja' })
+    assert.deepEqual(await db.prepare("SELECT locale, status, is_source FROM organization_locales WHERE organization_id = 'tenant' AND locale = 'ja'").first(),
+      { locale: 'ja', status: 'disabled', is_source: 0 })
+    assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, pagePath: '/ja' }), null)
+    await assert.rejects(publishOrganizationLanguage(createDb(db), env, { organizationId: 'tenant', locale: 'ja' }),
+      (error: unknown) => error instanceof HTTPError && error.statusCode === 409 && error.data?.code === 'LOCALIZATION_VALIDATION_FAILED')
+    await putLocalizationForAuthoring(env, db, { organizationId: 'tenant', resourceType: 'content_document', resourceId: 'home', locale: 'ja',
+      values: { title: 'ご来店をお待ちしています' }, userId: 'discovery-owner',
+      contentBlocks: [{ id: 'home-ja-body', type: 'markdown', data: { markdown: '旬の料理をお楽しみください。', editor_mode: 'rich' } }],
+    })
+    assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, pagePath: '/ja' }), null)
+    await publishOrganizationLanguage(createDb(db), env, { organizationId: 'tenant', locale: 'ja' })
+    assert.deepEqual(await db.prepare("SELECT status, is_source FROM organization_locales WHERE organization_id = 'tenant' AND locale = 'ja'").first(),
+      { status: 'published', is_source: 0 })
+    const publishedHome = await getPublishedTenantPage(createDb(db), 'tenant', '/', 'ja')
+    assert(publishedHome)
+    assert.equal(publishedHome.title, 'ご来店をお待ちしています')
+    assert.deepEqual(publishedHome.blocks.map(block => [block.type, block.data.markdown]), [['markdown', '旬の料理をお楽しみください。']])
+    assert.equal((await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, pagePath: '/ja' }))?.documentId, publishedHome.id)
+    await putLocalizationForAuthoring(env, db, { organizationId: 'tenant', resourceType: 'content_document', resourceId: 'home', locale: 'ja',
+      values: { title: '季節の料理をどうぞ' }, userId: 'discovery-owner', expectedUpdatedAt: publishedHome.updated_at,
+    })
+    assert.equal((await getPublishedTenantPage(createDb(db), 'tenant', '/', 'ja'))?.title, '季節の料理をどうぞ')
+    assert.equal(await db.prepare("SELECT title FROM content_documents WHERE id = 'home'").first<string>('title'), 'home')
+    assert.equal(await db.prepare("SELECT count(*) AS count FROM subscription WHERE referenceId = 'tenant'").first<number>('count'), 0)
+    await disableOrganizationLanguage(createDb(db), { organizationId: 'tenant', locale: 'ja' })
+    assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, pagePath: '/ja' }), null)
+    assert.equal((await getPublishedTenantPage(createDb(db), 'tenant', '/', 'ja'))?.title, '季節の料理をどうぞ')
     assert.deepEqual(await resolvePublicPageIdentity(env, createDb(db), { ...officeInput, pagePath: '/locations/branch' }), {
       publicPath: '/locations/branch', sourcePath: '/locations/branch', locale: 'en', locationId: 'branch',
       pageId: null, documentId: null, pageType: null, recipe: null, productId: null,
@@ -121,7 +153,13 @@ test('public discovery resolves translations through current publication owners'
     for (const path of ['/th', '/th/about', '/fr/menu', '/th/experiences/missing', '/th/unpublished']) {
       assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, pagePath: path }), null, path)
     }
-    assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, organizationId: 'other', pagePath: '/th/menu' }), null)
+    // The other tenant also has published Thai, so its built-in menu is available
+    // without a subscription. It still cannot resolve this tenant's location.
+    assert.deepEqual(await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, organizationId: 'other', pagePath: '/th/menu' }), {
+      publicPath: '/th/menu', sourcePath: '/menu', locale: 'th', locationId: null,
+      pageId: null, documentId: null, pageType: null, recipe: null, productId: null,
+    })
+    assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, organizationId: 'other', pagePath: '/th/locations/branch/contact' }), null)
     // A section is owned by the location's translation, not by a second
     // resource_localizations row for every child URL. Both readers use it.
     for (const section of ['experiences', 'qa', 'contact']) {

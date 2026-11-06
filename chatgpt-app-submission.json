@@ -4,7 +4,7 @@
   "app_info": {
     "display_name": "KrabiClaw",
     "subtitle": "Manage your business website",
-    "description": "Create and manage your KrabiClaw business website from ChatGPT. Save a private website draft, publish it once its required details are complete, and add locations. Edit products, prices, announcements, articles, translations and media. Read customer inquiries, manage bookings and propose changes for guest acceptance. Read and send internal team messages with the current business members, optionally about an accessible stay or location. Manage host-entered stays, nightly availability and prices; connected homes update Airbnb through Channex and apply existing automatic guest-message schedules. Read payment reports, transactions and payouts. Read Google Ads campaigns, create Search campaigns, pause or enable campaigns and change daily budgets in the connected account; enabled campaigns can spend its advertising budget. Publishing a website emails KrabiClaw operators; live content and uploaded media can be public, and booking actions may email guests. Payment setup, online payment collection, refund preparation and refund execution require the authenticated KrabiClaw dashboard. Publish to connected Facebook, Instagram or Discord destinations only when requested. A KrabiClaw account is required, with access to each business you manage.",
+    "description": "Create and manage your KrabiClaw business website from ChatGPT. Save a private website draft, publish it once its required details are complete, and add locations. Edit products, prices, announcements, articles, translations and media. Read customer inquiries, manage bookings and propose changes for guest acceptance. Read and send internal team messages with the current business members, optionally about an accessible stay or location. Manage host-entered stays, nightly availability and prices; connected homes update Airbnb through Channex and apply existing automatic guest-message schedules. Read payment reports, transactions and payouts. Read Google Ads campaigns, create paused Search campaigns, pause or enable campaigns and change daily budgets in the connected account; enabled campaigns can spend its advertising budget. Publishing a website emails KrabiClaw operators; live content and uploaded media can be public, and booking actions may email guests. Payment setup, online payment collection, refund preparation and refund execution require the authenticated KrabiClaw dashboard. Publish to connected Facebook, Instagram or Discord destinations only when requested. A KrabiClaw account is required, with access to each business you manage.",
     "category": "BUSINESS"
   },
   "tools": {
@@ -1347,7 +1347,7 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Publishes an added language only after entitlement and actual translated-homepage checks.",
+        "read_only_justification": "Publishes an added language after checking its authored translated homepage.",
         "destructive_justification": "Overwrites saved language publication state and exposes previously private translations.",
         "open_world_justification": "Creates public localized website routes."
       }

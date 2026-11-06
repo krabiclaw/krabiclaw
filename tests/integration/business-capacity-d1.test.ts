@@ -357,7 +357,7 @@ test('live homes are reported to their Stripe meter, drafts and locations are fr
     assert.deepEqual(await counts('starter'), 1)
     assert.deepEqual(await homesQuote(env, db, 'starter', 0), starterQuote(1, 3, 0, true))
     assert.deepEqual(await homesQuote(env, db, 'starter', 1), starterQuote(1, 3, 1, false))
-    const homeLimit = { status: 402, data: { error: 'Basic includes 1 live home. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 1, covered: 1 } } }
+    const homeLimit = { status: 402, data: { error: 'Basic includes 1 live home.', code: 'HOME_LIMIT', homes: { used: 1, covered: 1 } } }
     await assert.rejects(publish('starter', starterHomes[1]!.product_id), homeLimit)
     assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM product_publications WHERE product_id = ? AND published = 1').bind(starterHomes[1]!.product_id).first('n'), 0)
     assert.equal((await readStayHome(db, manager('starter'), starterHomes[1]!.product_id)).live, false)

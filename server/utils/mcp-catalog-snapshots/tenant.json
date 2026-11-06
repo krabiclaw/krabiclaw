@@ -1,12 +1,12 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:46f3d6592eb40a97617c73bc7ac9f468ed758d13a4c4b875484aadd0011eb7a1",
-  "documentationFingerprint": "sha256:8db49cc2dca768e4c1dbebdc1c996253b31ba4f3a7ceaf17518a17d52989bbbf",
+  "fingerprint": "sha256:e18827bff7d1d0c9015160dc0ad1b2f221763881b772a04d3c4816c89fb8813a",
+  "documentationFingerprint": "sha256:251673e15bad4b898a71f0030c9bc5a097942d4692deb85e1ff20dcab334cd4a",
   "tools": [
     {
       "name": "add_organization_language",
       "title": "Add organization language",
-      "description": "Add a website language for private authoring. Requires the website’s language entitlement. A new language starts disabled; an existing language keeps its publication status and translations while its stored label is refreshed from the platform catalog.",
+      "description": "Add a supported website language for private authoring. A new language starts disabled; an existing language keeps its publication status and translations while its stored label is refreshed from the platform catalog.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -72772,7 +72772,7 @@
     {
       "name": "publish_organization_language",
       "title": "Publish organization language",
-      "description": "Publish an added website language’s authored translations on public routes. Requires the website’s language entitlement and a translated homepage. Missing translations remain unavailable; the source language is unchanged.",
+      "description": "Publish an added website language’s authored translations after translating its homepage. Legal Services sites also require a translated organization name and consultation call-to-action label. Missing translations remain unavailable; the source language is unchanged.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

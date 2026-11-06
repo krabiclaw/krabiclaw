@@ -2,9 +2,8 @@ import { PLATFORM_LOCALES, platformLocale } from '~/shared/platform-locales'
 import { prepareContentDocumentDeletion } from '~/server/utils/content/documents'
 import { getPublishedTenantPage } from '~/server/utils/content/pages'
 import { execute, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { getOrganizationBillingStatus } from '~/server/utils/billing'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { assertOrganizationLanguageEntitlement, canonicalizeLocale, getPersistedSourceLocale } from '~/server/utils/localization'
+import { assertOrganizationLanguage, canonicalizeLocale, getPersistedSourceLocale } from '~/server/utils/localization'
 import { localizationError } from '~/server/utils/localization-errors'
 import { validateLocalizedValues } from '~/server/utils/localization-registry'
 import { isLegalPracticeSite } from '~/utils/template-registry'
@@ -27,10 +26,10 @@ async function loadLanguage(db: DbClient, organizationId: string, locale: string
 
 /** A new language remains private while its content is authored. */
 export async function addOrganizationLanguage(
-  db: DbClient, env: CloudflareEnv,
+  db: DbClient, _env: CloudflareEnv,
   input: { organizationId: string; locale: unknown },
 ) {
-  const language = await assertOrganizationLanguageEntitlement(env, db, input.organizationId, canonicalizeLocale(input.locale), 'plan')
+  const language = await assertOrganizationLanguage(db, input.organizationId, canonicalizeLocale(input.locale), 'available')
   const { locale } = language
   if (language.source) return loadLanguage(db, input.organizationId, locale)
   const catalog = platformLocale(locale)!
@@ -45,10 +44,10 @@ export async function addOrganizationLanguage(
 
 /** Publishing exposes authored translations; absent representations stay absent. */
 export async function publishOrganizationLanguage(
-  db: DbClient, env: CloudflareEnv,
+  db: DbClient, _env: CloudflareEnv,
   input: { organizationId: string; locale: unknown },
 ) {
-  const language = await assertOrganizationLanguageEntitlement(env, db, input.organizationId, canonicalizeLocale(input.locale))
+  const language = await assertOrganizationLanguage(db, input.organizationId, canonicalizeLocale(input.locale))
   const { locale } = language
   if (language.source) return loadLanguage(db, input.organizationId, locale)
 
@@ -114,13 +113,10 @@ export async function deleteDisabledOrganizationLanguageContent(
 
 
 export async function getOrganizationLanguageSettings(
-  db: DbClient, env: CloudflareEnv,
+  db: DbClient, _env: CloudflareEnv,
   input: { organizationId: string },
 ) {
-  // The plan and the site's languages are independent reads; running them in
-  // series made the slowest endpoint in production wait for both in turn.
-  const [projection, languageRows, source] = await Promise.all([
-    getOrganizationBillingStatus(env, db, input.organizationId),
+  const [languageRows, source] = await Promise.all([
     queryAll<{ locale: string; is_source: number; status: 'published' | 'disabled' }>(db, `
       SELECT locale, is_source, status FROM organization_locales
        WHERE organization_id = ? 
@@ -134,5 +130,5 @@ export async function getOrganizationLanguageSettings(
   })
   const availableCatalogs = PLATFORM_LOCALES.filter(catalog => catalog.locale !== source.locale)
     .map(({ locale, label, direction }) => ({ locale, label, direction }))
-  return { effective_plan: projection.plan, languages, available_catalogs: availableCatalogs }
+  return { languages, available_catalogs: availableCatalogs }
 }

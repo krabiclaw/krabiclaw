@@ -38,7 +38,7 @@ import { isSingleMediaPlacement } from '~/shared/media-placement-contract'
 import { getMediaPlacements } from '~/server/utils/media-placement'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import { findAuthUsersByIds, type CloudflareEnv } from '~/server/utils/auth'
-import { assertPublicOrganizationLanguageEntitlement } from '~/server/utils/localization'
+import { assertPublicOrganizationLanguage } from '~/server/utils/localization'
 import { findOrganizationById } from '~/server/utils/member-access'
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
@@ -389,7 +389,7 @@ const ARTICLE_ORDER_SQL = (alias: string) => `${alias}.sort_order, ${alias}.publ
  */
 export async function listPublishedArticles(db: DbClient, env: CloudflareEnv, organizationId: string, collection: ArticleCollection, locale: string) {
   // A language the site has not published is not readable, here or anywhere public.
-  await assertPublicOrganizationLanguageEntitlement(env, db, organizationId, locale)
+  await assertPublicOrganizationLanguage(db, organizationId, locale)
   const sql = `
     SELECT
       root.id, p.title, p.slug, p.summary AS excerpt, (root.metadata_json ->> '$.collection') AS collection,
