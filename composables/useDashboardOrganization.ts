@@ -5,6 +5,7 @@ import { STAY_MAP_SHARING_MODES, type StayMapSharing } from '~/shared/stay-listi
 import { coordinatesFailure } from '~/utils/location-map'
 import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
 import { LOGO_SHAPES, type LogoPresentation } from '~/shared/media-placement-contract'
+import type { ProductFeature } from '~/config/cms-registry'
 
 /**
  * The tenant, as the dashboard reads it.
@@ -29,6 +30,8 @@ export interface DashboardOrganization {
   effective_plan: string
   default_currency: string
   media: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string | null; presentation: LogoPresentation | null }>
+  /** The modules this organization has (resolveCmsCapabilities); whether a screen exists reads this. */
+  features: ProductFeature[]
 }
 
 export interface DashboardLocation {
@@ -81,6 +84,7 @@ const isDashboardOrganization = (value: unknown): value is DashboardOrganization
   && typeof value.status === 'string'
   && typeof value.onboarding_status === 'string'
   && typeof value.default_currency === 'string'
+  && Array.isArray(value.features) && value.features.every(feature => typeof feature === 'string')
   && isMediaList(value.media)
   && (value.media as Array<Record<string, unknown>>).every(item => item.presentation === null || (isRecord(item.presentation) && LOGO_SHAPES.includes(item.presentation.shape as LogoPresentation['shape'])))
 
@@ -166,6 +170,8 @@ export function useDashboardOrganization() {
   const organization = computed(() => state.value?.organization ?? null)
   const organizationId = computed(() => organization.value?.id ?? null)
   const locations = computed(() => state.value?.locations ?? [])
+  /** Whether the organization has a module, and so whether its screens exist. */
+  const hasFeature = (feature: ProductFeature) => organization.value?.features.includes(feature) === true
   /** What the organization's plan includes, by the one policy the server enforces. */
   const entitlements = computed(() => {
     const plan = organization.value?.effective_plan
@@ -200,6 +206,7 @@ export function useDashboardOrganization() {
     organization,
     organizationId,
     locations,
+    hasFeature,
     canUpdateBilling,
     entitlements,
     organizationPaths,

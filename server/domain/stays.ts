@@ -42,6 +42,7 @@ import { mediaStillUrl, MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placemen
 import { isStayPhotoRoomType, isStaySleepingArrangements, MAX_STAY_BEDS_PER_TYPE, type StayPhotoRoom, type StayPhotoRoomType } from '~/shared/stay-photos'
 import { isStayHomeAccessibility, isStayRoomAccessibility, type StayHomeAccessibility, type StayRoomAccessibility } from '~/shared/stay-accessibility'
 import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
+import { requireStays } from '~/server/utils/cms-capabilities'
 
 /**
  * Places to stay: the one implementation of stays, nights and offline
@@ -515,6 +516,7 @@ function stayPhoto(item: MediaPlacementItem, position: number): StayPhoto {
 
 /** Every place to stay this caller may see: all of them for managers, their assigned homes for members. */
 export async function listStayHomes(db: DbClient, access: StayAccess): Promise<StayHome[]> {
+  await requireStays(db, access.organizationId)
   return await stayHomes(db, access, null)
 }
 
