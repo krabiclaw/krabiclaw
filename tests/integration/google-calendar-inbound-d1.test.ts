@@ -188,8 +188,12 @@ test('Google time and exact attorney replacement request client approval while c
     assert.equal((await db.prepare('SELECT status FROM bookings WHERE id=?').bind(bookingId).first())?.status,'pending')
     assert.equal(events.get(eventId)?.status,'tentative')
     assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE event_name='calendar_sync.event_deleted' AND kind='operation'").first('n'),1)
-    // A deleted event the booking put back needs nobody; only a refused move is a change task.
-    assert.equal(await db.prepare("SELECT count(*) n FROM tasks WHERE kind='booking_change'").first('n'),0)
+    // Each refused move is an open change task the owner acknowledges; each Google proposal's task closed when it was
+    // answered or replaced; a deleted event the booking put back is nobody's work.
+    const changeTasks = (await db.prepare(`SELECT e.event_name, t.status, count(*) n FROM tasks t JOIN activity_entries e ON t.dedupe_key = 'booking_change:' || e.id
+      WHERE t.kind = 'booking_change' GROUP BY e.event_name, t.status ORDER BY e.event_name, t.status`).all()).results
+    const refused = await db.prepare("SELECT count(*) n FROM activity_entries WHERE event_name='calendar_sync.move_refused' AND kind='operation'").first<number>('n')
+    assert.deepEqual(changeTasks, [{ event_name: 'booking_change.requested', status: 'done', n: 3 }, { event_name: 'calendar_sync.move_refused', status: 'open', n: refused }])
     const deletionInvitations=invitations.length
     changes=[deletion]
     await pullCalendarChanges(env,'org',provider)
