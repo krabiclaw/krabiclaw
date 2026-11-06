@@ -158,16 +158,38 @@ headline, location or context, image and badge, with the entire card a link.
 An undated task states its status rather than inventing an appointment time.
 
 Today and Upcoming each render one list in the canonical server order, without
-category headings, separate groups or hosting accordions. The agenda owns booked
-activity and its chronological order. Today may also show an actual pending
-booking review or a recorded delivery/publication failure with a direct link to
-its owning workflow. Successful and healthy scheduled operations remain with
-their inbox, booking or publishing records; they are not owner tasks. Unanswered
-messages alone do not establish obligations and stay in Messages.
+category headings, separate groups or hosting accordions. Today puts due work
+and dated activity first, then optional work, then ongoing hosting context so
+it cannot displace an action from the first page. Item status and time stay on
+the item. Priority controls sit below the list without a category wrapper.
+Completed work leaves the shared action feed and consumes none of its display
+or pagination budget. Work is due when a recorded fact makes it so: a
+booking awaiting the owner's decision, an unanswered guest message about a live
+(pending or confirmed, not yet ended) commitment, an unanswered message or
+contact form from the last seven days, a failed or uncertain scheduled send,
+a failed review invitation, or a failed publication. Inbox state
+alone is not due work: an older unanswered inquiry with no live commitment
+stays in Messages and is not mandatory on Today.
 
-There is no Today goal input, recommendation feedback, keyword selection,
-optional-suggestion limit, or generic business-progress endpoint. No game
-missions or economy are inferred from this operational surface.
+Optional work comes only from capabilities Today can recognise as finished —
+replying to a guest (`guest_thread.reply`) and publishing a blog draft
+(`article.publish`) — and only when the owner has a reason for it: an active
+priority whose words the work shares, their own earlier choice to do it, or a
+deferral that has come due. At most three are shown; a day with no such work
+shows none. Analytics, advertising, plan offers, photos and social shares do not
+earn a card by existing.
+
+Owners and admins state priorities on Today; they are `organization_goals`.
+Every suggested card carries its reason and, for owners and admins, the
+evidence revision it was suggested on. "I'll do this", "Later", "Dismiss" and
+"Correct" save `recommendation_feedback` against that evidence and the matched
+priority. A current dismissal or correction removes the card without touching
+the conversation or article; a deferral moves it to its chosen day, where
+Upcoming shows it at that action time ahead of the occurrence it prepares for.
+When the evidence, the priority or the deferral date changes, the decision no
+longer applies and the card returns with the reason it returned. Upcoming
+orders by action time, then occurrence time, and the page keeps the server's
+order.
 
 Assigned service members see only their own authorized appointments and related
 work. Lodging members see only
@@ -177,24 +199,38 @@ their arrival and departure days; these are not extra cleanings for assigned
 members. A departure notes when another noncancelled stay at that same home
 arrives on its checkout date.
 
-The card opens its data owner, never a second editor or task database. Pending
-booking review opens the booking; delivery failure opens its conversation; a
-failed publication opens its publishing controls. No suggestion feedback or
-manual completion state sits between the card and the actual operation.
+The card is an entrance to its data owner, never a second editor or task
+database. A reply opens its conversation; a decision opens its booking; a
+draft opens its article; a failed publication opens its publishing controls.
 
-Upcoming contains actual future booked activity in the canonical agenda order.
-Pending communications and automatic review invitations stay in their owning
-inbox and booking views. Failed or uncertain sends belong in Today until their
-canonical state changes; reading an alert does not clear them. Future bookings
-awaiting review may appear in Today now and retain their actual booking date.
-Booking occurrences retain their own location's timezone.
+Current domain state determines whether work remains outstanding. Reading a
+notification does not complete it; several notifications for one concern make
+one card. Resolved work disappears, while unresolved work survives midnight.
+A successful business reply, including a property reply mirrored from Airbnb,
+or a published draft is recognised on the next read. A delayed mirror of an old
+reply cannot answer a newer guest message, and a scheduled check-in template
+does not answer an unrelated question. Waiting age starts at the first still
+unanswered guest message, rather than restarting for every follow-up.
 
-Canonical conversation, booking and delivery records retain their outcomes.
-The shared Today projection excludes healthy automated operations and completed
-failure recovery for every consumer, including web and native. An actual visit
-remains on its agenda after its booking decision is finished. Today re-reads on
-relevant dashboard invalidations, when the page regains focus, and at day and
-occurrence boundaries.
+Upcoming includes actual pending scheduled communications and delayed replies,
+with their due time and automatic or member responsibility, alongside booked
+activity and explicitly deferred work. A sent, cancelled or superseded schedule
+no longer appears as future work. Failed and uncertain sends belong in Today
+until their canonical state changes; reading an alert does not clear them.
+An eligible unsent automatic review invitation is scheduled work; it does not
+ask the owner to perform an action that only the automation currently owns.
+Booking occurrences retain their own location's timezone. Future bookings
+needing a decision belong in Today now and retain their actual booking date.
+
+Canonical conversation, booking and delivery records retain completed outcomes.
+The shared Today action feed excludes finished work for every consumer,
+including web and native. Clients render that projection rather than filtering
+completion history independently. A successful reply or scheduled send clears
+its action; a failed or uncertain outcome remains actionable. A booking's
+actual current or future visit remains on its agenda after the decision is
+finished. Completed work cannot push a current action behind Load more.
+Today re-reads on relevant dashboard invalidations, when the page regains focus,
+and when time passing makes an existing due item or day boundary current.
 
 Stay cards read the canonical agenda and open `O/bookings/stay/:stayId`.
 Booked activity opens beneath Today: desktop keeps the agenda beside the

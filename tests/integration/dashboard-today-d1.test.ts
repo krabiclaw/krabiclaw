@@ -13,10 +13,13 @@ import { firstUnansweredGuestEntryTimes, updateThreadProjectionIfLatestEntry } f
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
 import { createArticleCategory } from '../../server/utils/content/article-categories.ts'
-import { createBlogPost } from '../../server/utils/content/publishing.ts'
+import { createBlogPost, updateBlogLifecycle, updateBlogPost } from '../../server/utils/content/publishing.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import todayRoute from '../../server/api/dashboard/today.get.ts'
-import type { TodayFeedPayload } from '../../shared/dashboard-today.ts'
+import goalCreateRoute from '../../server/api/organizations/[organizationId]/goals.post.ts'
+import goalUpdateRoute from '../../server/api/organizations/[organizationId]/goals/[goalId].patch.ts'
+import feedbackRoute from '../../server/api/organizations/[organizationId]/recommendation-feedback.put.ts'
+import type { TodayCard, TodayFeedPayload } from '../../shared/dashboard-today.ts'
 import { localDateAt } from '../../utils/timezone.ts'
 import { cancelScheduledGuestMessage, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
 import { cancelSendLaterMessage, createSendLaterMessage, sendDueSendLaterMessages } from '../../server/domain/send-later.ts'
@@ -85,6 +88,9 @@ async function boot() {
     assert.ok(token)
     const app = new H3()
     app.get('/api/dashboard/today', todayRoute)
+    app.post('/api/organizations/:organizationId/goals', goalCreateRoute)
+    app.patch('/api/organizations/:organizationId/goals/:goalId', goalUpdateRoute)
+    app.put('/api/organizations/:organizationId/recommendation-feedback', feedbackRoute)
     const call = async <T>(method: string, path: string, body?: unknown, status = 200): Promise<T> => {
       const response = await app.request(Object.assign(new Request(`https://proof.example${path}`, {
         method, headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body),
@@ -103,39 +109,106 @@ async function contactThread(db: D1Database, id: string, message: string, create
     created_at: createdAt, updated_at: createdAt }).map(write => db.prepare(write.query).bind(...write.params)))
 }
 
-test('Today reads booked activity and actual delivery failures without inferring work from unanswered messages or drafts', async t => {
+test('Today and Upcoming select work from obligations, the owner’s priority and their decisions, and stop once the canonical operation completes', async t => {
   const { runtime, db, env, homeId, call } = await boot()
   try {
     const now = Date.now()
     const today = (range: 'today' | 'upcoming' = 'today', window?: { from: string; to: string }) =>
       call<TodayFeedPayload>('GET', `/api/dashboard/today?org=${ORG}&range=${range}${window ? `&from=${window.from}&to=${window.to}` : ''}`)
     const ids = (feed: TodayFeedPayload) => feed.cards.map(card => card.id)
-    await contactThread(db, 'old-inquiry', 'Could we feature your business in our directory?', new Date(now - 20 * DAY).toISOString())
-    await contactThread(db, 'recent-inquiry', 'Could we feature your business in our directory?', new Date(now - 60 * 60_000).toISOString())
+    const find = (feed: TodayFeedPayload, id: string) => feed.cards.find(card => card.id === id)
+
+    // An old question with no booking behind it, and a question asked an hour ago.
+    await contactThread(db, 'old-inquiry', 'Is there parking near the kayak launch for the Saturday kayak trip?', new Date(now - 20 * DAY).toISOString())
+    await contactThread(db, 'recent-inquiry', 'Is the cabin pet friendly? We would bring a small dog.', new Date(now - 60 * 60_000).toISOString())
+    // An equally old unanswered message about a stay that has not happened yet.
     const checkIn = localDateAt(new Date(now + 10 * DAY), ZONE), checkOut = localDateAt(new Date(now + 12 * DAY), ZONE)
-    const access: StayAccess = { organizationId: ORG, actorId: OWNER, manage: true }
-    const stay = await createStay(db, env, access, { product_id: homeId, idempotency_key: 'upcoming-stay', check_in_date: checkIn, check_out_date: checkOut,
-      adults: 2, guest_name: 'Stella', guest_email: 'stella@provider-proof.com', total_minor: 30_000 })
-    const stayThread = stay.request_id!
-    const question = await appendEntry(db, { threadId: stayThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'What time can we check in?',
-      dedupeKey: 'stay-question', occurredAt: new Date(now - 20 * DAY).toISOString() })
+    const manager: StayAccess = { organizationId: ORG, actorId: OWNER, manage: true }
+    const stay = await createStay(db, env, manager, { product_id: homeId, idempotency_key: 'upcoming-stay', check_in_date: checkIn, check_out_date: checkOut, adults: 2,
+      guest_name: 'Stella', guest_email: 'stella@provider-proof.com', total_minor: 30_000 })
+    const stayThread = (await db.prepare("SELECT id FROM requests WHERE kind = 'stay'").first<{ id: string }>())!.id
+    // The guest-message pipeline's own writes, dated when the guest wrote.
+    const question = await appendEntry(db, { threadId: stayThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'What time can we check in?', dedupeKey: 'stay-question', occurredAt: new Date(now - 20 * DAY).toISOString() })
     await updateThreadProjectionIfLatestEntry(db, stayThread, question.id, { conversationState: 'needs_attention' })
     const category = await createArticleCategory(db, { organizationId: ORG, collection: 'blog', name: 'Guides', actorId: OWNER })
-    await createBlogPost(db as unknown as D1Database, OWNER, { idempotency_key: 'draft', title: 'A draft guide', excerpt: 'A saved draft is not an owner task.', category_id: category.id,
-      content_blocks: [{ type: 'markdown', data: { markdown: 'A saved draft is not an owner task.', editor_mode: 'rich' } }] }, { organization_id: ORG }, env)
-    const currentStay = await createStay(db, env, access, { product_id: homeId, idempotency_key: 'current-stay',
-      check_in_date: localDateAt(new Date(now - DAY), ZONE), check_out_date: localDateAt(new Date(now + DAY), ZONE), adults: 1, guest_name: 'Mara', total_minor: 15_000 })
-    const historyBefore = (await getGuestThreadDetail(db, 'recent-inquiry', ORG))!.entries
+    const draft = async (key: string, title: string, excerpt: string) => (await createBlogPost(db as unknown as D1Database, OWNER, { idempotency_key: key, title, excerpt, category_id: category.id,
+      content_blocks: [{ type: 'markdown', data: { markdown: excerpt, editor_mode: 'rich' } }] }, { organization_id: ORG }, env)).post as { id: string; updated_at: string }
+    const kayak = await draft('kayak', 'Kayak trip packing list', 'What to bring on our Saturday kayak trip.')
+    const sourdough = await draft('sourdough', 'Sourdough breakfast guide', 'How our sourdough breakfast is baked each morning.')
+    const historyBefore = (await getGuestThreadDetail(db, 'recent-inquiry', ORG))!.entries.length
+
+    // Without a priority: obligations only, with the fact that makes each due.
     let feed = await today()
-    assert.equal(feed.priorities, null)
-    assert.deepEqual(ids(feed), [`stay:${currentStay.id}:current`])
-    assert.ok(feed.cards.every(card => card.reason === null && card.decision === null && card.completedAt === null))
-    const upcoming = await today('upcoming', { from: localDateAt(new Date(now + 2 * DAY), ZONE), to: localDateAt(new Date(now + 20 * DAY), ZONE) })
-    assert.deepEqual(ids(upcoming), [`stay:${stay.id}:arrival`, `stay:${stay.id}:departure`])
-    assert.deepEqual((await getGuestThreadDetail(db, 'recent-inquiry', ORG))!.entries, historyBefore, 'reading Today does not change a conversation')
+    assert.deepEqual(feed.priorities, [])
+    assert.ok(ids(feed).includes('attention:recent-inquiry'))
+    assert.match(find(feed, 'attention:recent-inquiry')!.reason!, /^Rhea wrote .* and has no reply yet\.$/)
+    assert.equal(find(feed, `attention:${stayThread}`)?.priority, 'attention', 'age alone does not hide a message about a live stay')
+    assert.match(find(feed, `attention:${stayThread}`)!.reason!, /unanswered message about their stay/)
+    assert.equal(ids(feed).some(id => id.endsWith(':old-inquiry')), false, 'an old inquiry with no commitment is not work because the guest wrote last')
+    assert.equal(ids(feed).some(id => id.startsWith('draft:')), false, 'a draft is not work merely because it exists')
+    assert.equal(feed.cards.filter(card => card.priority === 'opportunity').length, 0)
+
+    // A priority makes the work it names worth doing, and says why.
+    const { goal: kayakGoal } = await call<{ goal: { id: string; revision: string } }>('POST', `/api/organizations/${ORG}/goals`, { idempotencyKey: 'kayak-goal', intent: 'Fill the remaining places on Saturday’s kayak trip' }, 201)
+    const currentStay = await createStay(db, env, manager, { product_id: homeId, idempotency_key: 'current-stay',
+      check_in_date: localDateAt(new Date(now - DAY), ZONE), check_out_date: localDateAt(new Date(now + DAY), ZONE), adults: 1, guest_name: 'Mara', total_minor: 15_000 })
+    feed = await today()
+    assert.deepEqual(feed.priorities?.map(priority => priority.id), [kayakGoal.id])
+    assert.deepEqual(feed.cards.filter(card => card.priority === 'opportunity').map(card => card.id).sort(), [`draft:${kayak.id}`, 'reply:old-inquiry'].sort())
+    assert.ok(ids(feed).indexOf(`stay:${currentStay.id}:current`) > ids(feed).indexOf(`draft:${kayak.id}`), 'ongoing hosting context cannot displace an actionable item in the flat list')
+    assert.ok(ids(feed).indexOf(`stay:${currentStay.id}:current`) > ids(feed).indexOf('reply:old-inquiry'))
+    assert.match(find(feed, 'reply:old-inquiry')!.reason!, /Olive has had no reply since .*It supports your priority “Fill the remaining places on Saturday’s kayak trip”\./)
+    assert.deepEqual(find(feed, `draft:${kayak.id}`)!.decision, { operation: 'article.publish', subjectId: kayak.id, evidenceRevision: find(feed, `draft:${kayak.id}`)!.decision!.evidenceRevision,
+      goalId: kayakGoal.id, goalRevision: kayakGoal.revision, revision: null, current: null })
+
+    // Changing the priority changes the optional work.
+    await call('PATCH', `/api/organizations/${ORG}/goals/${kayakGoal.id}`, { revision: kayakGoal.revision, status: 'archived' })
+    await call('POST', `/api/organizations/${ORG}/goals`, { idempotencyKey: 'bread-goal', intent: 'Promote our sourdough breakfast' }, 201)
+    feed = await today()
+    assert.deepEqual(feed.cards.filter(card => card.priority === 'opportunity').map(card => card.id), [`draft:${sourdough.id}`])
+
+    // A dismissal survives fresh reads and leaves the work's own record untouched.
+    const sourdoughCard = find(feed, `draft:${sourdough.id}`)!
+    const decide = (card: TodayCard, decision: string, extra: Record<string, unknown> = {}) => call<{ feedback: { id: string; decision: string } }>('PUT', `/api/organizations/${ORG}/recommendation-feedback`, {
+      operation: card.decision!.operation, subjectId: card.decision!.subjectId, evidenceRevision: card.decision!.evidenceRevision, revision: card.decision!.revision, decision,
+      ...(card.decision!.goalId ? { goalId: card.decision!.goalId, goalRevision: card.decision!.goalRevision } : {}), ...extra,
+    })
+    await decide(sourdoughCard, 'dismiss')
+    assert.equal(ids(await today()).includes(`draft:${sourdough.id}`), false)
+    assert.equal(ids(await today()).includes(`draft:${sourdough.id}`), false)
+    const stored = await db.prepare('SELECT status, updated_at FROM content_documents WHERE id = ?').bind(sourdough.id).first<{ status: string; updated_at: string }>()
+    assert.deepEqual(stored, { status: 'draft', updated_at: sourdough.updated_at })
+
+    // New evidence brings it back with the reason it returned.
+    const edited = await updateBlogPost(db as unknown as D1Database, sourdough.id, { excerpt: 'How our sourdough breakfast loaves are baked before sunrise.', expected_updated_at: sourdough.updated_at }, ORG, OWNER, env) as { post: { updated_at: string } }
+    feed = await today()
+    assert.match(find(feed, `draft:${sourdough.id}`)!.reason!, /^This draft changed since you dismissed it on /)
+
+    // Preparation planned for a later day appears on that day, ahead of the stay it precedes.
+    const recentCard = find(feed, 'attention:recent-inquiry')!
+    const deferUntil = new Date(now + 3 * DAY).toISOString()
+    await decide(recentCard, 'defer', { deferUntil, note: 'Waiting for the owner to confirm the pet policy.' })
+    feed = await today()
+    assert.equal(ids(feed).includes('attention:recent-inquiry'), false)
+    const upcoming = await today('upcoming', { from: localDateAt(new Date(now + DAY), ZONE), to: localDateAt(new Date(now + 20 * DAY), ZONE) })
+    const planned = find(upcoming, 'attention:recent-inquiry')!
+    assert.equal(planned.actionAt, deferUntil)
+    assert.match(planned.eyebrow, /^Planned for /)
+    assert.match(planned.reason!, /You set this aside until .* Your note: “Waiting for the owner to confirm the pet policy\.”$/)
+    const arrival = `stay:${stay.id}:arrival`
+    assert.ok(ids(upcoming).indexOf('attention:recent-inquiry') < ids(upcoming).indexOf(arrival), 'the planned action precedes the stay it prepares for')
+    assert.equal((await getGuestThreadDetail(db, 'recent-inquiry', ORG))!.entries.length, historyBefore, 'a decision never edits conversation history')
+
+    // Completing the work through its own operation removes it on the next read.
+    await updateBlogLifecycle(db as unknown as D1Database, sourdough.id, { expected_updated_at: edited.post.updated_at }, ORG, OWNER)
     const provider = providerTransport(t)
     const response = await executeGuestThreadOperation(db, { threadId: stayThread, organizationId: ORG, action: 'reply', body: 'Check-in opens at 4pm.', actorUserId: OWNER, idempotencyKey: 'stay-reply', env: { ...env, ...provider.configuration } })
     assert.equal(response.ok, true, JSON.stringify(response))
+    feed = await today()
+    assert.equal(ids(feed).includes(`draft:${sourdough.id}`), false)
+    assert.equal(ids(feed).includes(`attention:${stayThread}`), false)
+    assert.equal(feed.cards.filter(card => card.priority === 'opportunity').length, 0, 'with nothing worth doing, no optional work is invented')
+
     // A physically accepted reply answers the guest, but its own recorded completion error still needs attention.
     const receipt = (await db.prepare(`SELECT d.* FROM guest_thread_deliveries d JOIN activity_entries e ON e.id=d.entry_id
       WHERE e.request_id=? AND e.event_name='thread.member_reply' AND d.purpose='member_reply' AND d.channel='email'`).bind(stayThread).first<GuestThreadDeliveryRow>())!
@@ -155,10 +228,10 @@ test('Today reads booked activity and actual delivery failures without inferring
     await db.prepare('DROP TRIGGER reject_direct_reply_completion').run()
     assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [stayThread])).has(stayThread), false, 'saved metadata failure does not undo the actual customer reply')
     feed = await today()
-    const attention = feed.cards.find(card => card.id === `attention:${stayThread}`)!
+    const attention = find(feed, `attention:${stayThread}`)!
     assert.equal(attention.priority, 'attention')
     assert.equal(attention.headline, 'Check the message to Stella')
-    assert.equal(attention.description, await db.prepare('SELECT error FROM guest_thread_deliveries WHERE id=?').bind(receipt.id).first('error'))
+    assert.equal(attention.reason, await db.prepare('SELECT error FROM guest_thread_deliveries WHERE id=?').bind(receipt.id).first('error'))
     assert.equal(provider.sendAttempts, 1)
     const deliveredEvent = { type: 'email.delivered', created_at: new Date().toISOString(), data: { email_id: receipt.provider_message_id!,
       created_at: new Date().toISOString(), from: 'hello@krabiclaw.com', to: ['stella@provider-proof.com'], subject: 'Proof', message_id: receipt.email_message_id! } } as Parameters<typeof applyResendEmailEvent>[2]
@@ -172,7 +245,7 @@ test('Today reads booked activity and actual delivery failures without inferring
   }
 })
 
-test('Today excludes healthy automation while actual failed or unconfirmed delivery stays actionable and clears on recovery', async t => {
+test('Today reads actual scheduled work and review outcomes: cancellation and success clear work, and failed or unconfirmed delivery stays actionable', async t => {
   const reference = new Date()
   reference.setUTCHours(18, 0, 0, 0)
   t.mock.timers.enable({ apis: ['Date'], now: reference })
@@ -188,20 +261,22 @@ test('Today excludes healthy automation while actual failed or unconfirmed deliv
     const planned = await db.prepare('SELECT id,status,due_at FROM scheduled_guest_messages WHERE template_id=? AND stay_id=?').bind(template.id, stay.id).first<{ id: string; status: string; due_at: string }>()
     assert.ok(planned)
     let feed = await read('upcoming')
-    const automaticId = `automatic-message:${planned.id}`
-    assert.equal(feed.cards.some(card => card.id === automaticId), false, 'healthy automation remains in its owning message schedule')
+    const automatic = feed.cards.find(card => card.id === `automatic-message:${planned.id}`)
+    assert.ok(automatic)
+    assert.equal(automatic.actionAt, planned.due_at)
+    assert.match(automatic.reason!, /^Automatic · /)
     await cancelScheduledGuestMessage(db, env, access, planned.id)
     assert.equal(await db.prepare('SELECT status FROM scheduled_guest_messages WHERE id=?').bind(planned.id).first('status'), 'cancelled')
-    assert.equal((await read('upcoming')).cards.some(card => card.id === automaticId), false)
+    assert.equal((await read('upcoming')).cards.some(card => card.id === automatic.id), false)
 
     const abandoned = await createSendLaterMessage(db, principal, stay.request_id!, { body: 'An unnecessary follow-up.', sendAt: new Date(now + DAY).toISOString() })
-    assert.equal((await read('upcoming')).cards.some(card => card.id === `send-later:${abandoned.id}`), false)
+    assert.equal((await read('upcoming')).cards.filter(card => card.id === `send-later:${abandoned.id}`).length, 1)
     await cancelSendLaterMessage(db, principal, abandoned.id)
     assert.equal((await read('upcoming')).cards.some(card => card.id === `send-later:${abandoned.id}`), false)
 
     const provider = providerTransport(t), providerEnv = { ...env, ...provider.configuration }
     const later = await createSendLaterMessage(db, principal, stay.request_id!, { body: 'Your cabin is ready.', sendAt: new Date(now + 60_000).toISOString() })
-    assert.equal((await read()).cards.some(card => card.id === `send-later:${later.id}`), false)
+    assert.equal((await read()).cards.find(card => card.id === `send-later:${later.id}`)?.priority, 'schedule')
     t.mock.timers.tick(120_000)
     const sentResult = await sendDueSendLaterMessages(db, providerEnv)
     assert.deepEqual(sentResult, { sent: 1, failed: 0, needs_review: 0 }, JSON.stringify(await db.prepare('SELECT status,reason,error_code FROM send_later_messages WHERE id=?').bind(later.id).first()))
@@ -227,7 +302,7 @@ test('Today excludes healthy automation while actual failed or unconfirmed deliv
     await db.prepare('DROP TRIGGER reject_delivery_completion').run()
     let attention = (await read()).cards.find(card => card.id === `send-later:${later.id}`)
     assert.equal(attention?.priority, 'attention')
-    assert.equal(attention!.description, await db.prepare('SELECT error FROM guest_thread_deliveries WHERE id=?').bind(receipt.id).first('error'))
+    assert.equal(attention!.reason, await db.prepare('SELECT error FROM guest_thread_deliveries WHERE id=?').bind(receipt.id).first('error'))
     const deliveredEvent = { type: 'email.delivered', created_at: new Date().toISOString(), data: { email_id: receipt.provider_message_id!,
       created_at: new Date().toISOString(), from: 'hello@krabiclaw.com', to: ['stella@provider-proof.com'], subject: 'Proof', message_id: receipt.email_message_id! } } as Parameters<typeof applyResendEmailEvent>[2]
     assert.equal(await applyResendEmailEvent(db, env, deliveredEvent), 'advanced')
@@ -242,7 +317,7 @@ test('Today excludes healthy automation while actual failed or unconfirmed deliv
     assert.deepEqual(await sendDueSendLaterMessages(db, providerEnv), { sent: 0, failed: 1, needs_review: 0 })
     const failedCard = (await read()).cards.find(card => card.id === `send-later:${failure.id}`)
     assert.equal(failedCard?.priority, 'attention')
-    assert.match(failedCard!.description!, /controlled recipient rejection/)
+    assert.match(failedCard!.reason!, /controlled recipient rejection/)
     provider.reject(false)
     const willBounce = await createSendLaterMessage(db, principal, stay.request_id!, { body: 'Please review your arrival details.', sendAt: new Date(Date.now() + 60_000).toISOString() })
     t.mock.timers.tick(120_000)
@@ -252,7 +327,7 @@ test('Today excludes healthy automation while actual failed or unconfirmed deliv
       bounce: { type: 'Permanent', subType: 'General', message: 'mailbox unavailable' } } } as Parameters<typeof applyResendEmailEvent>[2]), 'advanced')
     const bounced = (await read()).cards.find(card => card.id === `send-later:${willBounce.id}`)
     assert.equal(bounced?.priority, 'attention')
-    assert.match(bounced!.description!, /mailbox unavailable/)
+    assert.match(bounced!.reason!, /mailbox unavailable/)
     assert.equal((await read('upcoming')).cards.some(card => card.id === bounced!.id), false)
 
     // The existing review dispatch owns the automatic work and marks its real success.
@@ -278,11 +353,14 @@ test('Today excludes healthy automation while actual failed or unconfirmed deliv
       check_out_date: localDateAt(new Date(now), ZONE), adults: 1, guest_name: 'Rhea', guest_email: 'rhea@provider-proof.com', total_minor: 15_000 })
     const freshInvite = await createGuestThreadInvite(db, env, { organizationId: ORG, threadId: justEnded.request_id!, actorUserId: OWNER })
     await claimGuestThreadInvite(db, { token: new URL(freshInvite.url).pathname.split('/').at(-1)!, userId: guest.response!.user.id })
-    const futureReviewId = `review-invitation:${justEnded.request_id}`
-    assert.equal((await read('upcoming')).cards.some(card => card.id === futureReviewId), false)
-    assert.equal((await read()).cards.some(card => card.id === futureReviewId), false)
-    const dueReviewId = `review-invitation:${ended.request_id}`
-    assert.equal((await read()).cards.some(card => card.id === dueReviewId), false, 'an eligible automatic invitation is not an owner task')
+    const futureReview = (await read('upcoming')).cards.find(card => card.id === `review-invitation:${justEnded.request_id}`)
+    assert.ok(futureReview)
+    assert.equal(futureReview.priority, 'schedule')
+    assert.equal(localDateAt(new Date(futureReview.actionAt!), ZONE), localDateAt(new Date(now + DAY), ZONE))
+    assert.equal((await read()).cards.some(card => card.id === futureReview.id), false)
+    const dueReview = (await read()).cards.find(card => card.id === `review-invitation:${ended.request_id}`)
+    assert.ok(dueReview)
+    assert.equal(dueReview.priority, 'schedule', 'automatic work with no failure is not an invented owner action')
     const ordered = (await read()).cards
     const firstScheduled = ordered.findIndex(card => card.priority === 'schedule')
     assert.ok(firstScheduled > 0)
@@ -293,10 +371,10 @@ test('Today excludes healthy automation while actual failed or unconfirmed deliv
     const visit = await db.prepare('SELECT first_sent_at,send_count FROM review_requests WHERE booking_id=?').bind(ended.request_id).first<{ first_sent_at: string; send_count: number }>()
     assert.equal(visit?.send_count, 1)
     feed = await read()
-    assert.equal(feed.cards.some(card => card.id === dueReviewId), false)
+    assert.equal(feed.cards.some(card => card.id === dueReview.id), false)
     assert.ok(visit?.first_sent_at)
     await assert.rejects(sendReviewRequestForBooking(providerEnv, db, 'stay', ended.request_id!), /not due a review invitation/)
-    assert.equal((await read()).cards.some(card => card.id === dueReviewId), false)
+    assert.equal((await read()).cards.some(card => card.id === dueReview.id), false)
     assert.equal(provider.sent.size, 3, 'two scheduled sends and one invitation reached the controlled provider')
 
     const reviewReceipt = (await db.prepare(`SELECT d.* FROM guest_thread_deliveries d JOIN activity_entries e ON e.id=d.entry_id
@@ -339,7 +417,7 @@ test('Today excludes healthy automation while actual failed or unconfirmed deliv
       bounce: { type: 'Permanent', subType: 'General', message: 'teammate delivery failed' } } } as Parameters<typeof applyResendEmailEvent>[2]), 'advanced')
     const teamFailure = (await read()).cards.find(card => card.id === `send-later:${teamReply.id}`)
     assert.equal(teamFailure?.priority, 'attention', 'a teammate’s already-sent message is shared work when its delivery later fails')
-    assert.match(teamFailure!.description!, /teammate delivery failed/)
+    assert.match(teamFailure!.reason!, /teammate delivery failed/)
 
     const teamPrivate = await createSendLaterMessage(db, teammate, stay.request_id!, { body: 'Private draft for tomorrow.', sendAt: new Date(Date.now() + DAY).toISOString() })
     assert.equal((await read('upcoming')).cards.some(card => card.id === `send-later:${teamPrivate.id}`), false)
@@ -351,12 +429,12 @@ test('Today excludes healthy automation while actual failed or unconfirmed deliv
     assert.deepEqual(await db.prepare('SELECT m.status,d.provider FROM send_later_messages m JOIN guest_thread_deliveries d ON d.entry_id=m.entry_id WHERE m.id=?').bind(preview.id).first(), { status: 'sent', provider: 'log_only' })
     const unconfirmed = (await read()).cards.find(card => card.id === `send-later:${preview.id}`)
     assert.equal(unconfirmed?.priority, 'attention')
-    assert.equal(unconfirmed?.description, 'No successful delivery is recorded for this message.')
+    assert.equal(unconfirmed?.reason, 'No successful delivery is recorded for this message.')
     assert.equal(provider.sent.size, 4)
     t.mock.timers.tick(DAY)
     const tomorrow = await read()
     assert.equal(tomorrow.cards.find(card => card.id === `send-later:${failure.id}`)?.priority, 'attention', 'an unresolved send failure survives midnight')
-    assert.equal(tomorrow.cards.some(card => card.id === dueReviewId), false, 'a sent invitation does not become pending work again on the next day')
+    assert.equal(tomorrow.cards.some(card => card.id === dueReview.id), false, 'a sent invitation does not become pending work again on the next day')
   } finally {
     await runtime.dispose()
     t.mock.timers.reset()

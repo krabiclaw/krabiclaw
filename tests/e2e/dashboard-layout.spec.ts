@@ -1578,8 +1578,10 @@ test.describe('dashboard pane hierarchy', () => {
     const last = cards.last()
     await expect(last).toContainText(feed.cards.at(-1)!.headline)
     const finalBody = (await body.boundingBox())!
-    await expect(last).toBeInViewport({ ratio: 1 })
-    const finalItem = (await last.boundingBox())!
+    // The owner's priority control follows the list.
+    const priorityForm = panel.getByTestId('today-priorities').locator('form')
+    await expect(priorityForm).toBeInViewport({ ratio: 1 })
+    const finalItem = (await priorityForm.boundingBox())!
     expect(finalBody.y + finalBody.height - finalItem.y - finalItem.height, 'Today has the canonical 16px panel padding after its last item').toBeCloseTo(16, 0)
     const nav = (await page.getByTestId('dashboard-mobile-nav').boundingBox())!
     expect(finalBody.y + finalBody.height).toBeCloseTo(nav.y, 0)

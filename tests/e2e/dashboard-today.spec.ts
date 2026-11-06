@@ -4,13 +4,107 @@ import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededSiteHeaders } from './test-env'
 import { seededTenant } from './seed/manifest'
-import { isDashboardInvalidation } from '../../shared/dashboard-invalidations'
 import type { TodayFeedPayload } from '../../shared/dashboard-today'
 import type { AgendaPayload } from '../../server/utils/dashboard-agenda'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 import type { InboxListPage, InboxThread } from '../../server/domain/guest-threads/types'
+import { isDashboardInvalidation } from '../../shared/dashboard-invalidations'
+import { localNow } from '../../utils/timezone'
 
 const ORG = '/dashboard/ember-slice-demo'
+
+test('Upcoming removes a cancelled scheduled reply without a reload and keeps the unanswered inquiry', async ({ page, request, baseURL }, testInfo) => {
+  test.setTimeout(120_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Scheduled replies use disposable local data only')
+  const organizationId = seededTenant('restaurant').organizationId
+  const release = await acquireTenantMutationLock(testInfo, organizationId)
+  const marker = `ScheduledReply${Date.now()}`
+  let messageId: string | null = null
+  let futureMessageId: string | null = null
+  let cancelled = false
+  try {
+    await loginAs(page.request, baseURL!)
+    await dismissPreviewToolbar(page)
+    const submitted = await request.post('/api/public/contact', { headers: seededSiteHeaders('restaurant'), data: {
+      name: marker, email: `${marker.toLowerCase()}@playwright.example`, subject: 'general', consent: true,
+      message: 'Can you accommodate a group for dinner next week?',
+    } })
+    expect(submitted.status(), await submitted.text()).toBe(201)
+    const inbox = await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads`, { params: { type: 'contact' } })
+    expect(inbox.status(), await inbox.text()).toBe(200)
+    const threads = (await inbox.json() as { threads: Array<{ id: string; guestName: string }> }).threads.filter(thread => thread.guestName === marker)
+    expect(threads).toHaveLength(1)
+    const threadId = threads[0]!.id
+    const sendAt = new Date(Date.now() + 2 * 86_400_000).toISOString()
+    const scheduled = await page.request.post(`/api/dashboard/organizations/${organizationId}/guest-threads/${threadId}/send-later`, {
+      data: { body: `We can discuss your group dinner, ${marker}.`, sendAt },
+    })
+    expect(scheduled.status(), await scheduled.text()).toBe(201)
+    messageId = (await scheduled.json() as { message: { id: string } }).message.id
+    const futureSendAt = new Date(Date.now() + 40 * 86_400_000).toISOString()
+    const futureScheduled = await page.request.post(`/api/dashboard/organizations/${organizationId}/guest-threads/${threadId}/send-later`, {
+      data: { body: `Later follow-up for ${marker}.`, sendAt: futureSendAt },
+    })
+    expect(futureScheduled.status(), await futureScheduled.text()).toBe(201)
+    futureMessageId = (await futureScheduled.json() as { message: { id: string } }).message.id
+
+    const socketOpened = page.waitForEvent('websocket', { predicate: socket => new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket' })
+    expect((await page.goto(`${ORG}?range=upcoming`))?.status()).toBe(200)
+    const socket = await socketOpened
+    await waitForNuxtHydration(page)
+    const upcoming = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo', range: 'upcoming',
+      from: new Date(Date.parse(sendAt) - 86_400_000).toISOString().slice(0, 10), to: new Date(Date.parse(sendAt) + 86_400_000).toISOString().slice(0, 10) } })
+    expect(upcoming.status(), await upcoming.text()).toBe(200)
+    const scheduledCard = (await upcoming.json() as TodayFeedPayload).cards.filter(card => card.actionAt === sendAt && card.to.includes(threadId))
+    expect(scheduledCard).toHaveLength(1)
+    const card = page.locator(`[data-card-id="${scheduledCard[0]!.id}"]`)
+    await expect(card).toBeVisible()
+    await expect(card).toContainText(marker)
+    const futureCard = page.locator(`[data-card-id="send-later:${futureMessageId}"]`)
+    if (!await futureCard.isVisible()) await page.getByRole('button', { name: 'Load more', exact: true }).click()
+    await expect(futureCard).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath('upcoming-scheduled-reply.png'), fullPage: true, animations: 'disabled' })
+    // A successful heartbeat proves the existing socket joined the authorized
+    // hub before the other-window cancellation publishes its invalidation.
+    await socket.waitForEvent('framereceived', { predicate: frame => frame.payload === 'pong', timeout: 30_000 })
+    const changed = new Promise<void>(resolve => {
+      socket.on('framereceived', frame => {
+        if (typeof frame.payload !== 'string' || frame.payload === 'pong') return
+        const event: unknown = JSON.parse(frame.payload)
+        if (isDashboardInvalidation(event) && event.type === 'thread.changed' && event.threadId === threadId) resolve()
+      })
+    })
+    const response = await page.request.post(`/api/dashboard/organizations/${organizationId}/send-later/${messageId}/cancel`)
+    expect(response.status(), await response.text()).toBe(200)
+    expect(await response.json()).toMatchObject({ message: { id: messageId, status: 'cancelled' } })
+    cancelled = true
+    await changed
+    const persisted = await page.request.get(`/api/dashboard/organizations/${organizationId}/send-later`, { params: { threadId } })
+    expect(persisted.status(), await persisted.text()).toBe(200)
+    // This reader deliberately lists work still scheduled or recently failed;
+    // cancelled work leaves it, as it must leave Upcoming independently below.
+    expect((await persisted.json() as { messages: Array<{ id: string }> }).messages.filter(message => message.id === messageId)).toEqual([])
+    await expect(card).toHaveCount(0)
+    // Live reconciliation preserves the later windows the owner already opened.
+    await expect(futureCard).toBeVisible()
+    await page.getByRole('tab', { name: 'Today', exact: true }).click()
+    await expect(page.getByRole('tab', { name: 'Today', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByTestId('today-list').locator(`[data-card-id="attention:${threadId}"]`)).toBeVisible()
+    await expect(card).toHaveCount(0)
+    await page.screenshot({ path: testInfo.outputPath('today-work-list.png'), fullPage: true, animations: 'disabled' })
+  } finally {
+    try {
+      if (messageId && !cancelled) {
+        const response = await page.request.post(`/api/dashboard/organizations/${organizationId}/send-later/${messageId}/cancel`)
+        expect(response.status(), await response.text()).toBe(200)
+      }
+      if (futureMessageId) {
+        const response = await page.request.post(`/api/dashboard/organizations/${organizationId}/send-later/${futureMessageId}/cancel`)
+        expect(response.status(), await response.text()).toBe(200)
+      }
+    } finally { await release() }
+  }
+})
 
 test.beforeEach(async ({ page }) => {
   await page.addLocatorHandler(page.getByRole('region', { name: 'Analytics notice', exact: true }), async notice => {
@@ -341,4 +435,92 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
     try { await release() } catch (error) { failures.push(error) }
   }
   if (failures.length) throw new AggregateError(failures, 'Branch reservation access workflow or restoration failed')
+})
+
+test('an owner’s priority selects a draft on Today, and Dismiss and Later persist through reloads and Upcoming', async ({ page, baseURL }, testInfo) => {
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Priorities, drafts and decisions use disposable local data only')
+  test.setTimeout(120_000)
+  const organizationId = seededTenant('restaurant').organizationId
+  const release = await acquireTenantMutationLock(testInfo, organizationId)
+  const marker = `Lanternfish${Date.now()}`
+  const editor = `/api/editor/organizations/${organizationId}/blog`
+  let goal: { id: string; revision: string } | null = null
+  let postId: string | null = null
+  try {
+    await loginAs(page.request, baseURL!)
+    await dismissPreviewToolbar(page)
+    const created = await page.request.post(`${editor}/posts`, { data: { idempotency_key: crypto.randomUUID(), title: `${marker} supper club announcement`,
+      excerpt: 'Our monthly supper club returns.', content_blocks: [{ type: 'markdown', data: { markdown: 'Our monthly supper club returns.', editor_mode: 'rich' } }] } })
+    expect(created.status(), await created.text()).toBe(200)
+    postId = (await created.json() as { post: { id: string } }).post.id
+    const cardId = `draft:${postId}`
+    const card = page.locator(`[data-card-id="${cardId}"]`)
+    await page.goto(ORG)
+    await waitForNuxtHydration(page)
+    const priorities = page.getByTestId('today-priorities')
+    await expect(priorities).toBeVisible()
+    await expect(card).toHaveCount(0)
+
+    // The owner says what matters; the draft that serves it appears with that reason.
+    const goalSaved = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/organizations/${organizationId}/goals`)
+    await priorities.getByRole('textbox', { name: 'New priority', exact: true }).fill(`Promote the ${marker} supper club`)
+    await priorities.getByRole('button', { name: 'Add', exact: true }).click()
+    const saved = await goalSaved
+    expect(saved.status(), await saved.text()).toBe(201)
+    goal = (await saved.json() as { goal: { id: string; revision: string } }).goal
+    await expect(priorities.getByTestId('today-priority')).toContainText([`Promote the ${marker} supper club`])
+    await expect(card).toHaveAttribute('href', `${ORG}/website/blog/${postId}`)
+    const item = card.locator('xpath=..')
+    await expect(item.getByTestId('today-card-reason')).toContainText(`It supports your priority “Promote the ${marker} supper club”.`)
+
+    // Later moves it off Today to the chosen day in Upcoming.
+    await item.getByRole('button', { name: 'Later', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'Come back to this later', exact: true })
+    await expect(dialog).toBeVisible()
+    // Browser-tomorrow can still be today for this business. Choose a future
+    // day explicitly: this assertion exercises Upcoming, not Later today.
+    const future = localNow(Intl.DateTimeFormat().resolvedOptions().timeZone, new Date(Date.now() + 2 * 86_400_000))
+    await dialog.locator('input[type="datetime-local"]').fill(`${future.date}T${future.time}`)
+    const deferred = page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname.endsWith('/recommendation-feedback'))
+    await dialog.getByRole('button', { name: 'Set aside', exact: true }).click()
+    expect((await deferred).status()).toBe(200)
+    await expect(dialog).toBeHidden()
+    await expect(card).toHaveCount(0)
+    await page.reload()
+    await waitForNuxtHydration(page)
+    await expect(page.getByTestId('today-priorities')).toBeVisible()
+    await expect(card).toHaveCount(0)
+    await page.getByRole('tab', { name: 'Upcoming', exact: true }).click()
+    await expect(card).toBeVisible()
+    await expect(card).toContainText(/Planned for /)
+    await expect(card.locator('xpath=..').getByTestId('today-card-reason')).toContainText('You set this aside until')
+
+    // Dismissing it there removes it everywhere, and the article itself is untouched.
+    const dismissed = page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname.endsWith('/recommendation-feedback'))
+    await card.locator('xpath=..').getByRole('button', { name: 'Dismiss', exact: true }).click()
+    expect((await dismissed).status()).toBe(200)
+    const upcomingReload = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/today' && new URL(response.url()).searchParams.get('range') === 'upcoming')
+    await page.reload()
+    expect((await upcomingReload).status()).toBe(200)
+    await waitForNuxtHydration(page)
+    await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(card).toHaveCount(0)
+    await page.getByRole('tab', { name: 'Today', exact: true }).click()
+    await expect(page.getByTestId('today-priorities')).toBeVisible()
+    await expect(card).toHaveCount(0)
+    const article = await page.request.get(`${editor}/${postId}`)
+    expect(article.status(), await article.text()).toBe(200)
+    expect((await article.json() as { post: { status: string } }).post.status).toBe('draft')
+  } finally {
+    try {
+      if (goal) {
+        const today = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo' } })
+        const current = (await today.json() as TodayFeedPayload).priorities?.find(priority => priority.id === goal!.id)
+        if (current) expect((await page.request.patch(`/api/organizations/${organizationId}/goals/${goal.id}`, { data: { revision: current.revision, status: 'archived' } })).status()).toBe(200)
+      }
+      if (postId) expect((await page.request.delete(`${editor}/${postId}`)).status()).toBe(200)
+    } finally {
+      await release()
+    }
+  }
 })
