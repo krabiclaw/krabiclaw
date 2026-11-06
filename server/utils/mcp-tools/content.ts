@@ -251,7 +251,7 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'delete_site_page',
-      description: 'Delete the selected site page or translation. Deleting a translation removes that translation; deleting the source locale removes the page and every translation with it, and the response names the locales that went. A page the site site renders cannot be deleted, because its route would then have nothing to show.',
+      description: 'Delete the selected site page or translation. Deleting a translation removes that translation; deleting the source locale removes the page and every translation with it, and the response names the locales that went. A required site page cannot be deleted, because its route would then have nothing to show.',
       domain: 'content',
       minimumRole: 'admin',
       inputSchema: {
