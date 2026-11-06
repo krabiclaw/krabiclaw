@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "cd4abc1d-1381-401e-bab3-7ae513412cbb",
+  "id": "4caf8e62-5e58-40b5-9e3f-9b3459e9cc9f",
   "prevId": "fc13cd56-c952-4fa8-8ab2-673f09037086",
   "tables": {
     "account": {
@@ -1605,7 +1605,7 @@
       "checkConstraints": {
         "broadcasts_category_check": {
           "name": "broadcasts_category_check",
-          "value": "category IN ('account_security', 'reservations_bookings', 'messages', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')"
+          "value": "category IN ('account_security', 'reservations_bookings', 'messages', 'tasks', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')"
         },
         "broadcasts_created_at_check": {
           "name": "broadcasts_created_at_check",
@@ -19811,7 +19811,7 @@
       "checkConstraints": {
         "user_notification_preferences_category_check": {
           "name": "user_notification_preferences_category_check",
-          "value": "category IN ('account_security', 'reservations_bookings', 'messages', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')"
+          "value": "category IN ('account_security', 'reservations_bookings', 'messages', 'tasks', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')"
         },
         "user_notification_preferences_updated_at_check": {
           "name": "user_notification_preferences_updated_at_check",

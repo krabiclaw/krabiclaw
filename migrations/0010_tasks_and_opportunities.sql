@@ -109,6 +109,23 @@ LEFT JOIN `products` p ON p.`organization_id` = o.`organization_id` AND p.`id` =
 WHERE o.`status` = 'accepted';--> statement-breakpoint
 DROP TABLE `recommendation_feedback`;--> statement-breakpoint
 PRAGMA foreign_keys=OFF;--> statement-breakpoint
+CREATE TABLE `__new_broadcasts` (
+	`id` text PRIMARY KEY NOT NULL,
+	`content_document_id` text NOT NULL,
+	`category` text NOT NULL,
+	`provider_broadcast_id` text,
+	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	FOREIGN KEY (`content_document_id`) REFERENCES `content_documents`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "broadcasts_category_check" CHECK(category IN ('account_security', 'reservations_bookings', 'messages', 'tasks', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')),
+	CONSTRAINT "broadcasts_created_at_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at)
+);
+--> statement-breakpoint
+INSERT INTO `__new_broadcasts`("id", "content_document_id", "category", "provider_broadcast_id", "created_at") SELECT "id", "content_document_id", "category", "provider_broadcast_id", "created_at" FROM `broadcasts`;--> statement-breakpoint
+DROP TABLE `broadcasts`;--> statement-breakpoint
+ALTER TABLE `__new_broadcasts` RENAME TO `broadcasts`;--> statement-breakpoint
+PRAGMA foreign_keys=ON;--> statement-breakpoint
+CREATE UNIQUE INDEX `broadcasts_content_document_id_unique` ON `broadcasts` (`content_document_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `broadcasts_provider_broadcast_id_unique` ON `broadcasts` (`provider_broadcast_id`) WHERE provider_broadcast_id IS NOT NULL;--> statement-breakpoint
 CREATE TABLE `__new_media_placements` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,
@@ -132,7 +149,23 @@ CREATE TABLE `__new_media_placements` (
 INSERT INTO `__new_media_placements`("id", "organization_id", "owner_type", "owner_id", "slot", "asset_id", "sort_order", "status", "presentation_json", "created_at", "updated_at") SELECT "id", "organization_id", "owner_type", "owner_id", "slot", "asset_id", "sort_order", "status", "presentation_json", "created_at", "updated_at" FROM `media_placements`;--> statement-breakpoint
 DROP TABLE `media_placements`;--> statement-breakpoint
 ALTER TABLE `__new_media_placements` RENAME TO `media_placements`;--> statement-breakpoint
-PRAGMA foreign_keys=ON;--> statement-breakpoint
 CREATE INDEX `media_placements_asset_idx` ON `media_placements` (`organization_id`,`asset_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `media_placements_org_owner_slot_asset_unique` ON `media_placements` (`owner_type`,`owner_id`,`slot`,`asset_id`);--> statement-breakpoint
-CREATE UNIQUE INDEX `media_placements_org_owner_slot_order_unique` ON `media_placements` (`owner_type`,`owner_id`,`slot`,`sort_order`);
+CREATE UNIQUE INDEX `media_placements_org_owner_slot_order_unique` ON `media_placements` (`owner_type`,`owner_id`,`slot`,`sort_order`);--> statement-breakpoint
+CREATE TABLE `__new_user_notification_preferences` (
+	`user_id` text NOT NULL,
+	`category` text NOT NULL,
+	`email_enabled` integer NOT NULL,
+	`whatsapp_enabled` integer NOT NULL,
+	`push_enabled` integer NOT NULL,
+	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	PRIMARY KEY(`user_id`, `category`),
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "user_notification_preferences_category_check" CHECK(category IN ('account_security', 'reservations_bookings', 'messages', 'tasks', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')),
+	CONSTRAINT "user_notification_preferences_updated_at_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at),
+	CONSTRAINT "user_notification_preferences_account_security_check" CHECK(category != 'account_security' OR email_enabled = 1)
+);
+--> statement-breakpoint
+INSERT INTO `__new_user_notification_preferences`("user_id", "category", "email_enabled", "whatsapp_enabled", "push_enabled", "updated_at") SELECT "user_id", "category", "email_enabled", "whatsapp_enabled", "push_enabled", "updated_at" FROM `user_notification_preferences`;--> statement-breakpoint
+DROP TABLE `user_notification_preferences`;--> statement-breakpoint
+ALTER TABLE `__new_user_notification_preferences` RENAME TO `user_notification_preferences`;
