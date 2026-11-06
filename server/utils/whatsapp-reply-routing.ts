@@ -111,6 +111,10 @@ export function buildConfirmSendPrompt(destination: string): string {
 }
 
 export const REPLY_SENT_CONFIRMATION = 'Reply sent.'
+/** A reply that failed for a reason the manager cannot act on; the error is reported, never shown. */
+export const REPLY_FAILED_ALERTED_MESSAGE = 'Reply not sent. The team has been alerted.'
+/** A reply whose delivery is unknown: it may already be with the guest. */
+export const REPLY_UNCERTAIN_MESSAGE = 'This reply may have reached the guest. Check the conversation before sending again.'
 
 /** The reply operation's own reason it refused or failed. */
 export function buildReplyFailedMessage(reason: string): string {

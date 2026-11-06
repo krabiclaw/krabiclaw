@@ -17,7 +17,7 @@ import { findSubmissionByPhone } from '~/server/utils/submission-messages'
 import { isAuthorizedWhatsAppRecipient, isOrganizationWideRole, resolveMemberId, resolveOrganizationMembership } from '~/server/utils/member-access'
 import { findVerifiedAuthUserByPhone } from '~/server/utils/auth'
 import {
-  PROMPT_QUOTE_NOTIFICATION_MESSAGE, REPLY_SENT_CONFIRMATION, buildCollectReplyPrompt, buildConfirmSendPrompt, buildDisambiguationPrompt, buildReplyFailedMessage, decideWhatsAppReplyRouting, maskEmailForDisplay, type DisambiguationCandidate, type PendingWhatsAppReplyState, } from '~/server/utils/whatsapp-reply-routing'
+  PROMPT_QUOTE_NOTIFICATION_MESSAGE, REPLY_FAILED_ALERTED_MESSAGE, REPLY_SENT_CONFIRMATION, REPLY_UNCERTAIN_MESSAGE, buildCollectReplyPrompt, buildConfirmSendPrompt, buildDisambiguationPrompt, buildReplyFailedMessage, decideWhatsAppReplyRouting, maskEmailForDisplay, type DisambiguationCandidate, type PendingWhatsAppReplyState, } from '~/server/utils/whatsapp-reply-routing'
 
 interface WhatsAppMessage {
   id: string
@@ -246,6 +246,12 @@ async function routeManagerWhatsAppMessage(
     const sendResult = await sendWhatsAppText(env, opts.toPhone, text)
     if (!sendResult.success) throw new Error(sendResult.error || failure)
   }
+  // The manager is told first, then the pending reply is cleared: a notice Meta refused leaves
+  // this message unhandled, so Meta's redelivery runs it again.
+  const tellAndClear = async (text: string, failure: string) => {
+    await sendOrThrow(text, failure)
+    await clearPending()
+  }
 
   async function resolveFreshDispatch(): Promise<{
     quotedDeliveryMatch: 'authorized_thread_found' | 'unmatched' | null
@@ -281,8 +287,7 @@ async function routeManagerWhatsAppMessage(
   if (!pendingState) {
     const fresh = await resolveFreshDispatch()
     if (fresh.quotedRefusal !== null) {
-      await clearPending()
-      await sendOrThrow(buildReplyFailedMessage(fresh.quotedRefusal), 'Failed to send WhatsApp reply refusal')
+      await tellAndClear(buildReplyFailedMessage(fresh.quotedRefusal), 'Failed to send WhatsApp reply refusal')
       return
     }
 
@@ -368,8 +373,7 @@ async function routeManagerWhatsAppMessage(
         organizationId: pendingState.organizationId,
       })
       if (!authorized) {
-        await clearPending()
-        await sendOrThrow('Your WhatsApp access has been revoked. Please contact your organization administrator.', 'Failed to send WhatsApp access notice')
+        await tellAndClear('Your WhatsApp access has been revoked. Please contact your organization administrator.', 'Failed to send WhatsApp access notice')
         return
       }
       const actorMemberId = await resolveMemberId({
@@ -391,29 +395,30 @@ async function routeManagerWhatsAppMessage(
             })
           : { ok: false as const, status: 404 as const, reason: 'thread_not_found' as const }
       } catch (error) {
-        // A refusal the operation throws (it names its code) is told like a returned one. Anything
-        // else may or may not have reached the guest: the manager is told to look, and the error is
-        // reported. Either way the pending reply is cleared, so a redelivery does not repeat it.
-        await clearPending()
-        const data = error instanceof HTTPError || error instanceof ChannexError ? error.data : null
-        const refused = data && typeof data === 'object' && 'code' in data && typeof data.code === 'string'
-        const message = error instanceof Error ? error.message : String(error)
-        // Only a refusal's message is written for the manager; anything else is reported, not shown.
-        try {
-          await sendOrThrow(refused ? buildReplyFailedMessage(message) : 'Your reply may not have been sent. Check the conversation in KrabiClaw.', 'Failed to send WhatsApp reply outcome')
-        } catch (sendError) {
-          throw refused ? sendError : new AggregateError([error, sendError], 'The reply failed and the manager could not be told', { cause: error })
+        // Only the refusals the operation throws by design (a 4xx with its code) are told as they are.
+        // Anything else, a provider or invariant failure, is never shown raw: the manager reads a fixed
+        // notice and the error is reported. A notice that also fails keeps both.
+        const refusal = error instanceof HTTPError && error.status >= 400 && error.status < 500 && typeof (error.data as { code?: unknown } | undefined)?.code === 'string'
+        if (refusal) {
+          await tellAndClear(buildReplyFailedMessage(error.message), 'Failed to send WhatsApp reply refusal')
+          return
         }
-        if (refused) return
+        const code = (error instanceof HTTPError || error instanceof ChannexError) ? (error.data as { code?: unknown } | undefined)?.code : undefined
+        try {
+          await tellAndClear(code === 'CHANNEL_RECEIPT_INVALID' || code === 'CHANNEL_REPLY_UNCERTAIN' ? REPLY_UNCERTAIN_MESSAGE : REPLY_FAILED_ALERTED_MESSAGE, 'Failed to send WhatsApp reply outcome')
+        } catch (noticeError) {
+          throw new AggregateError([error, noticeError], 'The reply failed and the manager could not be told', { cause: noticeError })
+        }
         throw error
       }
-      await clearPending()
       if (result.ok) {
         await publishGuestInboxThreadEvent(env, db, { threadId: result.thread.id, type: 'thread.changed' })
-        await sendOrThrow(REPLY_SENT_CONFIRMATION, 'Failed to send WhatsApp reply confirmation')
+        await tellAndClear(REPLY_SENT_CONFIRMATION, 'Failed to send WhatsApp reply confirmation')
+      } else if (result.reason === 'delivery_failed' && result.code === 'CHANNEL_REPLY_UNCERTAIN') {
+        await tellAndClear(REPLY_UNCERTAIN_MESSAGE, 'Failed to send WhatsApp reply outcome')
       } else {
         // The reply operation's own reason: a conversation that changed since it was offered says why.
-        await sendOrThrow(buildReplyFailedMessage('message' in result ? result.message : result.reason), 'Failed to send WhatsApp reply refusal')
+        await tellAndClear(buildReplyFailedMessage('message' in result ? result.message : result.reason), 'Failed to send WhatsApp reply refusal')
       }
       return
     }
@@ -439,16 +444,14 @@ async function routeManagerWhatsAppMessage(
         organizationId: chosen.organizationId,
       })
       if (!authorized) {
-        await clearPending()
-        await sendOrThrow('Your WhatsApp access has been revoked. Please contact your organization administrator.', 'Failed to send WhatsApp access notice')
+        await tellAndClear('Your WhatsApp access has been revoked. Please contact your organization administrator.', 'Failed to send WhatsApp access notice')
         return
       }
 
       // The conversation can have changed since it was offered; then the reply is refused as the inbox refuses it.
       const reply = await replyDestination(db, chosen.threadId, chosen.organizationId)
       if ('refused' in reply) {
-        await clearPending()
-        await sendOrThrow(buildReplyFailedMessage(reply.refused), 'Failed to send WhatsApp reply refusal')
+        await tellAndClear(buildReplyFailedMessage(reply.refused), 'Failed to send WhatsApp reply refusal')
         return
       }
       const destination = reply.destination
@@ -472,8 +475,7 @@ async function routeManagerWhatsAppMessage(
     // collect_reply: any non-empty text becomes the reply body, moving to confirm_send.
     const reply = await replyDestination(db, pendingState.threadId, pendingState.organizationId)
     if ('refused' in reply) {
-      await clearPending()
-      await sendOrThrow(buildReplyFailedMessage(reply.refused), 'Failed to send WhatsApp reply refusal')
+      await tellAndClear(buildReplyFailedMessage(reply.refused), 'Failed to send WhatsApp reply refusal')
       return
     }
     const destination = reply.destination
@@ -497,8 +499,7 @@ async function routeManagerWhatsAppMessage(
   // Cancelled confirm_send/disambiguate above — redispatch this same message fresh.
   const fresh = await resolveFreshDispatch()
   if (fresh.quotedRefusal !== null) {
-    await clearPending()
-    await sendOrThrow(buildReplyFailedMessage(fresh.quotedRefusal), 'Failed to send WhatsApp reply refusal')
+    await tellAndClear(buildReplyFailedMessage(fresh.quotedRefusal), 'Failed to send WhatsApp reply refusal')
     return
   }
 
@@ -520,22 +521,22 @@ async function routeManagerWhatsAppMessage(
         locationId: match.locationId,
         replyBody: rawText,
       }
+      await sendOrThrow(buildConfirmSendPrompt(match.destination), 'Failed to send WhatsApp confirmation prompt')
       await patchWhatsAppWorkspaceState(db, {
         userId: opts.userId,
         pendingConfirmation: newState,
         lastInboundId: opts.messageId,
       })
-      await sendOrThrow(buildConfirmSendPrompt(match.destination), 'Failed to send WhatsApp confirmation prompt')
       return
     }
     case 'start_disambiguation': {
       const newState: PendingWhatsAppReplyState = { kind: 'disambiguate', candidates: fresh.recentCandidates }
+      await sendOrThrow(buildDisambiguationPrompt(fresh.recentCandidates), 'Failed to send WhatsApp disambiguation prompt')
       await patchWhatsAppWorkspaceState(db, {
         userId: opts.userId,
         pendingConfirmation: newState as unknown as JsonSerializable,
         lastInboundId: opts.messageId,
       })
-      await sendOrThrow(buildDisambiguationPrompt(fresh.recentCandidates), 'Failed to send WhatsApp disambiguation prompt')
       return
     }
     case 'prompt_quote_notification':

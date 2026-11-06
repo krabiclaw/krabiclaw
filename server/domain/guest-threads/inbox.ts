@@ -109,14 +109,14 @@ async function threadFacts(db: DbClient, raw: GuestThreadDetailViewModel, organi
   const airbnbFirstName = airbnbName ? text(meta(airbnbName)!.name)! : null
   const guestFullName = kind === 'support' ? 'Airbnb Support' : raw.guestName ?? airbnbFirstName ?? raw.participantLabel
   const guestName = kind === 'support' ? 'Airbnb Support'
-    : airbnbFirstName ?? (raw.replyChannel === 'airbnb' && raw.guestName ? firstName(raw.guestName) : guestFullName)
+    : airbnbFirstName ?? (raw.conversationChannel === 'airbnb' && raw.guestName ? firstName(raw.guestName) : guestFullName)
   const record = raw.operationalRecord
   // A stay is its nights; a booking or reservation is its start, in the home's clock; an inquiry is the dates asked about.
   const when = record?.check_in_date && record.check_out_date ? stayWhen(record.check_in_date, record.check_out_date, now, timeZone)
     : record ? `${calendarDate(localDateKey(record.starts_at, timeZone))}, ${clockTime(record.starts_at, timeZone)}`
       : inquiry && kind === 'guest' ? formatCalendarRange(inquiry.checkIn, inquiry.checkOut, 'en-US') : null
   return {
-    raw, kind, guestName, guestFullName, channel: raw.replyChannel === 'airbnb' ? 'airbnb' : 'direct',
+    raw, kind, guestName, guestFullName, channel: raw.conversationChannel,
     home: raw.locationLabel, when, timeZone,
     ownerFirstName: owner ? firstName(owner.name) : null,
     automaticTitles: new Map(automatic.map(row => [row.entry_id, row.template_title])),
@@ -316,17 +316,21 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
     activityPath: raw.activityPath,
     stream: items,
     pending: viewer.audience === 'member' ? await pendingMessages(db, raw.id, organizationId, viewer.principal, facts.timeZone, now.toISOString()) : [],
-    composer: await composer(db, raw.id, organizationId, viewer),
+    composer: await composer(db, raw.id, organizationId, viewer, facts.channel),
   }
 }
 
-/** A guest writes to the business; a member writes wherever the reply operation would send (`guestReplyDestination`). */
-async function composer(db: DbClient, threadId: string, organizationId: string, viewer: Viewer): Promise<InboxThread['composer']> {
-  if (viewer.audience === 'buyer') return { channel: 'email', available: true }
+/**
+ * A guest writes to the business. A member writes wherever the reply operation
+ * would send (`guestReplyDestination`); where it cannot, there is no composer and
+ * its reason shows instead. An Airbnb conversation is always Airbnb's.
+ */
+async function composer(db: DbClient, threadId: string, organizationId: string, viewer: Viewer, conversation: 'airbnb' | 'direct'): Promise<InboxThread['composer']> {
+  if (viewer.audience === 'buyer') return { channel: 'email', available: true, reason: null }
   const request = await getGuestRequest(db, threadId, organizationId)
   if (!request) throw new Error(`Guest thread ${threadId} has no request`)
   const destination = await guestReplyDestination(db, request)
-  return { channel: destination.channel === 'airbnb' ? 'airbnb' : 'email', available: destination.channel !== null }
+  return { channel: conversation === 'airbnb' ? 'airbnb' : 'email', available: destination.channel !== null, reason: destination.channel === null ? destination.reason : null }
 }
 
 /**

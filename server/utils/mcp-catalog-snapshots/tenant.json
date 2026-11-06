@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:5e0b9f49c4e03323a48f089d03b8d1a9af978a1998e3565b255c82e6ade371df",
-  "documentationFingerprint": "sha256:d42219c4ad0162bbc5cc50592c8b8fb12e5d48304abdd60e40a166dacc01fe88",
+  "fingerprint": "sha256:86c7fdae920511b1fab3487ccdde4dc82b74805e9cdc59b631844231eda04ca9",
+  "documentationFingerprint": "sha256:f36f49c05a06f96995b393abe93670ac2f0d902a423b2ae624f6d3d92494404c",
   "tools": [
     {
       "name": "add_organization_language",
@@ -66942,11 +66942,23 @@
                   ]
                 },
                 "reply_channel": {
+                  "description": "Where reply_to_guest sends; null when the guest cannot be replied to, and reply_not_possible says why.",
                   "enum": [
+                    "airbnb",
                     "email",
-                    "airbnb"
+                    "account",
+                    null
                   ],
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reply_not_possible": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "request_id": {
                   "type": "string"
@@ -66966,6 +66978,7 @@
                 "guest_name",
                 "participant_label",
                 "reply_channel",
+                "reply_not_possible",
                 "type",
                 "state",
                 "operational_status",
@@ -127223,7 +127236,7 @@
         "get_product_booking": "sha256:1f0d7f20d207a6fb1aecb169e86483ae515c5b6209fbf9fe948a2be26860968d",
         "get_team_conversation": "sha256:68a4390f99121151a6c3dcca2e3cff8675166b27d958e7a1a71dcd3a4c9a81d0",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
+        "list_guest_conversations": "sha256:f1a1d47b6c74191b19cf9da049909dc5ed3636f69eb5f59a16ed36f11c4ca9f5",
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
@@ -127358,7 +127371,7 @@
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
         "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
+        "list_guest_conversations": "sha256:f1a1d47b6c74191b19cf9da049909dc5ed3636f69eb5f59a16ed36f11c4ca9f5",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",

@@ -118,8 +118,9 @@
         </p>
 
         <UAlert v-if="requestingChange" class="mb-3" color="info" variant="soft" :description="t(changeRequestSent ? 'booking.change_request_sent' : 'booking.change_request_help')" />
-        <!-- A guest with no email and no KrabiClaw account cannot be written to: there is no composer. -->
-        <MessageComposer v-if="thread.composer.available" v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :sending="sending" :channel="thread.composer.channel" :send-later="!personalScope" :suggestions-hidden="suggestionsHidden" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : 'Send reply'" @send="sendReply" @show-suggestions="recallSuggestions" />
+        <!-- Where the reply operation cannot send (no email, account or connected Airbnb home), there is no composer: its reason shows instead. -->
+        <p v-if="!thread.composer.available" class="rounded-2xl bg-elevated px-4 py-3 text-sm text-muted">{{ thread.composer.reason }}</p>
+        <MessageComposer v-else v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :sending="sending" :channel="thread.composer.channel" :send-later="!personalScope" :suggestions-hidden="suggestionsHidden" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : 'Send reply'" @send="sendReply" @show-suggestions="recallSuggestions" />
         <MessagePhotoViewer v-model="viewer" />
       </div>
     </template>

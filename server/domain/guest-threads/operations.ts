@@ -507,12 +507,13 @@ async function executeReply(
     ? await Promise.all(photoInput.map(async photo => ({ filename: photo.filename, hash: [...new Uint8Array(await crypto.subtle.digest('SHA-256', photo.bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('') })))
     : photoInput.sourceIds
   const requestHash = await creationRequestHash({ body, photos: photoIdentity })
-  // Where a new reply goes is the one rule every surface reads; nowhere is refused
-  // before anything is sent. A reply already recorded under this key replays on the
-  // channel it was sent through, whatever has changed since.
+  // Where a reply goes is the one rule every surface reads (`guestReplyDestination`);
+  // nowhere is refused before anything is sent. Only a reply this key already
+  // delivered replays where it went, whatever has changed since.
   const destination = await guestReplyDestination(db, context.thread)
   const recorded = await findEntryByDedupeKey(db, operationDedupeKey(input))
-  if (destination.channel === null && !recorded) return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'request_id', message: destination.reason }
+  const delivered = recorded ? await getDeliveryById(db, recorded.channel === 'airbnb' ? `guest-thread-channex:${context.thread.id}:${input.idempotencyKey}` : deliveryDedupeKey(input)) : null
+  if (destination.channel === null && !(delivered && isDeliverySent(delivered))) return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'request_id', message: destination.reason }
   const channel = destination.channel === 'airbnb' ? destination.mapping
     : recorded?.channel === 'airbnb' ? await getChannelThreadMapping(db, context.thread.id, context.thread.organization_id) : null
   if (channel) {

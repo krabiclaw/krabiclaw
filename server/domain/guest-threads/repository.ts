@@ -251,7 +251,6 @@ type GuestThreadListRow = GuestThreadRow & {
   channel_product_id: string | null
   stay_channel: GuestThreadListItemViewModel['stayChannel']
   guest_name: string | null
-  reply_channel: 'email' | 'airbnb'
   location_title: string | null
   organization_name?: string
   organization_vertical?: string | null
@@ -532,7 +531,7 @@ export async function listOrganizationGuestThreads(
   const rows = await queryAll<GuestThreadListRow>(db, `
     SELECT
       gt.*, ${stateSql} AS effective_conversation_state, ${rule.sql} AS past_by_rule,
-      ${SOURCE_GUEST_NAME_SQL} AS guest_name, ${REPLY_CHANNEL_SQL} AS reply_channel,
+      ${SOURCE_GUEST_NAME_SQL} AS guest_name,
       bl.title AS location_title,
       (
         SELECT body FROM activity_entries
@@ -574,7 +573,6 @@ export async function listOrganizationGuestThreads(
       organizationId: row.organization_id,
       guestName: row.guest_name,
       participantLabel: participantLabel(parseGuestRequest(row as unknown as Record<string, unknown>)),
-      replyChannel: row.reply_channel,
       submissionType: row.kind,
       locationLabel: row.location_title,
       locationId: row.location_id,

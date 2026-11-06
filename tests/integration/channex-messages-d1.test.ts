@@ -3,6 +3,7 @@ import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import { H3 } from 'h3'
+import { createHmac } from 'node:crypto'
 import { hashPassword } from 'better-auth/crypto'
 import sharp from 'sharp'
 import * as schema from '../../server/db/schema.ts'
@@ -22,6 +23,8 @@ import type { TodayFeedPayload } from '../../shared/dashboard-today.ts'
 import { guestThreadListPage, parseGuestThreadListQuery } from '../../server/utils/dashboard-guest-threads.ts'
 import { assertAssignedBookingAccess, memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
+import whatsappWebhook from '../../server/api/whatsapp/webhook.post.ts'
+import { getWhatsAppWorkspaceState } from '../../server/utils/mcp-context.ts'
 
 const ORG = 'org', OWNER = 'owner'
 const NOW = '2026-10-16T00:00:00.000Z'
@@ -186,7 +189,7 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     assert.deepEqual(await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay', mailbox: 'past' }), [])
     assert.equal(await db.prepare('SELECT product_id FROM channel_threads WHERE request_id = ?').bind(rows[0]!.id).first('product_id'), productId)
     const detail = (await getGuestThreadDetail(db, rows[0]!.id, ORG))!
-    assert.deepEqual([detail.operationalRecord, detail.guestEmail, detail.guestPhone, detail.guestName, detail.participantLabel, detail.replyChannel], [null, null, null, null, 'Conversation supplied by Airbnb', 'airbnb'])
+    assert.deepEqual([detail.operationalRecord, detail.guestEmail, detail.guestPhone, detail.guestName, detail.participantLabel, detail.conversationChannel], [null, null, null, null, 'Conversation supplied by Airbnb', 'airbnb'])
     assert.deepEqual(detail.entries.map(entry => [entry.body, entry.actorKind, entry.providerTimestamp]), [['Hello', 'guest', RAW], [null, 'system', RAW]])
     // Airbnb's photo is read once when the message lands and kept as the business's own media, placed on that message.
     assert.deepEqual(provider.fileReads, ['/attachment/file'])
@@ -856,9 +859,10 @@ test('an in-flight or interrupted reply never blocks actual provider messages an
     // A new reply to a disconnected home is nowhere to send, refused before anything is recorded or sent.
     assert.deepEqual(await executeGuestThreadOperation(db, { ...input, idempotencyKey: 'disconnected-new', body: 'Not attempted' }),
       { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'request_id', message: 'This home is disconnected from Airbnb, so its guest cannot be replied to here.' })
-    // The inbox reads the same rule: a disconnected home's conversation shows no composer.
+    // The inbox reads the same rule: a disconnected home's Airbnb conversation shows no composer, and says why.
     const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
-    assert.deepEqual((await getInboxThread(db, mirrored.request_id, ORG, { audience: 'member', userId: OWNER, principal: owner }))!.composer, { channel: 'email', available: false })
+    assert.deepEqual((await getInboxThread(db, mirrored.request_id, ORG, { audience: 'member', userId: OWNER, principal: owner }))!.composer,
+      { channel: 'airbnb', available: false, reason: 'This home is disconnected from Airbnb, so its guest cannot be replied to here.' })
     assert.equal(await db.prepare('SELECT count(*) FROM activity_entries WHERE request_id IS NOT NULL').first('count(*)'), 6, 'failed preflight records no outbound message')
   } finally { release(); globalThis.fetch = realFetch; await runtime.dispose() }
 })
@@ -939,5 +943,60 @@ test('explicit provider instants order replies across offsets without losing sub
     provider.messages.push(provider.message('offset-answer', 'property', 'Yes.', [], '2026-10-15T16:12:00.123457Z'))
     await mirrorChannexThread(db, env, 'thread', 'property')
     assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [mirrored.request_id])).size, 0)
+  } finally { globalThis.fetch = realFetch; await runtime.dispose() }
+})
+
+// A WhatsApp reply to an Airbnb conversation that fails inside the reply operation, by a
+// provider error or an invariant the operation throws, is never shown raw: the manager reads
+// a fixed notice, the pending reply is cleared, and the error fails the webhook to be reported.
+test('a WhatsApp reply the operation throws on tells the manager a fixed notice and reports the error', async () => {
+  const { runtime, db, env: base } = await boot()
+  const provider = new Provider(), realFetch = globalThis.fetch
+  const sent: string[] = []
+  let failure: 'channex' | 'invariant' | null = null
+  globalThis.fetch = (async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
+    if (url.hostname === 'graph.facebook.com') {
+      sent.push(JSON.parse(String(init.body)).text.body)
+      return Response.json({ messages: [{ id: `meta-out-${sent.length}` }] })
+    }
+    if (failure === 'channex' && url.pathname === `/api/v1/message_threads/${provider.threadId}`) return new Response('<html>Bad gateway from upstream</html>', { status: 502 })
+    return provider.fetch(input, init)
+  }) as typeof fetch
+  try {
+    const env = { ...base, WHATSAPP_DELIVERY_MODE: 'provider', WHATSAPP_PHONE_NUMBER_ID: 'local-proof-phone-id', WHATSAPP_ACCESS_TOKEN: 'local-proof-no-live-token', WHATSAPP_APP_SECRET: 'whatsapp-secret' } as CloudflareEnv
+    await db.prepare("UPDATE user SET phoneNumber = '+66812345678', phoneNumberVerified = 1 WHERE id = ?").bind(OWNER).run()
+    await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, periodEnd) VALUES ('sub', 'growth', ?, 'active', ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86400).run()
+    assert.deepEqual(await backfillChannexMessages(db, env, 'property', ORG), { threads: 1 })
+    const threadId = (await db.prepare('SELECT request_id FROM channel_threads').first<{ request_id: string }>())!.request_id
+    const entry = await appendEntry(db, { threadId, kind: 'message', actorKind: 'guest', channel: 'airbnb', body: 'Is there parking?', dedupeKey: 'whatsapp-alerted' })
+    const alert = await createDeliveryReceipt(db, { entryId: entry.id, channel: 'whatsapp', provider: 'meta', purpose: 'owner_alert', idempotencyKey: 'alert' })
+    await recordDeliveryOutcome(db, { deliveryId: alert.id, status: 'sent', providerMessageId: 'meta-alert' })
+    const app = new H3()
+    app.post('/api/whatsapp/webhook', whatsappWebhook)
+    let inbound = 0
+    const write = async (text: string, quoting?: string) => {
+      const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ value: { messages: [{ id: `wamid-${++inbound}`, from: '66812345678', type: 'text', text: { body: text }, ...(quoting && { context: { id: quoting } }) }] } }] }] })
+      return await app.request(Object.assign(new Request('https://proof.example/api/whatsapp/webhook', {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': `sha256=${createHmac('sha256', 'whatsapp-secret').update(body).digest('hex')}` }, body,
+      }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    }
+    const pending = async () => (await getWhatsAppWorkspaceState(db, OWNER))?.pending_confirmation ?? null
+
+    for (const mode of ['channex', 'invariant'] as const) {
+      failure = null
+      provider.propertyId = 'property'
+      assert.equal((await write('We have two spots', 'meta-alert')).status, 200)
+      assert.equal(sent.at(-1), 'This reply will be sent through Airbnb. Reply YES to send.')
+      // Channex answers with an HTML error page (a ChannexError), or names a property that is not the
+      // home's (the operation's own 502 invariant HTTPError).
+      if (mode === 'channex') failure = 'channex'
+      else provider.propertyId = 'another-property'
+      const confirmed = await write('YES')
+      assert.equal(confirmed.status, 502, `${mode}: the error fails the webhook with its own status, to be reported`)
+      assert.equal(sent.at(-1), 'Reply not sent. The team has been alerted.', `${mode}: no raw text reaches the manager`)
+      assert.equal(await pending(), null, `${mode}: the pending reply is cleared`)
+      assert.equal(provider.sends, 0, `${mode}: nothing reached Airbnb`)
+    }
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
