@@ -8,6 +8,18 @@
     "category": "BUSINESS"
   },
   "tools": {
+    "accept_opportunity": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Records the decision and creates the opportunity's task.",
+        "destructive_justification": "Adds work and may notify its assignee by email, WhatsApp or push.",
+        "open_world_justification": "Re-reads the workspace's connected providers to confirm the opportunity still applies; recipients stay within the workspace."
+      }
+    },
     "add_organization_language": {
       "annotations": {
         "readOnlyHint": false,
@@ -150,6 +162,18 @@
         "read_only_justification": "Cancels the reservation and releases its table capacity.",
         "destructive_justification": "Overwrites reservation state and emails the cancellation; required refunds are handed off first.",
         "open_world_justification": "Emails the reservation’s guest."
+      }
+    },
+    "complete_task": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Marks a task done and saves the caller's note and optional photo.",
+        "destructive_justification": "Closes the task and records it in the business's activity.",
+        "open_world_justification": "Can download an optional photo from the host-supplied HTTPS attachment URL; the task stays in the selected private workspace."
       }
     },
     "confirm_product_booking": {
@@ -356,6 +380,18 @@
         "open_world_justification": "Can email the supplied guest address and notify business staff."
       }
     },
+    "create_task": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Persists a new task in the selected workspace and notifies its assignee.",
+        "destructive_justification": "Adds work and sends the assignee email, WhatsApp or push notifications that cannot be recalled.",
+        "open_world_justification": "Notification recipients remain members of the selected private workspace."
+      }
+    },
     "create_team": {
       "annotations": {
         "readOnlyHint": false,
@@ -366,6 +402,18 @@
         "read_only_justification": "Creates a named Better Auth team in the selected business.",
         "destructive_justification": "Only adds a private team record; it removes no member and sends no invitation.",
         "open_world_justification": "Confined to the selected private business’s Better Auth teams."
+      }
+    },
+    "defer_opportunity": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Records when an opportunity should come back.",
+        "destructive_justification": "Hides the opportunity until the chosen time.",
+        "open_world_justification": "Writes only to the selected private workspace."
       }
     },
     "delete_article_category": {
@@ -582,6 +630,18 @@
         "read_only_justification": "Disables an existing secondary language while preserving its authored translations; source language is refused.",
         "destructive_justification": "Withdraws existing public localized routes.",
         "open_world_justification": "Changes guest access to website translations."
+      }
+    },
+    "dismiss_opportunity": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Records the owner's decision to decline an opportunity.",
+        "destructive_justification": "Hides the opportunity until its evidence changes.",
+        "open_world_justification": "Writes only to the selected private workspace."
       }
     },
     "get_blog_post": {
@@ -1088,6 +1148,18 @@
         "open_world_justification": "Reads saved automatic-message text and schedules in the selected business."
       }
     },
+    "list_opportunities": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Records what the business could do against its current evidence; a repeat records nothing new.",
+        "destructive_justification": "Supersedes opportunities whose evidence changed; it does not change content, bookings or settings.",
+        "open_world_justification": "Reads the workspace's own records and its connected analytics, Search Console, Ads and social accounts."
+      }
+    },
     "list_organization_locales": {
       "annotations": {
         "readOnlyHint": true,
@@ -1266,6 +1338,18 @@
         "read_only_justification": "Reads saved restaurant reservations and their status summary.",
         "destructive_justification": "Does not reserve tables, change party sizes, cancel reservations or email guests.",
         "open_world_justification": "Reads restaurant reservations and summaries only within the authorized business."
+      }
+    },
+    "list_tasks": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads only the stored tasks the caller may see in the selected workspace.",
+        "destructive_justification": "Does not create, assign, complete or change any task.",
+        "open_world_justification": "Reads only the selected private workspace."
       }
     },
     "list_team_conversation_recipients": {
@@ -1856,6 +1940,18 @@
         "open_world_justification": "Only changes the signed-in user’s private workspace selection."
       }
     },
+    "skip_task": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Marks a task skipped with the caller's reason.",
+        "destructive_justification": "Closes the task and records it in the business's activity.",
+        "open_world_justification": "Writes only to the selected private workspace."
+      }
+    },
     "start_team_conversation": {
       "annotations": {
         "readOnlyHint": false,
@@ -2118,6 +2214,18 @@
         "read_only_justification": "Persists supplied private arrival-guide fields for the selected home.",
         "destructive_justification": "Overwrites or clears saved instructions and Wi-Fi details.",
         "open_world_justification": "Only changes the bounded home’s private guide; Airbnb changes are returned as editor handoffs, not sent."
+      }
+    },
+    "update_task": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Changes a stored task's assignee, window, title or notes.",
+        "destructive_justification": "Overwrites the task's saved assignment or schedule and notifies a new assignee.",
+        "open_world_justification": "Notification recipients remain members of the selected private workspace."
       }
     },
     "update_team": {
