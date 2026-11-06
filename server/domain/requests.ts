@@ -1,3 +1,4 @@
+import { conversationTaskQueries } from '~/server/domain/tasks'
 import { openingMessageQueries } from '~/server/domain/guest-threads/opening'
 import { z } from 'zod'
 import { HTTPError } from 'nitro'
@@ -49,10 +50,17 @@ const threadPayload = z.object({
   cancellation: z.object({ token_hash: z.string().nullable(), expires_at: z.string().nullable(), used_at: z.string().nullable() }),
 })
 
+/**
+ * requests.conversation_state and resolved_at are retired: an open guest_reply
+ * task (server/domain/tasks.ts) says whether the business owes a reply.
+ * requests_state_check still requires a value until the next database epoch
+ * drops the column with its CHECK; nothing reads it.
+ */
+export const RETIRED_CONVERSATION_STATE = 'waiting_on_guest'
+
 const threadScope = z.object({
   id: z.string(), organization_id: z.string(),  location_id: z.string().nullable(),
   user_id: z.string().nullable(), review_id: z.string().nullable(),
-  conversation_state: z.enum(['needs_attention', 'waiting_on_guest', 'resolved']), resolved_at: z.string().nullable(),
   archived_at: z.string().nullable(), archived_by_user_id: z.string().nullable(), blocked_at: z.string().nullable(),
   created_at: z.string(), updated_at: z.string(),
 })
@@ -244,13 +252,13 @@ export async function getThreadOperationalRecord(db: DbClient, requestId: string
 export function requestInsertQueries(request: Omit<GuestRequest, 'archived_at' | 'archived_by_user_id' | 'blocked_at'>, claimedBy?: BatchQuery, opening?: { body: string }): BatchQuery[] {
   const provenance = (request.kind === 'booking' || request.kind === 'reservation') && 'provenance' in request.payload ? request.payload.provenance : undefined
   const values = [request.id, request.kind, request.organization_id, request.location_id, request.user_id, request.review_id,
-    request.conversation_state, request.resolved_at, JSON.stringify(request.payload), request.created_at, request.updated_at]
+    JSON.stringify(request.payload), request.created_at, request.updated_at]
   return [{
     query: claimedBy
-      ? `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, conversation_state, resolved_at, payload_json, created_at, updated_at)
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (${claimedBy.query})`
-      : `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, conversation_state, resolved_at, payload_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ? `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, conversation_state, payload_json, created_at, updated_at)
+      SELECT ?, ?, ?, ?, ?, ?, '${RETIRED_CONVERSATION_STATE}', ?, ?, ? WHERE EXISTS (${claimedBy.query})`
+      : `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, conversation_state, payload_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, '${RETIRED_CONVERSATION_STATE}', ?, ?, ?)`,
     params: claimedBy ? [...values, ...(claimedBy.params ?? [])] : values,
   }, {
     query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, payload_json, dedupe_key, sequence, occurred_at, created_at)
@@ -298,13 +306,12 @@ export function stayThreadQueries(input: { organizationId: string; stayId: strin
         AND EXISTS (SELECT 1 FROM channel_threads t WHERE t.request_id = requests.id AND t.organization_id = st.organization_id AND t.product_id = st.product_id)`,
     params: [input.stayId, input.organizationId],
   }, {
-    // A booking the channel or the guest brought is new to the host; one the host took waits on its guest.
     // The conversation belongs to the stay's guest account when the guest booked it.
-    query: `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, conversation_state, resolved_at, payload_json, created_at, updated_at)
-      SELECT ?, 'stay', st.organization_id, c.location_id, st.user_id, NULL, ?, NULL,
+    query: `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, conversation_state, payload_json, created_at, updated_at)
+      SELECT ?, 'stay', st.organization_id, c.location_id, st.user_id, NULL, '${RETIRED_CONVERSATION_STATE}',
         json_object('guest', json_object('name', ${name}, 'email', ${email}, 'phone', ${phone})), ?, ?
       FROM ${stay} AND st.request_id IS NULL AND st.owner = 'app' AND st.channel = 'direct' AND (${email} IS NOT NULL OR ${phone} IS NOT NULL) AND ${name} <> ''`,
-    params: [id, host ? 'waiting_on_guest' : 'needs_attention', input.now, input.now, input.stayId, input.organizationId],
+    params: [id, input.now, input.now, input.stayId, input.organizationId],
   }, {
     query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, payload_json, dedupe_key, sequence, occurred_at, created_at)
       SELECT ?, id, 'submission', 'request', ?, ?, 'system', json_object('kind', kind, 'stay_id', ?), ?, 1, created_at, created_at FROM requests WHERE id = ? AND changes() = 1`,
@@ -426,13 +433,12 @@ export async function cancelBookingRequest(db: DbClient, input: {
   const [consumed, released] = await executeBatch(db, [
     {
       query: `UPDATE requests SET
-          payload_json = json_set(payload_json, '$.cancellation.used_at', ?),
-          conversation_state = 'resolved', resolved_at = ?, updated_at = ?
+          payload_json = json_set(payload_json, '$.cancellation.used_at', ?), updated_at = ?
         WHERE id = ? AND organization_id = ? AND kind = ?
           AND ${input.buyerUserId ? 'user_id = ?' : "json_extract(payload_json, '$.cancellation.token_hash') = ? AND json_extract(payload_json, '$.cancellation.expires_at') > ?"}
           AND json_extract(payload_json, '$.cancellation.used_at') IS NULL AND (${refund.guard?.query ?? '1=1'})
           AND EXISTS (SELECT 1 FROM ${table} WHERE id = ? AND organization_id = ? AND request_id = ? AND status = ?${input.buyerUserId ? ' AND user_id = ?' : ''}) RETURNING *`,
-      params: [input.now, input.now, input.now, input.id, input.organizationId, input.kind, ...(input.buyerUserId ? [input.buyerUserId] : [input.tokenHash, input.now]), ...(refund.guard?.params ?? []), record.id, input.organizationId, input.id, record.status, ...(input.buyerUserId ? [input.buyerUserId] : [])],
+      params: [input.now, input.now, input.id, input.organizationId, input.kind, ...(input.buyerUserId ? [input.buyerUserId] : [input.tokenHash, input.now]), ...(refund.guard?.params ?? []), record.id, input.organizationId, input.id, record.status, ...(input.buyerUserId ? [input.buyerUserId] : [])],
     },
     {
       query: `UPDATE ${table} SET status = 'cancelled', cancelled_at = ?, cancellation_reason = 'guest_cancelled', updated_at = ?
@@ -449,6 +455,7 @@ export async function cancelBookingRequest(db: DbClient, input: {
       params: [crypto.randomUUID(), input.id, `${record.kind}.cancel`, JSON.stringify({ action: 'cancel', beforeStatus: record.status, afterStatus: 'cancelled', operational_booking_id: record.id, request_id: input.id, ...(input.buyerUserId ? { actor_user_id: input.buyerUserId } : {}) }), `${record.kind}:${record.id}:guest-cancel`, input.id, input.now, input.now],
     },
     ...refund.queries,
+    ...conversationTaskQueries(input.id, input.now),
   ], { operation: 'Cancel booking request' })
 
   const row = (consumed?.results?.[0] ?? null) as Record<string, unknown> | null

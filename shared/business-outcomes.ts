@@ -138,7 +138,6 @@ export interface BusinessProgressReference {
     configurationUpdatedAt: string
   } | {
     kind: 'guest_thread'
-    conversationState: string
     archivedAt: string | null
     blockedAt: string | null
     latestGuestEntryId: string | null

@@ -1,5 +1,4 @@
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
-import type { ConversationState } from './types'
 
 export type BookingChangeStatus = 'pending' | 'accepted' | 'declined' | 'withdrawn' | 'stale' | 'expired'
 export interface BookingChangeState { status: BookingChangeStatus; decisionId: string | null; message?: string }
@@ -54,21 +53,4 @@ export async function bookingChangeStates(db: DbClient, proposalIds: string[], n
     WHERE proposal.event_name='booking_change.requested' AND proposal.id IN (SELECT value FROM json_each(?))`, [JSON.stringify(proposalIds)])
   for (const row of rows) states.set(row.id, { status: row.status, decisionId: row.decision_id, ...(['stale', 'expired'].includes(row.status) ? { message: messages[row.status as 'stale' | 'expired'] } : {}) })
   return states
-}
-
-/** Expired approval work belongs back with staff while that proposal still owns the projection. */
-export function guestThreadConversationStateSql(owner: string, now = new Date().toISOString()): string {
-  return `(CASE WHEN ${owner}.conversation_state='waiting_on_guest' AND EXISTS (
-    SELECT 1 FROM activity_entries proposal
-    LEFT JOIN activity_entries decision ON decision.request_id=proposal.request_id AND decision.dedupe_key='booking-change-decision:'||proposal.id
-    WHERE proposal.request_id=${owner}.id AND proposal.event_name='booking_change.requested' AND proposal.occurred_at=${owner}.updated_at
-      AND NOT EXISTS (SELECT 1 FROM activity_entries later WHERE later.request_id=${owner}.id AND later.sequence>proposal.sequence)
-      AND ${statusSql('proposal', owner, 'decision', clockSql(now))} IN ('stale','expired')
-  ) THEN 'needs_attention' ELSE ${owner}.conversation_state END)`
-}
-
-export async function guestThreadConversationState(db: DbClient, threadId: string, now = new Date().toISOString()): Promise<ConversationState> {
-  const row = await queryFirst<{ state: ConversationState }>(db, `SELECT ${guestThreadConversationStateSql('owner', now)} state FROM requests owner WHERE owner.id=?`, [threadId])
-  if (!row) throw new Error('Conversation disappeared while its state was being read')
-  return row.state
 }

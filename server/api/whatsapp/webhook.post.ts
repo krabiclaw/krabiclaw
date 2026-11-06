@@ -521,7 +521,7 @@ async function handleMessage(db: D1Database, env: ApiRecord, message: WhatsAppMe
           dedupeKey: `whatsapp:${message.id}`,
         })
         await attachGuestPhotos(db, env, match.organizationId, entry.id, photos)
-        await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id, { conversationState: 'needs_attention' })
+        await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id)
         // The guest's message is in the thread before the owner is alerted, so an alert that fails cannot hide it.
         await publishGuestInboxThreadEvent(env, db, { threadId: thread.id, type: 'entry.appended' })
 

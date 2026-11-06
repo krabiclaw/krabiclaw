@@ -1,4 +1,5 @@
 import { buyerRequestActivityPath } from '~/server/domain/payments/buyer'
+import { OPEN_REPLY_TASK_SQL } from './repository'
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { getGuestRequest, getThreadOperationalRecord, requestSummary, requestActions, stayPreview } from '~/server/domain/requests'
 import { formatOperationalStatusLabel } from './status-labels'
@@ -9,7 +10,6 @@ import { listMessagePhotos } from './attachments'
 import type { GuestThreadDetailViewModel, GuestThreadEntryDeliveryViewModel, GuestThreadEntryRow, GuestThreadEntryViewModel } from './types'
 import { HTTPError } from 'nitro'
 import { providerTimestamp } from '~/server/integrations/channex/messages'
-import { guestThreadConversationState } from './booking-change-state'
 import { bookingChangeViews } from './booking-changes'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
 
@@ -138,7 +138,7 @@ export async function getGuestThreadDetail(
     submissionType: thread.kind,
     submissionId: thread.id,
     locationLabel: summary.locationTitle,
-    conversationState: audience ? null : await guestThreadConversationState(db, thread.id, now),
+    needsReply: !audience && Boolean(await queryFirst(db, `SELECT 1 AS open FROM requests gt WHERE gt.id = ? AND ${OPEN_REPLY_TASK_SQL}`, [thread.id])),
     operationalRecord: record ? { id: record.id, kind: record.kind, status: record.status, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, party_size: record.party_size, check_in_date: record.check_in_date, check_out_date: record.check_out_date } : null,
     source: {
       submissionType: thread.kind,
@@ -189,7 +189,6 @@ export async function getGuestThreadDetail(
     })),
     createdAt: thread.created_at,
     updatedAt: thread.updated_at,
-    resolvedAt: audience ? null : thread.resolved_at,
   }
 }
 

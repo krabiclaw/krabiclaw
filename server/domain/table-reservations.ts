@@ -239,7 +239,7 @@ export async function createTableReservation(event: H3Event, input: {
       requestId: id, requestFingerprint: fingerprint, quantity: partySize, idempotencyKey,
       origin: operator ? null : { request: event.req, pageEventId: readPageEventId(body.page_event_id) },
       following: paymentId => requestInsertQueries({ id, kind: 'reservation', organization_id: organizationId, location_id: resolvedLocationId,
-        user_id: userId, review_id: null, conversation_state: 'waiting_on_guest', resolved_at: null, payload, created_at: now, updated_at: now,
+        user_id: userId, review_id: null, payload, created_at: now, updated_at: now,
       }, { query: "SELECT 1 FROM payment_checkout_holds WHERE payment_id = ? AND status = 'active'", params: [paymentId] }, opening),
     })
     return creationResult({ success: true, status: 'checkout', ...checkout }, { status: 201 })
@@ -259,7 +259,7 @@ export async function createTableReservation(event: H3Event, input: {
       thread: [...requestInsertQueries({
         id, kind: 'reservation', organization_id: organization.id,
         location_id: resolvedLocationId, user_id: userId, review_id: null,
-        conversation_state: 'needs_attention', resolved_at: null, payload, created_at: now, updated_at: now,
+        payload, created_at: now, updated_at: now,
       }, { query: 'SELECT 1 FROM reservations WHERE id = ?', params: [reservationId] }, opening), {
         query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, actor_user_id, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
           SELECT ?, ?, 'operation', 'request', ?, ?, 'reservation.created', json_object('operational_reservation_id', id, 'afterStatus', status), ?,

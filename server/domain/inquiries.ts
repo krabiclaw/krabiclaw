@@ -1,5 +1,6 @@
 import type { H3Event } from 'nitro'
 import { requestInsertQueries, getGuestRequest } from '~/server/domain/requests'
+import { conversationTaskQueries } from '~/server/domain/tasks'
 import { acceptFormAnswers, readFormQuestions } from '~/server/domain/form-questions'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { isLegalPracticeSite } from '~/utils/site-routing'
@@ -143,11 +144,10 @@ export async function createInquiry(event: H3Event, input: { organizationId: str
   const now = new Date().toISOString()
   try {
     await executeBatch(db, requestInsertQueries({ id, kind: 'contact', organization_id: organization.id, location_id: assignedLocationId,
-      user_id: userId, review_id: null, conversation_state: 'needs_attention', resolved_at: null,
-      payload: { guest: { name, email, phone, locale: language.locale }, subject: subject || topic || null, message, consent_at: consentAcknowledged ? now : null, ip_hash: ipHash,
+      user_id: userId, review_id: null, payload: { guest: { name, email, phone, locale: language.locale }, subject: subject || topic || null, message, consent_at: consentAcknowledged ? now : null, ip_hash: ipHash,
         source: source || null, route_context: routeContext || null, suggested_summary: suggestedSummary || null, agent_metadata: agentMetadata, answers,
         ...(idempotencyKey && fingerprint ? { submission: { idempotency_key: idempotencyKey, fingerprint, actor_user_id: operator?.userId ?? null, source: source || 'website', followups_completed: false } } : {}) },
-      created_at: now, updated_at: now }))
+      created_at: now, updated_at: now }).concat(conversationTaskQueries(id, now)))
   } catch (error) {
     // The same key committed by a concurrent attempt is that attempt's inquiry.
     const concurrent = await replay()

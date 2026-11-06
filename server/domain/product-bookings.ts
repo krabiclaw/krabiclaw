@@ -287,8 +287,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
       origin: operator ? null : { request: event.req, pageEventId },
       following: paymentId => requestInsertQueries({
         kind: 'booking', id: threadId, organization_id: organizationId, location_id: session.location_id,
-        user_id: userId, review_id: null, conversation_state: 'waiting_on_guest', resolved_at: null,
-        payload, created_at: now, updated_at: now,
+        user_id: userId, review_id: null, payload, created_at: now, updated_at: now,
       }, { query: "SELECT 1 FROM payment_checkout_holds WHERE payment_id = ? AND status = 'active'", params: [paymentId] }, opening),
     })
     return creationResult({ success: true, status: 'checkout', ...checkout }, { status: 201 })
@@ -307,7 +306,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
         ...requestInsertQueries({
           kind: 'booking', id: threadId, organization_id: organization.id,
           location_id: session.location_id, user_id: userId, review_id: null,
-          conversation_state: 'needs_attention', resolved_at: null, payload,
+          payload,
           created_at: now, updated_at: now,
         }, { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, opening),
         {

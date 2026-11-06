@@ -418,7 +418,7 @@ export async function readBusinessProgressReference(
   ])
   const deliveries = latestReply ? await queryAll<GuestThreadDeliveryRow>(db, "SELECT * FROM guest_thread_deliveries WHERE entry_id = ? AND purpose = 'member_reply' ORDER BY id", [latestReply.id]) : []
   const evidence = {
-    kind: 'guest_thread' as const, conversationState: request.conversation_state, archivedAt: request.archived_at, blockedAt: request.blocked_at,
+    kind: 'guest_thread' as const, archivedAt: request.archived_at, blockedAt: request.blocked_at,
     latestGuestEntryId: latestGuest?.id ?? null, latestReplyEntryId: latestReply?.id ?? null,
     latestMemberEntryId: latestMember?.id ?? null,
     commitment: commitment ? { kind: commitment.kind, id: commitment.id, status: commitment.status, startsAt: commitment.starts_at, endsAt: commitment.ends_at } : null,

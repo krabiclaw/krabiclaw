@@ -1,4 +1,5 @@
 import { HTTPError } from 'nitro'
+import { turnoverTaskQueries } from '~/server/domain/tasks'
 import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevision, parseStoredFormQuestions, type FormAnswerSnapshot, type FormQuestion } from '~/shared/form-questions'
 import { acceptFormAnswers } from '~/server/domain/form-questions'
 import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CALENDAR_DAYS, changeNightPrice, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNELS, STAY_CHANNEL_LABELS, isChannelManagedStay, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
@@ -1683,6 +1684,8 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
     locale: null, answers: input.answers, questionsRevision: input.questions_revision, revisionRequired: false })
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
+  const turnovers = await turnoverTaskQueries(db, { organizationId: access.organizationId, now, before: null,
+    after: { id, product_id: home.product_id, status: 'confirmed', check_in_date: fields.check_in_date, check_out_date: fields.check_out_date } })
   try {
     await executeBatch(db, [
       {
@@ -1697,6 +1700,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
       organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.created', entityType: 'stay', entityId: id,
         context: access.audit, afterState: { ...fields, channel, channel_booking_id: channelBookingId }, ...(imported ? { metadata: { imported } } : {}) }),
       ...(payment ? stayPaymentInsert(access, { id, currency: home.currency, location_id: home.location_id }, payment, `${key}:payment`, now) : []),
+      ...turnovers,
     ], { operation: 'Create stay' })
   } catch (error) {
     if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
@@ -1735,6 +1739,8 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
   await requireChannelPush(db, env, access.organizationId, home.product_id)
   const next = current.version + 1
   const now = new Date().toISOString()
+  const turnovers = await turnoverTaskQueries(db, { organizationId: access.organizationId, now, before: current,
+    after: { id: stayId, product_id: current.product_id, status: current.status, check_in_date: fields.check_in_date, check_out_date: fields.check_out_date } })
   let results: unknown
   try {
     results = await executeBatch(db, [
@@ -1748,6 +1754,7 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
       organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.updated', entityType: 'stay', entityId: stayId, onlyIfPreviousChangedOneRow: true }),
       ...reconcileNightsQueries(access.organizationId, stayId),
       ...stayThreadQueries({ organizationId: access.organizationId, stayId, now, openedBy: { userId: access.actorId } }),
+      ...turnovers,
     ], { operation: 'Update stay' })
   } catch (error) {
     if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
@@ -1797,6 +1804,7 @@ export async function cancelStay(db: DbClient, env: StayMutationEnv, access: Sta
     authorizationId: input.authorization_id, financialWritesAllowed: input.financial_writes_allowed, note: reason ?? undefined, now,
     committed: { query: "EXISTS(SELECT 1 FROM stays WHERE organization_id=? AND id=? AND status='cancelled' AND version=?)", params: [access.organizationId, stayId, next] },
   })
+  const turnovers = await turnoverTaskQueries(db, { organizationId: access.organizationId, now, before: current, after: { ...current, status: 'cancelled' } })
   const results = await executeBatch(db, [
     {
       query: `UPDATE stays SET status = 'cancelled', cancelled_at = ?, cancellation_reason = ?, version = ?, updated_at = ?, updated_by = ?
@@ -1806,6 +1814,7 @@ export async function cancelStay(db: DbClient, env: StayMutationEnv, access: Sta
     organizationEventQuery({ organizationId: access.organizationId, locationId: current.location_id, actorId: access.actorId, eventType: 'stay.cancelled', entityType: 'stay', entityId: stayId, onlyIfPreviousChangedOneRow: true }),
     ...reconcileNightsQueries(access.organizationId, stayId),
     ...refund.queries,
+    ...turnovers,
   ], { operation: 'Cancel stay' })
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
   return complete(next)
@@ -1902,6 +1911,7 @@ export async function cancelStayAsGuest(db: DbClient, env: StayMutationEnv & Clo
     const next = stay.version + 1
     // Stripe's full-remaining refund when the policy returns everything still held.
     const amount = quote.refund_minor === payment.captured_amount - payment.refunded_amount ? null : quote.refund_minor
+    const turnovers = await turnoverTaskQueries(db, { organizationId, now, before: stay, after: { ...stay, status: 'cancelled' } })
     const results = await executeBatch(db, [
       {
         query: `UPDATE stays SET status = 'cancelled', cancelled_at = ?, cancellation_reason = 'guest_cancelled', version = ?, updated_at = ?, updated_by = ?
@@ -1917,6 +1927,7 @@ export async function cancelStayAsGuest(db: DbClient, env: StayMutationEnv & Clo
                 ON CONFLICT(idempotency_key) DO NOTHING`,
         params: [crypto.randomUUID(), payment.id, key, amount, buyerUserId, now, now, organizationId, stayId, next],
       }] : []),
+      ...turnovers,
     ], { operation: 'Guest cancels stay' })
     if (!versionChanged(results)) fail(409, 'STAY_NOT_CANCELLABLE', 'This stay changed or a refund is already on its way. Reload it and try again.', 'stay_id')
   } else if (stay.cancellation_reason !== 'guest_cancelled') {
@@ -2315,6 +2326,8 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   const home = await queryFirst<{ location_id: string }>(db, 'SELECT location_id FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, productId])
   if (!home) fail(404, 'STAY_HOME_NOT_FOUND', 'The channel booking home was not found', 'product_id')
   const now = new Date().toISOString()
+  const turnovers = await turnoverTaskQueries(db, { organizationId, now, before: previous,
+    after: { id, product_id: productId, status: booking.cancelled ? 'cancelled' : 'confirmed', check_in_date: booking.check_in_date, check_out_date: booking.check_out_date } })
   const write = (overbooked: 0 | 1): BatchQuery[] => [...(existing?.external_booking_id === null ? [{
     // An imported OTA confirmation becomes channel-owned when its real revision arrives; keep its one stay and night claims.
     query: `UPDATE stays SET owner = 'channel', provider = ?, external_booking_id = ? WHERE organization_id = ? AND id = ?
@@ -2371,6 +2384,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
     params: [id, organizationId, productId],
   },
   ...stayThreadQueries({ organizationId, stayId: id, now, openedBy: 'channel' }),
+  ...turnovers,
   ]
   let writes: Awaited<ReturnType<typeof executeBatch>>
   try {

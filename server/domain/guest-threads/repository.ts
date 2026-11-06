@@ -1,12 +1,10 @@
-import { guestThreadConversationStateSql } from './booking-change-state'
 import { REQUEST_CURRENT_BUYER_SQL, STAY_THREAD_ENDS_SQL, STAY_THREAD_STARTS_SQL, stayPreview, parseGuestRequest, participantLabel } from '~/server/domain/requests'
 import { BUYER_UNREAD_THREAD_SQL, buyerUnreadThreadParams } from './entries'
 import { messagePreview } from './attachments'
-import { execute, queryAll, type BatchQuery, type DbClient } from '~/server/db'
+import { execute, executeBatch, queryAll, type BatchQuery, type DbClient } from '~/server/db'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import { assignedGuestThreadScope, roleAllows, assertRoleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import type {
-  ConversationState,
   GuestThreadListItemViewModel,
   GuestThreadRow,
   InboxRow,
@@ -16,6 +14,7 @@ import type {
 import { calendarDate, clockTime, firstName, initial, listTime, localDateKey, providerInstant, stayWhen } from './presentation'
 import { formatCalendarRange } from '~/utils/timezone'
 import { formatOperationalStatusLabel, formatThreadWhenLabel } from './status-labels'
+import { conversationTaskQueries } from '~/server/domain/tasks'
 import { pastByRuleSql, pastSql, type GuestThreadMailbox } from './mailbox'
 import { OPENING_EVENT } from './opening'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
@@ -86,52 +85,8 @@ export function businessReplyAfterSql(guestEntry: string): string {
       )`
 }
 
-function unansweredGuestMessagesSql(threadId: string, afterCancellation = false): string {
-  return `EXISTS (
-    SELECT 1 FROM activity_entries guest_message
-    WHERE guest_message.request_id = ${threadId}
-      AND guest_message.kind = 'message' AND guest_message.actor_kind = 'guest'
-      ${afterCancellation ? `AND NOT EXISTS (
-        SELECT 1 FROM activity_entries cancelled
-        WHERE cancelled.request_id = guest_message.request_id AND cancelled.kind = 'operation'
-          AND cancelled.event_name IN ('booking.cancel', 'booking.reject', 'reservation.cancel', 'reservation.reject')
-          AND json_extract(cancelled.payload_json, '$.afterStatus') = 'cancelled'
-          AND cancelled.sequence >= guest_message.sequence
-      )` : ''}
-      AND NOT ${businessReplyAfterSql('guest_message')}
-  )`
-}
-
-/**
- * The first received guest entry still awaiting a business response.
- * Further messages do not reset the waiting age. Provider-relative order
- * establishes which mirrored messages remain unanswered; it does not invent
- * an absolute received instant for an offset-free provider timestamp. Use the
- * original provider instant when it has an offset, otherwise local receipt.
- */
-export async function firstUnansweredGuestEntryTimes(db: DbClient, organizationId: string, threadIds: readonly string[], needsResponse: (text: string, receivedAt: string) => boolean = () => true): Promise<Map<string, string>> {
-  const times = new Map<string, string>()
-  for (let index = 0; index < threadIds.length; index += 200) {
-    const rows = await queryAll<{ request_id: string; occurred_at: string; body: string | null }>(db, `
-      SELECT guest_entry.request_id, CASE WHEN guest_entry.kind = 'submission' THEN json_extract(r.payload_json, '$.message') ELSE guest_entry.body END AS body, CASE WHEN guest_entry.event_name = 'channel.message_mirrored' AND ${offsetSql(providerTimeSql('guest_entry'))}
-          THEN strftime('%Y-%m-%dT%H:%M:%fZ', ${providerTimeSql('guest_entry')}) ELSE guest_entry.occurred_at END AS occurred_at
-        FROM activity_entries guest_entry JOIN requests r ON r.id = guest_entry.request_id AND r.organization_id = ?
-       WHERE guest_entry.request_id IN (SELECT value FROM json_each(?)) AND guest_entry.actor_kind = 'guest'
-         AND (guest_entry.kind = 'message' OR (guest_entry.kind = 'submission' AND r.kind = 'contact'))
-         AND NOT ${businessReplyAfterSql('guest_entry')}
-       ORDER BY guest_entry.occurred_at, guest_entry.id`, [organizationId, d1JsonStringSet(threadIds.slice(index, index + 200))])
-    for (const row of rows) {
-      if (!needsResponse(row.body ?? '', row.occurred_at)) continue
-      const previous = times.get(row.request_id)
-      if (!previous || row.occurred_at < previous) times.set(row.request_id, row.occurred_at)
-    }
-  }
-  return times
-}
-
-// Old guest cancellations left the request open. The cancellation ends that
-// review task; only an unanswered message after its ledger fact reopens work.
-const CANCELLED_ATTENTION_SQL = `(gt.kind NOT IN ('booking', 'reservation') OR op.status IS NOT 'cancelled' OR ${unansweredGuestMessagesSql('gt.id', true)})`
+/** The conversation has an open reply task (server/domain/tasks.ts). */
+export const OPEN_REPLY_TASK_SQL = `EXISTS (SELECT 1 FROM tasks reply_task WHERE reply_task.kind = 'guest_reply' AND reply_task.subject_type = 'request' AND reply_task.subject_id = gt.id AND reply_task.status = 'open')`
 
 async function assignedThreadScope(principal?: MemberAccessPrincipal | null) {
   if (!principal || await roleAllows({ ...principal, permissions: { operations: ['read'] } })) return { sql: '', params: [] as string[] }
@@ -245,7 +200,7 @@ function sourcePreviewText(row: {
 
 type GuestThreadListRow = GuestThreadRow & {
   past_by_rule: number
-  effective_conversation_state: GuestThreadRow['conversation_state']
+  needs_reply: number
   assigned_member_id: string | null
   record_product_id: string | null
   channel_product_id: string | null
@@ -281,8 +236,6 @@ function threadProductId(row: GuestThreadListRow): string | null {
   return row.record_product_id ?? row.channel_product_id
 }
 
-/** The inbox filters by what a person sees — kind, unread, search — not by the attention state Today and MCP read. */
-type InboxListOptions = Omit<ListGuestThreadsOptions, 'conversationState'> & { conversationState?: never }
 
 const BUYER_VISIBLE_MESSAGE_SQL = `((e.actor_kind='guest' AND e.channel IN ('web','email','whatsapp')) OR (e.actor_kind='member' AND e.event_name='thread.member_reply') OR (e.actor_kind='system' AND e.event_name IN ('thread.scheduled_message', '${OPENING_EVENT}')))`
 
@@ -303,7 +256,7 @@ const UNREAD_FOR_MEMBER_SQL = `EXISTS (
       )`
 
 /** The scope every inbox read shares: whose threads, which location, which mailbox, which kind, what was searched. */
-async function inboxWhere(organizationId: string | null, opts: InboxListOptions, now: string) {
+async function inboxWhere(organizationId: string | null, opts: ListGuestThreadsOptions, now: string) {
   if (!organizationId && !opts.buyerAudience) throw new Error('Thread list requires organization scope')
   if (opts.buyerAudience && !opts.userId) throw new Error('Buyer thread list requires authenticated identity')
   const params: Array<string | number> = opts.buyerAudience ? [opts.userId] : [organizationId!]
@@ -361,7 +314,7 @@ type InboxListRow = GuestThreadRow & {
 export async function listGuestThreads(
   db: DbClient,
   organizationId: string | null,
-  opts: InboxListOptions,
+  opts: ListGuestThreadsOptions,
   now = new Date(),
 ): Promise<InboxRow[]> {
   const scope = await inboxWhere(organizationId, opts, now.toISOString())
@@ -462,7 +415,7 @@ function previewFrom(message: LatestMessage, context: { guestName: string; viewe
  * All, Guests and Airbnb Support. Team conversations are counted by their own
  * inbox.
  */
-export async function countUnreadInboxThreads(db: DbClient, organizationId: string, opts: InboxListOptions): Promise<Omit<InboxUnreadCounts, 'team'>> {
+export async function countUnreadInboxThreads(db: DbClient, organizationId: string, opts: ListGuestThreadsOptions): Promise<Omit<InboxUnreadCounts, 'team'>> {
   const scope = await inboxWhere(organizationId, { ...opts, kind: null, q: null, mailbox: 'current' }, new Date().toISOString())
   const rows = await queryAll<{ support: number; count: number }>(db, `
     SELECT ${SUPPORT_THREAD_SQL} AS support, COUNT(*) AS count
@@ -482,7 +435,6 @@ export async function listOrganizationGuestThreads(
   },
 ): Promise<GuestThreadListItemViewModel[]> {
   const now = new Date().toISOString()
-  const stateSql = guestThreadConversationStateSql('gt', now)
   const params: Array<string | number> = [opts.organizationId]
   let where = 'gt.organization_id = ?'
 
@@ -502,11 +454,7 @@ export async function listOrganizationGuestThreads(
     where += ' AND gt.kind = ?'
     params.push(opts.type)
   }
-  if (opts.conversationState) {
-    where += ` AND ${stateSql} = ?`
-    params.push(opts.conversationState)
-    if (opts.conversationState === 'needs_attention') where += ` AND ${CANCELLED_ATTENTION_SQL}`
-  }
+  if (opts.needsReply) where += ` AND ${OPEN_REPLY_TASK_SQL}`
   // One instant for the filter and for each row's mailbox, so a row cannot be
   // listed as Current and labelled Past.
   const mailbox = mailboxWhere(opts.mailbox ?? null, now, opts.userId)
@@ -531,7 +479,7 @@ export async function listOrganizationGuestThreads(
   const rule = pastByRuleSql(now, opts.userId)
   const rows = await queryAll<GuestThreadListRow>(db, `
     SELECT
-      gt.*, ${stateSql} AS effective_conversation_state, ${rule.sql} AS past_by_rule,
+      gt.*, ${rule.sql} AS past_by_rule, ${OPEN_REPLY_TASK_SQL} AS needs_reply,
       ${SOURCE_GUEST_NAME_SQL} AS guest_name, ${REPLY_CHANNEL_SQL} AS reply_channel,
       bl.title AS location_title,
       (
@@ -584,7 +532,7 @@ export async function listOrganizationGuestThreads(
       occurrenceAt: row.record_starts_at,
       timeZone: row.record_timezone,
       latestMessageFromGuest: row.latest_message_actor_kind === 'guest',
-      conversationState: row.effective_conversation_state,
+      needsReply: row.needs_reply === 1,
       operationalStatus: row.operational_status,
       operationalStatusLabel: row.operational_status ? formatOperationalStatusLabel(row.kind, row.operational_status) : null,
       unread,
@@ -593,7 +541,6 @@ export async function listOrganizationGuestThreads(
         ? { kind: 'message', text: messagePreview(row.latest_message_body, row.latest_message_photos) }
         : (preview ? { kind: 'submission', text: preview } : null),
       lastActivityAt: row.updated_at,
-      needsAttention: row.effective_conversation_state === 'needs_attention',
       // Two renditions of one asset, not two sources: a row 60px wide takes the
       // thumbnail, and an asset with no rendition yet is served at full size.
       imageUrl: mediaStillUrl({ kind: row.place_image_kind, public_url: row.place_image_public_url, thumbnail_url: row.place_image_thumbnail_url }),
@@ -629,49 +576,18 @@ async function listUnreadThreadIds(db: DbClient, threadIds: string[], userId: st
   return (rows ?? []).map(row => row.request_id)
 }
 
-export async function updateThreadProjection(
-  db: DbClient,
-  threadId: string,
-  update: { conversationState: ConversationState },
-): Promise<void> {
-  const now = new Date().toISOString()
-  await execute(db, `
-    UPDATE requests
-    SET conversation_state = ?, resolved_at = ?, updated_at = ?
-    WHERE id = ?
-  `, [update.conversationState, update.conversationState === 'resolved' ? now : null, now, threadId])
-}
-
-export async function updateThreadProjectionIfLatestEntry(
-  db: DbClient,
-  threadId: string,
-  entryId: string,
-  update: { conversationState: ConversationState; preserveUnansweredGuestMessages?: boolean },
-): Promise<void> {
-  await execute(db, `
-    UPDATE requests
-    SET conversation_state = CASE WHEN EXISTS (
-        SELECT 1 FROM activity_entries mirrored WHERE mirrored.id = ? AND mirrored.request_id = requests.id AND mirrored.kind = 'message'
-          AND ((mirrored.event_name = 'channel.message_mirrored' AND mirrored.actor_kind IN ('guest', 'member'))
-            OR mirrored.event_name = 'thread.scheduled_message')
-      ) THEN CASE WHEN ${unansweredGuestMessagesSql('requests.id')} THEN 'needs_attention' ELSE 'waiting_on_guest' END ELSE ? END,
-      resolved_at = CASE WHEN ? = 'resolved' THEN (SELECT occurred_at FROM activity_entries WHERE id=?) ELSE NULL END,
-      updated_at = (SELECT occurred_at FROM activity_entries WHERE id=?)
-    WHERE id = ?
-      AND EXISTS (
-        SELECT 1
-        FROM activity_entries projected
-        WHERE projected.id = ?
-          AND projected.request_id = requests.id
-          AND NOT EXISTS (
-            SELECT 1
-            FROM activity_entries later
-            WHERE later.request_id = projected.request_id
-              AND later.sequence > projected.sequence
-          )
-      )
-      AND (? = 0 OR NOT ${unansweredGuestMessagesSql('requests.id')})
-  `, [entryId, update.conversationState, update.conversationState, entryId, entryId, threadId, entryId, update.preserveUnansweredGuestMessages ? 1 : 0])
+/**
+ * After an entry lands: the conversation moves to the top when the entry is
+ * its latest, and its reply tasks follow the ledger (server/domain/tasks.ts)
+ * in the same batch.
+ */
+export async function updateThreadProjectionIfLatestEntry(db: DbClient, threadId: string, entryId: string): Promise<void> {
+  await executeBatch(db, [{
+    query: `UPDATE requests SET updated_at = (SELECT occurred_at FROM activity_entries WHERE id = ?)
+      WHERE id = ? AND EXISTS (SELECT 1 FROM activity_entries projected WHERE projected.id = ? AND projected.request_id = requests.id
+        AND NOT EXISTS (SELECT 1 FROM activity_entries later WHERE later.request_id = projected.request_id AND later.sequence > projected.sequence))`,
+    params: [entryId, threadId, entryId],
+  }, ...conversationTaskQueries(threadId, new Date().toISOString())], { operation: 'Project conversation entry' })
 }
 
 /**

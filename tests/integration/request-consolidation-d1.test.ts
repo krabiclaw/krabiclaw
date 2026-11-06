@@ -169,7 +169,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     assert.equal((await listOrganizationGuestThreads(db, { organizationId: ORG, principal: OWNER, userId: ACTOR })).find(thread => thread.id === reservationThread)?.operationalStatus, 'cancelled')
 
     const guestReply = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'When will my refund arrive?', occurredAt: '2098-01-02T00:00:00.000Z' })
-    await updateThreadProjectionIfLatestEntry(db, reservationThread, guestReply.id, { conversationState: 'needs_attention' })
+    await updateThreadProjectionIfLatestEntry(db, reservationThread, guestReply.id)
     assert.deepEqual((await needsAttention(db)).map(thread => thread.id), [reservationThread])
     const retry = await cancelBookingRequest(db, { id: reservationThread, organizationId: ORG, kind: 'reservation', tokenHash: 'hash', now: '2098-01-03T00:00:00.000Z' })
     assert.equal(retry?.changed, false)
@@ -188,10 +188,10 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     await recordDeliveryOutcome(db, { deliveryId: receipt.id, status: 'sent', providerMessageId: 'delivered-cancelled-reply' })
     assert.deepEqual((await needsAttention(db)).map(thread => thread.id), [])
     const nextQuestion = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Thank you. Can you send the receipt?', occurredAt: '2098-01-05T00:00:00.000Z' })
-    await updateThreadProjectionIfLatestEntry(db, reservationThread, nextQuestion.id, { conversationState: 'needs_attention' })
+    await updateThreadProjectionIfLatestEntry(db, reservationThread, nextQuestion.id)
     const webReply = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'member', actorUserId: ACTOR, channel: 'web', eventName: 'thread.member_reply', body: 'Here is your receipt.', occurredAt: '2098-01-06T00:00:00.000Z' })
     assert.deepEqual((await needsAttention(db)).map(thread => thread.id), [])
-    await updateThreadProjectionIfLatestEntry(db, reservationThread, webReply.id, { conversationState: 'resolved', preserveUnansweredGuestMessages: true })
+    await updateThreadProjectionIfLatestEntry(db, reservationThread, webReply.id)
     assert.equal((await getGuestRequest(db, reservationThread))?.conversation_state, 'resolved', 'a committed web reply needs no external delivery receipt')
 
     // A notification is acknowledged only by someone the visibility filter

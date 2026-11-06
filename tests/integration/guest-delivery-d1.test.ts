@@ -302,7 +302,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       eventName: 'thread.completed',
       dedupeKey: 'lifecycle-resolve-proof',
     })
-    await updateThreadProjectionIfLatestEntry(db, 'contact-proof', resolvingEntry.id, { conversationState: 'resolved' })
+    await updateThreadProjectionIfLatestEntry(db, 'contact-proof', resolvingEntry.id)
     assert.equal((await reply('A reply', operationKey)).ok, true)
     assert.equal((await db.prepare('SELECT conversation_state FROM requests WHERE id = ?').bind('contact-proof').first<{ conversation_state: string }>())?.conversation_state, 'resolved')
 
@@ -335,7 +335,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       body: 'A newer guest reply',
       dedupeKey: 'email:newer-guest-reply-proof',
     })
-    await updateThreadProjectionIfLatestEntry(db, 'contact-proof', inboundEntry.id, { conversationState: 'needs_attention' })
+    await updateThreadProjectionIfLatestEntry(db, 'contact-proof', inboundEntry.id)
     assert.deepEqual(await reply('A delayed reply', delayedOperationKey).then(outcome => ({ ok: outcome.ok, status: outcome.status })), { ok: true, status: 200 })
     assert.equal((await deliveryRow(`guest-thread-email:contact-proof:${delayedOperationKey}`))?.status, 'sent')
     assert.equal((await db.prepare('SELECT conversation_state FROM requests WHERE id = ?').bind('contact-proof').first<{ conversation_state: string }>())?.conversation_state, 'needs_attention')

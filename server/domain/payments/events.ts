@@ -17,6 +17,7 @@ import { notifyStayBooked, raiseSettledFailures } from '~/server/utils/notificat
 import { paymentsBillingBasis } from './fx'
 import { deliverPaymentsUsage } from './usage'
 import { isStayPurchase } from './checkout'
+import { turnoverTaskQueries } from '~/server/domain/tasks'
 import { completeStayFromCheckout, isStayNightConflict, releaseLapsedStayHolds, stayFromCheckoutQueries } from '~/server/domain/stays'
 
 interface Hold {
@@ -105,7 +106,7 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,int
         {query:`UPDATE payment_checkout_holds SET status='converted',${convertedColumn}=? WHERE id=? AND status IN ('active','released') AND EXISTS(SELECT 1 FROM ${table} WHERE id=?)`,params:[subjectId,hold.id,subjectId]},
         {query:`INSERT INTO activity_entries(id,request_id,kind,scope_kind,actor_kind,event_name,payload_json,dedupe_key,sequence,occurred_at,created_at) SELECT ?,v.request_id,'operation','request','system',?,json_object(?,v.id,'request_id',v.request_id,'afterStatus',v.status,'payment_id',?,'intent',?),?,COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id=v.request_id),0)+1,?,? FROM ${table} v WHERE v.id=? AND v.request_id IS NOT NULL ON CONFLICT(dedupe_key) DO NOTHING`,params:[crypto.randomUUID(),`${kind}.created`,`operational_${kind}_id`,payment.id,`${kind}.created`,`${kind}:${subjectId}:created`,now,now,subjectId]},
         {query:`UPDATE payments SET subject_id=?,updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM ${table} WHERE id=?)`,params:[subjectId,now,payment.id,subjectId]},
-        {query:`UPDATE requests SET conversation_state='needs_attention',payload_json=json_set(payload_json,'$.payment.state','captured'),updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM ${table} WHERE id=?)`,params:[now,hold.request_id,subjectId]},
+        {query:`UPDATE requests SET payload_json=json_set(payload_json,'$.payment.state','captured'),updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM ${table} WHERE id=?)`,params:[now,hold.request_id,subjectId]},
       ],{operation:'Convert authenticated visit payment'})
       created = results[0]?.meta.changes === 1
     } catch (error) {
@@ -150,11 +151,14 @@ async function settleStayPayment(db: DbClient, stripe: Stripe, env: CloudflareEn
     const home = await queryFirst<{ name: string }>(db, 'SELECT name FROM products WHERE id = ? AND organization_id = ?', [hold.product_id, payment.organization_id])
     if (!home) throw new Error('Captured stay payment names a home that does not exist')
     let created = false
+    const turnovers = await turnoverTaskQueries(db, { organizationId: payment.organization_id, now, before: null,
+      after: { id: candidate, product_id: purchase.product_id, status: 'confirmed', check_in_date: purchase.check_in_date, check_out_date: purchase.check_out_date } })
     try {
       const results = await executeBatch(db, [
         ...stayFromCheckoutQueries({ organizationId: payment.organization_id, locationId: hold.location_id, stayId: candidate, holdId: hold.id, paymentId: payment.id, buyerUserId: payment.buyer_user_id ?? hold.buyer_user_id, now, stay: { quote: purchase, guest: purchase.guest }, homeTitle: home.name }),
         { query: "UPDATE payment_checkout_holds SET status='converted', converted_stay_id=? WHERE id=? AND status IN ('active','released') AND EXISTS(SELECT 1 FROM stays WHERE id=?)", params: [candidate, hold.id, candidate] },
         { query: 'UPDATE payments SET subject_id=?, updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM stays WHERE id=?)', params: [candidate, now, payment.id, candidate] },
+        ...turnovers,
       ], { operation: 'Convert captured stay payment' })
       created = results[1]?.meta.changes === 1
       if (created) stayId = candidate
