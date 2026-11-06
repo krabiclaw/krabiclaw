@@ -57,7 +57,7 @@
         <p class="mt-4 text-xs text-muted">Stripe payments captured in the selected period, less refunds; channel reservation amounts are separate.</p>
       </section>
 
-      <ChannelReservationSummary v-if="data && dashboard.organization.value?.vertical === 'lodging'" class="mt-10" :rows="data.channelReservations" :month="monthTitle" />
+      <ChannelReservationSummary v-if="data && dashboard.hasFeature('stays')" class="mt-10" :rows="data.channelReservations" :month="monthTitle" />
     </template>
   </DashboardLeafPanel>
 </template>

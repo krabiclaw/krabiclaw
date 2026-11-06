@@ -21,7 +21,7 @@
     <UAlert v-else class="m-6" color="error" title="Messages are unavailable" description="Your membership does not allow access to conversations." />
     <UAlert v-if="accessError" class="m-6" color="error" title="Conversation access changed" :description="accessError" />
     <UModal v-model:open="settingsOpen" title="Messaging settings">
-      <template #body><MessagingSettings :manage="canManageMessages" @navigate="settingsOpen = false" /></template>
+      <template #body><MessagingSettings :manage="canManageMessages && dashboard.hasFeature('stays')" @navigate="settingsOpen = false" /></template>
     </UModal>
   </DashboardIndexPanel>
 </template>

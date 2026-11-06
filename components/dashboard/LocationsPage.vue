@@ -62,7 +62,7 @@ const { locations, error: locationsError, pending: locationsPending } = await us
 const capabilities = computed(() => {
   const vertical = organization.value?.vertical
   if (!vertical) return null
-  return resolveCmsCapabilities(normalizeVertical(vertical) as OrganizationVertical, resolvePublicTemplate({ vertical }).slug)
+  return resolveCmsCapabilities(normalizeVertical(vertical) as OrganizationVertical, resolvePublicTemplate({ vertical }).slug, null)
 })
 const usesServiceAreaVocabulary = computed(() => capabilities.value?.locationVocabulary === 'office/service area')
 const locationsLabel = computed(() => (usesServiceAreaVocabulary.value ? 'Offices' : 'Locations'))

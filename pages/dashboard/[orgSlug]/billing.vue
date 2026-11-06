@@ -139,7 +139,7 @@ const firstLeaf = computed(() => !dashboard.canUpdateBilling.value ? null : chan
 // charged nothing for them, so the row says so.
 const homesRow = computed<EditorNavigationItem | null>(() => {
   const current = homes.value
-  if (!current || (!current.homes.used && !current.homes.drafts && dashboard.organization.value?.vertical !== 'lodging')) return null
+  if (!current || !dashboard.hasFeature('stays')) return null
   const counted = `${current.homes.used} live · ${current.homes.drafts} ${current.homes.drafts === 1 ? 'draft' : 'drafts'}`
   const summary = current.homes.limit !== null
     ? `${counted} · This plan includes ${current.homes.limit}`

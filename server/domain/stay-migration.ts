@@ -73,8 +73,7 @@ function homeFields(home: StayHome): MigrationHome {
 }
 async function migrationHomes(db: DbClient, access: StayAccess) {
   manager(access)
-  const organization = await queryFirst<{ vertical: string }>(db, 'SELECT vertical FROM organization WHERE id = ?', [access.organizationId])
-  if (!organization || organization.vertical !== 'lodging') fail(422, 'MIGRATION_VERTICAL_REQUIRED', 'Hostaway migration belongs to a lodging business')
+  // Listing the homes requires `stays`; a business without places to stay has nothing to migrate.
   return listStayHomes(db, access)
 }
 export async function getStayMigrationContext(db: DbClient, access: StayAccess): Promise<MigrationContext> {

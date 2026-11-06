@@ -47,7 +47,7 @@ const isHomes = (value: unknown): value is Homes => isRecord(value) && typeof va
   && value.homes.every(home => isRecord(home) && typeof home.product_id === 'string' && typeof home.name === 'string' && typeof home.timezone === 'string' && isValidTimezone(home.timezone))
 const { data: homes, error: homesError } = await useAsyncData(
   () => `calendar-homes:${String(route.params.orgSlug)}`,
-  () => api('/api/dashboard/stay-homes', { validate: isHomes }),
+  () => dashboard.hasFeature('stays') ? api('/api/dashboard/stay-homes', { validate: isHomes }) : Promise.resolve(null),
 )
 // Whether the Places view has rows: one day of the places calendar names every restaurant location, experience and consultation.
 const todayKey = today(getLocalTimeZone()).toString()

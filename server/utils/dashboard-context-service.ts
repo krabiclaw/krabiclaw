@@ -6,6 +6,7 @@ import {
   listDashboardLocations,
   loadDashboardOrganizationCard,
 } from '~/server/utils/dashboard-context'
+import { loadOrganizationFeatures } from '~/server/utils/cms-capabilities'
 import { recordRequestPhase } from '~/server/utils/request-metrics'
 
 // The scope is the route's `org` query param. No organization is a 400 and one
@@ -27,15 +28,16 @@ export async function loadDashboardContext(
   recordRequestPhase(event, 'context', contextStartedAt)
 
   const resourcesStartedAt = performance.now()
-  const [card, locations] = await Promise.all([
+  const [card, locations, features] = await Promise.all([
     loadDashboardOrganizationCard(env, db, organization.id),
     listDashboardLocations(db, organization.id),
+    loadOrganizationFeatures(db, organization.id),
   ])
   recordRequestPhase(event, 'resources', resourcesStartedAt)
 
   return {
     success: true as const,
-    organization: { ...organization, ...card },
+    organization: { ...organization, ...card, features },
     locations,
   }
 }

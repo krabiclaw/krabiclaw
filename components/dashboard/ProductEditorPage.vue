@@ -783,10 +783,11 @@ const editVersion = ref<string | null>(null)
  * `product`, not the form. A failed re-read fails the write that asked for it.
  */
 async function reload() {
+  const wasStay = product.value?.kind === 'stay'
   await refresh()
   if (loadFailure.value) throw loadFailure.value
   if (product.value) editVersion.value = product.value.updated_at
-  await Promise.all([refreshCatalog(), refreshHomeQuote()])
+  await Promise.all([refreshCatalog(), refreshHomeQuote(), ...(wasStay !== (product.value?.kind === 'stay') ? [dashboard.refresh()] : [])])
 }
 
 // ── The weekly schedule ─────────────────────────────────
@@ -1856,7 +1857,8 @@ async function commit(concern?: ProductConcern) {
         const members = collectionProductIds(createCollectionId.value)
         await setCollectionProducts(createCollectionId.value, members.includes(createdId) ? members : [...members, createdId], members)
       }
-      await refreshCatalog()
+      // A business's first stay product gives it `stays`, which the dashboard context carries.
+      await Promise.all([refreshCatalog(), ...(form.kind === 'stay' && !dashboard.hasFeature('stays') ? [dashboard.refresh()] : [])])
       // The record it became, not the `new` form it was, so Back from a saved
       // product goes to Catalog and never to an empty Add screen.
       const destinationLocationId = form.kind === 'stay' ? form.stay_location_id : id
