@@ -113,7 +113,7 @@ export function openingMessageQueries(input: {
  * as the record or, for a checkout never captured, its hold says when nothing
  * changed it. They are dated at the thread's creation and placed after its
  * submission. Airbnb stays are left alone, and a thread that already has its
- * opening is skipped by its dedupe key. Run by every deploy, after migrations.
+ * opening is skipped by its dedupe key.
  */
 export async function backfillOpeningMessages(db: DbClient, organizationId?: string): Promise<{ written: number; skipped: number }> {
   const threads = await queryAll<{ id: string; kind: 'reservation' | 'booking' | 'stay'; organization_id: string; user_id: string | null; created_at: string; payload_json: string; vertical: string | null; checkout: string | null }>(db, `

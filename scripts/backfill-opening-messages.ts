@@ -1,10 +1,12 @@
-// Writes the opening messages (inbox-parity.md, Revision 2026-11-06) into
-// reservation, booking and site-stay conversations created before creation
-// wrote them. Every staging and production deploy runs it after migrations and
-// before the Worker deploy (ci.yml); a database that has them all writes none.
+// One-time derivation of existing data (inbox-parity.md, Revision 2026-11-06):
+// writes the opening messages into reservation, booking and site-stay
+// conversations created before creation wrote them. Creation writes them for
+// every new conversation; SQL cannot derive these (IANA time zones, phone
+// formatting), so this is the migration for the rows already there.
+// Idempotent: a conversation that has its opening is skipped.
 //
-//   yarn db:openings --staging
-//   yarn db:openings --production [--organization <id>]
+//   node --experimental-strip-types --import ./tests/unit/support/register-aliases.mjs scripts/backfill-opening-messages.ts --staging
+//   node --experimental-strip-types --import ./tests/unit/support/register-aliases.mjs scripts/backfill-opening-messages.ts --production
 import { parseArgs } from 'node:util'
 import { Miniflare } from 'miniflare'
 import { startRemoteProxySession, unstable_readConfig } from 'wrangler'
