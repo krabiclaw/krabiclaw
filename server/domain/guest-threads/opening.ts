@@ -156,7 +156,7 @@ async function bookedStay(db: DbClient, thread: BackfillThread): Promise<{ facts
 }
 
 /** The values a booking change records about the visit it changed, in either of the shapes it has been written in. */
-type ChangedFrom = { startsAt?: string; starts_at?: string; partySize?: number; party_size?: number; timezone?: string; productId?: string | null; locationId?: string | null; notes?: string | null; guest?: { name?: string | null; phone?: string | null } }
+type ChangedFrom = { startsAt?: string; starts_at?: string; partySize?: number; party_size?: number; partySizeIsMinimum?: boolean; timezone?: string; productId?: string | null; locationId?: string | null; notes?: string | null; guest?: { name?: string | null; phone?: string | null } }
 
 /** A reservation or booking as the guest asked for it. */
 async function bookedVisit(db: DbClient, thread: BackfillThread): Promise<{ facts: OpeningFacts; note: string | null }> {
@@ -187,7 +187,10 @@ async function bookedVisit(db: DbClient, thread: BackfillThread): Promise<{ fact
   const note = before.notes === undefined ? payload.notes ?? null : before.notes
   if (thread.kind === 'reservation') {
     if (!place) throw new Error(`Reservation conversation ${thread.id} has no location`)
-    return { note, facts: { kind: 'reservation', ...common, partySizeIsMinimum: payload.party_size_is_minimum === true, placeTitle: place.title } }
+    // "4+" as asked: the first change's own record of it, else the submission's. Both write a boolean.
+    const partySizeIsMinimum = typeof before.partySizeIsMinimum === 'boolean' ? before.partySizeIsMinimum : payload.party_size_is_minimum
+    if (typeof partySizeIsMinimum !== 'boolean') throw new Error(`Reservation conversation ${thread.id} does not say whether its party size is a minimum`)
+    return { note, facts: { kind: 'reservation', ...common, partySizeIsMinimum, placeTitle: place.title } }
   }
   const product = asked.productId ? await queryFirst<{ name: string }>(db, 'SELECT name FROM products WHERE id = ? AND organization_id = ?', [asked.productId, thread.organization_id]) : null
   if (!thread.vertical || !product) throw new Error(`Booking conversation ${thread.id} has no vertical or product`)

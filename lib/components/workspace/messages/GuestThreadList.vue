@@ -264,10 +264,11 @@ useIntervalFn(()=>{if(props.personalScope&&documentVisibility.value==='visible')
 
 // The newest thread, for the index above to open into its second column on
 // arrival. The list only says which; whether there is a column is the shell's.
-// Not while another mailbox's rows are still on screen: they would open a
-// conversation that is not in the list being loaded.
+// While a list loads there is none: the rows on screen may be another
+// mailbox's, and the shell must not keep one of them to open.
 watch([threads, openThreadId, pending], ([rows, open, loading]) => {
-  if (open || loading) return
+  if (open) return
+  if (loading) { emit('first', null); return }
   const first = rows[0]
   emit('first', first ? { path: threadRoute(first), query: route.query } : null)
 }, { immediate: true })
