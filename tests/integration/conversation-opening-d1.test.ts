@@ -87,7 +87,7 @@ test('a reservation opens with its own message and the guest note, written once,
     await reservation('moved', null)
     await db.prepare(`INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
       VALUES ('move', 'moved', 'operation', 'request', 'member', 'booking_change.moved', ?, 'move-moved', 2, '2026-11-03T10:00:00.000Z', '2026-11-03T10:00:00.000Z')`)
-      .bind(JSON.stringify({ before: { recordKind: 'reservation', partySize: 2, partySizeIsMinimum: true, startsAt: '2026-11-04T05:00:00.000Z', endsAt: '2026-11-04T07:00:00.000Z', timezone: 'Asia/Bangkok', locationId: 'loc', notes: null, guest: { name: 'Filip Heurckmans', phone: '+32475699444' } } })).run()
+      .bind(JSON.stringify({ before: { recordKind: 'reservation', partySize: 2, partySizeIsMinimum: true, startsAt: '2026-11-04T05:00:00.000Z', endsAt: '2026-11-04T07:00:00.000Z', timezone: 'Asia/Bangkok', locationId: 'loc', productId: null, notes: null, guest: { name: 'Filip Heurckmans', phone: '+32475699444' } } })).run()
     // A checkout never captured has no reservation; its hold says what was asked.
     const held = threadPayloadForGuest({ name: 'Ana Ruiz', email: 'ana@example.test', phone: null, locale: 'en', notes: null, ipHash: null, partySizeIsMinimum: false, answers: [] })
     await db.batch([
@@ -118,6 +118,10 @@ test('a reservation opens with its own message and the guest note, written once,
       VALUES ('accept', 'unrecorded', 'operation', 'request', 'member', 'booking_change.accepted', ?, 'accept-unrecorded', 2, '2026-11-03T10:00:00.000Z', '2026-11-03T10:00:00.000Z')`)
       .bind(JSON.stringify({ before: { starts_at: '2026-11-04T05:00:00.000Z', ends_at: '2026-11-04T07:00:00.000Z', party_size: 2 } })).run()
     await assert.rejects(backfillOpeningMessages(db, ORG), /Reservation conversation unrecorded does not record whether the party size it was booked with is a minimum/)
+    // Nor one whose first change does not record the time it replaced: the record's time is the changed one.
+    await db.prepare("UPDATE activity_entries SET payload_json = ? WHERE id = 'accept'")
+      .bind(JSON.stringify({ before: { recordKind: 'reservation', partySize: 2, partySizeIsMinimum: false, timezone: 'Asia/Bangkok', locationId: 'loc', productId: null } })).run()
+    await assert.rejects(backfillOpeningMessages(db, ORG), /Conversation unrecorded has a change that does not record the time and party it was booked with/)
   } finally {
     await runtime.dispose()
   }

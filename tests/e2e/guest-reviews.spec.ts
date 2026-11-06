@@ -27,10 +27,9 @@ test('a guest who did not come is marked a no-show from the booking record, and 
     await loginAs(page.request, baseURL, ownerId)
     // An ended, confirmed visit nobody has reviewed: the record says whether it may still be a no-show.
     let target: { thread: InboxRow & { submissionType: 'booking' | 'reservation' }; details: DashboardBookingDetails } | null = null
-    // Ended visits are Past once read and Current while unread, so both mailboxes are searched.
-    for (const [submissionType, mailbox] of [['booking', 'past'], ['booking', 'current'], ['reservation', 'past'], ['reservation', 'current']] as const) {
-      const rows = (await body<{ threads: InboxRow[] }>(await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads`, { params: { mailbox, type: submissionType } }), 200)).threads
-      for (const row of rows) {
+    for (const submissionType of ['booking', 'reservation'] as const) {
+      const past = (await body<{ threads: InboxRow[] }>(await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads`, { params: { mailbox: 'past', type: submissionType } }), 200)).threads
+      for (const row of past) {
         const { booking } = await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/${submissionType}/${row.id}`, { params: { org: slug } }), 200)
         if (booking.canMarkNoShow) { target = { thread: { ...row, submissionType }, details: booking }; break }
       }

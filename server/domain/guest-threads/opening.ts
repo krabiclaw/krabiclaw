@@ -158,6 +158,26 @@ async function bookedStay(db: DbClient, thread: BackfillThread): Promise<{ facts
 /** The values a booking change records about the visit it changed, in either of the shapes it has been written in. */
 type ChangedFrom = { startsAt?: string; starts_at?: string; partySize?: number; party_size?: number; partySizeIsMinimum?: boolean; timezone?: string; productId?: string | null; locationId?: string | null; notes?: string | null; guest?: { name?: string | null; phone?: string | null } }
 
+type Visit = { startsAt: string; timezone: string; partySize: number; productId: string | null; locationId: string | null }
+
+/**
+ * The visit a changed thread was booked as: its first change's own record of
+ * it, never the record a change has since rewritten. A change records the time
+ * and party it replaced in every shape it has been written in; one that does not
+ * cannot say what was booked, and refuses. The early accepted shape
+ * (`starts_at`, `ends_at`, `party_size`, `assigned_member_id`, with the same keys
+ * after) could move only the time and party, so the place, offering and zone are
+ * the record's; every later shape records them itself.
+ */
+function askedBeforeChange(threadId: string, before: ChangedFrom, now: Visit): Visit {
+  const startsAt = before.startsAt ?? before.starts_at
+  const partySize = before.partySize ?? before.party_size
+  if (typeof startsAt !== 'string' || typeof partySize !== 'number') throw new Error(`Conversation ${threadId} has a change that does not record the time and party it was booked with`)
+  if (before.starts_at !== undefined) return { ...now, startsAt, partySize }
+  if (typeof before.timezone !== 'string' || before.locationId === undefined || before.productId === undefined) throw new Error(`Conversation ${threadId} has a change that does not record the place it was booked at`)
+  return { startsAt, partySize, timezone: before.timezone, productId: before.productId, locationId: before.locationId }
+}
+
 /** A reservation or booking as the guest asked for it. */
 async function bookedVisit(db: DbClient, thread: BackfillThread): Promise<{ facts: OpeningFacts; note: string | null }> {
   const payload = JSON.parse(thread.payload_json) as { guest?: { name?: string | null; phone?: string | null }; notes?: string | null; answers?: FormAnswerSnapshot[]; party_size_is_minimum?: boolean }
@@ -166,20 +186,14 @@ async function bookedVisit(db: DbClient, thread: BackfillThread): Promise<{ fact
   const record = recorded ? await getThreadOperationalRecord(db, thread.id) : null
   const hold = record ? null : await queryFirst<{ starts_at: string; timezone: string | null; quantity: number; product_id: string | null; location_id: string | null }>(db,
     'SELECT starts_at, timezone, quantity, product_id, location_id FROM payment_checkout_holds WHERE request_id = ? AND organization_id = ? ORDER BY created_at LIMIT 1', [thread.id, thread.organization_id])
-  const now = record ? { startsAt: record.starts_at, timezone: record.timezone, partySize: record.party_size, productId: record.product_id, locationId: record.location_id }
+  const now: Visit | null = record ? { startsAt: record.starts_at, timezone: record.timezone, partySize: record.party_size, productId: record.product_id, locationId: record.location_id }
     : hold?.timezone ? { startsAt: hold.starts_at, timezone: hold.timezone, partySize: hold.quantity, productId: hold.product_id, locationId: hold.location_id } : null
   if (!now) throw new Error(`Conversation ${thread.id} has neither its ${thread.kind} nor a checkout hold`)
   const first = await queryFirst<{ before: string }>(db, `SELECT json_extract(payload_json, '$.before') AS before FROM activity_entries
      WHERE request_id = ? AND event_name IN ('booking_change.requested', 'booking_change.moved', 'booking_change.accepted') AND json_type(payload_json, '$.before') = 'object'
      ORDER BY sequence LIMIT 1`, [thread.id])
   const before = first ? JSON.parse(first.before) as ChangedFrom : {}
-  const asked = {
-    startsAt: before.startsAt ?? before.starts_at ?? now.startsAt,
-    timezone: before.timezone ?? now.timezone,
-    partySize: before.partySize ?? before.party_size ?? now.partySize,
-    productId: before.productId === undefined ? now.productId : before.productId,
-    locationId: before.locationId === undefined ? now.locationId : before.locationId,
-  }
+  const asked = first ? askedBeforeChange(thread.id, before, now) : now
   const guestName = (before.guest?.name ?? payload.guest?.name)?.trim()
   if (!guestName) throw new Error(`Conversation ${thread.id} has no guest name`)
   const place = asked.locationId ? await queryFirst<{ title: string }>(db, 'SELECT title FROM business_locations WHERE id = ? AND organization_id = ?', [asked.locationId, thread.organization_id]) : null

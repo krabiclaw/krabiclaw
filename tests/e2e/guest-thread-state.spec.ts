@@ -442,23 +442,14 @@ async function loadMailbox(request: APIRequestContext, mailbox: Mailbox) {
 /**
  * A Past conversation nobody archived: its booking ended and the owner has read
  * it, so it offers neither Archive nor Move to Messages. The experience seed has
- * ended bookings whose alerts nobody read, which keeps them Current; opening one
- * reads it, as the owner would, and the rule files it in Past.
+ * one; a run's own archived contacts are Past too, and they offer Move to Messages.
  */
 async function endedConversation(request: APIRequestContext) {
-  for (const mailbox of ['past', 'current'] as const) {
-    const response = await request.get(`/api/dashboard/organizations/${organizationId()}/guest-threads`, { params: { mailbox, type: 'booking' } })
-    await expectStatus(response, 200)
-    for (const thread of (await response.json() as { threads: InboxRow[] }).threads) {
-      const booking = await request.get(`/api/dashboard/bookings/booking/${thread.id}`, { params: { org: organizationSlug() } })
-      await expectStatus(booking, 200)
-      if (!(await booking.json() as { booking: { complete: boolean } }).booking.complete) continue
-      await loadThreadDetail(request, thread.id)
-      const actions = await loadThreadActions(request, thread.id)
-      if (!actions.archive && !actions.unarchive) return thread
-    }
+  for (const thread of (await loadMailbox(request, 'past')).byId) {
+    const actions = await loadThreadActions(request, thread.id)
+    if (!actions.archive && !actions.unarchive) return thread
   }
-  throw new Error('The experience seed includes a booking that has ended, and no conversation about one is Past once read')
+  throw new Error('The experience seed includes a booking that has ended and been read, and no Past conversation is one')
 }
 
 async function submitContact(request: APIRequestContext, guestName: string) {
