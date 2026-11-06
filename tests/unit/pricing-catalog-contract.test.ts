@@ -190,6 +190,7 @@ test('renderPlansMarkdown generates accurate, machine-readable markdown specific
   assert.ok(md.includes('- **Billing**: Homes and fees are billed on your subscription invoice at the end of each month.\n'))
   assert.ok(!md.includes('Payments fees'))
   assert.ok(md.includes('## Add-ons\n'))
+  assert.ok(md.includes('| Website translations Manually author and publish translations in all supported languages; no automatic translation. | Included | Included |'))
   assert.ok(md.includes('- **Managed ads**: 10% of monthly ad spend. Chris hand-manages'))
   assert.ok(md.includes('- **SEO and marketing strategy**: $2,000 per month. Julia leads'))
 })

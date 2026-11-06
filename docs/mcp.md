@@ -159,6 +159,13 @@ not open-world: the selected business's Stripe account, media storage and linked
 accounts remain bounded targets. Guest email, host attachment downloads and
 external social audiences cross that scope.
 
+Creating a record is not necessarily additive: creating a stay or enabling a
+message template can queue irreversible guest sends. These operations and
+scheduled replies are destructive. Purely additive location, session and paused
+campaign creation are not. Idempotency covers the complete operation, including
+notifications; a provider's time-limited email deduplication is not an indefinite
+replay guarantee.
+
 The [metadata evaluation corpus](mcp-metadata-evaluation.md) contains prepared
 direct, indirect and nearby negative prompts for the covered operations. It is
 not a complete catalog evaluation; selection outcomes require an actual

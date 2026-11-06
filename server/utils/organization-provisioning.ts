@@ -78,7 +78,7 @@ export async function provisionOrganization(
   const normalizedSubdomain = params.subdomain.toLowerCase()
   const source = platformLocale(params.sourceLocale)
   if (!source) return { status: 400, data: { error: 'Choose a supported website language' } }
-  const linkedDraft = params.writeGuard ? null : await queryFirst<SavedOnboardingDraft>(db, "SELECT * FROM onboarding_drafts WHERE organization_id = ? AND status IN ('active', 'committing') LIMIT 1", [organizationId])
+  const linkedDraft = params.writeGuard ? null : await queryFirst<SavedOnboardingDraft>(db, "SELECT * FROM onboarding_drafts WHERE organization_id = ? AND status = 'active' LIMIT 1", [organizationId])
   if (linkedDraft && linkedDraft.user_id !== userId) return { status: 403, data: { error: 'Only the draft owner can finish this website setup' } }
   const writeGuard: BatchQuery = params.writeGuard ?? (linkedDraft ? onboardingDraftWriteGuard(linkedDraft, organizationId) : {
     query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM organization o WHERE o.id = ? AND o.onboarding_status IN ('pending', 'failed') AND NOT EXISTS (SELECT 1 FROM onboarding_drafts WHERE organization_id = o.id AND status = 'abandoned')) THEN NULL ELSE json('Organization provisioning is no longer available') END",
@@ -222,10 +222,7 @@ async function recordOnboardingComplete(env: SetupEnv, db: D1Database, organizat
   })
 }
 
-/**
- * Emails each operator address once per business. Activation runs once per
- * draft; the Resend idempotency key makes a repeated request a no-op too.
- */
+/** Email operators; the provider suppresses retries only within its key retention window. */
 async function emailOperatorOnboardingComplete(env: SetupEnv, db: D1Database, organizationId: string): Promise<void> {
   const platformOrganizationId = (await getPlatformOrganization(db)).id
   if (organizationId === platformOrganizationId) return

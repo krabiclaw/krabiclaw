@@ -42,7 +42,7 @@ export function getEditablePages(
   vertical: OrganizationVertical,
   template: PublicTemplateSlug,
 ): EditablePage[] {
-  const capability = resolveCmsCapabilities(vertical, template)
+  const capability = resolveCmsCapabilities(vertical, template, null)
   return capability.pages.map(page => ({
     id: page.id,
     label: page.label,

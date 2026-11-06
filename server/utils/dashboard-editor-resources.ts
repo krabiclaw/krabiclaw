@@ -53,7 +53,7 @@ export async function loadDashboardEditorContext(event: H3Event, organizationId:
     throw new HTTPError({ statusCode: 500, statusMessage: 'PREVIEW_SECRET is required for editor previews' })
   }
   const previewToken = await createPreviewToken(env.PREVIEW_SECRET, organizationId, Date.now() + PREVIEW_TOKEN_TTL_MS)
-  const { vertical, template } = resolveOrganizationCmsCapabilities(organization.vertical, organization.theme_id)
+  const { vertical, template } = resolveOrganizationCmsCapabilities(organization.vertical, organization.theme_id, null)
   return {
     success: true as const,
     context: {

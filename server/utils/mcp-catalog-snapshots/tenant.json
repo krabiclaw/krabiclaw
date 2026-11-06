@@ -1,12 +1,12 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:764d03d3a0d5194258109d0d43ab6487db17f8b5388275c11d1b147538a1c6a2",
-  "documentationFingerprint": "sha256:7c8586e58379957341f98b862da3eefb4df8d1b91f48076c66a3d2d408d32e65",
+  "fingerprint": "sha256:e18827bff7d1d0c9015160dc0ad1b2f221763881b772a04d3c4816c89fb8813a",
+  "documentationFingerprint": "sha256:251673e15bad4b898a71f0030c9bc5a097942d4692deb85e1ff20dcab334cd4a",
   "tools": [
     {
       "name": "add_organization_language",
       "title": "Add organization language",
-      "description": "Add a website language for private authoring. Requires the website’s language entitlement. A new language starts disabled; an existing language keeps its publication status and translations while its stored label is refreshed from the platform catalog.",
+      "description": "Add a supported website language for private authoring. A new language starts disabled; an existing language keeps its publication status and translations while its stored label is refreshed from the platform catalog.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -19480,7 +19480,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
+        "destructiveHint": false,
         "openWorldHint": true,
         "readOnlyHint": false,
         "title": "Create Google Ads search campaign"
@@ -20044,7 +20044,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
@@ -20291,7 +20291,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
         "title": "Create message template"
@@ -28790,7 +28790,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
@@ -36843,7 +36843,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
@@ -72772,7 +72772,7 @@
     {
       "name": "publish_organization_language",
       "title": "Publish organization language",
-      "description": "Publish an added website language’s authored translations on public routes. Requires the website’s language entitlement and a translated homepage. Missing translations remain unavailable; the source language is unchanged.",
+      "description": "Publish an added website language’s authored translations after translating its homepage. Legal Services sites also require a translated organization name and consultation call-to-action label. Missing translations remain unavailable; the source language is unchanged.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -73057,7 +73057,7 @@
     {
       "name": "publish_website",
       "title": "Publish website",
-      "description": "Publish a saved website draft, select it as your workspace and notify KrabiClaw operators by email. Finish any returned missing fields before retrying.",
+      "description": "Publish a saved website draft, select it as your workspace and notify KrabiClaw operators by email. Finish any returned missing fields before retrying. Repeating a completed publication can resend the operator email.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -73174,7 +73174,7 @@
       },
       "annotations": {
         "destructiveHint": true,
-        "idempotentHint": true,
+        "idempotentHint": false,
         "openWorldHint": true,
         "readOnlyHint": false,
         "title": "Publish website"
@@ -99222,7 +99222,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
         "title": "Schedule guest reply"
@@ -99427,7 +99427,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false,
@@ -127220,7 +127220,7 @@
         "reply_to_guest": "sha256:28402ef75ec3f1464c60ffbaa91a3781f96f9764994e56b2c7362dbd26eefb80",
         "request_product_booking_change": "sha256:d09a9c88466237aff04465bbcffa219f28e197cfad0cb4fdd99f41484343d400",
         "request_table_reservation_change": "sha256:71868f28cc9f329b1f44276ae0a223c487c789f4682c3bb8f3a09b96fde9e2dd",
-        "send_team_message": "sha256:3865f5f6aeadf25e330b9adf73caece28d6e9044984bdad3bef64eb3f47f0ee7",
+        "send_team_message": "sha256:b9f715f29f98d627cd0e5fa89f873b5623e13d5ba0867cc7dba69216ba886f97",
         "start_team_conversation": "sha256:b297eb76fda6a481f0246ee8c6c39d5481ebe9379dd979ecee747b54c67f0492",
         "update_team_group": "sha256:e58436da6c0b45816e909c58d6ff9265c364e410a5c5edf696a7c6085bb3f6cb"
       }
@@ -127282,7 +127282,7 @@
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
-        "publish_website": "sha256:939b1ce7c3fd387584cc132ae36ef88ea13eb064617de0ba0764e5a81f572f3f",
+        "publish_website": "sha256:6ba702a3293b004e38bcc734ff0b74c3073caaeb12cd831f0f78ddec1a1efaa4",
         "save_website_draft": "sha256:6a7e9c21393133afa96ef5bd80d3ca08ced43fc89e669394496d8d4785ed82ab",
         "update_menu": "sha256:cd6ae334587cddc89c052c08d9f30ce9855bd0394c95eb87d69378a393068269",
         "update_organization_settings": "sha256:7191c77fc0ed6eb5ce818283be58acb26679a8cf793cbba600dccb694e8051a6",

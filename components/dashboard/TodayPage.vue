@@ -102,10 +102,10 @@ const realtime = useDashboardInvalidations()
 const orgSlug = computed(() => props.personalScope ? 'account' : String(route.params.orgSlug ?? ''))
 const { signature: filterSignature, active: hasActiveFilters, query: filterQuery, range: activeRange, failure: navigationError } = useAgendaFilters()
 const organizationId = props.personalScope ? null : useDashboardOrganizationId()
-const { organization } = useDashboardOrganization()
+const { organization, hasFeature } = useDashboardOrganization()
 const canAddStay = computed(() => {
   const role = organization.value?.role as keyof typeof organizationRoles | undefined
-  return !props.personalScope && organization.value?.vertical === 'lodging' && Boolean(role && authClient.organization.checkRolePermission({ role, permissions: { operations: ['update'] } }))
+  return !props.personalScope && hasFeature('stays') && Boolean(role && authClient.organization.checkRolePermission({ role, permissions: { operations: ['update'] } }))
 })
 const schedulingOrganizationId = computed(() => organization.value?.vertical === 'lodging' ? null : organizationId)
 const todayKey = computed(() => `dashboard-today-${orgSlug.value}-${props.personalScope ? '' : filterSignature.value}`)

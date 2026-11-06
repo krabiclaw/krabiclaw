@@ -48,8 +48,13 @@ patch auth tables. Platform admin access by itself does not grant tenant access.
 The order is **add → publish the bundle → publish the language**, and it is not
 interchangeable. Adding the language through the site's language settings
 creates it `disabled`: writable, and invisible to the public. Publish the bundle
-into it. Only then publish the language, which is refused until every source
-field with content has a translation.
+into it. Only then publish the language. Publication requires a translated
+homepage; Legal Services sites also require the translated organization name
+and consultation call-to-action label. Other missing translations remain
+unavailable rather than falling back to source-language content. Translating
+the complete bundle is this client delivery's requirement, not a platform
+publication gate. Every plan supports manually authored translations in every
+supported language without a translation-count limit.
 
 Adding used to publish in the same step, so the moment a language was picked the
 site served that prefix with nothing in it — and a locale shows exactly what has

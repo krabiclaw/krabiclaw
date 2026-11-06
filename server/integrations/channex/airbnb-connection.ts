@@ -28,6 +28,7 @@ import { calendarMinimumDefaults, completeChannelPush, configureStayCalendar, fo
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import { backfillChannexMessages } from '~/server/domain/guest-threads/channel-messages'
 import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
+import { requireStays } from '~/server/utils/cms-capabilities'
 
 /**
  * An organization's Airbnb account, connected through Channex: start a
@@ -319,6 +320,7 @@ export class AirbnbConnection {
    * `channel_active` reports.
    */
   async status(): Promise<{ status: ConnectionStatus; connected_at: string | null; listing_count: number; channel_active: boolean }> {
+    await requireStays(this.db, this.organizationId)
     const row = await this.row()
     if (!row) return { status: 'not_connected', connected_at: null, listing_count: 0, channel_active: false }
     if (row.status !== 'connected') return { status: row.status, connected_at: row.connected_at, listing_count: 0, channel_active: false }
@@ -328,6 +330,7 @@ export class AirbnbConnection {
 
   /** A single-use Airbnb sign-in link for the person asking. */
   async start(): Promise<{ authorization_url: string }> {
+    await requireStays(this.db, this.organizationId)
     return await this.locked(async (row) => {
       if (row.channel_id) fail(409, 'ALREADY_CONNECTED', 'Disconnect the current Airbnb account before connecting another one.')
       if (row.authorization_url) {

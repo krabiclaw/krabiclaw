@@ -1,4 +1,4 @@
-import { assertPublicOrganizationLanguageEntitlement, getPersistedSourceLocale } from '~/server/utils/localization'
+import { assertPublicOrganizationLanguage, getPersistedSourceLocale } from '~/server/utils/localization'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { createContentDocumentWithBlocks, updateContentDocument } from '~/server/utils/content/documents'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
@@ -205,7 +205,7 @@ export async function getPublicLinksPage(env: CloudflareEnv, db: DbClient, organ
   if (!organization) return null
   const media = await getMediaPlacements(db, { organizationId, ownerType: 'organization', ownerIds: [organizationId] })
 
-  await assertPublicOrganizationLanguageEntitlement(env, db, organizationId, locale)
+  await assertPublicOrganizationLanguage(db, organizationId, locale)
   const { page: sourcePage } = await getLinksPage(db, organizationId)
   const { page, items } = await getLinksPage(db, organizationId, locale)
   const publicItems = items.filter(item => item.status === 'active')

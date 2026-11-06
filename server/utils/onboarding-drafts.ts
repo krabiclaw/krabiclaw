@@ -1,7 +1,7 @@
 import { platformLocale } from '~/shared/platform-locales'
 import { parseOpeningHours, parseSpecialHours, type OpeningHours, type SpecialHours } from '~/shared/reservation-hours'
 import type { OrganizationVertical } from '~/utils/vertical-copy'
-import { execute, queryAll, queryFirst, type BatchQuery } from '~/server/db'
+import { queryAll, queryFirst, type BatchQuery } from '~/server/db'
 import { creationRequestHash } from '~/server/utils/organization-events'
 import { isCurrencyCode } from '~/shared/currencies'
 import { isValidTimezone } from '~/utils/timezone'
@@ -35,16 +35,10 @@ export interface SavedOnboardingDraft {
 
 export async function readActiveOnboardingDraft(db: D1Database, userId: string, includeAbandoned = false) {
   const rows = await queryAll<SavedOnboardingDraft>(db,
-    "SELECT * FROM onboarding_drafts d WHERE user_id = ? AND (status IN ('active', 'committing') OR (status = 'abandoned' AND EXISTS (SELECT 1 FROM organization WHERE (id = d.organization_id OR json_extract(metadata, ?) = d.id) AND onboarding_status <> 'active'))) ORDER BY created_at, id LIMIT 2", [userId, `$.${ONBOARDING_ORGANIZATION_MARKER}`])
+    "SELECT * FROM onboarding_drafts d WHERE user_id = ? AND (status = 'active' OR (status = 'abandoned' AND EXISTS (SELECT 1 FROM organization WHERE (id = d.organization_id OR json_extract(metadata, ?) = d.id) AND onboarding_status <> 'active'))) ORDER BY created_at, id LIMIT 2", [userId, `$.${ONBOARDING_ORGANIZATION_MARKER}`])
   if (rows.length > 1) throw new HTTPError({ statusCode: 409, statusMessage: 'More than one unfinished website draft needs recovery', data: { code: 'ONBOARDING_DRAFT_CONFLICT', draft_ids: rows.map(row => row.id) } })
   const row = rows[0]
   if (row?.status === 'abandoned' && !includeAbandoned) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft cleanup is incomplete. Retry discarding this draft.', data: { code: 'ONBOARDING_DRAFT_DISCARD_INCOMPLETE', draft_id: row.id, organization_id: row.organization_id } })
-  if (row?.status === 'committing') {
-    const updatedAt = new Date(Math.max(Date.now(), Date.parse(row.updated_at) + 1)).toISOString()
-    const restored = await execute(db, "UPDATE onboarding_drafts SET status = 'active', updated_at = ? WHERE id = ? AND user_id = ? AND status = 'committing' AND updated_at = ?", [updatedAt, row.id, userId, row.updated_at])
-    if (!restored.meta.changes) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; retry the same request', data: { code: 'ONBOARDING_DRAFT_CHANGED', draft_id: row.id } })
-    return { ...row, status: 'active', updated_at: updatedAt }
-  }
   return row ?? null
 }
 
@@ -588,9 +582,7 @@ export async function readOnboardingDraft(db: D1Database, userId: string, draftI
     : await readActiveOnboardingDraft(db, userId)
   if (!draft) throw new HTTPError({ statusCode: 404, statusMessage: 'Website draft not found' })
   if (draft.status === 'abandoned') throw new HTTPError({ statusCode: 409, statusMessage: 'This website draft was discarded', data: { code: 'ONBOARDING_DRAFT_ABANDONED', draft_id: draft.id } })
-  const current = draft.status === 'committing' ? await readActiveOnboardingDraft(db, userId) : draft
-  if (!current || current.id !== draft.id) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft changed; read it again', data: { code: 'ONBOARDING_DRAFT_CHANGED', draft_id: draft.id } })
-  return { row: current, payload: parseOnboardingDraftPayload(current.payload_json) }
+  return { row: draft, payload: parseOnboardingDraftPayload(draft.payload_json) }
 }
 
 export async function upsertActiveOnboardingDraft(db: D1Database, input: {

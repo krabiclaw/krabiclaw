@@ -84,6 +84,8 @@ export const organizationOptions = {
       additionalFields: {
         default_currency: { type: 'string', required: true, input: true },
         timezone: { type: 'string', required: true, input: true },
+        // Onboarding provisioning sets the vertical; Better Auth only returns it.
+        vertical: { type: 'string', required: true, input: false },
       },
     },
   },

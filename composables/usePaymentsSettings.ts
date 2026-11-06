@@ -47,13 +47,15 @@ const isHomesQuote = (value: unknown): value is HomesQuote =>
  * check also answers by: `adding` is how many are about to go live, 0 for the
  * cost of the live homes now. Read only while `enabled`.
  */
-export async function useHomesQuote(organizationId: string, adding: MaybeRefOrGetter<number>, enabled: MaybeRefOrGetter<boolean> = true) {
+export function useHomesQuote(organizationId: string, adding: MaybeRefOrGetter<number>, enabled: MaybeRefOrGetter<boolean> = true) {
   const dashboardApi = useDashboardApi()
-  const { data, error, refresh } = await useAsyncData(
+  const { data, error, status, refresh } = useAsyncData(
     () => `homes-quote:${organizationId}:${toValue(adding)}:${toValue(enabled)}`,
-    async () => toValue(enabled) ? await dashboardApi(`/api/organizations/${encodeURIComponent(organizationId)}/billing/homes`, { query: { adding: String(toValue(adding)) }, validate: isHomesQuote }) : null,
+    () => dashboardApi(`/api/organizations/${encodeURIComponent(organizationId)}/billing/homes`, { query: { adding: String(toValue(adding)) }, validate: isHomesQuote }),
+    { server: false, lazy: true, enabled },
   )
-  return { quote: data, quoteError: error, refreshQuote: refresh }
+  const pending = computed(() => toValue(enabled) && (status.value === 'idle' || status.value === 'pending'))
+  return { quote: data, quoteError: error, quotePending: pending, refreshQuote: refresh }
 }
 
 export type Strategy = { item_id: string; amount: number; currency: string; interval: string; since: string }

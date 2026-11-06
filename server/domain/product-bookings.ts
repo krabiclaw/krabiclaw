@@ -12,7 +12,7 @@ import { productPolicySummarySource, renderBookingPolicySummary } from '~/server
 import { getProduct, resolveVariantPrice } from '~/server/utils/product-management'
 import { isCurrencyCode } from '~/shared/currencies'
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { assertExactCanonicalLocale, assertPublicOrganizationLanguageEntitlement } from '~/server/utils/localization'
+import { assertExactCanonicalLocale, assertPublicOrganizationLanguage } from '~/server/utils/localization'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import { buildOwnerThreadInboxUrl } from '~/server/utils/dashboard-notification-links'
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '~/server/utils/reservation-cancel-token'
@@ -175,7 +175,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     return creationResult({ success: true, status: 'checkout', replayed: true, ...checkout }, { status: 200 })
   }
 
-  await assertPublicOrganizationLanguageEntitlement(env, db, organizationId, locale)
+  await assertPublicOrganizationLanguage(db, organizationId, locale)
   const product = await queryFirst<{ id: string; name: string; order_url: string | null }>(db, `
     SELECT p.id, p.name, p.order_url FROM products p
       JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id

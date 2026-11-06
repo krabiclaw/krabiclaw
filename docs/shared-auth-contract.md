@@ -181,7 +181,7 @@ A home is **live** when it is active at its active location and either published
 - Publishing a home (`PATCH /api/dashboard/stay-homes/:productId` `{published: true}`, the product publication route, the MCP tool), syncing an Airbnb listing (§3.5), reconnecting a listing, turning a home or its location back on: each that makes one more home live past Basic's 1 is refused with 402:
 
 ```json
-{ "error": "Basic includes 1 live home. Choose Growth or Business in Billing to add more.", "code": "HOME_LIMIT", "homes": { "used": 1, "covered": 1 } }
+{ "error": "Basic includes 1 live home.", "code": "HOME_LIMIT", "homes": { "used": 1, "covered": 1 } }
 ```
 
   On Growth and Business nothing is refused, and every change to the live count is reported to the Stripe homes meter.
@@ -200,7 +200,7 @@ Stages of a listing's import, in order: `property`, `room`, `rate`, `inventory`,
 `sync` names listings of the connected Airbnb account to import (if they are not homes yet) and make live, each with `details` (optional): values for the fields `GET …/listings/:listingId` reports in `missingFields`, each text, used when the home is made. Contact email and phone default to the organization's. `stop` names homes imported from the account to stop syncing; they become free drafts only when they are not otherwise live through website publication (§3.4). The plan is checked once for the whole request, before anything is queued: the live homes it leaves are the live homes now, plus each synced listing not live yet, less each stopped home that is not also published on the site. Past Basic's 1 it is 402, nothing queued:
 
 ```json
-{ "error": "Basic includes 1 live home. Choose Growth or Business in Billing to add more.", "code": "HOME_LIMIT", "homes": { "used": 1, "covered": 1 }, "quote": { "plan": "free", "currency": "USD", "homes": { "used": 1, "drafts": 0, "included": 1, "additional_price_minor": 400, "amount_minor": 0 }, "adding": { "count": 1, "additional_homes": 1, "amount_minor": 400, "allowed": false }, "billing": { "period_end": null, "trial_end": null, "prorated": false } } }
+{ "error": "Basic includes 1 live home.", "code": "HOME_LIMIT", "homes": { "used": 1, "covered": 1 }, "quote": { "plan": "free", "currency": "USD", "homes": { "used": 1, "drafts": 0, "included": 1, "additional_price_minor": 400, "amount_minor": 0 }, "adding": { "count": 1, "additional_homes": 1, "amount_minor": 400, "allowed": false }, "billing": { "period_end": null, "trial_end": null, "prorated": false } } }
 ```
 
 `quote` is the homes quote (§3.1) with `adding` the increase. Otherwise 202 with the named listings as `GET` returns them; each replaces any earlier request for that listing. 422 `VALIDATION_ERROR` when it names nothing or names a listing in both; 404 `LISTING_NOT_FOUND` (`listing_id`) for a listing not on the account, 404 `IMPORT_NOT_FOUND` (`product_id`) for a home not imported from it.

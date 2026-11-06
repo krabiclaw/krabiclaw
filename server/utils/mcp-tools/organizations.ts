@@ -166,7 +166,7 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
     outputSchema: websiteDraftOutputSchema,
   })),
   globalTool(withToolAnnotations({
-    name: 'publish_website', description: 'Publish a saved website draft, select it as your workspace and notify KrabiClaw operators by email. Finish any returned missing fields before retrying.',
+    name: 'publish_website', description: 'Publish a saved website draft, select it as your workspace and notify KrabiClaw operators by email. Finish any returned missing fields before retrying. Repeating a completed publication can resend the operator email.',
     domain: 'organizations', minimumRole: 'admin',
     inputSchema: { type: 'object', properties: { draft_id: { type: 'string', minLength: 1 }, revision: { type: 'string', format: 'date-time' } }, required: ['draft_id', 'revision'], additionalProperties: false },
     outputSchema: { type: 'object', properties: {

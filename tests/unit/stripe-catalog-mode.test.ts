@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { assertCatalogModeKey, buildCatalogPlan, PLAN_DEFINITIONS, sha256Json } from '../../scripts/lib/stripe-catalog-plan.mjs'
+import { assertCatalogModeKey, buildCatalogPlan, PLAN_DEFINITIONS, readCatalogSnapshot, sha256Json } from '../../scripts/lib/stripe-catalog-plan.mjs'
 import { assertStripeCliIdentity, main, parseCli, parseStripeCliResponse } from '../../scripts/seed-stripe.mjs'
 
 // Catalog mutation must require an explicit live target, before provider access.
@@ -97,7 +97,7 @@ test('Business catalog consolidates new sales without repricing existing contrac
   assert.equal(plan.providerSnapshotSha256, sha256Json(original))
   assert.deepEqual(plan.operations.filter(operation => operation.type.includes('subscription')), [])
   assert.deepEqual(plan.operations.filter(operation => operation.type === 'create_product').map(operation => operation.planId),
-    ['business', 'homes', 'captured_volume', 'stripe_cost', 'ad_spend', 'site_language', 'strategy'])
+    ['business', 'homes', 'captured_volume', 'stripe_cost', 'ad_spend', 'strategy'])
   // Each plan is one flat monthly price; the $39 Growth price a subscription is on is retired for new sales only.
   const growthPrice = plan.operations.find(operation => operation.type === 'create_price' && operation.planId === 'growth')
   assert.deepEqual(growthPrice?.params, { currency: 'usd', recurring: { interval: 'month', interval_count: 1 }, billing_scheme: 'per_unit', unit_amount: 4900 })
@@ -126,15 +126,17 @@ test('Business catalog consolidates new sales without repricing existing contrac
   assert.equal(homeUpdate?.params.unit_label, 'home')
   // A plan is billed once, so its product carries no unit.
   assert.equal(plan.operations.find(operation => operation.type === 'update_product' && operation.product?.id === 'prod_growth')?.params.unit_label, '')
-  // Rental units and locations are not billed: an Additional rental unit or Additional location product is retired like a retired plan.
+  // Rental units, locations and manually localized languages are retired for new sales.
   const withUnits = buildCatalogPlan({ snapshot: { ...snapshot,
     products: [...snapshot.products,
       { id: 'prod_units', active: true, metadata: { product_family: 'rental_units', monthly_price_id: 'price_units' }, default_price: 'price_units' },
-      { id: 'prod_locations', active: true, metadata: { product_family: 'locations', monthly_price_id: 'price_locations' }, default_price: 'price_locations' }],
+      { id: 'prod_locations', active: true, metadata: { product_family: 'locations', monthly_price_id: 'price_locations' }, default_price: 'price_locations' },
+      { id: 'prod_language', active: true, metadata: { product_family: 'site_language', monthly_price_id: 'price_language' }, default_price: 'price_language' }],
     pricesByProduct: { ...snapshot.pricesByProduct,
       prod_units: [{ id: 'price_units', product: 'prod_units', active: true, currency: 'usd', unit_amount: 1900, billing_scheme: 'per_unit', recurring: { interval: 'month', interval_count: 1 } }],
-      prod_locations: [{ id: 'price_locations', product: 'prod_locations', active: true, currency: 'usd', billing_scheme: 'tiered', tiers_mode: 'graduated', recurring: { interval: 'month', interval_count: 1, usage_type: 'metered', meter: 'mtr_locations' } }] } } })
-  for (const productId of ['prod_units', 'prod_locations']) assert.deepEqual(withUnits.operations.filter(operation => operation.productId === productId).map(operation => operation.type), ['clear_product_default_price', 'deactivate_price', 'archive_product'])
+      prod_locations: [{ id: 'price_locations', product: 'prod_locations', active: true, currency: 'usd', billing_scheme: 'tiered', tiers_mode: 'graduated', recurring: { interval: 'month', interval_count: 1, usage_type: 'metered', meter: 'mtr_locations' } }],
+      prod_language: [{ id: 'price_language', product: 'prod_language', active: true, currency: 'usd', unit_amount: 500, billing_scheme: 'per_unit', recurring: { interval: 'month', interval_count: 1 } }] } } })
+  for (const productId of ['prod_units', 'prod_locations', 'prod_language']) assert.deepEqual(withUnits.operations.filter(operation => operation.productId === productId).map(operation => operation.type), ['clear_product_default_price', 'deactivate_price', 'archive_product'])
   // The app finds the strategy product by its service metadata and never by a plan id, which would make Better Auth treat it as a plan.
   const strategyProduct = plan.operations.find(operation => operation.type === 'create_product' && operation.planId === 'strategy')
   assert.deepEqual(strategyProduct?.params.metadata, { product_family: 'services', service: 'strategy', highlighted: 'false' })
@@ -157,6 +159,39 @@ test('Business catalog consolidates new sales without repricing existing contrac
   assert.deepEqual(offersOnly.operations, plan.operations.filter(operation => !['clear_product_default_price', 'deactivate_price', 'archive_product'].includes(operation.type)))
   assert.deepEqual(offersOnly.providerSnapshot.subscriptions, original.subscriptions)
   assert.notEqual(offersOnly.planSha256, plan.planSha256)
+})
+
+test('catalog snapshot signs standalone language and service contracts without a main plan', async () => {
+  const subscriptions = [
+    { id: 'sub_language', status: 'active', items: { data: [{ id: 'si_language', price: { id: 'price_language', product: 'prod_language' }, quantity: 2 }] } },
+    { id: 'sub_service', status: 'trialing', items: { data: [{ id: 'si_service', price: { id: 'price_service', product: 'prod_service' }, quantity: 1 }] } },
+    { id: 'sub_closed', status: 'canceled', items: { data: [{ id: 'si_closed', price: { id: 'price_missing', product: 'prod_deleted' }, quantity: 1 }] } },
+  ]
+  const cursors: (string | undefined)[] = []
+  const readAdapter = {
+    account: { retrieve: async () => ({ id: 'acct_contracts' }) },
+    products: { list: async ({ active }: { active: boolean }) => ({ data: active ? [
+      { id: 'prod_language', active: true, metadata: { product_family: 'site_language' } },
+      { id: 'prod_service', active: true, metadata: { product_family: 'services', service: 'strategy' } },
+    ] : [], has_more: false }) },
+    prices: { list: async ({ product, active }: { product: string, active: boolean }) => ({ data: active ? [
+      { id: product === 'prod_language' ? 'price_language' : 'price_service', product, active: true },
+    ] : [], has_more: false }) },
+    meters: { list: async () => ({ data: [], has_more: false }) },
+    subscriptions: { list: async ({ status, starting_after }: { status: string, starting_after?: string }) => {
+      assert.equal(status, 'all')
+      cursors.push(starting_after)
+      return starting_after
+        ? { data: subscriptions.slice(1), has_more: false }
+        : { data: subscriptions.slice(0, 1), has_more: true }
+    } },
+  }
+  const snapshot = await readCatalogSnapshot(readAdapter, { accountMode: 'test' })
+  assert.deepEqual(cursors, [undefined, 'sub_language'])
+  assert.deepEqual(snapshot.subscriptions.map(subscription => ({ id: subscription.id, items: subscription.items })), [
+    { id: 'sub_language', items: [{ id: 'si_language', price: 'price_language', quantity: 2, current_period_start: null, current_period_end: null }] },
+    { id: 'sub_service', items: [{ id: 'si_service', price: 'price_service', quantity: 1, current_period_start: null, current_period_end: null }] },
+  ])
 })
 
 test('retirement-only requires complete replacement offers and emits only archival operations', () => {

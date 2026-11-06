@@ -1,8 +1,7 @@
-import { SUBSCRIPTION_STATE_INVALID } from '~/server/utils/billing-access'
 import { HTTPError } from 'nitro'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { queryAll, type DbClient } from '~/server/db'
-import { assertOrganizationLanguageEntitlement, getPersistedSourceLocale } from '~/server/utils/localization'
+import { assertOrganizationLanguage, getPersistedSourceLocale } from '~/server/utils/localization'
 import { platformLocale } from '~/shared/platform-locales'
 import { RESOURCE_LOCALIZATION_REGISTRY, type LocalizedResourceType } from '~/server/utils/localization-registry'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
@@ -67,15 +66,13 @@ function isUnavailableRepresentation(error: unknown): boolean {
   const code = error.data && typeof error.data === 'object' && 'code' in error.data
     ? error.data.code
     : null
-  return code === 'LANGUAGE_ENTITLEMENT_REQUIRED'
-    || code === 'LANGUAGE_NOT_ENABLED'
+  return code === 'LANGUAGE_NOT_ENABLED'
     || code === 'LANGUAGE_NOT_PUBLISHED'
     || code === 'PLATFORM_LOCALE_UNAVAILABLE'
-    || code === SUBSCRIPTION_STATE_INVALID
 }
 
 export async function listPublicLocaleRepresentations(
-  env: CloudflareEnv,
+  _env: CloudflareEnv,
   db: DbClient,
   input: RepresentationInput,
 ): Promise<PublicLocaleRepresentation[]> {
@@ -126,7 +123,7 @@ export async function listPublicLocaleRepresentations(
 
   for (const candidate of candidates) {
     try {
-      await assertOrganizationLanguageEntitlement(env, db, input.organizationId, candidate.locale)
+      await assertOrganizationLanguage(db, input.organizationId, candidate.locale)
     } catch (error) {
       if (isUnavailableRepresentation(error)) continue
       throw error

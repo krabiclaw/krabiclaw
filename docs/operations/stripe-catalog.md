@@ -4,8 +4,9 @@
 (free, with no Stripe product), Growth (`$49` per month) and Business (`$149`
 per month). Business includes Growth's features, online payments and managed
 Google Ads campaigns. Each plan price is one flat monthly price billed at
-quantity 1. The catalog is monthly only: there is no annual offer for any plan,
-service or Site Language.
+quantity 1. The catalog is monthly only: there is no annual offer for any plan
+or service. Manually localized languages are unlimited on every plan and have
+no product or price offered for sale.
 
 Everything else a plan bills is a metered price on a Stripe billing meter, each
 its own product with `product_family` set to the meter key (never a `plan_id`):
@@ -28,11 +29,13 @@ Growth → Business is one `subscription.upgrade` (`docs/payments/payments.md`).
 without exactly one active product per meter at its published price, so apply
 the offers before deploying an application that sells them.
 
-The graduated per-location plan prices sold before #1503, the annual Growth
-price and the yearly Site Language price are retired for new sales by the full
+The graduated per-location plan prices sold before #1503 and the annual Growth
+price are retired for new sales by the full
 plan's `deactivate_price` operations: any active recurring price on a canonical
 product other than its one monthly price is archived. The former Additional rental unit product
-(`product_family=rental_units`) is a retired family, so the full plan clears its
+(`product_family=rental_units`), Additional location (`product_family=locations`)
+and Site Language (`product_family=site_language`) products are retired families,
+so the full plan clears each one's
 default price, deactivates its prices and archives it. Subscriptions on any of
 them keep their items until they change plan.
 
@@ -41,7 +44,9 @@ Managed (`$149`) and SEO Accelerator (`$349`) are retired from new offers. Every
 product and price, including already-archived products and inactive or one-time prices, is
 read into the reviewed snapshot. Only products whose metadata explicitly names
 `plan_id=commerce|marketing|managed|seo_accelerator`,
-`addon_type=translation|seasonal|gbp_setup` or `product_family=rental_units` are retired; unknown products are never classified by name. For each still-active
+`addon_type=translation|seasonal|gbp_setup` or
+`product_family=rental_units|locations|site_language` are retired; unknown products
+are never classified by name. For each still-active
 retired product whose default price is active, the plan first clears that exact
 default price, then deactivates every independently active price before archiving
 the product, including duplicates. Inactive products are never cleared or
@@ -49,7 +54,11 @@ archived. Retired products are never created or marketed, and an absent retired
 product produces no operation. Commerce and Marketing remain valid existing
 subscription identities with their original capabilities; they cannot be
 purchased as new subscriptions or selected as a plan change. Existing customers
-retain their exact price IDs, quantities, schedules and renewal terms. Better
+retain their exact price IDs, quantities, schedules and renewal terms. Archiving
+a price does not stop an existing subscription from billing it. Before retiring
+Site Language, review all of its price IDs against every nonclosed subscription;
+any remaining language charge needs a separately reviewed subscription change,
+which this catalog operator does not perform. Better
 Auth Stripe owns their subscription lifecycle. Historical fulfillment rows
 remain raw read-only audit history.
 
@@ -58,7 +67,8 @@ it never changes a price amount or writes a subscription. Google bills the ad
 spend itself; the ad-spend meter bills only KrabiClaw's 10%.
 
 The default mode is read-only. It proves the exact Stripe account, lists every
-product and all of its active and inactive prices, writes no product/price/file
+product and all of its active and inactive prices, includes every nonclosed
+subscription even when it contains no main plan, writes no product/price/file
 mutations, and emits a deterministic JSON plan with a SHA-256 hash. The full
 `pricesByProduct` snapshot is included in `providerSnapshotSha256`, so expected
 price state is covered by the signed plan and every destructive precondition:
@@ -179,8 +189,7 @@ safe. The journal never claims compensation or completion when a provider
 mutation may have succeeded without a durable result.
 
 The signed operation order creates or reconciles each offered plan's canonical
-product, required monthly price and configured image first. Business does not require a product image. The full
-planner also reconciles the existing Site Language catalog family.
+product, required monthly price and configured image first. Business does not require a product image.
 For active retired products, it clears a signed active default price before
 deactivating prices and archiving the product. The operator re-reads the provider
 and proves that no canonical operation remains before each deactivation or
@@ -219,8 +228,8 @@ never selected or deactivated. The plan snapshot includes each price's tiers,
 `lookup_key` and normalized metadata, so these inputs are covered by the review
 hash.
 
-The signed snapshot records every open subscription billed on an offered or
-retired paid plan product, including already-archived products. It includes the
+The signed snapshot records every nonclosed subscription, including standalone
+language or service charges and already-archived products. It includes the
 status, schedule, billing-cycle anchor, cancellation and trial settings,
 collection method, and each item's exact price ID, quantity and billing-period
 boundaries. Every apply read and the final read-back must match that contract
