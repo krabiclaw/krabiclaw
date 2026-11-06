@@ -110,6 +110,14 @@ test('a reservation opens with its own message and the guest note, written once,
     await db.batch(openingMessageQueries({ target: { requestId: 'moved' }, body: 'Replayed', note: 'Added since', guestUserId: null, at: CREATED })
       .map(query => db.prepare(query.query).bind(...(query.params ?? []))))
     assert.deepEqual(await movedLedger(), before)
+
+    // A table moved by a change that did not record whether its party was a minimum cannot say what the guest
+    // asked for: the move reset the submission's flag. The backfill refuses rather than open it without the "+".
+    await reservation('unrecorded', null)
+    await db.prepare(`INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
+      VALUES ('accept', 'unrecorded', 'operation', 'request', 'member', 'booking_change.accepted', ?, 'accept-unrecorded', 2, '2026-11-03T10:00:00.000Z', '2026-11-03T10:00:00.000Z')`)
+      .bind(JSON.stringify({ before: { starts_at: '2026-11-04T05:00:00.000Z', ends_at: '2026-11-04T07:00:00.000Z', party_size: 2 } })).run()
+    await assert.rejects(backfillOpeningMessages(db, ORG), /Reservation conversation unrecorded does not record whether the party size it was booked with is a minimum/)
   } finally {
     await runtime.dispose()
   }

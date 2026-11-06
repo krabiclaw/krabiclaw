@@ -187,9 +187,12 @@ async function bookedVisit(db: DbClient, thread: BackfillThread): Promise<{ fact
   const note = before.notes === undefined ? payload.notes ?? null : before.notes
   if (thread.kind === 'reservation') {
     if (!place) throw new Error(`Reservation conversation ${thread.id} has no location`)
-    // "4+" as asked: the first change's own record of it, else the submission's. Both write a boolean.
-    const partySizeIsMinimum = typeof before.partySizeIsMinimum === 'boolean' ? before.partySizeIsMinimum : payload.party_size_is_minimum
-    if (typeof partySizeIsMinimum !== 'boolean') throw new Error(`Reservation conversation ${thread.id} does not say whether its party size is a minimum`)
+    // "4+" as asked. A change the guest accepted, or a move, sets the submission's flag
+    // to false, so a changed table reads it from its first change's own record of it;
+    // only one never changed still has it as submitted.
+    const changed = await queryFirst(db, "SELECT 1 FROM activity_entries WHERE request_id = ? AND event_name IN ('booking_change.accepted', 'booking_change.moved')", [thread.id])
+    const partySizeIsMinimum = changed ? before.partySizeIsMinimum : payload.party_size_is_minimum
+    if (typeof partySizeIsMinimum !== 'boolean') throw new Error(`Reservation conversation ${thread.id} does not record whether the party size it was booked with is a minimum`)
     return { note, facts: { kind: 'reservation', ...common, partySizeIsMinimum, placeTitle: place.title } }
   }
   const product = asked.productId ? await queryFirst<{ name: string }>(db, 'SELECT name FROM products WHERE id = ? AND organization_id = ?', [asked.productId, thread.organization_id]) : null
