@@ -34,6 +34,31 @@
     <!-- Airbnb's "Create a new listing": the first thing the plan lacks, offered once, to someone who can take it. -->
     <OfferCard v-if="offer" :offer="offer" />
 
+    <!-- PWA install banner: shown only on browsers offering an install prompt -->
+    <div
+      v-if="canInstall"
+      class="flex items-center justify-between gap-4 rounded-2xl bg-elevated p-5 sm:p-6"
+      data-testid="pwa-install-banner"
+    >
+      <div class="flex min-w-0 items-center gap-4">
+        <span class="flex size-12 shrink-0 items-center justify-center rounded-xl bg-accented" aria-hidden="true">
+          <UIcon name="i-lucide-smartphone" class="size-6 text-highlighted" />
+        </span>
+        <div class="min-w-0">
+          <p class="text-base font-semibold text-highlighted">Install KrabiClaw app</p>
+          <p class="mt-0.5 text-sm text-muted">Add to home screen for full-screen access</p>
+        </div>
+      </div>
+      <UButton
+        size="md"
+        color="neutral"
+        variant="solid"
+        label="Install"
+        data-testid="pwa-install-button"
+        @click="promptInstall"
+      />
+    </div>
+
     <EditorNavigationList :groups="groups" :active-item="activeItem" @act="onAct" />
   </div>
 </template>
@@ -52,6 +77,7 @@ import { isAccountActivityResponse, type AccountActivityResponse } from '~/share
 // Rendered by both the desktop slideover and the mobile menu page, off one
 // model, so the two surfaces cannot show different menus.
 const { scopeModel, logOut, personal, organization } = useDashboardMenu()
+const { canInstall, promptInstall } = usePwaInstall()
 const dashboard = useDashboardOrganization()
 // Only the routed organization's plan is loaded here; the active one reached from Account settings is not offered anything.
 const offer = computed(() => dashboard.organization.value && dashboard.canUpdateBilling.value ? planOffers(dashboard.entitlements.value)[0] ?? null : null)
