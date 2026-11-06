@@ -114,11 +114,10 @@ export async function activateOnboardingDraft(env: CloudflareEnv, db: D1Database
   origin: { headers: Headers } | null
   activateSession?: (_organizationId: string) => Promise<void>
 }) {
-  let draft = await queryFirst<SavedOnboardingDraft | null>(db,
+  const draft = await queryFirst<SavedOnboardingDraft | null>(db,
     'SELECT * FROM onboarding_drafts WHERE id = ? AND user_id = ? LIMIT 1', [input.draftId, input.userId])
   if (!draft) throw new HTTPError({ statusCode: 404, statusMessage: 'Draft not found' })
-  if (draft.status === 'committing') draft = await readActiveOnboardingDraft(db, input.userId)
-  if (!draft || draft.id !== input.draftId || !['active', 'committed'].includes(draft.status)) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft is no longer available', data: { code: 'ONBOARDING_DRAFT_UNAVAILABLE', draft_id: input.draftId } })
+  if (!['active', 'committed'].includes(draft.status)) throw new HTTPError({ statusCode: 409, statusMessage: 'Website draft is no longer available', data: { code: 'ONBOARDING_DRAFT_UNAVAILABLE', draft_id: input.draftId } })
   const payload = parseOnboardingDraftPayload(draft.payload_json)
   const { currency, timezone, sourceLocale } = payload.source.details
   const missingFields = onboardingPublicationMissingFields(draft, payload)

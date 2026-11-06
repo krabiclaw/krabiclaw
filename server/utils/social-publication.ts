@@ -200,7 +200,7 @@ async function currentAccessProblem(env: CloudflareEnv, connection: ConnectionRe
       }
       return null
     }
-    // The token as stored: a read never renews or writes it.
+    // Better Auth refreshes the linked account's access token when needed.
     const account = await getInstagramAccount((await linkedAccountAccessToken(env, connection.accountId!)).accessToken)
     if (account.id !== connection.targetId) {
       return { code: 'account_mismatch', message: `The linked Instagram login now belongs to @${account.username}, not ${connection.targetName}. Connect Instagram again.` }
