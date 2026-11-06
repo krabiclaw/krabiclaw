@@ -480,6 +480,15 @@ test('continuous recommendations follow explicit strategy, feedback and actual p
       await page.screenshot({ path: testInfo.outputPath(`single-column-${viewport.width}.png`), fullPage: true, animations: 'disabled' })
     }
     await page.setViewportSize({ width: 1440, height: 1000 })
+    const [cardTelemetry] = await Promise.all([
+      page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/telemetry' && response.request().postDataJSON()?.action === 'today_card_click'),
+      card.click(),
+    ])
+    expect(cardTelemetry.status(), await cardTelemetry.text()).toBe(200)
+    expect(new URL(cardTelemetry.url()).searchParams.get('org')).toBe('ember-slice-demo')
+    await expect(page).toHaveURL(`${ORG}/website/blog/${postId}`)
+    expect((await page.goto(ORG))?.status()).toBe(200)
+    await waitForNuxtHydration(page)
     const priorities = page.getByTestId('today-priorities')
     await expect(priorities).toBeVisible()
     await priorities.getByText('Business goals', { exact: true }).click()
