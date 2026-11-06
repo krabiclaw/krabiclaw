@@ -29,7 +29,6 @@ const WIDE = { width: 1440, height: 900 }
 const NARROW = { width: 900, height: 900 }
 const PHONE = { width: 390, height: 844 }
 // A short phone, so the demo owner's real Today cards overflow and the scroll end is measurable.
-const SHORT_PHONE = { width: 390, height: 600 }
 
 /** The panes on screen, left to right, by the id each DashboardIndexPanel/LeafPanel is given. */
 async function visiblePanes(page: Page): Promise<string[]> {
