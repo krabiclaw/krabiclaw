@@ -448,7 +448,7 @@ export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskLis
   const statusSql = query.status ? 't.status = ?' : `(t.status = 'open' OR (? = 'today' AND t.status IN ('done', 'skipped') AND t.closed_at >= ?))`
   const statusParams = query.status ? [query.status] : [query.range, closedSince]
   const rows = await queryAll<TaskRow>(db, `SELECT t.* FROM tasks t WHERE t.organization_id = ? AND ${scope.sql} AND ${statusSql}${filters.map(sql => ` AND ${sql}`).join('')}
-    ORDER BY COALESCE(t.starts_at, t.due_at, t.created_at), t.id LIMIT 500`, [organizationId, ...scope.params, ...statusParams, ...params])
+    ORDER BY COALESCE(t.starts_at, t.due_at, t.created_at), t.id`, [organizationId, ...scope.params, ...statusParams, ...params])
   const today = (row: TaskRow) => localDateAt(now, row.timezone)
   const dayOf = (instant: string | null, row: TaskRow) => instant === null ? null : localDateAt(new Date(instant), row.timezone)
   const isToday = (row: TaskRow) => {

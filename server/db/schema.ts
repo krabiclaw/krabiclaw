@@ -111,8 +111,6 @@ export const requests = sqliteTable("requests", {
  location_id: text().references((): AnySQLiteColumn => business_locations.id, { onDelete: "set null" }),
  user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
  review_id: text().references((): AnySQLiteColumn => reviews.id, { onDelete: "set null" }),
- conversation_state: text({ enum: ["needs_attention", "waiting_on_guest", "resolved"] }),
- resolved_at: text(),
  // The tenant's explicit archive action, and who took it. Past/Current is
  // derived from the linked reservation or session's ends_at at runtime and is
  // never stored. Archiving is not conversation activity: it does not move
@@ -127,7 +125,7 @@ export const requests = sqliteTable("requests", {
  created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
  updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, table => [
-	check("requests_instants_check", sql`(resolved_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', resolved_at, '+0 days') IS resolved_at) AND (archived_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', archived_at, '+0 days') IS archived_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
+	check("requests_instants_check", sql`(archived_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', archived_at, '+0 days') IS archived_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
  foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: "requests_location_scope_fk" }),
  check("requests_payload_check", sql`json_valid(payload_json) AND json_type(payload_json) = 'object'`),
 	check("requests_guest_payload_check", sql`(
@@ -145,10 +143,8 @@ export const requests = sqliteTable("requests", {
   )`),
  check("requests_message_payload_check", sql`kind <> 'contact' OR json_type(payload_json, '$.message') IS 'text'`),
  check("requests_scope_check", sql`organization_id IS NOT NULL`),
- check("requests_state_check", sql`conversation_state IS NOT NULL`),
  uniqueIndex("requests_review_owner_unique").on(table.organization_id, table.id, table.kind),
  uniqueIndex("requests_scope_id_unique").on(table.organization_id, table.id),
- index("requests_org_activity_idx").on(table.conversation_state, table.updated_at),
  index("requests_org_kind_idx").on(table.kind, table.location_id, table.updated_at),
  index("requests_org_user_idx").on(table.organization_id, table.user_id),
  index("requests_org_archive_activity_idx").on(table.organization_id, table.archived_at, table.updated_at),

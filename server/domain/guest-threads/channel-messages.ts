@@ -12,7 +12,7 @@ import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import { getMediaAsset, readMediaPlacements } from '~/server/utils/media-asset-manager'
 import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
 import { downloadImageBuffer } from '~/server/utils/cloudflare-images'
-import { getGuestRequest, requestSummary, RETIRED_CONVERSATION_STATE, stayThreadQueries } from '~/server/domain/requests'
+import { getGuestRequest, requestSummary, stayThreadQueries } from '~/server/domain/requests'
 import { isAirbnbSupportMessage, notifyGuestThreadReply, notifyAirbnbInquiry } from '~/server/utils/notifications'
 import { readAirbnbInquiry } from '~/server/integrations/channex/live-feed'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -79,8 +79,8 @@ async function adoptThread(db: DbClient, env: ChannelEnv, home: HomeMapping, thr
       WHERE provider = 'channex' AND external_thread_id = ? AND request_id = ? AND organization_id = ? AND product_id = ?`,
     params: [thread.id, thread.bookingId, thread.updatedAt, now, retired.external_thread_id, requestId, home.organization_id, home.product_id],
   }] : []), {
-    query: `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, conversation_state, payload_json, created_at, updated_at)
-      SELECT ?, 'stay', ?, ?, NULL, NULL, '${RETIRED_CONVERSATION_STATE}', ?, ?, ?
+    query: `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, payload_json, created_at, updated_at)
+      SELECT ?, 'stay', ?, ?, NULL, NULL, ?, ?, ?
       WHERE NOT EXISTS (SELECT 1 FROM requests WHERE id = ?)
         AND NOT EXISTS (SELECT 1 FROM channel_threads WHERE provider = 'channex' AND external_thread_id = ?)`,
     params: [requestId, home.organization_id, home.location_id, JSON.stringify({ participant: { kind: 'channel', title: thread.title }, guest: { name: null, email: null, phone: null } }), now, now, requestId, thread.id],

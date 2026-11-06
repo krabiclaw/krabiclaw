@@ -22,9 +22,9 @@ const dryRun = values['dry-run']
 
 async function backfill(db: DbClient) {
   const now = new Date()
-  // Before the migration that creates tasks has run, a dry run counts everything as still to open; a real run refuses.
+  // On the v23 source before cutover a dry run counts everything as still to open; a real run needs the v24 database.
   const migrated = (await queryAll(db, "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'tasks'")).length === 1
-  if (!migrated && !dryRun) throw new Error('This database has no tasks table yet: apply migrations/0010_tasks_and_opportunities.sql first.')
+  if (!migrated && !dryRun) throw new Error('This database has no tasks table: run against the v24 replacement.')
   const absent = (sql: string) => migrated ? `AND NOT EXISTS (${sql})` : ''
   const stays = (await queryAll<StayWindow & { organization_id: string; timezone: string }>(db, `
     SELECT s.id, s.organization_id, s.product_id, s.status, s.check_in_date, s.check_out_date, l.timezone
@@ -33,20 +33,17 @@ async function backfill(db: DbClient) {
      WHERE s.status = 'confirmed' AND s.check_out_date >= date('now', '-1 day')
        ${absent("SELECT 1 FROM tasks t WHERE t.dedupe_key = 'turnover:' || s.id")}
      ORDER BY s.check_out_date, s.id`)).filter(stay => stay.check_out_date >= localDateAt(now, stay.timezone))
-  const conversations = await queryAll<{ id: string; was_needs_attention: number }>(db, `
-    SELECT DISTINCT r.id, r.conversation_state = 'needs_attention' AS was_needs_attention
+  const conversations = await queryAll<{ id: string }>(db, `
+    SELECT DISTINCT r.id
       FROM requests r JOIN activity_entries guest_entry ON guest_entry.request_id = r.id
      WHERE r.archived_at IS NULL AND r.blocked_at IS NULL AND ${GUEST_QUESTION_SQL}
        AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}
        ${absent("SELECT 1 FROM tasks t WHERE t.kind = 'guest_reply' AND t.subject_type = 'request' AND t.subject_id = r.id AND t.status = 'open'")}`)
-  const needsAttention = await queryAll<{ count: number }>(db, "SELECT COUNT(*) AS count FROM requests WHERE conversation_state = 'needs_attention' AND archived_at IS NULL AND blocked_at IS NULL")
   const messages = await queryAll<{ id: string }>(db, `SELECT id FROM scheduled_guest_messages m WHERE m.status IN ('failed', 'needs_review')
     ${absent("SELECT 1 FROM tasks t WHERE t.dedupe_key = 'message_delivery:' || m.id")}`)
   const report = {
     tasksTableExists: migrated,
     turnovers: stays.length, guestReplies: conversations.length, messageDeliveries: messages.length,
-    // For comparison with the retired stored guess: conversations it marked needs_attention, and how many of those have an unanswered question.
-    retiredNeedsAttention: needsAttention[0]?.count ?? 0, guestRepliesAlsoNeedsAttention: conversations.filter(row => row.was_needs_attention).length,
   }
   if (dryRun) return report
   const at = now.toISOString()

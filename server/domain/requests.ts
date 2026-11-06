@@ -49,14 +49,6 @@ const threadPayload = z.object({
   cancellation: z.object({ token_hash: z.string().nullable(), expires_at: z.string().nullable(), used_at: z.string().nullable() }),
 })
 
-/**
- * requests.conversation_state and resolved_at are retired: an open guest_reply
- * task (server/domain/tasks.ts) says whether the business owes a reply.
- * requests_state_check still requires a value until the next database epoch
- * drops the column with its CHECK; nothing reads it.
- */
-export const RETIRED_CONVERSATION_STATE = 'waiting_on_guest'
-
 const threadScope = z.object({
   id: z.string(), organization_id: z.string(),  location_id: z.string().nullable(),
   user_id: z.string().nullable(), review_id: z.string().nullable(),
@@ -254,10 +246,10 @@ export function requestInsertQueries(request: Omit<GuestRequest, 'archived_at' |
     JSON.stringify(request.payload), request.created_at, request.updated_at]
   return [{
     query: claimedBy
-      ? `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, conversation_state, payload_json, created_at, updated_at)
-      SELECT ?, ?, ?, ?, ?, ?, '${RETIRED_CONVERSATION_STATE}', ?, ?, ? WHERE EXISTS (${claimedBy.query})`
-      : `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, conversation_state, payload_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, '${RETIRED_CONVERSATION_STATE}', ?, ?, ?)`,
+      ? `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, payload_json, created_at, updated_at)
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (${claimedBy.query})`
+      : `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, payload_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     params: claimedBy ? [...values, ...(claimedBy.params ?? [])] : values,
   }, {
     query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, payload_json, dedupe_key, sequence, occurred_at, created_at)
@@ -306,8 +298,8 @@ export function stayThreadQueries(input: { organizationId: string; stayId: strin
     params: [input.stayId, input.organizationId],
   }, {
     // The conversation belongs to the stay's guest account when the guest booked it.
-    query: `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, conversation_state, payload_json, created_at, updated_at)
-      SELECT ?, 'stay', st.organization_id, c.location_id, st.user_id, NULL, '${RETIRED_CONVERSATION_STATE}',
+    query: `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, payload_json, created_at, updated_at)
+      SELECT ?, 'stay', st.organization_id, c.location_id, st.user_id, NULL,
         json_object('guest', json_object('name', ${name}, 'email', ${email}, 'phone', ${phone})), ?, ?
       FROM ${stay} AND st.request_id IS NULL AND st.owner = 'app' AND st.channel = 'direct' AND (${email} IS NOT NULL OR ${phone} IS NOT NULL) AND ${name} <> ''`,
     params: [id, input.now, input.now, input.stayId, input.organizationId],
