@@ -1,3 +1,5 @@
+import type { ProductFeature } from '~/config/cms-registry'
+
 /**
  * What each connection is, in the words the dashboard shows: the one canonical
  * description the Connections index and every leaf read.
@@ -29,6 +31,8 @@ export interface IntegrationDefinition {
   purpose: string
   /** The plan capability it needs; absent when every plan has it. */
   entitlement?: string
+  /** The module the organization must have for it to exist; absent when every organization has it. */
+  feature?: ProductFeature
   /**
    * The provider's items that map to ours, which the host chooses on the leaf
    * and can change any time: one Discord channel, many Airbnb listings.
@@ -42,7 +46,7 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     purpose: 'Busy on your calendar? Booked out on your website. New bookings show up on your calendar.',
   },
   {
-    key: 'airbnb', name: 'Airbnb sync', logo: 'i-simple-icons-airbnb', group: 'sync', entitlement: 'channel_sync', items: { noun: 'listing', selection: 'many' },
+    key: 'airbnb', name: 'Airbnb sync', logo: 'i-simple-icons-airbnb', group: 'sync', entitlement: 'channel_sync', feature: 'stays', items: { noun: 'listing', selection: 'many' },
     purpose: 'Reservations, nightly rates and open dates stay in step with Airbnb, so no night is sold twice.',
   },
   {

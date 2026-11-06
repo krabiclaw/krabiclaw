@@ -16,6 +16,7 @@ export type ProductFeature =
   | 'products' | 'reservations'
   | 'services' | 'consultations' | 'appointments'
   | 'blog' | 'qa' | 'reviews' | 'posts' | 'photos'
+  | 'stays'
 
 export interface CmsPageCapability {
   id: string
@@ -43,6 +44,8 @@ export interface CmsCapabilityDefinition {
   locationVocabulary: 'location' | 'office/service area'
   pages: readonly CmsPageCapability[]
   managers: readonly CmsManagerCapability[]
+  /** Every module this organization has; the dashboard decides which screens exist from it. */
+  features: readonly ProductFeature[]
 }
 
 interface CmsTemplateCatalog {
@@ -177,15 +180,23 @@ function effectiveLabel(vertical: OrganizationVertical, feature: ProductFeature,
   return verticalLabelOverrides[vertical]?.[feature] ?? fallback
 }
 
+/**
+ * `organization` is the organization's own state beside its vertical, or null
+ * where no organization exists yet (onboarding) or the caller reads only pages
+ * and managers. `stays`, the place-to-stay module, belongs to a vacation rental
+ * and to any business that has a stay product.
+ */
 export function resolveCmsCapabilities(
   vertical: OrganizationVertical,
   template: PublicTemplateSlug,
+  organization: { hasStayProduct: boolean } | null,
 ): CmsCapabilityDefinition {
   if (!supportedCombinations[vertical]?.includes(template)) {
     throw new Error(`Unsupported CMS capability combination: ${vertical}/${template}`)
   }
   const catalog = catalogFor(vertical, template)
   const features = new Set<ProductFeature>([...verticalDefaultFeatures[vertical], ...ALWAYS_ON_FEATURES])
+  if (vertical === 'lodging' || organization?.hasStayProduct) features.add('stays')
 
   const productPresentation = resolveProductPresentation(vertical)
   const pages = catalog.pages
@@ -206,50 +217,7 @@ export function resolveCmsCapabilities(
     locationVocabulary: catalog.locationVocabularyDefault,
     pages,
     managers,
-  }
-}
-
-/** Every (vertical, template) combination this product actually supports. */
-export const cmsCapabilityRegistry: readonly CmsCapabilityDefinition[] = Object.entries(supportedCombinations)
-  .flatMap(([vertical, templates]) => templates.map(template => resolveCmsCapabilities(vertical as OrganizationVertical, template)))
-
-/** Validates one resolved definition's internal consistency — split out from
- *  validateCmsCapabilityRegistry so malformed fixtures can be exercised directly in tests instead
- *  of only ever validating the (always-valid-by-construction) real registry. */
-export function validateCmsCapabilityDefinition(definition: CmsCapabilityDefinition): void {
-  const combination = `${definition.vertical}/${definition.template}`
-
-  const pageIds = new Set<string>()
-  const pageRoutesByScope = { organization: new Set<string>(), location: new Set<string>() }
-  for (const page of definition.pages) {
-    if (pageIds.has(page.id)) throw new Error(`Duplicate CMS page id in ${combination}: ${page.id}`)
-    if (pageRoutesByScope[page.scope].has(page.route)) throw new Error(`Duplicate CMS page route in ${combination}/${page.scope}: ${page.route}`)
-    if (page.scope === 'location' && !page.route.includes(':location')) {
-      throw new Error(`Location-scoped CMS page must declare :location: ${combination}/${page.id}`)
-    }
-    pageIds.add(page.id)
-    pageRoutesByScope[page.scope].add(page.route)
-  }
-
-  const managerKeys = new Set<string>()
-  const managerRoutesByScope = { organization: new Set<string>(), location: new Set<string>() }
-  for (const manager of definition.managers) {
-    if (managerKeys.has(manager.key)) throw new Error(`Duplicate CMS manager key in ${combination}: ${manager.key}`)
-    if (manager.key !== `${manager.scope}.${manager.id}`) throw new Error(`CMS manager key must be \`\${scope}.\${id}\`: ${combination}/${manager.key}`)
-    if (managerRoutesByScope[manager.scope].has(manager.route)) throw new Error(`Duplicate CMS manager route in ${combination}/${manager.scope}: ${manager.route}`)
-    if (manager.scope === 'location' && !manager.route.includes(':location')) {
-      throw new Error(`Location-scoped CMS manager must declare :location: ${combination}/${manager.key}`)
-    }
-    managerKeys.add(manager.key)
-    managerRoutesByScope[manager.scope].add(manager.route)
-  }
-}
-
-export function validateCmsCapabilityRegistry(): void {
-  for (const [vertical, templates] of Object.entries(supportedCombinations) as [OrganizationVertical, readonly PublicTemplateSlug[]][]) {
-    for (const template of templates) {
-      validateCmsCapabilityDefinition(resolveCmsCapabilities(vertical, template))
-    }
+    features: [...features],
   }
 }
 

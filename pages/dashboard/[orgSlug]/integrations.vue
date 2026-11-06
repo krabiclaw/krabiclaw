@@ -125,6 +125,7 @@ const plan = ref<'all' | typeof PLANS[number]>('all')
 const planTabs = [{ label: 'All', value: 'all' }, ...PLANS.map(value => ({ label: planName(value), value }))]
 
 const items = computed<EditorNavigationItem[]>(() => INTEGRATIONS
+  .filter(definition => !definition.feature || dashboard.hasFeature(definition.feature))
   .filter(definition => plan.value === 'all' || includedFrom(definition.entitlement) === plan.value)
   .map((definition) => {
     const lacking = definition.entitlement && dashboard.entitlements.value[definition.entitlement] !== true
@@ -139,7 +140,7 @@ const items = computed<EditorNavigationItem[]>(() => INTEGRATIONS
 const migrationItem = computed<EditorNavigationItem[]>(() => {
   const organization = dashboard.organization.value
   const role = organization?.role
-  if (organization?.vertical !== 'lodging' || !role || !(role in organizationRoles) || !organizationRoles[role as keyof typeof organizationRoles].authorize({ operations: ['update'] }).success) return []
+  if (!dashboard.hasFeature('stays') || !role || !(role in organizationRoles) || !organizationRoles[role as keyof typeof organizationRoles].authorize({ operations: ['update'] }).success) return []
   return [{ id: 'hostaway-migration', label: 'Migrate from Hostaway', summary: 'Move existing stays and check blocked dates', lead: { icon: 'i-lucide-arrow-right-left' }, to: `${base.value}/hostaway-migration` }]
 })
 

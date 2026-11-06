@@ -58,6 +58,15 @@ const adminStatements = {
   team_messages: ['read', 'send'],
 } as const
 
+const ORGANIZATION_ROLE_LABELS: Record<string, string> = { owner: 'Owner', admin: 'Admin', member: 'Member' }
+
+/** A member's role as the dashboard names it. */
+export function organizationRoleLabel(role: string): string {
+  const label = ORGANIZATION_ROLE_LABELS[role]
+  if (!label) throw new Error(`Unknown organization role: ${role}`)
+  return label
+}
+
 export const organizationRoles = {
   member: organizationAccessControl.newRole({
     scheduling: ['own'],
