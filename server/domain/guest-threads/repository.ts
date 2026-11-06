@@ -17,6 +17,7 @@ import { calendarDate, clockTime, firstName, initial, listTime, localDateKey, pr
 import { formatCalendarRange } from '~/utils/timezone'
 import { formatOperationalStatusLabel, formatThreadWhenLabel } from './status-labels'
 import { pastByRuleSql, pastSql, type GuestThreadMailbox } from './mailbox'
+import { OPENING_EVENT } from './opening'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 import { HTTPError } from 'nitro'
 
@@ -279,7 +280,7 @@ function threadProductId(row: GuestThreadListRow): string | null {
 /** The inbox filters by what a person sees — kind, unread, search — not by the attention state Today and MCP read. */
 type InboxListOptions = Omit<ListGuestThreadsOptions, 'conversationState'> & { conversationState?: never }
 
-const BUYER_VISIBLE_MESSAGE_SQL = "((e.actor_kind='guest' AND e.channel IN ('web','email','whatsapp')) OR (e.actor_kind='member' AND e.event_name='thread.member_reply') OR (e.actor_kind='system' AND e.event_name IN ('thread.scheduled_message', 'thread.opening')))"
+const BUYER_VISIBLE_MESSAGE_SQL = `((e.actor_kind='guest' AND e.channel IN ('web','email','whatsapp')) OR (e.actor_kind='member' AND e.event_name='thread.member_reply') OR (e.actor_kind='system' AND e.event_name IN ('thread.scheduled_message', '${OPENING_EVENT}')))`
 
 /** An Airbnb Support case, said to the database as `isSupportThread` says it: Airbnb's agents wrote and no guest did. */
 const SUPPORT_THREAD_SQL = `(EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND e.actor_kind = 'system' AND e.event_name = 'channel.message_mirrored')
@@ -441,7 +442,8 @@ async function latestMessages(db: DbClient, ids: string[]): Promise<Map<string, 
 
 /** "You", or the sender's first name, before the preview. */
 function previewFrom(message: LatestMessage, context: { guestName: string; viewerId: string; buyer: boolean; business: string }): string {
-  if (message.actorKind === 'guest') return context.buyer ? 'You' : context.guestName
+  // The booking's own opening message is the guest's, as the thread draws it.
+  if (message.actorKind === 'guest' || message.eventName === OPENING_EVENT) return context.buyer ? 'You' : context.guestName
   if (message.actorKind === 'system' && message.eventName === 'channel.message_mirrored') return 'Airbnb Support'
   if (context.buyer) return context.business
   if (message.actorKind === 'member' && message.actorUserId && message.actorUserId !== context.viewerId) {

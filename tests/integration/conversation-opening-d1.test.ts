@@ -6,6 +6,7 @@ import * as schema from '../../server/db/schema.ts'
 import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
 import { backfillOpeningMessages, openingSentence } from '../../server/domain/guest-threads/opening.ts'
 import { getInboxThread } from '../../server/domain/guest-threads/inbox.ts'
+import { listGuestThreads } from '../../server/domain/guest-threads/repository.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
@@ -61,6 +62,10 @@ test('a reservation opens with its own message and the guest note, written once,
     const stream = (await getInboxThread(db, 'old', ORG, viewer, new Date('2026-11-05T00:00:00.000Z')))!.stream
     assert.deepEqual(stream.filter(item => item.type !== 'day').map(item => item.type === 'message' ? item.body : item.type === 'event' ? item.text : item.type), [sentence, 'Review invitation sent'])
     assert.deepEqual(await backfillOpeningMessages(db, ORG), { written: 0, skipped: 0 })
+    // In the list (past: it ended and nothing is unread) the opening is the guest's message, under the guest's name.
+    const rows = await listGuestThreads(db, ORG, { userId: OWNER, mailbox: 'past' }, new Date('2026-11-05T00:00:00.000Z'))
+    const listed = rows.find(row => row.id === 'old')
+    assert.deepEqual(listed && [listed.previewFrom, listed.preview], ['Filip', sentence])
     assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE request_id = 'old' AND event_name = 'thread.opening'").first('count(*)'), 1)
   } finally {
     await runtime.dispose()
