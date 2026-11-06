@@ -63,7 +63,7 @@ export async function createBusinessGoal(db: DbClient, principal: MemberAccessPr
   const constraints = parsed.data.constraints ?? null, targetAt = parsed.data.targetAt ?? null
   const strategy = parsed.data.strategy ?? null
   const key = creationDedupeKey('organization_goal', principal.organizationId, idempotencyKey)
-  const requestHash = await creationRequestHash({ actorId: principal.userId, intent, constraints, targetAt, strategy })
+  const requestHash = await creationRequestHash({ actorId: principal.userId, intent, constraints, targetAt, strategy: strategy ?? undefined })
   const replay = async () => {
     const record = await readCreationRecord(db, key)
     if (!record) return null

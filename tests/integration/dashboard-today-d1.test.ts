@@ -125,6 +125,14 @@ test('Today continuously selects useful growth and customer work, preserves feed
     assert.deepEqual(cold.priorities, [])
     assert.equal(cold.cards.find(card => card.decision?.operation === 'article.create')?.presentation.type, 'opportunity')
     assert.ok(cold.cards.some(card => card.decision?.operation === 'article.create' && card.decision.subjectId === ORG), 'a business can start useful marketing without a saved goal or prior content')
+    const originalGoalRequest = { idempotencyKey: 'original-goal-contract', intent: 'Grow direct bookings' }
+    const originalGoal = await call<{ goal: { id: string; revision: string } }>('POST', `/api/organizations/${ORG}/goals`, originalGoalRequest, 201)
+    // Captured from staging's pre-strategy creation contract: retrying an unchanged
+    // request after this release must still identify the same saved goal.
+    assert.equal(await db.prepare("SELECT payload_json->>'$.metadata.request_hash' FROM activity_entries WHERE dedupe_key=?").bind(`create:organization_goal:${ORG}:original-goal-contract`).first("payload_json->>'$.metadata.request_hash'"), '1491f892b42f1821ad518549e11b49c30f541fc1cc6a53bb0376b1ec33922df0')
+    const originalReplay = await call<{ goal: { id: string } }>('POST', `/api/organizations/${ORG}/goals`, { ...originalGoalRequest, strategy: null }, 201)
+    assert.equal(originalReplay.goal.id, originalGoal.goal.id)
+    await call('PATCH', `/api/organizations/${ORG}/goals/${originalGoal.goal.id}`, { revision: originalGoal.goal.revision, status: 'archived' })
     const { goal: paymentFocus } = await call<{ goal: { id: string; revision: string } }>('POST', `/api/organizations/${ORG}/goals`, {
       idempotencyKey: 'payment-focus', intent: 'Accept payment for direct bookings', strategy: { channels: [], payments: true },
     }, 201)
