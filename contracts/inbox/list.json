@@ -18,6 +18,19 @@
       "time": "12:00 PM",
       "unread": true,
       "when": "In 3 days"
+    },
+    {
+      "avatarInitial": "A",
+      "channel": "direct",
+      "guestName": "Ana Ruiz",
+      "home": "74 D · Sky",
+      "id": "00000000-0000-4000-8000-000000000047",
+      "kind": "guest",
+      "preview": "We arrive late, around 9 PM.",
+      "previewFrom": "Ana",
+      "time": "12:00 PM",
+      "unread": false,
+      "when": "Nov 20 – 23"
     }
   ],
   "unread": {
