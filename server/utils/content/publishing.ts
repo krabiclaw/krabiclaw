@@ -410,11 +410,17 @@ export async function listPublishedArticles(db: DbClient, env: CloudflareEnv, or
 
 /**
  * The languages a collection's index is read in: every language the site
- * publishes, at its locale prefix. The index lists that language's articles,
- * and its categories' pages follow the same prefix.
+ * publishes, at its locale prefix. A blog is available only in languages
+ * with published articles, matching its navigation and route guard.
  */
 export async function listArticleCollectionRepresentations(env: CloudflareEnv, db: DbClient, organizationId: string, collection: ArticleCollection) {
-  return listPublicLocaleRepresentations(env, db, { organizationId, sourcePath: ARTICLE_COLLECTIONS[collection].pathPrefix, publishedLocaleRoute: true })
+  const representations = await listPublicLocaleRepresentations(env, db, { organizationId, sourcePath: ARTICLE_COLLECTIONS[collection].pathPrefix, publishedLocaleRoute: true })
+  if (collection !== 'blog') return representations
+  // The blog route, navigation and language switcher share the same availability rule.
+  const { PUBLIC_CONTENT_SECTION_QUERIES } = await import('~/server/utils/public-shell-query')
+  const availability = await Promise.all(representations.map(async representation =>
+    Boolean(await queryFirst(db, PUBLIC_CONTENT_SECTION_QUERIES.blog, [representation.locale, organizationId]))))
+  return representations.filter((_, index) => availability[index])
 }
 
 /**
