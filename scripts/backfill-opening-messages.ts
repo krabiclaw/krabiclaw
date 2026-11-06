@@ -1,10 +1,10 @@
-// One-time data repair (inbox-parity.md, Revision 2026-11-06): writes the
-// opening messages into reservation, booking and site-stay conversations
-// created before creation wrote them. Idempotent: a conversation that already
-// has its opening is skipped.
+// Writes the opening messages (inbox-parity.md, Revision 2026-11-06) into
+// reservation, booking and site-stay conversations created before creation
+// wrote them. Every staging and production deploy runs it after migrations and
+// before the Worker deploy (ci.yml); a database that has them all writes none.
 //
-//   node --experimental-strip-types --import ./tests/unit/support/register-aliases.mjs scripts/backfill-opening-messages.ts --staging
-//   … --production
+//   yarn db:openings --staging
+//   yarn db:openings --production [--organization <id>]
 import { parseArgs } from 'node:util'
 import { Miniflare } from 'miniflare'
 import { startRemoteProxySession, unstable_readConfig } from 'wrangler'

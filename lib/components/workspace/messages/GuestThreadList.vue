@@ -137,7 +137,7 @@ const emptyTitle = computed(() => search.value || kind.value || unreadOnly.value
 const emptyDescription = computed(() => {
   if (search.value) return `Nothing matched “${search.value}”.`
   if (blockedOnly.value) return 'Guests you block appear here until you unblock them.'
-  if (pastOnly.value) return 'Conversations move here when their stay or booking ends, or when you archive them.'
+  if (pastOnly.value) return 'Conversations move here when you archive them, when their stay or booking has ended and you have read them, or after 30 days without a message.'
   return props.personalScope ? 'Your conversations with businesses will appear here.' : 'When a guest writes, the conversation appears here.'
 })
 
@@ -264,8 +264,10 @@ useIntervalFn(()=>{if(props.personalScope&&documentVisibility.value==='visible')
 
 // The newest thread, for the index above to open into its second column on
 // arrival. The list only says which; whether there is a column is the shell's.
-watch([threads, openThreadId], ([rows, open]) => {
-  if (open) return
+// Not while another mailbox's rows are still on screen: they would open a
+// conversation that is not in the list being loaded.
+watch([threads, openThreadId, pending], ([rows, open, loading]) => {
+  if (open || loading) return
   const first = rows[0]
   emit('first', first ? { path: threadRoute(first), query: route.query } : null)
 }, { immediate: true })

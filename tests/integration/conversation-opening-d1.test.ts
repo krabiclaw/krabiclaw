@@ -4,7 +4,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
-import { backfillOpeningMessages, openingSentence } from '../../server/domain/guest-threads/opening.ts'
+import { backfillOpeningMessages, openingMessageQueries, openingSentence } from '../../server/domain/guest-threads/opening.ts'
 import { getInboxThread } from '../../server/domain/guest-threads/inbox.ts'
 import { listGuestThreads } from '../../server/domain/guest-threads/repository.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
@@ -81,6 +81,35 @@ test('a reservation opens with its own message and the guest note, written once,
     // time still orders the conversation ahead of the one whose newest message is its opening.
     const rows = await listGuestThreads(db, ORG, { userId: OWNER, mailbox: 'past' }, new Date('2026-11-05T00:00:00.000Z'))
     assert.deepEqual(rows.map(row => [row.id, row.previewFrom, row.preview]), [['old', 'Filip', 'Running ten minutes late'], ['new', 'Filip', 'Window seat if possible']])
+
+    // The backfill says what the guest asked for when they asked. A table moved since opens with the
+    // time and party before its first change, not the record's current ones.
+    await reservation('moved', null)
+    await db.prepare(`INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
+      VALUES ('move', 'moved', 'operation', 'request', 'member', 'booking_change.moved', ?, 'move-moved', 2, '2026-11-03T10:00:00.000Z', '2026-11-03T10:00:00.000Z')`)
+      .bind(JSON.stringify({ before: { recordKind: 'reservation', partySize: 2, startsAt: '2026-11-04T05:00:00.000Z', endsAt: '2026-11-04T07:00:00.000Z', timezone: 'Asia/Bangkok', locationId: 'loc', notes: null, guest: { name: 'Filip Heurckmans', phone: '+32475699444' } } })).run()
+    // A checkout never captured has no reservation; its hold says what was asked.
+    const held = threadPayloadForGuest({ name: 'Ana Ruiz', email: 'ana@example.test', phone: null, locale: 'en', notes: null, ipHash: null, partySizeIsMinimum: false, answers: [] })
+    await db.batch([
+      ...requestInsertQueries({ id: 'held', kind: 'reservation', organization_id: ORG, location_id: 'loc', user_id: null, review_id: null, conversation_state: 'waiting_on_guest', resolved_at: null, payload: held, created_at: CREATED, updated_at: CREATED }),
+      { query: `INSERT INTO payments (id, organization_id, buyer_user_id, stripe_account_id, livemode, subject_type, subject_id, location_id, currency, amount, captured_amount, state, stripe_payment_intent_id, price_snapshot_json, created_at, updated_at)
+          VALUES ('held-pay', ?, NULL, 'acct', 0, 'reservation', NULL, 'loc', 'THB', 50000, 0, 'pending', 'pi_held', '{}', ?, ?)`, params: [ORG, CREATED, CREATED] },
+      { query: `INSERT INTO payment_checkout_holds (id, organization_id, location_id, timezone, request_id, payment_id, quantity, amount, currency, starts_at, ends_at, status, expires_at, created_at)
+          VALUES ('hold', ?, 'loc', 'Asia/Bangkok', 'held', 'held-pay', 3, 50000, 'THB', '2026-11-06T11:00:00.000Z', '2026-11-06T13:00:00.000Z', 'released', ?, ?)`, params: [ORG, CREATED, CREATED] },
+    ].map(query => db.prepare(query.query).bind(...(query.params ?? []))))
+    assert.deepEqual(await backfillOpeningMessages(db, ORG), { written: 2, skipped: 0 })
+    const opened = async (id: string) => (await db.prepare("SELECT body FROM activity_entries WHERE request_id = ? AND event_name = 'thread.opening'").bind(id).first<{ body: string }>())!.body
+    assert.deepEqual([await opened('moved'), await opened('held')], [
+      'Table for 2 on Wed, Nov 4 at 12:00 PM at Kikuzuki Krabi. Filip Heurckmans, +32 475 69 94 44.',
+      'Table for 3 on Fri, Nov 6 at 6:00 PM at Kikuzuki Krabi. Ana Ruiz.',
+    ])
+    // Replaying the writes for a conversation opened without a note, now with one (a run that read it
+    // after an edit), writes and moves nothing: the note goes only with the opening this batch wrote.
+    const movedLedger = async () => (await db.prepare("SELECT sequence, COALESCE(event_name, kind) AS what FROM activity_entries WHERE request_id = 'moved' ORDER BY sequence").all()).results
+    const before = await movedLedger()
+    await db.batch(openingMessageQueries({ target: { requestId: 'moved' }, body: 'Replayed', note: 'Added since', guestUserId: null, at: CREATED })
+      .map(query => db.prepare(query.query).bind(...(query.params ?? []))))
+    assert.deepEqual(await movedLedger(), before)
   } finally {
     await runtime.dispose()
   }

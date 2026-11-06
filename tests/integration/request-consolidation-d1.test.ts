@@ -5,7 +5,7 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { threadPayloadForGuest, requestInsertQueries, cancelBookingRequest, getGuestRequest, getThreadOperationalRecord } from '../../server/domain/requests.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
-import { countUnreadInboxThreads, listGuestThreads, listOrganizationGuestThreads, updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
+import { countUnreadInboxThreads, listGuestThreads, listOrganizationGuestThreads, mailboxTransitionQueries, updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
 import { getInboxThreadDetails } from '../../server/domain/guest-threads/inbox.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
@@ -387,6 +387,11 @@ test('archive and unarchive file a conversation without touching its booking, st
     assert.deepEqual(refused, { ok: false, status: 409, reason: 'invalid_transition', message: 'This conversation is past because its booking has ended' })
     assert.deepEqual(await row('ended-archived'), endedBefore)
     assert.equal(await entries('ended-archived', 'thread.unarchived'), 0)
+    // The write itself refuses too, for a move whose check passed before the rule filed the thread in Past.
+    const raced = await db.batch(mailboxTransitionQueries({ transition: 'unarchive', threadId: 'ended-archived', organizationId: ORG, actorUserId: ACTOR, entryId: 'raced', dedupeKey: 'raced-unarchive', now: NOW })
+      .map(query => db.prepare(query.query).bind(...(query.params ?? []))))
+    assert.deepEqual(raced.map(result => result.meta.changes), [0, 0])
+    assert.deepEqual(await row('ended-archived'), endedBefore)
     // One the guest wrote about after it ended is Current: it can be archived and moved back like any other.
     assert.equal((await operate('ended', 'archive', 'archive-ended')).ok, true)
     assert.deepEqual([(await ids('past')).includes('ended'), await filing('ended')], [true, { archive: false, unarchive: true }])

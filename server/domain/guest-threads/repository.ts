@@ -701,21 +701,29 @@ export function mailboxTransitionQueries(input: {
   const guard = (alias: string) => `${alias}.id = ? AND ${alias}.organization_id = ?
         AND ${alias}.archived_at IS ${archive ? 'NULL' : 'NOT NULL'}`
   const guardParams = [input.threadId, input.organizationId]
+  // Moving back is also refused in the write where the rule files the thread
+  // in Past for this member by then (their last alert read in another tab):
+  // clearing the flag would report a move that did not happen.
+  const rule = pastByRuleSql(input.now, input.actorUserId)
+  const stillPast = archive ? { sql: '', params: [] } : {
+    sql: ` AND NOT EXISTS (SELECT 1 FROM requests gt${OPERATIONAL_RECORD_SQL} WHERE gt.id = ? AND ${rule.sql})`,
+    params: [input.threadId, ...rule.params],
+  }
   return [{
     query: `
       INSERT INTO activity_entries
         (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, body, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
-      SELECT ?, gt.id, 'operation', 'request', 'member', ?, NULL, NULL, ?, ?, ?,
-             COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id = gt.id), 0) + 1,
+      SELECT ?, thread.id, 'operation', 'request', 'member', ?, NULL, NULL, ?, ?, ?,
+             COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id = thread.id), 0) + 1,
              ?, ?
-      FROM requests gt
-      WHERE ${guard('gt')}
+      FROM requests thread
+      WHERE ${guard('thread')}${stillPast.sql}
       ON CONFLICT(dedupe_key) DO NOTHING
     `,
     params: [
       input.entryId, input.actorUserId, archive ? 'thread.archived' : 'thread.unarchived',
       JSON.stringify({ action: input.transition }), input.dedupeKey, input.now, input.now,
-      ...guardParams,
+      ...guardParams, ...stillPast.params,
     ],
   }, {
     query: `

@@ -83,12 +83,14 @@ export function openingMessageQueries(input: {
   const first = `(SELECT MIN(sequence) FROM activity_entries WHERE request_id = ${scope.thread})`
   // Clear of any sequence a thread has, then back down by the room the messages take.
   const ASIDE = 1_000_000_000
-  const entry = (key: string, offset: number, actor: 'system' | 'guest', userId: string | null, body: string, eventName: string): BatchQuery => ({
+  // The opening is written where its key is not; the note only where this batch
+  // just wrote the opening, so a replay that read a different note moves nothing.
+  const entry = (key: string, offset: number, actor: 'system' | 'guest', userId: string | null, body: string, eventName: string, gate: { sql: string; params: string[] }): BatchQuery => ({
     query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, body, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
       SELECT ?, id, 'message', 'request', ?, ?, 'web', ?, ?, '{}', ?, ${first} + ${offset}, ?, ?
-        FROM requests WHERE id = ${scope.thread} AND ${unwritten}
+        FROM requests WHERE id = ${scope.thread} AND ${gate.sql}
       ON CONFLICT(dedupe_key) DO NOTHING`,
-    params: [crypto.randomUUID(), actor, userId, body, eventName, key, ...scope.params, input.at, input.at, ...scope.params, key],
+    params: [crypto.randomUUID(), actor, userId, body, eventName, key, ...scope.params, input.at, input.at, ...scope.params, ...gate.params],
   })
   return [
     // OPENING_INSERT counts these two.
@@ -96,8 +98,8 @@ export function openingMessageQueries(input: {
         WHERE request_id = ${scope.thread} AND sequence > ${first} AND ${unwritten}`, params: [...scope.params, ...scope.params, openingKey] },
     { query: `UPDATE activity_entries SET sequence = sequence - ${ASIDE - room}
         WHERE request_id = ${scope.thread} AND sequence > ${ASIDE}`, params: scope.params },
-    entry(openingKey, 1, 'system', null, input.body, OPENING_EVENT),
-    ...(note ? [entry(`${scope.key}:guest-note`, 2, 'guest', input.guestUserId, note, GUEST_NOTE_EVENT)] : []),
+    entry(openingKey, 1, 'system', null, input.body, OPENING_EVENT, { sql: unwritten, params: [openingKey] }),
+    ...(note ? [entry(`${scope.key}:guest-note`, 2, 'guest', input.guestUserId, note, GUEST_NOTE_EVENT, { sql: 'changes() = 1', params: [] })] : []),
   ]
 }
 
@@ -105,55 +107,89 @@ export function openingMessageQueries(input: {
  * Writes the opening messages once into reservation, booking and site-stay
  * conversations created before they were written with the record (51 of 84
  * reservation and booking threads on production opened empty on 2026-11-06).
- * The facts come from the record and the guest's submission, the same
- * `openingSentence` creation uses; the messages are dated at the thread's
- * creation and placed after its submission, before everything said since.
- * Airbnb stays are left alone, and a thread that already has its opening is
- * skipped by its dedupe key.
+ * They say what the guest booked when they booked it, from what was recorded
+ * then: a stay's checkout purchase; otherwise the guest's submission with the
+ * visit as it stood before its first change (that change's own `before`), or
+ * as the record or, for a checkout never captured, its hold says when nothing
+ * changed it. They are dated at the thread's creation and placed after its
+ * submission. Airbnb stays are left alone, and a thread that already has its
+ * opening is skipped by its dedupe key. Run by every deploy, after migrations.
  */
 export async function backfillOpeningMessages(db: DbClient, organizationId?: string): Promise<{ written: number; skipped: number }> {
-  const threads = await queryAll<{ id: string; kind: 'reservation' | 'booking' | 'stay'; organization_id: string; location_id: string | null; user_id: string | null; created_at: string; payload_json: string; vertical: string | null; location_title: string | null }>(db, `
-    SELECT r.id, r.kind, r.organization_id, r.location_id, r.user_id, r.created_at, r.payload_json, o.vertical, l.title AS location_title
+  const threads = await queryAll<{ id: string; kind: 'reservation' | 'booking' | 'stay'; organization_id: string; user_id: string | null; created_at: string; payload_json: string; vertical: string | null; checkout: string | null }>(db, `
+    SELECT r.id, r.kind, r.organization_id, r.user_id, r.created_at, r.payload_json, o.vertical,
+           (SELECT substr(s.idempotency_key, 10) FROM stays s WHERE s.request_id = r.id AND s.organization_id = r.organization_id) AS checkout
       FROM requests r JOIN organization o ON o.id = r.organization_id
-      LEFT JOIN business_locations l ON l.id = r.location_id AND l.organization_id = r.organization_id
      WHERE r.kind IN ('reservation', 'booking', 'stay') ${organizationId ? 'AND r.organization_id = ?' : ''}
        AND NOT EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = r.id AND e.event_name = '${OPENING_EVENT}')
        AND (r.kind <> 'stay' OR EXISTS (SELECT 1 FROM stays s WHERE s.request_id = r.id AND s.organization_id = r.organization_id AND s.channel = 'direct' AND s.owner = 'app' AND s.idempotency_key LIKE 'checkout:%'))
      ORDER BY r.created_at, r.id`, organizationId ? [organizationId] : [])
   let written = 0, skipped = 0
   for (const thread of threads) {
-    const record = await getThreadOperationalRecord(db, thread.id)
-    if (!record) { skipped += 1; continue }
-    const payload = JSON.parse(thread.payload_json) as { guest?: { name?: string | null; phone?: string | null }; notes?: string | null; answers?: FormAnswerSnapshot[]; party_size_is_minimum?: boolean }
-    let facts: OpeningFacts
-    let note: string | null = payload.notes ?? null
-    if (thread.kind === 'stay') {
-      const stay = await queryFirst<{ guest_name: string | null; guest_surname: string | null; guest_phone: string | null; notes: string | null; answers: string; adults: number; children: number; check_in_date: string; check_out_date: string; home: string }>(db,
-        'SELECT s.guest_name, s.guest_surname, s.guest_phone, s.notes, s.answers, s.adults, s.children, s.check_in_date, s.check_out_date, p.name AS home FROM stays s JOIN products p ON p.id = s.product_id AND p.organization_id = s.organization_id WHERE s.request_id = ? AND s.organization_id = ?',
-        [thread.id, thread.organization_id])
-      if (!stay) throw new Error(`Site stay conversation ${thread.id} has no stay`)
-      const guestName = [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ').trim()
-      if (!guestName) throw new Error(`Site stay conversation ${thread.id} has no guest name`)
-      note = stay.notes
-      facts = { kind: 'stay', homeTitle: stay.home, checkIn: stay.check_in_date, checkOut: stay.check_out_date, guests: stay.adults + stay.children,
-        guestName, guestPhone: stay.guest_phone, answers: JSON.parse(stay.answers) as FormAnswerSnapshot[] }
-    } else {
-      const guestName = payload.guest?.name?.trim()
-      if (!guestName) throw new Error(`Conversation ${thread.id} has no guest name`)
-      const common = { guestName, guestPhone: payload.guest?.phone ?? null, answers: payload.answers ?? [], startsAt: record.starts_at, timezone: record.timezone }
-      if (thread.kind === 'reservation') {
-        if (!thread.location_title) throw new Error(`Reservation conversation ${thread.id} has no location`)
-        facts = { kind: 'reservation', ...common, partySize: record.party_size, partySizeIsMinimum: payload.party_size_is_minimum === true, placeTitle: thread.location_title }
-      } else {
-        if (!thread.vertical || !record.product_name) throw new Error(`Booking conversation ${thread.id} has no vertical or product`)
-        facts = { kind: 'booking', ...common, vertical: thread.vertical, productTitle: record.product_name, partySize: record.party_size, placeTitle: thread.location_title }
-      }
-    }
-    const queries = openingMessageQueries({ target: { requestId: thread.id }, body: openingSentence(facts), note, guestUserId: thread.user_id, at: thread.created_at })
+    const opening = thread.kind === 'stay' ? await bookedStay(db, thread) : await bookedVisit(db, thread)
+    const queries = openingMessageQueries({ target: { requestId: thread.id }, body: openingSentence(opening.facts), note: opening.note, guestUserId: thread.user_id, at: thread.created_at })
     const results = await executeBatch(db, queries, { operation: 'Backfill conversation opening' })
     // The opening's own insert, after the two moves that make room for it.
     if (Number(results[OPENING_INSERT]?.meta.changes ?? 0) === 1) written += 1
     else skipped += 1
   }
   return { written, skipped }
+}
+
+type BackfillThread = { id: string; kind: 'reservation' | 'booking' | 'stay'; organization_id: string; payload_json: string; vertical: string | null; checkout: string | null }
+
+/** A site stay as its checkout bought it: the purchase frozen on its payment. */
+async function bookedStay(db: DbClient, thread: BackfillThread): Promise<{ facts: OpeningFacts; note: string | null }> {
+  const payment = thread.checkout ? await queryFirst<{ price_snapshot_json: string }>(db, 'SELECT price_snapshot_json FROM payments WHERE id = ? AND organization_id = ?', [thread.checkout, thread.organization_id]) : null
+  const snapshot: unknown = payment ? JSON.parse(payment.price_snapshot_json) : null
+  const purchase = snapshot && typeof snapshot === 'object' && 'stay' in snapshot ? snapshot.stay : null
+  // Loaded here: payments' checkout module reaches back into requests, which imports this one.
+  const { isStayPurchase } = await import('~/server/domain/payments/checkout')
+  if (!isStayPurchase(purchase)) throw new Error(`Site stay conversation ${thread.id} has no checkout purchase`)
+  const home = await queryFirst<{ name: string }>(db, 'SELECT name FROM products WHERE id = ? AND organization_id = ?', [purchase.product_id, thread.organization_id])
+  if (!home) throw new Error(`Site stay conversation ${thread.id} names a home that does not exist`)
+  return {
+    note: purchase.guest.notes,
+    facts: { kind: 'stay', homeTitle: home.name, checkIn: purchase.check_in_date, checkOut: purchase.check_out_date, guests: purchase.adults + purchase.children,
+      guestName: purchase.guest.name.trim(), guestPhone: purchase.guest.phone, answers: purchase.guest.answers ?? [] },
+  }
+}
+
+/** The values a booking change records about the visit it changed, in either of the shapes it has been written in. */
+type ChangedFrom = { startsAt?: string; starts_at?: string; partySize?: number; party_size?: number; timezone?: string; productId?: string | null; locationId?: string | null; notes?: string | null; guest?: { name?: string | null; phone?: string | null } }
+
+/** A reservation or booking as the guest asked for it. */
+async function bookedVisit(db: DbClient, thread: BackfillThread): Promise<{ facts: OpeningFacts; note: string | null }> {
+  const payload = JSON.parse(thread.payload_json) as { guest?: { name?: string | null; phone?: string | null }; notes?: string | null; answers?: FormAnswerSnapshot[]; party_size_is_minimum?: boolean }
+  // A checkout never captured left no reservation or booking, and reading one for it refuses.
+  const recorded = await queryFirst(db, `SELECT 1 FROM ${thread.kind === 'reservation' ? 'reservations' : 'bookings'} WHERE request_id = ? AND organization_id = ?`, [thread.id, thread.organization_id])
+  const record = recorded ? await getThreadOperationalRecord(db, thread.id) : null
+  const hold = record ? null : await queryFirst<{ starts_at: string; timezone: string | null; quantity: number; product_id: string | null; location_id: string | null }>(db,
+    'SELECT starts_at, timezone, quantity, product_id, location_id FROM payment_checkout_holds WHERE request_id = ? AND organization_id = ? ORDER BY created_at LIMIT 1', [thread.id, thread.organization_id])
+  const now = record ? { startsAt: record.starts_at, timezone: record.timezone, partySize: record.party_size, productId: record.product_id, locationId: record.location_id }
+    : hold?.timezone ? { startsAt: hold.starts_at, timezone: hold.timezone, partySize: hold.quantity, productId: hold.product_id, locationId: hold.location_id } : null
+  if (!now) throw new Error(`Conversation ${thread.id} has neither its ${thread.kind} nor a checkout hold`)
+  const first = await queryFirst<{ before: string }>(db, `SELECT json_extract(payload_json, '$.before') AS before FROM activity_entries
+     WHERE request_id = ? AND event_name IN ('booking_change.requested', 'booking_change.moved', 'booking_change.accepted') AND json_type(payload_json, '$.before') = 'object'
+     ORDER BY sequence LIMIT 1`, [thread.id])
+  const before = first ? JSON.parse(first.before) as ChangedFrom : {}
+  const asked = {
+    startsAt: before.startsAt ?? before.starts_at ?? now.startsAt,
+    timezone: before.timezone ?? now.timezone,
+    partySize: before.partySize ?? before.party_size ?? now.partySize,
+    productId: before.productId === undefined ? now.productId : before.productId,
+    locationId: before.locationId === undefined ? now.locationId : before.locationId,
+  }
+  const guestName = (before.guest?.name ?? payload.guest?.name)?.trim()
+  if (!guestName) throw new Error(`Conversation ${thread.id} has no guest name`)
+  const place = asked.locationId ? await queryFirst<{ title: string }>(db, 'SELECT title FROM business_locations WHERE id = ? AND organization_id = ?', [asked.locationId, thread.organization_id]) : null
+  const common = { guestName, guestPhone: before.guest?.phone === undefined ? payload.guest?.phone ?? null : before.guest.phone, answers: payload.answers ?? [], startsAt: asked.startsAt, timezone: asked.timezone, partySize: asked.partySize }
+  const note = before.notes === undefined ? payload.notes ?? null : before.notes
+  if (thread.kind === 'reservation') {
+    if (!place) throw new Error(`Reservation conversation ${thread.id} has no location`)
+    return { note, facts: { kind: 'reservation', ...common, partySizeIsMinimum: payload.party_size_is_minimum === true, placeTitle: place.title } }
+  }
+  const product = asked.productId ? await queryFirst<{ name: string }>(db, 'SELECT name FROM products WHERE id = ? AND organization_id = ?', [asked.productId, thread.organization_id]) : null
+  if (!thread.vertical || !product) throw new Error(`Booking conversation ${thread.id} has no vertical or product`)
+  return { note, facts: { kind: 'booking', ...common, vertical: thread.vertical, productTitle: product.name, placeTitle: place?.title ?? null } }
 }
