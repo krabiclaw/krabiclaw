@@ -5,6 +5,7 @@ import { listSendLaterMessages } from '~/server/domain/send-later'
 import { stayAccessFor } from '~/server/domain/stays'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import { getGuestThreadDetail } from './detail'
+import { OPENING_EVENT } from './opening'
 import { formatFormAnswer } from '~/shared/form-questions'
 import { threadRecordTitle } from '~/lib/components/workspace/messages/guest-thread-client'
 import { calendarDate, clockTime, dayLabel, firstName, initial, localDateKey, providerInstant, sendTime, stayWhen } from './presentation'
@@ -217,10 +218,12 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date): InboxStreamItem[
   let newestBusiness: { item: MessageItem; entry: GuestThreadEntryViewModel } | null = null
   for (const entry of raw.entries) {
     if (entry.kind === 'submission') {
-      // The guest's own words open the conversation: what they wrote, then their
-      // answers to the business's questions. The form's other fields are the record's.
+      // A contact form's words open its conversation: what the guest wrote, then
+      // their answers. A reservation, booking or stay opens with real messages
+      // written with it (opening.ts), so its submission draws nothing.
+      if (raw.submissionType !== 'contact') continue
       const answers = raw.source.fields.answers.map(answer => `${answer.label} ${formatFormAnswer(answer, { yes: 'Yes', no: 'No' })}`)
-      const words = [text(raw.source.fields.message) ?? text(raw.source.fields.notes), ...answers].filter(Boolean).join('\n\n') || null
+      const words = [text(raw.source.fields.message), ...answers].filter(Boolean).join('\n\n') || null
       if (words) message(entry, words, { side: 'guest', author: viewer.audience === 'buyer' ? 'You' : facts.guestName, label: null, photos: [], translated: null })
       continue
     }
@@ -232,6 +235,11 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date): InboxStreamItem[
         const translation = text(meta(entry)?.translated_message)
         const translated = translation !== null && translation !== text(entry.body)
         message(entry, translated ? translation : entry.body, { side: 'guest', author: viewer.audience === 'buyer' ? 'You' : facts.guestName, label: null, photos, translated: translated ? { original: entry.body! } : null })
+        continue
+      }
+      // The booking's own message states what the guest asked for, on their side of the conversation.
+      if (entry.actorKind === 'system' && entry.eventName === OPENING_EVENT) {
+        message(entry, entry.body, { side: 'guest', author: viewer.audience === 'buyer' ? 'You' : facts.guestName, label: null, photos, translated: null })
         continue
       }
       if (entry.actorKind === 'system' && entry.eventName === 'channel.message_mirrored') {
@@ -281,7 +289,7 @@ async function pendingMessages(db: DbClient, threadId: string, organizationId: s
 }
 
 async function rawThread(db: DbClient, threadId: string, organizationId: string, viewer: Viewer): Promise<GuestThreadDetailViewModel | null> {
-  return getGuestThreadDetail(db, threadId, organizationId, viewer.audience === 'buyer' ? { buyerUserId: viewer.userId } : undefined)
+  return viewer.audience === 'buyer' ? getGuestThreadDetail(db, threadId, organizationId, { buyerUserId: viewer.userId }) : getGuestThreadDetail(db, threadId, organizationId, undefined, viewer.userId)
 }
 
 /** The conversation's view model, or null when the viewer has no such conversation. */

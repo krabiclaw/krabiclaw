@@ -54,17 +54,20 @@ export async function seedExperience(createTenant: CreateTenant): Promise<SeedTe
       description: 'Paint a bisque-fired cup or plate with our glazes by the river, then collect it after the kiln firing.',
     })
     // A guest who already came: a short class booked now that ends while the
-    // seed finishes, so the studio has a conversation in its past mailbox.
+    // seed finishes, and that the owner has read, so the studio has a
+    // conversation in its past mailbox (an ended booking with nothing unread).
     const wheel = tenant.products['wheel-class']!
     const startsAt = new Date(Date.now() + 15_000)
     const endsAt = new Date(startsAt.getTime() + 60_000)
     const { sessions: [session] } = await tool<{ sessions: Array<{ id: string }> }>('create_product_session', {
       product_id: wheel.id, location_id: aoNang.id, starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString(), capacity: 4, idempotency_key: 'seed-experience-ended-class',
     })
-    await tool('create_product_booking', {
+    const pastGuest = await tool<{ request_id: string }>('create_product_booking', {
       product_slug: wheel.slug, session_id: session!.id, party_size: 1, guest_name: 'Past Guest', guest_email: 'past-guest@playwright.example',
       source: 'phone', guest_acknowledgement: false, idempotency_key: 'seed-experience-ended-booking',
     })
+    // The owner opens the conversation, as a click on it does, which reads its alerts.
+    await owner.json('GET', `/api/dashboard/organizations/${tenant.organizationId}/guest-threads/${pastGuest.request_id}`)
     tenant.endedSessionEndsAt = endsAt.toISOString()
     return tenant
   } finally { await owner.dispose() }
