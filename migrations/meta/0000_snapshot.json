@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "334281ed-b778-48ea-9a98-748f6579d765",
+  "id": "b4d35404-94e4-4807-ab38-53a30c1408fc",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -18810,7 +18810,7 @@
       "checkConstraints": {
         "tasks_kind_check": {
           "name": "tasks_kind_check",
-          "value": "kind IN ('turnover', 'guest_reply', 'message_delivery', 'opportunity', 'custom')\n    AND (subject_type IS NULL) = (subject_id IS NULL)\n    AND (subject_type IS NULL OR subject_type IN ('stay', 'request', 'scheduled_guest_message', 'article', 'post', 'product'))\n    AND (kind <> 'custom' OR subject_type IS NULL)\n    AND ((kind = 'opportunity') = (opportunity_id IS NOT NULL))"
+          "value": "kind IN ('turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom')\n    AND (subject_type IS NULL) = (subject_id IS NULL)\n    AND (subject_type IS NULL OR subject_type IN ('stay', 'request', 'scheduled_guest_message', 'booking', 'reservation', 'article', 'post', 'product'))\n    AND (kind <> 'custom' OR subject_type IS NULL)\n    AND ((kind = 'opportunity') = (opportunity_id IS NOT NULL))"
         },
         "tasks_text_check": {
           "name": "tasks_text_check",

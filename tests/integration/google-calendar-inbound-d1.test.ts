@@ -188,6 +188,8 @@ test('Google time and exact attorney replacement request client approval while c
     assert.equal((await db.prepare('SELECT status FROM bookings WHERE id=?').bind(bookingId).first())?.status,'pending')
     assert.equal(events.get(eventId)?.status,'tentative')
     assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE event_name='calendar_sync.event_deleted' AND kind='operation'").first('n'),1)
+    // A deleted event the booking put back needs nobody; only a refused move is a change task.
+    assert.equal(await db.prepare("SELECT count(*) n FROM tasks WHERE kind='booking_change'").first('n'),0)
     const deletionInvitations=invitations.length
     changes=[deletion]
     await pullCalendarChanges(env,'org',provider)

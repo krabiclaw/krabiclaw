@@ -357,7 +357,7 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     // The guest's question is the business's to answer: one open reply task on Today, which opens the conversation.
     expect(openingLedger.needs_reply).toBe(true)
     expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({
-      kind: 'guest_reply', status: 'open', title: guestName, detail: message, requestId: threadId, outcome: null,
+      kind: 'guest_reply', status: 'open', title: `Thread${nonce}`, detail: message, requestId: threadId, outcome: null,
       action: { type: 'open', label: 'Reply', path: expect.stringContaining(threadId) },
       can: expect.objectContaining({ complete: false }),
     })] }])
@@ -435,12 +435,11 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
       previewFrom: 'You',
       unread: false,
     })
-    // The reply answered it: the task is done by the owner who replied, and nothing is left to answer.
-    expect((await loadLedger(owner, threadId)).needs_reply).toBe(false)
-    expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([{ section: 'done', tasks: [expect.objectContaining({
-      id: replyTask.id, status: 'done', outcome: { note: null, photos: [], closedAt: expect.any(String), closedBy: 'you' },
-    })] }])
-    expect(await loadReplyTasks(secondOwner, organizationSlug(), threadId)).toEqual([{ section: 'done', tasks: [expect.objectContaining({ id: replyTask.id, status: 'done' })] }])
+    // A reply is an answer once a provider accepted it. This environment delivers email log-only, so the record
+    // shows no delivered answer: the one reply task stays open, for every owner alike.
+    expect((await loadLedger(owner, threadId)).needs_reply).toBe(true)
+    expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({ id: replyTask.id, status: 'open', outcome: null })] }])
+    expect(await loadReplyTasks(secondOwner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({ id: replyTask.id, status: 'open' })] }])
     expect(contactNotification(ownerNotificationsAfterReply, guestName).read_at).toEqual(expect.any(String))
   } finally {
     await Promise.all([owner.dispose(), secondOwner.dispose(), foreignOwner.dispose()])

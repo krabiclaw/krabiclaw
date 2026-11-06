@@ -318,8 +318,9 @@ export const opportunities = sqliteTable('opportunities', {
 
 // Work someone has to do (server/domain/tasks.ts). Every task but a custom
 // one is opened and closed by the batch that changes its subject: a stay's
-// turnover, a guest's unanswered message, a failed scheduled message, an
-// accepted opportunity. Kinds other than custom
+// turnover, a guest's unanswered message, a failed scheduled message, a
+// booking awaiting approval, a change that needs the business, an accepted
+// opportunity. Kinds other than custom
 // and opportunity take their words from the subject, so title is NULL there.
 // assigned_member_id is a Better Auth member.id; like every responsibility it
 // is cleared by reconcileResponsibilities when the member leaves.
@@ -327,8 +328,8 @@ export const opportunities = sqliteTable('opportunities', {
 export const tasks = sqliteTable('tasks', {
   id: text().primaryKey(),
   organization_id: text().notNull().references(() => organization.id, { onDelete: 'cascade' }),
-  kind: text({ enum: ['turnover', 'guest_reply', 'message_delivery', 'opportunity', 'custom'] }).notNull(),
-  subject_type: text({ enum: ['stay', 'request', 'scheduled_guest_message', 'article', 'post', 'product'] }),
+  kind: text({ enum: ['turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom'] }).notNull(),
+  subject_type: text({ enum: ['stay', 'request', 'scheduled_guest_message', 'booking', 'reservation', 'article', 'post', 'product'] }),
   subject_id: text(),
   product_id: text(),
   location_id: text(),
@@ -359,9 +360,9 @@ export const tasks = sqliteTable('tasks', {
   index('tasks_member_status_due_idx').on(table.organization_id, table.assigned_member_id, table.status, table.due_at),
   index('tasks_team_status_due_idx').on(table.organization_id, table.assigned_team_id, table.status, table.due_at),
   index('tasks_subject_idx').on(table.subject_type, table.subject_id),
-  check('tasks_kind_check', sql`kind IN ('turnover', 'guest_reply', 'message_delivery', 'opportunity', 'custom')
+  check('tasks_kind_check', sql`kind IN ('turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom')
     AND (subject_type IS NULL) = (subject_id IS NULL)
-    AND (subject_type IS NULL OR subject_type IN ('stay', 'request', 'scheduled_guest_message', 'article', 'post', 'product'))
+    AND (subject_type IS NULL OR subject_type IN ('stay', 'request', 'scheduled_guest_message', 'booking', 'reservation', 'article', 'post', 'product'))
     AND (kind <> 'custom' OR subject_type IS NULL)
     AND ((kind = 'opportunity') = (opportunity_id IS NOT NULL))`),
   check('tasks_text_check', sql`(title IS NULL OR length(trim(title)) BETWEEN 1 AND 200) AND (kind NOT IN ('custom', 'opportunity') OR title IS NOT NULL)

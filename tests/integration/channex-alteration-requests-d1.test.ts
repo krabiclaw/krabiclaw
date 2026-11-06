@@ -196,7 +196,8 @@ test('a guest change request lands once in the stay conversation, survives a rel
       after: { whenLabel: 'Jan 10, 2027 – Jan 14, 2027', partySize: 3, totalLabel: '$600.00', assignedMemberId: null, assignedMemberName: null },
     })
     assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-13', adults: 2, total_minor: 45_000, version: 1 })
-    const expectedToday = { tasks: [['guest_reply', stay.request_id]], opportunities: ['post.create', 'social.connect', 'article.create'] }
+    // The guest's change is the business's to answer: a change task beside the reply task.
+    const expectedToday = { tasks: [['guest_reply', stay.request_id], ['booking_change', stay.request_id]], opportunities: ['post.create', 'social.connect', 'article.create'] }
     assert.deepEqual(await today(), expectedToday)
 
     // A member who cannot change stays is refused before Channex hears anything.
@@ -210,6 +211,8 @@ test('a guest change request lands once in the stay conversation, survives a rel
     // Airbnb's confirmed revision is the change: landed and acknowledged, the stay now as the guest asked.
     assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-14', adults: 3, total_minor: 60_000, version: 2 })
     assert.deepEqual(channex.acked, ['rev-1', 'rev-2'])
+    // Answering the change closes its task, by the member who answered; the guest's message is still owed a reply.
+    assert.deepEqual(await db.prepare("SELECT status, closed_by_user_id FROM tasks WHERE dedupe_key = ?").bind(`booking_change:${request!.id}`).first(), { status: 'done', closed_by_user_id: OWNER })
     assert.deepEqual(await openReplies(db, stay.request_id), [`guest_reply:${stay.request_id}:${guestMessage}`])
     const answeredThread = (await getGuestThreadDetail(db, stay.request_id, ORG))!
     assert.equal(answeredThread.needsReply, true, 'the inbox preserves the separate unanswered message after a booking decision')

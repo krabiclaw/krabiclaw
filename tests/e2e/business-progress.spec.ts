@@ -258,8 +258,9 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     })])
     const { reference: repliedReference } = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'guest_thread.reply', subjectId: threadId } }))
     expect(repliedReference.evidence).toMatchObject({ kind: 'guest_thread', latestGuestEntryId: expect.any(String), latestReplyEntryId: replies[0]!.id })
-    // The reply answered it: the task is done today.
-    expect(await replyTasks()).toEqual([{ section: 'done', tasks: [{ id: unanswered[0]!.tasks[0]!.id, status: 'done', detail: expect.any(String) }] }])
+    // A reply is an answer once a provider accepted it. Here its only receipt is log-only (unconfirmed, above),
+    // so the record shows no delivered answer and the question is still owed.
+    expect(await replyTasks()).toEqual(unanswered)
     const guestReply = 'I found another letter with a deadline tomorrow; should I send it now?'
     await responseBody(await member.post(`/api/account/messages/${threadId}/reply`, { headers: authRequestHeaders(baseURL!), data: { body: guestReply, idempotencyKey: crypto.randomUUID() } }))
     const { reference: inboundReference } = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'guest_thread.reply', subjectId: threadId } }))
@@ -267,13 +268,9 @@ test('authored goals and evidence-bound opportunity decisions follow persisted w
     if (inboundReference.evidence.kind !== 'guest_thread' || repliedReference.evidence.kind !== 'guest_thread') throw new Error('The explicit thread reference must describe thread evidence')
     expect(inboundReference.evidence.latestGuestEntryId).not.toBe(repliedReference.evidence.latestGuestEntryId)
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
-    // The client's new question is owed a reply again: a new open task beside the done one.
+    // The client writing again does not add a second task: the one task stays on the first question still owed.
     const reasked = await replyTasks()
-    expect(reasked).toEqual([
-      { section: 'open', tasks: [{ id: expect.any(String), status: 'open', detail: guestReply }] },
-      { section: 'done', tasks: [{ id: unanswered[0]!.tasks[0]!.id, status: 'done', detail: expect.any(String) }] },
-    ])
-    expect(reasked[0]!.tasks[0]!.id).not.toBe(unanswered[0]!.tasks[0]!.id)
+    expect(reasked).toEqual(unanswered)
     expect(progress.outcomes.filter(outcome => outcome.event === 'thread.member_reply' && outcome.subject.id === threadId)).toEqual(replies)
     // The conversation keeps one copy of each side's message: the owner's retried reply and the client's answer.
     const preserved = await responseBody<{ thread: InboxThread }>(await request.get(threadUrl))

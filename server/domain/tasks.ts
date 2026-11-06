@@ -5,7 +5,7 @@ import { organizationEventQuery } from '~/server/utils/organization-events'
 import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { discardMessagePhotos, listMessagePhotos, messagePhotoPlacements, uploadMessagePhotos, MessagePhotoRejection, type MessagePhoto } from '~/server/domain/guest-threads/attachments'
 import { firstName } from '~/server/domain/guest-threads/presentation'
-import { guestConversationPath } from '~/server/utils/dashboard-links'
+import { bookingEditorPath, guestConversationPath } from '~/server/utils/dashboard-links'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { addLocalDays, formatCalendarDate, formatTimestamp, isValidInstant, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -18,13 +18,13 @@ import type { CloudflareEnv } from '~/server/utils/auth'
   reopen them here, from the dashboard, MCP and the app alike.
 */
 
-export const TASK_KINDS = ['turnover', 'guest_reply', 'message_delivery', 'opportunity', 'custom'] as const
+export const TASK_KINDS = ['turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom'] as const
 export type TaskKind = typeof TASK_KINDS[number]
 export type TaskStatus = 'open' | 'done' | 'skipped' | 'cancelled'
 
 export interface TaskRow {
   id: string; organization_id: string; kind: TaskKind
-  subject_type: 'stay' | 'request' | 'scheduled_guest_message' | 'article' | 'post' | 'product' | null; subject_id: string | null
+  subject_type: 'stay' | 'request' | 'scheduled_guest_message' | 'booking' | 'reservation' | 'article' | 'post' | 'product' | null; subject_id: string | null
   product_id: string | null; location_id: string | null; opportunity_id: string | null
   title: string | null; notes: string | null
   assigned_member_id: string | null; assigned_team_id: string | null
@@ -268,13 +268,28 @@ interface Context {
   arrivals: Map<string, StayFacts | null>
   requests: Map<string, { guest_name: string | null; participant: string | null; preview: string | null; asked_at: string | null }>
   messages: Map<string, { title: string; status: string; request_id: string | null; stay_id: string }>
+  /** A booking's or reservation's conversation and when it is. */
+  records: Map<string, { request_id: string | null; starts_at: string }>
+  /** The entry a change task is about. */
+  entries: Map<string, { event_name: string; actor_kind: string; body: string | null }>
   photos: Map<string, TaskPhoto[]>
 }
 
 async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): Promise<Context> {
   const organizationId = viewer.principal.organizationId
   const ids = (pick: (row: TaskRow) => string | null) => [...new Set(rows.map(pick).filter((id): id is string => id !== null))]
-  const requestIds = ids(row => row.subject_type === 'request' ? row.subject_id : null)
+  const recordIds = ids(row => row.subject_type === 'booking' || row.subject_type === 'reservation' ? row.subject_id : null)
+  const records = await queryAll<{ id: string; request_id: string | null; starts_at: string }>(db, `
+    SELECT b.id, b.request_id, ps.starts_at FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id AND ps.organization_id = b.organization_id
+     WHERE b.organization_id = ? AND b.id IN (SELECT value FROM json_each(?))
+    UNION ALL SELECT v.id, v.request_id, v.starts_at FROM reservations v WHERE v.organization_id = ? AND v.id IN (SELECT value FROM json_each(?))`,
+  [organizationId, d1JsonStringSet(recordIds), organizationId, d1JsonStringSet(recordIds)])
+  const changeStays = rows.filter(row => row.kind === 'booking_change' && row.subject_type === 'stay').map(row => row.subject_id!)
+  const changeStayRequests = changeStays.length ? await queryAll<{ request_id: string | null }>(db, 'SELECT request_id FROM stays WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', [organizationId, d1JsonStringSet(changeStays)]) : []
+  const entryIds = rows.filter(row => row.kind === 'booking_change').map(row => row.dedupe_key.slice('booking_change:'.length))
+  const entries = entryIds.length ? await queryAll<{ id: string; event_name: string; actor_kind: string; body: string | null }>(db, 'SELECT id, event_name, actor_kind, body FROM activity_entries WHERE id IN (SELECT value FROM json_each(?))', [d1JsonStringSet(entryIds)]) : []
+  const requestIds = [...new Set([...ids(row => row.subject_type === 'request' ? row.subject_id : null),
+    ...records.flatMap(record => record.request_id ? [record.request_id] : []), ...changeStayRequests.flatMap(stay => stay.request_id ? [stay.request_id] : [])])]
   const messageIds = ids(row => row.subject_type === 'scheduled_guest_message' ? row.subject_id : null)
   // Stay writers load this module; the conversation repository is loaded when a view is drawn.
   const { guestEntryAskedAtSql } = await import('~/server/domain/guest-threads/repository')
@@ -321,6 +336,8 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
     arrivals,
     requests: new Map(requests.map(request => [request.id, request])),
     messages: new Map(messages.map(message => [message.id, { title: message.template_title, status: message.status, request_id: message.request_id, stay_id: message.stay_id }])),
+    records: new Map(records.map(record => [record.id, { request_id: record.request_id, starts_at: record.starts_at }])),
+    entries: new Map(entries.map(entry => [entry.id, { event_name: entry.event_name, actor_kind: entry.actor_kind, body: entry.body }])),
     photos: new Map([...photos].map(([id, list]) => [id, list.map(photo => ({ id: photo.id, url: photo.url, thumbnailUrl: photo.thumbnailUrl, width: photo.width, height: photo.height }))])),
   }
 }
@@ -423,6 +440,42 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       sheet = { heading: 'Message', title, date: null, checkout: null, checkin: null }
       break
     }
+    case 'booking_review': {
+      const record = context.records.get(row.subject_id!)
+      const request = record?.request_id ? context.requests.get(record.request_id) : undefined
+      if (!record?.request_id || !request) throw new Error(`Review task ${row.id} has no booking conversation`)
+      requestId = record.request_id
+      face = 'compact'
+      title = request.guest_name ? firstName(request.guest_name) : request.participant ?? 'Guest'
+      avatar = { initial: initialOf(title), tone: 'warm' }
+      statusLine = ['Waiting for your approval', place].filter(Boolean).join(' · ')
+      detail = `${day(record.starts_at)}, ${time(record.starts_at)}`
+      path = bookingEditorPath(context.slug, 'booking', record.request_id)
+      action = { type: 'open', label: 'Review', path }
+      sheet = { heading: 'Booking request', title, date: day(record.starts_at), checkout: null, checkin: null }
+      break
+    }
+    case 'booking_change': {
+      const entry = context.entries.get(row.dedupe_key.slice('booking_change:'.length))
+      const stay = row.subject_type === 'stay' ? context.stays.get(row.subject_id!) : undefined
+      const record = row.subject_type === 'stay' ? null : context.records.get(row.subject_id!)
+      requestId = stay?.request_id ?? record?.request_id ?? null
+      const request = requestId ? context.requests.get(requestId) : undefined
+      if (!entry || !requestId || !request) throw new Error(`Change task ${row.id} has no change or conversation`)
+      stayId = stay?.id ?? null
+      face = 'compact'
+      title = request.guest_name ? firstName(request.guest_name) : request.participant ?? 'Guest'
+      avatar = { initial: initialOf(title), tone: 'cool' }
+      const refused = entry.event_name === 'calendar_sync.move_refused'
+      const waiting = !refused && entry.actor_kind !== 'guest' && row.starts_at !== null && row.starts_at > now.toISOString()
+      statusLine = [refused ? 'Google Calendar move refused' : entry.actor_kind === 'guest' ? 'Change requested' : waiting ? 'Change proposal waiting on the guest' : 'Change proposal expired', place].filter(Boolean).join(' · ')
+      detail = refused ? entry.body : record ? `${day(record.starts_at)}, ${time(record.starts_at)}` : null
+      path = conversation(requestId)
+      // A refused move needs only acknowledgement; a change closes when it is answered or proposed again.
+      action = refused ? { type: 'complete', label: 'Done' } : { type: 'open', label: 'Review', path: path! }
+      sheet = { heading: 'Change', title, date: null, checkout: null, checkin: null }
+      break
+    }
     case 'opportunity':
       face = 'compact'
       statusLine = ['Accepted opportunity', place].filter(Boolean).join(' · ')
@@ -450,7 +503,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     detail = null
   }
   const mine = assignee?.you ?? false
-  const reachable = viewer.manage || mine || row.assigned_team_id !== null || row.kind === 'turnover' || row.kind === 'custom' || row.kind === 'opportunity'
+  const reachable = viewer.manage || mine || row.assigned_team_id !== null || row.kind === 'turnover' || row.kind === 'custom' || row.kind === 'opportunity' || row.kind === 'booking_change'
   const personClosed = (row.status === 'done' || row.status === 'skipped') && row.closed_by_user_id !== null
   const can = {
     complete: row.status === 'open' && action?.type === 'complete' && reachable,
@@ -492,7 +545,7 @@ export function parseTaskListQuery(query: Record<string, unknown>, defaults: Par
 }
 
 /** Today's open work in the owner's order: failed deliveries, turnovers, replies, then everything else. */
-const TODAY_ORDER: Record<TaskKind, number> = { message_delivery: 0, turnover: 1, guest_reply: 2, custom: 3, opportunity: 3 }
+const TODAY_ORDER: Record<TaskKind, number> = { message_delivery: 0, turnover: 1, guest_reply: 2, booking_review: 2, booking_change: 2, custom: 3, opportunity: 3 }
 
 /** Today: open work due or starting today or earlier, or with no date; then what was closed today. Upcoming: open work later than today, by day. */
 export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskListQuery, now = new Date()): Promise<{ sections: TaskSection[]; resolvedAt: string }> {

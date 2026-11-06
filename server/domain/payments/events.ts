@@ -18,6 +18,7 @@ import { paymentsBillingBasis } from './fx'
 import { deliverPaymentsUsage } from './usage'
 import { isStayPurchase } from './checkout'
 import { turnoverTaskQueries } from '~/server/domain/tasks'
+import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import { completeStayFromCheckout, isStayNightConflict, releaseLapsedStayHolds, stayFromCheckoutQueries } from '~/server/domain/stays'
 
 interface Hold {
@@ -107,6 +108,7 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,int
         {query:`INSERT INTO activity_entries(id,request_id,kind,scope_kind,actor_kind,event_name,payload_json,dedupe_key,sequence,occurred_at,created_at) SELECT ?,v.request_id,'operation','request','system',?,json_object(?,v.id,'request_id',v.request_id,'afterStatus',v.status,'payment_id',?,'intent',?),?,COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id=v.request_id),0)+1,?,? FROM ${table} v WHERE v.id=? AND v.request_id IS NOT NULL ON CONFLICT(dedupe_key) DO NOTHING`,params:[crypto.randomUUID(),`${kind}.created`,`operational_${kind}_id`,payment.id,`${kind}.created`,`${kind}:${subjectId}:created`,now,now,subjectId]},
         {query:`UPDATE payments SET subject_id=?,updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM ${table} WHERE id=?)`,params:[subjectId,now,payment.id,subjectId]},
         {query:`UPDATE requests SET payload_json=json_set(payload_json,'$.payment.state','captured'),updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM ${table} WHERE id=?)`,params:[now,hold.request_id,subjectId]},
+        ...conversationTaskQueries(hold.request_id,now),
       ],{operation:'Convert authenticated visit payment'})
       created = results[0]?.meta.changes === 1
     } catch (error) {

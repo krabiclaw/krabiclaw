@@ -18,6 +18,7 @@ import { buildOwnerThreadInboxUrl } from '~/server/utils/dashboard-notification-
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '~/server/utils/reservation-cancel-token'
 import { ensureInteractionUser, type CloudflareEnv } from '~/server/utils/auth'
 import { getGuestRequest, getThreadOperationalRecord, requestInsertQueries, threadPayloadForGuest, type BookingOperator } from '~/server/domain/requests'
+import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import { openingSentence } from '~/server/domain/guest-threads/opening'
 import { DEFAULT_EMAIL_DAILY_LIMIT as EMAIL_DAILY_LIMIT, DEFAULT_IP_HOURLY_LIMIT as IP_HOURLY_LIMIT, getClientIp, hashClientIp, hashIdentifier, incrementHourlyRateLimit } from '~/server/utils/hourly-rate-limit'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
@@ -328,6 +329,8 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
                   FROM bookings WHERE id = ? AND request_id IS NOT NULL`,
           params: [crypto.randomUUID(), operator ? 'member' : 'system', operator?.userId ?? null, `booking:${bookingId}:created`, now, now, bookingId],
         },
+        // A booking that waits for the business's approval is its review task.
+        ...conversationTaskQueries(threadId, now),
       ],
     })
     operationalBookingId = claim.bookingId

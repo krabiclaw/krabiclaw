@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:d68117d580ebbbd1f5c87aba4d16c4c13de327e818bd0bd7b02c3e558e0a7a08",
-  "documentationFingerprint": "sha256:cd3575fbf800ce897283fa93b87baaa6e7b66c00928a260e7b7291aebb7919a2",
+  "fingerprint": "sha256:ad8649f05d7a404a9b7f63fc44423940059ef8728116088e6b24e906fc960c20",
+  "documentationFingerprint": "sha256:54930b0c96746e78e7294249744c46b811cc9c3be5616b951aa959195fb89e13",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -169,6 +169,8 @@
                   "turnover",
                   "guest_reply",
                   "message_delivery",
+                  "booking_review",
+                  "booking_change",
                   "opportunity",
                   "custom"
                 ],
@@ -14112,6 +14114,8 @@
                   "turnover",
                   "guest_reply",
                   "message_delivery",
+                  "booking_review",
+                  "booking_change",
                   "opportunity",
                   "custom"
                 ],
@@ -37938,6 +37942,8 @@
                   "turnover",
                   "guest_reply",
                   "message_delivery",
+                  "booking_review",
+                  "booking_change",
                   "opportunity",
                   "custom"
                 ],
@@ -72657,6 +72663,8 @@
               "turnover",
               "guest_reply",
               "message_delivery",
+              "booking_review",
+              "booking_change",
               "opportunity",
               "custom"
             ],
@@ -72864,6 +72872,8 @@
                           "turnover",
                           "guest_reply",
                           "message_delivery",
+                          "booking_review",
+                          "booking_change",
                           "opportunity",
                           "custom"
                         ],
@@ -104380,6 +104390,8 @@
                   "turnover",
                   "guest_reply",
                   "message_delivery",
+                  "booking_review",
+                  "booking_change",
                   "opportunity",
                   "custom"
                 ],
@@ -129209,6 +129221,8 @@
                   "turnover",
                   "guest_reply",
                   "message_delivery",
+                  "booking_review",
+                  "booking_change",
                   "opportunity",
                   "custom"
                 ],

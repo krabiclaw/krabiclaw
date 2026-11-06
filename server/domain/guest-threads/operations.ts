@@ -451,8 +451,8 @@ async function executeSourceMutation(
     operationEntryQuery(context, plan, input, entryId, dedupeKey, now, email,refundPlan.guard),
     sourceUpdateQuery(context, plan, input, entryId, now),
     ...refundPlan.queries,
-    // A cancellation answers what the guest asked before it.
-    ...(plan.afterStatus === 'cancelled' ? conversationTaskQueries(context.thread.id, now) : []),
+    // An approval closes the booking's review; a cancellation also answers what the guest asked before it.
+    ...conversationTaskQueries(context.thread.id, now),
   ]
   if (plan.afterStatus === 'cancelled') queries.push(revokeReviewRequestQuery(plan.kind, context.thread.id, entryId, now))
   if (plan.requiresNotification && summary.guestEmail) {

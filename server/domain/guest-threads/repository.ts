@@ -634,8 +634,54 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
         SELECT m.id FROM scheduled_guest_messages m WHERE m.request_id = ? AND EXISTS (
           SELECT 1 FROM activity_entries reply WHERE reply.request_id = m.request_id AND ${successfulBusinessReplySql('reply')} AND reply.occurred_at > m.updated_at))`,
     params: [now, now, requestId],
+  }, {
+    // A booking waiting for the business's approval is work until it is approved, declined or cancelled.
+    query: `UPDATE tasks SET status = CASE WHEN b.status IN ('confirmed', 'completed') THEN 'done' ELSE 'cancelled' END, closed_at = ?, version = tasks.version + 1, updated_at = ?,
+        closed_by_user_id = (SELECT e.actor_user_id FROM activity_entries e WHERE e.request_id = b.request_id AND e.event_name IN ('booking.confirm', 'booking.reject', 'booking.cancel') ORDER BY e.sequence DESC LIMIT 1)
+      FROM bookings b WHERE tasks.dedupe_key = 'booking_review:' || b.id AND tasks.status = 'open' AND b.request_id = ? AND b.status <> 'pending'`,
+    params: [now, now, requestId],
+  }, {
+    query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
+      SELECT ?, b.organization_id, 'booking_review', 'booking', b.id, b.product_id, ps.location_id, b.assigned_member_id, ps.starts_at, ps.timezone, 'open', 'booking_review:' || b.id, 1, ?, ?
+        FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id AND ps.organization_id = b.organization_id
+       WHERE b.request_id = ? AND b.status = 'pending'
+      ON CONFLICT (dedupe_key) DO NOTHING`,
+    params: [crypto.randomUUID(), now, now, requestId],
+  }, {
+    // A change is answered, or replaced by a newer proposal or a move: its task is done, by whoever answered or replaced it.
+    query: `UPDATE tasks SET status = 'done', closed_at = ?, version = tasks.version + 1, updated_at = ?,
+        closed_by_user_id = (SELECT answer.actor_user_id FROM activity_entries answer WHERE answer.request_id = p.request_id
+          AND (answer.dedupe_key = 'booking-change-decision:' || p.id OR (answer.event_name IN ('booking_change.requested', 'booking_change.moved') AND answer.sequence > p.sequence))
+          ORDER BY answer.sequence LIMIT 1)
+      FROM activity_entries p
+      WHERE tasks.kind = 'booking_change' AND tasks.status = 'open' AND tasks.dedupe_key = 'booking_change:' || p.id
+        AND p.request_id = ? AND p.event_name = 'booking_change.requested' AND ${CHANGE_ANSWERED_SQL}`,
+    params: [now, now, requestId],
+  }, {
+    // A change that needs the business: one the guest asked for (now), a business proposal on a booking or
+    // reservation (from when it expires unanswered), or a Google Calendar move the booking refused.
+    query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, starts_at, timezone, status, dedupe_key, version, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), r.organization_id, 'booking_change', r.kind, record.id, record.product_id, r.location_id,
+          CASE WHEN p.event_name = 'booking_change.requested' AND p.actor_kind <> 'guest'
+            THEN min(strftime('%Y-%m-%dT%H:%M:%fZ', p.occurred_at, '+7 days'), COALESCE(record.ends_at, strftime('%Y-%m-%dT%H:%M:%fZ', p.occurred_at, '+7 days'))) END,
+          COALESCE(record.timezone, l.timezone, o.timezone), 'open', 'booking_change:' || p.id, 1, ?, ?
+        FROM requests r JOIN organization o ON o.id = r.organization_id
+        LEFT JOIN business_locations l ON l.organization_id = r.organization_id AND l.id = r.location_id
+        JOIN (SELECT b.id, b.request_id, b.product_id, ps.ends_at, ps.timezone FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id AND ps.organization_id = b.organization_id
+              UNION ALL SELECT v.id, v.request_id, NULL, v.ends_at, v.timezone FROM reservations v
+              UNION ALL SELECT s.id, s.request_id, s.product_id, NULL, NULL FROM stays s) record ON record.request_id = r.id
+        JOIN activity_entries p ON p.request_id = r.id
+       WHERE r.id = ? AND ((p.event_name = 'booking_change.requested' AND NOT ${CHANGE_ANSWERED_SQL}
+           AND (p.actor_kind = 'guest' OR r.kind IN ('booking', 'reservation')))
+         OR p.event_name = 'calendar_sync.move_refused')
+      ON CONFLICT (dedupe_key) DO NOTHING`,
+    params: [now, now, requestId],
   }]
 }
+
+/** A change proposal (entry `p`) has its answer, or a newer proposal or a move replaced it. */
+const CHANGE_ANSWERED_SQL = `(EXISTS (SELECT 1 FROM activity_entries answer WHERE answer.request_id = p.request_id AND answer.dedupe_key = 'booking-change-decision:' || p.id)
+  OR EXISTS (SELECT 1 FROM activity_entries later WHERE later.request_id = p.request_id AND later.event_name IN ('booking_change.requested', 'booking_change.moved') AND later.sequence > p.sequence))`
 
 /**
  * After an entry lands: the conversation moves to the top when the entry is

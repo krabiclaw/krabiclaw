@@ -197,9 +197,9 @@ test('a responsible home team reads its stays as turnovers on every surface unti
       assignee: { type: 'team', id: teamId, name: teamName, initial: 'H', you: false },
       can: { complete: true, skip: true, reopen: false, assign: false, edit: false },
     })])
-    // The member reads the turnover, not the guest: no name, contact, note or conversation.
+    // The member reads the turnover as its card does: the guest by first name, never their contact, note or conversation.
     expect(leaks(upcomingBody)).toEqual([])
-    expect(JSON.stringify(upcomingBody)).not.toContain(guestName)
+    expect(turnoverDay!.tasks.find(task => task.stayId === stay.id)!.detail).toBe(`${guestName} out`)
     const memberAgenda = await memberContext.request.get(api(`agenda?from=${localDay(0)}&to=${localDay(3)}`))
     await expectStatus(memberAgenda, 200)
     const memberAgendaBody = await memberAgenda.json() as { items: Array<{ id: string; stayId: string }> }
@@ -552,10 +552,11 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
     const [hostReply] = await Promise.all([page.waitForResponse(response => response.url().includes(`/guest-threads/${activityId}/operations/reply`) && response.request().method() === 'POST'), page.getByRole('button', { name: 'Send reply', exact: true }).click()])
     await expectStatus(hostReply, 200)
     await expect(page.locator('#dashboard-panel-organization-messages-thread').getByText('Yes, the lockbox is ready at 4 pm.', { exact: true })).toBeVisible()
-    // The reply answered it: nothing is left for the business to reply to.
+    // A reply is an answer once a provider accepted it; this environment delivers email log-only, so the
+    // record shows no delivered answer and the guest's question is still owed.
     const answeredLedger = await call<{ conversation: { needs_reply: boolean } }>('get_guest_conversation', { request_id: activityId })
     expect(answeredLedger.error).toBeNull()
-    expect(answeredLedger.data!.conversation.needs_reply).toBe(false)
+    expect(answeredLedger.data!.conversation.needs_reply).toBe(true)
     const alertsRead = await guest.request.get(`${baseURL}/api/dashboard/notifications?scope=personal`)
     await expectStatus(alertsRead, 200)
     const alerts = (await alertsRead.json() as { notifications: Array<{ id: string; template: string; deep_link: string }> }).notifications.filter(alert => alert.template === 'guest_thread_event' && alert.deep_link === `/dashboard/account/messages/${activityId}`)
@@ -4449,9 +4450,9 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expectStatus(completed, 200)
       const afterDone = await cleaner.request.get(api('today'))
       await expectStatus(afterDone, 200)
-      expect((await afterDone.json() as BusinessToday).tasks).toEqual([{ id: 'done', title: 'Done', tasks: [expect.objectContaining({
+      expect((await afterDone.json() as BusinessToday).tasks).toEqual([{ id: 'done', title: 'Done', subtitle: null, tasks: [expect.objectContaining({
         id: turnover.id, kind: 'turnover', status: 'done', stayId: stays[0]!.id, version: turnover.version + 1,
-        outcome: { note: 'Fresh linen on both beds', photos: [], closedAt: expect.any(String), closedBy: 'you' },
+        outcome: { note: 'Fresh linen on both beds', photos: [], closedAt: expect.any(String), closedBy: 'You' },
         can: { complete: false, skip: false, reopen: true, assign: false, edit: false },
       })] }])
       const afterDoneUpcoming = await cleaner.request.get(api('today'), { params: { range: 'upcoming' } })
