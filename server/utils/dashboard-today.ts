@@ -6,7 +6,7 @@ import { memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
 import { firstUnansweredGuestEntryTimes, listOrganizationGuestThreads } from '~/server/domain/guest-threads/repository'
 import type { GuestThreadDeliveryRow, GuestThreadListItemViewModel } from '~/server/domain/guest-threads/types'
 import { readBusinessRecommendations, readRecommendationDecisionInputs, readRecommendationDecisions } from '~/server/domain/business-progress'
-import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayDecision, type TodayFeedPayload } from '~/shared/dashboard-today'
+import { todayFeedSchema, type TodayCard, type TodayDecision, type TodayFeedPayload } from '~/shared/dashboard-today'
 import type { RecommendationFeedback, RecommendationFeedbackView } from '~/shared/business-progress'
 import type { BusinessProgressOperation } from '~/shared/business-outcomes'
 import { formatTimestamp, isValidInstant, localDateAt } from '~/utils/timezone'
@@ -40,7 +40,7 @@ export function parseTodayFeedQuery(query: Record<string, unknown>): TodayFeedQu
 }
 
 function card(input: Pick<TodayCard, 'id' | 'to' | 'eyebrow' | 'headline' | 'priority'> & Partial<TodayCard>): TodayCard {
-  return { description: null, imageUrl: null, imageFit: 'cover', imageIcon: 'i-lucide-circle-check', badgeImageUrl: null, badgeIcon: null,
+  return { presentation: { type: 'compact' }, description: null, imageUrl: null, imageFit: 'cover', imageIcon: 'i-lucide-circle-check', badgeImageUrl: null, badgeIcon: null,
     locationId: null, assignedMemberId: null, bookingKind: null, stayId: null, productId: null, stayChannel: null, occurrenceAt: null, timeZone: null,
     actionAt: null, completedAt: null, reason: null, decision: null, ...input }
 }
@@ -94,9 +94,10 @@ function threadWork(thread: GuestThreadListItemViewModel, unansweredAt: string |
         : null
   return {
     card: card({
+      presentation: { type: pending ? 'detailed' : 'minimal' },
       id: `${obligation ? 'attention' : 'reply'}:${thread.id}`, priority: obligation ? 'attention' : 'opportunity',
       to: pending ? bookingEditorPath(organization.slug, 'booking', thread.id) : guestConversationPath(organization.slug, thread.id),
-      eyebrow: pending ? 'Awaiting your decision' : obligation ? 'Needs attention' : 'Unanswered message',
+      eyebrow: pending ? 'Awaiting your decision' : '',
       headline: pending ? `Review ${name}’s ${noun}` : conversation && thread.operationalStatus !== 'cancelled' ? `Review conversation: ${thread.participantLabel}` : `Reply to ${thread.guestName ?? thread.participantLabel}`,
       description: [thread.locationLabel, thread.whenLabel, pending ? null : thread.preview?.text].filter(Boolean).join(' · '),
       imageUrl: thread.imageUrl, imageFit: thread.imageFit, imageIcon: bookingKind ? 'i-lucide-calendar-clock' : 'i-lucide-message-circle',
@@ -140,13 +141,6 @@ async function threadRecords(db: DbClient, organization: DashboardOrganizationRo
   return threads
 }
 
-function inWindow(at: string, zone: string, input: TodayFeedQuery, now: Date, outstanding = false): boolean {
-  if (!isValidInstant(at)) throw new Error('Today work has an invalid recorded instant')
-  const day = localDateAt(new Date(at), zone), today = localDateAt(now, zone)
-  return input.range === 'today' ? outstanding ? day <= today : day === today
-    : day > today && day >= input.from! && day <= input.to!
-}
-
 function threadCard(thread: GuestThreadListItemViewModel, input: Pick<TodayCard, 'id' | 'headline' | 'eyebrow'> & Partial<TodayCard>, organization: DashboardOrganizationRow): TodayCard {
   return card({ to: guestConversationPath(organization.slug, thread.id), priority: 'schedule',
     description: [thread.locationLabel, thread.whenLabel].filter(Boolean).join(' · '), imageUrl: thread.imageUrl, imageFit: thread.imageFit,
@@ -164,7 +158,7 @@ interface PlannedMessage {
 }
 
 /** The schedule and its outcome remain owned by the message, never by a Today task. */
-async function messageCards(db: DbClient, organization: DashboardOrganizationRow, threads: GuestThreadListItemViewModel[], input: TodayFeedQuery, zone: string, now: Date, automatic: boolean): Promise<TodayCard[]> {
+async function messageCards(db: DbClient, organization: DashboardOrganizationRow, threads: GuestThreadListItemViewModel[], input: TodayFeedQuery, zone: string, automatic: boolean): Promise<TodayCard[]> {
   const byId = new Map(threads.map(thread => [thread.id, thread]))
   const rows = await queryAll<PlannedMessage>(db, `SELECT * FROM (
     SELECT m.id,m.request_id,NULL AS stay_id,NULL AS product_id,NULL AS location_id,NULL AS assigned_member_id,
@@ -199,20 +193,16 @@ async function messageCards(db: DbClient, organization: DashboardOrganizationRow
     if (sent && (!isValidInstant(row.sent_at) || !row.entry_id)) throw new Error(`Sent message ${row.id} has no completion record`)
     const unconfirmed = sent && row.entry_channel !== 'web' && !deliveries.some(receipt => receipt.provider !== 'log_only' && isDeliverySent(receipt))
     const failed = row.status === 'failed' || row.status === 'needs_review' || Boolean(deliveryFailure) || unconfirmed
-    if (row.automatic && !failed && input.range === 'today') return []
+    // Pending sends are already automation-owned; only a failed result creates human work.
+    if (!failed || input.range !== 'today') return []
     const failureReason = row.reason ?? deliveryFailure?.error ?? (unconfirmed ? 'No successful delivery is recorded for this message.' : null)
     if (!row.automatic && row.user_id !== organization.userId && !sent) return []
-    if (sent && !failed) return []
-    if (failed) {
-      if (input.range !== 'today') return []
-      if (!failureReason) throw new Error(`Failed message ${row.id} has no recorded reason`)
-    } else if (!row.due_at || !inWindow(row.due_at, timeZone, input, now, true)) return []
+    if (!failureReason) throw new Error(`Failed message ${row.id} has no recorded reason`)
     const automaticLabel = row.automatic ? 'Automatic' : row.user_id === organization.userId ? 'Scheduled by you' : 'Scheduled reply'
-    const status = failed ? row.status === 'needs_review' || sent ? 'Delivery needs attention' : 'Message failed' : row.status === 'sending' ? 'Sending' : 'Scheduled'
-    const values = { id: `${row.automatic ? 'automatic-message' : 'send-later'}:${row.id}`, priority: failed ? 'attention' as const : 'schedule' as const,
+    const status = row.status === 'needs_review' || sent ? 'Delivery needs attention' : 'Message failed'
+    const values = { id: `${row.automatic ? 'automatic-message' : 'send-later'}:${row.id}`, priority: 'attention' as const,
       eyebrow: `${status} · ${automaticLabel}`, headline: `${row.title}${name ? ` for ${name}` : ''}`,
-      reason: failed ? failureReason : `${automaticLabel}${row.due_at ? ` · ${formatTimestamp(row.due_at, 'en', timeZone, { dateStyle: 'medium', timeStyle: 'short' })}` : ''}`,
-      actionAt: failed ? null : row.due_at, timeZone,
+      reason: failureReason, actionAt: null, timeZone,
       ...(row.automatic ? { stayId: row.stay_id, productId: row.product_id } : {}),
     }
     return [thread ? threadCard(thread, values, organization) : card({ ...values,
@@ -263,17 +253,16 @@ async function reviewCards(db: DbClient, organization: DashboardOrganizationRow,
     const context = await getReviewBookingContext(db, thread.submissionType as ReviewBookingType, thread.id)
     if (!context || Date.parse(context.completed_at) > now.getTime()) continue
     const due = new Date(Date.parse(context.completed_at) + 24 * 3_600_000).toISOString()
-    // The visit has already ended. Its canonical 24-hour delay can be shown before dispatch is due.
+    // Only an eligible failed dispatch is owner work; healthy dispatch stays with its scheduler.
     if (!reviewInvitationDue(context, new Date(Math.max(now.getTime(), Date.parse(due)))) || !context.guest_email || !context.organization_public_url || !context.user_id
       || !await wantsNotification(db, context.user_id, 'review_requests', 'email')) continue
     const failure = failures.find(row => row.booking_id === thread.id)?.last_error
-    if (!failure && input.range === 'today') continue
-    if (failure ? input.range !== 'today' : !inWindow(due, context.visit_timezone, input, now, true)) continue
-    result.push(threadCard(thread, { id: `review-invitation:${thread.id}`, priority: failure ? 'attention' : 'schedule',
-      eyebrow: failure ? 'Review invitation needs attention' : due > now.toISOString() ? 'Automatic review invitation scheduled' : 'Automatic review invitation pending',
+    if (!failure || input.range !== 'today') continue
+    result.push(threadCard(thread, { id: `review-invitation:${thread.id}`, priority: 'attention',
+      eyebrow: 'Review invitation needs attention',
       headline: `Review invitation for ${thread.guestName ?? thread.participantLabel}`,
-      reason: failure ?? `Automatic · due ${formatTimestamp(due, 'en', context.visit_timezone, { dateStyle: 'medium', timeStyle: 'short' })}`,
-      actionAt: failure ? null : due, timeZone: context.visit_timezone }, organization))
+      reason: failure,
+      actionAt: null, timeZone: context.visit_timezone }, organization))
   }
   return result
 }
@@ -313,11 +302,6 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
   const zone = (await queryFirst<{ timezone: string }>(db, 'SELECT timezone FROM organization WHERE id = ?', [organization.id]))?.timezone
   if (!zone) throw new Error(`Organization ${organization.id} has no timezone`)
   const today = localDateAt(now, zone)
-  const schedule = agenda.items.filter(item => (!input.locationId || item.locationId === input.locationId)
-    && (!input.assignedMemberId || item.assignedMemberId === input.assignedMemberId)
-    && (!input.kinds?.length || item.kind !== 'post' && input.kinds.includes(item.kind))
-    && (input.range === 'today' || item.dayKey > localDateAt(now, item.timeZone)))
-  const scheduleCards = schedule.map(item => agendaToTodayCard(item, { resolvedAt, vertical: organization.vertical, assigned: !organizationWide }))
   const availableKinds = agenda.availableKinds.filter((kind): kind is 'reservation' | 'booking' | 'stay' => kind === 'reservation' || kind === 'booking' || kind === 'stay')
   const locations = agenda.locations
 
@@ -330,7 +314,7 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
   const unanswered = await firstUnansweredGuestEntryTimes(db, organization.id, records.map(thread => thread.id))
   const threads = records.map(thread => threadWork(thread, unanswered.get(thread.id), organization, zone, now)).filter((work): work is Work => work !== null)
   const [messages, reviews, deliveryFailures] = await Promise.all([
-    messageCards(db, organization, records, input, zone, now, organizationWide && await roleAllows({ ...organization, permissions: { operations: ['update'] } })),
+    messageCards(db, organization, records, input, zone, organizationWide && await roleAllows({ ...organization, permissions: { operations: ['update'] } })),
     organizationWide && await roleAllows({ ...organization, permissions: { operations: ['update'] } }) ? reviewCards(db, organization, records, input, now, env) : [],
     input.range === 'today' ? deliveryAttentionCards(db, organization, records, unanswered) : [],
   ])
@@ -377,11 +361,14 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
     if (!ownerScope || !(current?.decision === 'accept' || elapsed)) continue
     optional.push({ card: shown, rank: [current?.decision === 'accept' ? 1 : 0, elapsed ? 1 : 0, 0, Date.parse(work.recency)] })
   }
+  const recommendationPictures = await loadOwnerPictures(db, organization.id, 'content_document', (plan?.recommendations ?? []).filter(item => item.operation === 'article.publish' || item.operation === 'post.publish').map(item => item.subjectId), { organizationFallback: false })
   for (const [index, recommendation] of (plan?.recommendations ?? []).entries()) {
     const { operation, subjectId, goal, feedback, reference } = recommendation
     const current = feedback?.applicability.current ? feedback : null
-    const shown = card({ id: `recommendation:${operation}:${subjectId}`, to: recommendation.to, priority: 'opportunity',
-      eyebrow: '', headline: recommendation.headline,
+    const existingWork = operation === 'article.publish' || operation === 'post.publish' || operation === 'stay.gap'
+    const presentation: TodayCard['presentation'] = { type: existingWork ? goal && operation !== 'stay.gap' ? 'detailed' : 'compact' : 'opportunity' }
+    const shown = card({ presentation, id: `recommendation:${operation}:${subjectId}`, to: recommendation.to, priority: 'opportunity',
+      eyebrow: goal?.intent ?? '', headline: recommendation.headline, imageUrl: recommendationPictures.get(subjectId)?.imageUrl ?? null,
       reason: [feedback && !current ? resurfacedBecause(feedback, { operation, subjectId }, zone) : null, recommendation.reason].filter(Boolean).join(' '), imageIcon: recommendation.icon,
       locationId: recommendation.locationId, productId: recommendation.productId,
       decision: { operation, subjectId, evidenceRevision: reference.evidenceRevision, goalId: goal?.id ?? null, goalRevision: goal?.revision ?? null,
@@ -398,18 +385,17 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
   const priorities = inputs ? goals.map(goal => ({ id: goal.id, intent: goal.intent, constraints: goal.constraints, targetAt: goal.targetAt, strategy: goal.strategy, revision: goal.revision })) : null
   if (input.range === 'upcoming') {
     const when = (item: TodayCard) => item.actionAt ?? item.occurrenceAt ?? ''
-    return todayFeedSchema.parse({ cards: [...scheduleCards, ...messages, ...reviews, ...planned].sort((a, b) => when(a).localeCompare(when(b)) || a.id.localeCompare(b.id)), availableKinds, locations, resolvedAt, priorities, recommendationIssues })
+    return todayFeedSchema.parse({ cards: planned.sort((a, b) => when(a).localeCompare(when(b)) || a.id.localeCompare(b.id)), availableKinds, locations, resolvedAt, priorities, recommendationIssues })
   }
-  const handledRequests = new Set(due.map(item => item.id.slice(item.id.indexOf(':') + 1)))
   const byRank = (a: typeof optional[number], b: typeof optional[number]) => {
     const index = a.rank.findIndex((value, position) => value !== b.rank[position])
     return index === -1 ? a.card.id.localeCompare(b.card.id) : b.rank[index]! - a.rank[index]!
   }
   const chosen = optional.sort(byRank).slice(0, OPTIONAL_LIMIT).map(item => item.card)
   const deliveryFailureIds = new Set(deliveryFailures.map(item => item.id))
-  const cards = [...due.filter(item => !deliveryFailureIds.has(item.id)), ...deliveryFailures, ...failures, ...messages, ...reviews.filter(item => !deliveryFailureIds.has(item.id)), ...scheduleCards.filter(item => !handledRequests.has(item.id.slice(item.id.indexOf(':') + 1))), ...planned.sort((a, b) => a.actionAt!.localeCompare(b.actionAt!)), ...chosen]
+  const cards = [...due.filter(item => !deliveryFailureIds.has(item.id)), ...deliveryFailures, ...failures, ...messages, ...reviews.filter(item => !deliveryFailureIds.has(item.id)), ...planned.sort((a, b) => a.actionAt!.localeCompare(b.actionAt!)), ...chosen]
   const rank = (item: TodayCard) => item.priority === 'attention' ? 0 : item.priority === 'opportunity' ? 2
-    : item.bookingKind === 'stay' && item.occurrenceAt === null && item.actionAt === null ? 3 : 1
+    : 1
   cards.sort((a, b) => rank(a) - rank(b))
   return todayFeedSchema.parse({ cards, availableKinds, locations, resolvedAt, priorities, recommendationIssues })
 }

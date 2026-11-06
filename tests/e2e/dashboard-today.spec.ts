@@ -13,7 +13,7 @@ import { formatTimestamp, localDateAt, localNow } from '../../utils/timezone'
 
 const ORG = '/dashboard/ember-slice-demo'
 
-test('Upcoming removes a cancelled scheduled reply without a reload and keeps the unanswered inquiry', async ({ page, request, baseURL }, testInfo) => {
+test('automation remains in Inbox while Today keeps the unanswered inquiry', async ({ page, request, baseURL }, testInfo) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Scheduled replies use disposable local data only')
   const organizationId = seededTenant('restaurant').organizationId
@@ -56,14 +56,14 @@ test('Upcoming removes a cancelled scheduled reply without a reload and keeps th
       from: new Date(Date.parse(sendAt) - 86_400_000).toISOString().slice(0, 10), to: new Date(Date.parse(sendAt) + 86_400_000).toISOString().slice(0, 10) } })
     expect(upcoming.status(), await upcoming.text()).toBe(200)
     const scheduledCard = (await upcoming.json() as TodayFeedPayload).cards.filter(card => card.actionAt === sendAt && card.to.includes(threadId))
-    expect(scheduledCard).toHaveLength(1)
-    const card = page.locator(`[data-card-id="${scheduledCard[0]!.id}"]`)
-    await expect(card).toBeVisible()
-    await expect(card).toContainText(marker)
+    expect(scheduledCard).toHaveLength(0)
+    const card = page.locator(`[data-card-id="send-later:${messageId}"]`)
     const futureCard = page.locator(`[data-card-id="send-later:${futureMessageId}"]`)
-    if (!await futureCard.isVisible()) await page.getByRole('button', { name: 'Load more', exact: true }).click()
-    await expect(futureCard).toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath('upcoming-scheduled-reply.png'), fullPage: true, animations: 'disabled' })
+    await expect(card).toHaveCount(0)
+    await expect(futureCard).toHaveCount(0)
+    const pending = await page.request.get(`/api/dashboard/organizations/${organizationId}/send-later`, { params: { threadId } })
+    expect(pending.status(), await pending.text()).toBe(200)
+    expect((await pending.json() as { messages: Array<{ id: string; status: string }> }).messages).toEqual(expect.arrayContaining([expect.objectContaining({ id: messageId, status: 'pending' })]))
     // A successful heartbeat proves the existing socket joined the authorized
     // hub before the other-window cancellation publishes its invalidation.
     await socket.waitForEvent('framereceived', { predicate: frame => frame.payload === 'pong', timeout: 30_000 })
@@ -86,7 +86,7 @@ test('Upcoming removes a cancelled scheduled reply without a reload and keeps th
     expect((await persisted.json() as { messages: Array<{ id: string }> }).messages.filter(message => message.id === messageId)).toEqual([])
     await expect(card).toHaveCount(0)
     // Live reconciliation preserves the later windows the owner already opened.
-    await expect(futureCard).toBeVisible()
+    await expect(futureCard).toHaveCount(0)
     await page.getByRole('tab', { name: 'Today', exact: true }).click()
     await expect(page.getByRole('tab', { name: 'Today', exact: true })).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByTestId('today-list').locator(`[data-card-id="attention:${threadId}"]`)).toBeVisible()
@@ -316,10 +316,8 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
       expect(upcomingResponse.status(), await upcomingResponse.text()).toBe(200)
       const feed = await upcomingResponse.json() as TodayFeedPayload
       const id = `reservation:${reservationId}`
-      if (assigned) {
-        expect(feed.cards.find(card => card.id === id)).toMatchObject({ id, to: destination, priority: 'schedule', locationId, bookingKind: 'reservation', occurrenceAt: slot.starts_at, timeZone: calendar.timezone })
-        expect(feed.locations.map(location => location.id)).toContain(locationId)
-      } else expect(feed.cards.some(card => card.id === id)).toBe(false)
+      expect(feed.cards.some(card => card.id === id)).toBe(false)
+      if (assigned) expect(feed.locations.map(location => location.id)).toContain(locationId)
       const agendaResponse = await memberRequest.get('/api/dashboard/agenda', { params: { org, from: day.date, to: day.date } })
       expect(agendaResponse.status(), await agendaResponse.text()).toBe(200)
       const agenda = await agendaResponse.json() as AgendaPayload
@@ -341,7 +339,7 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
         expect((await record.json() as { booking: DashboardBookingDetails }).booking).toMatchObject({ id: reservationId, threadId: reservationId, guestName, locationId, status: 'confirmed' })
         expect((await memberPage.goto(`${ORG}?range=upcoming`))?.status()).toBe(200)
         await waitForNuxtHydration(memberPage)
-        await expect(memberPage.locator(`[data-card-id="reservation:${reservationId}"]`)).toHaveAttribute('href', `${destination}?range=upcoming`)
+        await expect(memberPage.locator(`[data-card-id="reservation:${reservationId}"]`)).toHaveCount(0)
         await memberPage.getByRole('tab', { name: 'Today', exact: true }).click()
         await expect(memberPage.getByRole('tab', { name: 'Today', exact: true })).toHaveAttribute('aria-selected', 'true')
         await expect(memberPage.locator(`[data-card-id="reservation:${reservationId}"]`)).toHaveCount(0)
@@ -471,14 +469,31 @@ test('continuous recommendations follow explicit strategy, feedback and actual p
     const beforeGoal = await readToday()
     const suggestion = beforeGoal.cards.find(card => card.decision?.operation === 'article.publish' && card.decision.subjectId === postId)
     expect(suggestion, 'A real draft is useful marketing before the owner saves a matching-text priority').toBeDefined()
+    expect(suggestion!.presentation.type).toBe('compact')
     const card = page.locator(`[data-card-id="${suggestion!.id}"]`)
     const socketOpened = page.waitForEvent('websocket', { predicate: socket => new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket' })
     expect((await page.goto(ORG))?.status()).toBe(200)
     await socketOpened
     await waitForNuxtHydration(page)
     await expect(card).toBeVisible()
+    // The actual rendered list remains one column at desktop and mobile sizes.
+    for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport)
+      const cards = page.getByTestId('today-list').getByTestId('today-card')
+      const count = await cards.count()
+      expect(count).toBeGreaterThan(1)
+      const boxes = await Promise.all(Array.from({ length: count }, (_, index) => cards.nth(index).boundingBox()))
+      for (let index = 1; index < boxes.length; index++) {
+        expect(boxes[index]!.x).toBeCloseTo(boxes[0]!.x, 0)
+        expect(boxes[index]!.width).toBeCloseTo(boxes[0]!.width, 0)
+        expect(boxes[index]!.y).toBeGreaterThanOrEqual(boxes[index - 1]!.y + boxes[index - 1]!.height)
+      }
+      await page.screenshot({ path: testInfo.outputPath(`single-column-${viewport.width}.png`), fullPage: true, animations: 'disabled' })
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 })
     const priorities = page.getByTestId('today-priorities')
     await expect(priorities).toBeVisible()
+    await priorities.getByText('Business goals', { exact: true }).click()
 
     // The owner chooses channels explicitly; unrelated intent wording is not a relevance algorithm.
     const goalSaved = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/organizations/${organizationId}/goals`)
@@ -496,9 +511,16 @@ test('continuous recommendations follow explicit strategy, feedback and actual p
     await expect(priorities.getByTestId('today-priority')).toContainText([intent])
     await expect(card).toHaveAttribute('href', `${ORG}/website/blog/${postId}`)
     const item = card.locator('xpath=..')
-    await expect(item.getByTestId('today-card-reason')).toContainText(intent)
+    await expect(card).toHaveAttribute('data-card-presentation', 'detailed')
+    await expect(card.locator('.quest-card__art .iconify')).toBeVisible()
+    expect(await card.locator('.quest-card__art .iconify').evaluate(element => getComputedStyle(element).maskImage)).not.toBe('none')
+    await item.getByRole('button', { name: `Options for ${suggestion!.headline}`, exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Why this recommendation', exact: true }).click()
+    await expect(page.getByTestId('today-card-reason')).toContainText(intent)
+    await page.getByRole('dialog', { name: 'About this recommendation', exact: true }).getByRole('button', { name: 'Close', exact: true }).click()
 
-    await item.getByRole('button', { name: 'Later', exact: true }).click()
+    await item.getByRole('button', { name: `Options for ${suggestion!.headline}`, exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Later', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Come back to this later', exact: true })
     await expect(dialog).toBeVisible()
     const future = localNow(Intl.DateTimeFormat().resolvedOptions().timeZone, new Date(Date.now() + 2 * 86_400_000))
@@ -521,7 +543,8 @@ test('continuous recommendations follow explicit strategy, feedback and actual p
     expect(plannedFeed.status(), await plannedFeed.text()).toBe(200)
     expect((await plannedFeed.json() as TodayFeedPayload).cards.find(value => value.id === suggestion!.id)).toMatchObject({ priority: 'schedule', actionAt: deferUntil })
     const dismissed = page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname.endsWith('/recommendation-feedback'))
-    await card.locator('xpath=..').getByRole('button', { name: 'Dismiss', exact: true }).click()
+    await item.getByRole('button', { name: `Options for ${suggestion!.headline}`, exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Dismiss', exact: true }).click()
     expect((await dismissed).status()).toBe(200)
     await expect(card).toHaveCount(0)
     await page.getByRole('tab', { name: 'Today', exact: true }).click()
@@ -543,9 +566,25 @@ test('continuous recommendations follow explicit strategy, feedback and actual p
     const editedArticle = (await edited.json() as { post: { updated_at: string } }).post
     await editedEvent
     await expect(card).toBeVisible()
-    await expect(card.locator('xpath=..').getByTestId('today-card-reason')).toContainText('dismissed')
+    await item.getByRole('button', { name: `Options for ${suggestion!.headline}`, exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Why this recommendation', exact: true }).click()
+    await expect(page.getByTestId('today-card-reason')).toContainText('dismissed')
+    await page.getByRole('dialog', { name: 'About this recommendation', exact: true }).getByRole('button', { name: 'Close', exact: true }).click()
     await card.scrollIntoViewIfNeeded()
     await page.screenshot({ path: testInfo.outputPath('continuous-growth-before-publication.png'), fullPage: true, animations: 'disabled' })
+
+    // Complete it from another surface while its deferred card is open in Upcoming.
+    await item.getByRole('button', { name: `Options for ${suggestion!.headline}`, exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Later', exact: true }).click()
+    await dialog.locator('input[type="datetime-local"]').fill(`${future.date}T${future.time}`)
+    const plannedAgain = page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname.endsWith('/recommendation-feedback'))
+    await dialog.getByRole('button', { name: 'Set aside', exact: true }).click()
+    expect((await plannedAgain).status()).toBe(200)
+    await expect(card).toHaveCount(0)
+    await page.getByRole('tab', { name: 'Upcoming', exact: true }).click()
+    await expect(card).toBeVisible()
+    await card.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath('upcoming-before-publication.png'), fullPage: true, animations: 'disabled' })
 
     const publishedEvent = businessChange(currentSocket)
     const published = await page.request.post(`${editor}/${postId}/publish`, { data: { expected_updated_at: editedArticle.updated_at } })
@@ -559,8 +598,10 @@ test('continuous recommendations follow explicit strategy, feedback and actual p
     expect(after.cards.some(value => value.decision?.operation === 'article.publish' && value.decision.subjectId === postId)).toBe(false)
     const next = after.cards.find(value => value.decision && ['article.create', 'article.distribute', 'post.create', 'social.connect'].includes(value.decision.operation))
     expect(next, 'Publication makes the next useful growth action available in the same session').toBeDefined()
+    await page.getByRole('tab', { name: 'Today', exact: true }).click()
     const nextCard = page.locator(`[data-card-id="${next!.id}"]`)
     await expect(nextCard).toBeVisible()
+    await expect(nextCard).toHaveAttribute('data-card-presentation', 'opportunity')
     await nextCard.scrollIntoViewIfNeeded()
     await page.screenshot({ path: testInfo.outputPath('continuous-growth-after-publication.png'), fullPage: true, animations: 'disabled' })
   } finally {

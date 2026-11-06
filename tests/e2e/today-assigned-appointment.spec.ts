@@ -17,7 +17,7 @@ async function body<T>(response: APIResponse, status: number): Promise<T> {
   return response.json() as Promise<T>
 }
 
-test('an assigned staff member can review a future online consultation from Today and find it in Upcoming', async ({ page, browser, request, baseURL }, testInfo) => {
+test('an assigned staff member reviews a consultation from Today while Calendar retains its occurrence', async ({ page, browser, request, baseURL }, testInfo) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Provider hours and roles use disposable local data only')
   const ORGANIZATION = seededTenant('legal').organizationId
@@ -89,9 +89,9 @@ test('an assigned staff member can review a future online consultation from Toda
     expect(today.cards.find(card => card.id === `attention:${requestId}`)).toMatchObject({ priority: 'attention', to: bookingPath, assignedMemberId: actor.id, occurrenceAt: session.starts_at, bookingKind: 'booking' })
     expect(today.cards.every(card => card.assignedMemberId === actor.id && card.bookingKind === 'booking' && (card.priority === 'attention' || card.priority === 'schedule'))).toBe(true)
     const upcoming = await body<TodayFeedPayload>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG, range: 'upcoming', from: day, to: day } }), 200)
-    expect(upcoming.cards.find(card => card.id === `booking:${requestId}`)).toMatchObject({ priority: 'schedule', to: bookingPath, assignedMemberId: actor.id,
-      headline: `Consultation with ${guestFirstName} in 2 days`, description: `${product.name} · Online`, occurrenceAt: session.starts_at, timeZone: 'UTC' })
-    expect(upcoming.cards.every(card => card.assignedMemberId === actor.id && card.priority === 'schedule')).toBe(true)
+    expect(upcoming.cards.some(card => card.id === `booking:${requestId}`)).toBe(false)
+    const agenda = await body<{ items: Array<{ id: string; requestId: string; startsAt: string; to: string }> }>(await memberContext.request.get('/api/dashboard/agenda', { params: { org: SLUG, from: day, to: day } }), 200)
+    expect(agenda.items.find(item => item.requestId === requestId)).toMatchObject({ id: `booking:${requestId}`, startsAt: session.starts_at, to: bookingPath })
 
     const memberPage = await memberContext.newPage()
     await dismissPreviewToolbar(memberPage)
@@ -135,12 +135,11 @@ test('an assigned staff member can review a future online consultation from Toda
     expect((await memberPage.goto(new URL(`${DASHBOARD}?range=upcoming`, baseURL!).toString()))?.status()).toBe(200)
     await waitForNuxtHydration(memberPage)
     const appointment = memberPage.locator(`[data-card-id="booking:${requestId}"]`)
-    await expect(appointment).toHaveAttribute('href', `${bookingPath}?range=upcoming`)
-    await expect(appointment).toContainText(`Consultation with ${guestFirstName} in 2 days`)
-    await expect(appointment.getByText(`${product.name} · Online`, { exact: true })).toBeVisible()
+    await expect(appointment).toHaveCount(0)
     await memberPage.getByRole('tab', { name: 'Today', exact: true }).click()
     const attention = memberPage.locator(`[data-card-id="attention:${requestId}"]`)
     await expect(attention).toHaveAttribute('href', bookingPath)
+    await expect(attention).toHaveAttribute('data-card-presentation', 'detailed')
     await attention.click()
     await expect(memberPage).toHaveURL(new URL(bookingPath, baseURL!).toString())
     const detail = memberPage.locator('#dashboard-panel-booking-details')

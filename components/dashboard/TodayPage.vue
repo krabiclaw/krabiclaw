@@ -10,14 +10,9 @@
     </template>
 
     <div>
-      <DashboardFilterPills
-        id="today-range"
-        v-model="rangeModel"
-        label="Agenda view"
-        :items="ranges"
-        role="tablist"
-        class="mb-8"
-      />
+      <div class="quest-tabs mb-8 flex justify-center gap-3 py-6" role="tablist" aria-label="Work view">
+        <button v-for="range in ranges" :key="range.value" type="button" role="tab" :aria-selected="rangeModel === range.value" :tabindex="rangeModel === range.value ? 0 : -1" :data-testid="`today-range-${range.value}`" class="quest-tab" @click="rangeModel = range.value" @keydown="onRangeKeydown($event)">{{ range.label }}</button>
+      </div>
 
       <UAlert
         v-if="activeError"
@@ -35,7 +30,7 @@
       <UAlert v-if="decisionError" class="mb-6" color="error" variant="soft" title="Your choice was not saved" :description="getErrorMessage(decisionError, 'The request failed')" />
       <UAlert v-if="todayData?.recommendationIssues.length && !activeError" class="mb-6" color="warning" variant="soft" title="Some performance data could not be loaded" :description="todayData.recommendationIssues.join(' ')" />
 
-      <ul v-if="visibleItems.length && !activeError" class="space-y-4" role="list" data-testid="today-list">
+      <ul v-if="visibleItems.length && !activeError" class="mx-auto w-full max-w-3xl space-y-4" role="list" data-testid="today-list">
         <li v-for="item in visibleItems" :key="item.id">
           <TodayAgendaCard :item="item" :surface="activeRange" :on-decide="decide" />
         </li>
@@ -43,7 +38,8 @@
 
       <p v-if="!visibleItems.length && !activeLoading && !activeError && !hasMore" class="text-sm text-muted">{{ emptyTitle }}</p>
 
-      <div v-if="!personalScope && activeRange === 'today' && !activeError && priorities" class="mt-8" role="group" aria-label="Your priority" data-testid="today-priorities">
+      <details v-if="!personalScope && activeRange === 'today' && !activeError && priorities" class="mx-auto mt-8 w-full max-w-3xl" role="group" aria-label="Your priority" data-testid="today-priorities">
+        <summary class="cursor-pointer text-sm font-medium">Business goals</summary>
         <ul v-if="priorities.length" class="mb-4 space-y-2">
           <li v-for="goal in priorities" :key="goal.id" class="flex items-start justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2" data-testid="today-priority">
             <div class="min-w-0 text-sm">
@@ -67,7 +63,7 @@
             </div>
           </details>
         </form>
-      </div>
+      </details>
 
       <div
         v-if="(hasMore || activeLoading) && !activeError"
@@ -150,6 +146,16 @@ const rangeModel = computed<string>({
     }
   },
 })
+function onRangeKeydown(event: KeyboardEvent) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const index = event.key === 'Home' ? 0 : event.key === 'End' ? ranges.length - 1
+    : (ranges.findIndex(range => range.value === rangeModel.value) + (event.key === 'ArrowRight' ? 1 : -1) + ranges.length) % ranges.length
+  rangeModel.value = ranges[index]!.value
+  const tabs = (event.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+  tabs?.[index]?.focus()
+}
+
 const todayVisibleCount = ref(PAGE_SIZE)
 const upcomingItems = ref<TodayCard[]>([])
 const upcomingLoading = ref(false)
@@ -429,3 +435,9 @@ onBeforeUnmount(() => {
   loadMoreObserver?.disconnect()
 })
 </script>
+
+<style scoped>
+.quest-tab { height: 48px; padding: 14px 24px; border-radius: 9999px; font-size: 16px; line-height: 20px; font-weight: 500; background: rgb(240 240 240 / 86%); color: #000; }
+.quest-tab[aria-selected="true"] { background: rgb(32 32 32 / 86%); color: #fff; box-shadow: 0 4px 16px rgb(0 0 0 / 9%), 0 2px 8px rgb(0 0 0 / 6%); }
+.quest-tab:focus-visible { outline: 2px solid var(--ui-text-highlighted); outline-offset: 4px; }
+</style>

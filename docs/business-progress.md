@@ -32,7 +32,7 @@ conversation. Audit entries preserve edits to goals and feedback.
 Article activity is recorded by ordinary CMS/MCP writes; reply evidence comes
 from the existing conversation activity and delivery receipts. Goals and feedback
 are collected only through explicit submissions to their APIs: Today's priority
-form creates and archives goals, and its card controls save feedback against
+disclosure creates and archives goals, and each card's options menu saves feedback against
 the evidence revision and goal revision the card was selected with. No
 recommendation impression, exposure, usefulness, effort saved or achieved
 business goal is established by these records.

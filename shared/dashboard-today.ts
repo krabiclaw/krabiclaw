@@ -20,6 +20,7 @@ export type TodayPriority = Pick<BusinessGoal, 'id' | 'intent' | 'constraints' |
 export type TodayDecisionInput = Pick<RecommendationFeedback, 'decision' | 'note' | 'deferUntil'>
 
 export const todayCardSchema = z.object({
+  presentation: z.object({ type: z.enum(['detailed', 'compact', 'minimal', 'opportunity']) }),
   id: z.string(), to: z.string(), eyebrow: z.string(), headline: z.string(), description: z.string().nullable(),
   imageUrl: z.string().nullable(), imageFit: z.enum(['cover', 'contain']), imageIcon: z.string(), badgeImageUrl: z.string().nullable(), badgeIcon: z.string().nullable(),
   locationId: z.string().nullable(), assignedMemberId: z.string().nullable(),
@@ -55,7 +56,7 @@ export interface TodayFeedPayload {
   recommendationIssues: string[]
 }
 
-/** One projection for business and personal Today, including future agenda windows. */
+/** Personal-account agenda projection; the business feed selects actionable work on the server. */
 export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string; personal?: boolean; vertical?: string | null; assigned?: boolean }): TodayCard {
   if (item.kind !== 'reservation' && item.kind !== 'booking' && item.kind !== 'stay') throw new Error('Today cards require a booking, reservation or stay')
   const referenceDay = localDateAt(new Date(input.resolvedAt), item.timeZone)
@@ -75,6 +76,7 @@ export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string;
     : input.assigned || presentation?.noun === 'consultation' ? `${presentation!.label} with ${firstName} ${when}`
       : `${firstName} arrives ${when}${guests ? ` · ${guests}` : ''}`
   return {
+    presentation: { type: 'compact' },
     id: item.id, to: input.personal ? item.to.replace(/^\/dashboard\/account\/activity\//, '/dashboard/account/bookings/') : item.to,
     eyebrow: item.stayMoment === 'current' ? 'Currently hosting' : formatTimestamp(item.startsAt, 'en', item.timeZone, { hour: 'numeric', minute: '2-digit' }), headline,
     description: input.personal ? [...new Set([item.subtitle, item.locationTitle].filter((part): part is string => !!part && part !== item.title))].join(' · ')

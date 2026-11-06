@@ -123,6 +123,7 @@ test('Today continuously selects useful growth and customer work, preserves feed
 
     const cold = await today()
     assert.deepEqual(cold.priorities, [])
+    assert.equal(cold.cards.find(card => card.decision?.operation === 'article.create')?.presentation.type, 'opportunity')
     assert.ok(cold.cards.some(card => card.decision?.operation === 'article.create' && card.decision.subjectId === ORG), 'a business can start useful marketing without a saved goal or prior content')
     const { goal: paymentFocus } = await call<{ goal: { id: string; revision: string } }>('POST', `/api/organizations/${ORG}/goals`, {
       idempotencyKey: 'payment-focus', intent: 'Accept payment for direct bookings', strategy: { channels: [], payments: true },
@@ -156,6 +157,8 @@ test('Today continuously selects useful growth and customer work, preserves feed
     let feed = await today()
     assert.deepEqual(feed.priorities, [])
     assert.ok(ids(feed).includes('attention:recent-inquiry'))
+    assert.equal(find(feed, 'attention:recent-inquiry')?.presentation.type, 'minimal')
+    assert.equal(feed.cards.find(card => card.decision?.operation === 'article.publish' && card.decision.subjectId === sourdough.id)?.presentation.type, 'compact')
     assert.equal(find(feed, `attention:${stayThread}`)?.priority, 'attention', 'age alone does not hide a message about a live stay')
     assert.equal(find(feed, 'attention:promotional-inquiry'), undefined, 'promotional outreach is not a waiting customer obligation')
     assert.equal(find(feed, 'attention:old-inquiry'), undefined, 'a request for tomorrow from twenty days ago does not establish a current obligation')
@@ -172,6 +175,7 @@ test('Today continuously selects useful growth and customer work, preserves feed
     assert.deepEqual(feed.priorities?.[0]?.strategy, { channels: ['blog'] })
     const selectedDraft = feed.cards.find(card => card.decision?.operation === 'article.publish' && card.decision.subjectId === sourdough.id)
     assert.ok(selectedDraft)
+    assert.equal(selectedDraft.presentation.type, 'detailed')
     assert.equal(selectedDraft.decision!.goalId, breakfastGoal.id, 'the chosen channel binds the actual work to the owner strategy without a shared-word score')
     assert.equal(selectedDraft.decision!.goalRevision, breakfastGoal.revision)
 
@@ -215,7 +219,7 @@ test('Today continuously selects useful growth and customer work, preserves feed
     assert.match(planned.eyebrow, /^Planned for /)
     assert.match(planned.reason!, /You set this aside until .* Your note: “Waiting for the owner to confirm the pet policy\.”$/)
     const arrival = `stay:${stay.id}:arrival`
-    assert.ok(ids(upcoming).indexOf('attention:recent-inquiry') < ids(upcoming).indexOf(arrival), 'the planned action precedes the stay it prepares for')
+    assert.equal(ids(upcoming).includes(arrival), false, 'Calendar owns passive stay occurrences; Upcoming owns planned actions')
     assert.equal((await getGuestThreadDetail(db, 'recent-inquiry', ORG))!.entries.length, historyBefore, 'a decision never edits conversation history')
 
     // Completing the work through its own operation removes it on the next read.
@@ -259,6 +263,11 @@ test('Today continuously selects useful growth and customer work, preserves feed
     assert.equal(feed.cards.some(card => card.id === `attention:${stayThread}`), false)
     assert.deepEqual(await db.prepare('SELECT status,error FROM guest_thread_deliveries WHERE id=?').bind(receipt.id).first(), { status: 'delivered', error: null })
     assert.equal(provider.sendAttempts, 1, 'the provider callback recovers the saved completion without sending another reply')
+    const deferredReply = await executeGuestThreadOperation(db, { threadId: 'recent-inquiry', organizationId: ORG, action: 'reply', body: 'Yes, your dog is welcome.', actorUserId: OWNER, idempotencyKey: 'deferred-reply', env: { ...env, ...provider.configuration } })
+    assert.equal(deferredReply.ok, true, JSON.stringify(deferredReply))
+    assert.equal((await getGuestThreadDetail(db, 'recent-inquiry', ORG))!.entries.at(-1)!.body, 'Yes, your dog is welcome.')
+    assert.equal((await today('upcoming', { from: localDateAt(new Date(now + DAY), ZONE), to: localDateAt(new Date(now + 20 * DAY), ZONE) })).cards.some(card => card.id === 'attention:recent-inquiry'), false, 'A real reply clears deferred work from Upcoming too')
+
   } finally {
     await runtime.dispose()
   }
@@ -281,21 +290,20 @@ test('Today reads actual scheduled work and review outcomes: cancellation and su
     assert.ok(planned)
     let feed = await read('upcoming')
     const automatic = feed.cards.find(card => card.id === `automatic-message:${planned.id}`)
-    assert.ok(automatic)
-    assert.equal(automatic.actionAt, planned.due_at)
-    assert.match(automatic.reason!, /^Automatic · /)
+    assert.equal(automatic, undefined, 'Healthy scheduled work remains automation-owned')
+    assert.equal(planned.status, 'pending')
     await cancelScheduledGuestMessage(db, env, access, planned.id)
     assert.equal(await db.prepare('SELECT status FROM scheduled_guest_messages WHERE id=?').bind(planned.id).first('status'), 'cancelled')
-    assert.equal((await read('upcoming')).cards.some(card => card.id === automatic.id), false)
+    assert.equal((await read('upcoming')).cards.some(card => card.id === `automatic-message:${planned.id}`), false)
 
     const abandoned = await createSendLaterMessage(db, principal, stay.request_id!, { body: 'An unnecessary follow-up.', sendAt: new Date(now + DAY).toISOString() })
-    assert.equal((await read('upcoming')).cards.filter(card => card.id === `send-later:${abandoned.id}`).length, 1)
+    assert.equal((await read('upcoming')).cards.filter(card => card.id === `send-later:${abandoned.id}`).length, 0)
     await cancelSendLaterMessage(db, principal, abandoned.id)
     assert.equal((await read('upcoming')).cards.some(card => card.id === `send-later:${abandoned.id}`), false)
 
     const provider = providerTransport(t), providerEnv = { ...env, ...provider.configuration }
     const later = await createSendLaterMessage(db, principal, stay.request_id!, { body: 'Your cabin is ready.', sendAt: new Date(now + 60_000).toISOString() })
-    assert.equal((await read()).cards.find(card => card.id === `send-later:${later.id}`)?.priority, 'schedule')
+    assert.equal((await read()).cards.some(card => card.id === `send-later:${later.id}`), false)
     t.mock.timers.tick(120_000)
     const sentResult = await sendDueSendLaterMessages(db, providerEnv)
     assert.deepEqual(sentResult, { sent: 1, failed: 0, needs_review: 0 }, JSON.stringify(await db.prepare('SELECT status,reason,error_code FROM send_later_messages WHERE id=?').bind(later.id).first()))
@@ -362,7 +370,7 @@ test('Today reads actual scheduled work and review outcomes: cancellation and su
     const reservationId = String(reservation.body.request_id)
     assert.equal(await db.prepare('SELECT status FROM reservations WHERE request_id=?').bind(reservationId).first('status'), 'confirmed')
     assert.equal((await read()).cards.some(card => card.id.endsWith(`:${reservationId}`)), false, 'a confirmed future reservation is not work due today')
-    assert.equal((await read('upcoming')).cards.find(card => card.id === `reservation:${reservationId}`)?.priority, 'schedule')
+    assert.equal((await read('upcoming')).cards.some(card => card.id === `reservation:${reservationId}`), false)
     const ended = await createStay(db, env, access, { product_id: homeId, idempotency_key: 'ended-stay', check_in_date: localDateAt(new Date(now - 5 * DAY), ZONE),
       check_out_date: localDateAt(new Date(now - 2 * DAY), ZONE), adults: 1, guest_name: 'Rhea', guest_email: 'rhea@provider-proof.com', total_minor: 45_000 })
     const guest = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
@@ -373,16 +381,15 @@ test('Today reads actual scheduled work and review outcomes: cancellation and su
     const freshInvite = await createGuestThreadInvite(db, env, { organizationId: ORG, threadId: justEnded.request_id!, actorUserId: OWNER })
     await claimGuestThreadInvite(db, { token: new URL(freshInvite.url).pathname.split('/').at(-1)!, userId: guest.response!.user.id })
     const futureReview = (await read('upcoming')).cards.find(card => card.id === `review-invitation:${justEnded.request_id}`)
-    assert.ok(futureReview)
-    assert.equal(futureReview.priority, 'schedule')
-    assert.equal(localDateAt(new Date(futureReview.actionAt!), ZONE), localDateAt(new Date(now + DAY), ZONE))
-    assert.equal((await read()).cards.some(card => card.id === futureReview.id), false)
+    assert.equal(futureReview, undefined, 'Healthy review dispatch stays in the scheduler')
     const dueReviewId = `review-invitation:${ended.request_id}`
     assert.equal((await read()).cards.some(card => card.id === dueReviewId), false, 'healthy automatic work runs in the background without an owner action card')
     const ordered = (await read()).cards
     const firstScheduled = ordered.findIndex(card => card.priority === 'schedule')
-    assert.ok(firstScheduled > 0)
-    assert.equal(ordered.slice(firstScheduled).some(card => card.priority === 'attention'), false, 'attention cannot be pushed behind scheduled work by pagination')
+    assert.equal(firstScheduled, -1, 'Healthy background sends and booked occurrences create no owner task')
+    const firstOpportunity = ordered.findIndex(card => card.priority === 'opportunity')
+    assert.ok(firstOpportunity > 0)
+    assert.equal(ordered.slice(firstOpportunity).some(card => card.priority === 'attention'), false, 'attention cannot be pushed behind growth work by pagination')
 
     const delivered = await sendReviewRequestForBooking(providerEnv, db, 'stay', ended.request_id!)
     assert.equal(delivered.sent, true)
