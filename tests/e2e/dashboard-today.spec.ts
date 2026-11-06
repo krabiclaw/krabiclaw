@@ -48,9 +48,7 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
     expect(futureScheduled.status(), await futureScheduled.text()).toBe(201)
     futureMessageId = (await futureScheduled.json() as { message: { id: string } }).message.id
 
-    const socketOpened = page.waitForEvent('websocket', { predicate: socket => new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket' })
     expect((await page.goto(`${ORG}?range=upcoming`))?.status()).toBe(200)
-    const socket = await socketOpened
     await waitForNuxtHydration(page)
     const upcoming = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo', range: 'upcoming',
       from: new Date(Date.parse(sendAt) - 86_400_000).toISOString().slice(0, 10), to: new Date(Date.parse(sendAt) + 86_400_000).toISOString().slice(0, 10) } })
@@ -64,28 +62,19 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
     const pending = await page.request.get(`/api/dashboard/organizations/${organizationId}/send-later`, { params: { threadId } })
     expect(pending.status(), await pending.text()).toBe(200)
     expect((await pending.json() as { messages: Array<{ id: string; status: string }> }).messages).toEqual(expect.arrayContaining([expect.objectContaining({ id: messageId, status: 'pending' })]))
-    // A successful heartbeat proves the existing socket joined the authorized
-    // hub before the other-window cancellation publishes its invalidation.
-    await socket.waitForEvent('framereceived', { predicate: frame => frame.payload === 'pong', timeout: 30_000 })
-    const changed = new Promise<void>(resolve => {
-      socket.on('framereceived', frame => {
-        if (typeof frame.payload !== 'string' || frame.payload === 'pong') return
-        const event: unknown = JSON.parse(frame.payload)
-        if (isDashboardInvalidation(event) && event.type === 'thread.changed' && event.threadId === threadId) resolve()
-      })
-    })
+    // Cancellation is verified in Inbox's persisted schedule. Healthy sends no
+    // longer have a feed card or a feed invalidation to assert against here.
     const response = await page.request.post(`/api/dashboard/organizations/${organizationId}/send-later/${messageId}/cancel`)
     expect(response.status(), await response.text()).toBe(200)
     expect(await response.json()).toMatchObject({ message: { id: messageId, status: 'cancelled' } })
     cancelled = true
-    await changed
     const persisted = await page.request.get(`/api/dashboard/organizations/${organizationId}/send-later`, { params: { threadId } })
     expect(persisted.status(), await persisted.text()).toBe(200)
     // This reader deliberately lists work still scheduled or recently failed;
     // cancelled work leaves it, as it must leave Upcoming independently below.
     expect((await persisted.json() as { messages: Array<{ id: string }> }).messages.filter(message => message.id === messageId)).toEqual([])
     await expect(card).toHaveCount(0)
-    // Live reconciliation preserves the later windows the owner already opened.
+    // Other healthy background work also stays outside the quest feed.
     await expect(futureCard).toHaveCount(0)
     await page.getByRole('tab', { name: 'Today', exact: true }).click()
     await expect(page.getByRole('tab', { name: 'Today', exact: true })).toHaveAttribute('aria-selected', 'true')

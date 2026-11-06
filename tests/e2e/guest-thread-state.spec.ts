@@ -691,7 +691,7 @@ for (const viewport of [
   })
 }
 
-test('Today uses the CMS patterns and sends one reservation change request', async ({ page }, testInfo) => {
+test('Calendar retains confirmed reservations and their detail sends one change request', async ({ page }, testInfo) => {
   test.skip(!writable, 'Today writes require disposable local or preview data')
   releaseDemoLock = await acquireTenantMutationLock(testInfo, demoOrganizationId())
   await loginAs(page.request, baseURL)
@@ -775,16 +775,16 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await dismissPreviewToolbar(page)
 
   await page.goto(`${baseURL}/dashboard/${demoSlug()}`)
-  // A new confirmed reservation is a commitment, not a task: it is on today's
-  // schedule, and its whole-card link opens the exact booking's actions.
+  // Confirmed bookings are Calendar commitments, not quests for Today.
   const todayResponse = await page.request.get('/api/dashboard/today', { params: { org: demoSlug() } })
   await expectStatus(todayResponse, 200)
   const todayFeed = await todayResponse.json() as TodayFeedPayload
-  expect(todayFeed.cards.some(card => card.id === `attention:${bookingIds[0]}`)).toBe(false)
-  const reviewCard = todayFeed.cards.find(card => card.id === `reservation:${bookingIds[0]}`)
-  expect(reviewCard?.priority).toBe('schedule')
-  expect(reviewCard?.to).toBe(`/dashboard/${demoSlug()}/bookings/reservation/${bookingIds[0]}`)
-  await expect(page.getByTestId('today-list').locator(`[data-card-id="${reviewCard!.id}"]`)).toHaveAttribute('href', reviewCard!.to)
+  expect(todayFeed.cards.some(card => card.id === `attention:${bookingIds[0]}` || card.id === `reservation:${bookingIds[0]}`)).toBe(false)
+  const agendaResponse = await page.request.get('/api/dashboard/agenda', { params: { org: demoSlug(), from: localToday.date, to: localDateAt(new Date(now + 5 * 86_400_000), timezone) } })
+  await expectStatus(agendaResponse, 200)
+  const agenda = await agendaResponse.json() as { items: Array<{ id: string; to: string; startsAt: string }> }
+  const reservation = agenda.items.find(item => item.id === `reservation:${bookingIds[0]}`)
+  expect(reservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/reservation/${bookingIds[0]}`)
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Filter activity', exact: true })).toBeVisible()
@@ -795,12 +795,12 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   } })
   await expectStatus(upcomingResponse, 200)
   const upcomingFeed = await upcomingResponse.json() as TodayFeedPayload
-  const upcomingCard = upcomingFeed.cards.find(card => card.id === `reservation:${upcomingBookingId}`)
-  expect(upcomingCard?.to).toBe(`/dashboard/${demoSlug()}/bookings/reservation/${upcomingBookingId}`)
-  expect(localDateAt(new Date(upcomingCard!.occurrenceAt!), timezone) > localToday.date).toBe(true)
-  expect(upcomingFeed.cards.some(card => card.id === `reservation:${bookingIds[0]}`)).toBe(false)
+  expect(upcomingFeed.cards.some(card => bookingIds.some(id => card.id === `reservation:${id}`))).toBe(false)
+  const upcomingReservation = agenda.items.find(item => item.id === `reservation:${upcomingBookingId}`)
+  expect(upcomingReservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/reservation/${upcomingBookingId}`)
+  expect(localDateAt(new Date(upcomingReservation!.startsAt), timezone) > localToday.date).toBe(true)
 
-  await page.locator(`[data-card-id="${reviewCard!.id}"]`).click()
+  await page.goto(`${baseURL}${reservation!.to}`)
   await expect(page.getByRole('heading', { name: 'Currently hosting', exact: true })).toBeVisible()
   await expect(page.getByText(guestName, { exact: true }).first()).toBeVisible()
   await expect(page.getByText(guestEmail, { exact: true })).toHaveCount(0)
