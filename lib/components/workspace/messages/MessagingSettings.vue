@@ -41,6 +41,8 @@ const listPath = computed(() => `/dashboard/${encodeURIComponent(String(route.pa
 const links = computed(() => [
   { label: 'Automatic messages', icon: 'i-lucide-message-square-text', to: `${listPath.value}/automatic` },
   { label: 'Sent and upcoming', icon: 'i-lucide-clock', to: `${listPath.value}/scheduled` },
+  // Guests a member blocked are out of every list until unblocked, from their conversation's sheet.
+  { label: 'Blocked guests', icon: 'i-lucide-ban', to: `${listPath.value}?blocked=` },
 ])
 const dashboard = useDashboardOrganization()
 const api = useDashboardApi(useDashboardRouteScope())

@@ -16,7 +16,7 @@ import type {
 import { calendarDate, clockTime, firstName, initial, listTime, localDateKey, providerInstant, stayWhen } from './presentation'
 import { formatCalendarRange } from '~/utils/timezone'
 import { formatOperationalStatusLabel, formatThreadWhenLabel } from './status-labels'
-import { resolveGuestThreadMailbox, type GuestThreadMailbox } from './mailbox'
+import { pastByRuleSql, pastSql, type GuestThreadMailbox } from './mailbox'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 import { HTTPError } from 'nitro'
 
@@ -160,32 +160,27 @@ const OPERATIONAL_RECORD_SQL = `
   LEFT JOIN ${OPERATIONAL_RECORDS_SQL} op ON op.request_id = gt.id`
 
 /**
- * `resolveGuestThreadMailbox`, said to the database. Current is not archived
- * and not ended; Past is archived or ended. The occurrence's END decides, so a
- * reservation stays Current while it is being served, and a thread with no
- * occurrence is Current until someone archives it. A blocked guest's thread is
- * in Blocked only, and a list with no mailbox leaves it out.
+ * The mailbox filter, `resolveGuestThreadMailbox` said to the database
+ * (mailbox.ts `pastSql`) for the viewer. A blocked guest's thread is in
+ * Blocked only, and a list with no mailbox leaves it out. A guest's own inbox
+ * has no archive and reads only whether the occurrence ended.
  */
-function mailboxWhere(mailbox: GuestThreadMailbox | null, now: string, buyerAudience=false): { sql: string; params: string[] } {
+function mailboxWhere(mailbox: GuestThreadMailbox | null, now: string, viewerUserId: string, buyerAudience = false): { sql: string; params: string[] } {
   if (buyerAudience) {
     if (mailbox === null) return { sql: '', params: [] }
-    return mailbox === 'current' ? {sql:' AND (op.ends_at IS NULL OR op.ends_at >= ?)',params:[now]} : {sql:' AND op.ends_at < ?',params:[now]}
+    return mailbox === 'current' ? { sql: ' AND (op.ends_at IS NULL OR op.ends_at >= ?)', params: [now] } : { sql: ' AND op.ends_at < ?', params: [now] }
   }
   if (mailbox === 'blocked') return { sql: ' AND gt.blocked_at IS NOT NULL', params: [] }
   if (mailbox === null) return { sql: ' AND gt.blocked_at IS NULL', params: [] }
-  return mailbox === 'current'
-    ? { sql: ' AND gt.blocked_at IS NULL AND gt.archived_at IS NULL AND (op.ends_at IS NULL OR op.ends_at >= ?)', params: [now] }
-    : { sql: ' AND gt.blocked_at IS NULL AND (gt.archived_at IS NOT NULL OR op.ends_at < ?)', params: [now] }
+  const past = pastSql(now, viewerUserId)
+  return { sql: ` AND gt.blocked_at IS NULL AND ${mailbox === 'current' ? 'NOT ' : ''}${past.sql}`, params: past.params }
 }
 
-function mailboxFields(row: { archived_at: string | null; blocked_at: string | null; record_ends_at: string | null }, now: string, buyerAudience=false) {
-  const state = resolveGuestThreadMailbox(row, row.record_ends_at === null ? null : { ends_at: row.record_ends_at }, now, buyerAudience?'buyer':'member')
-  return {
-    mailbox: state.mailbox,
-    manuallyArchived: state.manuallyArchived,
-    canArchive: state.canArchive,
-    canUnarchive: state.canUnarchive,
-  }
+/** A listed row's mailbox, from the archive flags and the rule as the list query computed it (`past_by_rule`). */
+function mailboxFields(row: { archived_at: string | null; blocked_at: string | null; past_by_rule: number }) {
+  const blocked = row.blocked_at !== null, archived = row.archived_at !== null, pastByRule = row.past_by_rule === 1
+  const mailbox: GuestThreadMailbox = blocked ? 'blocked' : archived || pastByRule ? 'past' : 'current'
+  return { mailbox, manuallyArchived: archived, canArchive: mailbox === 'current', canUnarchive: !blocked && archived && !pastByRule }
 }
 
 // The guest's own words where there are any. The booking line is composed in
@@ -244,6 +239,7 @@ function sourcePreviewText(row: {
 }
 
 type GuestThreadListRow = GuestThreadRow & {
+  past_by_rule: number
   effective_conversation_state: GuestThreadRow['conversation_state']
   assigned_member_id: string | null
   record_product_id: string | null
@@ -283,7 +279,7 @@ function threadProductId(row: GuestThreadListRow): string | null {
 /** The inbox filters by what a person sees — kind, unread, search — not by the attention state Today and MCP read. */
 type InboxListOptions = Omit<ListGuestThreadsOptions, 'conversationState'> & { conversationState?: never }
 
-const BUYER_VISIBLE_MESSAGE_SQL = "((e.actor_kind='guest' AND e.channel IN ('web','email','whatsapp')) OR (e.actor_kind='member' AND e.event_name='thread.member_reply') OR (e.actor_kind='system' AND e.event_name='thread.scheduled_message'))"
+const BUYER_VISIBLE_MESSAGE_SQL = "((e.actor_kind='guest' AND e.channel IN ('web','email','whatsapp')) OR (e.actor_kind='member' AND e.event_name='thread.member_reply') OR (e.actor_kind='system' AND e.event_name IN ('thread.scheduled_message', 'thread.opening')))"
 
 /** An Airbnb Support case, said to the database as `isSupportThread` says it: Airbnb's agents wrote and no guest did. */
 const SUPPORT_THREAD_SQL = `(EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND e.actor_kind = 'system' AND e.event_name = 'channel.message_mirrored')
@@ -330,7 +326,7 @@ async function inboxWhere(organizationId: string | null, opts: InboxListOptions,
     params.push(like, like, like, like, like, like)
   }
   where += ` AND ${HAS_CONVERSATION_SQL}`
-  const mailbox = mailboxWhere(opts.mailbox ?? null, now, opts.buyerAudience)
+  const mailbox = mailboxWhere(opts.mailbox ?? null, now, opts.userId, opts.buyerAudience)
   where += mailbox.sql
   params.push(...mailbox.params)
   return { where, params }
@@ -507,7 +503,7 @@ export async function listOrganizationGuestThreads(
   }
   // One instant for the filter and for each row's mailbox, so a row cannot be
   // listed as Current and labelled Past.
-  const mailbox = mailboxWhere(opts.mailbox ?? null, now)
+  const mailbox = mailboxWhere(opts.mailbox ?? null, now, opts.userId)
   where += mailbox.sql
   params.push(...mailbox.params)
 
@@ -526,9 +522,10 @@ export async function listOrganizationGuestThreads(
     `
     : ''
 
+  const rule = pastByRuleSql(now, opts.userId)
   const rows = await queryAll<GuestThreadListRow>(db, `
     SELECT
-      gt.*, ${stateSql} AS effective_conversation_state,
+      gt.*, ${stateSql} AS effective_conversation_state, ${rule.sql} AS past_by_rule,
       ${SOURCE_GUEST_NAME_SQL} AS guest_name, ${REPLY_CHANNEL_SQL} AS reply_channel,
       bl.title AS location_title,
       (
@@ -557,7 +554,7 @@ export async function listOrganizationGuestThreads(
     ${unreadFilter}
     ORDER BY gt.updated_at DESC, gt.id
     LIMIT ? OFFSET ?
-  `, opts.unreadOnly && opts.userId ? [...params, ...(opts.buyerAudience?buyerUnreadThreadParams(opts.userId):[opts.userId,opts.userId]), limit, opts.offset ?? 0] : [...params, limit, opts.offset ?? 0])
+  `, opts.unreadOnly && opts.userId ? [...rule.params, ...params, ...(opts.buyerAudience?buyerUnreadThreadParams(opts.userId):[opts.userId,opts.userId]), limit, opts.offset ?? 0] : [...rule.params, ...params, limit, opts.offset ?? 0])
 
   const unreadIds = opts.userId
     ? new Set(await listUnreadThreadIds(db, rows.map(row => row.id), opts.userId))
@@ -598,7 +595,7 @@ export async function listOrganizationGuestThreads(
       whenLabel: row.record_check_in_date ? stayRecordLabel(row)
         : row.record_starts_at && row.record_timezone ? formatThreadWhenLabel(row.record_starts_at, row.record_timezone)
           : null,
-      ...mailboxFields(row, now),
+      ...mailboxFields(row),
     })
   }
   return items
@@ -676,9 +673,9 @@ export async function updateThreadProjectionIfLatestEntry(
  * as one batch.
  *
  * The entry is written only while the thread is still in the state the
- * transition leaves — archived_at unset for Archive, set for Unarchive — and
- * its occurrence has not ended, which is `resolveGuestThreadMailbox`'s
- * canArchive/canUnarchive said to the database. The update then lands only
+ * transition leaves — archived_at unset for Archive, set for Unarchive; the
+ * caller has already asked `resolveGuestThreadMailbox` whether the move is
+ * allowed. The update then lands only
  * where that entry did, so a thread that changed between the caller's read and
  * this write gets neither. A retried key hits the entry's dedupe key and writes
  * nothing.
@@ -696,10 +693,12 @@ export function mailboxTransitionQueries(input: {
   now: string
 }): [entry: BatchQuery, update: BatchQuery] {
   const archive = input.transition === 'archive'
+  // Whether the rule allows the move is decided by `resolveGuestThreadMailbox`
+  // before this batch; the guard holds the flag itself, so a thread that moved
+  // between that read and this write gets neither the entry nor the update.
   const guard = (alias: string) => `${alias}.id = ? AND ${alias}.organization_id = ?
-        AND ${alias}.archived_at IS ${archive ? 'NULL' : 'NOT NULL'}
-        AND NOT EXISTS (SELECT 1 FROM ${OPERATIONAL_RECORDS_SQL} op WHERE op.request_id = ${alias}.id AND op.ends_at < ?)`
-  const guardParams = [input.threadId, input.organizationId, input.now]
+        AND ${alias}.archived_at IS ${archive ? 'NULL' : 'NOT NULL'}`
+  const guardParams = [input.threadId, input.organizationId]
   return [{
     query: `
       INSERT INTO activity_entries

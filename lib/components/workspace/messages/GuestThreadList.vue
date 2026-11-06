@@ -80,15 +80,6 @@
         <span>{{ pastOnly || blockedOnly ? 'Current conversations' : 'Past conversations' }}</span>
         <UIcon name="i-lucide-chevron-right" class="size-4 shrink-0 text-muted" />
       </NuxtLink>
-      <!-- Blocked guests are reached from Past: they are out of every list until unblocked. -->
-      <NuxtLink
-        v-if="data && pastOnly && !personalScope"
-        :to="{ path: listRoute, query: { ...withoutArchived, blocked: '' } }"
-        class="-mx-4 flex items-center justify-between gap-3 border-t border-default px-4 py-4 text-sm font-medium text-highlighted transition hover:bg-elevated/60 sm:-mx-6 sm:px-6"
-      >
-        <span>Blocked guests</span>
-        <UIcon name="i-lucide-chevron-right" class="size-4 shrink-0 text-muted" />
-      </NuxtLink>
     </div>
   </div>
 </template>

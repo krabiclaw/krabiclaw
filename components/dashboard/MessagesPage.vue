@@ -5,7 +5,7 @@
       <InboxFilters v-if="!personalScope" :team="teamScope" :can-read-team="canReadTeam" :can-read-guests="canReadGuests" />
     </div>
   </DefineControls>
-  <DashboardIndexPanel :id="personalScope ? 'account-messages' : 'organization-messages'" :title="pastOnly && !teamScope ? 'Past conversations' : 'Messages'" :auto-open="firstThread" fill>
+  <DashboardIndexPanel :id="personalScope ? 'account-messages' : 'organization-messages'" :title="teamScope ? 'Messages' : blockedOnly ? 'Blocked guests' : pastOnly ? 'Past conversations' : 'Messages'" :auto-open="firstThread" fill>
     <!-- Search and settings beside the title, as on Airbnb. -->
     <template #right>
       <UButton v-if="!teamScope" icon="i-lucide-search" color="neutral" variant="soft" class="rounded-full" :aria-label="searching ? 'Close search' : 'Search messages'" :aria-pressed="searching" @click="toggleSearch" />
@@ -68,6 +68,7 @@ watchDebounced(query, words => {
   void router.replace({ path: route.path, query: words.trim() ? { ...rest, q: words.trim() } : rest })
 }, { debounce: 250 })
 const pastOnly = computed(() => route.query.archived !== undefined)
+const blockedOnly = computed(() => !props.personalScope && route.query.blocked !== undefined)
 const firstThread = ref<RouteLocationRaw | null>(null)
 const session = authClient.useSession()
 const accessError = ref('')

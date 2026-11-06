@@ -11,7 +11,7 @@ import { findEntryByDedupeKey, parseEntryPayload } from './entries'
 import { discardMessagePhotos, listMessagePhotos, MessagePhotoRejection, messagePhotoPlacements, uploadMessagePhotos, type MessagePhotoInput } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import { mailboxTransitionQueries, updateThreadProjectionIfLatestEntry } from './repository'
-import { resolveGuestThreadMailbox } from './mailbox'
+import { readMailboxActivity, resolveGuestThreadMailbox } from './mailbox'
 import { renderNotificationEmail } from '~/server/emails/render'
 import { guestThreadReplyMessage, guestThreadStatusMessage } from '~/server/notifications/guest-events'
 import { organizationLogo } from '~/server/notifications/hero'
@@ -667,6 +667,7 @@ async function replyRecipient(db: DbClient, context: ThreadContext): Promise<str
 }
 
 const ENDED_OCCURRENCE_MESSAGE = 'This conversation is past because its booking has ended'
+const QUIET_CONVERSATION_MESSAGE = 'This conversation is past because nobody has written for 30 days'
 
 /**
  * File a conversation under Past, or bring a manually archived one back.
@@ -691,12 +692,13 @@ async function executeMailboxTransition(
   }
 
   const now = new Date().toISOString()
-  const state = resolveGuestThreadMailbox(context.thread, context.record, now)
+  const state = resolveGuestThreadMailbox(context.thread, context.record, now, await readMailboxActivity(db, context.thread.id, input.actorUserId))
+  const pastBy = state.pastByRule ? context.record ? ENDED_OCCURRENCE_MESSAGE : QUIET_CONVERSATION_MESSAGE : null
   if (transition === 'archive' && !state.canArchive) {
-    return conflict(state.occurrenceEnded ? ENDED_OCCURRENCE_MESSAGE : 'This conversation is already archived')
+    return conflict(pastBy ?? 'This conversation is already archived')
   }
   if (transition === 'unarchive' && !state.canUnarchive) {
-    return conflict(state.occurrenceEnded ? ENDED_OCCURRENCE_MESSAGE : 'This conversation is not archived')
+    return conflict(pastBy ?? 'This conversation is not archived')
   }
 
   const [entry, update] = await executeBatch(db, mailboxTransitionQueries({
@@ -721,8 +723,8 @@ async function executeMailboxTransition(
   }
   const reread = await loadThreadContext(db, input.threadId, input.organizationId)
   if ('ok' in reread) return reread
-  const after = resolveGuestThreadMailbox(reread.thread, reread.record, new Date().toISOString())
-  return conflict(after.occurrenceEnded ? ENDED_OCCURRENCE_MESSAGE : 'This conversation changed; reload it and try again')
+  const after = resolveGuestThreadMailbox(reread.thread, reread.record, new Date().toISOString(), await readMailboxActivity(db, reread.thread.id, input.actorUserId))
+  return conflict(after.pastByRule ? reread.record ? ENDED_OCCURRENCE_MESSAGE : QUIET_CONVERSATION_MESSAGE : 'This conversation changed; reload it and try again')
 }
 
 /**

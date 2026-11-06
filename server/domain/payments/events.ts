@@ -147,10 +147,12 @@ async function settleStayPayment(db: DbClient, stripe: Stripe, env: CloudflareEn
   if (hold.status !== 'converted') {
     const candidate = crypto.randomUUID()
     const now = new Date().toISOString()
+    const home = await queryFirst<{ name: string }>(db, 'SELECT name FROM products WHERE id = ? AND organization_id = ?', [hold.product_id, payment.organization_id])
+    if (!home) throw new Error('Captured stay payment names a home that does not exist')
     let created = false
     try {
       const results = await executeBatch(db, [
-        ...stayFromCheckoutQueries({ organizationId: payment.organization_id, locationId: hold.location_id, stayId: candidate, holdId: hold.id, paymentId: payment.id, buyerUserId: payment.buyer_user_id ?? hold.buyer_user_id, now, stay: { quote: purchase, guest: purchase.guest } }),
+        ...stayFromCheckoutQueries({ organizationId: payment.organization_id, locationId: hold.location_id, stayId: candidate, holdId: hold.id, paymentId: payment.id, buyerUserId: payment.buyer_user_id ?? hold.buyer_user_id, now, stay: { quote: purchase, guest: purchase.guest }, homeTitle: home.name }),
         { query: "UPDATE payment_checkout_holds SET status='converted', converted_stay_id=? WHERE id=? AND status IN ('active','released') AND EXISTS(SELECT 1 FROM stays WHERE id=?)", params: [candidate, hold.id, candidate] },
         { query: 'UPDATE payments SET subject_id=?, updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM stays WHERE id=?)', params: [candidate, now, payment.id, candidate] },
       ], { operation: 'Convert captured stay payment' })

@@ -18,6 +18,7 @@ import { buildOwnerThreadInboxUrl } from '~/server/utils/dashboard-notification-
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '~/server/utils/reservation-cancel-token'
 import { ensureInteractionUser, type CloudflareEnv } from '~/server/utils/auth'
 import { getGuestRequest, getThreadOperationalRecord, requestInsertQueries, threadPayloadForGuest, type BookingOperator } from '~/server/domain/requests'
+import { openingSentence } from '~/server/domain/guest-threads/opening'
 import { DEFAULT_EMAIL_DAILY_LIMIT as EMAIL_DAILY_LIMIT, DEFAULT_IP_HOURLY_LIMIT as IP_HOURLY_LIMIT, getClientIp, hashClientIp, hashIdentifier, incrementHourlyRateLimit } from '~/server/utils/hourly-rate-limit'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { HTTPError, type H3Event } from 'nitro'
@@ -263,6 +264,13 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
 
   const now = new Date().toISOString()
   const payload = threadPayloadForGuest({ name: guestName, email: guestEmail, phone: normalizedGuestPhone, locale, notes, ipHash, answers })
+  // The booking's own message opens its conversation, stated where and when it is.
+  const place = session.location_id === null ? null
+    : await queryFirst<{ title: string }>(db, 'SELECT title FROM business_locations WHERE id = ? AND organization_id = ?', [session.location_id, organizationId])
+  if (session.location_id !== null && !place) throw new HTTPError({ statusCode: 404, message: 'The session location does not exist' })
+  if (!organization.vertical) throw new Error('The organization has no vertical')
+  const opening = { body: openingSentence({ kind: 'booking', vertical: organization.vertical, productTitle: product.name, guestName: payload.guest.name ?? guestName, guestPhone: payload.guest.phone,
+    answers: payload.answers, partySize, startsAt: session.starts_at, timezone: session.timezone, placeTitle: place?.title ?? null }) }
   payload.provenance = { source: operator?.source ?? 'website', external_reference: operator?.externalReference ?? null, actor_user_id: operator?.userId ?? null,
     idempotency_key: idempotencyKey, fingerprint, guest_acknowledgement: operator?.guestAcknowledgement ?? true,
     creation_kind: requiresPayment ? 'checkout' : 'ordinary', creation_status: config.confirmation_mode === 'review' ? 'pending' : 'confirmed', followups_completed: false }
@@ -281,7 +289,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
         kind: 'booking', id: threadId, organization_id: organizationId, location_id: session.location_id,
         user_id: userId, review_id: null, conversation_state: 'waiting_on_guest', resolved_at: null,
         payload, created_at: now, updated_at: now,
-      }, { query: "SELECT 1 FROM payment_checkout_holds WHERE payment_id = ? AND status = 'active'", params: [paymentId] }),
+      }, { query: "SELECT 1 FROM payment_checkout_holds WHERE payment_id = ? AND status = 'active'", params: [paymentId] }, opening),
     })
     return creationResult({ success: true, status: 'checkout', ...checkout }, { status: 201 })
   }
@@ -301,7 +309,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
           location_id: session.location_id, user_id: userId, review_id: null,
           conversation_state: 'needs_attention', resolved_at: null, payload,
           created_at: now, updated_at: now,
-        }, { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }),
+        }, { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, opening),
         {
           query: `UPDATE bookings SET request_id = ?, updated_at = ?
                    WHERE id = ? AND EXISTS (SELECT 1 FROM requests WHERE id = ?)`,
