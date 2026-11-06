@@ -16,7 +16,7 @@ import { createDeliveryReceipt, getDeliveryById, isDeliverySent, isVisibleDelive
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import whatsappWebhook from '../../server/api/whatsapp/webhook.post.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { createStay, updateStay } from '../../server/domain/stays.ts'
+import { createStay, getStay, updateStay } from '../../server/domain/stays.ts'
 import { getWhatsAppWorkspaceState } from '../../server/utils/mcp-context.ts'
 
 // Real D1 billing, membership, preferences and notification persistence. Only
@@ -251,6 +251,16 @@ test('a WhatsApp reply offers the conversations the inbox can write to and refus
     assert.doesNotMatch(again, /Ana/u)
     await updateStay(db, env, manager, bo.id, { expected_version: bo.version, guest_email: null })
     assert.equal(await write(pick(again, 'Bo')), 'Reply not sent: This guest has no email or KrabiClaw account to reply to.')
+    assert.equal(await pending(), null)
+    // A member removed after the pick is told their access ended before their reply is read, and nothing of the
+    // conversation (where it would go, or why it could not) reaches them.
+    await updateStay(db, env, manager, bo.id, { expected_version: (await getStay(db, manager, bo.id)).version, guest_email: 'bo@example.test' })
+    const third = await write('One more')
+    assert.equal(await write(pick(third, 'Bo')), 'Type your reply now — it will be sent by email to b***@example.test.')
+    await db.prepare("DELETE FROM member WHERE id = 'member-paid'").run()
+    const removed = await write('Here is my reply')
+    assert.equal(removed, 'Your WhatsApp access has been revoked. Please contact your organization administrator.')
+    assert.doesNotMatch(removed, /b\*\*\*@|email|KrabiClaw account/u)
     assert.equal(await pending(), null)
   } finally {
     globalThis.fetch = originalFetch

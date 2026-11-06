@@ -473,6 +473,16 @@ async function routeManagerWhatsAppMessage(
     await clearPending()
   } else {
     // collect_reply: any non-empty text becomes the reply body, moving to confirm_send.
+    // Reauthorize before reading the conversation, as the pick and the send do.
+    const authorized = await isAuthorizedWhatsAppRecipient(db, {
+      env: env as CloudflareEnv,
+      phone: opts.toPhone,
+      organizationId: pendingState.organizationId,
+    })
+    if (!authorized) {
+      await tellAndClear('Your WhatsApp access has been revoked. Please contact your organization administrator.', 'Failed to send WhatsApp access notice')
+      return
+    }
     const reply = await replyDestination(db, pendingState.threadId, pendingState.organizationId)
     if ('refused' in reply) {
       await tellAndClear(buildReplyFailedMessage(reply.refused), 'Failed to send WhatsApp reply refusal')
