@@ -12,7 +12,6 @@ export type PendingWhatsAppReplyState =
       organizationId: string
       locationId: string | null
       replyBody: string
-      guestEmailMasked: string
     }
   | {
       kind: 'disambiguate'
@@ -23,7 +22,6 @@ export type PendingWhatsAppReplyState =
       threadId: string
       organizationId: string
       locationId: string | null
-      guestEmailMasked: string
     }
 
 export interface RoutingDecisionInput {
@@ -107,21 +105,23 @@ export function buildDisambiguationPrompt(candidates: DisambiguationCandidate[])
   ].join('\n')
 }
 
-export function buildConfirmSendPrompt(guestEmailMasked: string): string {
-  return `This reply will be emailed to ${guestEmailMasked}. Reply YES to send.`
+/** `destination` is where the reply goes, as the inbox decides it: "through Airbnb", "by email to a***@x.com", "to their KrabiClaw inbox". */
+export function buildConfirmSendPrompt(destination: string): string {
+  return `This reply will be sent ${destination}. Reply YES to send.`
 }
 
-export const REPLY_SENT_CONFIRMATION = 'Reply sent by email.'
+export const REPLY_SENT_CONFIRMATION = 'Reply sent.'
 
-export function buildReplyFailedMessage(error: string): string {
-  return `Reply failed to send by email: ${error}`
+/** The reply operation's own reason it refused or failed. */
+export function buildReplyFailedMessage(reason: string): string {
+  return `Reply not sent: ${reason}`
 }
 
 export const PROMPT_QUOTE_NOTIFICATION_MESSAGE =
   'To reply to a guest, please quote their notification message. To manage your site, please open your KrabiClaw dashboard.'
 
-export function buildCollectReplyPrompt(guestEmailMasked: string): string {
-  return `Type your reply now — it will be emailed to ${guestEmailMasked}.`
+export function buildCollectReplyPrompt(destination: string): string {
+  return `Type your reply now — it will be sent ${destination}.`
 }
 
 /**

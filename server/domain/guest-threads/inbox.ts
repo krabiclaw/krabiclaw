@@ -316,9 +316,20 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
     pending: viewer.audience === 'member' ? await pendingMessages(db, raw.id, organizationId, viewer.principal, facts.timeZone, now.toISOString()) : [],
     composer: {
       channel: viewer.audience === 'member' && raw.replyChannel === 'airbnb' ? 'airbnb' : 'email',
-      available: viewer.audience === 'buyer' || raw.replyChannel === 'airbnb' || Boolean(raw.guestEmail) || raw.guestAccountLinked,
+      available: viewer.audience === 'buyer' || guestReplyDestination(raw) !== null,
     },
   }
+}
+
+/**
+ * Where a member's reply to the guest goes: Airbnb's own thread, the guest's
+ * email, or their KrabiClaw account inbox. Null when there is none, and the
+ * conversation shows no composer. Every surface that replies asks this.
+ */
+export function guestReplyDestination(raw: Pick<GuestThreadDetailViewModel, 'replyChannel' | 'guestEmail' | 'guestAccountLinked'>): { channel: 'airbnb' } | { channel: 'email'; email: string } | { channel: 'account' } | null {
+  if (raw.replyChannel === 'airbnb') return { channel: 'airbnb' }
+  if (raw.guestEmail) return { channel: 'email', email: raw.guestEmail }
+  return raw.guestAccountLinked ? { channel: 'account' } : null
 }
 
 /**

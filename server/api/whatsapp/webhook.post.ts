@@ -8,7 +8,9 @@ import {
 import { execute, queryAll, queryFirst } from '~/server/db'
 import { updateThreadProjectionIfLatestEntry } from '~/server/domain/guest-threads/repository'
 import { getGuestRequest, requestSummary } from '~/server/domain/requests'
-import { executeGuestThreadOperation } from '~/server/domain/guest-threads/operations'
+import { executeGuestThreadOperation, GUEST_UNREACHABLE_MESSAGE } from '~/server/domain/guest-threads/operations'
+import { getGuestThreadDetail } from '~/server/domain/guest-threads/detail'
+import { guestReplyDestination } from '~/server/domain/guest-threads/inbox'
 import { appendEntry, findEntryByDedupeKey } from '~/server/domain/guest-threads/entries'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { notifyGuestThreadReply } from '~/server/utils/notifications'
@@ -134,7 +136,20 @@ interface QuotedDeliveryMatch {
   threadId: string
   organizationId: string
   locationId: string | null
-  guestEmail: string
+  /** Where a reply goes, said for the manager. */
+  destination: string
+}
+
+/**
+ * Where a reply to this conversation goes, said for the manager, as the inbox
+ * decides it (`guestReplyDestination`); null when the inbox shows it no composer.
+ */
+async function replyDestination(db: D1Database, threadId: string, organizationId: string): Promise<string | null> {
+  const detail = await getGuestThreadDetail(db, threadId, organizationId)
+  const destination = detail ? guestReplyDestination(detail) : null
+  if (!destination) return null
+  if (destination.channel === 'airbnb') return 'through Airbnb'
+  return destination.channel === 'email' ? `by email to ${maskEmailForDisplay(destination.email)}` : 'to their KrabiClaw inbox'
 }
 
 async function resolveQuotedDelivery(
@@ -143,24 +158,24 @@ async function resolveQuotedDelivery(
     request_id: string
     organization_id: string
     location_id: string | null
-    guest_email: string | null
   }>(db, `
-    SELECT gt.id AS request_id, gt.organization_id, gt.location_id,
-           json_extract(gt.payload_json, '$.guest.email') AS guest_email
+    SELECT gt.id AS request_id, gt.organization_id, gt.location_id
     FROM guest_thread_deliveries d
     JOIN activity_entries e ON e.id = d.entry_id
     JOIN requests gt ON gt.id = e.request_id
     WHERE d.provider = 'meta' AND d.provider_message_id = ?
     LIMIT 1
   `, [providerMessageId])
-  if (!thread?.guest_email) return null
+  if (!thread) return null
 
   const authorized = await isAuthorizedWhatsAppRecipient(db, {
     env: env as CloudflareEnv,
     phone, organizationId: thread.organization_id })
   if (!authorized) return null
 
-  return { threadId: thread.request_id, organizationId: thread.organization_id, locationId: thread.location_id, guestEmail: thread.guest_email }
+  const destination = await replyDestination(db, thread.request_id, thread.organization_id)
+  if (!destination) return null
+  return { threadId: thread.request_id, organizationId: thread.organization_id, locationId: thread.location_id, destination }
 }
 
 async function listRecentGuestDeliveryCandidates(db: D1Database, env: ApiRecord, userId: string): Promise<DisambiguationCandidate[]> {
@@ -179,8 +194,7 @@ async function listRecentGuestDeliveryCandidates(db: D1Database, env: ApiRecord,
     JOIN activity_entries e ON e.id = d.entry_id
     JOIN requests gt ON gt.id = e.request_id
     JOIN member m ON m.organizationId = gt.organization_id AND m.userId = ? AND m.role IN ('owner', 'admin')
-    -- A reply from WhatsApp is emailed, so only conversations with a guest email are offered.
-    WHERE d.channel = 'whatsapp' AND d.created_at > ? AND COALESCE(TRIM(json_extract(gt.payload_json, '$.guest.email')), '') <> ''
+    WHERE d.channel = 'whatsapp' AND d.created_at > ?
     GROUP BY gt.id
     ORDER BY createdAt DESC
     LIMIT 25
@@ -191,8 +205,10 @@ async function listRecentGuestDeliveryCandidates(db: D1Database, env: ApiRecord,
       organizationId: row.organizationId,
       userId,
     })
-    // Only the roles WhatsApp replies are authorized for see a thread's guest.
-    return membership && isOrganizationWideRole(membership.role) ? row : null
+    // Only the roles WhatsApp replies are authorized for see a thread's guest,
+    // and only conversations the inbox lets them write to are offered.
+    if (!membership || !isOrganizationWideRole(membership.role)) return null
+    return await replyDestination(db, row.threadId, row.organizationId) ? row : null
   }))).filter((row): row is NonNullable<typeof row> => Boolean(row)).slice(0, 5)
   return authorizedRows.map((r) => ({
     threadId: r.threadId, organizationId: r.organizationId, locationId: r.locationId, label: `${submissionTypeLabel(r.submissionType)} from ${r.guestName}`, }))
@@ -268,21 +284,18 @@ async function routeManagerWhatsAppMessage(
         if (!trimmedText) {
           // Captionless media or empty reply — resend the prompt without advancing
           const match = fresh.quotedDelivery!
-          const guestEmailMasked = maskEmailForDisplay(match.guestEmail)
-          await sendWhatsAppText(env, opts.toPhone, buildConfirmSendPrompt(guestEmailMasked))
+          await sendWhatsAppText(env, opts.toPhone, buildConfirmSendPrompt(match.destination))
           return
         }
         const match = fresh.quotedDelivery!
-        const guestEmailMasked = maskEmailForDisplay(match.guestEmail)
         const newState: PendingWhatsAppReplyState = {
           kind: 'confirm_send',
           threadId: match.threadId,
           organizationId: match.organizationId,
           locationId: match.locationId,
           replyBody: trimmedText,
-          guestEmailMasked,
         }
-        const sendResult = await sendWhatsAppText(env, opts.toPhone, buildConfirmSendPrompt(guestEmailMasked))
+        const sendResult = await sendWhatsAppText(env, opts.toPhone, buildConfirmSendPrompt(match.destination))
         if (!sendResult.success) {
           throw new Error(sendResult.error || 'Failed to send WhatsApp confirmation prompt')
         }
@@ -364,7 +377,8 @@ async function routeManagerWhatsAppMessage(
         await publishGuestInboxThreadEvent(env, db, { threadId: result.thread.id, type: 'thread.changed' })
         await sendWhatsAppText(env, opts.toPhone, REPLY_SENT_CONFIRMATION)
       } else {
-        await sendWhatsAppText(env, opts.toPhone, buildReplyFailedMessage(result.reason))
+        // The reply operation's own reason: a conversation that changed since it was offered says why.
+        await sendWhatsAppText(env, opts.toPhone, buildReplyFailedMessage('message' in result ? result.message : result.reason))
       }
       return
     }
@@ -395,18 +409,20 @@ async function routeManagerWhatsAppMessage(
         return
       }
 
-      const chosenThread = await getGuestRequest(db, chosen.threadId, chosen.organizationId)
-      const chosenGuestEmail = chosenThread?.payload.guest.email ?? null
-      if (!chosenGuestEmail) throw new Error(`WhatsApp reply candidate ${chosen.threadId} has no guest email`)
-      const guestEmailMasked = maskEmailForDisplay(chosenGuestEmail)
+      // The conversation can have changed since it was offered; then the reply is refused as the inbox refuses it.
+      const destination = await replyDestination(db, chosen.threadId, chosen.organizationId)
+      if (!destination) {
+        await clearPending()
+        await sendWhatsAppText(env, opts.toPhone, buildReplyFailedMessage(GUEST_UNREACHABLE_MESSAGE))
+        return
+      }
       const newState: PendingWhatsAppReplyState = {
         kind: 'collect_reply',
         threadId: chosen.threadId,
         organizationId: chosen.organizationId,
         locationId: chosen.locationId,
-        guestEmailMasked,
       }
-      const sendResult = await sendWhatsAppText(env, opts.toPhone, buildCollectReplyPrompt(guestEmailMasked))
+      const sendResult = await sendWhatsAppText(env, opts.toPhone, buildCollectReplyPrompt(destination))
       if (!sendResult.success) throw new Error(sendResult.error || 'Failed to send WhatsApp reply prompt')
       await patchWhatsAppWorkspaceState(db, {
         userId: opts.userId,
@@ -418,15 +434,20 @@ async function routeManagerWhatsAppMessage(
     await clearPending()
   } else {
     // collect_reply: any non-empty text becomes the reply body, moving to confirm_send.
+    const destination = await replyDestination(db, pendingState.threadId, pendingState.organizationId)
+    if (!destination) {
+      await clearPending()
+      await sendWhatsAppText(env, opts.toPhone, buildReplyFailedMessage(GUEST_UNREACHABLE_MESSAGE))
+      return
+    }
     const newState: PendingWhatsAppReplyState = {
       kind: 'confirm_send',
       threadId: pendingState.threadId,
       organizationId: pendingState.organizationId,
       locationId: pendingState.locationId,
       replyBody: rawText,
-      guestEmailMasked: pendingState.guestEmailMasked,
     }
-    const sendResult = await sendWhatsAppText(env, opts.toPhone, buildConfirmSendPrompt(pendingState.guestEmailMasked))
+    const sendResult = await sendWhatsAppText(env, opts.toPhone, buildConfirmSendPrompt(destination))
     if (!sendResult.success) throw new Error(sendResult.error || 'Failed to send WhatsApp confirmation prompt')
     await patchWhatsAppWorkspaceState(db, {
       userId: opts.userId,
@@ -450,21 +471,19 @@ async function routeManagerWhatsAppMessage(
   switch (decision.action) {
     case 'start_confirm_send': {
       const match = fresh.quotedDelivery!
-      const guestEmailMasked = maskEmailForDisplay(match.guestEmail)
       const newState: PendingWhatsAppReplyState = {
         kind: 'confirm_send',
         threadId: match.threadId,
         organizationId: match.organizationId,
         locationId: match.locationId,
         replyBody: rawText,
-        guestEmailMasked,
       }
       await patchWhatsAppWorkspaceState(db, {
         userId: opts.userId,
         pendingConfirmation: newState,
         lastInboundId: opts.messageId,
       })
-      await sendWhatsAppText(env, opts.toPhone, buildConfirmSendPrompt(guestEmailMasked))
+      await sendWhatsAppText(env, opts.toPhone, buildConfirmSendPrompt(match.destination))
       return
     }
     case 'start_disambiguation': {

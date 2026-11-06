@@ -657,11 +657,14 @@ async function replyRecipient(db: DbClient, context: ThreadContext): Promise<str
   }
   if (guestEmail) return guestEmail
   if (context.thread.user_id === null) {
-    return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'request_id', message: 'This guest has no email or KrabiClaw account to reply to.' }
+    return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'request_id', message: GUEST_UNREACHABLE_MESSAGE }
   }
   const account = await queryFirst<{ email: string }>(db, 'SELECT email FROM user WHERE id = ? AND "emailVerified" = 1 AND COALESCE("isAnonymous", 0) = 0', [context.thread.user_id])
   return account?.email ?? null
 }
+
+/** Why a reply to a guest with no email, no Airbnb thread and no KrabiClaw account is refused. */
+export const GUEST_UNREACHABLE_MESSAGE = 'This guest has no email or KrabiClaw account to reply to.'
 
 const ENDED_OCCURRENCE_MESSAGE = 'This conversation is past because its booking has ended'
 const QUIET_CONVERSATION_MESSAGE = 'This conversation is past because nobody has written for 30 days'

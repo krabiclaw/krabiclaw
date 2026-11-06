@@ -15,6 +15,9 @@ import { requestInsertQueries } from '../../server/domain/requests.ts'
 import { createDeliveryReceipt, getDeliveryById, isDeliverySent, isVisibleDeliveryFailure, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import whatsappWebhook from '../../server/api/whatsapp/webhook.post.ts'
+import { createProduct } from '../../server/utils/product-management.ts'
+import { createStay, updateStay } from '../../server/domain/stays.ts'
+import { getWhatsAppWorkspaceState } from '../../server/utils/mcp-context.ts'
 
 // Real D1 billing, membership, preferences and notification persistence. Only
 // the external Meta HTTP boundary is intercepted; no live messages are sent.
@@ -161,6 +164,79 @@ test('the WhatsApp webhook accepts only what Meta signed with the configured app
     assert.equal(accepted.status, 200)
     assert.deepEqual(await accepted.json(), { success: true })
   } finally {
+    await runtime.dispose()
+  }
+})
+
+// A manager replying from WhatsApp is offered exactly the conversations the inbox
+// shows a composer for, and a conversation that changed after it was offered is
+// refused with the reason the reply operation gives. Only Meta's HTTP boundary is intercepted.
+test('a WhatsApp reply offers the conversations the inbox can write to and refuses one that changed', async () => {
+  const runtime = new Miniflare({ workers: [{ config: {
+    name: 'whatsapp-reply-proof', compatibilityDate: '2024-11-01',
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
+    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'whatsapp-reply-proof', exportName: 'Hub' } },
+  } }] })
+  const originalFetch = globalThis.fetch
+  try {
+    const db = await runtime.getD1Database('DB')
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+      STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof',
+      EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'provider', WHATSAPP_PHONE_NUMBER_ID: 'local-proof-phone-id', WHATSAPP_ACCESS_TOKEN: 'local-proof-no-live-token',
+      WHATSAPP_APP_SECRET: 'whatsapp-secret' } as CloudflareEnv
+    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
+      VALUES ('paid', 'Cabins', 'cabins', 'cabins', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'America/Denver')`).run()
+    await db.prepare("INSERT INTO organization_locales (id,organization_id,locale,is_source,status) VALUES ('paid-en','paid','en',1,'published')").run()
+    await db.prepare("INSERT INTO user (id,name,email,emailVerified,phoneNumber,phoneNumberVerified) VALUES ('owner','Owner','owner@proof.example',1,'+66812345678',1)").run()
+    await db.prepare("INSERT INTO member (id,organizationId,userId,role) VALUES ('member-paid','paid','owner','owner')").run()
+    await db.prepare("INSERT INTO subscription (id,plan,referenceId,status,periodEnd) VALUES ('paid-sub','growth','paid','active',?)").bind(Math.floor(Date.now() / 1000) + 86400).run()
+    await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
+      VALUES ('cabin-site', 'paid', 'cabin', 'Cabin', 'active', 'America/Denver', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`).run()
+    const manager = { organizationId: 'paid', actorId: 'owner', manage: true }
+    const cabin = await createProduct(db, { env, organizationId: 'paid', actor: { actorId: 'owner' }, product: {
+      kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
+      stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null, assigned_team_id: null },
+    } })
+    const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
+    // Ana can be emailed; Dee left only a phone and has no KrabiClaw account, so the inbox shows her no composer.
+    const ana = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'ana', check_in_date: day(3), check_out_date: day(5), adults: 1, guest_name: 'Ana', guest_email: 'ana@example.test', guest_phone: '+61491570150', total_minor: 30_000 })
+    const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(10), check_out_date: day(12), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 30_000 })
+    // Both guests wrote, and the owner was alerted on WhatsApp about each.
+    for (const [stay, name] of [[ana, 'ana'], [dee, 'dee']] as const) {
+      const entry = await appendEntry(db, { threadId: stay.request_id!, kind: 'message', actorKind: 'guest', channel: 'email', body: `Hi from ${name}`, dedupeKey: `guest-${name}` })
+      await createDeliveryReceipt(db, { entryId: entry.id, channel: 'whatsapp', provider: 'meta', purpose: 'owner_alert', idempotencyKey: `alert-${name}` })
+    }
+    const sent: string[] = []
+    globalThis.fetch = async (input, init) => {
+      if (!String(input).startsWith('https://graph.facebook.com/')) return originalFetch(input, init)
+      sent.push(JSON.parse(String(init?.body)).text.body)
+      return Response.json({ messages: [{ id: `meta-out-${sent.length}` }] })
+    }
+    const app = new H3()
+    app.post('/api/whatsapp/webhook', whatsappWebhook)
+    const write = async (id: string, text: string) => {
+      const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ value: { messages: [{ id, from: '66812345678', type: 'text', text: { body: text } }] } }] }] })
+      const response = await app.request(Object.assign(new Request('https://proof.example/api/whatsapp/webhook', {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': `sha256=${createHmac('sha256', 'whatsapp-secret').update(body).digest('hex')}` }, body,
+      }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+      assert.equal(response.status, 200, await response.clone().text())
+      return sent.at(-1)
+    }
+    const pending = async () => (await getWhatsAppWorkspaceState(db, 'owner'))?.pending_confirmation
+
+    // Dee is never offered: there is nothing to reply to her through.
+    const offered = await write('wamid-1', 'Can I reply?')
+    assert.match(offered!, /Reply to which\?/u)
+    assert.match(offered!, /Ana/u)
+    assert.doesNotMatch(offered!, /Dee/u)
+    // The host takes Ana's email off her stay before the pick: the reply is refused as the inbox refuses it.
+    await updateStay(db, env, manager, ana.id, { expected_version: ana.version, guest_email: null })
+    assert.equal(await write('wamid-2', '1'), 'Reply not sent: This guest has no email or KrabiClaw account to reply to.')
+    assert.equal(await pending(), null)
+  } finally {
+    globalThis.fetch = originalFetch
     await runtime.dispose()
   }
 })
