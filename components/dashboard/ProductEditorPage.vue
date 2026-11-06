@@ -789,7 +789,7 @@ async function reload() {
   await refresh()
   if (loadFailure.value) throw loadFailure.value
   if (product.value) editVersion.value = product.value.updated_at
-  await Promise.all([refreshCatalog(), refreshHomeQuote()])
+  await refreshCatalog()
 }
 
 // ── The weekly schedule ─────────────────────────────────
@@ -863,7 +863,7 @@ const form = reactive(draft.value)
 // home's is its share of the homes billed now.
 const homeQuoted = computed(() => !isNew.value && product.value?.kind === 'stay')
 const homeLive = computed(() => product.value?.stay?.live === true)
-const { quote: homeQuote, quoteError: homeQuoteError, quotePending: homeQuotePending, refreshQuote: refreshHomeQuote } = useHomesQuote(organizationId, () => homeLive.value ? 0 : 1, () => homeQuoted.value && !arrivalTab.value)
+const { quote: homeQuote, quoteError: homeQuoteError, quotePending: homeQuotePending } = useHomesQuote(organizationId, () => homeLive.value ? 0 : 1, () => homeQuoted.value && !arrivalTab.value)
 const homeBilling = computed<{ text: string; billing?: string } | null>(() => {
   if (isNew.value && form.kind === 'stay') return { text: 'A new home is a free draft until it is published or synced with Airbnb.' }
   if (!homeQuoted.value || arrivalTab.value) return null

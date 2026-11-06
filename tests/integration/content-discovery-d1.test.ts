@@ -12,7 +12,7 @@ import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { createDb } from '../../server/db/index.ts'
 import { recordTenantPageview, resolvePublicPageIdentity } from '../../server/utils/pageview-tracking.ts'
 import { putLocalizationForAuthoring, putResourceLocalization, resolveLocalizedPublicRoute } from '../../server/utils/localization.ts'
-import { getPublishedTenantPage } from '../../server/utils/content/pages.ts'
+import { createTenantPage, getPublishedTenantPage } from '../../server/utils/content/pages.ts'
 import { createProduct, setProductLocation } from '../../server/utils/product-management.ts'
 import { addOrganizationLanguage, disableOrganizationLanguage, publishOrganizationLanguage } from '../../server/utils/organization-languages.ts'
 
@@ -106,9 +106,15 @@ test('public discovery resolves translations through current publication owners'
     assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, pagePath: '/ja' }), null)
     await assert.rejects(publishOrganizationLanguage(createDb(db), env, { organizationId: 'tenant', locale: 'ja' }),
       (error: unknown) => error instanceof HTTPError && error.statusCode === 409 && error.data?.code === 'LOCALIZATION_VALIDATION_FAILED')
-    await putLocalizationForAuthoring(env, db, { organizationId: 'tenant', resourceType: 'content_document', resourceId: 'home', locale: 'ja',
-      values: { title: 'ご来店をお待ちしています' }, userId: 'discovery-owner',
-      contentBlocks: [{ id: 'home-ja-body', type: 'markdown', data: { markdown: '旬の料理をお楽しみください。', editor_mode: 'rich' } }],
+    await assert.rejects(createTenantPage(createDb(db), { env, organizationId: 'tenant', userId: 'discovery-owner',
+      data: { path: '/contact', title: 'Additional source page', blocks: [] },
+    }), (error: unknown) => error instanceof HTTPError && error.statusCode === 402)
+    // Creating a translation through the page editor/MCP page boundary must not
+    // charge the existing source page's custom-page capability again.
+    await createTenantPage(createDb(db), { env, organizationId: 'tenant', userId: 'discovery-owner',
+      data: { pageId: 'home', locale: 'ja', path: '/', title: 'ご来店をお待ちしています',
+        blocks: [{ id: 'home-ja-body', type: 'markdown', data: { markdown: '旬の料理をお楽しみください。', editor_mode: 'rich' } }],
+      },
     })
     assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, pagePath: '/ja' }), null)
     await publishOrganizationLanguage(createDb(db), env, { organizationId: 'tenant', locale: 'ja' })
