@@ -86,15 +86,15 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
   const config = useRuntimeConfig()
   const requestURL = useRequestURL()
   const { organization, previewAuthorized } = useTenantOrganization()
-  const shell = organization.template.slug === 'platform' ? null : useOrganizationShellState()
+  const shell = organization.site.slug === 'platform' ? null : useOrganizationShellState()
   const publicLocale = useState<string>('public-locale', () => 'en')
   const localeRepresentations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
 
   const normalized = computed(() => {
     const value = toValue(input)
     if (!value) return null
-    const template = organization.template.slug
-    const origin = template === 'platform'
+    const site = organization.site.slug
+    const origin = site === 'platform'
       ? config.public.siteUrl
       : requestURL.origin
     const privatePage = value.discoverability === 'private'
@@ -106,7 +106,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
     const brand = { organizationName: organization.name }
     const socialInput: SocialPageMetadataInput = {
       ...value,
-      template,
+      template: site,
       brand,
       pageType: value.pageType || 'website',
       canonicalUrl,
@@ -123,7 +123,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
     const resolvedImage = image
       ? { ...image, url: resolveSeoUrl(image.url, origin), alt: image.alt || value.title }
       : null
-    return { value, origin, template, tags: composeSocialMetadata(socialInput, resolvedImage) }
+    return { value, origin, site, tags: composeSocialMetadata(socialInput, resolvedImage) }
   })
 
   useHead(() => {
@@ -170,14 +170,14 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
 
   useSchemaOrg(computed(() => {
     if (!normalized.value) return []
-    const { value, origin, template, tags } = normalized.value
+    const { value, origin, site, tags } = normalized.value
     if (value.schema === false || value.discoverability === 'private') return []
     const blocks = (value.contentBlocks ?? []).filter(block =>
       block.data.status !== 'inactive' && block.data.render_enabled !== false && block.data.schema_enabled !== false,
     )
     const videos = videoObjectNodes(blocks, tags.canonicalUrl)
     const shouldEmitSchema = (
-      template === 'platform'
+      site === 'platform'
       || value.schema === true
       || Boolean(value.breadcrumbs?.length)
       || Boolean(value.faqItems?.length)

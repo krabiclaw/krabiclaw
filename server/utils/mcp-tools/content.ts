@@ -33,7 +33,7 @@ import {
 } from '~/server/utils/content/documents'
 import { prepareTenantBlogContentBlocks } from '~/server/utils/content/publishing'
 import { executeBatch, queryFirst } from '~/server/db'
-import { resolvePublicTemplate } from '~/utils/template-registry'
+import { resolvePublicSite } from '~/utils/site-routing'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { renderStructuredResponse } from '~/server/utils/mcp-render'
@@ -47,7 +47,7 @@ export const TENANT_PAGE_METADATA_SCHEMA = {
   title: { type: 'string', description: "The page's name, e.g. About. The site name is appended to the browser title. Always sent in full — an omitted title is not kept." },
   summary: { type: ['string', 'null'], description: 'Omit to preserve on update; null clears it.' },
   pageType: { type: 'string', enum: ['custom', 'recipe', 'legal', 'system'], description: "The page's type. Send the page_type from the last read unless you are changing it." },
-  recipe: { type: ['string', 'null'], description: 'The template section this page fills, or null for a page that fills none. Send the recipe from the last read unless you are changing it; an omitted recipe is not kept.' },
+  recipe: { type: ['string', 'null'], description: 'The site section this page fills, or null for a page that fills none. Send the recipe from the last read unless you are changing it; an omitted recipe is not kept.' },
   sortOrder: { type: 'number', description: "The page's position in the site's page list. Send the sort_order from the last read unless you are reordering." },
 }
 
@@ -251,7 +251,7 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'delete_site_page',
-      description: 'Delete the selected site page or translation. Deleting a translation removes that translation; deleting the source locale removes the page and every translation with it, and the response names the locales that went. A page the site template renders cannot be deleted, because its route would then have nothing to show.',
+      description: 'Delete the selected site page or translation. Deleting a translation removes that translation; deleting the source locale removes the page and every translation with it, and the response names the locales that went. A required site page cannot be deleted, because its route would then have nothing to show.',
       domain: 'content',
       minimumRole: 'admin',
       inputSchema: {
@@ -336,7 +336,7 @@ function nullableStringArg(args: Record<string, unknown>, key: string, fallback:
   return value.trim()
 }
 
-// Required, but legitimately null: a page that fills no template section has no
+// Required, but legitimately null: a page that fills no site section has no
 // recipe. The caller must say which, rather than omitting the key and having the
 // stored row read back in.
 function requiredNullableString(args: Record<string, unknown>, key: string): string | null {
@@ -440,11 +440,11 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
       try {
         const pages = await listTenantPages(organization.db, organization.organizationId, { locale: optionalString(args, "locale") });
         const page = paginateMcpCollection(pages, args, { resource: `tenant-pages:${organization.organizationId}:${optionalString(args, 'locale') ?? ''}` });
-        const site = await queryFirst<{ vertical: string; theme_id: string }>(organization.db, 'SELECT vertical, theme_id FROM organization WHERE id = ?', [organization.organizationId]);
-        if (!site) throw new HTTPError({ statusCode: 404, message: 'Organization not found' });
-        const template = resolvePublicTemplate({ vertical: site.vertical, themeId: site.theme_id });
-        const paths = new Set([...template.sitemap.exactPaths, ...Object.values(template.pageDocuments.recipes)]);
-        const built_in_pages = [...paths].map(path => ({ path, recipe: Object.entries(template.pageDocuments.recipes).find(([, value]) => value === path)?.[0] ?? null, public_url: organization.publicUrl ? new URL(path, organization.publicUrl).toString() : null }));
+        const organizationSite = await queryFirst<{ vertical: string; theme_id: string }>(organization.db, 'SELECT vertical, theme_id FROM organization WHERE id = ?', [organization.organizationId]);
+        if (!organizationSite) throw new HTTPError({ statusCode: 404, message: 'Organization not found' });
+        const site = resolvePublicSite({ themeId: organizationSite.theme_id });
+        const paths = new Set([...site.sitemap.exactPaths, ...Object.values(site.pageDocuments.recipes)]);
+        const built_in_pages = [...paths].map(path => ({ path, recipe: Object.entries(site.pageDocuments.recipes).find(([, value]) => value === path)?.[0] ?? null, public_url: organization.publicUrl ? new URL(path, organization.publicUrl).toString() : null }));
         return { built_in_pages, pages: page.items.map(row => ({ ...row, admin_edit_url: pageEditUrl(organization.organizationSlug, row) })), page_info: page.page_info };
       } catch (error) {
         return rethrowAsInvalidParams(error);

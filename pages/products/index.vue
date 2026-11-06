@@ -8,6 +8,6 @@
 <script setup lang="ts">
 import TenantProductCatalog from '~/components/products/TenantProductCatalog.vue'
 definePageMeta({ layout: false })
-const { template } = useTenantOrganization().organization
-const isPlatform = template.slug === 'platform'
+const { site } = useTenantOrganization().organization
+const isPlatform = site.slug === 'platform'
 </script>

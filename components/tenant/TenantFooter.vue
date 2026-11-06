@@ -67,7 +67,7 @@ import { catalogNavigation, publicLocationPath } from '~/utils/product-presentat
 import { getActiveSpecialClosure } from '~/utils/formatters'
 import { getTodayHoursLabel, type OpeningHours, type SpecialHours } from '~/shared/reservation-hours'
 import { formatPostalAddress, type PostalAddress } from '~/utils/postal-address'
-import { isLegalPractice } from '~/utils/template-registry'
+import { isLegalPractice } from '~/utils/site-routing'
 
 const props = withDefaults(defineProps<{
   organization: ApiRecord | null
@@ -122,8 +122,9 @@ const footerGroups = computed(() => [
   {
     label: t('site.footer.heading_discover'),
     items: [
-      ...linksFor(['/pricing', '/blog', '/donate']),
+      ...linksFor(['/pricing', '/donate']),
       ...sectionLinks([
+        { section: 'blog', path: '/blog', labelKey: 'site.footer.blog' },
         { section: 'reviews', path: '/reviews', labelKey: 'site.footer.reviews' },
         { section: 'posts', path: '/posts', labelKey: 'site.footer.latest_updates' },
         { section: 'qa', path: '/qa', labelKey: 'site.footer.qa' },

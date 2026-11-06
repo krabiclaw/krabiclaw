@@ -44,7 +44,7 @@
 import DashboardOrganizationLocationSelector, { type OrganizationLocationSelectorItem } from '~/components/dashboard/OrganizationLocationSelector.vue'
 import { getErrorMessage } from '~/utils/errors'
 import { resolveCmsCapabilities } from '~/config/cms-registry'
-import { resolvePublicTemplate } from '~/utils/template-registry'
+import { resolvePublicSite } from '~/utils/site-routing'
 import { normalizeVertical, type OrganizationVertical } from '~/utils/vertical-copy'
 
 const route = useRoute()
@@ -62,7 +62,7 @@ const { locations, error: locationsError, pending: locationsPending } = await us
 const capabilities = computed(() => {
   const vertical = organization.value?.vertical
   if (!vertical) return null
-  return resolveCmsCapabilities(normalizeVertical(vertical) as OrganizationVertical, resolvePublicTemplate({ vertical }).slug, null)
+  return resolveCmsCapabilities(normalizeVertical(vertical) as OrganizationVertical, resolvePublicSite({}).slug, null)
 })
 const usesServiceAreaVocabulary = computed(() => capabilities.value?.locationVocabulary === 'office/service area')
 const locationsLabel = computed(() => (usesServiceAreaVocabulary.value ? 'Offices' : 'Locations'))

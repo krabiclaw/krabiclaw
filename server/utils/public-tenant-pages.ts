@@ -21,7 +21,7 @@ import {
 import { documentOfRootSql } from '~/server/utils/content/documents'
 import { listPublicLocaleRepresentations, resolvePublicDocumentSourcePath } from '~/server/utils/public-locale-representations'
 import { listPublicSocialPosts } from '~/server/utils/post-management'
-import { isLegalPracticeSite, resolvePublicTemplate } from '~/utils/template-registry'
+import { isLegalPracticeSite, resolvePublicSite } from '~/utils/site-routing'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { EXPERIENCE_PRESENTATION, presentationForProduct, publicLocationPath } from '~/utils/product-presentation'
 import { publicLocationHomeSlugSql, publicLocationSql } from '~/server/utils/public-locations'
@@ -237,7 +237,7 @@ async function hydrateBlocks(
     // A contact form may name an offering whose booking flow a visitor can enter instead.
     if (block.type === 'contact_form' && typeof block.data.booking_product_id === 'string' && block.data.booking_product_id.trim()) productIds.add(block.data.booking_product_id)
   }
-  // The site this page belongs to. Its template decides where an article
+  // The site this page belongs to. Its site decides where an article
   // lives, its vertical decides where a product lives, and its currency
   // decides which offers apply.
   // The reads a block names (pages, FAQ, reviews, posts) depend on the blocks
@@ -261,21 +261,21 @@ async function hydrateBlocks(
     `, [locale, organizationId]) : [],
   ])
   if (!organizationRow) throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant page site is unavailable' })
-  const template = resolvePublicTemplate({ themeId: organizationRow.theme_id, vertical: organizationRow.vertical })
+  const site = resolvePublicSite({ themeId: organizationRow.theme_id})
   // Legal practices list their practice areas on /services, and their offices
   // link to the contact page rather than to location pages they do not have.
   const legalPractice = isLegalPracticeSite({ themeId: organizationRow.theme_id, vertical: organizationRow.vertical })
   const defaultServices = pagePath === '/services' && legalPractice && blocks.length === 1 && blocks[0]?.type === 'hero'
-  const defaultLocationGrid = pagePath === '/' && template.slug !== 'platform' && organizationRow.vertical !== 'lodging' && !blocks.some(block => block.type === 'location_grid')
+  const defaultLocationGrid = pagePath === '/' && site.slug !== 'platform' && organizationRow.vertical !== 'lodging' && !blocks.some(block => block.type === 'location_grid')
   const addressVisible = !legalPractice || organizationRow.address_visibility === 'visible'
   // Each grid gets the products it named, and only those. Keyed by collection
   // rather than flattened into one list: two grids on a page name two different
   // collections, and a flat union rendered both collections in both grids.
   const currency = organizationRow.default_currency
-  const homepage = pagePath === '/' && template.slug !== 'platform'
+  const homepage = pagePath === '/' && site.slug !== 'platform'
   const homepageMenu = homepage && !legalPractice
   // The default services list, the catalog and the branches all follow from the
-  // template alone; one round trip reads the three.
+  // site alone; one round trip reads the three.
   const [services, productCatalog, sourceLocations] = await Promise.all([
     defaultServices ? listOrganizationProducts(db, { organizationId, kind: 'service', publishedOnly: true, env }).then(products => products.map(publicProduct)) : [],
     collectionIds.size || productIds.size || homepage || defaultServices ? loadTenantPageProductCatalog(db, organizationId, locale, localizations, env) : undefined,
@@ -303,7 +303,7 @@ async function hydrateBlocks(
     && !(Array.isArray(block.data.product_ids) && block.data.product_ids.length) && !block.data.collection_id)
   for (const product of homepageDishes) if (defaultMenuGrid || product.details.featured === true) productIds.add(product.id)
   if (homepage) for (const product of productCatalog!.products) if (product.kind === 'experience' || product.details.featured === true || (organizationRow.vertical === 'lodging' && product.kind === 'stay')) productIds.add(product.id)
-  // Null on a template that sells nothing; its pages carry no product grid.
+  // Null on a site that sells nothing; its pages carry no product grid.
   if ((collectionIds.size || productIds.size) && !currency) {
     throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant page site has no currency' })
   }
@@ -404,7 +404,7 @@ async function hydrateBlocks(
     description: typeof row.content === 'string' ? row.content : undefined,
     value: row.rating == null ? undefined : String(row.rating),
     // The reviewer's picture, which the review record owns. It was dropped on
-    // the way into the item, so a template drawing portraits drew none.
+    // the way into the item, so a site drawing portraits drew none.
     media: Array.isArray(row.media) ? row.media : [],
   }))
   const postItems = postRows.map((post) => {

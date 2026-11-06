@@ -1,6 +1,7 @@
+import { testBaseUrl } from '../e2e/test-env'
 import { expect, test, type Page } from '@playwright/test'
 import { openTenantPage } from '../e2e/helpers'
-import { blawbyBaseURL, blawbyExtraHeaders, kikuzukiBaseURL, kikuzukiExtraHeaders, potteryHouseBaseURL, potteryHouseExtraHeaders } from './real-tenants'
+import { strutBaseURL, blawbyBaseURL, blawbyExtraHeaders, kikuzukiBaseURL, kikuzukiExtraHeaders, potteryHouseBaseURL, potteryHouseExtraHeaders } from './real-tenants'
 
 async function clientJourney(page: Page, options: {
   baseURL: string
@@ -88,3 +89,27 @@ test('NCLS home → services → service detail', async ({ page }) => {
     detailPath: '/services/family', detailText: /Family Law/i,
   })
 })
+
+for (const [name, baseURL] of [['Strut', strutBaseURL], ['NCLS', blawbyBaseURL]]) {
+  test(`${name} home → blog → article uses the shared navigation`, async ({ page }) => {
+    test.skip(name === 'Strut' && new URL(testBaseUrl()).hostname !== 'krabiclaw.com', 'Strut is a production-only tenant; staging has no Strut organization.')
+    expect((await openTenantPage(page, `${baseURL}/`, {}))?.status()).toBe(200)
+    await expect(page.locator('footer a[href="/blog"]')).toHaveCount(1)
+    const headerLink = page.locator('header nav').first().getByRole('link', { name: 'Blog', exact: true })
+    await expect(headerLink).toBeVisible()
+    await headerLink.click()
+    await expect(page).toHaveURL(/\/blog$/)
+    const article = page.locator('main article h2 a[href^="/blog/"]').first()
+    await expect(article).toBeVisible()
+    const title = await article.innerText()
+    await article.click()
+    await expect(page.locator('main h1')).toHaveText(title)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.locator('header').getByLabel('Toggle navigation', { exact: true }).click()
+    const mobileLink = page.locator('header details nav').last().getByRole('link', { name: 'Blog', exact: true })
+    await expect(mobileLink).toBeVisible()
+    await mobileLink.click()
+    await expect(page).toHaveURL(/\/blog$/)
+    await expect(page.locator('main')).toContainText(title)
+  })
+}

@@ -43,7 +43,7 @@
 </template>
 
 <script setup lang="ts">
-import { listPublishedTemplateMarketing } from '~/utils/template-registry'
+import { listPublishedTemplateMarketing } from '~/utils/template-marketing'
 
 definePageMeta({ layout: 'platform' })
 
@@ -53,8 +53,8 @@ const config = useRuntimeConfig()
 const organizationUrl = config.public.siteUrl
 
 // A page about the business: its image is the organization's.
-const { social_image: organizationSocialImage, template: organizationTemplate } = useTenantOrganization().organization
-if (organizationTemplate.slug !== 'platform') throw createError({ statusCode: 404, statusMessage: 'Page not found', fatal: true })
+const { social_image: organizationSocialImage, site: organizationSite } = useTenantOrganization().organization
+if (organizationSite.slug !== 'platform') throw createError({ statusCode: 404, statusMessage: 'Page not found', fatal: true })
 useSocialMetadata({
   path: '/templates',
   socialImage: organizationSocialImage,

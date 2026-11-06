@@ -10,7 +10,7 @@ export interface ArticleNav {
 
 /**
  * The collection's navigation, provided by the articles layout to the
- * template's header inside it: on a phone the header's own menu is the one
+ * site's header inside it: on a phone the header's own menu is the one
  * navigation, so the article list lives there rather than in a second drawer.
  */
 export const articleNavKey = Symbol('article-nav') as InjectionKey<ComputedRef<ArticleNav>>
@@ -24,7 +24,7 @@ export const articleNavKey = Symbol('article-nav') as InjectionKey<ComputedRef<A
 export async function useArticleNav() {
   const route = useRoute()
   const { t } = useI18n()
-  const { template } = useTenantOrganization().organization
+  const { site } = useTenantOrganization().organization
   const publicLocale = useState<string>('public-locale', () => 'en')
   const collection = computed(() => route.meta.articleCollection === 'docs' ? 'docs' as const : 'blog' as const)
   const { categoryTree } = await usePublishedArticles(collection)
@@ -33,7 +33,7 @@ export async function useArticleNav() {
     categories: categoryTree.value,
     indexLabel: collection.value === 'docs' ? t('site.footer.docs') : t('site.footer.blog'),
     // KrabiClaw searches its own blog and docs; a site searches its articles, in English only.
-    search: template.slug === 'platform'
+    search: site.slug === 'platform'
       ? { surface: collection.value, variant: 'platform' }
       : publicLocale.value === 'en' ? { surface: 'tenant_blog', variant: 'tenant' } : null,
   }))

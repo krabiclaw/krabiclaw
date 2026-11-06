@@ -6,10 +6,7 @@ import { renderTenantCard } from './tenant.ts'
 
 export type OgImageRenderer = (_payload: RenderInputs) => SatoriNode
 
-/**
- * Template registry for OG image rendering — like utils/template-registry.ts, the
- * render pipeline dispatches on `template`, never on scattered per-page checks.
- */
+/** Social-card renderers use the site surface, independently of page and business type. */
 export const ogImageRenderers: Record<SocialTemplate, OgImageRenderer> = {
   platform: renderPlatformCard,
   tenant: renderTenantCard,

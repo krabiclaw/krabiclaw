@@ -1,5 +1,5 @@
 import { TENANT_TYPES, type TenantType } from '../../utils/tenant-routing.ts'
-import { TENANT_NON_INDEXABLE_EXACT_PATHS } from '../../utils/template-registry.ts'
+import { TENANT_NON_INDEXABLE_EXACT_PATHS } from '../../utils/site-routing.ts'
 import { isEnvironmentTenantAliasHost } from './tenant-hosts.ts'
 import { isDemoHost, isDemoOrganization } from '../../shared/demo.ts'
 

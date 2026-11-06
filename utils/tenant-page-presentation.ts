@@ -9,7 +9,7 @@
 
 import type { Component } from 'vue'
 import type { TenantPageBlock, TenantPageBlockType } from '~/utils/tenant-page-blocks'
-import type { PublicTemplateSlug } from '~/utils/template-registry'
+import type { SiteSurface } from '~/utils/site-routing'
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import PlatformMarketingHero from '~/components/platform/marketing/PlatformMarketingHero.vue'
 import PlatformFeatureCards from '~/components/platform/marketing/PlatformFeatureCards.vue'
@@ -46,7 +46,7 @@ type BlockPresentation = Component<{ block: TenantPageBlock, page: PublicTenantP
 const feedOrBlock = (component: unknown) => component as BlockPresentation
 
 const PRESENTATIONS: Readonly<Record<string, BlockPresentation>> = {
-  // KrabiClaw's own platform marketing template.
+  // KrabiClaw's own platform marketing site.
   'platform:hero': PlatformMarketingHero,
   'platform:button_group': PlatformProductNavigation,
   'platform:feature_grid': PlatformFeatureCards,
@@ -85,10 +85,10 @@ const PRESENTATIONS: Readonly<Record<string, BlockPresentation>> = {
   'tenant:social_posts': feedOrBlock(SocialPosts),
 }
 
-/** The component this template draws this block with, or null for the default. */
+/** The component this site draws this block with, or null for the default. */
 export function tenantPageBlockPresentation(
-  template: PublicTemplateSlug,
+  site: SiteSurface,
   type: TenantPageBlockType,
 ): BlockPresentation | null {
-  return PRESENTATIONS[`${template === 'platform' ? 'platform' : 'tenant'}:${type}`] ?? null
+  return PRESENTATIONS[`${site === 'platform' ? 'platform' : 'tenant'}:${type}`] ?? null
 }

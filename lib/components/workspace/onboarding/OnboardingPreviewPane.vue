@@ -114,7 +114,7 @@
 
 <script setup lang="ts">
 import { getEditablePages } from '~/config/content-registry'
-import { resolvePublicTemplate } from '~/utils/template-registry'
+import { resolvePublicSite } from '~/utils/site-routing'
 import type { OrganizationVertical } from '~/utils/vertical-copy'
 
 const props = withDefaults(defineProps<{
@@ -185,12 +185,10 @@ const previewFrameId = useId()
 
 const secondaryTab = computed(() => {
   if (props.vertical === 'service') {
-    const offeringsPath = resolvePublicTemplate({ vertical: props.vertical }).serviceRoutes.offeringsIndex
-    if (!offeringsPath) return null
-    return { id: offeringsPath.replace(/^\//, ''), label: 'Services', enabled: !!props.iframeSrc || props.organizationLocations.length > 0, locationScoped: false }
+    return { id: 'services', label: 'Services', enabled: !!props.iframeSrc || props.organizationLocations.length > 0, locationScoped: false }
   }
-  const template = resolvePublicTemplate({ vertical: props.vertical })
-  const match = getEditablePages(props.vertical, template.slug).find(page => page.id === 'menu' || page.id === 'products')
+  const site = resolvePublicSite({})
+  const match = getEditablePages(props.vertical, site.slug).find(page => page.id === 'menu' || page.id === 'products')
   if (!match) return null
   const locationScoped = match.scope === 'location'
   const enabled = locationScoped ? props.organizationLocations.length > 0 : !!props.iframeSrc || props.organizationLocations.length > 0

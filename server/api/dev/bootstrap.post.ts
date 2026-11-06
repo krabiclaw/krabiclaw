@@ -5,7 +5,7 @@ import { createAuth } from '~/server/utils/auth'
 import { assertDevRouteAllowed } from '~/server/utils/dev-route-auth'
 import { executeBatch } from '~/server/db'
 import { provisionOrganization } from '~/server/utils/organization-provisioning'
-import { PLATFORM_THEME_ID } from '~/utils/template-registry'
+import { PLATFORM_THEME_ID } from '~/utils/site-routing'
 
 // A fresh local E2E database holds nothing, and the Worker serves no platform
 // request until one organization runs the platform template. Production's

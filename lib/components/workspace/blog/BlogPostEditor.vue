@@ -35,7 +35,7 @@
             v-model:title="form.title"
             :excerpt="form.excerpt || null"
             :blocks="blocks"
-            :template="templateName"
+            :site="siteSurface"
             editable
             :show-meta="false"
             @update:block="updateBlock"
@@ -162,7 +162,7 @@ if (newArticle) {
 const saveDisabled = computed(() => saving.value || Boolean(loadError.value) || !form.title.trim() || saveState.value === 'conflict'
   || (section.value === 'publishing' && post.value?.status !== 'published' && (!isArticleValid() || !form.category_id))
   || (!contentDirty.value && !(section.value === 'publishing' && post.value?.status !== 'published')))
-const templateName = computed(() => post.value?.editor_template || 'tenant')
+const siteSurface = computed(() => post.value?.editor_surface || 'tenant')
 const collectionOptions = ARTICLE_COLLECTION_SLUGS.map(slug => ({ label: ARTICLE_COLLECTIONS[slug].label, value: slug }))
 if (!props.organizationId) throw new Error('The blog editor needs the organization it edits')
 // The page awaits the post before this editor exists; the draft is seeded from it

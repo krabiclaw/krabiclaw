@@ -2,7 +2,6 @@ import { getPersistedSourceLocale } from '~/server/utils/localization'
 import { platformLocale } from '~/shared/platform-locales'
 // Seed only structural records for a newly created organization. Customer-facing
 // copy must be supplied by the owner or an approved import.
-// All records use source='template' so ChowBot can identify and reference them.
 
 import { getVerticalCopy, type OrganizationVertical } from "~/utils/vertical-copy";
 import { executeBatch, queryAll, type BatchQuery, type DbClient } from "~/server/db";
@@ -63,7 +62,7 @@ export async function seedNewOrganization(
   // for every page but the home page, its heading. The key beside it is an
   // identifier, and using it as the title is what wrote 'about' and 'contact'
   // into the title column and rendered them as h1s.
-  const templatePages = new Map<string, { path: string; title: string; pageType: 'system' | 'recipe' | 'legal'; recipe: string }>([
+  const sitePages = new Map<string, { path: string; title: string; pageType: 'system' | 'recipe' | 'legal'; recipe: string }>([
     ['home', { path: '/', title: pageTitle('home'), pageType: 'system', recipe: 'home' }],
     ['about', { path: '/about', title: pageTitle('about'), pageType: 'system', recipe: 'about' }],
     ['contact', { path: '/contact', title: pageTitle('contact'), pageType: 'system', recipe: 'contact' }],
@@ -80,7 +79,7 @@ export async function seedNewOrganization(
       ['privacy', '/policies/privacy', pageTitle('privacy'), 'legal'],
       ['terms', '/policies/terms', pageTitle('terms'), 'legal'],
       ['third-party-notices', '/third-party-notices', pageTitle('third_party_notices'), 'legal'],
-    ] as const) templatePages.set(page, { path, title, pageType, recipe: page });
+    ] as const) sitePages.set(page, { path, title, pageType, recipe: page });
   }
   const pagesToCreate: Array<{
     data: {
@@ -95,7 +94,7 @@ export async function seedNewOrganization(
   }> = []
   const existingPages = await queryAll<{ path: string }>(db, "SELECT path FROM content_documents WHERE organization_id = ? AND kind = 'page' AND row_role = 'root'", [organizationId])
   const existingPaths = new Set(existingPages.map(page => page.path))
-  for (const definition of templatePages.values()) {
+  for (const definition of sitePages.values()) {
     if (existingPaths.has(definition.path)) continue
     const blocks: Array<{ id: string; type: string; position: number; data: Record<string, unknown> }> = [
       {

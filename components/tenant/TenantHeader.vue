@@ -74,7 +74,7 @@ import PlatformCommandSearchTrigger from '~/components/platform/search/PlatformC
 import { articleNavKey } from '~/composables/useArticleNav'
 import { catalogNavigation } from '~/utils/product-presentation'
 import { getVerticalCopy } from '~/utils/vertical-copy'
-import { isLegalPractice } from '~/utils/template-registry'
+import { isLegalPractice } from '~/utils/site-routing'
 import type { PublicShellPayload } from '~/utils/public-resource-contracts'
 
 const props = withDefaults(defineProps<{
@@ -138,7 +138,7 @@ const verticalCopy = computed(() => (props.organization?.vertical
   ? getVerticalCopy(props.organization.vertical as string, locale.value)
   : { ctaRoute: '', reserveCta: '' }))
 // The site's own pages, in the order a visitor reads a practice or venue by.
-const headerOrder = ['/services', '/experiences', '/pricing', '/about', '/blog', '/donate']
+const headerOrder = ['/services', '/experiences', '/pricing', '/about', '/donate']
 const catalogLinks = computed(() => (props.organization?.vertical
   ? catalogNavigation(props.organization.vertical as string, props.sections)
   : []))
@@ -152,6 +152,7 @@ const navItems = computed(() => {
     const page = byPath.get(path)
     if (page && !items.some(item => item.path === path)) items.push({ path, title: page.title })
   }
+  if (props.sections?.blog) items.push({ path: '/blog', title: t('site.footer.blog') })
   if (props.sections?.reservations) items.push({ path: '/reservations', title: t('site.header.reservations') })
   if (showLocations.value) items.push({ path: '/locations', title: t('site.header.locations') })
   items.push({ path: '/contact', title: props.pageLinks.find(page => page.path === '/contact')?.title || t('site.header.contact') })

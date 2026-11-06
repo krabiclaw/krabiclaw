@@ -19,7 +19,7 @@
           :author-image="post.author?.image ?? null"
           :organization-name="organizationName"
           :blocks="post.content_blocks"
-          :template="template.slug"
+          :site="site.slug"
         >
           <template #before-content>
             <ArticleToc v-if="hasToc" :headings="tocHeadings" collapsible class="mb-8 xl:hidden" />
@@ -68,7 +68,7 @@ const props = defineProps<{ collection: ArticleCollection }>()
 const route = useRoute()
 const { t, localePath } = useI18n()
 const { organization } = useTenantOrganization()
-const { template } = organization
+const { site } = organization
 const locale = useState<string>('public-locale', () => 'en')
 
 const slug = computed(() => String(route.params.slug || '').trim())
@@ -78,7 +78,7 @@ const { readingOrder: articles, categories } = await usePublishedArticles(props.
 
 const organizationName = organization.name
 const authorName = computed(() => post.value.author?.name ?? null)
-// Each collection's index is at its own prefix on every template; only a blog article's own path varies (/blog or /article).
+// Each collection's index is at its own prefix on every site; only a blog article's own path varies (/blog or /article).
 const indexPath = computed(() => localePath(ARTICLE_COLLECTIONS[props.collection].pathPrefix))
 const indexLabel = computed(() => props.collection === 'docs' ? t('site.footer.docs') : t('site.footer.blog'))
 const articlePath = computed(() => localePath(tenantBlogPostPath(post.value.slug, props.collection)))

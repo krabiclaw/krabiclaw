@@ -42,9 +42,9 @@ import { isPublicPagePayload } from '~/utils/public-resource-contracts'
 import type { LocalizedResourceType } from '~/server/utils/localization-registry'
 import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-representations'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
-import { resolvePublicTemplate } from '~/utils/template-registry'
+import { resolvePublicSite } from '~/utils/site-routing'
 import { isPublicSourceRouteRoot } from '~/shared/public-locale-routes'
-import { templateRendersPageDocumentAt } from '~/shared/tenant-page-paths'
+import { siteRendersPageDocumentAt } from '~/shared/tenant-page-paths'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { assertPublicOrganizationLanguage } from '~/server/utils/localization'
 import {
@@ -130,8 +130,8 @@ interface PublicPageLoadOptions {
  * not it carries a tenant page document: /menu and /locations render products
  * and locations, and still have /th/menu and /th/locations.
  *
- * Where the *document* lives is a different question, answered per template in
- * utils/template-registry.ts. Collapsing the two is what made /th/menu 404.
+ * Where the *document* lives is a different question, answered per site in
+ * utils/site-routing.ts. Collapsing the two is what made /th/menu 404.
  */
 function routeSourcePath(page: string | null): string | null {
   if (!page) return null
@@ -504,14 +504,14 @@ async function loadPublicPageSource(
       ? (batchResults[idxQa] as { results: Record<string, unknown>[] })
       : { results: [] as Record<string, unknown>[] };
   const routePagePath = routeSourcePath(page)
-  // Which paths carry a tenant page document is declared once, per template.
-  const template = resolvePublicTemplate({ themeId: organization.theme_id, vertical: organization.vertical })
+  // Which paths carry a tenant page document is declared once, per site.
+  const site = resolvePublicSite({ themeId: organization.theme_id})
   const locationDocumentPath = locationRow && page === 'location'
     ? `/locations/${locationRow.slug}`
     : null
-  const documentPath = locationDocumentPath && templateRendersPageDocumentAt(template, locationDocumentPath)
+  const documentPath = locationDocumentPath && siteRendersPageDocumentAt(site, locationDocumentPath)
     ? locationDocumentPath
-    : page ? template.pageDocuments.recipes[page] ?? null
+    : page ? site.pageDocuments.recipes[page] ?? null
     : null
   const contentPagePath = requestedDatasets.has('content') ? documentPath : null
   const tenantPageOptions = {
@@ -580,7 +580,7 @@ async function loadPublicPageSource(
   // These complete built-in routes may display an optional CMS content overlay.
   // The route remains valid when that optional overlay has no translated page.
   const allowsMissingLocalizedTenantPage = page === 'location'
-    || Boolean(contentPagePath && template.pageDocuments.optionalLocalizedPaths.includes(contentPagePath))
+    || Boolean(contentPagePath && site.pageDocuments.optionalLocalizedPaths.includes(contentPagePath))
   if (contentPagePath && !tenantPage && locale && locale !== sourceLocale && !isPreviewAuthorized && !allowsMissingLocalizedTenantPage) {
     throw new HTTPError({ statusCode: 404, statusMessage: 'Localized page was not found' })
   }

@@ -1,5 +1,5 @@
 <template>
-  <NuxtLayout :name="template.layout">
+  <NuxtLayout :name="site.layout">
     <ProductCollectionPage :products="experiences" :collections="collections" :locations="productLocations" :location-id="locationId" :currency="currency" :presentation="presentation" :vertical="vertical" :title="collectionTitle" :brand-name="brandName" />
   </NuxtLayout>
 </template>
@@ -10,7 +10,7 @@ import { isCurrencyCode } from '~/shared/currencies'
 import { EXPERIENCE_PRESENTATION, isExperience, resolveProductPresentation } from '~/utils/product-presentation'
 
 definePageMeta({ layout: false })
-const { template } = useTenantOrganization().organization
+const { site } = useTenantOrganization().organization
 const { products, collections, locations, location, config, organization, data: pagePayload } = await usePublicPageData({ lazy: false })
 const currentLocation = location.value
 if (!currentLocation) throw createError({ statusCode: 404, statusMessage: 'Location not found' })

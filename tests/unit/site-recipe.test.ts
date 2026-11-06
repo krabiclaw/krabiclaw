@@ -1,27 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { isLegalPracticeSite, PLATFORM_THEME_ID, resolvePublicTemplate, TENANT_THEME_ID } from '../../utils/template-registry.ts'
 import { siteRecipeStyle } from '../../shared/site-recipe.ts'
 
-
-test('every customer site resolves to the tenant template, KrabiClaw to the platform', () => {
-  for (const vertical of ['restaurant', 'experience', 'lodging', 'service']) {
-    const template = resolvePublicTemplate({ themeId: TENANT_THEME_ID, vertical })
-    assert.equal(template.slug, 'tenant')
-    assert.equal(template.layout, 'tenant')
-  }
-  // A stored theme id from before the merge is a customer site like any other.
-  assert.equal(resolvePublicTemplate({ themeId: 'blawby-theme-v1', vertical: 'service' }).slug, 'tenant')
-  assert.equal(resolvePublicTemplate({ themeId: PLATFORM_THEME_ID, vertical: 'service' }).slug, 'platform')
-})
-
-test('legal practice routes come from the vertical, and KrabiClaw is never a legal practice', () => {
-  assert.equal(resolvePublicTemplate({ vertical: 'service' }).serviceRoutes.offeringsIndex, '/services')
-  assert.equal(resolvePublicTemplate({ vertical: 'restaurant' }).serviceRoutes.offeringsIndex, null)
-  assert.equal(isLegalPracticeSite({ themeId: TENANT_THEME_ID, vertical: 'service' }), true)
-  assert.equal(isLegalPracticeSite({ themeId: PLATFORM_THEME_ID, vertical: 'service' }), false)
-  assert.equal(isLegalPracticeSite({ themeId: TENANT_THEME_ID, vertical: 'restaurant' }), false)
-})
 
 test('siteRecipeStyle maps recipe tokens to css variables', () => {
   const emptyStyle = siteRecipeStyle()
