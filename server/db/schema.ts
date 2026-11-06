@@ -287,32 +287,94 @@ export const organization_goals = sqliteTable('organization_goals', {
   check('organization_goals_instants_check', sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (target_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', target_at, '+0 days') IS target_at)`),
 ]);
 
-// A person's reaction to an explicit operation at a particular evidence revision.
-// A new source revision is a new context, not a permanent dismissal of a subject.
-// Optional goal scope ties feedback only to the goal the person actually named.
-export const recommendation_feedback = sqliteTable('recommendation_feedback', {
+// Something the business could do, as the opportunity selector found it at one
+// evidence revision (server/domain/opportunities.ts). New evidence is a new
+// row; the old one becomes superseded. Accepting creates its one task
+// (tasks.opportunity_id); dismissing records the owner's decision. Tasks
+// reference this table, so its value sets (operation, status) are enforced by
+// the domain, not by a CHECK a new value would have to rebuild. A decision
+// (accepted, dismissed) carries when and by whom.
+export const opportunities = sqliteTable('opportunities', {
   id: text().primaryKey(),
   organization_id: text().notNull().references(() => organization.id, { onDelete: 'cascade' }),
-  user_id: text().notNull().references(() => user.id, { onDelete: 'cascade' }),
   operation: text({ enum: BUSINESS_PROGRESS_OPERATIONS }).notNull(),
   subject_id: text().notNull(),
   evidence_revision: text().notNull(),
   goal_id: text(),
   goal_revision: text(),
-  decision: text({ enum: ['accept', 'dismiss', 'defer', 'correct'] }).notNull(),
-  note: text(),
-  defer_until: text(),
+  status: text({ enum: ['open', 'accepted', 'dismissed', 'superseded'] }).notNull(),
+  available_at: text(),
+  decision_note: text(),
+  decided_at: text(),
+  decided_by_user_id: text().references(() => user.id, { onDelete: 'set null' }),
   created_at: text().notNull(),
   updated_at: text().notNull(),
 }, table => [
-  foreignKey({ columns: [table.organization_id, table.goal_id], foreignColumns: [organization_goals.organization_id, organization_goals.id], name: 'recommendation_feedback_goal_scope_fk' }).onDelete('cascade'),
-  uniqueIndex('recommendation_feedback_reference_unique').on(table.organization_id, table.user_id, table.operation, table.subject_id, table.evidence_revision).where(sql`${table.goal_id} IS NULL`),
-  uniqueIndex('recommendation_feedback_goal_reference_unique').on(table.organization_id, table.user_id, table.operation, table.subject_id, table.evidence_revision, table.goal_id, table.goal_revision).where(sql`${table.goal_id} IS NOT NULL`),
-  index('recommendation_feedback_actor_idx').on(table.organization_id, table.user_id, table.updated_at),
-  check('recommendation_feedback_operation_check', sql`operation IN (${sql.raw(BUSINESS_PROGRESS_OPERATIONS.map(operation => `'${operation}'`).join(', '))}) AND length(trim(subject_id)) > 0`),
-  check('recommendation_feedback_revision_check', sql`length(evidence_revision) = 64 AND evidence_revision NOT GLOB '*[^a-f0-9]*' AND ((goal_id IS NULL AND goal_revision IS NULL) OR (goal_id IS NOT NULL AND length(trim(goal_id)) > 0 AND goal_revision IS NOT NULL))`),
-  check('recommendation_feedback_decision_check', sql`decision IN ('accept', 'dismiss', 'defer', 'correct') AND ((decision = 'defer' AND defer_until IS NOT NULL) OR (decision <> 'defer' AND defer_until IS NULL)) AND (decision <> 'correct' OR note IS NOT NULL) AND (note IS NULL OR length(trim(note)) BETWEEN 1 AND 2000)`),
-  check('recommendation_feedback_instants_check', sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (goal_revision IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', goal_revision, '+0 days') IS goal_revision) AND (defer_until IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', defer_until, '+0 days') IS defer_until)`),
+  unique('opportunities_scope_unique').on(table.organization_id, table.id),
+  foreignKey({ columns: [table.organization_id, table.goal_id], foreignColumns: [organization_goals.organization_id, organization_goals.id], name: 'opportunities_goal_scope_fk' }).onDelete('cascade'),
+  uniqueIndex('opportunities_reference_unique').on(table.organization_id, table.operation, table.subject_id, table.evidence_revision).where(sql`${table.goal_id} IS NULL`),
+  uniqueIndex('opportunities_goal_reference_unique').on(table.organization_id, table.operation, table.subject_id, table.evidence_revision, table.goal_id).where(sql`${table.goal_id} IS NOT NULL`),
+  index('opportunities_status_idx').on(table.organization_id, table.status, table.available_at),
+  check('opportunities_reference_check', sql`length(trim(subject_id)) > 0 AND length(evidence_revision) = 64 AND evidence_revision NOT GLOB '*[^a-f0-9]*' AND ((goal_id IS NULL AND goal_revision IS NULL) OR (goal_id IS NOT NULL AND length(trim(goal_id)) > 0 AND goal_revision IS NOT NULL))`),
+  check('opportunities_decision_check', sql`(status IN ('accepted', 'dismissed')) = (decided_at IS NOT NULL) AND (decided_at IS NOT NULL OR decided_by_user_id IS NULL) AND (decision_note IS NULL OR length(trim(decision_note)) BETWEEN 1 AND 2000)`),
+  check('opportunities_instants_check', sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (goal_revision IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', goal_revision, '+0 days') IS goal_revision) AND (available_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', available_at, '+0 days') IS available_at) AND (decided_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', decided_at, '+0 days') IS decided_at)`),
+]);
+
+// Work someone has to do (server/domain/tasks.ts). Every task but a custom
+// one is opened and closed by the batch that changes its subject: a stay's
+// turnover, a guest's unanswered message, a failed scheduled message, a
+// review awaiting its reply, an accepted opportunity. Kinds other than custom
+// and opportunity take their words from the subject, so title is NULL there.
+// assigned_member_id is a Better Auth member.id; like every responsibility it
+// is cleared by reconcileResponsibilities when the member leaves.
+// Photos are media_placements(owner_type 'task', slot 'attachments').
+export const tasks = sqliteTable('tasks', {
+  id: text().primaryKey(),
+  organization_id: text().notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  kind: text({ enum: ['turnover', 'guest_reply', 'message_delivery', 'review_reply', 'opportunity', 'custom'] }).notNull(),
+  subject_type: text({ enum: ['stay', 'request', 'scheduled_guest_message', 'review', 'article', 'post', 'product'] }),
+  subject_id: text(),
+  product_id: text(),
+  location_id: text(),
+  opportunity_id: text(),
+  title: text(),
+  notes: text(),
+  assigned_member_id: text(),
+  assigned_team_id: text(),
+  starts_at: text(),
+  due_at: text(),
+  timezone: text().notNull(),
+  status: text({ enum: ['open', 'done', 'skipped', 'cancelled'] }).notNull(),
+  outcome_note: text(),
+  closed_at: text(),
+  closed_by_user_id: text().references(() => user.id, { onDelete: 'set null' }),
+  dedupe_key: text().notNull().unique(),
+  version: integer().default(1).notNull(),
+  created_by_user_id: text().references(() => user.id, { onDelete: 'set null' }),
+  created_at: text().notNull(),
+  updated_at: text().notNull(),
+}, table => [
+  foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [products.organization_id, products.id], name: 'tasks_product_scope_fk' }).onDelete('cascade'),
+  foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: 'tasks_location_scope_fk' }).onDelete('cascade'),
+  foreignKey({ columns: [table.organization_id, table.opportunity_id], foreignColumns: [opportunities.organization_id, opportunities.id], name: 'tasks_opportunity_scope_fk' }).onDelete('no action'),
+  foreignKey({ columns: [table.organization_id, table.assigned_team_id], foreignColumns: [team.organizationId, team.id], name: 'tasks_team_scope_fk' }).onDelete('no action'),
+  uniqueIndex('tasks_opportunity_unique').on(table.opportunity_id).where(sql`opportunity_id IS NOT NULL`),
+  index('tasks_status_due_idx').on(table.organization_id, table.status, table.due_at),
+  index('tasks_member_status_due_idx').on(table.organization_id, table.assigned_member_id, table.status, table.due_at),
+  index('tasks_team_status_due_idx').on(table.organization_id, table.assigned_team_id, table.status, table.due_at),
+  index('tasks_subject_idx').on(table.subject_type, table.subject_id),
+  check('tasks_kind_check', sql`kind IN ('turnover', 'guest_reply', 'message_delivery', 'review_reply', 'opportunity', 'custom')
+    AND (subject_type IS NULL) = (subject_id IS NULL)
+    AND (subject_type IS NULL OR subject_type IN ('stay', 'request', 'scheduled_guest_message', 'review', 'article', 'post', 'product'))
+    AND (kind <> 'custom' OR subject_type IS NULL)
+    AND ((kind = 'opportunity') = (opportunity_id IS NOT NULL))`),
+  check('tasks_text_check', sql`(title IS NULL OR length(trim(title)) BETWEEN 1 AND 200) AND (kind NOT IN ('custom', 'opportunity') OR title IS NOT NULL)
+    AND (notes IS NULL OR length(trim(notes)) BETWEEN 1 AND 5000) AND (outcome_note IS NULL OR length(trim(outcome_note)) BETWEEN 1 AND 5000)
+    AND length(trim(dedupe_key)) > 0 AND timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'`),
+  check('tasks_assignee_check', sql`assigned_member_id IS NULL OR assigned_team_id IS NULL`),
+  check('tasks_window_check', sql`starts_at IS NULL OR due_at IS NULL OR starts_at <= due_at`),
+  check('tasks_status_check', sql`status IN ('open', 'done', 'skipped', 'cancelled') AND (status = 'open') = (closed_at IS NULL) AND (status <> 'open' OR closed_by_user_id IS NULL) AND (status <> 'skipped' OR outcome_note IS NOT NULL) AND version >= 1`),
+  check('tasks_instants_check', sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (starts_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', starts_at, '+0 days') IS starts_at) AND (due_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', due_at, '+0 days') IS due_at) AND (closed_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', closed_at, '+0 days') IS closed_at)`),
 ]);
 
 export const media_assets = sqliteTable("media_assets", {
@@ -373,7 +435,7 @@ export const media_placements = sqliteTable("media_placements", {
 		foreignColumns: [media_assets.organization_id, media_assets.id],
 		name: "media_placements_asset_scope_fk",
 	}).onDelete("cascade"),
-	check("media_placements_owner_type_check", sql`owner_type IN ('organization', 'business_location', 'product', 'collection', 'content_document', 'content_block', 'review', 'review_request', 'activity_entry', 'team_message')`),
+	check("media_placements_owner_type_check", sql`owner_type IN ('organization', 'business_location', 'product', 'collection', 'content_document', 'content_block', 'review', 'review_request', 'activity_entry', 'team_message', 'task')`),
 	check("media_placements_sort_order_check", sql`sort_order >= 0`),
 	unique("media_placements_org_owner_slot_asset_unique").on(table.owner_type, table.owner_id, table.slot, table.asset_id),
 	unique("media_placements_org_owner_slot_order_unique").on(table.owner_type, table.owner_id, table.slot, table.sort_order),

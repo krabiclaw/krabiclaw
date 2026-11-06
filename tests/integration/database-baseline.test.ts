@@ -92,6 +92,48 @@ test('publication attribution retains historical receipts as unknown and referen
   } finally { database.close() }
 })
 
+test('recommendation feedback becomes the business\'s opportunities, an accepted one with its task, and nothing is left behind', () => {
+  const database = new Database(':memory:')
+  database.pragma('foreign_keys = ON')
+  try {
+    const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
+    const at = journal.entries.findIndex(entry => entry.tag === '0010_tasks_and_opportunities')
+    assert.notEqual(at, -1)
+    for (const entry of journal.entries.slice(0, at)) database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
+    database.prepare("INSERT INTO organization(id,name,slug,default_currency,timezone) VALUES('owner-business','Owner','owner-business','USD','America/Denver')").run()
+    for (const user of ['owner', 'admin']) {
+      database.prepare('INSERT INTO user(id,name,email,emailVerified) VALUES(?,?,?,1)').run(user, user, `${user}@example.test`)
+      database.prepare("INSERT INTO member(id,organizationId,userId,role) VALUES(?, 'owner-business', ?, ?)").run(`${user}-member`, user, user)
+    }
+    const revision = (n: number) => String(n).repeat(64)
+    const insert = database.prepare(`INSERT INTO recommendation_feedback(id,organization_id,user_id,operation,subject_id,evidence_revision,decision,note,defer_until,created_at,updated_at)
+      VALUES(?, 'owner-business', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    insert.run('accepted', 'owner', 'article.publish', 'draft-article', revision(1), 'accept', null, null, '2026-11-01T10:00:00.000Z', '2026-11-01T10:00:00.000Z')
+    insert.run('dismissed', 'owner', 'social.connect', 'owner-business', revision(2), 'dismiss', 'We do not use social media', null, '2026-11-01T10:00:00.000Z', '2026-11-01T10:00:00.000Z')
+    insert.run('corrected', 'owner', 'post.create', 'owner-business', revision(3), 'correct', 'Our photos are on the website already', null, '2026-11-01T10:00:00.000Z', '2026-11-01T10:00:00.000Z')
+    insert.run('deferred', 'owner', 'payments.connect', 'owner-business', revision(4), 'defer', null, '2026-11-20T09:00:00.000Z', '2026-11-01T10:00:00.000Z', '2026-11-01T10:00:00.000Z')
+    // Two people decided about one reference: the later decision is the business's.
+    insert.run('earlier', 'admin', 'article.create', 'owner-business', revision(5), 'dismiss', 'Not now', null, '2026-11-01T10:00:00.000Z', '2026-11-01T10:00:00.000Z')
+    insert.run('later', 'owner', 'article.create', 'owner-business', revision(5), 'accept', null, null, '2026-11-02T10:00:00.000Z', '2026-11-02T10:00:00.000Z')
+
+    database.exec(readFileSync(`migrations/${journal.entries[at]!.tag}.sql`, 'utf8'))
+
+    assert.deepEqual(database.prepare('SELECT id,operation,status,available_at,decision_note,decided_at,decided_by_user_id FROM opportunities ORDER BY id').all(), [
+      { id: 'accepted', operation: 'article.publish', status: 'accepted', available_at: null, decision_note: null, decided_at: '2026-11-01T10:00:00.000Z', decided_by_user_id: 'owner' },
+      { id: 'corrected', operation: 'post.create', status: 'dismissed', available_at: null, decision_note: 'Our photos are on the website already', decided_at: '2026-11-01T10:00:00.000Z', decided_by_user_id: 'owner' },
+      { id: 'deferred', operation: 'payments.connect', status: 'open', available_at: '2026-11-20T09:00:00.000Z', decision_note: null, decided_at: null, decided_by_user_id: null },
+      { id: 'dismissed', operation: 'social.connect', status: 'dismissed', available_at: null, decision_note: 'We do not use social media', decided_at: '2026-11-01T10:00:00.000Z', decided_by_user_id: 'owner' },
+      { id: 'later', operation: 'article.create', status: 'accepted', available_at: null, decision_note: null, decided_at: '2026-11-02T10:00:00.000Z', decided_by_user_id: 'owner' },
+    ])
+    assert.deepEqual(database.prepare('SELECT opportunity_id,kind,subject_type,subject_id,title,assigned_member_id,timezone,status,dedupe_key FROM tasks ORDER BY opportunity_id').all(), [
+      { opportunity_id: 'accepted', kind: 'opportunity', subject_type: 'article', subject_id: 'draft-article', title: 'Publish the blog draft', assigned_member_id: 'owner-member', timezone: 'America/Denver', status: 'open', dedupe_key: 'opportunity:accepted' },
+      { opportunity_id: 'later', kind: 'opportunity', subject_type: null, subject_id: null, title: 'Write a blog article', assigned_member_id: 'owner-member', timezone: 'America/Denver', status: 'open', dedupe_key: 'opportunity:later' },
+    ])
+    assert.equal(database.prepare("SELECT name FROM sqlite_schema WHERE name = 'recommendation_feedback'").get(), undefined)
+    assert.deepEqual(database.pragma('foreign_key_check'), [])
+  } finally { database.close() }
+})
+
 test('channel retry proof preserves every historical receipt as unknown and leaves old writers unable to assert non-delivery', () => {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
