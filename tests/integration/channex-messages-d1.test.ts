@@ -473,7 +473,8 @@ test('an existing stay timeline is adopted intact; two existing timelines fail e
     await db.prepare("UPDATE stays SET request_id = 'history' WHERE id = ?").bind(stay.id).run()
     await appendEntry(db, { threadId: 'history', kind: 'message', actorKind: 'guest', channel: 'email', body: 'Historical message', dedupeKey: 'old' })
     const input = { threadId: 'history', organizationId: ORG, action: 'reply', body: 'Hello', idempotencyKey: 'unaddressable', actorUserId: OWNER, env }
-    await assert.rejects(executeGuestThreadOperation(db, input), code('CHANNEL_THREAD_UNADDRESSABLE'))
+    // A channel stay with no addressable conversation is nowhere to reply, refused before anything is recorded or sent.
+    assert.deepEqual(await executeGuestThreadOperation(db, input), { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'request_id', message: 'This Airbnb stay has no conversation to reply in yet.' })
     provider.bookingId = 'booking'
     await mirrorChannexThread(db, env, 'thread', 'property')
     assert.equal(await db.prepare('SELECT request_id FROM channel_threads').first('request_id'), 'history')
@@ -852,7 +853,12 @@ test('an in-flight or interrupted reply never blocks actual provider messages an
     assert.equal(await db.prepare('SELECT count(*) FROM activity_entries WHERE request_id IS NOT NULL').first('count(*)'), 6, 'presentation never deletes either immutable fact')
     await db.prepare("UPDATE product_channel_mappings SET enabled = 0").run()
     assert.equal((await executeGuestThreadOperation(db, input)).ok, true, 'an actual recorded receipt replays without a new provider request')
-    await assert.rejects(executeGuestThreadOperation(db, { ...input, idempotencyKey: 'disconnected-new', body: 'Not attempted' }), code('CHANNEL_PROPERTY_NOT_READY'))
+    // A new reply to a disconnected home is nowhere to send, refused before anything is recorded or sent.
+    assert.deepEqual(await executeGuestThreadOperation(db, { ...input, idempotencyKey: 'disconnected-new', body: 'Not attempted' }),
+      { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'request_id', message: 'This home is disconnected from Airbnb, so its guest cannot be replied to here.' })
+    // The inbox reads the same rule: a disconnected home's conversation shows no composer.
+    const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
+    assert.deepEqual((await getInboxThread(db, mirrored.request_id, ORG, { audience: 'member', userId: OWNER, principal: owner }))!.composer, { channel: 'email', available: false })
     assert.equal(await db.prepare('SELECT count(*) FROM activity_entries WHERE request_id IS NOT NULL').first('count(*)'), 6, 'failed preflight records no outbound message')
   } finally { release(); globalThis.fetch = realFetch; await runtime.dispose() }
 })

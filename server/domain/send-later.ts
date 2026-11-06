@@ -4,7 +4,7 @@ import { assertAssignedBookingAccess, memberAccessPrincipal, resolveMembership, 
 import { getGuestRequest } from '~/server/domain/requests'
 import { isValidInstant } from '~/utils/timezone'
 import { messageText, messagingError } from './guest-message-schedule'
-import { operationDedupeKey, sendScheduledGuestReply, type OperationOutcome } from './guest-threads/operations'
+import { guestReplyDestination, operationDedupeKey, sendScheduledGuestReply, type OperationOutcome } from './guest-threads/operations'
 import { findEntryByDedupeKey } from './guest-threads/entries'
 import { publishGuestInboxThreadEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { ChannexError } from '~/server/integrations/channex/client'
@@ -60,6 +60,9 @@ export async function createSendLaterMessage(db: DbClient, principal: MemberAcce
   const thread = await getGuestRequest(db, threadId, principal.organizationId)
   if (!thread) messagingError(404, 'THREAD_NOT_FOUND', 'Thread not found', 'threadId')
   await assertAssignedBookingAccess(db, { ...principal, requestId: thread.id })
+  // Nothing is scheduled to a guest the reply could not reach.
+  const destination = await guestReplyDestination(db, thread)
+  if (destination.channel === null) messagingError(409, 'GUEST_UNREACHABLE', destination.reason, 'request_id')
   const id = crypto.randomUUID()
   await execute(db, `INSERT INTO send_later_messages (id, organization_id, request_id, user_id, body, due_at, status, version, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, 'pending', 1, ?, ?)`, [id, principal.organizationId, thread.id, principal.userId, body, due, now, now])

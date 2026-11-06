@@ -241,7 +241,7 @@ test('a responsible home team reads its stays as turnovers on every surface unti
   }
 })
 
-test('a host creates a stay, records its payments and arrival guide, and cancels it with an offline refund', async ({ page, baseURL }) => {
+test('a host creates a stay, records its payments and arrival guide, and cancels it with an offline refund', async ({ page, browser, baseURL }) => {
   test.setTimeout(90_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, headers, slug, location, call, api, productId } = await createStayHome(page, baseURL!, true)
@@ -359,6 +359,30 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   const savedGuide = await request.patch(api(`stay-homes/${productId}`), { headers, data: guide })
   await expectStatus(savedGuide, 200)
   expect((await call('update_product', { product_id: productId, details: { pets_allowed: false, stairs_required: true, stairs_required_details: 'Two steps at the entrance.' } })).error).toBeNull()
+
+  // A Personal-only buyer returns to Personal without being sent to business onboarding,
+  // and Personal never asks for organization roles or permissions.
+  const buyer = await browser.newContext()
+  const personalOrganizationReads: string[] = []
+  buyer.on('request', request => {
+    const path = new URL(request.url()).pathname
+    if (path === '/api/auth/organization/get-active-member-role' || path === '/api/auth/organization/has-permission') personalOrganizationReads.push(path)
+  })
+  try {
+    await loginAs(buyer.request, baseURL!, 'user-e2e-buyer')
+    const returnToAccount = await buyer.request.get(`${baseURL}/api/post-login`, { maxRedirects: 0 })
+    await expectStatus(returnToAccount, 302)
+    expect(returnToAccount.headers().location).toBe('/dashboard/account')
+    const billingWithoutOrganization = await buyer.request.get(`${baseURL}/api/post-login?plan=business`, { maxRedirects: 0 })
+    await expectStatus(billingWithoutOrganization, 409)
+    const accountPage = await buyer.newPage()
+    await accountPage.goto(`${baseURL}/dashboard/account`)
+    await waitForNuxtHydration(accountPage)
+    await expect(accountPage).toHaveURL(`${baseURL}/dashboard/account`)
+  } finally {
+    await buyer.close()
+  }
+  expect(personalOrganizationReads, 'A Personal account without an organization must not request organization roles or permissions').toEqual([])
 
   // The host cancels the stay, its nights open again, and the offline refund is recorded against it.
   // A guest's own account and receipt reads of a stay they bought are covered in stays-d1: only a checkout gives a stay its guest's account.

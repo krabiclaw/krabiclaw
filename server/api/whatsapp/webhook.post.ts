@@ -1,3 +1,4 @@
+import { ChannexError } from '~/server/integrations/channex/client'
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { fetchWhatsAppMedia, sendWhatsAppText } from '~/server/utils/whatsapp'
 import { attachGuestPhotos, messagePreview, sortGuestFiles, type MessagePhoto } from '~/server/domain/guest-threads/attachments'
@@ -8,9 +9,7 @@ import {
 import { execute, queryAll, queryFirst } from '~/server/db'
 import { updateThreadProjectionIfLatestEntry } from '~/server/domain/guest-threads/repository'
 import { getGuestRequest, requestSummary } from '~/server/domain/requests'
-import { executeGuestThreadOperation, GUEST_UNREACHABLE_MESSAGE } from '~/server/domain/guest-threads/operations'
-import { getGuestThreadDetail } from '~/server/domain/guest-threads/detail'
-import { guestReplyDestination } from '~/server/domain/guest-threads/inbox'
+import { executeGuestThreadOperation, guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import { appendEntry, findEntryByDedupeKey } from '~/server/domain/guest-threads/entries'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { notifyGuestThreadReply } from '~/server/utils/notifications'
@@ -141,15 +140,16 @@ interface QuotedDeliveryMatch {
 }
 
 /**
- * Where a reply to this conversation goes, said for the manager, as the inbox
- * decides it (`guestReplyDestination`); null when the inbox shows it no composer.
+ * Where a reply to this conversation goes, said for the manager, by the reply
+ * operation's own rule (`guestReplyDestination`); otherwise why it cannot go.
  */
-async function replyDestination(db: D1Database, threadId: string, organizationId: string): Promise<string | null> {
-  const detail = await getGuestThreadDetail(db, threadId, organizationId)
-  const destination = detail ? guestReplyDestination(detail) : null
-  if (!destination) return null
-  if (destination.channel === 'airbnb') return 'through Airbnb'
-  return destination.channel === 'email' ? `by email to ${maskEmailForDisplay(destination.email)}` : 'to their KrabiClaw inbox'
+async function replyDestination(db: D1Database, threadId: string, organizationId: string): Promise<{ destination: string } | { refused: string }> {
+  const thread = await getGuestRequest(db, threadId, organizationId)
+  if (!thread) return { refused: 'This conversation no longer exists.' }
+  const destination = await guestReplyDestination(db, thread)
+  if (destination.channel === null) return { refused: destination.reason }
+  if (destination.channel === 'airbnb') return { destination: 'through Airbnb' }
+  return { destination: destination.channel === 'email' ? `by email to ${maskEmailForDisplay(destination.email)}` : 'to their KrabiClaw inbox' }
 }
 
 async function resolveQuotedDelivery(
@@ -173,9 +173,9 @@ async function resolveQuotedDelivery(
     phone, organizationId: thread.organization_id })
   if (!authorized) return null
 
-  const destination = await replyDestination(db, thread.request_id, thread.organization_id)
-  if (!destination) return null
-  return { threadId: thread.request_id, organizationId: thread.organization_id, locationId: thread.location_id, destination }
+  const reply = await replyDestination(db, thread.request_id, thread.organization_id)
+  if ('refused' in reply) return null
+  return { threadId: thread.request_id, organizationId: thread.organization_id, locationId: thread.location_id, destination: reply.destination }
 }
 
 async function listRecentGuestDeliveryCandidates(db: D1Database, env: ApiRecord, userId: string): Promise<DisambiguationCandidate[]> {
@@ -208,7 +208,7 @@ async function listRecentGuestDeliveryCandidates(db: D1Database, env: ApiRecord,
     // Only the roles WhatsApp replies are authorized for see a thread's guest,
     // and only conversations the inbox lets them write to are offered.
     if (!membership || !isOrganizationWideRole(membership.role)) return null
-    return await replyDestination(db, row.threadId, row.organizationId) ? row : null
+    return 'destination' in await replyDestination(db, row.threadId, row.organizationId) ? row : null
   }))).filter((row): row is NonNullable<typeof row> => Boolean(row)).slice(0, 5)
   return authorizedRows.map((r) => ({
     threadId: r.threadId, organizationId: r.organizationId, locationId: r.locationId, label: `${submissionTypeLabel(r.submissionType)} from ${r.guestName}`, }))
@@ -240,6 +240,11 @@ async function routeManagerWhatsAppMessage(
       pendingConfirmation: null,
       lastInboundId: opts.messageId,
     })
+  // A message the manager must read that Meta refused fails the webhook, as every prompt here does.
+  const sendOrThrow = async (text: string, failure: string) => {
+    const sendResult = await sendWhatsAppText(env, opts.toPhone, text)
+    if (!sendResult.success) throw new Error(sendResult.error || failure)
+  }
 
   async function resolveFreshDispatch(): Promise<{
     quotedDeliveryMatch: 'authorized_thread_found' | 'unmatched' | null
@@ -284,7 +289,7 @@ async function routeManagerWhatsAppMessage(
         if (!trimmedText) {
           // Captionless media or empty reply — resend the prompt without advancing
           const match = fresh.quotedDelivery!
-          await sendWhatsAppText(env, opts.toPhone, buildConfirmSendPrompt(match.destination))
+          await sendOrThrow(buildConfirmSendPrompt(match.destination), 'Failed to send WhatsApp confirmation prompt')
           return
         }
         const match = fresh.quotedDelivery!
@@ -353,7 +358,7 @@ async function routeManagerWhatsAppMessage(
       })
       if (!authorized) {
         await clearPending()
-        await sendWhatsAppText(env, opts.toPhone, 'Your WhatsApp access has been revoked. Please contact your organization administrator.')
+        await sendOrThrow('Your WhatsApp access has been revoked. Please contact your organization administrator.', 'Failed to send WhatsApp access notice')
         return
       }
       const actorMemberId = await resolveMemberId({
@@ -361,24 +366,38 @@ async function routeManagerWhatsAppMessage(
         userId: opts.userId,
         env,
       })
-      const result = actorMemberId
-        ? await executeGuestThreadOperation(db, {
-            threadId: pendingState.threadId,
-            organizationId: pendingState.organizationId,
-            action: 'reply',
-            actorUserId: opts.userId,
-            body: pendingState.replyBody,
-            env,
-            idempotencyKey: `whatsapp:${opts.messageId}:reply`,
-          })
-        : { ok: false as const, status: 404 as const, reason: 'thread_not_found' as const }
+      let result: Awaited<ReturnType<typeof executeGuestThreadOperation>> | { ok: false; status: 404; reason: 'thread_not_found' }
+      try {
+        result = actorMemberId
+          ? await executeGuestThreadOperation(db, {
+              threadId: pendingState.threadId,
+              organizationId: pendingState.organizationId,
+              action: 'reply',
+              actorUserId: opts.userId,
+              body: pendingState.replyBody,
+              env,
+              idempotencyKey: `whatsapp:${opts.messageId}:reply`,
+            })
+          : { ok: false as const, status: 404 as const, reason: 'thread_not_found' as const }
+      } catch (error) {
+        // A refusal the operation throws (it names its code) is told like a returned one. Anything
+        // else may or may not have reached the guest: the manager is told to look, and the error is
+        // reported. Either way the pending reply is cleared, so a redelivery does not repeat it.
+        await clearPending()
+        const data = error instanceof HTTPError || error instanceof ChannexError ? error.data : null
+        const refused = data && typeof data === 'object' && 'code' in data && typeof data.code === 'string'
+        const message = error instanceof Error ? error.message : String(error)
+        await sendOrThrow(refused ? buildReplyFailedMessage(message) : `Your reply may not have been sent: ${message}. Check the conversation in KrabiClaw.`, 'Failed to send WhatsApp reply outcome')
+        if (refused) return
+        throw error
+      }
       await clearPending()
       if (result.ok) {
         await publishGuestInboxThreadEvent(env, db, { threadId: result.thread.id, type: 'thread.changed' })
-        await sendWhatsAppText(env, opts.toPhone, REPLY_SENT_CONFIRMATION)
+        await sendOrThrow(REPLY_SENT_CONFIRMATION, 'Failed to send WhatsApp reply confirmation')
       } else {
         // The reply operation's own reason: a conversation that changed since it was offered says why.
-        await sendWhatsAppText(env, opts.toPhone, buildReplyFailedMessage('message' in result ? result.message : result.reason))
+        await sendOrThrow(buildReplyFailedMessage('message' in result ? result.message : result.reason), 'Failed to send WhatsApp reply refusal')
       }
       return
     }
@@ -405,17 +424,18 @@ async function routeManagerWhatsAppMessage(
       })
       if (!authorized) {
         await clearPending()
-        await sendWhatsAppText(env, opts.toPhone, 'Your WhatsApp access has been revoked. Please contact your organization administrator.')
+        await sendOrThrow('Your WhatsApp access has been revoked. Please contact your organization administrator.', 'Failed to send WhatsApp access notice')
         return
       }
 
       // The conversation can have changed since it was offered; then the reply is refused as the inbox refuses it.
-      const destination = await replyDestination(db, chosen.threadId, chosen.organizationId)
-      if (!destination) {
+      const reply = await replyDestination(db, chosen.threadId, chosen.organizationId)
+      if ('refused' in reply) {
         await clearPending()
-        await sendWhatsAppText(env, opts.toPhone, buildReplyFailedMessage(GUEST_UNREACHABLE_MESSAGE))
+        await sendOrThrow(buildReplyFailedMessage(reply.refused), 'Failed to send WhatsApp reply refusal')
         return
       }
+      const destination = reply.destination
       const newState: PendingWhatsAppReplyState = {
         kind: 'collect_reply',
         threadId: chosen.threadId,
@@ -434,12 +454,13 @@ async function routeManagerWhatsAppMessage(
     await clearPending()
   } else {
     // collect_reply: any non-empty text becomes the reply body, moving to confirm_send.
-    const destination = await replyDestination(db, pendingState.threadId, pendingState.organizationId)
-    if (!destination) {
+    const reply = await replyDestination(db, pendingState.threadId, pendingState.organizationId)
+    if ('refused' in reply) {
       await clearPending()
-      await sendWhatsAppText(env, opts.toPhone, buildReplyFailedMessage(GUEST_UNREACHABLE_MESSAGE))
+      await sendOrThrow(buildReplyFailedMessage(reply.refused), 'Failed to send WhatsApp reply refusal')
       return
     }
+    const destination = reply.destination
     const newState: PendingWhatsAppReplyState = {
       kind: 'confirm_send',
       threadId: pendingState.threadId,
@@ -483,7 +504,7 @@ async function routeManagerWhatsAppMessage(
         pendingConfirmation: newState,
         lastInboundId: opts.messageId,
       })
-      await sendWhatsAppText(env, opts.toPhone, buildConfirmSendPrompt(match.destination))
+      await sendOrThrow(buildConfirmSendPrompt(match.destination), 'Failed to send WhatsApp confirmation prompt')
       return
     }
     case 'start_disambiguation': {
@@ -493,12 +514,12 @@ async function routeManagerWhatsAppMessage(
         pendingConfirmation: newState as unknown as JsonSerializable,
         lastInboundId: opts.messageId,
       })
-      await sendWhatsAppText(env, opts.toPhone, buildDisambiguationPrompt(fresh.recentCandidates))
+      await sendOrThrow(buildDisambiguationPrompt(fresh.recentCandidates), 'Failed to send WhatsApp disambiguation prompt')
       return
     }
     case 'prompt_quote_notification':
     default: {
-      await sendWhatsAppText(env, opts.toPhone, PROMPT_QUOTE_NOTIFICATION_MESSAGE)
+      await sendOrThrow(PROMPT_QUOTE_NOTIFICATION_MESSAGE, 'Failed to send WhatsApp routing prompt')
       return
     }
   }
@@ -669,5 +690,5 @@ export default defineHandler(async (event) => {
 
   return jsonResponse({ success: true })
 })
-import { defineHandler } from 'nitro';
+import { defineHandler, HTTPError } from 'nitro';
 import {  readRawBody  } from 'nitro/h3';

@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { getGuestThreadDetail } from '~/server/domain/guest-threads/detail'
 import { listOrganizationGuestThreads } from '~/server/domain/guest-threads/repository'
-import { executeGuestThreadOperation } from '~/server/domain/guest-threads/operations'
+import { executeGuestThreadOperation, guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import { getGuestRequest } from '~/server/domain/requests'
 import { assertMemberScope, assertAssignedBookingAccess, roleAllows, assertRoleAllows, memberAccessPrincipal } from '~/server/utils/member-access'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
@@ -21,7 +21,7 @@ const changeSide = { type: 'object', properties: { whenLabel: { type: 'string' }
 const bookingChange = { type: ['object', 'null'], description: 'Canonical proposal details and current response state. A pending proposal does not change the operational record.', properties: { status: { type: 'string', enum: ['pending', 'accepted', 'declined', 'withdrawn', 'stale', 'expired'] }, before: changeSide, after: changeSide, locationTitle: { type: 'string' }, originalLocationTitle: { type: 'string' }, message: { type: 'string' } }, required: ['status', 'before', 'after', 'locationTitle', 'originalLocationTitle'] }
 const conversationResult = { type: 'object', properties: { conversation: { type: 'object', properties: {
   request_id: { type: 'string' }, type: { type: 'string', enum: ['contact', 'reservation', 'booking', 'stay'] }, state: nullableString, archived: { type: 'boolean' }, updated_at: { type: 'string' },
-  participant_label: { type: 'string' }, reply_channel: { type: 'string', enum: ['email', 'airbnb'] },
+  participant_label: { type: 'string' }, reply_channel: { type: ['string', 'null'], enum: ['airbnb', 'email', 'account', null], description: 'Where reply_to_guest sends: Airbnb’s conversation, the guest’s email, or their KrabiClaw account inbox. Null when the guest cannot be replied to; reply_not_possible says why.' }, reply_not_possible: nullableString,
   guest: { type: 'object', properties: { name: nullableString, email: nullableString, phone: nullableString }, required: ['name', 'email', 'phone'] },
   answers: formAnswerSnapshotsJsonSchema(),
   operational_record: { type: ['object', 'null'], description: 'For a stay, check_in_date and check_out_date are its nights and id is the stay for get_stay; its starts_at and ends_at only order and archive the conversation.', properties: { id: { type: 'string' }, kind: { type: 'string', enum: ['booking', 'reservation', 'stay'] }, status: { type: 'string' }, starts_at: { type: 'string' }, ends_at: { type: 'string' }, timezone: { type: 'string' }, party_size: { type: 'integer' }, check_in_date: nullableString, check_out_date: nullableString }, required: ['id', 'kind', 'status', 'starts_at', 'ends_at', 'timezone', 'party_size', 'check_in_date', 'check_out_date'] },
@@ -29,7 +29,7 @@ const conversationResult = { type: 'object', properties: { conversation: { type:
     deliveries: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, channel: { type: 'string' }, purpose: { type: 'string' }, status: { type: 'string' } }, required: ['id', 'channel', 'purpose', 'status'] } },
     attachments: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, url: { type: 'string' }, alt: nullableString, width: { type: ['integer', 'null'] }, height: { type: ['integer', 'null'] } }, required: ['id', 'url', 'alt', 'width', 'height'] } },
   }, required: ['id', 'kind', 'actor', 'channel', 'body', 'event', 'occurred_at', 'provider_timestamp', 'booking_change', 'deliveries', 'attachments'] } },
-}, required: ['request_id', 'type', 'state', 'archived', 'updated_at', 'participant_label', 'reply_channel', 'guest', 'answers', 'operational_record', 'entries'] } }, required: ['conversation'] }
+}, required: ['request_id', 'type', 'state', 'archived', 'updated_at', 'participant_label', 'reply_channel', 'reply_not_possible', 'guest', 'answers', 'operational_record', 'entries'] } }, required: ['conversation'] }
 const conversationMutationResult = { type: 'object', properties: {
   outcome: { type: 'object', properties: { ok: { const: true } }, required: ['ok'] },
   conversation: { type: 'object', properties: { request_id: { type: 'string' }, state: nullableString, archived: { type: 'boolean' }, updated_at: { type: 'string' } }, required: ['request_id', 'state', 'archived', 'updated_at'], additionalProperties: false },
@@ -39,8 +39,12 @@ async function readConversation(ctx: McpExecutorContext, requestId: string) {
   const { db, organizationId } = ctx.organization
   const detail = await getGuestThreadDetail(db, requestId, organizationId)
   if (!detail) throw new HTTPError({ statusCode: 404, message: 'Guest conversation not found' })
+  const request = await getGuestRequest(db, requestId, organizationId)
+  if (!request) throw new HTTPError({ statusCode: 404, message: 'Guest conversation not found' })
+  // Where reply_to_guest would send, by the reply operation's own rule.
+  const destination = await guestReplyDestination(db, request)
   return { request_id: detail.id, type: detail.submissionType, state: detail.conversationState, archived: detail.manuallyArchived, updated_at: detail.updatedAt,
-    participant_label: detail.participantLabel, reply_channel: detail.replyChannel,
+    participant_label: detail.participantLabel, reply_channel: destination.channel, reply_not_possible: destination.channel === null ? destination.reason : null,
     guest: { name: detail.guestName, email: detail.guestEmail, phone: detail.guestPhone }, answers: detail.source.fields.answers, operational_record: detail.operationalRecord,
     entries: detail.entries.map(entry => ({ id: entry.id, kind: entry.kind, actor: entry.actorLabel, channel: entry.channel, body: entry.body, event: entry.eventName, payload: entry.payload, booking_change: entry.bookingChange, occurred_at: entry.occurredAt, provider_timestamp: entry.providerTimestamp, deliveries: entry.deliveries, attachments: entry.attachments })),
   }

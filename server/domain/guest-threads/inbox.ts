@@ -5,6 +5,8 @@ import { listSendLaterMessages } from '~/server/domain/send-later'
 import { stayAccessFor } from '~/server/domain/stays'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import { getGuestThreadDetail } from './detail'
+import { guestReplyDestination } from './operations'
+import { getGuestRequest } from '~/server/domain/requests'
 import { OPENING_EVENT } from './opening'
 import { formatFormAnswer } from '~/shared/form-questions'
 import { threadRecordTitle } from '~/lib/components/workspace/messages/guest-thread-client'
@@ -314,22 +316,17 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
     activityPath: raw.activityPath,
     stream: items,
     pending: viewer.audience === 'member' ? await pendingMessages(db, raw.id, organizationId, viewer.principal, facts.timeZone, now.toISOString()) : [],
-    composer: {
-      channel: viewer.audience === 'member' && raw.replyChannel === 'airbnb' ? 'airbnb' : 'email',
-      available: viewer.audience === 'buyer' || guestReplyDestination(raw) !== null,
-    },
+    composer: await composer(db, raw.id, organizationId, viewer),
   }
 }
 
-/**
- * Where a member's reply to the guest goes: Airbnb's own thread, the guest's
- * email, or their KrabiClaw account inbox. Null when there is none, and the
- * conversation shows no composer. Every surface that replies asks this.
- */
-export function guestReplyDestination(raw: Pick<GuestThreadDetailViewModel, 'replyChannel' | 'guestEmail' | 'guestAccountLinked'>): { channel: 'airbnb' } | { channel: 'email'; email: string } | { channel: 'account' } | null {
-  if (raw.replyChannel === 'airbnb') return { channel: 'airbnb' }
-  if (raw.guestEmail) return { channel: 'email', email: raw.guestEmail }
-  return raw.guestAccountLinked ? { channel: 'account' } : null
+/** A guest writes to the business; a member writes wherever the reply operation would send (`guestReplyDestination`). */
+async function composer(db: DbClient, threadId: string, organizationId: string, viewer: Viewer): Promise<InboxThread['composer']> {
+  if (viewer.audience === 'buyer') return { channel: 'email', available: true }
+  const request = await getGuestRequest(db, threadId, organizationId)
+  if (!request) throw new Error(`Guest thread ${threadId} has no request`)
+  const destination = await guestReplyDestination(db, request)
+  return { channel: destination.channel === 'airbnb' ? 'airbnb' : 'email', available: destination.channel !== null }
 }
 
 /**

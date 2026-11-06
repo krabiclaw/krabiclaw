@@ -200,11 +200,12 @@ test('a WhatsApp reply offers the conversations the inbox can write to and refus
       stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null, assigned_team_id: null },
     } })
     const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
-    // Ana can be emailed; Dee left only a phone and has no KrabiClaw account, so the inbox shows her no composer.
+    // Ana and Bo can be emailed; Dee left only a phone and has no KrabiClaw account, so the inbox shows her no composer.
     const ana = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'ana', check_in_date: day(3), check_out_date: day(5), adults: 1, guest_name: 'Ana', guest_email: 'ana@example.test', guest_phone: '+61491570150', total_minor: 30_000 })
+    const bo = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'bo', check_in_date: day(6), check_out_date: day(8), adults: 1, guest_name: 'Bo', guest_email: 'bo@example.test', guest_phone: '+61491570152', total_minor: 30_000 })
     const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(10), check_out_date: day(12), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 30_000 })
-    // Both guests wrote, and the owner was alerted on WhatsApp about each.
-    for (const [stay, name] of [[ana, 'ana'], [dee, 'dee']] as const) {
+    // Each guest wrote, and the owner was alerted on WhatsApp about each.
+    for (const [stay, name] of [[ana, 'ana'], [bo, 'bo'], [dee, 'dee']] as const) {
       const entry = await appendEntry(db, { threadId: stay.request_id!, kind: 'message', actorKind: 'guest', channel: 'email', body: `Hi from ${name}`, dedupeKey: `guest-${name}` })
       await createDeliveryReceipt(db, { entryId: entry.id, channel: 'whatsapp', provider: 'meta', purpose: 'owner_alert', idempotencyKey: `alert-${name}` })
     }
@@ -216,24 +217,36 @@ test('a WhatsApp reply offers the conversations the inbox can write to and refus
     }
     const app = new H3()
     app.post('/api/whatsapp/webhook', whatsappWebhook)
-    const write = async (id: string, text: string) => {
-      const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ value: { messages: [{ id, from: '66812345678', type: 'text', text: { body: text } }] } }] }] })
+    let inbound = 0
+    const write = async (text: string) => {
+      const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ value: { messages: [{ id: `wamid-${++inbound}`, from: '66812345678', type: 'text', text: { body: text } }] } }] }] })
       const response = await app.request(Object.assign(new Request('https://proof.example/api/whatsapp/webhook', {
         method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': `sha256=${createHmac('sha256', 'whatsapp-secret').update(body).digest('hex')}` }, body,
       }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
       assert.equal(response.status, 200, await response.clone().text())
-      return sent.at(-1)
+      return sent.at(-1)!
     }
     const pending = async () => (await getWhatsAppWorkspaceState(db, 'owner'))?.pending_confirmation
+    const pick = (list: string, name: string) => list.split('\n').find(line => line.endsWith(`from ${name}`))!.split('.')[0]!
 
     // Dee is never offered: there is nothing to reply to her through.
-    const offered = await write('wamid-1', 'Can I reply?')
-    assert.match(offered!, /Reply to which\?/u)
-    assert.match(offered!, /Ana/u)
-    assert.doesNotMatch(offered!, /Dee/u)
-    // The host takes Ana's email off her stay before the pick: the reply is refused as the inbox refuses it.
+    const offered = await write('Can I reply?')
+    assert.match(offered, /Reply to which\?/u)
+    assert.match(offered, /from Ana/u)
+    assert.match(offered, /from Bo/u)
+    assert.doesNotMatch(offered, /Dee/u)
+    // Picking Ana says where the reply goes, as the reply operation would send it.
+    assert.equal(await write(pick(offered, 'Ana')), 'Type your reply now — it will be sent by email to a***@example.test.')
+    assert.equal(await write('See you at 4'), 'This reply will be sent by email to a***@example.test. Reply YES to send.')
+    // The host takes Ana's email off her stay before YES: the reply operation refuses, and its reason reaches the manager.
     await updateStay(db, env, manager, ana.id, { expected_version: ana.version, guest_email: null })
-    assert.equal(await write('wamid-2', '1'), 'Reply not sent: This guest has no email or KrabiClaw account to reply to.')
+    assert.equal(await write('YES'), 'Reply not sent: This guest has no email or KrabiClaw account to reply to.')
+    assert.equal(await pending(), null)
+    // Ana is no longer offered. Bo loses his email after the list and before the pick: refused the same way.
+    const again = await write('Another reply')
+    assert.doesNotMatch(again, /Ana/u)
+    await updateStay(db, env, manager, bo.id, { expected_version: bo.version, guest_email: null })
+    assert.equal(await write(pick(again, 'Bo')), 'Reply not sent: This guest has no email or KrabiClaw account to reply to.')
     assert.equal(await pending(), null)
   } finally {
     globalThis.fetch = originalFetch
