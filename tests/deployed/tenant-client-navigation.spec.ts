@@ -1,3 +1,4 @@
+import { testBaseUrl } from '../e2e/test-env'
 import { expect, test, type Page } from '@playwright/test'
 import { openTenantPage } from '../e2e/helpers'
 import { strutBaseURL, blawbyBaseURL, blawbyExtraHeaders, kikuzukiBaseURL, kikuzukiExtraHeaders, potteryHouseBaseURL, potteryHouseExtraHeaders } from './real-tenants'
@@ -91,6 +92,7 @@ test('NCLS home → services → service detail', async ({ page }) => {
 
 for (const [name, baseURL] of [['Strut', strutBaseURL], ['NCLS', blawbyBaseURL]]) {
   test(`${name} home → blog → article uses the shared navigation`, async ({ page }) => {
+    test.skip(name === 'Strut' && new URL(testBaseUrl()).hostname !== 'krabiclaw.com', 'Strut is a production-only tenant; staging has no Strut organization.')
     expect((await openTenantPage(page, `${baseURL}/`, {}))?.status()).toBe(200)
     await expect(page.locator('footer a[href="/blog"]')).toHaveCount(1)
     const headerLink = page.locator('header nav').first().getByRole('link', { name: 'Blog', exact: true })
