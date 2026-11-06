@@ -372,9 +372,9 @@ test.describe('stateless MCP server', () => {
       for (const archived of [true, false]) {
         const archive = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'set_guest_conversation_archived',args:{organization_id:organizationId,request_id:contactSubmission!.request_id,archived,idempotency_key:crypto.randomUUID()}})
         expect(archive.status()).toBe(200)
-        const receipt = mcpData<{outcome:{ok:boolean};conversation:{request_id:string;state:string;archived:boolean;updated_at:string}}>(await archive.json())
+        const receipt = mcpData<{outcome:{ok:boolean};conversation:{request_id:string;needs_reply:boolean;archived:boolean;updated_at:string}}>(await archive.json())
         expect(receipt.outcome).toEqual({ok:true})
-        expect(Object.keys(receipt.conversation).sort()).toEqual(['archived','request_id','state','updated_at'])
+        expect(Object.keys(receipt.conversation).sort()).toEqual(['archived','needs_reply','request_id','updated_at'])
         expect(receipt.conversation).toMatchObject({request_id:contactSubmission!.request_id,archived})
         // The dashboard reads the same filing: the conversation keeps every earlier item, and says each move once.
         const native = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${contactSubmission!.request_id}`)

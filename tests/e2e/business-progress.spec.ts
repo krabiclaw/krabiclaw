@@ -1,20 +1,22 @@
 import { expect, request as playwrightRequest, test, type APIResponse } from '@playwright/test'
 import sharp from 'sharp'
 import type { BusinessOutcomePage, BusinessProgressReference } from '../../shared/business-outcomes'
-import type { BusinessGoal, RecommendationFeedback, RecommendationFeedbackView } from '../../shared/business-progress'
+import type { BusinessGoal } from '../../shared/business-progress'
+import type { TaskSection, TaskView } from '../../server/domain/tasks'
+import type { OpportunityView } from '../../server/domain/opportunities'
 import type { InboxRow, InboxThread } from '../../server/domain/guest-threads/types'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { seededTenant } from './seed/manifest'
 
-type Progress = BusinessOutcomePage & { goals: BusinessGoal[]; feedback: RecommendationFeedbackView[] }
+type Progress = BusinessOutcomePage & { goals: BusinessGoal[] }
 
 async function responseBody<T>(response: APIResponse, status = 200): Promise<T> {
   expect(response.status(), await response.text()).toBe(status)
   return response.json() as Promise<T>
 }
 
-test('authored goals and evidence-bound feedback follow persisted work', async ({ request, baseURL }) => {
+test('authored goals and evidence-bound opportunity decisions follow persisted work', async ({ request, baseURL }) => {
   test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'This journey writes only to disposable local D1 data.')
   test.setTimeout(300_000)
   const actorId = 'user-e2e-onboarding-wizard'
@@ -156,76 +158,58 @@ test('authored goals and evidence-bound feedback follow persisted work', async (
     const { goal: mixedGoal } = await responseBody<{ goal: BusinessGoal }>(await request.post(`${api}/goals`, { data: {
       idempotencyKey: crypto.randomUUID(), intent: `Publish our approved guide "${edited.title}" and answer the recent client enquiry about consultation documents today.`,
     } }), 201)
-    const { feedback: mixedHold } = await responseBody<{ feedback: RecommendationFeedback }>(await request.put(`${api}/recommendation-feedback`, { data: {
-      operation: reference.operation, subjectId: postId, evidenceRevision: reference.evidenceRevision,
-      goalId: mixedGoal.id, goalRevision: mixedGoal.revision, decision: 'correct',
-      note: 'The consultation instructions are already attorney-approved for direct replies to clients. Website publication must wait for my separate publication authorization.',
-    } }))
     const { goal: archivedMixedGoal } = await responseBody<{ goal: BusinessGoal }>(await request.patch(`${api}/goals/${mixedGoal.id}`, {
       data: { revision: mixedGoal.revision, status: 'archived' },
     }))
-
-    const feedbackRequest = {
-      operation: reference.operation, subjectId: postId, evidenceRevision: reference.evidenceRevision,
-      goalId: goal.id, goalRevision: currentGoal.revision, decision: 'dismiss', note: 'The current explanation is sufficient for this week.',
-    }
-    const { feedback } = await responseBody<{ feedback: RecommendationFeedback }>(await request.put(`${api}/recommendation-feedback`, { data: feedbackRequest }))
-    const feedbackReplay = await responseBody<{ feedback: RecommendationFeedback }>(await request.put(`${api}/recommendation-feedback`, { data: feedbackRequest }))
-    expect(feedbackReplay.feedback).toEqual(feedback)
-    await responseBody(await request.put(`${api}/recommendation-feedback`, { data: { ...feedbackRequest, decision: 'accept' } }), 409)
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
-    expect(progress.feedback).toEqual([
-      expect.objectContaining({ id: feedback.id, actorId, decision: 'dismiss', note: feedbackRequest.note, applicability: { current: true, reasons: [] } }),
-      { ...mixedHold, applicability: { current: false, reasons: ['goal_changed', 'goal_archived'] } },
-    ])
-    const correction = await responseBody<{ feedback: RecommendationFeedback }>(await request.put(`${api}/recommendation-feedback`, { data: {
-      ...feedbackRequest, revision: feedback.revision, decision: 'correct', note: 'Do not publish this guide. An attorney must review the consultation instructions first.',
-    } }))
-    expect(correction.feedback).toMatchObject({ id: feedback.id, decision: 'correct' })
-    expect(correction.feedback.revision).not.toBe(feedback.revision)
-    progress = await responseBody<Progress>(await request.get(`${api}/progress`))
-    expect(progress.feedback.find(item => item.id === feedback.id)).toEqual({
-      ...correction.feedback,
-      note: 'Do not publish this guide. An attorney must review the consultation instructions first.',
-      applicability: { current: true, reasons: [] },
-    })
     expect(progress.goals).toEqual([archivedMixedGoal, currentGoal])
+
+    // The draft is an opportunity, recorded against its evidence; the owner's decision about it lasts until the evidence changes.
+    const blogPath = `/dashboard/${slug}/website/blog/${postId}`
+    const draftOpportunities = async () => {
+      const { opportunities } = await responseBody<{ opportunities: OpportunityView[]; issues: string[] }>(await request.get(`${api}/opportunities`))
+      return opportunities.filter(opportunity => opportunity.path === blogPath)
+    }
+    const offered = await draftOpportunities()
+    expect(offered).toEqual([expect.objectContaining({ eyebrow: 'Website', title: `Finish “${edited.title}”`, detail: expect.stringContaining('Complete legal review before publishing.') })])
+    const dismissal = { note: 'Do not publish this guide. An attorney must review the consultation instructions first.' }
+    expect(await responseBody(await request.post(`${api}/opportunities/${offered[0]!.id}/dismiss`, { data: dismissal }))).toEqual({ opportunity: { id: offered[0]!.id, status: 'dismissed' } })
+    // A decision is made once: neither a second dismissal nor an accept changes it.
+    expect(await responseBody(await request.post(`${api}/opportunities/${offered[0]!.id}/dismiss`, { data: dismissal }), 409)).toMatchObject({ data: { code: 'OPPORTUNITY_DECIDED' } })
+    expect(await responseBody(await request.post(`${api}/opportunities/${offered[0]!.id}/accept`, { data: {} }), 409)).toMatchObject({ data: { code: 'OPPORTUNITY_DECIDED' } })
+    // While the draft is unchanged it stays dismissed, and dismissing wrote nothing to the draft.
+    expect(await draftOpportunities()).toEqual([])
     const { post: heldPost } = await responseBody<{ post: { id: string; status: string; updated_at: string } }>(await request.get(postUrl))
     expect(heldPost).toMatchObject({ id: postId, status: 'draft', updated_at: edited.updated_at })
-    await responseBody(await request.put(`${api}/recommendation-feedback`, { data: { ...feedbackRequest, revision: feedback.revision, decision: 'accept' } }), 409)
-
-    const unknownCorrection = await responseBody<{ feedback: RecommendationFeedback }>(await request.put(`${api}/recommendation-feedback`, { data: {
-      ...feedbackRequest, revision: correction.feedback.revision, decision: 'correct',
-      note: 'I do not know whether an attorney has reviewed this revision; publication must wait until that is confirmed.',
-    } }))
-    expect(unknownCorrection.feedback).toMatchObject({ id: feedback.id, decision: 'correct' })
-    expect(unknownCorrection.feedback.revision).not.toBe(correction.feedback.revision)
-    progress = await responseBody<Progress>(await request.get(`${api}/progress`))
-    expect(progress.feedback.find(item => item.id === feedback.id)).toEqual({
-      ...unknownCorrection.feedback,
-      note: 'I do not know whether an attorney has reviewed this revision; publication must wait until that is confirmed.',
-      applicability: { current: true, reasons: [] },
-    })
-    expect(progress.goals).toEqual([archivedMixedGoal, currentGoal])
     const unknownReviewReference = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'article.publish', subjectId: postId } }))
     expect(unknownReviewReference.reference).toEqual(reference)
-    const { post: unknownReviewPost } = await responseBody<{ post: { id: string; status: string; updated_at: string } }>(await request.get(postUrl))
-    expect(unknownReviewPost).toMatchObject({ id: postId, status: 'draft', updated_at: edited.updated_at })
-    await responseBody(await request.put(`${api}/recommendation-feedback`, { data: { ...feedbackRequest, revision: correction.feedback.revision, decision: 'accept' } }), 409)
+    expect(articleOutcomes(await responseBody<Progress>(await request.get(`${api}/progress`)))).toEqual(editedOutcomes)
 
     const changedArticle = await responseBody<{ post: { updated_at: string } }>(await request.patch(postUrl, { data: {
       expected_updated_at: edited.updated_at, excerpt: 'Updated guidance for existing clients.',
     } }))
-    progress = await responseBody<Progress>(await request.get(`${api}/progress`))
-    expect(progress.feedback).toEqual([
-      expect.objectContaining({ id: feedback.id, decision: 'correct', applicability: { current: false, reasons: ['evidence_changed'] } }),
-      { ...mixedHold, applicability: { current: false, reasons: ['evidence_changed', 'goal_changed', 'goal_archived'] } },
-    ])
-    await responseBody(await request.put(`${api}/recommendation-feedback`, { data: { ...feedbackRequest, revision: unknownCorrection.feedback.revision } }), 409)
     const changedReference = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'article.publish', subjectId: postId } }))
     expect(changedReference.reference.evidenceRevision).not.toBe(reference.evidenceRevision)
-    const newFeedback = await responseBody<{ feedback: RecommendationFeedback }>(await request.put(`${api}/recommendation-feedback`, { data: { ...feedbackRequest, evidenceRevision: changedReference.reference.evidenceRevision } }))
-    expect(newFeedback.feedback.id).not.toBe(feedback.id)
+    // Changed evidence is a new opportunity; the dismissal of the old evidence does not hide it.
+    const reoffered = await draftOpportunities()
+    expect(reoffered).toEqual([expect.objectContaining({ title: `Finish “${edited.title}”` })])
+    expect(reoffered[0]!.id).not.toBe(offered[0]!.id)
+    // A deferral hides it until its time, on the real clock, and then it returns unchanged.
+    const until = new Date(Date.now() + 5_000).toISOString()
+    expect(await responseBody(await request.post(`${api}/opportunities/${reoffered[0]!.id}/defer`, { data: { until } }))).toEqual({ opportunity: { id: reoffered[0]!.id, availableAt: until } })
+    expect(await draftOpportunities()).toEqual([])
+    await expect.poll(draftOpportunities, { timeout: 15_000 }).toEqual(reoffered)
+    // Accepting makes it the owner's task, due today, recorded as business activity.
+    const { task: acceptedTask } = await responseBody<{ task: TaskView }>(await request.post(`${api}/opportunities/${reoffered[0]!.id}/accept`, { data: {} }), 201)
+    expect(acceptedTask).toMatchObject({ kind: 'opportunity', status: 'open', title: `Finish “${edited.title}”`, assignee: { type: 'member', you: true }, dueAt: expect.any(String) })
+    expect(await draftOpportunities()).toEqual([])
+    const listedTasks = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'list_tasks', args: { organization_id: organization.id, range: 'today', kind: 'opportunity' } })
+    expect(listedTasks.status(), await listedTasks.text()).toBe(200)
+    expect(mcpData<{ sections: TaskSection[] }>(await listedTasks.json()).sections).toEqual([expect.objectContaining({ id: 'open', tasks: [expect.objectContaining({ id: acceptedTask.id, status: 'open' })] })])
+    progress = await responseBody<Progress>(await request.get(`${api}/progress`))
+    expect(progress.outcomes.filter(outcome => outcome.event === 'opportunity.accepted' && outcome.subject.id === reoffered[0]!.id)).toEqual([expect.objectContaining({
+      subject: { kind: 'opportunity', id: reoffered[0]!.id }, actor: { kind: 'member', userId: actorId },
+    })])
 
     const { lifecycle } = await responseBody<{ lifecycle: { status: string; changed: boolean; updated_at: string } }>(await request.post(`${postUrl}/publish`, { data: { expected_updated_at: changedArticle.post.updated_at } }))
     expect(lifecycle).toMatchObject({ status: 'published', changed: true })
@@ -252,18 +236,16 @@ test('authored goals and evidence-bound feedback follow persisted work', async (
     expect(afterMedia.reference.evidence).toMatchObject({ kind: 'article', updatedAt: publishedRead.post.updated_at, media: [expect.objectContaining({ assetId: asset.asset_id })] })
     expect(afterMedia.reference.evidenceRevision).not.toBe(beforeMedia.reference.evidenceRevision)
 
-    const { reference: unansweredReference } = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'guest_thread.reply', subjectId: threadId } }))
-    // A short authored deferral lets progress prove expiry using its real clock.
-    const { feedback: shortDeferral } = await responseBody<{ feedback: RecommendationFeedback }>(await request.put(`${api}/recommendation-feedback`, { data: {
-      operation: 'guest_thread.reply', subjectId: threadId, evidenceRevision: unansweredReference.evidenceRevision,
-      decision: 'defer', deferUntil: new Date(Date.now() + 5_000).toISOString(), note: 'Pause this enquiry briefly before reassessing it.',
-    } }))
-    progress = await responseBody<Progress>(await request.get(`${api}/progress`))
-    expect(progress.feedback.find(item => item.id === shortDeferral.id)).toEqual({ ...shortDeferral, applicability: { current: true, reasons: [] } })
-    await expect.poll(async () => {
-      const current = await responseBody<Progress>(await request.get(`${api}/progress`))
-      return current.feedback.find(item => item.id === shortDeferral.id)
-    }, { timeout: 10_000 }).toEqual({ ...shortDeferral, applicability: { current: false, reasons: ['defer_elapsed'] } })
+    // The client's enquiry is the owner's open reply task on Today, read through the dashboard and through MCP alike.
+    const replyTasks = async () => {
+      const { tasks } = await responseBody<{ tasks: TaskSection[] }>(await request.get('/api/dashboard/today', { params: { org: slug, kind: 'guest_reply' } }))
+      const listed = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'list_tasks', args: { organization_id: organization.id, range: 'today', kind: 'guest_reply' } })
+      expect(listed.status(), await listed.text()).toBe(200)
+      expect(mcpData<{ sections: TaskSection[] }>(await listed.json()).sections).toEqual(tasks)
+      return tasks.map(section => ({ section: section.id, tasks: section.tasks.filter(task => task.requestId === threadId).map(task => ({ id: task.id, status: task.status, detail: task.detail })) })).filter(section => section.tasks.length)
+    }
+    const unanswered = await replyTasks()
+    expect(unanswered).toEqual([{ section: 'open', tasks: [{ id: expect.any(String), status: 'open', detail: 'Which documents should I bring to my legal consultation?' }] }])
     const replyBody = 'Please bring the relevant documents and any prior correspondence.'
     const replyKey = crypto.randomUUID()
     await responseBody(await request.post(`${threadUrl}/operations/reply`, { data: { body: replyBody, idempotencyKey: replyKey } }))
@@ -276,10 +258,8 @@ test('authored goals and evidence-bound feedback follow persisted work', async (
     })])
     const { reference: repliedReference } = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'guest_thread.reply', subjectId: threadId } }))
     expect(repliedReference.evidence).toMatchObject({ kind: 'guest_thread', latestGuestEntryId: expect.any(String), latestReplyEntryId: replies[0]!.id })
-    const { feedback: deferred } = await responseBody<{ feedback: RecommendationFeedback }>(await request.put(`${api}/recommendation-feedback`, { data: {
-      operation: 'guest_thread.reply', subjectId: threadId, evidenceRevision: repliedReference.evidenceRevision,
-      decision: 'defer', deferUntil: new Date(Date.now() + 86_400_000).toISOString(), note: 'Wait for the client to provide documents.',
-    } }))
+    // The reply answered it: the task is done today.
+    expect(await replyTasks()).toEqual([{ section: 'done', tasks: [{ id: unanswered[0]!.tasks[0]!.id, status: 'done', detail: expect.any(String) }] }])
     const guestReply = 'I found another letter with a deadline tomorrow; should I send it now?'
     await responseBody(await member.post(`/api/account/messages/${threadId}/reply`, { headers: authRequestHeaders(baseURL!), data: { body: guestReply, idempotencyKey: crypto.randomUUID() } }))
     const { reference: inboundReference } = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'guest_thread.reply', subjectId: threadId } }))
@@ -287,7 +267,13 @@ test('authored goals and evidence-bound feedback follow persisted work', async (
     if (inboundReference.evidence.kind !== 'guest_thread' || repliedReference.evidence.kind !== 'guest_thread') throw new Error('The explicit thread reference must describe thread evidence')
     expect(inboundReference.evidence.latestGuestEntryId).not.toBe(repliedReference.evidence.latestGuestEntryId)
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
-    expect(progress.feedback.find(item => item.id === deferred.id)?.applicability).toEqual({ current: false, reasons: ['evidence_changed'] })
+    // The client's new question is owed a reply again: a new open task beside the done one.
+    const reasked = await replyTasks()
+    expect(reasked).toEqual([
+      { section: 'open', tasks: [{ id: expect.any(String), status: 'open', detail: guestReply }] },
+      { section: 'done', tasks: [{ id: unanswered[0]!.tasks[0]!.id, status: 'done', detail: expect.any(String) }] },
+    ])
+    expect(reasked[0]!.tasks[0]!.id).not.toBe(unanswered[0]!.tasks[0]!.id)
     expect(progress.outcomes.filter(outcome => outcome.event === 'thread.member_reply' && outcome.subject.id === threadId)).toEqual(replies)
     // The conversation keeps one copy of each side's message: the owner's retried reply and the client's answer.
     const preserved = await responseBody<{ thread: InboxThread }>(await request.get(threadUrl))
@@ -297,7 +283,6 @@ test('authored goals and evidence-bound feedback follow persisted work', async (
     const archived = await responseBody<{ goal: BusinessGoal }>(await request.patch(`${api}/goals/${goal.id}`, { data: { revision: currentGoal.revision, status: 'archived' } }))
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
     expect(progress.goals).toEqual([archived.goal, archivedMixedGoal])
-    expect(progress.feedback.find(item => item.id === newFeedback.feedback.id)?.applicability).toEqual({ current: false, reasons: ['evidence_changed', 'goal_changed', 'goal_archived'] })
 
     await responseBody(await request.get(`/api/organizations/${seededTenant('restaurant').organizationId}/progress`), 404)
     await responseBody(await request.get(`${api}/progress/reference`, { params: { operation: 'article.update', subjectId: crypto.randomUUID() } }), 404)
@@ -308,7 +293,9 @@ test('authored goals and evidence-bound feedback follow persisted work', async (
     await responseBody(await member.get(`${api}/progress`), 404)
     await responseBody(await member.get(`${api}/progress/reference`, { params: { operation: 'article.update', subjectId: postId } }), 404)
     await responseBody(await member.post(`${api}/goals`, { data: { ...intent, idempotencyKey: crypto.randomUUID() } }), 404)
-    await responseBody(await member.put(`${api}/recommendation-feedback`, { data: feedbackRequest }), 404)
+    // Opportunities are the owner's decisions: a member can neither read nor decide one.
+    expect(await responseBody(await member.get(`${api}/opportunities`), 403)).toMatchObject({ data: { code: 'FORBIDDEN' } })
+    expect(await responseBody(await member.post(`${api}/opportunities/${reoffered[0]!.id}/dismiss`, { data: {} }), 403)).toMatchObject({ data: { code: 'FORBIDDEN' } })
   } finally {
     try {
       await responseBody(await request.post('/api/auth/organization/delete', { headers: authRequestHeaders(baseURL!), data: { organizationId: organization.id } }))
@@ -335,20 +322,13 @@ test('business progress read-only contract holds on an established business', as
   expect(first.coverage.unverified).toContain('causal_revenue_attribution')
   expect(new Set(first.coverage.supportedEvents).size).toBe(first.coverage.supportedEvents.length)
   expect(second.coverage).toEqual(first.coverage)
-  // These are fresh reads: edits/deletions can change goals and feedback,
+  // These are fresh reads: edits/deletions can change goals,
   // while new activity can shift page membership. Compare retained versions.
   for (const goal of first.goals) {
     const repeated = second.goals.find(item => item.id === goal.id && item.revision === goal.revision)
     if (!repeated) continue
     expect(repeated).toMatchObject({ id: goal.id, intent: goal.intent, constraints: goal.constraints, targetAt: goal.targetAt,
       status: goal.status, createdAt: goal.createdAt, revision: goal.revision })
-  }
-  for (const feedback of first.feedback) {
-    const repeated = second.feedback.find(item => item.id === feedback.id && item.revision === feedback.revision)
-    if (!repeated) continue
-    const { applicability: _firstApplicability, ...saved } = feedback
-    const { applicability: _secondApplicability, ...savedAgain } = repeated
-    expect(savedAgain).toEqual(saved)
   }
   for (const outcome of first.outcomes) {
     const repeated = second.outcomes.find(item => item.id === outcome.id)

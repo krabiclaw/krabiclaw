@@ -245,7 +245,11 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       const experienceThread = (await experienceThreadResponse.json() as { thread: InboxThread }).thread
       // The guest's request is one message from them that the business now has to answer.
       expect(experienceThread.stream.filter(item => item.type === 'message' && item.side === 'guest' && item.body === 'Could we attend the following week instead?')).toHaveLength(1)
-      expect((await call<{ conversation: { state: string } }>('get_guest_conversation', { request_id: publicCreated.request_id })).conversation.state).toBe('needs_attention')
+      expect((await call<{ conversation: { needs_reply: boolean } }>('get_guest_conversation', { request_id: publicCreated.request_id })).conversation.needs_reply).toBe(true)
+      // The unanswered request is the owner's open reply task on Today.
+      const replyTasks = (await call<{ sections: Array<{ id: string; tasks: Array<{ kind: string; status: string; requestId: string | null }> }> }>('list_tasks', { range: 'today', kind: 'guest_reply' }))
+        .sections.flatMap(section => section.tasks).filter(task => task.requestId === publicCreated.request_id)
+      expect(replyTasks).toEqual([expect.objectContaining({ kind: 'guest_reply', status: 'open', requestId: publicCreated.request_id })])
       const foreign = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_product_booking', args: { organization_id: seededTenant('restaurant').organizationId, operational_booking_id: instant.operational_booking_id } })
       expect(foreign.status()).toBe(200)
       expect((await foreign.json()).result.isError).toBe(true)
