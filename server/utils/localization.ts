@@ -28,7 +28,7 @@ import { STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, parseStayAmenityAnswers }
 import { isRecord } from '~/server/utils/type-guards'
 import { PUBLIC_LOCATION_SECTIONS, type PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
-import { isLegalPracticeSite } from '~/utils/template-registry'
+import { isLegalPracticeSite } from '~/utils/site-routing'
 import { sanitizeAdditionalNotesHtml } from '~/server/utils/reservations'
 
 
@@ -666,11 +666,11 @@ export async function putLocalizationForAuthoring(env: CloudflareEnv, db: D1Data
       changes.path = path
       changes.slug = slug
       if (root.kind === 'page') {
-        const [{ assertTenantPagePathAvailable }, { loadOrganizationTemplate }] = await Promise.all([
+        const [{ assertTenantPagePathAvailable }, { loadOrganizationSite }] = await Promise.all([
           import('~/server/utils/content/pages'), import('~/server/utils/content/publishing'),
         ])
-        const { template } = await loadOrganizationTemplate(db, input.organizationId)
-        await assertTenantPagePathAvailable(db, { organizationId: input.organizationId, locale, path, template })
+        const { site } = await loadOrganizationSite(db, input.organizationId)
+        await assertTenantPagePathAvailable(db, { organizationId: input.organizationId, locale, path, site })
       }
     }
   }

@@ -28,7 +28,7 @@ import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { normalizeBlogSlug } from '~/utils/blog-editor'
 import { creationDedupeKey, creationRequestHash, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { mcpPageInfo, type McpPageInfo } from '~/server/utils/mcp-pagination'
-import { resolvePublicTemplate } from '~/utils/template-registry'
+import { resolvePublicSite } from '~/utils/site-routing'
 import { getConfig } from '~/server/utils/organization-config'
 import { resolveSitePalette } from '~/shared/site-palette'
 import { buildSingleMediaPlacementQueries, hydrateMediaPlacementRefs, insertInitialMediaPlacements } from '~/server/utils/media-asset-manager'
@@ -175,16 +175,16 @@ export function articleCollectionOf(value: unknown): ArticleCollection {
   return value
 }
 
-/** The tenant's template and identity, which decide article URLs and editor chrome. */
-export async function loadOrganizationTemplate(db: DbClient, organizationId: string) {
+/** The tenant's site and identity, which decide article URLs and editor chrome. */
+export async function loadOrganizationSite(db: DbClient, organizationId: string) {
   const organization = await queryFirst<{ organization_id: string; theme_id: string | null; vertical: string | null; name: string }>(db, `
     SELECT o.id AS organization_id, o.theme_id, o.vertical, o.name
       FROM organization o
      WHERE o.id = ? LIMIT 1
   `, [organizationId])
   if (!organization) notFound('Organization not found')
-  const template = resolvePublicTemplate({ themeId: organization.theme_id, vertical: organization.vertical })
-  return { ...organization, template, isPlatform: template.slug === 'platform' }
+  const site = resolvePublicSite({ themeId: organization.theme_id})
+  return { ...organization, site, isPlatform: site.slug === 'platform' }
 }
 
 type NormalizedEditorBlock = ContentBlockInput & { id: string; placement_media: Array<{ asset_id: string; slot: string }> }
@@ -529,18 +529,18 @@ export async function getBlogPost(db: DbClient, postIdOrSlug: string, organizati
     blocks: await attachContentBlockMedia(db, document.id, rawBlocks.map(formatBlockOutline)),
   }
   const slug = typeof postFields.slug === 'string' ? postFields.slug : ''
-  const [context, organization] = await Promise.all([resolveTenantContext(db, organizationId, env), loadOrganizationTemplate(db, organizationId)])
+  const [context, organization] = await Promise.all([resolveTenantContext(db, organizationId, env), loadOrganizationSite(db, organizationId)])
   const publicPath = slug ? tenantBlogPostPath(slug, articleCollectionOf(postFields.collection)) : null
   // The canvas wears the site's light palette, so a draft reads as it will publish.
-  const templateSlug = organization.template.slug
-  const editorColors = templateSlug !== 'platform'
+  const siteSurface = organization.site.slug
+  const editorColors = siteSurface !== 'platform'
     ? resolveSitePalette((await getConfig(db, organizationId)).palette).light
     : null
   return {
     ...await contentReviewUrls(attachArticleCategory(attachCoverMedia(attachPublished(postFields, Boolean(postFields.published_at)))), publicPath, organizationId, context, env),
     body: renderContentBlocksToMarkdown(rawBlocks),
     content_document: contentDocument,
-    editor_template: organization.template.slug,
+    editor_surface: organization.site.slug,
     editor_colors: editorColors,
     editor_organization_name: organization.name,
   }
@@ -582,7 +582,7 @@ async function getPublicOrganizationBlogPost(db: DbClient, organizationId: strin
 
 /**
  * One published article of a collection, by slug, in the locale asked for —
- * the read behind every article page on every template. An article is found
+ * the read behind every article page on every site. An article is found
  * only in its own collection, so a doc is not also served under /blog.
  */
 export async function getPublishedBlogPost(
@@ -666,7 +666,7 @@ export async function createBlogPost(
   const organizationId = scope.organization_id
   if (!organizationId) badRequest('organization_id is required')
   if (!env?.PREVIEW_SECRET) throw new HTTPError({ statusCode: 500, statusMessage: 'Article preview signing is not configured' })
-  await loadOrganizationTemplate(db, organizationId)
+  await loadOrganizationSite(db, organizationId)
   const requestHash = await creationRequestHash(article)
   const dedupeKey = creationDedupeKey('article', organizationId, idempotencyKey)
   const replay = async () => {

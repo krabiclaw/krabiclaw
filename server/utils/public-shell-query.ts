@@ -1,3 +1,4 @@
+import { documentOfRootSql } from '~/server/utils/content/documents'
 import { parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
 import type { BatchQuery, DbClient } from '~/server/db'
 import type { PublicBase } from '~/server/utils/public-base'
@@ -45,9 +46,10 @@ export const PUBLIC_CONTENT_SECTION_QUERIES = {
         WHERE organization_id = ? AND kind = 'qa' AND row_role = 'root' AND status = 'published'`,
   posts: `SELECT DISTINCT location_id, 1 AS site FROM content_documents
            WHERE organization_id = ? AND kind = 'social_post' AND row_role = 'root' AND status = 'published' AND visibility = 'listed'`,
-  blog: `SELECT DISTINCT NULL AS location_id, 1 AS site FROM content_documents
-          WHERE organization_id = ? AND kind = 'article' AND row_role = 'root' AND status = 'published' AND visibility = 'listed'
-            AND (metadata_json ->> '$.collection') = 'blog'`,
+  blog: `SELECT DISTINCT NULL AS location_id, 1 AS site FROM content_documents root
+          JOIN content_documents p ON ${documentOfRootSql('p', 'root')} AND p.locale = ?
+          WHERE root.organization_id = ? AND root.kind = 'article' AND root.row_role = 'root' AND root.status = 'published' AND root.visibility = 'listed'
+            AND (root.metadata_json ->> '$.collection') = 'blog'`,
   photos: `SELECT DISTINCT mp.owner_id AS location_id, 1 AS site FROM media_placements mp JOIN media_assets ma ON ma.id = mp.asset_id
             WHERE mp.organization_id = ? AND mp.owner_type = 'business_location' AND mp.slot = 'gallery' AND mp.status = 'active'
               AND ma.kind = 'image' AND ma.status = 'active'`,
@@ -110,6 +112,7 @@ export function publicSections(vertical: string | null, catalog: readonly Public
 export function appendPublicShellQueries(
   queries: BatchQuery[],
   organizationId: string,
+  locale: string,
 ): PublicShellQueryIndexes {
   const push = (query: string, params: unknown[]) => {
     const index = queries.length
@@ -137,7 +140,7 @@ export function appendPublicShellQueries(
                  AND setting.key IN ('press_email', 'partnerships_email', 'catering_email', 'careers_email')
               `, [organizationId]),
     catalog: push(PUBLIC_CATALOG_SECTIONS_SQL, [organizationId]),
-    content: Object.fromEntries(PUBLIC_CONTENT_SECTIONS.map(section => [section, push(PUBLIC_CONTENT_SECTION_QUERIES[section], [organizationId])])) as Record<PublicContentSection, number>,
+    content: Object.fromEntries(PUBLIC_CONTENT_SECTIONS.map(section => [section, push(PUBLIC_CONTENT_SECTION_QUERIES[section], section === 'blog' ? [locale, organizationId] : [organizationId])])) as Record<PublicContentSection, number>,
     // The organization's own placements and its locations' heroes and cards,
     // in one read: the shell's logo and favicon, and each location's og:image.
     media: push(`SELECT mp.owner_type, mp.owner_id, mp.slot, ma.id AS asset_id,

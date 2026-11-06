@@ -1,5 +1,5 @@
 <template>
-  <NuxtLayout :name="template.layout">
+  <NuxtLayout :name="site.layout">
     <div class="min-h-screen bg-default text-default">
       <div class="mx-auto max-w-xl px-4 pb-24 pt-16 sm:px-6 lg:px-8">
         <div class="rounded-3xl border border-default bg-elevated p-10 text-center shadow-sm sm:p-12">
@@ -28,7 +28,7 @@ import GuestAccountPrompt from '~/components/booking/GuestAccountPrompt.vue'
 definePageMeta({ layout: false })
 
 const { t } = useI18n()
-const { template } = useTenantOrganization().organization
+const { site } = useTenantOrganization().organization
 
 // Always shows a generic success state rather than gating on the sessionStorage
 // handoff — a missing handoff (private browsing, storage quota, etc.) doesn't

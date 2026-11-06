@@ -4,7 +4,7 @@ import { createContentDocumentWithBlocks, updateContentDocument } from '~/server
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import { cleanString } from '~/server/utils/api-response'
-import { resolvePublicTemplate, type PublicTemplateSlug } from '~/utils/template-registry'
+import { resolvePublicSite, type SiteSurface } from '~/utils/site-routing'
 import { getMediaPlacements } from '~/server/utils/media-placement'
 import { loadExactPublicLocalizations, projectExactLocalizedResource } from '~/server/utils/public-localization'
 import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-representations'
@@ -45,7 +45,7 @@ export interface PublicOrganizationLinksPayload {
     media: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string | null }>
     theme_id: string | null
     vertical: string | null
-    template: PublicTemplateSlug
+    site: SiteSurface
   }
   page: OrganizationLinksPage
   items: OrganizationLinkItem[]
@@ -220,10 +220,8 @@ export async function getPublicLinksPage(env: CloudflareEnv, db: DbClient, organ
     ? projectExactLocalizedResource('organization', { ...organization, id: organizationId }, organizationLocalization)
     : isSourceLocale ? organization : { ...organization, name: null, brand_description: null }
 
-  const template = resolvePublicTemplate({
-    themeId: typeof organization.theme_id === 'string' ? organization.theme_id : null,
-    vertical: typeof organization.vertical === 'string' ? organization.vertical : null,
-  })
+  const site = resolvePublicSite({
+    themeId: typeof organization.theme_id === 'string' ? organization.theme_id : null})
 
   return {
     organization: {
@@ -233,7 +231,7 @@ export async function getPublicLinksPage(env: CloudflareEnv, db: DbClient, organ
       media: (media.get(organizationId) ?? []).map(item => ({ asset_id: item.asset_id, slot: item.slot, public_url: item.public_url, thumbnail_url: item.thumbnail_url, kind: item.kind })),
       theme_id: typeof organization.theme_id === 'string' ? organization.theme_id : null,
       vertical: typeof organization.vertical === 'string' ? organization.vertical : null,
-      template: template.slug,
+      site: site.slug,
     },
     page,
     items: publicItems,

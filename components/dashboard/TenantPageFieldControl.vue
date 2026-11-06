@@ -125,7 +125,7 @@
 import MediaPicker from '~/lib/components/workspace/media/MediaPicker.vue'
 import TenantPageGalleryField from '~/components/dashboard/TenantPageGalleryField.vue'
 import TenantPageCalculatorField from '~/components/dashboard/TenantPageCalculatorField.vue'
-import { isPlatformTemplate } from '~/utils/template-registry'
+import { isPlatformSite } from '~/utils/site-routing'
 import type { TenantPageField } from '~/utils/tenant-page-blocks'
 
 /**
@@ -167,7 +167,7 @@ const stringList = computed(() => {
 const multipleReference = computed(() => props.fieldKey.endsWith('_ids'))
 
 const options = computed(() => {
-  const platform = isPlatformTemplate({ themeId: dashboard.organization.value?.theme_id })
+  const platform = isPlatformSite({ themeId: dashboard.organization.value?.theme_id })
   return (props.field.options ?? []).filter(option => !option.platformOnly || platform)
 })
 

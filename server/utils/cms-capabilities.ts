@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro';
 import { resolveCmsCapabilities, type ProductFeature } from '~/config/cms-registry'
 import { queryFirst, type DbClient } from '~/server/db'
-import { resolvePublicTemplate } from '~/utils/template-registry'
+import { resolvePublicSite } from '~/utils/site-routing'
 import { ALL_VERTICALS, normalizeVertical, type OrganizationVertical } from '~/utils/vertical-copy'
 
 export function resolveOrganizationCmsCapabilities(verticalValue: string, themeId: string, organization: { hasStayProduct: boolean } | null) {
@@ -9,12 +9,12 @@ export function resolveOrganizationCmsCapabilities(verticalValue: string, themeI
   if (!ALL_VERTICALS.includes(normalizedVertical as OrganizationVertical)) {
     throw new HTTPError({ statusCode: 422, statusMessage: `Unsupported organization vertical: ${verticalValue}` })
   }
-  const template = resolvePublicTemplate({ themeId, vertical: normalizedVertical }).slug
+  const site = resolvePublicSite({ themeId }).slug
   const vertical = normalizedVertical as OrganizationVertical
   try {
-    return { vertical, template, capabilities: resolveCmsCapabilities(vertical, template, organization) }
+    return { vertical, site, capabilities: resolveCmsCapabilities(vertical, site, organization) }
   } catch {
-    throw new HTTPError({ statusCode: 422, statusMessage: `Unsupported CMS capability combination: ${vertical}/${template}` })
+    throw new HTTPError({ statusCode: 422, statusMessage: `Unsupported CMS capability combination: ${vertical}/${site}` })
   }
 }
 

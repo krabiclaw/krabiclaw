@@ -1,6 +1,6 @@
 import { PUBLIC_CACHE_REVISION_SQL, publicCacheRevision } from '~/server/utils/edge-cache'
 // Tenant resolution middleware: every host, KrabiClaw's own included, resolves
-// to an organization. The organization's template decides whether it renders as
+// to an organization. The organization's site decides whether it renders as
 // the platform (marketing, docs, blog) or as a customer site.
 
 import { HTTPError, defineHandler  } from 'nitro';
@@ -16,7 +16,7 @@ import {
   usesTenantHeader,
 } from "../utils/tenant-hosts";
 import { previewSecretOf, resolvePreviewAuthorization } from "../utils/preview-token";
-import { PLATFORM_TEMPLATE, resolvePublicTemplate } from "~/utils/template-registry";
+import { PLATFORM_SITE, resolvePublicSite } from "~/utils/site-routing";
 import { organizationSocialMediaFromJson } from '~/server/utils/public-social-image'
 import { resolveOrganizationFontPreset } from '~/shared/organization-fonts'
 import { parseSitePalette, resolveSitePalette } from '~/shared/site-palette'
@@ -79,8 +79,8 @@ const TENANT_SELECT_SQL = `SELECT o.id,
              o.settings_json ->> '$.config.heading_casing' AS heading_casing`
 
 // KrabiClaw's own tenant is the one active organization running the platform
-// template. Platform hosts differ per environment (localhost, staging, the
-// apex), so the host itself is not the key; the template is.
+// site. Platform hosts differ per environment (localhost, staging, the
+// apex), so the host itself is not the key; the site is.
 async function resolvePlatformTenant(db: DbClient): Promise<TenantRow | null> {
   return await queryFirst<TenantRow>(
     db,
@@ -93,7 +93,7 @@ async function resolvePlatformTenant(db: DbClient): Promise<TenantRow | null> {
       WHERE o.theme_id = ? AND o.status = 'active' AND o.onboarding_status = 'active'
       LIMIT 1
     `,
-    [PLATFORM_TEMPLATE.themeId],
+    [PLATFORM_SITE.themeId],
   )
 }
 
@@ -143,7 +143,7 @@ function requireTenantMetadata(tenant: Pick<TenantRow, 'theme_id' | 'vertical' |
   if (!themeId || !vertical || !name) {
     throw new HTTPError({
       statusCode: 500,
-      statusMessage: `Tenant ${source} is missing canonical identity or template metadata`,
+      statusMessage: `Tenant ${source} is missing canonical identity or site metadata`,
       data: { code: 'TENANT_METADATA_INCOMPLETE' },
     })
   }
@@ -210,9 +210,9 @@ function setResolvedTenantContext(
 ) {
   const metadata = requireTenantMetadata(tenant, tenant.id)
   const socialMedia = publicTenantMedia(tenant)
-  const resolvedTemplate = resolvePublicTemplate({ themeId: metadata.themeId, vertical: metadata.vertical })
-  const templateSlug = resolvedTemplate.slug
-  const isPlatform = templateSlug === 'platform'
+  const resolvedSite = resolvePublicSite({ themeId: metadata.themeId})
+  const siteSurface = resolvedSite.slug
+  const isPlatform = siteSurface === 'platform'
   const logos = siteLogos(tenant.media_json)
   const fontPreset = resolveOrganizationFontPreset(tenant.font_preset_type === null ? undefined : tenant.font_preset)
   const palette = !isPlatform
@@ -232,7 +232,7 @@ function setResolvedTenantContext(
     brand_description: tenant.brand_description,
     theme_id: metadata.themeId,
     vertical: metadata.vertical,
-    template: resolvedTemplate,
+    site: resolvedSite,
     fontPreset,
     palette,
     recipe,
@@ -323,7 +323,7 @@ export default defineHandler(async (event) => {
   }
 
   if (isPlatformRequest) {
-    throw new HTTPError({ statusCode: 500, statusMessage: 'No active organization runs the platform template', data: { code: 'PLATFORM_TENANT_MISSING' } })
+    throw new HTTPError({ statusCode: 500, statusMessage: 'No active organization runs the platform site', data: { code: 'PLATFORM_TENANT_MISSING' } })
   }
   throw new HTTPError({ statusCode: 404, statusMessage: 'Organization Not Found' })
 });

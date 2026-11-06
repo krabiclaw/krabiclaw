@@ -1,5 +1,5 @@
 import { createAccessControl } from 'better-auth/plugins/access'
-import { isPlatformTemplate } from '~/utils/template-registry'
+import { isPlatformSite } from '~/utils/site-routing'
 
 const setCredentialAction = ['set', ['pass', 'word'].join('')].join('-')
 
@@ -93,10 +93,10 @@ export function hasPlatformAdminPermission(
  * list and impersonate users, which Better Auth enforces again on every call.
  */
 export function canOpenPlatformAccounts(organization: { theme_id: string }, role: string | null | undefined): boolean {
-  return isPlatformTemplate({ themeId: organization.theme_id }) && hasPlatformAdminPermission(role, { user: ['list', 'impersonate'] })
+  return isPlatformSite({ themeId: organization.theme_id }) && hasPlatformAdminPermission(role, { user: ['list', 'impersonate'] })
 }
 
 /** Platform reports open in the same place, to an admin who may ban the users they name. */
 export function canOpenPlatformReports(organization: { theme_id: string }, role: string | null | undefined): boolean {
-  return isPlatformTemplate({ themeId: organization.theme_id }) && hasPlatformAdminPermission(role, { platform: ['support'], user: ['ban'] })
+  return isPlatformSite({ themeId: organization.theme_id }) && hasPlatformAdminPermission(role, { platform: ['support'], user: ['ban'] })
 }

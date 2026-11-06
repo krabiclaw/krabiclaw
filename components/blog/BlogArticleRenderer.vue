@@ -1,5 +1,5 @@
 <template>
-  <article ref="rootEl" class="blog-article min-w-0" :data-template="template">
+  <article ref="rootEl" class="blog-article min-w-0" :data-surface="site">
     <header v-if="showHeader" class="blog-article-header mb-10">
       <!-- The category is the site's navigation, so the article does not repeat it. -->
       <textarea v-if="editable" :value="title" rows="1" class="field-sizing-content w-full resize-none overflow-hidden border-0 bg-transparent p-0 text-4xl font-bold leading-tight text-inherit outline-none sm:text-5xl" aria-label="Post title" placeholder="Post title" @input="$emit('update:title', ($event.target as HTMLTextAreaElement).value)" @keydown.enter.prevent />
@@ -220,12 +220,12 @@ const props = withDefaults(defineProps<{
   authorImage?: string | null
   organizationName?: string | null
   editable?: boolean
-  template?: 'tenant' | 'platform'
+  site?: 'tenant' | 'platform'
   showHeader?: boolean
   showMeta?: boolean
 }>(), {
   excerpt: null, publishedAt: null, updatedAt: null, authorName: null, authorImage: null, organizationName: null,
-  editable: false, template: 'tenant', showHeader: true, showMeta: true,
+  editable: false, site: 'tenant', showHeader: true, showMeta: true,
 })
 const emit = defineEmits<{ 'update:title': [value: string]; 'update:block': [index: number, block: BlogEditorBlock]; 'insert-block': [index: number, cursorPosition: number]; 'insert-block-type': [index: number, type: string]; 'move-block': [index: number, delta: -1 | 1]; 'merge-block': [index: number, direction: 'back' | 'forward']; 'split-insert': [index: number, payload: { after: string; blockType: 'image' | 'faq' | 'how_to'; editorMode: 'rich' | 'source' }] }>()
 const authorInitials = computed(() => String(props.authorName || props.organizationName || 'A').split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase())
@@ -419,6 +419,6 @@ function aiAssistanceProps(block: BlogEditorBlock) {
 </script>
 
 <style scoped>
-.blog-article[data-template="tenant"] { color: var(--ui-text); }
-.blog-article[data-template="tenant"] .blog-article-header h1 { color: var(--tenant-primary, currentColor); }
+.blog-article[data-surface="tenant"] { color: var(--ui-text); }
+.blog-article[data-surface="tenant"] .blog-article-header h1 { color: var(--tenant-primary, currentColor); }
 </style>

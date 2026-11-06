@@ -2,7 +2,7 @@ import type { SocialImageSource } from '~/utils/social-metadata'
 import type { OrganizationFontPreset } from '~/shared/organization-fonts'
 import type { SitePalette } from '~/shared/site-palette'
 import type { SiteLogo } from '~/shared/media-placement-contract'
-import type { PublicTemplateDefinition } from '~/utils/template-registry'
+import type { PublicSiteDefinition } from '~/utils/site-routing'
 import type { SiteRecipe } from '~/shared/site-recipe'
 
 export type { SiteRecipe }
@@ -19,7 +19,7 @@ export interface TenantOrganizationInfo {
   name: string
   theme_id: string
   vertical: string
-  template: PublicTemplateDefinition
+  site: PublicSiteDefinition
   fontPreset: OrganizationFontPreset
   palette: SitePalette | null
   recipe?: SiteRecipe

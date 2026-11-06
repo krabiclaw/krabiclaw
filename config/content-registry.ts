@@ -1,6 +1,6 @@
 import type { CmsCapabilityDefinition, CmsPageCapability } from '~/config/cms-registry'
 import { resolveCmsCapabilities } from '~/config/cms-registry'
-import type { PublicTemplateSlug } from '~/utils/template-registry'
+import type { SiteSurface } from '~/utils/site-routing'
 import type { OrganizationVertical } from '~/utils/vertical-copy'
 
 export interface PreviewContext {
@@ -40,9 +40,9 @@ export const contentRegistry: Record<string, { path: string }> = {
 
 export function getEditablePages(
   vertical: OrganizationVertical,
-  template: PublicTemplateSlug,
+  site: SiteSurface,
 ): EditablePage[] {
-  const capability = resolveCmsCapabilities(vertical, template, null)
+  const capability = resolveCmsCapabilities(vertical, site, null)
   return capability.pages.map(page => ({
     id: page.id,
     label: page.label,

@@ -1,5 +1,5 @@
 <template>
-  <NuxtLayout :name="template.layout">
+  <NuxtLayout :name="site.layout">
   <div class="min-h-screen bg-default text-default">
     <div v-if="pending" class="flex min-h-screen items-center justify-center">
       <TenantIcon name="arrow-path" class="size-12 animate-spin text-muted" />
@@ -66,7 +66,7 @@ const { locale, localePath, t } = useI18n()
 const route = useRoute()
 const justCopied = ref(false)
 const { organization } = useTenantOrganization()
-const { id: organizationId, template } = organization
+const { id: organizationId, site } = organization
 
 const confirmation = ref<BookingConfirmationData | null>(null)
 const pending = ref(true)

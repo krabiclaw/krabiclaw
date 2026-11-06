@@ -1,3 +1,4 @@
+import { getSourceLocale } from '~/server/utils/organization-locales'
 import type { ProductKind } from '~/shared/product-details'
 import { catalogNavigation, locationSurfacePath, productSurfaceOf, presentationForProduct, resolveProductPresentation } from '~/utils/product-presentation'
 import { PUBLIC_CONTENT_SECTION_QUERIES, PUBLIC_CONTENT_SECTIONS, productCatalogRows, publicContentSectionRows, publicSections, type PublicContentSectionRow } from '~/server/utils/public-shell-query'
@@ -14,7 +15,7 @@ import { isDemoOrganization } from '~/shared/demo'
 import { ARTICLE_COLLECTIONS, collectionCategoryPath, isArticleCollection } from '~/utils/article-collections'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
-import { resolvePublicTemplate } from '~/utils/template-registry'
+import { resolvePublicSite } from '~/utils/site-routing'
 import { assertOrganizationLanguage } from '~/server/utils/localization'
 import { listOrganizationProducts } from '~/server/utils/product-management'
 
@@ -40,8 +41,8 @@ async function listPublishedTenantSitemapPages(db: DbClient, organizationId: str
 }
 
 /**
- * A site's listed articles, on every template, the index of each collection
- * that has one (the blog at its template's prefix, the docs at /docs), and
+ * A site's listed articles, on every site, the index of each collection
+ * that has one (the blog at its site's prefix, the docs at /docs), and
  * each category page that lists at least one of them. KrabiClaw's site and
  * every customer's read the same queries.
  */
@@ -91,7 +92,7 @@ export default definePlugin((nitroApp) => {
     ctx.sources = []
   })
 
-  /** The organization's listed, published short posts and their feed, on every template. */
+  /** The organization's listed, published short posts and their feed, on every site. */
   const socialPostEntries = async (db: DbClient, organizationId: string): Promise<SitemapEntry[]> => {
     const posts = await queryAll<{ slug: string; updated_at: string }>(db, `SELECT slug, updated_at FROM content_documents
       WHERE organization_id = ? AND kind = 'social_post' AND row_role = 'root' AND status = 'published' AND visibility = 'listed'
@@ -157,9 +158,12 @@ export default definePlugin((nitroApp) => {
       return
     }
 
-    const template = resolvePublicTemplate({ themeId: organization.theme_id, vertical: organization.vertical })
+    const site = resolvePublicSite({ themeId: organization.theme_id})
     const productPresentation = resolveProductPresentation(organization.vertical)
-    const publicProducts = await listOrganizationProducts(db, { organizationId, publishedOnly: true, env })
+    const [publicProducts, sourceLocale] = await Promise.all([
+      listOrganizationProducts(db, { organizationId, publishedOnly: true, env }),
+      getSourceLocale(db, organizationId),
+    ])
     const publicProductIds = JSON.stringify(publicProducts.map(product => product.id))
 
     const localizedLocales = await queryAll<{ locale: string; organization_id: string }>(db, `
@@ -268,14 +272,14 @@ export default definePlugin((nitroApp) => {
       ),
       listSitemapArticleEntries(db, organizationId),
       listPublishedTenantSitemapPages(db, organizationId),
-      Promise.all(PUBLIC_CONTENT_SECTIONS.map(async section => [section, await queryAll<PublicContentSectionRow>(db, PUBLIC_CONTENT_SECTION_QUERIES[section], [organizationId])] as const))
+      Promise.all(PUBLIC_CONTENT_SECTIONS.map(async section => [section, await queryAll<PublicContentSectionRow>(db, PUBLIC_CONTENT_SECTION_QUERIES[section], section === 'blog' ? [sourceLocale, organizationId] : [organizationId])] as const))
         .then(entries => new Map(entries)).then(rows => publicContentSectionRows(section => rows.get(section)!)),
     ])
     // The sections the site's navigation offers, from the same flags.
     const sections = publicSections(organization.vertical, productCatalogRows(publicProducts), contentRows,
       locations.some(location => Number(location.has_reservations) === 1))
 
-    entries.push(...template.sitemap.exactPaths
+    entries.push(...site.sitemap.exactPaths
       .filter(loc => !(loc in SECTION_PATHS) || sections.site[SECTION_PATHS[loc]!])
       .map(loc => ({ loc })))
     for (const item of catalogNavigation(organization.vertical, sections.site)) entries.push({ loc: item.path })

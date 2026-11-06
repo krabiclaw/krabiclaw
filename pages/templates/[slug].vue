@@ -117,7 +117,7 @@
 </template>
 
 <script setup lang="ts">
-import { findPublishedTemplateMarketing } from '~/utils/template-registry'
+import { findPublishedTemplateMarketing } from '~/utils/template-marketing'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
 // Keyed by full path so navigating directly between two template slugs (e.g.
@@ -204,8 +204,8 @@ onUnmounted(() => {
 const organizationUrl = config.public.siteUrl
 
 // A page about the business: its image is the organization's.
-const { social_image: organizationSocialImage, template: organizationTemplate } = useTenantOrganization().organization
-if (organizationTemplate.slug !== 'platform') throw createError({ statusCode: 404, statusMessage: 'Page not found', fatal: true })
+const { social_image: organizationSocialImage, site: organizationSite } = useTenantOrganization().organization
+if (organizationSite.slug !== 'platform') throw createError({ statusCode: 404, statusMessage: 'Page not found', fatal: true })
 useSocialMetadata({
   path: `/templates/${template.slug}`,
   socialImage: organizationSocialImage,

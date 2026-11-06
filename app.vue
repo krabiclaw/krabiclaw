@@ -11,8 +11,8 @@
 import { buildTenantHeadLinks } from '~/utils/tenant-head'
 
 const { organization } = useTenantOrganization()
-const { template } = organization
-const isPlatform = template.slug === 'platform'
+const { site } = organization
+const isPlatform = site.slug === 'platform'
 
 const organizationShell = isPlatform ? null : useOrganizationShellState()
 if (import.meta.server) await organizationShell?.ready

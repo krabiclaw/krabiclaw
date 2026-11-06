@@ -49,3 +49,12 @@ export function recordProduct(tenant: SeedTenant, key: string, product: { id: st
   tenant.products[key] = { id: product.id, slug: product.slug, name: product.name, kind: product.kind }
   return product
 }
+
+/** Published editorial content, created through the same tools the owner uses. */
+export async function seedArticle(tool: Tool, categoryId: string, title: string, body: string) {
+  const { post } = await tool<{ post: { id: string; updated_at: string } }>('create_blog_post', {
+    idempotency_key: `seed-article-${categoryId}`, title, category_id: categoryId,
+    content_blocks: [{ type: 'markdown', data: { markdown: body, editor_mode: 'rich' } }],
+  })
+  await tool('publish_blog_post', { post_id: post.id, expected_updated_at: post.updated_at })
+}

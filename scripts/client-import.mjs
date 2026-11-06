@@ -32,7 +32,7 @@ import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { spawnYarn } from "./utils/spawn-yarn.mjs";
 import { ALL_VERTICALS } from "../utils/vertical-copy.ts";
-import { resolvePublicTemplate } from "../utils/template-registry.ts";
+import { TENANT_THEME_ID } from "../utils/site-routing.ts";
 import { normalizeGoogleOpeningHours } from "../shared/reservation-hours.ts";
 import { normalizeGoogleReview } from "../shared/google-review.ts";
 import { prepareD1SeedFile } from "./utils/d1-seed-file.mjs";
@@ -546,7 +546,7 @@ ON CONFLICT(id) DO UPDATE SET owner_id=excluded.owner_id, slot=excluded.slot, as
 -- The tenant itself
 UPDATE organization SET
   name = '${brandName.replace(/'/g, "''")}',
-  theme_id = '${resolvePublicTemplate({ vertical: VERTICAL }).themeId}',
+  theme_id = '${TENANT_THEME_ID}',
   subdomain = '${SLUG}',
   status = 'active',
   onboarding_status = 'active',

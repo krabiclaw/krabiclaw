@@ -1,6 +1,6 @@
 import { splitLocalePrefix } from '~/utils/tenant-locale-path'
 import { platformLocale } from '~/shared/platform-locales'
-import { TENANT_NON_INDEXABLE_EXACT_PATHS } from '~/utils/template-registry'
+import { TENANT_NON_INDEXABLE_EXACT_PATHS } from '~/utils/site-routing'
 
 export default defineNuxtRouteMiddleware(async (to) => {
   const state = useState<string>('public-locale', () => 'en')

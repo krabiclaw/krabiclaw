@@ -172,7 +172,7 @@ const isArticleResponse = (value: unknown): value is { post: PublishedArticleDet
 
 /**
  * One published article of a collection, in the page's language — the read
- * every article page on every template makes, through getPublishedBlogPost on
+ * every article page on every site makes, through getPublishedBlogPost on
  * the server and its public route in the browser. A missing article is a 404;
  * a failed read is the failure it was, not a 404.
  */
@@ -215,16 +215,16 @@ export async function usePublishedArticle(collection: ArticleCollection, slug: M
 }
 
 /**
- * The `ItemList` an index or a category page publishes, on every template: the
+ * The `ItemList` an index or a category page publishes, on every site: the
  * articles it lists, in its order, by their absolute URLs on this site. Tenant
  * pages publish their lists this way too (a product collection's ItemList).
  */
 export function useArticleItemList(listPath: MaybeRefOrGetter<string>, name: MaybeRefOrGetter<string>, articles: MaybeRefOrGetter<readonly PublishedArticle[]>) {
-  const { template } = useTenantOrganization().organization
+  const { site } = useTenantOrganization().organization
   const requestURL = useRequestURL()
   const runtimeConfig = useRuntimeConfig()
   return computed(() => {
-    const origin = template.slug === 'platform' ? runtimeConfig.public.siteUrl : requestURL.origin
+    const origin = site.slug === 'platform' ? runtimeConfig.public.siteUrl : requestURL.origin
     return {
       '@type': 'ItemList',
       '@id': `${resolveSeoUrl(toValue(listPath), origin)}#articles`,

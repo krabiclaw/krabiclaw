@@ -6,7 +6,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { assertOrganizationLanguage, canonicalizeLocale, getPersistedSourceLocale } from '~/server/utils/localization'
 import { localizationError } from '~/server/utils/localization-errors'
 import { validateLocalizedValues } from '~/server/utils/localization-registry'
-import { isLegalPracticeSite } from '~/utils/template-registry'
+import { isLegalPracticeSite } from '~/utils/site-routing'
 
 interface OrganizationLanguageRow {
   id: string

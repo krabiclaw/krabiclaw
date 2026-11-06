@@ -24,10 +24,10 @@
 
 <script setup lang="ts">
 import SocialPosts from '~/components/social/SocialPosts.vue'
-definePageMeta({ middleware: 'template-layout' })
+definePageMeta({ middleware: 'site-layout' })
 
 const { organization } = useTenantOrganization()
-const isPlatform = organization.template.slug === 'platform'
+const isPlatform = organization.site.slug === 'platform'
 const { t, localePath } = useI18n()
 
 const { locations, sections } = await usePublicPageData()
@@ -38,7 +38,7 @@ const organizationName = organization.name
 
 useSocialMetadata(() => ({
   path: '/posts',
-  // KrabiClaw's own pages carry the product name through their template.
+  // KrabiClaw's own pages carry the product name through their site.
   title: isPlatform ? t('social_posts.title') : `${t('social_posts.title')} | ${organizationName}`,
   description: t('social_posts.meta_description', { organization: organizationName }),
   socialImage: organization.social_image,

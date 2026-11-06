@@ -16,7 +16,7 @@ import { isStayHomeAccessibility, type StayHomeAccessibility, type StayRoomAcces
 import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, resolvePublishedTenantPageIdentity, type TenantPageEditorInput } from '~/server/utils/content/pages'
-import { loadOrganizationTemplate } from '~/server/utils/content/publishing'
+import { loadOrganizationSite } from '~/server/utils/content/publishing'
 import { publishAccessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
 import type { AirbnbSettingSections, pushStayHomeChannel } from '~/server/domain/stays'
@@ -1493,13 +1493,13 @@ export async function createProduct(db: DbClient, input: {
  * running out is a conflict the caller sees.
  */
 async function availableServicePagePath(db: DbClient, organizationId: string, slug: string, options: { takenPaths?: ReadonlySet<string>; replacedPages?: ReadonlyMap<string, string> } = {}): Promise<string> {
-  const { template } = await loadOrganizationTemplate(db, organizationId)
+  const { site } = await loadOrganizationSite(db, organizationId)
   const sourceLocale = await getSourceLocale(db, organizationId)
   for (let attempt = 0; attempt < MAX_SLUG_SUFFIX_ATTEMPTS; attempt += 1) {
     const path = `/services/${slugCandidate(slug, attempt)}`
     if (options.takenPaths?.has(path)) continue
     try {
-      return await assertTenantPagePathAvailable(db, { organizationId, locale: sourceLocale, path, template, excludeVariantId: options.replacedPages?.get(path) })
+      return await assertTenantPagePathAvailable(db, { organizationId, locale: sourceLocale, path, site, excludeVariantId: options.replacedPages?.get(path) })
     } catch (error) {
       if ((error as { statusCode?: number }).statusCode !== 409) throw error
     }

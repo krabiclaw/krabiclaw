@@ -1,12 +1,12 @@
 <template>
   <article
     data-tenant-page
-    :data-template="template"
+    :data-surface="site"
     class="text-default"
-    :class="[readingColumn ? 'py-16' : undefined, platformHome ? 'kc-platform-home' : undefined, template === 'platform' && page.recipe === 'products' ? 'kc-products-page' : undefined, template === 'platform' && page.path === '/pricing' ? 'kc-pricing-editorial' : undefined]"
+    :class="[readingColumn ? 'py-16' : undefined, platformHome ? 'kc-platform-home' : undefined, site === 'platform' && page.recipe === 'products' ? 'kc-products-page' : undefined, site === 'platform' && page.path === '/pricing' ? 'kc-pricing-editorial' : undefined]"
   >
     <!--
-      A template's own component names its band; the wrapper only names one for
+      The site's component names its band; the wrapper only names one for
       the markup below, or both would appear on the same section.
     -->
     <!--
@@ -22,7 +22,7 @@
       :aria-hidden="group.heroSection && block.type === 'divider' ? 'true' : undefined"
     >
       <!--
-        A template that draws this block its own way draws it; otherwise the
+        A registered block component draws the block; otherwise the
         markup below is the presentation. See utils/tenant-page-presentation.ts.
       -->
       <component :is="presentationOf(block)" v-if="presentationOf(block)" :block="block" :page="page" />
@@ -163,7 +163,7 @@
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock, TenantPageHowToStep } from '~/utils/tenant-page-blocks'
 import { h, type Component, type FunctionalComponent } from 'vue'
-import type { PublicTemplateSlug } from '~/utils/template-registry'
+import type { SiteSurface } from '~/utils/site-routing'
 import { tenantPageBlockPresentation } from '~/utils/tenant-page-presentation'
 import { isInternalRoute, overviewProseBlockId } from '~/utils/tenant-page-block-data'
 import { resolveSocialImageUrl } from '~/utils/social-metadata'
@@ -175,12 +175,12 @@ const props = defineProps<{ page: PublicTenantPage }>()
 provideMediaPreviews(ref(false))
 const reducedMotion = usePreferredReducedMotion()
 
-const { template: resolvedTemplate } = useTenantOrganization().organization
-const template = computed<PublicTemplateSlug>(() => resolvedTemplate.slug)
-const platformHome = computed(() => template.value === 'platform' && props.page.path === '/')
+const { site: resolvedSite } = useTenantOrganization().organization
+const site = computed<SiteSurface>(() => resolvedSite.slug)
+const platformHome = computed(() => site.value === 'platform' && props.page.path === '/')
 
 function presentationOf(block: TenantPageBlock): Component | null {
-  return tenantPageBlockPresentation(template.value, block.type)
+  return tenantPageBlockPresentation(site.value, block.type)
 }
 const { t, localePath } = useI18n()
 function route(url: string) { return isInternalRoute(url) ? localePath(url) : url }
@@ -190,7 +190,7 @@ function route(url: string) { return isInternalRoute(url) ? localePath(url) : ur
  * twice: once beside the pictures and once in a band below them.
  */
 const renderedBlocks = computed(() => {
-  const absorbed = template.value === 'platform' ? null : overviewProseBlockId(props.page)
+  const absorbed = site.value === 'platform' ? null : overviewProseBlockId(props.page)
   return absorbed ? props.page.blocks.filter(block => block.id !== absorbed) : props.page.blocks
 })
 
@@ -206,7 +206,7 @@ const HeroSection: FunctionalComponent<{ section: boolean }> = (sectionProps, { 
 HeroSection.props = ['section']
 const blockGroups = computed(() => {
   const blocks = renderedBlocks.value
-  const hero = template.value === 'platform' ? -1 : blocks.findIndex(block => block.type === 'hero')
+  const hero = site.value === 'platform' ? -1 : blocks.findIndex(block => block.type === 'hero')
   const divider = hero < 0 ? -1 : blocks.findIndex((block, index) => index > hero && block.type === 'divider')
   const closes = divider > hero && !blocks.slice(hero + 1, divider).some(block => block.type === 'hero')
   const single = (block: TenantPageBlock) => ({ key: block.id, heroSection: false, blocks: [block] })
@@ -220,10 +220,10 @@ const blockGroups = computed(() => {
 
 /**
  * A page this renderer draws by itself reads as one column of prose and needs
- * the space around it. A page whose template draws bands does not: each band
+ * the space around it. A page whose site draws bands does not: each band
  * carries its own, and the outer padding left a gap above the first one.
  */
-const readingColumn = computed(() => template.value !== 'platform' && !renderedBlocks.value.some(presentationOf))
+const readingColumn = computed(() => site.value !== 'platform' && !renderedBlocks.value.some(presentationOf))
 
 type GridItem = { id?: string; title?: string; description?: string; address?: string; value?: string; featured?: boolean; media?: Array<{ slot?: string; public_url?: string | null; thumbnail_url?: string | null; alt_text?: string | null; kind?: string | null }>; label?: string; labelKey?: string; url?: string; amount?: string }
 

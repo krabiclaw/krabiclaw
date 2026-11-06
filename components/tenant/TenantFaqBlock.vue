@@ -45,7 +45,7 @@ import { blockText, blockTextOrNull, blockRecords, blockMedia } from '~/utils/te
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 const { organization } = useTenantOrganization()
 
-const isPlatform = computed(() => organization.template.slug === 'platform')
+const isPlatform = computed(() => organization.site.slug === 'platform')
 const accordionName = useId()
 const decorationUrl = computed(() => blockMedia(props.block, 'decoration')[0]?.public_url ?? null)
 const eyebrow = computed(() => blockTextOrNull(props.block.data.label))
