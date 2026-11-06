@@ -1,4 +1,4 @@
-import { queryAll, queryFirst, type DbClient } from '~/server/db'
+import { queryAll, type DbClient } from '~/server/db'
 
 export type BookingChangeStatus = 'pending' | 'accepted' | 'declined' | 'withdrawn' | 'stale' | 'expired'
 export interface BookingChangeState { status: BookingChangeStatus; decisionId: string | null; message?: string }

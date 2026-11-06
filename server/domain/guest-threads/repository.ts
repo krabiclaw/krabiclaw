@@ -1,7 +1,7 @@
 import { REQUEST_CURRENT_BUYER_SQL, STAY_THREAD_ENDS_SQL, STAY_THREAD_STARTS_SQL, stayPreview, parseGuestRequest, participantLabel } from '~/server/domain/requests'
 import { BUYER_UNREAD_THREAD_SQL, buyerUnreadThreadParams } from './entries'
 import { messagePreview } from './attachments'
-import { execute, executeBatch, queryAll, type BatchQuery, type DbClient } from '~/server/db'
+import { executeBatch, queryAll, type BatchQuery, type DbClient } from '~/server/db'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import { assignedGuestThreadScope, roleAllows, assertRoleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import type {

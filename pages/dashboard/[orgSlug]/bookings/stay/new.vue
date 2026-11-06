@@ -147,7 +147,7 @@ async function commit() {
       && value.stay.currency === home.value?.currency && Array.isArray(value.stay.payments)
       && (!isRecord(payment) || value.stay.payments.some(saved => isRecord(saved) && saved.amount_minor === payment.amount_minor && saved.method === payment.method && saved.paid_on === payment.paid_on && saved.reference === payment.reference)) })
     if (mutation.signal.aborted) return
-    await refreshNuxtData(Object.keys(nuxtApp.payload.data).filter(key => key.startsWith(`dashboard-today-${orgSlug}-`) || key.startsWith(`stay-night-calendar:${orgSlug}:`)))
+    await refreshNuxtData(Object.keys(nuxtApp.payload.data).filter(key => key.startsWith(`today-${orgSlug}-`) || key.startsWith(`stay-night-calendar:${orgSlug}:`)))
     if (mutation.signal.aborted) return
     await navigateTo(`/dashboard/${encodeURIComponent(orgSlug)}/bookings/stay/${encodeURIComponent(result.stay.id)}`, { replace: true })
     clearNuxtState(draftKey, { reset: true })

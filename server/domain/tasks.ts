@@ -689,13 +689,8 @@ export async function closeTask(db: DbClient, viewer: TaskViewer, taskId: string
   if (input.status === 'skipped' && !view.can.skip) fail(403, 'TASK_SCOPE_DENIED', 'You cannot skip this task', 'status')
   const note = text(input.note, 'note', 5000, input.status === 'skipped')
   const now = new Date().toISOString()
-  let assetIds: string[] = []
-  try {
-    assetIds = input.photos.length ? await uploadMessagePhotos(db, input.env, viewer.principal.organizationId, input.photos, { source: 'uploaded', userId: viewer.principal.userId }) : []
-  } catch (error) {
-    if (error instanceof MessagePhotoRejection) fail(422, 'INVALID_PHOTO', error.message, 'photos')
-    throw error
-  }
+  const assetIds = input.photos.length ? await uploadMessagePhotos(db, input.env, viewer.principal.organizationId, input.photos, { source: 'uploaded', userId: viewer.principal.userId })
+    .catch((error: unknown) => error instanceof MessagePhotoRejection ? fail(422, 'INVALID_PHOTO', error.message, 'photos') : Promise.reject(error)) : []
   let results: Awaited<ReturnType<typeof executeBatch>>
   try {
     results = await executeBatch(db, [{

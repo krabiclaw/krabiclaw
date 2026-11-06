@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { BUSINESS_PROGRESS_OPERATIONS, type BusinessProgressOperation } from './business-outcomes'
+import { BUSINESS_PROGRESS_OPERATIONS } from './business-outcomes'
 
 const instant = z.iso.datetime({ precision: 3 })
 const authoredText = z.string().trim().min(1).max(2000)
