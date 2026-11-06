@@ -36,7 +36,7 @@ import { ARTICLE_COLLECTIONS, type ArticleCollection } from '~/utils/article-col
 const props = defineProps<{ collection: ArticleCollection }>()
 const { t, localePath } = useI18n()
 const { organization } = useTenantOrganization()
-const isPlatform = organization.template.slug === 'platform'
+const isPlatform = organization.site.slug === 'platform'
 const organizationName = organization.name
 
 const { posts, categoryTree, index, localeRepresentations } = await usePublishedArticles(props.collection)

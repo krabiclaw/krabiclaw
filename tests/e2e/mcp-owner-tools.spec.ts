@@ -3,7 +3,7 @@ import { dismissPreviewToolbar, openTenantPage, waitForNuxtHydration } from './h
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpOrganizationId, mcpRequest, mcpData } from './helpers/mcp'
 import { seededTenant } from './seed/manifest'
-import { seededSiteHeaders, seededSiteURL } from './test-env'
+import { seededSiteHeaders, seededSiteURL, paymentsProviderConfigured } from './test-env'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { generateReservationTimes, type OpeningHours, type SpecialHours } from '../../shared/reservation-hours'
 import { addLocalDays, localDateAt, localDateTimeToInstant, localNow } from '../../utils/timezone'
@@ -1046,13 +1046,13 @@ test.describe('stateless MCP server', () => {
         expect((await (await request.get(`${productUrl}/availability?location_id=${locationId}`)).json()).rules).toEqual([])
 
         const policy = { confirmation_mode: 'review', online_payment_required: false }
-        // Default local/CI does not configure Payments billing providers.
+        // A configured provider still requires this business to connect its own account.
         const paymentRequiredPolicy = { ...policy, online_payment_required: true }
         const httpPaymentPolicy = await request.put(`${productUrl}/booking`, { data: paymentRequiredPolicy })
-        expect(httpPaymentPolicy.status(), await httpPaymentPolicy.text()).toBe(503)
+        expect(httpPaymentPolicy.status(), await httpPaymentPolicy.text()).toBe(paymentsProviderConfigured ? 409 : 503)
         const paymentPolicyError = (await httpPaymentPolicy.json()).data
         expect(paymentPolicyError.code).toBe('financial_action_required')
-        expect(paymentPolicyError.missing).toContain('payments.configuration')
+        expect(paymentPolicyError.missing).toEqual(paymentsProviderConfigured ? ['payments.account'] : ['payments.configuration', 'payments.account'])
         expect(mcpData<{ product: { booking: unknown } }>(await call('get_product', { product_id: productId })).product.booking).toEqual(product.booking)
         expect((await call('set_product_booking_config', { product_id: productId, ...policy })).result.isError).not.toBe(true)
         const policyRead = await request.get(productUrl)

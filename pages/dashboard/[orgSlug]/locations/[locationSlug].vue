@@ -42,7 +42,7 @@
 import { formatPhone } from '~/utils/phone'
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import { resolveCmsCapabilities, type ProductFeature } from '~/config/cms-registry'
-import { resolvePublicTemplate } from '~/utils/template-registry'
+import { resolvePublicSite } from '~/utils/site-routing'
 import { getTodayHoursLabel, type OpeningHours } from '~/shared/reservation-hours'
 import { normalizeVertical, type OrganizationVertical } from '~/utils/vertical-copy'
 import { catalogLabel, catalogSummary, type CatalogCounts } from '~/utils/product-presentation'
@@ -117,7 +117,7 @@ const capabilities = computed(() => {
   // Deliberately unguarded: swallowing a capability error left the index with an
   // empty feature set, which removes every content and reservation row and
   // leaves a location that looks like it holds nothing.
-  return resolveCmsCapabilities(normalizeVertical(vertical) as OrganizationVertical, resolvePublicTemplate({ themeId: dashboard.organization.value?.theme_id, vertical }).slug, null)
+  return resolveCmsCapabilities(normalizeVertical(vertical) as OrganizationVertical, resolvePublicSite({ themeId: dashboard.organization.value?.theme_id}).slug, null)
 })
 const featureSet = computed(() => new Set<ProductFeature>([
   ...(capabilities.value?.pages.map(page => page.feature) ?? []),

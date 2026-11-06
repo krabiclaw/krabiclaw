@@ -7,7 +7,7 @@ import SocialPostDetail from '~/components/social/SocialPostDetail.vue'
 import { isPublicSocialPost, type PublicSocialPost } from '~/utils/public-resource-contracts'
 import { publicApiRequest, isRecord } from '~/utils/api-clients'
 
-definePageMeta({ middleware: 'template-layout' })
+definePageMeta({ middleware: 'site-layout' })
 
 type DetailPost = PublicSocialPost & { localeRepresentations: Array<{ locale: string; label: string; route_path: string; source: 'source' | 'localized' }> }
 
@@ -18,7 +18,7 @@ const route = useRoute()
 const requestEvent = useRequestEvent()
 const { organization, previewAuthorized } = useTenantOrganization()
 const { id: organizationId } = organization
-const isPlatform = organization.template.slug === 'platform'
+const isPlatform = organization.site.slug === 'platform'
 const { locale } = useI18n()
 
 const slug = computed(() => String(route.params.slug))
@@ -59,7 +59,7 @@ const seoTitle = computed(() => post.value?.title || post.value?.body?.split('\n
 const seoDescription = computed(() => post.value?.body || post.value?.title || '')
 useSocialMetadata(() => post.value && ({
   path: post.value.path,
-  // A tenant's page names the business, as its other pages do; KrabiClaw's template adds its own name.
+  // A tenant's page names the business, as its other pages do; KrabiClaw's site adds its own name.
   title: isPlatform || seoTitle.value === organizationName ? seoTitle.value : `${seoTitle.value} | ${organizationName}`,
   description: seoDescription.value,
   pageType: 'article',

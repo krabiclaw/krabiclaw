@@ -53,7 +53,7 @@ export async function loadDashboardEditorContext(event: H3Event, organizationId:
     throw new HTTPError({ statusCode: 500, statusMessage: 'PREVIEW_SECRET is required for editor previews' })
   }
   const previewToken = await createPreviewToken(env.PREVIEW_SECRET, organizationId, Date.now() + PREVIEW_TOKEN_TTL_MS)
-  const { vertical, template } = resolveOrganizationCmsCapabilities(organization.vertical, organization.theme_id, null)
+  const { vertical, site } = resolveOrganizationCmsCapabilities(organization.vertical, organization.theme_id, null)
   return {
     success: true as const,
     context: {
@@ -65,7 +65,7 @@ export async function loadDashboardEditorContext(event: H3Event, organizationId:
         status: organization.status,
         onboarding_status: organization.onboarding_status,
         vertical,
-        template,
+        site,
         entitlements,
       },
       locations,
@@ -74,7 +74,7 @@ export async function loadDashboardEditorContext(event: H3Event, organizationId:
         ...locations.map(location => ({ id: location.id, label: location.title, type: 'location' as const })),
       ],
       previewToken,
-      editablePages: getEditablePages(vertical, template),
+      editablePages: getEditablePages(vertical, site),
     },
   }
 }

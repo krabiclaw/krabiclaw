@@ -4,21 +4,23 @@ import { formatTimestamp, localDateAt } from '~/utils/timezone'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { STAY_CHANNELS } from '~/shared/bookings'
 import type { BusinessGoal, RecommendationFeedback } from '~/shared/business-progress'
+import { businessGoalStrategySchema, businessProgressReferenceSchema } from '~/shared/business-progress'
 
 /** What the caller can decide about one suggested piece of work, bound to the evidence it was suggested on. */
 const todayDecisionSchema = z.object({
-  operation: z.enum(['article.update', 'article.publish', 'guest_thread.reply']), subjectId: z.string(), evidenceRevision: z.string(),
+  operation: businessProgressReferenceSchema.shape.operation, subjectId: z.string(), evidenceRevision: z.string(),
   goalId: z.string().nullable(), goalRevision: z.string().nullable(),
   /** The revision of the caller's saved decision under exactly this evidence and goal; null when a decision would be new. */
   revision: z.string().nullable(),
   current: z.object({ decision: z.enum(['accept', 'dismiss', 'defer', 'correct']), note: z.string().nullable(), deferUntil: z.string().nullable() }).nullable(),
 })
 export type TodayDecision = z.infer<typeof todayDecisionSchema>
-const todayPrioritySchema = z.object({ id: z.string(), intent: z.string(), constraints: z.string().nullable(), targetAt: z.string().nullable(), revision: z.string() })
-export type TodayPriority = Pick<BusinessGoal, 'id' | 'intent' | 'constraints' | 'targetAt' | 'revision'>
+const todayPrioritySchema = z.object({ id: z.string(), intent: z.string(), constraints: z.string().nullable(), targetAt: z.string().nullable(), strategy: businessGoalStrategySchema.nullable(), revision: z.string() })
+export type TodayPriority = Pick<BusinessGoal, 'id' | 'intent' | 'constraints' | 'targetAt' | 'strategy' | 'revision'>
 export type TodayDecisionInput = Pick<RecommendationFeedback, 'decision' | 'note' | 'deferUntil'>
 
 export const todayCardSchema = z.object({
+  presentation: z.object({ type: z.enum(['detailed', 'compact', 'minimal', 'opportunity']) }),
   id: z.string(), to: z.string(), eyebrow: z.string(), headline: z.string(), description: z.string().nullable(),
   imageUrl: z.string().nullable(), imageFit: z.enum(['cover', 'contain']), imageIcon: z.string(), badgeImageUrl: z.string().nullable(), badgeIcon: z.string().nullable(),
   locationId: z.string().nullable(), assignedMemberId: z.string().nullable(),
@@ -43,6 +45,7 @@ export const todayFeedSchema = z.object({
   resolvedAt: z.string(),
   /** The owner's active priorities; null when the caller cannot author them. */
   priorities: z.array(todayPrioritySchema).nullable(),
+  recommendationIssues: z.array(z.string()),
 })
 export interface TodayFeedPayload {
   cards: TodayCard[]
@@ -50,9 +53,10 @@ export interface TodayFeedPayload {
   locations: AgendaLocation[]
   resolvedAt: string
   priorities: TodayPriority[] | null
+  recommendationIssues: string[]
 }
 
-/** One projection for business and personal Today, including future agenda windows. */
+/** Personal-account agenda projection; the business feed selects actionable work on the server. */
 export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string; personal?: boolean; vertical?: string | null; assigned?: boolean }): TodayCard {
   if (item.kind !== 'reservation' && item.kind !== 'booking' && item.kind !== 'stay') throw new Error('Today cards require a booking, reservation or stay')
   const referenceDay = localDateAt(new Date(input.resolvedAt), item.timeZone)
@@ -72,6 +76,7 @@ export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string;
     : input.assigned || presentation?.noun === 'consultation' ? `${presentation!.label} with ${firstName} ${when}`
       : `${firstName} arrives ${when}${guests ? ` · ${guests}` : ''}`
   return {
+    presentation: { type: 'compact' },
     id: item.id, to: input.personal ? item.to.replace(/^\/dashboard\/account\/activity\//, '/dashboard/account/bookings/') : item.to,
     eyebrow: item.stayMoment === 'current' ? 'Currently hosting' : formatTimestamp(item.startsAt, 'en', item.timeZone, { hour: 'numeric', minute: '2-digit' }), headline,
     description: input.personal ? [...new Set([item.subtitle, item.locationTitle].filter((part): part is string => !!part && part !== item.title))].join(' · ')

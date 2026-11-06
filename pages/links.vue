@@ -1,6 +1,6 @@
 <template>
-  <NuxtLayout :name="template.layout">
-    <section v-if="linksPage" :class="templateClass">
+  <NuxtLayout :name="site.layout">
+    <section v-if="linksPage" :class="pageClass">
       <div :class="shellClass">
         <div :class="identityClass">
           <img
@@ -41,8 +41,8 @@ import { isPublicLinksPayload, isPublicLinksResponse, type PublicLinksItem, type
 
 definePageMeta({ layout: false })
 
-const { id: organizationId, template, social_image: organizationSocialImage } = useTenantOrganization().organization
-const isTenant = template.slug !== 'platform'
+const { id: organizationId, site, social_image: organizationSocialImage } = useTenantOrganization().organization
+const isTenant = site.slug !== 'platform'
 const route = useRoute()
 const { localePath } = useI18n()
 const locale = typeof route.params.locale === 'string' ? route.params.locale : 'en'
@@ -87,7 +87,7 @@ const brandName = computed(() => linksPage.value?.organization.name || linksPage
 const profileImageUrl = computed(() => linksPage.value?.organization.media.find(item => item.slot === 'logo')?.public_url || null)
 const { trackLinkClick: recordLinkClick } = useOrganizationConversionTracking()
 
-const templateClass = 'min-h-[calc(100vh-8rem)] bg-default px-4 py-10 sm:px-6 sm:py-14'
+const pageClass = 'min-h-[calc(100vh-8rem)] bg-default px-4 py-10 sm:px-6 sm:py-14'
 const shellClass = 'mx-auto max-w-md'
 const identityClass = 'text-center'
 const profileImageClass = 'mx-auto size-18 rounded-full object-cover shadow-sm'

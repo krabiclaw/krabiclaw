@@ -1,5 +1,5 @@
 <template>
-  <NuxtLayout :name="template.layout">
+  <NuxtLayout :name="site.layout">
     <!--
       A localized home is its page document too: the `/` branch here rendered a
       template's own home component instead, which is how /th/ reached a
@@ -20,7 +20,7 @@ import { resolveTenantLocalePath, splitLocalePrefix } from '~/utils/tenant-local
 definePageMeta({ layout: false })
 
 const route = useRoute()
-const { template, id: organizationId } = useTenantOrganization().organization
+const { site, id: organizationId } = useTenantOrganization().organization
 // An unclaimed path is a page document on whichever site resolved, KrabiClaw's
 
 const segments = route.params.tenantPath

@@ -9,9 +9,9 @@ import { parseSiteProductPath } from '~/utils/product-presentation'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { findPublishedProductAtRoute, getOrganizationVertical, parseProductRouteSegments, resolveLocalizedPublicRoute } from '~/server/utils/localization'
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { PUBLIC_TEMPLATES, resolvePublicTemplate } from '~/utils/template-registry'
-import type { PublicTemplateDefinition } from '~/utils/template-registry'
-import { templateRendersPageDocumentAt } from '~/shared/tenant-page-paths'
+import { PUBLIC_SITES, resolvePublicSite } from '~/utils/site-routing'
+import type { PublicSiteDefinition } from '~/utils/site-routing'
+import { siteRendersPageDocumentAt } from '~/shared/tenant-page-paths'
 import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-representations'
 import { isLocalizedPublicAliasPath } from '~/shared/public-locale-routes'
 export { isTrackablePath, PAGEVIEW_SKIP_PREFIXES } from '~/utils/pageview-path'
@@ -111,12 +111,12 @@ export async function resolvePublicPageIdentity(env: CloudflareEnv, db: AppDb, i
 
   if (routing.localeSegment) {
     if (input.requestedLocale && input.requestedLocale !== routing.localeSegment) return null
-    const template = resolvePublicTemplate({ themeId: input.themeId, vertical: input.vertical })
+    const site = resolvePublicSite({ themeId: input.themeId})
     const derivesLocaleRoute = isLocalizedPublicAliasPath(routing.sourcePath)
-      && (template.sitemap.exactPaths.includes(routing.sourcePath)
-      || template.nonIndexableExactPaths.includes(routing.sourcePath))
-      && (!templateRendersPageDocumentAt(template, routing.sourcePath)
-        || template.pageDocuments.optionalLocalizedPaths.includes(routing.sourcePath))
+      && (site.sitemap.exactPaths.includes(routing.sourcePath)
+      || site.nonIndexableExactPaths.includes(routing.sourcePath))
+      && (!siteRendersPageDocumentAt(site, routing.sourcePath)
+        || site.pageDocuments.optionalLocalizedPaths.includes(routing.sourcePath))
     if (derivesLocaleRoute) {
       const representations = await listPublicLocaleRepresentations(env, db, {
         organizationId, sourcePath: routing.sourcePath, publishedLocaleRoute: true,
@@ -166,12 +166,12 @@ export async function resolvePublicPageIdentity(env: CloudflareEnv, db: AppDb, i
   if (product) return { ...base, locale: sourceLocale, locationId: product.location_id, pageId: null, pageType: 'product', recipe: null, documentId: null, productId: product.id }
 
   // Office overviews, like venue overviews, are public location resources even
-  // when the practice template has no location document or sitemap prefix.
+  // when the practice site has no location document or sitemap prefix.
   if (/^\/locations\/[^/]+$/.test(routing.sourcePath)) {
     return base.locationId ? { ...base, locale: sourceLocale, pageId: null, pageType: null, recipe: null, documentId: null, productId: null } : null
   }
 
-  if (!isKnownTenantPublicPath(routing.sourcePath, { themeId: input.themeId, vertical: input.vertical })) return null
+  if (!isKnownTenantPublicPath(routing.sourcePath, { themeId: input.themeId })) return null
   return { ...base, locale: sourceLocale, pageId: null, pageType: null, recipe: null, documentId: null, productId: null }
 }
 
@@ -194,15 +194,15 @@ export function boundedOccurrence(reported: unknown, receivedAt: string): string
 
 export function isKnownTenantPublicPath(
   pathname: string,
-  templateInput?: Parameters<typeof resolvePublicTemplate>[0],
+  siteInput?: Parameters<typeof resolvePublicSite>[0],
 ): boolean {
-  const templates: readonly PublicTemplateDefinition[] = templateInput
-    ? [resolvePublicTemplate(templateInput)]
-    : PUBLIC_TEMPLATES
-  return templates.some(template =>
-    template.sitemap.exactPaths.includes(pathname)
-    || template.nonIndexableExactPaths.includes(pathname)
-    || template.sitemap.dynamicPrefixes.some(prefix => pathname.startsWith(prefix)),
+  const sites: readonly PublicSiteDefinition[] = siteInput
+    ? [resolvePublicSite(siteInput)]
+    : PUBLIC_SITES
+  return sites.some(site =>
+    site.sitemap.exactPaths.includes(pathname)
+    || site.nonIndexableExactPaths.includes(pathname)
+    || site.sitemap.dynamicPrefixes.some(prefix => pathname.startsWith(prefix)),
   )
 }
 

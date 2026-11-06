@@ -1,7 +1,7 @@
 import type { Collection, Product, ProductPresentation, ProductSurface, SiteProductSurface } from '~/server/types/products'
 import { normalizeVertical } from '~/utils/vertical-copy'
 import { isMediaCategory, type MediaCategory } from '~/shared/media-placement-contract'
-import { isLegalPracticeSite } from '~/utils/template-registry'
+import { isLegalPracticeSite } from '~/utils/site-routing'
 
 /** Product kind owns its public surface; scheduling is an independent capability. */
 export function isExperience(product: Pick<Product, 'kind'>): boolean {

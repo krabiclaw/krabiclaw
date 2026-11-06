@@ -194,11 +194,12 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
         await purgePublicResourceCacheNow({
           DB: env.db,
           ORGANIZATION_CACHE: env.ORGANIZATION_CACHE,
+          GUEST_INBOX_HUBS: env.GUEST_INBOX_HUBS,
           NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN,
         }, resolvedOrganizationId);
       } catch (purgeError) {
         console.error({ event: "mcp_public_cache_purge_failed", tool: toolName, organization_id: resolvedOrganizationId, request_id: requestId, error: describeErrorForTelemetry(purgeError) });
-        purgeFailure = "Change saved; public website refresh failed";
+        purgeFailure = "Change saved; website or dashboard refresh failed";
       } finally {
         recordRequestPhase(event, "mcp_cache_purge", cacheStartedAt);
       }

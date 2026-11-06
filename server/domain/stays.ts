@@ -305,7 +305,7 @@ export interface StayNight {
 
 const MAX_LIST_DAYS = 400
 /** Every home's nights at once: three months, a window a multi-calendar pages through. */
-const MAX_HOMES_CALENDAR_DAYS = 92
+export const MAX_HOMES_CALENDAR_DAYS = 92
 const MAX_CALENDAR_BYTES = 2_000_000
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -1224,6 +1224,47 @@ export async function readStayCalendars<A extends StayAccess>(db: DbClient, acce
   const [homes, stays] = await Promise.all([stayHomes(db, access, null), staysOverlapping(db, access, { from, to })])
   const nights = homes.length ? await homesNights(db, access.organizationId, homes, from, to) : []
   return { from, to, homes: homes.map((home, index) => ({ home, nights: nights[index]! })), stays }
+}
+
+export interface StayGapCandidate {
+  productId: string
+  name: string
+  locationId: string
+  from: string
+  /** Exclusive: the next recorded stay arrives on this date. */
+  to: string
+  nights: number
+  bookable: boolean
+  restriction: string | null
+}
+
+/** Bounded gaps between actual stays, using the same nightly policy as a quote. */
+export async function readStayGapCandidates(db: DbClient, access: StayAccess, input: { from: unknown; to: unknown }): Promise<StayGapCandidate[]> {
+  const calendar = await readStayCalendars(db, access, input)
+  const gaps: StayGapCandidate[] = []
+  for (const { home, nights } of calendar.homes) {
+    if (!home.live) continue
+    for (let index = 0; index < nights.length;) {
+      if (!nights[index]!.available) { index++; continue }
+      const start = index
+      while (index < nights.length && nights[index]!.available) index++
+      const before = nights[start - 1], departure = nights[index]
+      if (!before?.stay_id || !departure?.stay_id) continue
+      const stayed = nights.slice(start, index)
+      if ([...stayed, departure].some(night => night.channel?.state === 'pending' || night.channel?.state === 'needs_review')) continue
+      if (stayed[0]!.date < homeToday(home.timezone)) continue
+      let restriction: string | null = null
+      try {
+        await quoteStay(db, access.organizationId, home, { check_in_date: stayed[0]!.date, check_out_date: departure.date, adults: 1 })
+      } catch (error) {
+        if (!(error instanceof HTTPError) || error.statusCode < 400 || error.statusCode >= 500) throw error
+        restriction = error.message
+      }
+      gaps.push({ productId: home.product_id, name: home.name, locationId: home.location_id,
+        from: stayed[0]!.date, to: departure.date, nights: stayed.length, bookable: restriction === null, restriction })
+    }
+  }
+  return gaps.sort((a, b) => a.from.localeCompare(b.from) || a.productId.localeCompare(b.productId))
 }
 
 /** A hold's claim counts while its hold is active and unexpired; this selects the claims that no longer do. */
@@ -2477,6 +2518,20 @@ export interface StayQuoteInput { check_in_date: unknown; check_out_date: unknow
  * departure, the minimum stay on arrival or through any night, or the
  * maximum stay. Every refusal names its code and the field it is about.
  */
+function stayNightRestriction(stayed: readonly StayNight[], departure: StayNight): { statusCode: number; code: string; message: string; field: string; detail?: Record<string, unknown> } | null {
+  const arrival = stayed[0]
+  if (!arrival) throw new Error('A stay interval requires at least one night')
+  const taken = stayed.filter(night => !night.available).map(night => night.date)
+  if (taken.length) return { statusCode: 409, code: 'STAY_NIGHTS_UNAVAILABLE', message: 'Some of these nights are no longer available', field: 'check_in_date', detail: { dates: taken } }
+  const unpriced = stayed.find(night => night.price_minor === null)
+  if (unpriced) return { statusCode: 409, code: 'STAY_NIGHT_UNPRICED', message: `${unpriced.date} has no nightly price yet`, field: 'check_in_date', detail: { date: unpriced.date } }
+  if (arrival.closed_to_arrival) return { statusCode: 422, code: 'STAY_CLOSED_TO_ARRIVAL', message: `Guests cannot check in on ${arrival.date}`, field: 'check_in_date' }
+  if (departure.closed_to_departure) return { statusCode: 422, code: 'STAY_CLOSED_TO_DEPARTURE', message: `Guests cannot check out on ${departure.date}`, field: 'check_out_date' }
+  if (stayed.length < arrival.min_stay_arrival) return { statusCode: 422, code: 'STAY_MIN_NIGHTS', message: `Stays arriving on ${arrival.date} are at least ${arrival.min_stay_arrival} nights`, field: 'check_out_date', detail: { min_nights: arrival.min_stay_arrival } }
+  if (arrival.max_stay !== null && stayed.length > arrival.max_stay) return { statusCode: 422, code: 'STAY_MAX_NIGHTS', message: `Stays arriving on ${arrival.date} are at most ${arrival.max_stay} nights`, field: 'check_out_date', detail: { max_nights: arrival.max_stay } }
+  return null
+}
+
 export async function quoteStay(db: DbClient, organizationId: string, home: StayHome, input: StayQuoteInput): Promise<StayQuote> {
   const checkIn = date(input.check_in_date, 'check_in_date')
   const checkOut = date(input.check_out_date, 'check_out_date')
@@ -2494,16 +2549,8 @@ export async function quoteStay(db: DbClient, organizationId: string, home: Stay
   const all = await homeNights(db, organizationId, home, checkIn, addDays(checkOut, 1))
   const stayed = all.slice(0, count_)
   const departure = all[count_]!
-  const taken = stayed.filter(night => !night.available).map(night => night.date)
-  if (taken.length) fail(409, 'STAY_NIGHTS_UNAVAILABLE', 'Some of these nights are no longer available', 'check_in_date', { dates: taken })
-  const unpriced = stayed.find(night => night.price_minor === null)
-  if (unpriced) fail(409, 'STAY_NIGHT_UNPRICED', `${unpriced.date} has no nightly price yet`, 'check_in_date', { date: unpriced.date })
-  const arrival = stayed[0]!
-  if (arrival.closed_to_arrival) fail(422, 'STAY_CLOSED_TO_ARRIVAL', `Guests cannot check in on ${checkIn}`, 'check_in_date')
-  if (departure.closed_to_departure) fail(422, 'STAY_CLOSED_TO_DEPARTURE', `Guests cannot check out on ${checkOut}`, 'check_out_date')
-  const minimum = arrival.min_stay_arrival
-  if (count_ < minimum) fail(422, 'STAY_MIN_NIGHTS', `Stays arriving on ${checkIn} are at least ${minimum} nights`, 'check_out_date', { min_nights: minimum })
-  if (arrival.max_stay !== null && count_ > arrival.max_stay) fail(422, 'STAY_MAX_NIGHTS', `Stays arriving on ${checkIn} are at most ${arrival.max_stay} nights`, 'check_out_date', { max_nights: arrival.max_stay })
+  const restriction = stayNightRestriction(stayed, departure)
+  if (restriction) fail(restriction.statusCode, restriction.code, restriction.message, restriction.field, restriction.detail)
   if (home.base_price_tax_behavior === null) fail(409, 'STAY_BASE_PRICE_REQUIRED', 'This home has no base nightly price', 'base_price_minor')
   const nightly = stayed.map(night => ({ date: night.date, price_minor: night.price_minor! }))
   const total = nightly.reduce((sum, night) => sum + night.price_minor, 0)

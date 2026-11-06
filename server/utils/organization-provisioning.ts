@@ -1,6 +1,6 @@
 import { platformLocale } from '~/shared/platform-locales'
 // Turning a bare Better Auth organization into a serving tenant: its address,
-// its template, its source locale and its seeded structure. The target
+// its site, its source locale and its seeded structure. The target
 // organization is always an explicit input from the caller — this module never
 // picks one from the user's memberships. Handles the same-organization retry,
 // subdomain uniqueness, and seeding.
@@ -9,7 +9,7 @@ import { createSystemSubdomain, isSystemSubdomainSpent, organizationPublicUrl } 
 import { executeBatch, queryFirst, type BatchQuery } from '~/server/db'
 import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
 import type { CurrencyCode } from '~/shared/currencies'
-import { resolvePublicTemplate } from '~/utils/template-registry'
+import { TENANT_THEME_ID } from '~/utils/site-routing'
 import { isOrganizationWideRole, organizationAdapter } from '~/server/utils/member-access'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
 import { measurementOutcome, originatingOwnerId, recordAndDeliverConversion } from '~/server/utils/organization-conversions'
@@ -61,11 +61,6 @@ async function markProvisioningFailed(db: D1Database, organizationId: string, ca
   return asError(cause)
 }
 
-// Every customer site gets the tenant theme id; its vertical decides its routes.
-function resolveThemeId(vertical: OrganizationVertical): string {
-  return resolvePublicTemplate({ vertical }).themeId
-}
-
 export async function provisionOrganization(
   env: SetupEnv,
   db: D1Database,
@@ -95,7 +90,7 @@ export async function provisionOrganization(
 
     const existingSource = await queryFirst<{ locale: string }>(db, 'SELECT locale FROM organization_locales WHERE organization_id = ? AND is_source = 1', [organizationId])
     if (existingSource && existingSource.locale !== source.locale) return { status: 409, data: { error: 'This organization already has a primary language; existing content cannot be relabelled' } }
-    const themeId = resolveThemeId(vertical)
+    const themeId = TENANT_THEME_ID
     const now = new Date().toISOString()
 
     const existingSubdomain = await queryFirst<ExistingSubdomainRow>(db, `

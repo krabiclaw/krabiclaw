@@ -1,16 +1,20 @@
 # Business progress foundation
 
 This contract records owner intent, useful work and recommendation feedback.
-The dashboard's Today and Upcoming views select optional work from active goals
-and apply the caller's feedback (see Today and Upcoming in `DESIGN.md`). Booky
+The dashboard's Today and Upcoming views read continuous business recommendations
+from `readBusinessRecommendations` and apply the caller's feedback (see Today
+and Upcoming in `DESIGN.md`). Booky
 Boo can consume the same domain operations when its presentation reaches
 parity; none of these records require lodging.
 
 ## Canonical records
 
 `organization_goals` stores what an owner or administrator explicitly says they
-want, their constraints and an optional target date. Intent and constraints are
-authored text, not model inferences. Goals are active or archived. A saved article
+want, their constraints, an optional target date and an optional explicit
+strategy. Strategy names the chosen marketing channels (`blog`, `social`,
+`google_ads`) and whether payment setup or availability are part of the goal.
+Intent and constraints remain authored text; the selector never infers channel
+choices by matching their words. Goals are active or archived. A saved article
 or a sent message does not establish that a goal was achieved.
 
 `activity_entries` remains the record of work. The progress API derives outcomes
@@ -28,7 +32,7 @@ conversation. Audit entries preserve edits to goals and feedback.
 Article activity is recorded by ordinary CMS/MCP writes; reply evidence comes
 from the existing conversation activity and delivery receipts. Goals and feedback
 are collected only through explicit submissions to their APIs: Today's priority
-form creates and archives goals, and its card controls save feedback against
+disclosure creates and archives goals, and each card's options menu saves feedback against
 the evidence revision and goal revision the card was selected with. No
 recommendation impression, exposure, usefulness, effort saved or achieved
 business goal is established by these records.
@@ -43,20 +47,54 @@ functions enforce the same access rules as the HTTP routes.
 
 | Method and suffix | Behavior |
 | --- | --- |
-| `POST /goals` | Create with `idempotencyKey`, `intent`, optional `constraints` and `targetAt`. Returns `{goal}` and 201, including an identical retry. Reusing the key for another request returns 409. |
+| `POST /goals` | Create with `idempotencyKey`, `intent`, optional `constraints`, `targetAt` and `strategy`. Returns `{goal}` and 201, including an identical retry. Reusing the key for another request returns 409. |
 | `PATCH /goals/:goalId` | Edit authored fields or `status`, supplying the current `revision`. Returns `{goal}`. A stale edit returns 409. |
 | `GET /progress?limit=50&offset=0` | Read goals, the caller's feedback and a page of canonical outcomes. Outcome `pagination` and `feedbackPagination` each describe their own page. Limit is 1–100. |
 | `GET /progress/reference?operation=article.update&subjectId=...` | Read `{reference}` for an explicit operation and canonical subject ID. Returns 404 for an absent or foreign subject. |
 | `PUT /recommendation-feedback` | Save `{operation, subjectId, evidenceRevision, decision}` with optional `note`, `deferUntil`, `goalId`, `goalRevision`, and edit `revision`. Returns `{feedback}`. |
 
 The experimental `POST /api/organizations/:organizationId/recommendations/preview`
-endpoint has been removed and returns 404. Today's selector matches a goal's
-own words against the work's recorded text; it does not invoke a model.
+endpoint has been removed and returns 404. `readBusinessRecommendations` reads
+current canonical facts on each request. It uses explicit strategy, vertical,
+content already in progress, native performance, connected provider evidence
+and current availability. A business without an authored strategy still has
+ordinary marketing opportunities. No model call or game economy is introduced.
 
-Operations currently supported for feedback are `article.update`,
-`article.publish` and `guest_thread.reply`. These name existing canonical
-capabilities, not a list of recommended tasks. New capabilities need their own
-source authorization and evidence definition before joining this contract.
+Feedback operations name canonical capabilities: `article.update`,
+`article.publish`, `article.create`, `post.create`, `post.publish`,
+`article.distribute`, `social.connect`, `google_ads.connect`, `payments.connect`, `product.payment`,
+`stay.gap` and `guest_thread.reply`. Organization-level creation/setup operations
+reference the exact organization, existing content operations reference their
+article/post, and product payment operations reference their exact product. Availability work
+references its recorded session, location/slot, or home/date interval. Echo the
+opaque `subjectId` returned by the server when saving feedback; it names that
+source opportunity, never a fabricated future article or post. References authorize
+the source and derive their evidence revision from its real state.
+
+Google Ads setup reuses the existing Integrations flow. Its feedback operation
+is needed because selecting an unconnected Ads strategy previously produced no
+related action; social/payment feedback cannot describe a Google Ads connection.
+
+Recommendations are continuously eligible, not a daily assignment batch. A
+publication can remove its publishing action and make distribution available
+in the same session; a successful reply removes the waiting response action.
+A draft change is progress, not proof of publication or goal achievement.
+Social distribution requires a real matching provider publication; a website
+post alone does not establish an external send. Payment setup uses Stripe's
+actual readiness. Calendar recommendations use effective nightly policy,
+including overrides, and disappear when that interval is no longer applicable.
+There is no midnight completion reset.
+
+Today displays provider/analytics failures through `recommendationIssues`,
+while retaining baseline opportunities with an honest evidence limit. Missing
+measurement is never replaced with measured zero demand or full capacity.
+Successful editor and MCP writes publish a content-free `business.changed`
+invalidation after their normal cache refresh. Existing conversation events
+cannot signal an article or post completion; without this signal the open
+dashboard can keep recommending work already published in another window.
+Open dashboards reread their
+authorized scope; payments and connection status also reconcile on return/focus
+and the existing visible-page timer.
 
 All dates and revisions use UTC ISO instants with milliseconds. `null` means an
 optional authored value is absent. Actor identity comes from the authenticated

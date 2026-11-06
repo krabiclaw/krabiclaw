@@ -2,7 +2,7 @@ import { getSourceLocale } from '~/server/utils/organization-locales'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { HTTPError } from 'nitro'
 import { createContentDocumentWithBlocks, documentOfRootSql, prepareContentDocumentDeletion, updateContentDocument, type ContentDocumentChanges } from '~/server/utils/content/documents'
-import { parsePostInput, PostValidationError, type PostCallToAction, type PostMediaRef, type PostMutation } from '~/shared/posts'
+import { isPublicationOutcomeUncertain, parsePostInput, PostValidationError, type PostCallToAction, type PostMediaRef, type PostMutation } from '~/shared/posts'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { normalizePostSlug, postPublicPath } from '~/utils/post-slugs'
@@ -61,6 +61,7 @@ export interface PostPublicationSummary {
   published_at: string | null
   /** The website copy has changed since what was sent. The external post was not edited. */
   local_content_changed: boolean
+  can_reconcile: boolean
 }
 
 export interface Post {
@@ -197,12 +198,13 @@ interface PublicationRow {
   error_code: string | null
   error_message: string | null
   published_at: string | null
+  updated_at: string
 }
 
 async function loadPublicationRows(db: DbClient, organizationId: string, postIds: string[]) {
   if (!postIds.length) return new Map<string, PublicationRow[]>()
   const rows = await queryAll<PublicationRow>(db, `SELECT id, post_id, channel, provider_target_id, state, provider_post_id, provider_permalink,
-      payload_hash, error_code, error_message, published_at
+      payload_hash, error_code, error_message, published_at, updated_at
     FROM post_publications WHERE organization_id = ? AND post_id IN (SELECT value FROM json_each(?)) ORDER BY channel`,
   [organizationId, d1JsonStringSet(postIds)])
   const byPost = new Map<string, PublicationRow[]>()
@@ -239,6 +241,7 @@ async function attachPostFields(db: DbClient, env: CloudflareEnv, rows: PostRow[
         id: publication.id, channel: publication.channel, target_id: publication.provider_target_id,
         state: publication.state, provider_post_id: publication.provider_post_id, public_url: publication.provider_permalink,
         code: publication.error_code, message: publication.error_message, published_at: publication.published_at,
+        can_reconcile: isPublicationOutcomeUncertain(publication),
         local_content_changed: publication.payload_hash !== await postPayloadFingerprint(post, { channel: publication.channel, target_id: publication.provider_target_id }),
       }))),
     }

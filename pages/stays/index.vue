@@ -1,5 +1,5 @@
 <template>
-  <NuxtLayout :name="template.layout">
+  <NuxtLayout :name="site.layout">
     <ProductCollectionPage :products="stays" :collections="collections" :locations="productLocations" :currency="currency" :presentation="presentation" :vertical="vertical" :title="collectionTitle" :brand-name="brandName" />
   </NuxtLayout>
 </template>
@@ -11,7 +11,7 @@ import { productSurfaceOf, STAY_PRESENTATION } from '~/utils/product-presentatio
 import type { PostalAddress } from '~/utils/postal-address'
 
 definePageMeta({ layout: false })
-const { template, social_image: socialImage } = useTenantOrganization().organization
+const { site, social_image: socialImage } = useTenantOrganization().organization
 const { t } = useI18n()
 const { products, collections, locations, config, organization, data: pagePayload } = await usePublicPageData({ lazy: false })
 const vertical = String(organization.value?.vertical ?? '')

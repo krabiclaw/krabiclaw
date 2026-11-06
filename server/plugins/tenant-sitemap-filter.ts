@@ -1,7 +1,7 @@
 import type { H3Event } from 'nitro'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { queryAll, type DbClient } from '~/server/db'
-import { resolvePublicTemplate } from '~/utils/template-registry'
+import { resolvePublicSite } from '~/utils/site-routing'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
 import { definePlugin } from 'nitro';
 
@@ -39,17 +39,15 @@ async function publishedTenantSitemapScope(db: DbClient | undefined, organizatio
 }
 
 function isAllowedTenantPath(event: H3Event, path: string, scope: { paths: Set<string>; locales: Set<string> }) {
-  const organization = event.context.organization as { theme?: string | null; vertical?: string | null } | undefined
-  const template = resolvePublicTemplate({
+  const site = resolvePublicSite({
     themeId: event.context.themeId as string | null | undefined,
-    vertical: organization?.vertical,
   })
-  const exactPaths = new Set(template.sitemap.exactPaths)
+  const exactPaths = new Set(site.sitemap.exactPaths)
   const normalized = path === '/' ? '/' : path.replace(/\/$/, '')
   if (scope.paths.has(normalized)) return true
   const locale = normalized.split('/')[1] ?? ''
   const route = scope.locales.has(locale) ? normalized.slice(locale.length + 1) || '/' : normalized
-  return exactPaths.has(route) || template.sitemap.dynamicPrefixes.some(prefix => route.startsWith(prefix))
+  return exactPaths.has(route) || site.sitemap.dynamicPrefixes.some(prefix => route.startsWith(prefix))
 }
 
 export default definePlugin((nitroApp) => {

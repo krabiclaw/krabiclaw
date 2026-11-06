@@ -36,13 +36,15 @@ async function migratedCacheD1(context: TestContext) {
           modules: {
             'index.mjs': {
               type: 'esm',
-              contents: 'export default { fetch() { return new Response("ok") } }',
+              contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }',
             },
           },
         },
+        exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
         env: {
           DB: { type: 'd1' },
           ORGANIZATION_CACHE: { type: 'kv' },
+          GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'public-resource-cache-test', exportName: 'Hub' },
         },
       },
     }],
@@ -58,7 +60,8 @@ async function migratedCacheD1(context: TestContext) {
   }
   await db.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('org', 'Org', 'org', 'org', 'USD', 'UTC')").run()
   await db.prepare("INSERT INTO organization (id, name, slug, subdomain, theme_id, default_currency, timezone) VALUES ('platform', 'Platform', 'platform', 'platform', 'krabiclaw-theme-v1', 'USD', 'UTC')").run()
-  return { db, kv }
+  const { GUEST_INBOX_HUBS: hubs } = await miniflare.getBindings<{ GUEST_INBOX_HUBS: DurableObjectNamespace }>()
+  return { db, kv, hubs }
 }
 
 async function insertInvalidation(
@@ -325,7 +328,7 @@ test('nonproduction drains cache invalidations without AI Search', async (t) => 
 
 
 test('an organization write purges that organization despite an older invalidation for another', async (t) => {
-  const { db, kv } = await migratedCacheD1(t)
+  const { db, kv, hubs } = await migratedCacheD1(t)
   await db.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('changed', 'Changed', 'changed', 'changed', 'USD', 'UTC')").run()
   await insertInvalidation(db, {
     id: 'older-other-org', status: 'pending', attemptCount: 0, createdAt: '2026-01-01T00:00:00.000Z',
@@ -334,7 +337,7 @@ test('an organization write purges that organization despite an older invalidati
     await kv.put(`public~${organization}~v4~page`, 'cached public resource')
     await kv.put(`html:${organization}.krabiclaw.com:/`, 'cached HTML')
   }
-  await purgePublicResourceCacheNow({ DB: db, ORGANIZATION_CACHE: kv, NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://krabiclaw.com' }, 'changed')
+  await purgePublicResourceCacheNow({ DB: db, ORGANIZATION_CACHE: kv, GUEST_INBOX_HUBS: hubs, NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'https://krabiclaw.com' }, 'changed')
   assert.equal(await kv.get('public~changed~v4~page'), null)
   assert.equal(await kv.get('html:changed.krabiclaw.com:/'), null)
   assert.equal(await kv.get('public~org~v4~page'), 'cached public resource')

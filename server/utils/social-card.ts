@@ -18,7 +18,7 @@ import {
   type SocialCardRenderPayload,
   type SocialTemplate,
 } from '~/utils/social-metadata'
-import { resolvePublicTemplate } from '~/utils/template-registry'
+import { resolvePublicSite } from '~/utils/site-routing'
 import { mediaStillUrl, resolveOwnerPicture, type MediaPlacementOwnerType } from '~/shared/media-placement-contract'
 import { platformHomeSocialCardCopy } from '~/server/utils/platform-home-social-card'
 import { publicLocationProtectedSql } from '~/server/utils/public-location-privacy'
@@ -192,7 +192,7 @@ async function loadOrganization(db: DbClient, organizationId: string): Promise<O
 /**
  * A page's or an article's picture is its first top-level block carrying a
  * `media` placement. Block type is not the test, because the block that leads
- * differs per template; carrying a picture is what they have in common. A
+ * differs per site; carrying a picture is what they have in common. A
  * social post keeps its picture in its own `cover` and has no blocks.
  */
 async function loadLeadingPictureBlockId(db: DbClient, owner: SocialCardOwner): Promise<string | null> {
@@ -221,7 +221,7 @@ export function buildSocialCardGenerationKey(input: {
 }
 
 function socialTemplate(organization: OrganizationRecord): SocialTemplate {
-  return resolvePublicTemplate({ themeId: organization.theme_id, vertical: organization.vertical }).slug
+  return resolvePublicSite({ themeId: organization.theme_id}).slug
 }
 
 async function clearSocialCard(input: { db: DbClient; env: SocialCardEnv; owner: SocialCardOwner; actorId?: string | null }, reason: 'no_source' | 'owner_not_found' | 'missing_content' | 'private_location') {

@@ -62,18 +62,18 @@
         </div>
       </div>
 
-      <div v-if="data?.pagination.hasMore" class="flex justify-center py-3">
+      <div v-if="page?.pagination.hasMore" class="flex justify-center py-3">
         <UButton color="neutral" variant="ghost" :loading="loadingMore" :disabled="pending" @click="loadMore">Load more conversations</UButton>
       </div>
 
-      <div v-if="data && threads.length === 0" class="py-14 text-center">
+      <div v-if="page && threads.length === 0" class="py-14 text-center">
         <p class="text-base font-medium text-highlighted">{{ emptyTitle }}</p>
         <p class="mt-1 text-sm text-muted">{{ emptyDescription }}</p>
       </div>
 
       <!-- Airbnb's own: a full-bleed row at the foot of the list. Past conversations are a place you go to. -->
       <NuxtLink
-        v-if="data"
+        v-if="page"
         :to="{ path: listRoute, query: pastOnly || blockedOnly ? withoutArchived : { ...route.query, archived: '' } }"
         class="-mx-4 mt-2 flex items-center justify-between gap-3 border-t border-default px-4 py-4 text-sm font-medium text-highlighted transition hover:bg-elevated/60 sm:-mx-6 sm:px-6"
       >
@@ -204,6 +204,10 @@ async function loadWindow(pages: number, scope: string, signal: AbortSignal): Pr
     }
   }
 }
+// Which list the rows on screen belong to. A refresh of the same list keeps
+// its rows; a different list (another mailbox, filter or search) shows the
+// loading state until its own rows arrive, never the previous list's.
+const rowsKey = ref(listKey.value)
 const { data, pending, error: threadsError, refresh } = await useAsyncData<ThreadListPage>(listKey, async (_app, { signal }) => {
   pageController?.abort()
   nextPageError.value = null
@@ -212,12 +216,15 @@ const { data, pending, error: threadsError, refresh } = await useAsyncData<Threa
   const { page, fetched } = await loadWindow(loadedPages, scope, signal)
   if (scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
   loadedPages = fetched
+  rowsKey.value = scope
   return page
 }, {
   server: !props.personalScope,
   getCachedData(cacheKey, nuxtApp, ctx) {
     if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
-    return nuxtApp.payload.data[cacheKey] as ThreadListPage | undefined
+    const cached = nuxtApp.payload.data[cacheKey] as ThreadListPage | undefined
+    if (cached) rowsKey.value = cacheKey
+    return cached
   },
 })
 
@@ -228,7 +235,8 @@ if (import.meta.client) {
     }
   })
 }
-const threads = computed(() => data.value?.threads ?? [])
+const page = computed(() => rowsKey.value === listKey.value ? data.value ?? null : null)
+const threads = computed(() => page.value?.threads ?? [])
 
 async function loadMore() {
   const before = data.value

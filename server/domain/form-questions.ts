@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { queryFirst, type DbClient } from '~/server/db'
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { isLegalPracticeSite } from '~/utils/template-registry'
+import { isLegalPracticeSite } from '~/utils/site-routing'
 import {
   FormQuestionDefinitionError,
   formQuestionLocalizationSchema,

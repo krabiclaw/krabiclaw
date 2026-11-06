@@ -1,10 +1,10 @@
 import type { OrganizationVertical } from '~/utils/vertical-copy'
-import { isLegalPractice, type PublicTemplateSlug } from '~/utils/template-registry'
+import { isLegalPractice, type SiteSurface } from '~/utils/site-routing'
 import { resolveProductPresentation } from '~/utils/product-presentation'
 
 export type CmsSectionId = 'pages' | 'collections' | 'locations' | 'media' | 'organization'
 
-// Explicit module identifiers a vertical/template/site/location can turn on.
+// Explicit module identifiers a vertical/site/site/location can turn on.
 // 'consultations' and 'appointments' are declared (not yet wired to any catalog entry below) because
 // no distinct manager/route exists for them yet, and a legal practice's practice management lives
 // entirely on the single 'services' page. Reservation policies belong to locations because every
@@ -40,61 +40,29 @@ export interface CmsManagerCapability {
 
 export interface CmsCapabilityDefinition {
   vertical: OrganizationVertical
-  template: PublicTemplateSlug
+  site: SiteSurface
   locationVocabulary: 'location' | 'office/service area'
   pages: readonly CmsPageCapability[]
   managers: readonly CmsManagerCapability[]
-  /** Every module this organization has; the dashboard decides which screens exist from it. */
   features: readonly ProductFeature[]
 }
 
-interface CmsTemplateCatalog {
+interface CmsSiteCatalog {
   pages: readonly CmsPageCapability[]
   managers: readonly CmsManagerCapability[]
   locationVocabularyDefault: 'location' | 'office/service area'
 }
 
-const venueCorePages: readonly CmsPageCapability[] = [
+// One customer catalog; domain features select the applicable editors.
+const customerSiteCatalog: CmsSiteCatalog = {
+  pages: [
     { id: 'home', feature: 'contact', label: 'Home', route: '/', scope: 'organization', editor: 'tenant_pages' },
     { id: 'about', feature: 'contact', label: 'About', route: '/about', scope: 'organization', editor: 'tenant_pages' },
     { id: 'contact', feature: 'contact', label: 'Contact', route: '/contact', scope: 'organization', editor: 'tenant_pages' },
-  { id: 'location', feature: 'locations', label: 'Location', route: '/locations/:location', scope: 'location', editor: 'tenant_pages' },
-]
-
-const venueCoreManagers: readonly CmsManagerCapability[] = [
-  { key: 'organization.blog', id: 'blog', label: 'Blog', section: 'collections', route: 'blog', scope: 'organization' },
-  { key: 'organization.qa', id: 'qa', label: 'Reviews and Q&A', section: 'collections', route: 'qa', scope: 'organization' },
-  { key: 'organization.locations', id: 'locations', label: 'Locations', section: 'locations', route: '', scope: 'organization' },
-  { key: 'location.qa', id: 'qa', label: 'Reviews and Q&A', section: 'collections', route: ':location/qa', scope: 'location' },
-  { key: 'location.posts', id: 'posts', label: 'Posts', section: 'collections', route: ':location/posts', scope: 'location' },
-  { key: 'location.photos', id: 'photos', label: 'Photos', section: 'media', route: ':location/photos', scope: 'location' },
-  { key: 'organization.settings', id: 'settings', label: 'Brand', section: 'organization', route: 'settings', scope: 'organization' },
-  { key: 'location.settings', id: 'settings', label: 'Location settings', section: 'organization', route: ':location/settings', scope: 'location' },
-]
-
-// Every feature a Saya site can EVER expose (restaurant + experience combined), tagged with its
-// owning feature id. Vertical defaults below select which of these are on.
-const venueSiteCatalog: CmsTemplateCatalog = {
-  pages: [
-    ...venueCorePages,
+    { id: 'location', feature: 'locations', label: 'Location', route: '/locations/:location', scope: 'location', editor: 'tenant_pages' },
     { id: 'products', feature: 'products', label: 'Products', route: '/products', scope: 'organization', editor: 'tenant_pages' },
     { id: 'reservations', feature: 'reservations', label: 'Reservations', route: '/reservations', scope: 'organization', editor: 'tenant_pages' },
-  ],
-  managers: [
-    ...venueCoreManagers,
-    { key: 'location.products', id: 'products', label: 'Products', section: 'collections', route: ':location/products', scope: 'location' },
-    { key: 'location.reservations', id: 'reservations', label: 'Reservations', section: 'collections', route: ':location/reservations', scope: 'location' },
-  ],
-  locationVocabularyDefault: 'location',
-}
-
-const legalPracticeCatalog: CmsTemplateCatalog = {
-  pages: [
-    { id: 'home', feature: 'contact', label: 'Home', route: '/', scope: 'organization', editor: 'tenant_pages' },
-    { id: 'about', feature: 'contact', label: 'About', route: '/about', scope: 'organization', editor: 'tenant_pages' },
-    { id: 'contact', feature: 'contact', label: 'Contact', route: '/contact', scope: 'organization', editor: 'tenant_pages' },
-    { id: 'location', feature: 'locations', label: 'Office', route: '/locations/:location', scope: 'location', editor: 'tenant_pages' },
-    { id: 'services', feature: 'services', label: 'Services', route: '/services', scope: 'organization', editor: 'tenant_pages' },
+    { id: 'services', feature: 'services', label: 'Practice areas & consultations', route: '/services', scope: 'organization', editor: 'tenant_pages' },
     { id: 'pricing', feature: 'services', label: 'Pricing', route: '/pricing', scope: 'organization', editor: 'tenant_pages' },
     { id: 'donate', feature: 'services', label: 'Donate', route: '/donate', scope: 'organization', editor: 'tenant_pages' },
     { id: 'schedule', feature: 'services', label: 'Schedule', route: '/schedule', scope: 'organization', editor: 'tenant_pages' },
@@ -102,22 +70,24 @@ const legalPracticeCatalog: CmsTemplateCatalog = {
   managers: [
     { key: 'organization.blog', id: 'blog', label: 'Blog', section: 'collections', route: 'blog', scope: 'organization' },
     { key: 'organization.qa', id: 'qa', label: 'Reviews and Q&A', section: 'collections', route: 'qa', scope: 'organization' },
-    { key: 'organization.locations', id: 'locations', label: 'Offices / service areas', section: 'locations', route: '', scope: 'organization' },
-    { key: 'organization.services', id: 'services', label: 'Services', section: 'collections', route: 'products/services', scope: 'organization' },
+    { key: 'organization.locations', id: 'locations', label: 'Locations', section: 'locations', route: '', scope: 'organization' },
+    { key: 'organization.services', id: 'services', label: 'Practice areas & consultations', section: 'collections', route: 'products/services', scope: 'organization' },
     { key: 'location.qa', id: 'qa', label: 'Reviews and Q&A', section: 'collections', route: ':location/qa', scope: 'location' },
     { key: 'location.posts', id: 'posts', label: 'Posts', section: 'collections', route: ':location/posts', scope: 'location' },
     { key: 'location.photos', id: 'photos', label: 'Photos', section: 'media', route: ':location/photos', scope: 'location' },
     { key: 'organization.settings', id: 'settings', label: 'Brand', section: 'organization', route: 'settings', scope: 'organization' },
     { key: 'location.settings', id: 'settings', label: 'Location settings', section: 'organization', route: ':location/settings', scope: 'location' },
+    { key: 'location.products', id: 'products', label: 'Products', section: 'collections', route: ':location/products', scope: 'location' },
+    { key: 'location.reservations', id: 'reservations', label: 'Reservations', section: 'collections', route: ':location/reservations', scope: 'location' },
   ],
-  locationVocabularyDefault: 'office/service area',
+  locationVocabularyDefault: 'location',
 }
 
 // KrabiClaw's own site. Its documentation is ordinary page documents under /docs,
 // so the pages index lists them without a catalog entry per page. The platform
 // owner's operations (organizations, every domain, platform analytics, staff) are
-// dashboard pages gated on this template, not content managers.
-const platformSiteCatalog: CmsTemplateCatalog = {
+// dashboard pages gated on this site, not content managers.
+const platformSiteCatalog: CmsSiteCatalog = {
   pages: [
     { id: 'home', feature: 'contact', label: 'Home', route: '/', scope: 'organization', editor: 'tenant_pages' },
     { id: 'contact', feature: 'contact', label: 'Help', route: '/help', scope: 'organization', editor: 'tenant_pages' },
@@ -132,13 +102,12 @@ const platformSiteCatalog: CmsTemplateCatalog = {
 
 // A customer site's editors are its vertical's: a legal practice edits its
 // practice pages, every other vertical its venue pages. KrabiClaw's own site has its own.
-function catalogFor(vertical: OrganizationVertical, template: PublicTemplateSlug): CmsTemplateCatalog {
-  if (template === 'platform') return platformSiteCatalog
-  return isLegalPractice(vertical) ? legalPracticeCatalog : venueSiteCatalog
+function catalogFor(site: SiteSurface): CmsSiteCatalog {
+  return site === 'platform' ? platformSiteCatalog : customerSiteCatalog
 }
 
-// Which (vertical, template) pairs are real products today: KrabiClaw's own site is a service site.
-const supportedCombinations: Record<OrganizationVertical, readonly PublicTemplateSlug[]> = {
+// Which (vertical, site) pairs are real products today: KrabiClaw's own site is a service site.
+const supportedCombinations: Record<OrganizationVertical, readonly SiteSurface[]> = {
   restaurant: ['tenant'],
   experience: ['tenant'],
   service: ['tenant', 'platform'],
@@ -174,28 +143,24 @@ const verticalDefaultFeatures: Record<OrganizationVertical, readonly ProductFeat
 // wording per vertical) live here instead of duplicating whole catalog objects.
 const verticalLabelOverrides: Partial<Record<OrganizationVertical, Partial<Record<ProductFeature, string>>>> = {
   experience: { reservations: 'Bookings' },
+  service: { locations: 'Offices / practice locations' },
 }
 
 function effectiveLabel(vertical: OrganizationVertical, feature: ProductFeature, fallback: string): string {
   return verticalLabelOverrides[vertical]?.[feature] ?? fallback
 }
 
-/**
- * `organization` is the organization's own state beside its vertical, or null
- * where no organization exists yet (onboarding) or the caller reads only pages
- * and managers. `stays`, the place-to-stay module, belongs to a vacation rental
- * and to any business that has a stay product.
- */
 export function resolveCmsCapabilities(
   vertical: OrganizationVertical,
-  template: PublicTemplateSlug,
+  site: SiteSurface,
   organization: { hasStayProduct: boolean } | null,
 ): CmsCapabilityDefinition {
-  if (!supportedCombinations[vertical]?.includes(template)) {
-    throw new Error(`Unsupported CMS capability combination: ${vertical}/${template}`)
+  if (!supportedCombinations[vertical]?.includes(site)) {
+    throw new Error(`Unsupported CMS capability combination: ${vertical}/${site}`)
   }
-  const catalog = catalogFor(vertical, template)
+  const catalog = catalogFor(site)
   const features = new Set<ProductFeature>([...verticalDefaultFeatures[vertical], ...ALWAYS_ON_FEATURES])
+
   if (vertical === 'lodging' || organization?.hasStayProduct) features.add('stays')
 
   const productPresentation = resolveProductPresentation(vertical)
@@ -213,18 +178,18 @@ export function resolveCmsCapabilities(
 
   return {
     vertical,
-    template,
-    locationVocabulary: catalog.locationVocabularyDefault,
+    site,
+    locationVocabulary: isLegalPractice(vertical) ? 'office/service area' : catalog.locationVocabularyDefault,
     pages,
     managers,
     features: [...features],
   }
 }
 
-/** All manager keys a template can ever produce across every vertical it supports. */
+/** All manager keys a site can ever produce across every vertical it supports. */
 export function allGuardableManagerKeys(): readonly string[] {
   const keys = new Set<string>()
-  for (const catalog of [venueSiteCatalog, legalPracticeCatalog, platformSiteCatalog]) {
+  for (const catalog of [customerSiteCatalog, platformSiteCatalog]) {
     for (const manager of catalog.managers) keys.add(manager.key)
   }
   return [...keys]

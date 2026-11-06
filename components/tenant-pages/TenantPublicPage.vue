@@ -1,11 +1,5 @@
 <template>
-  <!--
-    One renderer per template, chosen here. Every Blawby page is a Blawby page:
-    the practice areas were the only ones an allowlist of seven paths left out,
-    so they rendered in the Saya markup on a Blawby site. KrabiClaw's own pages
-    are KrabiClaw pages for the same reason — rendered through the Saya block
-    loop they lost every section the marketing site had (#903).
-  -->
+  <!-- Every site's authored pages use the shared page renderer. -->
   <template v-if="page">
     <ProductDetailPage v-if="linkedOffer" :key="`${linkedOffer.product.id}:${linkedOffer.location?.id ?? 'online'}:${Boolean(linkedOffer.scopeRequired)}`" :organization-id="organizationId" :organization-name="linkedOffer.brandName" :vertical="linkedOffer.product.kind === 'service' ? 'service' : linkedOffer.vertical" :product="linkedOffer.product" :booking="linkedOffer.booking" :location="linkedOffer.location" :locations="linkedOffer.locations" :online-available="linkedOffer.onlineAvailable" :scope-required="linkedOffer.scopeRequired" :currency="linkedOffer.currency" :page-document="page" :collection-name="linkedOffer.collectionName" :presentation="presentationForProduct(linkedOffer.product, organization.theme_id)" :reviews="linkedOffer.reviews" :sessions="linkedOffer.sessions" :collection-siblings="linkedOffer.collectionSiblings" :stay-checkout-available="linkedOffer.stayCheckoutAvailable">
       <template #actions>
@@ -30,8 +24,8 @@ import { normalizeTenantPagePath } from '~/utils/tenant-page-blocks'
 
 const props = defineProps<{ path: string; locale?: string | null }>()
 const { previewAuthorized, organization } = useTenantOrganization()
-const { id: organizationId, template } = organization
-const isPlatform = template.slug === 'platform'
+const { id: organizationId, site } = organization
+const isPlatform = site.slug === 'platform'
 const { locale: i18nLocale, localePath } = useI18n()
 // Page ownership is a resolved site, not a tenant type. KrabiClaw's own site is
 // a site row with page documents like any other, and requiring `isTenant` here
@@ -160,7 +154,7 @@ if (data.value?.page) {
 useSocialMetadata(() => page.value && ({
   path: page.value.path,
   // KrabiClaw's own brand name is the platform name: its layout's title
-  // template and useSocialMetadata already state it once for every platform
+  // site and useSocialMetadata already state it once for every platform
   // surface, so the page names only itself. A tenant states its own name.
   title: isPlatform ? page.value.title : `${page.value.title} | ${organization.name}`,
   description: page.value.summary || '',

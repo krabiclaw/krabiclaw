@@ -15,6 +15,7 @@ export default defineHandler(async event=>{
    locations: today.locations,
    resolvedAt: today.resolvedAt,
    priorities: null,
+   recommendationIssues: [],
  })
  return jsonResponse(finalizeRequestMetrics(event,'account-today',feed),{headers:{'cache-control':'private, no-store'}})
 })

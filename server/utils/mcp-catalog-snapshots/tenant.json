@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:e18827bff7d1d0c9015160dc0ad1b2f221763881b772a04d3c4816c89fb8813a",
-  "documentationFingerprint": "sha256:251673e15bad4b898a71f0030c9bc5a097942d4692deb85e1ff20dcab334cd4a",
+  "fingerprint": "sha256:695eba4dfe89f7718e01ea4b18a80c1c9efc160b3338538b25fc6fcba084e971",
+  "documentationFingerprint": "sha256:dfc4d92a1f922d10c4d43e69dd597e2bceeca7539efa0e0aec8a3fa18d7c146d",
   "tools": [
     {
       "name": "add_organization_language",
@@ -25290,7 +25290,7 @@
                 "type": "string"
               },
               "recipe": {
-                "description": "The template section this page fills, or null for a page that fills none. Send the recipe from the last read unless you are changing it; an omitted recipe is not kept.",
+                "description": "The site section this page fills, or null for a page that fills none. Send the recipe from the last read unless you are changing it; an omitted recipe is not kept.",
                 "type": [
                   "string",
                   "null"
@@ -41873,7 +41873,7 @@
     {
       "name": "delete_site_page",
       "title": "Delete site page",
-      "description": "Delete the selected site page or translation. Deleting a translation removes that translation; deleting the source locale removes the page and every translation with it, and the response names the locales that went. A page the site template renders cannot be deleted, because its route would then have nothing to show.",
+      "description": "Delete the selected site page or translation. Deleting a translation removes that translation; deleting the source locale removes the page and every translation with it, and the response names the locales that went. A required site page cannot be deleted, because its route would then have nothing to show.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -122332,7 +122332,7 @@
             ]
           },
           "recipe": {
-            "description": "The template section this page fills, or null for a page that fills none. Send the recipe from the last read unless you are changing it; an omitted recipe is not kept.",
+            "description": "The site section this page fills, or null for a page that fills none. Send the recipe from the last read unless you are changing it; an omitted recipe is not kept.",
             "type": [
               "string",
               "null"
@@ -127129,7 +127129,7 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:ae4d41ae341faf5a382fdec03c6048f96f4aaca1b3aa1a99da4fd9fe9c41d9e6",
+        "create_product": "sha256:eda9b539f7bc13fa334ffe44b23c401133640cb949c0c9556b8ae28ddf79c7c0",
         "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
@@ -127185,7 +127185,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:ae4d41ae341faf5a382fdec03c6048f96f4aaca1b3aa1a99da4fd9fe9c41d9e6",
+        "create_product": "sha256:eda9b539f7bc13fa334ffe44b23c401133640cb949c0c9556b8ae28ddf79c7c0",
         "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
@@ -127242,7 +127242,7 @@
         "remove_media": "sha256:70c3ad05014d52e9ce95b1a4363d6ab8b23b0d1ffd37c31b03a3da6684d49943",
         "reorder_media": "sha256:2ba6530e10b65684d8efd9d9543c6e3a62e760a988d7a876abe7962ff0fb7e75",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_site_page": "sha256:59cdde1aa4d584134607413f633453123521abe519087d8322525faa96f98bfb"
+        "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
       }
     },
     {
@@ -127273,7 +127273,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:ae4d41ae341faf5a382fdec03c6048f96f4aaca1b3aa1a99da4fd9fe9c41d9e6",
+        "create_product": "sha256:eda9b539f7bc13fa334ffe44b23c401133640cb949c0c9556b8ae28ddf79c7c0",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
@@ -127286,7 +127286,7 @@
         "save_website_draft": "sha256:6a7e9c21393133afa96ef5bd80d3ca08ced43fc89e669394496d8d4785ed82ab",
         "update_menu": "sha256:cd6ae334587cddc89c052c08d9f30ce9855bd0394c95eb87d69378a393068269",
         "update_organization_settings": "sha256:7191c77fc0ed6eb5ce818283be58acb26679a8cf793cbba600dccb694e8051a6",
-        "update_site_page": "sha256:59cdde1aa4d584134607413f633453123521abe519087d8322525faa96f98bfb"
+        "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
       }
     },
     {
@@ -127328,7 +127328,7 @@
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
         "update_product": "sha256:a6f1e84c2f216c0cf5f12ff3c680f5227a03b34c951caf3cf75f9d5580ca7372",
-        "update_site_page": "sha256:59cdde1aa4d584134607413f633453123521abe519087d8322525faa96f98bfb"
+        "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
       }
     },
     {

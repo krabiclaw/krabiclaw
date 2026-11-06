@@ -13,8 +13,8 @@
 <script setup lang="ts">
 definePageMeta({ layout: false })
 
-const { template } = useTenantOrganization().organization
-const homePath = template.pageDocuments.recipes.home
-const layout = template.layout
+const { site } = useTenantOrganization().organization
+const homePath = site.pageDocuments.recipes.home
+const layout = site.layout
 </script>
 

@@ -29,7 +29,11 @@ export const BUSINESS_OUTCOME_EVENTS = [
   ...BUSINESS_MEASUREMENT_EVENTS.map(name => `measurement.${name}` as const),
 ] as const
 export type BusinessOutcomeEvent = typeof BUSINESS_OUTCOME_EVENTS[number]
-export type BusinessProgressOperation = 'article.update' | 'article.publish' | 'guest_thread.reply'
+export const BUSINESS_PROGRESS_OPERATIONS = [
+  'article.create', 'article.update', 'article.publish', 'article.distribute',
+  'post.create', 'post.publish', 'social.connect', 'google_ads.connect', 'payments.connect', 'product.payment', 'stay.gap', 'guest_thread.reply',
+] as const
+export type BusinessProgressOperation = typeof BUSINESS_PROGRESS_OPERATIONS[number]
 
 export interface BusinessOutcomeReceipt {
   id: string
@@ -99,6 +103,39 @@ export interface BusinessProgressReference {
     updatedAt: string
     activityEntryId: string | null
     media: Array<{ placementId: string; assetId: string; assetUpdatedAt: string }>
+    distribution?: ArticleDistribution
+  } | {
+    kind: 'organization'
+    updatedAt: string
+    documents: Array<{ id: string; kind: string; status: string | null; updatedAt: string }>
+    media: Array<{ id: string; updatedAt: string }>
+  } | {
+    kind: 'post'
+    status: string | null
+    updatedAt: string
+    publications: RecommendationPublication[]
+  } | {
+    kind: 'social_connection'
+    entitled: boolean
+    channels: Array<{ channel: string; connected: boolean; targetId: string | null; revision: string | null; problems: string[] }>
+  } | {
+    kind: 'google_ads_connection'
+    connected: boolean
+    targetId: string | null
+    revision: string | null
+  } | {
+    kind: 'payment_setup'
+    missing: string[]
+    account: { status: string; cardPaymentsStatus: string | null; updatedAt: string } | null
+  } | {
+    kind: 'product'
+    updatedAt: string
+    paymentRequired: boolean | null
+    configurationUpdatedAt: string | null
+  } | {
+    kind: 'stay_home'
+    updatedAt: string
+    configurationUpdatedAt: string
   } | {
     kind: 'guest_thread'
     conversationState: string
@@ -109,4 +146,19 @@ export interface BusinessProgressReference {
     latestMemberEntryId: string | null
     commitment: { kind: 'booking' | 'reservation' | 'stay'; id: string; status: string; startsAt: string; endsAt: string } | null
   }
+}
+
+export interface RecommendationPublication {
+  id: string
+  channel: string
+  state: string
+  providerPostId: string | null
+  publishedAt: string | null
+  updatedAt: string
+}
+
+export interface ArticleDistribution {
+  /** The article's actual current public URL, null when its site has no public origin. */
+  url: string | null
+  posts: Array<{ id: string; status: string | null; updatedAt: string; publications: RecommendationPublication[] }>
 }

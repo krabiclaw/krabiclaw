@@ -19,7 +19,7 @@ import { recordRequestPhase } from '~/server/utils/request-metrics'
 import { isPublicShellPayload } from '~/utils/public-resource-contracts'
 import { assertExactCanonicalLocale, assertPublicOrganizationLanguage } from '~/server/utils/localization'
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { isLegalPracticeSite } from '~/utils/template-registry'
+import { isLegalPracticeSite } from '~/utils/site-routing'
 import {
   indexStoredPublicLocalizations,
   projectExactLocalizedResource,
@@ -131,7 +131,7 @@ export async function loadPublicShellSource(
   }
 
   const pageLinks = publishedPages
-    .filter(page => page.path !== '/schedule' || canSchedule)
+    .filter(page => page.path !== '/blog' && (page.path !== '/schedule' || canSchedule))
     .map(page => ({ id: page.id, path: page.path, title: page.title }))
 
   if (experiences.length && !pageLinks.some(page => page.path === '/experiences')) {

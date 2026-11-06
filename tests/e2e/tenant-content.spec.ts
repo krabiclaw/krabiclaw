@@ -202,3 +202,39 @@ test('a tap on the practice’s phone number is a call to its office; a number i
   expect(events.status()).toBe(200)
   expect(mcpData<{ rows: Array<Record<string, unknown>> }>(await events.json()).rows).toContainEqual(expect.objectContaining({ event_id: callId, stage: 'external_handoff', location_id: office.id, page: expect.objectContaining({ path: `/locations/${office.slug}` }) }))
 })
+
+// Published content owns discoverability on every customer site, independently of page recipes.
+for (const key of ['restaurant', 'legal', 'experience'] as const) {
+  test(`${key} blog navigation follows published articles`, async ({ page }) => {
+    const headers = seededSiteHeaders(key)
+    const base = seededSiteURL(key)
+    const shellRead = await page.request.get(`${base}/api/public/shell`, { headers })
+    expect(shellRead.status(), await shellRead.text()).toBe(200)
+    const shell = await shellRead.json()
+    const published = key !== 'experience'
+    expect(shell.sections.blog).toBe(published)
+    expect((await openTenantPage(page, `${base}/`, headers))?.status()).toBe(200)
+    const headerBlog = page.locator('header nav').first().getByRole('link', { name: 'Blog', exact: true })
+    const footerBlog = page.locator('footer').getByRole('link', { name: 'Blog', exact: true })
+    await expect(headerBlog).toHaveCount(published ? 1 : 0)
+    await expect(footerBlog).toHaveCount(published ? 1 : 0)
+    if (!published) return
+    await expect(headerBlog).toHaveAttribute('href', '/blog')
+    await expect(footerBlog).toHaveAttribute('href', '/blog')
+    await headerBlog.click()
+    await expect(page).toHaveURL(/\/blog$/)
+    await expect(page.locator('main h1')).toHaveText(key === 'legal' ? 'Legal guides' : 'Blog')
+    const article = page.locator('main article h2 a[href^="/blog/"]').first()
+    await expect(article).toBeVisible()
+    const title = await article.innerText()
+    await article.click()
+    await expect(page.locator('main h1')).toHaveText(title)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.locator('header').getByLabel('Toggle navigation', { exact: true }).click()
+    const mobileBlog = page.locator('header details nav').last().getByRole('link', { name: 'Blog', exact: true })
+    await expect(mobileBlog).toBeVisible()
+    await mobileBlog.click()
+    await expect(page).toHaveURL(/\/blog$/)
+    await expect(page.locator('main')).toContainText(title)
+  })
+}
