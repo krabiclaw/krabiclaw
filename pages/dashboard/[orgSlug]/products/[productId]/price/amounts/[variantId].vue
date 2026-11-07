@@ -1,8 +1,8 @@
 <template>
   <DashboardLeafPanel
-    id="product-combination-price"
-    :title="p.locationId.value ? priceLocation ? `Price at ${priceLocation.title}` : 'Price' : p.form.variants.length === 1 ? 'Shared price' : `${variant?.name ?? ''} · Shared price`"
-    :lead="p.locationId.value ? priceLocation ? `Set the price at ${priceLocation.title}. Leave the amount empty to use the shared price, if one is set.` : undefined : p.form.variants.length === 1 ? `Set an amount, or use price wording such as ${priceExample}. Leave both empty to show no shared price.` : 'Set the shared price for this choice.'"
+    id="product-amount"
+    :title="p.locationId.value ? priceLocation ? `Price at ${priceLocation.title}` : 'Price' : p.form.variants.length === 1 ? 'Price' : variant?.name ?? ''"
+    :lead="p.locationId.value ? priceLocation ? `Set the price at ${priceLocation.title}.` : undefined : p.form.variants.length === 1 ? `Set an amount, or use price wording such as ${priceExample}. Leave both empty to show no price.` : undefined"
     :saving="p.saving.value"
     :disabled="p.saveDisabled.value || Boolean(priceScopeError)"
     :save-label="p.saveLabel.value"
@@ -38,6 +38,6 @@ const priceExample = computed(() => p.form.kind === 'dish' ? 'Market price' : 'P
 const priceWording = PRODUCT_DETAIL_FIELDS.find(field => field.key === 'pricing_note')!
 
 watchEffect(() => {
-  if (p.product.value && !p.loadError.value && !variant.value) showError(createError({ statusCode: 404, statusMessage: 'Choice not found' }))
+  if (p.product.value && !p.loadError.value && !variant.value) showError(createError({ statusCode: 404, statusMessage: 'Price not found' }))
 })
 </script>

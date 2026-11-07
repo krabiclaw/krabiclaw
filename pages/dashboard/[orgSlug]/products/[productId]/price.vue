@@ -26,14 +26,13 @@
     </div>
   </DashboardLeafPanel>
   <DashboardIndexPanel v-else id="product-pricing" :title="p.sectionLabels.price" :auto-open="firstAmount">
-    <UAlert v-if="p.loadError.value || p.saveError.value" class="mb-6" color="error" variant="soft" :description="p.loadError.value || p.saveError.value || ''" />
-    <EditorNavigationList v-if="p.product.value && !p.loadError.value" :groups="groups" :active-item="activeItem" @act="act" />
+    <UAlert v-if="pageError" class="mb-6" color="error" variant="soft" :description="pageError" />
+    <EditorNavigationList v-if="p.product.value && !p.loadError.value && !p.organizationLocationsError.value" :groups="groups" :active-item="activeItem" />
   </DashboardIndexPanel>
 </template>
 
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
-import { PRODUCT_LIMITS } from '~/shared/product-limits'
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 
 definePageMeta({ layout: 'dashboard' })
@@ -47,37 +46,27 @@ const nightlyPrice = computed(() => p.product.value?.kind === 'stay' && p.form.v
 watchEffect(() => {
   if (nightlyPrice.value && level.child.value) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
 })
-const priceLocations = computed(() => p.locationId.value || nightlyPrice.value ? [] : p.allOrganizationLocations.value.filter(location => p.product.value?.locations.some(entry => entry.location_id === location.id)))
-const firstAmount = computed(() => !priceLocations.value.length && p.product.value?.variants.length === 1 ? p.sectionPath(`price/amounts/${encodeURIComponent(p.product.value.variants[0]!.id)}`) : null)
+const pageError = computed(() => p.loadError.value || p.organizationLocationsError.value || p.saveError.value || '')
+// An offering at locations is priced at each of them. Only one with no location, such as an online consultation, has a price of its own.
+const pricedByLocation = computed(() => !p.locationId.value && Boolean(p.product.value?.locations.length))
+const priceLocations = computed(() => pricedByLocation.value ? p.allOrganizationLocations.value.filter(location => p.product.value?.locations.some(entry => entry.location_id === location.id)) : [])
+const firstAmount = computed(() => !pricedByLocation.value && p.product.value?.variants.length === 1 ? p.sectionPath(`price/amounts/${encodeURIComponent(p.product.value.variants[0]!.id)}`) : null)
 const groups = computed<EditorNavigationGroup[]>(() => [{
   id: 'prices',
   items: [
-    ...p.form.variants.map(variant => ({
-      id: `price-${variant.id ?? variant.key}`,
-      label: p.form.variants.length === 1 ? p.locationId.value ? 'Amount' : 'Shared price' : `${variant.name}${p.locationId.value ? '' : ' · Shared price'}`,
-      summary: variant.price_major ? `${variant.price_major} ${p.currency}` : p.form.variants.length === 1 && typeof p.product.value?.details.pricing_note === 'string' ? p.product.value.details.pricing_note : p.locationId.value ? 'No price set' : 'No shared price set',
-      ...(variant.id ? { to: p.sectionPath(`price/amounts/${encodeURIComponent(variant.id)}`) } : {}),
-    })),
+    ...(pricedByLocation.value ? [] : p.form.variants.map(variant => ({
+      id: `price-${variant.id}`,
+      label: p.form.variants.length > 1 ? variant.name : p.locationId.value ? 'Amount' : 'Price',
+      summary: variant.price_major ? `${variant.price_major} ${p.currency}` : p.form.variants.length === 1 && typeof p.product.value?.details.pricing_note === 'string' ? p.product.value.details.pricing_note : 'No price set',
+      to: p.sectionPath(`price/amounts/${encodeURIComponent(variant.id)}`),
+    }))),
     ...priceLocations.value.map(location => ({
       id: `location-${location.id}`,
       label: `Price at ${location.title}`,
       summary: `${p.product.value ? priceLabel(p.product.value, true, location.id) || 'No price set' : ''}${location.status === 'active' ? '' : ' · Location inactive'}`,
       to: router.resolve({ path: level.path.value, query: { ...route.query, location_id: location.id } }).fullPath,
     })),
-    ...p.form.options.map(option => ({
-      id: `option-${option.id}`,
-      label: option.name || 'Choice',
-      summary: option.values.map(value => value.value).join(', ') || undefined,
-      to: p.sectionPath(`price/choices/${encodeURIComponent(option.id)}`),
-    })),
-    ...(p.form.kind !== 'stay' && p.form.options.length < PRODUCT_LIMITS.options ? [{ id: 'add', icon: 'i-lucide-plus', label: 'Add a choice', action: {} }] : []),
   ],
 }])
-const activeItem = computed(() => typeof route.params.optionId === 'string' ? `option-${route.params.optionId}` : typeof route.params.variantId === 'string' ? `price-${route.params.variantId}` : null)
-
-function act(id: string) {
-  if (id !== 'add') return
-  p.addOption()
-  void navigateTo(p.sectionPath(`price/choices/${encodeURIComponent(p.form.options.at(-1)!.id)}`))
-}
+const activeItem = computed(() => typeof route.params.variantId === 'string' ? `price-${route.params.variantId}` : null)
 </script>

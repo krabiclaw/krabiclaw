@@ -96,31 +96,12 @@ const priceWrite = {
   additionalProperties: false,
 } as const
 
-const optionValueWrite = {
-  type: 'object',
-  properties: { id: { type: 'string' }, value: { type: 'string' }, sort_order: { type: 'integer' } },
-  required: ['value'],
-  additionalProperties: false,
-} as const
-
-const optionWrite = {
-  type: 'object',
-  description: 'A customer choice such as Size, with values such as Small and Large. Variants combine these choices and carry prices. Descriptive facts belong in details.',
-  properties: {
-    id: { type: 'string' }, name: { type: 'string' }, sort_order: { type: 'integer' },
-    values: { type: 'array', minItems: 1, maxItems: PRODUCT_LIMITS.optionValues, items: optionValueWrite },
-  },
-  required: ['name', 'values'],
-  additionalProperties: false,
-} as const
-
 const variantWrite = {
   type: 'object',
-  description: 'One priced choice, such as Six pieces or Twelve pieces. Named choices may stand alone or select declared option values. Omitting variants on creation creates one default choice. Keep the id when editing to preserve its bookings.',
+  description: 'One priced choice, such as Six pieces or Twelve pieces. Omitting variants on creation creates one default choice. Keep the id when editing to preserve its bookings.',
   properties: {
     id: { type: 'string' }, name: { type: 'string' }, sku: { type: ['string', 'null'] },
     active: { type: 'boolean' }, sort_order: { type: 'integer' },
-    option_values: { type: 'object', additionalProperties: { type: 'string' }, description: 'Option id to option value id. Every option must be answered exactly once, and no two variants may answer identically.' },
     prices: { type: 'array', maxItems: 20, items: priceWrite },
   },
   required: ['name'],
@@ -132,20 +113,10 @@ const variantObject = {
   properties: {
     id: { type: 'string' }, product_id: { type: 'string' }, name: { type: 'string' },
     sku: { type: ['string', 'null'] }, active: { type: 'boolean' }, sort_order: { type: 'integer' },
-    option_values: { type: 'object', additionalProperties: { type: 'string' } },
     prices: { type: 'array', items: priceObject },
   },
-  required: ['id', 'product_id', 'name', 'sku', 'active', 'sort_order', 'option_values', 'prices'],
+  required: ['id', 'product_id', 'name', 'sku', 'active', 'sort_order', 'prices'],
   additionalProperties: false,
-} as const
-
-const optionObject = {
-  type: 'object',
-  properties: {
-    id: { type: 'string' }, name: { type: 'string' }, sort_order: { type: 'integer' },
-    values: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, value: { type: 'string' }, sort_order: { type: 'integer' } }, required: ['id', 'value', 'sort_order'] } },
-  },
-  required: ['id', 'name', 'sort_order', 'values'],
 } as const
 
 const publicationObject = {
@@ -270,7 +241,6 @@ const productObject = {
     page: { type: ['object', 'null'], description: "The source page this product owns, or null. Edit its content with the site-page tools; its binding is the page's product_id.", properties: { id: { type: 'string' }, path: { type: 'string' }, title: { type: 'string' } }, required: ['id', 'path', 'title'] },
     admin_edit_url: { type: ['string', 'null'], description: 'The dashboard editor for this product, on the platform host.' },
     tax_code: { type: ['string', 'null'] },
-    options: { type: 'array', items: optionObject },
     variants: { type: 'array', items: variantObject },
     details: detailObject,
     publications: { type: 'array', items: publicationObject },
@@ -281,7 +251,7 @@ const productObject = {
     source: { type: 'string', enum: ['manual', 'template', 'ai', 'import', 'copy'] },
     created_at: { type: 'string' }, updated_at: { type: 'string' },
   },
-  required: ['id', 'kind', 'name', 'slug', 'description', 'active', 'options', 'variants', 'details', 'publications', 'locations', 'collections', 'source', 'created_at', 'updated_at'],
+  required: ['id', 'kind', 'name', 'slug', 'description', 'active', 'variants', 'details', 'publications', 'locations', 'collections', 'source', 'created_at', 'updated_at'],
   additionalProperties: false,
 } as const
 
@@ -334,8 +304,7 @@ const productWrite = {
   marketing_features: { type: 'array', maxItems: PRODUCT_LIMITS.marketingFeatures, items: { type: 'string' }, description: 'Generic selling bullets. Inclusions, preparation instructions and policies are separate details.' },
   metadata: { type: 'object', additionalProperties: { type: 'string' }, description: 'Opaque string annotations for integrations. No pricing, scheduling, stock or filtering behavior may read these.' },
   tax_code: { type: ['string', 'null'] },
-  options: { type: 'array', maxItems: PRODUCT_LIMITS.options, items: optionWrite },
-  variants: { type: 'array', minItems: 1, maxItems: PRODUCT_LIMITS.variants, items: variantWrite, description: 'Omit to create a single default variant. Required once the product has options.' },
+  variants: { type: 'array', minItems: 1, maxItems: PRODUCT_LIMITS.variants, items: variantWrite, description: 'Omit to create a single default variant.' },
   details: { ...detailObject, description: 'Named customer-facing facts for the product kind. This is a complete replacement map; preserve fields to retain. pricing_note contains explicitly stated price wording and requires empty numeric prices.' },
 } as const
 
@@ -348,7 +317,7 @@ const productMutationResult = { type: 'object', properties: { product: productMu
 const pricePatch = { ...priceWrite, required: [] } as const
 const variantPatch = {
   ...variantWrite,
-  description: 'A partial update to an existing variant by id, or a new variant. Existing variants retain omitted fields and option selections. New variants require a name and complete option selections.',
+  description: 'A partial update to an existing variant by id, or a new variant. Existing variants retain omitted fields. New variants require a name.',
   properties: {
     ...variantWrite.properties,
     prices: { ...variantWrite.properties.prices, items: pricePatch, description: 'Partial existing prices by id or new offers. Omitted prices remain unless prices_mode is replace. A new offer requires unit_amount.' },
@@ -358,15 +327,14 @@ const variantPatch = {
 } as const
 const productPatch = {
   ...productWrite,
-  expected_updated_at: { type: 'string', minLength: 1, description: 'The Product updated_at from the read being edited. A stale value refuses the entire update, including options, variants and prices. Omit only for a deliberate update based on current state.' },
+  expected_updated_at: { type: 'string', minLength: 1, description: 'The Product updated_at from the read being edited. A stale value refuses the entire update, including variants and prices. Omit only for a deliberate update based on current state.' },
   details: { ...productDetailsSchema(undefined, false, true), description: 'Named customer-facing facts for the product kind. Omitted details stay unchanged. Supplied details replace their map by default, retaining featured unless supplied. With details_mode merge, only supplied facts change and null removes a named fact. pricing_note requires empty numeric prices.' },
   details_mode: { type: 'string', enum: ['merge', 'replace'], default: 'replace', description: 'Requires details. replace is the default complete replacement map, retaining featured unless supplied; null is refused. merge preserves unmentioned facts and null explicitly removes a named fact. Unknown keys are refused in either mode.' },
-  variants: { ...productWrite.variants, items: variantPatch, description: 'Partial existing variants by id or new variants. Omitted variants and their prices/options remain unless variants_mode is replace. Existing variant and price IDs retain their identities.' },
+  variants: { ...productWrite.variants, items: variantPatch, description: 'Partial existing variants by id or new variants. Omitted variants and their prices remain unless variants_mode is replace. Existing variant and price IDs retain their identities.' },
   variants_mode: { type: 'string', enum: ['merge', 'replace'], default: 'merge', description: 'merge preserves variants omitted from the supplied list. replace explicitly removes omitted variants and their owned records; removal is refused once a variant has booking history. Applies only with variants.' },
-  options: { ...productWrite.options, description: 'Complete option list when supplied; omitted options are removed. Omit to preserve existing options and selections.' },
 } as const
 
-const menuProductFields = ['id', 'kind', 'name', 'slug', 'description', 'active', 'order_url', 'unit_label', 'marketing_features', 'metadata', 'tax_code', 'options', 'variants', 'details', 'publications', 'locations', 'collections', 'updated_at'] as const
+const menuProductFields = ['id', 'kind', 'name', 'slug', 'description', 'active', 'order_url', 'unit_label', 'marketing_features', 'metadata', 'tax_code', 'variants', 'details', 'publications', 'locations', 'collections', 'updated_at'] as const
 const menuProductObject = {
   type: 'object',
   properties: { ...Object.fromEntries(menuProductFields.map(field => [field, productObject.properties[field]])), kind: { const: 'dish' }, details: productDetailsSchema('dish') },
@@ -394,15 +362,15 @@ export const PRODUCTS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'replace_product_weekly_schedule', description: 'Replace a product’s weekly time slots at one location when the user wants to change its recurring schedule. Times are in that location’s timezone and use the product duration/capacity. An online offering has no weekly slots: it is booked in its provider’s working hours (set_member_scheduling). An empty slots array clears that schedule. Sessions with any booking history are preserved; removed future sessions without bookings are cancelled, and re-added unbooked slots can reopen with current defaults.', domain: 'products', minimumRole: 'member', inputSchema: { product_id: { type: 'string' }, location_id: { type: 'string', description: 'A saved location ID.' }, slots: { type: 'array', items: { type: 'object', properties: { weekday: { type: 'integer', minimum: 0, maximum: 6 }, start_time: { type: 'string', description: 'Local HH:mm time.' } }, required: ['weekday', 'start_time'], additionalProperties: false } } }, required: ['product_id', 'location_id', 'slots'], outputSchema: weeklyScheduleResult }),
   organizationTool({ name: 'list_products', description: "List products carried by the selected site, published or withheld. Results include products across the site; list_location_products narrows to one location.", domain: 'products', minimumRole: 'member', inputSchema: { kind: { type: 'string', enum: [...PRODUCT_KINDS] }, featured: { type: 'boolean' }, published_only: { type: 'boolean' }, ...paginationInputSchema }, required: [], outputSchema: productListResultObject }),
   organizationTool({ name: 'list_location_products', description: 'List product identities offered at one selected location. Results are paginated; published_only narrows to published offerings. Use list_products for the whole site.', domain: 'products', minimumRole: 'admin', inputSchema: { location_id: { type: 'string' }, kind: { type: 'string', enum: [...PRODUCT_KINDS] }, featured: { type: 'boolean' }, published_only: { type: 'boolean' }, ...paginationInputSchema }, required: ['location_id'], outputSchema: productListResultObject }),
-  organizationTool({ name: 'get_product', description: "Read one site product before reviewing or editing its options, variants, prices, media, publication, locations, collections, named product facts or booking defaults. Prices belong to variants; booking defaults apply to new sessions.", domain: 'products', minimumRole: 'member', inputSchema: { product_id: { type: 'string' } }, required: ['product_id'], outputSchema: productResult }),
+  organizationTool({ name: 'get_product', description: "Read one site product before reviewing or editing its variants, prices, media, publication, locations, collections, named product facts or booking defaults. Prices belong to variants; booking defaults apply to new sessions.", domain: 'products', minimumRole: 'member', inputSchema: { product_id: { type: 'string' } }, required: ['product_id'], outputSchema: productResult }),
   organizationTool({ name: 'create_product', description: 'Add food or drink, an experience or class, a practice area or consultation, or a place to stay. An experience can start as a private draft without booking setup. To make it public, configure its booking flow or supply an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), keeps its public house rules in details, and is priced per night by its variant price; guests book it on the site and pay in full, so it takes no order_url and publishes only once it has a nightly price and online payments are set up. Repeat the same idempotency key on retry.' , domain: 'products', minimumRole: 'admin', inputSchema: { ...productWrite, booking: bookingSetup, stay: staySetup, page: { type: 'object', description: 'A source page created with this product and bound to it, in the same write. Omit for a product without a page of its own.', properties: { ...TENANT_PAGE_METADATA_SCHEMA, path: { type: 'string', description: "The page's public path. A practice area or consultation may omit it to get the first free /services/<slug>." }, blocks: TENANT_PAGE_BLOCKS_SCHEMA }, required: ['title', 'blocks'], additionalProperties: false }, idempotency_key: { type: 'string', minLength: 1, maxLength: 200, description: 'Repeat the same key with the same request to get the product it created instead of a second one.' } }, required: ['name', 'kind', 'idempotency_key'], outputSchema: productResult }),
-  organizationTool({ name: 'update_product', description: 'Edit a product and return its updated record. For a price change, supply the variant ID, price ID and unit_amount. Variants and prices merge by ID; omitted entries stay. Supplied options and details replace their current values by default. Use details_mode merge for focused fact edits, preserving unmentioned facts and clearing named facts with null. Booking setup also creates sessions and publishes the offering. For a connected Airbnb home, changed arrival/departure windows, cancellation, pet/smoking/event rules and minimum stays update supported listing settings through Channex. Unsupported connected-listing settings are refused before saving. A failed channel completion reports the committed edit with CHANNEL_PUSH_FAILED; reload before retrying. Increasing the number of live homes requires the dashboard.', domain: 'products', minimumRole: 'member', inputSchema: { product_id: { type: 'string' }, ...productPatch, booking: bookingSetup, stay: stayPatch, idempotency_key: { type: 'string', minLength: 1, maxLength: 200, description: 'Required with booking setup. Repeat the same key with the same request for an identical retry.' } }, required: ['product_id'], outputSchema: productMutationResult }),
+  organizationTool({ name: 'update_product', description: 'Edit a product and return its updated record. For a price change, supply the variant ID, price ID and unit_amount. Variants and prices merge by ID; omitted entries stay. Supplied details replace their current values by default. Use details_mode merge for focused fact edits, preserving unmentioned facts and clearing named facts with null. Booking setup also creates sessions and publishes the offering. For a connected Airbnb home, changed arrival/departure windows, cancellation, pet/smoking/event rules and minimum stays update supported listing settings through Channex. Unsupported connected-listing settings are refused before saving. A failed channel completion reports the committed edit with CHANNEL_PUSH_FAILED; reload before retrying. Increasing the number of live homes requires the dashboard.', domain: 'products', minimumRole: 'member', inputSchema: { product_id: { type: 'string' }, ...productPatch, booking: bookingSetup, stay: stayPatch, idempotency_key: { type: 'string', minLength: 1, maxLength: 200, description: 'Required with booking setup. Repeat the same key with the same request for an identical retry.' } }, required: ['product_id'], outputSchema: productMutationResult }),
   organizationTool({ name: 'delete_product', description: 'Delete a product and its public page. Booking history prevents deletion; pause bookings or withhold publication to retain it.', domain: 'products', minimumRole: 'admin', inputSchema: { product_id: { type: 'string' } }, required: ['product_id'], outputSchema: { type: 'object', properties: { deleted: { type: 'boolean' } }, required: ['deleted'] } }),
   organizationTool({ name: 'set_product_publication', description: "Publish or withhold a product on the selected site and return its saved publication flag. Read get_product first. A home or offering booked on this site needs an assigned host with an approved public profile and nonblank public_name: find membership IDs in list_organization_members, read get_member_public_profile, and author or approve the profile through update_member_public_profile. Assignment alone does not publish a profile. Other publication prerequisites, including pricing and availability, still apply. This setting is independent of whether the product is available for sale and of visibility at individual locations. Increasing the number of live homes requires the dashboard.", domain: 'products', minimumRole: 'admin', inputSchema: { product_id: { type: 'string' }, published: { type: 'boolean' } }, required: ['product_id', 'published'], outputSchema: productPublicationResult }),
   organizationTool({ name: 'set_product_location', description: "Set whether the selected location offers a product and shows it on that location’s website. A new location relationship defaults active and published to true; on an existing relationship, omitted flags retain their values. Returns the saved location flags. Existing prices do not establish a location offering; read get_product for the complete product.", domain: 'products', minimumRole: 'admin', inputSchema: { product_id: { type: 'string' }, location_id: { type: 'string' }, active: { type: 'boolean' }, published: { type: 'boolean' } }, required: ['product_id', 'location_id'], outputSchema: productLocationResult }),
   organizationTool({ name: 'remove_product_location', description: 'Remove the selected product’s offering at one explicit location and return its product and location IDs with removed true. The catalog product, prices and other location offerings remain. Read get_product to review them.', domain: 'products', minimumRole: 'admin', inputSchema: { product_id: { type: 'string' }, location_id: { type: 'string' } }, required: ['product_id', 'location_id'], outputSchema: { type: 'object', properties: { product_id: { type: 'string' }, location_id: { type: 'string' }, removed: { const: true } }, required: ['product_id', 'location_id', 'removed'], additionalProperties: false } }),
   organizationTool({ name: 'batch_create_products', description: "Create several products in the selected site’s catalog when the user supplies a new catalog batch. Validates every entry before writing; any invalid entry rejects the complete request. Publication and location offerings are assigned separately.", domain: 'products', minimumRole: 'admin', inputSchema: { idempotency_key: { type: 'string', minLength: 1, maxLength: 200 }, products: { type: 'array', minItems: 1, maxItems: PRODUCT_LIMITS.batchCreate, items: { type: 'object', properties: { ...productWrite, stay: staySetup }, required: ['name', 'kind'], additionalProperties: false } } }, required: ['products', 'idempotency_key'], outputSchema: { type: 'object', properties: { products: { type: 'array', items: productObject } }, required: ['products'] } }),
-  organizationTool({ name: 'reconcile_products', description: 'Synchronize complete catalog entries in one atomic local write. Existing product IDs preserve identity; supplied variants, prices and options replace their lists. Omitted products stay unchanged unless deactivate_missing disables them. A new home requires stay settings. Changed connected-home settings and nightly prices are pushed to Airbnb through Channex after saving. Unsupported connected-listing settings are refused before any local writes; a failed channel completion reports committed changes with CHANNEL_PUSH_FAILED. Repeat the same idempotency key for an identical retry. Use update_menu for a restaurant menu and update_product for a partial edit. Increasing the number of live homes requires the dashboard.', domain: 'products', minimumRole: 'admin', inputSchema: { idempotency_key: { type: 'string', minLength: 1, maxLength: 200 }, products: { type: 'array', maxItems: PRODUCT_LIMITS.reconcile, items: { type: 'object', properties: { product_id: { type: 'string', minLength: 1 }, ...productWrite, stay: staySetup }, required: ['name', 'kind'], additionalProperties: false } }, deactivate_missing: { type: 'boolean' } }, required: ['products', 'idempotency_key'], outputSchema: { type: 'object', properties: { products: { type: 'array', items: productMutationObject } }, required: ['products'] } }),
+  organizationTool({ name: 'reconcile_products', description: 'Synchronize complete catalog entries in one atomic local write. Existing product IDs preserve identity; supplied variants and prices replace their lists. Omitted products stay unchanged unless deactivate_missing disables them. A new home requires stay settings. Changed connected-home settings and nightly prices are pushed to Airbnb through Channex after saving. Unsupported connected-listing settings are refused before any local writes; a failed channel completion reports committed changes with CHANNEL_PUSH_FAILED. Repeat the same idempotency key for an identical retry. Use update_menu for a restaurant menu and update_product for a partial edit. Increasing the number of live homes requires the dashboard.', domain: 'products', minimumRole: 'admin', inputSchema: { idempotency_key: { type: 'string', minLength: 1, maxLength: 200 }, products: { type: 'array', maxItems: PRODUCT_LIMITS.reconcile, items: { type: 'object', properties: { product_id: { type: 'string', minLength: 1 }, ...productWrite, stay: staySetup }, required: ['name', 'kind'], additionalProperties: false } }, deactivate_missing: { type: 'boolean' } }, required: ['products', 'idempotency_key'], outputSchema: { type: 'object', properties: { products: { type: 'array', items: productMutationObject } }, required: ['products'] } }),
 
   organizationTool({ name: 'list_collections', description: "List the selected site’s product collections when the user wants to find menu sections or other product groups. Returns their public display order. Supply location_id to narrow the list to one location.", domain: 'products', minimumRole: 'admin', inputSchema: { location_id: { type: ['string', 'null'] } }, required: [], outputSchema: { type: 'object', properties: { collections: { type: 'array', items: collectionObject } }, required: ['collections'] } }),
   organizationTool({ name: 'create_collection', description: 'Create an empty product collection, such as a menu section, site-wide or at the named location. Returns the saved collection and its ID. Add products separately with set_collection_products; existing products and collections stay unchanged.', domain: 'products', minimumRole: 'admin', inputSchema: { name: { type: 'string' }, description: { type: ['string', 'null'] }, location_id: { type: ['string', 'null'], description: 'Narrow this collection to one location, or omit for site-wide.' }, sort_order: { type: 'integer' } }, required: ['name'], outputSchema: { type: 'object', properties: { collection: collectionObject }, required: ['collection'] } }),

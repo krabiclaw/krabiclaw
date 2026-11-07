@@ -168,7 +168,7 @@ test('one product identity serves two locations', { timeout: 120_000 }, async ()
         { unit_amount: 900, currency: 'USD' },
       ] }],
     } })
-    assert.equal(product.variants.length, 1, 'a product with no options still has one real variant')
+    assert.equal(product.variants.length, 1, 'a product that declares no variants still has one real variant')
     assert.equal(product.variants[0]!.prices.length, 3)
 
     await setProductPublication(db, { organizationId: ORG, productId: product.id, published: true, actor: ACTOR })
@@ -216,47 +216,25 @@ test('merchant activation, organization publication, and location publication ar
   } finally { await runtime.dispose() }
 })
 
-test('a simple product and an optioned product use the same variant-price path', { timeout: 120_000 }, async () => {
+test('a one-variant product and a product with named variants use the same variant-price path', { timeout: 120_000 }, async () => {
   const { runtime, db } = await boot()
   try {
     const simple = await createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',
       name: 'Espresso', variants: [{ name: 'Default', prices: [{ unit_amount: 8000, currency: 'THB' }] }],
     } })
-    const optioned = await createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',
+    const named = await createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',
       name: 'Latte',
-      options: [{ id: 'opt-size', name: 'Size', values: [{ id: 'val-s', value: 'Small' }, { id: 'val-l', value: 'Large' }] }],
       variants: [
-        { id: 'var-s', name: 'Small', option_values: { 'opt-size': 'val-s' }, prices: [{ unit_amount: 9000, currency: 'THB' }] },
-        { id: 'var-l', name: 'Large', option_values: { 'opt-size': 'val-l' }, prices: [{ unit_amount: 12000, currency: 'THB' }] },
+        { id: 'var-s', name: 'Small', prices: [{ unit_amount: 9000, currency: 'THB' }] },
+        { id: 'var-l', name: 'Large', prices: [{ unit_amount: 12000, currency: 'THB' }] },
       ],
     } })
-    for (const product of [simple, optioned]) {
+    for (const product of [simple, named]) {
       for (const variant of product.variants) {
         assert(resolveVariantPrice(variant, { currency: 'THB', location_id: null, at: NOW }), `${product.name}/${variant.name} prices through the same path`)
       }
     }
-    assert.equal(optioned.variants.length, 2)
-    assert.deepEqual(optioned.variants.map(v => v.option_values), [{ 'opt-size': 'val-s' }, { 'opt-size': 'val-l' }])
-
-    // Invalid option combinations are refused.
-    await assert.rejects(createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',
-      name: 'Broken A',
-      options: [{ id: 'o1', name: 'Size', values: [{ id: 'v1', value: 'S' }] }],
-      variants: [{ name: 'No selection', option_values: {} }],
-    } }), /must select a value for every option/)
-    await assert.rejects(createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',
-      name: 'Broken B',
-      options: [{ id: 'o1', name: 'Size', values: [{ id: 'v1', value: 'S' }] }],
-      variants: [
-        { name: 'One', option_values: { o1: 'v1' } },
-        { name: 'Two', option_values: { o1: 'v1' } },
-      ],
-    } }), /same combination/)
-    await assert.rejects(createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',
-      name: 'Broken C',
-      options: [{ id: 'o1', name: 'Size', values: [{ id: 'v1', value: 'S' }] }],
-      variants: [{ name: 'Alien', option_values: { o2: 'v9' } }],
-    } }), /options this product does not define/)
+    assert.deepEqual(named.variants.map(variant => variant.id), ['var-s', 'var-l'])
   } finally { await runtime.dispose() }
 })
 
@@ -437,7 +415,7 @@ test('editing a product keeps variant identity, so bookings survive', { timeout:
     assert.equal((await getProduct(db, ORG, product.id)).description, 'Now with clay')
     assert.equal(await db.prepare("SELECT count(*) n FROM product_sessions WHERE id = 's1'").first<number>('n'), 1)
 
-    // Removing that option is refused, and refused before anything is written:
+    // Removing that variant is refused, and refused before anything is written:
     // the booking's foreign key cascades, so a delete that went through would
     // take the guest's seat with it.
     await assert.rejects(
@@ -453,7 +431,7 @@ test('editing a product keeps variant identity, so bookings survive', { timeout:
       'the refused edit left the variant alone')
 
     // A cancelled booking is the record that it happened, and it is held by
-    // the same key. The option stops being sold by being turned off.
+    // the same key. The variant stops being sold by being turned off.
     await db.prepare("UPDATE bookings SET status = 'cancelled', cancelled_at = '2099-01-01T00:00:00.000Z' WHERE id = 'b1'").run()
     await assert.rejects(
       updateProduct(db, { organizationId: ORG, productId: product.id, actor: ACTOR, patch: {
@@ -469,29 +447,19 @@ test('editing a product keeps variant identity, so bookings survive', { timeout:
     // and before the write. The variant's foreign key RESTRICTS its deletion,
     // and D1 applies a batch whole or not at all — so the same statements the
     // writer runs, with a booking now present, leave the product exactly as it
-    // was: variant, selections and prices, not a surviving id with nothing
-    // behind it.
+    // was: variant and prices, not a surviving id with nothing behind it.
     await db.prepare("UPDATE bookings SET status = 'confirmed', cancelled_at = NULL WHERE id = 'b1'").run()
-    await db.prepare("INSERT INTO product_options (id, organization_id, product_id, name, sort_order) VALUES ('opt', ?, ?, 'Size', 0)").bind(ORG, product.id).run()
-    await db.prepare("INSERT INTO product_option_values (id, organization_id, product_id, product_option_id, value, sort_order) VALUES ('val', ?, ?, 'opt', 'Adult', 0)").bind(ORG, product.id).run()
-    await db.prepare("INSERT INTO product_variant_option_values (organization_id, product_id, product_variant_id, product_option_id, product_option_value_id) VALUES (?, ?, 'var-adult', 'opt', 'val')").bind(ORG, product.id).run()
     const before = {
       prices: await db.prepare("SELECT count(*) n FROM prices WHERE product_variant_id = 'var-adult'").first<number>('n'),
-      selections: await db.prepare("SELECT count(*) n FROM product_variant_option_values WHERE product_variant_id = 'var-adult'").first<number>('n'),
-      values: await db.prepare("SELECT count(*) n FROM product_option_values WHERE id = 'val'").first<number>('n'),
     }
-    assert.deepEqual(before, { prices: 1, selections: 1, values: 1 })
+    assert.deepEqual(before, { prices: 1 })
     await assert.rejects(db.batch([
-      db.prepare('DELETE FROM product_variant_option_values WHERE organization_id = ? AND product_id = ?').bind(ORG, product.id),
       db.prepare('DELETE FROM prices WHERE organization_id = ? AND product_variant_id IN (SELECT id FROM product_variants WHERE organization_id = ? AND product_id = ?)').bind(ORG, ORG, product.id),
       db.prepare("DELETE FROM product_variants WHERE organization_id = ? AND product_id = ? AND id NOT IN ('var-child')").bind(ORG, product.id),
-      db.prepare("DELETE FROM product_option_values WHERE organization_id = ? AND product_id = ? AND id NOT IN ('none')").bind(ORG, product.id),
       db.prepare("UPDATE products SET description = 'half-written' WHERE id = ?").bind(product.id),
     ]))
     const after = {
       prices: await db.prepare("SELECT count(*) n FROM prices WHERE product_variant_id = 'var-adult'").first<number>('n'),
-      selections: await db.prepare("SELECT count(*) n FROM product_variant_option_values WHERE product_variant_id = 'var-adult'").first<number>('n'),
-      values: await db.prepare("SELECT count(*) n FROM product_option_values WHERE id = 'val'").first<number>('n'),
       description: (await getProduct(db, ORG, product.id)).description,
     }
     assert.deepEqual(after, { ...before, description: 'Now with clay' }, 'the refused batch changed nothing')
@@ -519,17 +487,16 @@ test('an organization that withholds a product does not show it, at any location
   } finally { await runtime.dispose() }
 })
 
-test('a minimal price patch preserves sibling variants, prices, options and unrelated fields', { timeout: 120_000 }, async (t) => {
+test('a minimal price patch preserves sibling variants, prices and unrelated fields', { timeout: 120_000 }, async (t) => {
   const { runtime, db } = await boot()
   try {
     const product = await createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',
       name: 'Pad Thai', description: 'With tofu', unit_label: 'plate', metadata: { kitchen: 'wok' },
-      options: [{ id: 'opt-size', name: 'Size', values: [{ id: 'val-small', value: 'Small' }, { id: 'val-large', value: 'Large' }] }],
-      variants: [{ id: 'var-small', name: 'Small', sku: 'PAD-S', sort_order: 0, option_values: { 'opt-size': 'val-small' }, prices: [
+      variants: [{ id: 'var-small', name: 'Small', sku: 'PAD-S', sort_order: 0, prices: [
         { unit_amount: 18000, currency: 'THB', location_id: 'loc-a', compare_at_unit_amount: 30000, tax_behavior: 'inclusive', source: 'import', valid_from_at: '2026-01-01T00:00:00.000Z', valid_until_at: '2099-01-01T00:00:00.000Z' },
         { unit_amount: 14000, currency: 'THB', location_id: 'loc-b' },
       ] }, {
-        id: 'var-large', name: 'Large', sku: 'PAD-L', active: false, sort_order: 7, option_values: { 'opt-size': 'val-large' },
+        id: 'var-large', name: 'Large', sku: 'PAD-L', active: false, sort_order: 7,
         prices: [{ unit_amount: 24000, currency: 'THB', location_id: 'loc-a', tax_behavior: 'exclusive' }],
       }],
     } })
@@ -562,9 +529,6 @@ test('a minimal price patch preserves sibling variants, prices, options and unre
     const previous = await getProduct(db, ORG, product.id)
     const rowsBefore = {
       variants: (await db.prepare('SELECT * FROM product_variants WHERE product_id = ? ORDER BY id').bind(product.id).all()).results,
-      options: (await db.prepare('SELECT * FROM product_options WHERE product_id = ? ORDER BY id').bind(product.id).all()).results,
-      values: (await db.prepare('SELECT * FROM product_option_values WHERE product_id = ? ORDER BY id').bind(product.id).all()).results,
-      selections: (await db.prepare('SELECT * FROM product_variant_option_values WHERE product_id = ? ORDER BY product_variant_id').bind(product.id).all()).results,
       siblingPrices: (await db.prepare('SELECT * FROM prices WHERE product_variant_id IN (SELECT id FROM product_variants WHERE product_id = ?) AND id <> ? ORDER BY id').bind(product.id, priceA.id).all()).results,
     }
     t.mock.timers.enable({ apis: ['Date'], now: Date.parse(previous.updated_at) })
@@ -575,19 +539,15 @@ test('a minimal price patch preserves sibling variants, prices, options and unre
     const afterMinimal = await getProduct(db, ORG, product.id)
     assert.equal(afterMinimal.updated_at, new Date(Date.parse(previous.updated_at) + 1).toISOString(), 'a price edit advances the canonical Product version even in the same millisecond')
     await assert.rejects(updateProduct(db, { organizationId: ORG, productId: product.id, actor: ACTOR, patch: {
-      expected_updated_at: previous.updated_at, name: 'Stale dish', options: [], variants_mode: 'replace',
+      expected_updated_at: previous.updated_at, name: 'Stale dish', variants_mode: 'replace',
       variants: [{ id: kept.id, prices_mode: 'replace', prices: [{ id: priceA.id, unit_amount: 1 }] }],
     } }), { statusCode: 409, data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: product.id } })
-    assert.deepEqual(await getProduct(db, ORG, product.id), afterMinimal, 'a stale full catalog edit changes no scalar, option, variant or price')
+    assert.deepEqual(await getProduct(db, ORG, product.id), afterMinimal, 'a stale full catalog edit changes no scalar, variant or price')
     assert.equal(afterMinimal.variants.length, 2, 'an unmentioned sibling variant is preserved')
     assert.deepEqual(afterMinimal.variants.find(variant => variant.id === 'var-large'), previous.variants.find(variant => variant.id === 'var-large'))
-    assert.deepEqual(afterMinimal.options, previous.options)
     assert.deepEqual([afterMinimal.description, afterMinimal.unit_label, afterMinimal.metadata], ['With prawns', 'plate', { kitchen: 'wok' }])
     const rowsAfter = {
       variants: (await db.prepare('SELECT * FROM product_variants WHERE product_id = ? ORDER BY id').bind(product.id).all()).results,
-      options: (await db.prepare('SELECT * FROM product_options WHERE product_id = ? ORDER BY id').bind(product.id).all()).results,
-      values: (await db.prepare('SELECT * FROM product_option_values WHERE product_id = ? ORDER BY id').bind(product.id).all()).results,
-      selections: (await db.prepare('SELECT * FROM product_variant_option_values WHERE product_id = ? ORDER BY product_variant_id').bind(product.id).all()).results,
       siblingPrices: (await db.prepare('SELECT * FROM prices WHERE product_variant_id IN (SELECT id FROM product_variants WHERE product_id = ?) AND id <> ? ORDER BY id').bind(product.id, priceA.id).all()).results,
     }
     assert.deepEqual(rowsAfter, rowsBefore, 'every unmentioned persisted catalog field remains unchanged')
@@ -620,7 +580,6 @@ test('a minimal price patch preserves sibling variants, prices, options and unre
     assert.deepEqual(replaced.variants.map(variant => variant.id), [kept.id])
     assert.deepEqual(replaced.variants[0]!.prices.map(price => price.id), [priceA.id])
     assert.equal(replaced.variants[0]!.prices[0]!.unit_amount, 21000)
-    assert.deepEqual(replaced.options, previous.options)
     await updateProduct(db, { organizationId: ORG, productId: product.id, actor: ACTOR, patch: {
       variants: [{ id: kept.id, prices_mode: 'replace', prices: [] }],
     } })
@@ -629,32 +588,6 @@ test('a minimal price patch preserves sibling variants, prices, options and unre
     await assert.rejects(updateProduct(db, { organizationId: ORG, productId: product.id, actor: ACTOR, patch: {
       variants: [{ id: kept.id, prices_mode: 'replace' }],
     } }), /prices is required/)
-  } finally { await runtime.dispose() }
-})
-
-test('two options can offer the same value label without colliding', { timeout: 120_000 }, async () => {
-  const { runtime, db } = await boot()
-  try {
-    const product = await createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',
-      name: 'Mug',
-      options: [
-        { name: 'Inside colour', values: [{ value: 'White' }, { value: 'Blue' }] },
-        { name: 'Outside colour', values: [{ value: 'White' }, { value: 'Green' }] },
-      ],
-      variants: [
-        { name: 'White / White', option_values: { 'Inside colour': 'White', 'Outside colour': 'White' }, prices: [{ unit_amount: 40000, currency: 'THB' }] },
-        { name: 'Blue / Green', option_values: { 'Inside colour': 'Blue', 'Outside colour': 'Green' }, prices: [{ unit_amount: 45000, currency: 'THB' }] },
-      ],
-    } })
-    const stored = await getProduct(db, ORG, product.id)
-    const inside = stored.options.find(option => option.name === 'Inside colour')!
-    const outside = stored.options.find(option => option.name === 'Outside colour')!
-    const whiteWhite = stored.variants.find(variant => variant.name === 'White / White')!
-    assert.equal(whiteWhite.option_values[inside.id], inside.values.find(value => value.value === 'White')!.id,
-      'the inside selection points at the inside option own value')
-    assert.equal(whiteWhite.option_values[outside.id], outside.values.find(value => value.value === 'White')!.id,
-      'the outside selection points at the outside option own value')
-    assert.notEqual(whiteWhite.option_values[inside.id], whiteWhite.option_values[outside.id])
   } finally { await runtime.dispose() }
 })
 
@@ -671,7 +604,7 @@ test('an id from another tenant is refused, not upserted onto', { timeout: 120_0
     } })
     await assert.rejects(
       updateProduct(db, { organizationId: ORG, productId: mine.id, actor: ACTOR, patch: {
-        variants: [{ id: 'var-other', name: 'Hijacked', option_values: {}, prices: [] }],
+        variants: [{ id: 'var-other', name: 'Hijacked', prices: [] }],
       } }),
       /does not belong to this product/,
     )

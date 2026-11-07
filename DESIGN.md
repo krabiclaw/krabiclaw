@@ -290,10 +290,8 @@ with Assigned team member (the booking assignment concern: who guests' bookable
 consultations are with — not case ownership, and changing it never reassigns
 existing appointments), Consultation pricing, Bookings, Description, Page
 content, Locations and Website visibility. Pricing has one entrance. Its index
-names the saved prices and any real choices; a single amount opens beside it
-on desktop, while several amounts leave the choice to the host. Named priced
-versions remain valid without choice dimensions. Adding a dimension requires
-an explicit value for each saved version and preserves its identity and prices.
+names the saved prices; a single amount opens beside it on desktop, while
+several amounts leave the choice to the host.
 Typed facts open their own editors from the record; they do not need another
 overview card. Show authored optional facts; missing optional facts are offered
 through the existing registry's Add detail action, not a permanent stack of
@@ -304,8 +302,10 @@ informational practice area; real memberships, pricing and terms remain
 editable through their existing owners.
 
 Price summaries read the actual saved offers across their explicit scopes.
-No shared price is different from no price anywhere. Editing names the shared
-or selected location scope and never chooses another location for the caller.
+An offering at locations is priced at each location, and an offering at none
+has one price of its own. A location-neutral price is an API and MCP convenience
+for bulk writes, not a row on this screen. Editing names the selected location
+and never chooses another location for the caller.
 Website visibility states publication; consultation availability is independent.
 
 ### Tabs, parents and exits
@@ -891,10 +891,9 @@ A URL names a record, a concern, a keyed item, a tab or a mode, and a direct
 entry or a reload reconstructs it. A control's temporary state — a picker, a
 popover, a filter chip, a confirmation — is not in it.
 
-- **Keyed items use their ids.** A price choice is `price/choices/:optionId`, an amount
-  `price/amounts/:variantId`, a block `sections/:blockId`; never an index, a
-  name or a combination label, so reordering or renaming never changes which
-  item a saved URL edits.
+- **Keyed items use their ids.** An amount is `price/amounts/:variantId`, a block
+  `sections/:blockId`; never an index or a name, so reordering or renaming never
+  changes which item a saved URL edits.
 - **Views keep their query.** Blog or Docs is `?collection=`, Q&A or Reviews
   is `?tab=`, a catalog kind is `?kind=`.
 - **Data is awaited, not lazy.** A level's data is `await useAsyncData` in its

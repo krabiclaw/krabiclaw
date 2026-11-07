@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import type { ProductOptionInput, ProductVariantInput } from '~/server/types/products'
+import type { ProductVariantInput } from '~/server/types/products'
 import { PRODUCT_LIMITS, PRODUCT_METADATA_KEY, PRODUCT_SLUG } from '~/shared/product-limits'
 
 export { PRODUCT_LIMITS, PRODUCT_SLUG }
@@ -89,118 +89,30 @@ export function validateProductSlug(value: unknown, field = 'slug'): string {
   return normalized
 }
 
-export interface NormalizedProductOption {
-  id?: string
-  name: string
-  sort_order: number
-  values: { id?: string; value: string; sort_order: number }[]
-}
-
-export function validateProductOptions(value: unknown): NormalizedProductOption[] {
-  if (value === undefined) return []
-  if (!Array.isArray(value)) invalid('options must be an array')
-  if (value.length > PRODUCT_LIMITS.options) invalid(`a product may have at most ${PRODUCT_LIMITS.options} options`)
-  const names = new Set<string>()
-  return value.map((entry, index) => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) invalid(`options[${index}] must be an object`)
-    const option = entry as ProductOptionInput
-    const name = requireTrimmedProductString(option.name, `options[${index}].name`, PRODUCT_LIMITS.optionName)
-    const identity = name.toLocaleLowerCase('en-US')
-    if (names.has(identity)) invalid('option names must be unique ignoring case')
-    names.add(identity)
-    if (!Array.isArray(option.values) || option.values.length === 0) {
-      invalid(`options[${index}].values must contain at least one value`)
-    }
-    if (option.values.length > PRODUCT_LIMITS.optionValues) {
-      invalid(`options[${index}] may have at most ${PRODUCT_LIMITS.optionValues} values`)
-    }
-    const seen = new Set<string>()
-    const values = option.values.map((item, valueIndex) => {
-      if (!item || typeof item !== 'object') invalid(`options[${index}].values[${valueIndex}] must be an object`)
-      const text = requireTrimmedProductString(item.value, `options[${index}].values[${valueIndex}].value`, PRODUCT_LIMITS.optionValue)
-      const key = text.toLocaleLowerCase('en-US')
-      if (seen.has(key)) invalid(`options[${index}].values must be unique ignoring case`)
-      seen.add(key)
-      return { id: item.id, value: text, sort_order: item.sort_order ?? valueIndex }
-    })
-    return { id: option.id, name, sort_order: option.sort_order ?? index, values }
-  })
-}
-
 export interface NormalizedProductVariant {
   id?: string
   name: string
   sku: string | null
   active: boolean
   sort_order: number
-  option_values: Record<string, string>
 }
 
-/**
- * The two invariants SQLite cannot express.
- *
- * The schema already proves, per row, that a selected value belongs to the
- * right option and the right product, and that a variant answers each option
- * at most once. It cannot see the variant set as a whole, so these are here:
- *
- *  1. Every variant answers EVERY option — a half-configured variant is not a
- *     buyable thing, and leaving one unanswered would make two variants look
- *     identical to a customer.
- *  2. No two variants answer identically. Two rows with the same combination
- *     are one product pretending to be two, and a price on each is exactly the
- *     ambiguity the price contract refuses to resolve.
- *
- * Both are covered at the real persistence boundary, not only here.
- */
-export function validateProductVariants(
-  value: unknown,
-  options: readonly NormalizedProductOption[],
-): NormalizedProductVariant[] {
+export function validateProductVariants(value: unknown): NormalizedProductVariant[] {
   if (value === undefined) return []
   if (!Array.isArray(value)) invalid('variants must be an array')
   if (value.length === 0) invalid('a product must have at least one variant')
   if (value.length > PRODUCT_LIMITS.variants) invalid(`a product may have at most ${PRODUCT_LIMITS.variants} variants`)
 
-  const optionKeys = options.map(option => option.id ?? option.name)
-  const valuesByOption = new Map(options.map(option => [
-    option.id ?? option.name,
-    new Set(option.values.map(item => item.id ?? item.value)),
-  ]))
-  const combinations = new Set<string>()
-
   return value.map((entry, index) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) invalid(`variants[${index}] must be an object`)
     const variant = entry as ProductVariantInput
     const name = requireTrimmedProductString(variant.name, `variants[${index}].name`, PRODUCT_LIMITS.name)
-    const selections = variant.option_values ?? {}
-    const selectedKeys = Object.keys(selections)
-
-    const unknownOptions = selectedKeys.filter(key => !valuesByOption.has(key))
-    if (unknownOptions.length) invalid(`variants[${index}] selects options this product does not define: ${unknownOptions.join(', ')}`)
-    const missing = optionKeys.filter(key => !(key in selections))
-    if (missing.length) invalid(`variants[${index}] must select a value for every option; missing: ${missing.join(', ')}`)
-    for (const key of optionKeys) {
-      const allowed = valuesByOption.get(key)!
-      if (!allowed.has(selections[key]!)) invalid(`variants[${index}] selects a value that does not belong to option ${key}`)
-    }
-
-    // Two variants may not select the same combination — of options the
-    // product actually declares. A product with no options has no combination
-    // to collide on: "Six pieces" and "Twelve pieces" are two things to buy,
-    // told apart by their own names and prices.
-    if (optionKeys.length > 0) {
-      const combination = optionKeys.map(key => `${key}=${selections[key]}`).join('|')
-      if (combinations.has(combination)) invalid('two variants cannot select the same combination of option values')
-      combinations.add(combination)
-    }
-
     return {
       id: variant.id,
       name,
       sku: normalizeOptionalProductString(variant.sku, `variants[${index}].sku`, PRODUCT_LIMITS.sku),
       active: variant.active ?? true,
       sort_order: variant.sort_order ?? index,
-      option_values: Object.fromEntries(optionKeys.map(key => [key, selections[key]!])),
     }
   })
 }

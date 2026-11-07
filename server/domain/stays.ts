@@ -781,7 +781,7 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
     if (product.variants.length !== 1) fail(409, 'HOME_HAS_OPTIONS', 'This home has several options; change their prices in the product editor', 'base_price_minor')
     const variant = product.variants[0]!
     const base = selectPrice(variant.prices, { currency: home.currency, location_id: home.location_id })
-    if (price !== null) patch.variants = [{ id: variant.id, prices: [base ? { id: base.id, unit_amount: price } : { unit_amount: price }] }]
+    if (price !== null) patch.variants = [{ id: variant.id, prices: [base ? { id: base.id, unit_amount: price } : { unit_amount: price, location_id: home.location_id }] }]
     else if (base) patch.variants = [{ id: variant.id, prices_mode: 'replace', prices: variant.prices.filter(other => other.id !== base.id).map(other => ({ id: other.id })) }]
   }
   const pushes = pricing || ('min_nights' in body && nights !== home.min_nights) || ('calendar_rules' in body && JSON.stringify(stay.calendar_rules) !== JSON.stringify(home.calendar_rules))
@@ -852,7 +852,7 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
     publication: { published: false },
     product: {
       kind: 'stay', name: home.name,
-      ...(home.base_price_minor === null ? {} : { variants: [{ name: home.name, prices: [{ unit_amount: home.base_price_minor }] }] }),
+      ...(home.base_price_minor === null ? {} : { variants: [{ name: home.name, prices: [{ unit_amount: home.base_price_minor, location_id: locationId }] }] }),
       stay: { ...(home.internal_name === undefined ? {} : { internal_name: home.internal_name }), location_id: locationId, check_in_time: home.check_in_time, check_in_end_time: home.check_in_end_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, calendar_rules: home.calendar_rules, assigned_member_id: null, assigned_team_id: null,
         ...(home.cancellation_policy === undefined ? {} : { cancellation_policy: home.cancellation_policy }),
         ...(home.long_term_cancellation_policy === undefined ? {} : { long_term_cancellation_policy: home.long_term_cancellation_policy }) },

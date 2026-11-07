@@ -1145,7 +1145,8 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
       if (init.method === 'POST' && url.pathname === '/api/v1/restrictions') return new Response('Pause this property', { status: 429 })
       return channex.fetch(input, init)
     }
-    const queuedNight = await setStayNights(db, env, manager, { product_id: productId, from: addDays(today(), 20), to: addDays(today(), 21), price_minor: 25000 })
+    const queuedDate = addDays(today(), 20)
+    const queuedNight = await setStayNights(db, env, manager, { product_id: productId, from: queuedDate, to: addDays(queuedDate, 1), price_minor: 25000 })
     assert.equal(queuedNight.channel_push?.state, 'pending')
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 202)
     assert.deepEqual(await runCron(), { stepped: 1, done: 0, failed: 0 })
@@ -1160,7 +1161,7 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     assert.deepEqual(await runCron(), { stepped: 1, done: 1, failed: 0 })
     assert.deepEqual(await job(), { action: 'sync', state: 'done', product_id: productId, last_error_code: null, attempts: 0 })
     assert.deepEqual(channex.seen.slice(confirmedRefreshStart).filter(request => request.method === 'POST' && ['/restrictions', '/availability'].includes(request.path)), [{ method: 'POST', path: '/restrictions' }])
-    assert.deepEqual((await readStayCalendar(db, manager, { productId, from: addDays(today(), 20), to: addDays(today(), 21) })).nights.map(night => [night.price_minor, night.channel]), [[25000, { state: 'pushed', detail: null }]])
+    assert.deepEqual((await readStayCalendar(db, manager, { productId, from: queuedDate, to: addDays(queuedDate, 1) })).nights.map(night => [night.price_minor, night.channel]), [[25000, { state: 'pushed', detail: null }]])
     // An authored canonical change survives the next source refresh and the full sync restores Airbnb to it.
     await updateStayHome(env, db, manager, productId, { min_nights: 9, description: 'Host words stay.' })
     channex.availabilityRules.default_min_nights = 11
