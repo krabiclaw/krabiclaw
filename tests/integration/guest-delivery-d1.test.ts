@@ -865,6 +865,9 @@ test('financial notification replay preserves per-recipient receipts and isolate
     await createCanonicalNotification(db, { scope: 'global', targetUserId: 'owner-a', template: 'personal.owner', title: 'Own purchase', idempotencyKey: 'personal-owner' })
     await createCanonicalNotification(db, { scope: 'global', template: 'platform.alert', title: 'Platform alert', idempotencyKey: 'platform-alert' })
     await createCanonicalNotification(db, { publishEnv: env, scope: 'organization', organizationId: 'other-merchant', template: 'merchant.other', title: 'Other merchant', idempotencyKey: 'other-merchant-alert' })
+    // A member reads a task alert addressed to them; any other alert still follows its booking's assignment.
+    await createCanonicalNotification(db, { scope: 'organization', organizationId: 'merchant', targetUserId: 'other-user', template: 'task_starting', title: 'Turnover today', idempotencyKey: 'member-task-alert' })
+    await createCanonicalNotification(db, { scope: 'organization', organizationId: 'merchant', targetUserId: 'other-user', template: 'merchant.other', title: 'Not about their booking', idempotencyKey: 'member-other-alert' })
     const cases: Array<{ principal: NotificationVisibilityPrincipal; ids: unknown[] }> = [
       { principal: { userId: 'buyer', platformAdmin: false, organization: null }, ids: [buyer.id] },
       { principal: { userId: 'other-user', platformAdmin: false, organization: null }, ids: ['personal-other'] },
@@ -872,6 +875,7 @@ test('financial notification replay preserves per-recipient receipts and isolate
       { principal: { userId: 'owner-a', platformAdmin: false, organization: { id: 'merchant', role: 'owner' } }, ids: [merchant.id] },
       { principal: { userId: 'other-user', platformAdmin: false, organization: { id: 'other-merchant', role: 'owner' } }, ids: ['other-merchant-alert'] },
       { principal: { userId: 'staff', platformAdmin: false, organization: { id: 'merchant', role: 'member' } }, ids: [] },
+      { principal: { userId: 'other-user', platformAdmin: false, organization: { id: 'merchant', role: 'member' } }, ids: ['member-task-alert'] },
       { principal: { userId: 'buyer', platformAdmin: true, organization: null }, ids: [buyer.id, 'platform-alert'] },
       { principal: { userId: 'owner-a', platformAdmin: true, organization: { id: 'merchant', role: 'owner' } }, ids: [merchant.id] },
     ]

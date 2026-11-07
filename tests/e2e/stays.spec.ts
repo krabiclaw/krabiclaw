@@ -4444,6 +4444,24 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const otherLocation = await cleaner.request.get(api('today'), { params: { range: 'upcoming', locationId: homes[1]!.location_id } })
       await expectStatus(otherLocation, 200)
       expect((await otherLocation.json() as BusinessToday).tasks).toEqual([])
+      // The host takes the turnover back and gives it to the cleaner again: the alert reaches the member's
+      // own feed and unread count, and opening the task reads it.
+      const unassigned = await call<{ task: { version: number } }>('update_task', { task_id: turnover.id, expected_version: turnover.version, assigned_member_id: null })
+      expect(unassigned.error).toBeNull()
+      const reassigned = await call<{ task: { version: number } }>('update_task', { task_id: turnover.id, expected_version: unassigned.data!.task.version, assigned_member_id: memberId })
+      expect(reassigned.error).toBeNull()
+      const taskAlert = `?task=${encodeURIComponent(turnover.id)}`
+      const alertsResponse = await cleaner.request.get(api('notifications'))
+      await expectStatus(alertsResponse, 200)
+      const alerts = await alertsResponse.json() as { notifications: Array<{ template: string; deep_link: string | null; read_at: string | null }>; unread_count: number }
+      expect(alerts.notifications.filter(alert => alert.template === 'task_assigned' && alert.deep_link?.endsWith(taskAlert))).toEqual([expect.objectContaining({ read_at: null })])
+      const unreadBeforeOpening = alerts.unread_count
+      expect(unreadBeforeOpening).toBeGreaterThanOrEqual(1)
+      await expectStatus(await cleaner.request.post(`/api/organizations/${organizationId}/tasks/${turnover.id}/read`, { data: {} }), 200)
+      const countResponse = await cleaner.request.get(api('notifications/unread-count'))
+      await expectStatus(countResponse, 200)
+      expect((await countResponse.json() as { unread_count: number }).unread_count).toBe(unreadBeforeOpening - 1)
+
       // The cleaner finishes the turnover through the tasks route; Today reads it back as today's done work,
       // and the host reads the same task through MCP.
       const completed = await cleaner.request.post(`/api/organizations/${organizationId}/tasks/${turnover.id}/complete`, { data: { note: 'Fresh linen on both beds' } })
@@ -4451,7 +4469,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const afterDone = await cleaner.request.get(api('today'))
       await expectStatus(afterDone, 200)
       expect((await afterDone.json() as BusinessToday).tasks).toEqual([{ id: 'done', title: 'Done', subtitle: null, tasks: [expect.objectContaining({
-        id: turnover.id, kind: 'turnover', status: 'done', stayId: stays[0]!.id, version: turnover.version + 1,
+        id: turnover.id, kind: 'turnover', status: 'done', stayId: stays[0]!.id, version: reassigned.data!.task.version + 1,
         outcome: { note: 'Fresh linen on both beds', photos: [], closedAt: expect.any(String), closedBy: 'You' },
         can: { complete: false, skip: false, reopen: true, assign: false, edit: false },
       })] }])
