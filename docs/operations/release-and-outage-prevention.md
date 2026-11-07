@@ -868,7 +868,12 @@ Staging v25 (`2d7c538b-76ae-4098-a3bc-d93372ffbad8`) was created with
 the native migration ledger. Run the snapshot preflight, initial load, and
 verified final delta against the environment's own active source; staging's is
 `krabiclaw-staging-v24`. Keep the copies under
-`~/.codex/krabiclaw-db-replacements/provider-imports-v25/`. Repoint production,
-development and E2E before production promotion, after confirming production's
-actual source binding and preparing its own replacement. Do not load a source
-whose preceding cutover is still missing writes.
+`~/.codex/krabiclaw-db-replacements/provider-imports-v25/`. Production v25 (`9657b8e8-3c5f-43ea-9e97-c8517facf082`) was also created
+with `--location wnam` and verified as WNAM. The production, development and
+E2E bindings move with the production promotion. Check the deployed Worker's
+actual source binding before the load and again before the final delta.
+Do not cut over from a source whose preceding cutover is still missing writes.
+Production's active source for this release is v23. The canonical transfer
+applies the archived v24 transform on the private copy; after production's
+final delta and reconciliation, run the existing `yarn db:tasks --production`
+backfill and verify Today as an owner and an assigned member.
