@@ -826,7 +826,7 @@ test('Calendar retains confirmed reservations and their detail sends one change 
 
   await page.goto(`${baseURL}${reservation!.to}`)
   const instant = new Date().toISOString()
-  await expect(page.getByRole('heading', { name: reservation!.startsAt <= instant && instant < reservation!.endsAt! ? 'Currently hosting' : 'Today', exact: true })).toBeVisible()
+  await expect(page.locator('#dashboard-panel-booking-details').getByRole('heading', { name: reservation!.startsAt <= instant && instant < reservation!.endsAt! ? 'Currently hosting' : 'Today', exact: true })).toBeVisible()
   await expect(page.getByText(guestName, { exact: true }).first()).toBeVisible()
   await expect(page.getByText(guestEmail, { exact: true })).toHaveCount(0)
   const detailPanel = page.locator('#dashboard-panel-booking-details')
