@@ -136,6 +136,20 @@ test('a home keeps zero beds and unknown provider times through editing and the 
   const arrival = page.locator('#dashboard-panel-product-arrival-time')
   await expect(arrival.getByLabel('Start time', { exact: true })).toHaveValue('')
   await expect(arrival.getByLabel('Time', { exact: true })).toHaveValue('')
+  await arrival.getByLabel('Time', { exact: true }).fill('10:00')
+  const arrivalEndpoint = (url: URL) => url.pathname.endsWith(`/products/${productId}`)
+  await page.route(arrivalEndpoint, async route => route.request().method() === 'PATCH' ? await route.abort('failed') : await route.continue())
+  const saveArrival = arrival.getByRole('button', { name: 'Save', exact: true })
+  await saveArrival.click()
+  await expect(arrival.getByText('Failed to fetch', { exact: false })).toBeVisible()
+  await expect(arrival.getByLabel('Start time', { exact: true })).toHaveValue('')
+  await expect(arrival.getByLabel('Time', { exact: true })).toHaveValue('10:00')
+  await expect(saveArrival).toBeEnabled()
+  await page.unroute(arrivalEndpoint)
+  const retriedArrival = page.waitForResponse(response => response.request().method() === 'PATCH' && arrivalEndpoint(new URL(response.url())))
+  await saveArrival.click()
+  await expectStatus(await retriedArrival, 200)
+  await expect(arrival).not.toBeVisible()
   await page.goto(`/dashboard/${slug}/products/${productId}`)
   const { previewLink, previewIframe, preview } = previewLocators(page)
   await previewLink.click()
@@ -144,10 +158,10 @@ test('a home keeps zero beds and unknown provider times through editing and the 
   const publicRead = await request.get(new URL(previewURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), previewURL).href)
   await expectStatus(publicRead, 200)
   const product = (await publicRead.json() as { product: Product }).product
-  expect(product.stay).toMatchObject({ beds: 0, bathrooms: 1, check_in_time: null, check_out_time: null,
+  expect(product.stay).toMatchObject({ beds: 0, bathrooms: 1, check_in_time: null, check_out_time: '10:00',
     cancellation_policy: null, long_term_cancellation_policy: null })
   await expect(preview.locator('article')).not.toContainText('Check-in after')
-  await expect(preview.locator('article')).not.toContainText('Checkout before')
+  await expect(preview.locator('article')).toContainText('Checkout before')
 })
 
 test('a home keeps its operator name independent from its public title across CMS, calendar and reservation-backed tasks', async ({ page, baseURL }, testInfo) => {

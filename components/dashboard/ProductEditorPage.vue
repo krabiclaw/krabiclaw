@@ -752,6 +752,7 @@ const stayConfigError = computed(() => {
   if (!stay) return 'This place to stay has no stay settings.'
   const invalid = [
     !stay.location_id && 'location',
+    !(typeof stay.internal_name === 'string' && stay.internal_name.trim()) && 'internal name',
     stay.check_in_time !== null && !MINUTE_TIME_PATTERN.test(stay.check_in_time) && 'check-in time',
     stay.check_out_time !== null && !MINUTE_TIME_PATTERN.test(stay.check_out_time) && 'checkout time',
     !(Number.isInteger(stay.max_guests) && stay.max_guests >= 1 && stay.max_guests <= 99) && 'sleeps',
@@ -939,7 +940,7 @@ function loadForm(row: Product) {
   // Stay settings belong to a place to stay alone; on any other product they do not apply.
   const stay = row.stay
   form.stay_location_id = stay ? stay.location_id : ''
-  form.internal_name = stay?.internal_name ?? ''
+  form.internal_name = stay ? stay.internal_name : ''
   form.name = row.name
   form.description = row.description
   form.order_url = row.order_url ?? ''
@@ -1658,7 +1659,7 @@ async function commit(concern?: ProductConcern) {
     stay_property_size: form.stay_property_size,
     stay_property_size_unit: form.stay_property_size_unit,
   } : null
-  const arrivalTimeDraft = concern === 'arrival-time' ? { check_in_time: form.check_in_time || null, check_in_end_time: form.check_in_end_time, check_out_time: form.check_out_time || null } : null
+  const arrivalTimeDraft = concern === 'arrival-time' ? { check_in_time: form.check_in_time, check_in_end_time: form.check_in_end_time, check_out_time: form.check_out_time } : null
   const safetyDraft = isSafetyConcern(concern) ? { keys: staySafetySectionKeys(concern), details: { ...form.details }, answers: form.stay_amenity_answers.map(answer => ({ ...answer })) } : null
   const locationDetailKey = editorKey.value === 'location' ? STAY_LOCATION_DETAIL_KEYS.find(key => key === route.params.field) : undefined
   const locationDraft = locationDetailKey ? { key: locationDetailKey, value: form.details[locationDetailKey] } : null
