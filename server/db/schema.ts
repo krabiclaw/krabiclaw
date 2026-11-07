@@ -83,7 +83,6 @@ export const business_locations = sqliteTable("business_locations", {
 	check("business_locations_stay_map_sharing_check", sql`stay_map_sharing IN (${sql.raw(STAY_MAP_SHARING_MODES.map(mode => `'${mode}'`).join(', '))})`),
 ]);
 
-
 // The inbox: one conversation thread with a guest, and its workflow state.
 // Row meaning: someone contacted this site, and this is the thread.
 // Owner/scope: organization + site; location_id routes the thread to a branch.
@@ -153,8 +152,6 @@ export const requests = sqliteTable("requests", {
  index("requests_guest_email_idx").on(sql`lower(payload_json ->> '$.guest.email')`)
 ]);
 
-
-
 export const activity_entries = sqliteTable("activity_entries", {
  id: text().primaryKey(),
  kind: text({ enum: ["submission", "message", "operation", "assignment", "resolution", "notification", "acknowledgement", "audit"] }).notNull(),
@@ -188,7 +185,6 @@ export const activity_entries = sqliteTable("activity_entries", {
  index("activity_entries_org_created_idx").on(table.kind, table.organization_id, table.created_at),
  index("activity_entries_target_created_idx").on(table.kind, table.target_user_id, table.created_at)
 ]);
-
 
 export const guest_thread_deliveries = sqliteTable("guest_thread_deliveries", {
 	id: text().primaryKey(),
@@ -578,77 +574,6 @@ export const product_variants = sqliteTable("product_variants", {
 	check("product_variants_name_not_blank_check", sql`trim(name) <> ''`),
 	check("product_variants_active_check", sql`active IN (0, 1)`),
 	check("product_variants_sort_order_check", sql`sort_order >= 0`),
-]);
-
-// A selectable dimension of a Product ("Size", "Noodle"). Options and their
-// values are Product-owned so a variant's selections can be proved to belong
-// to the same Product in SQL rather than in a validator's memory.
-// Keys: (organization_id, product_id, id) is the parent key every selection
-//   row matches on.
-// Deletion: cascades to values and to the selections referencing them.
-// Read/write: server/utils/product-management.ts.
-export const product_options = sqliteTable("product_options", {
-	id: text().primaryKey(),
-	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
-	product_id: text().notNull(),
-	name: text().notNull(),
-	sort_order: integer().default(0).notNull(),
-	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-}, (table) => [
-	check("product_options_instants_check", sql`(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
-	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [products.organization_id, products.id], name: "product_options_product_scope_fk" }).onDelete("cascade"),
-	unique("product_options_product_id_unique").on(table.organization_id, table.product_id, table.id),
-	unique("product_options_product_name_unique").on(table.organization_id, table.product_id, table.name),
-	index("product_options_product_sort_idx").on(table.product_id, table.sort_order),
-	check("product_options_name_not_blank_check", sql`trim(name) <> ''`),
-	check("product_options_sort_order_check", sql`sort_order >= 0`),
-]);
-
-// One allowed value of one option. `product_id` is carried so the selection
-// table can match option, value and variant against a single Product key.
-// Keys: (organization_id, product_id, product_option_id, id).
-// Read/write: server/utils/product-management.ts.
-export const product_option_values = sqliteTable("product_option_values", {
-	id: text().primaryKey(),
-	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
-	product_id: text().notNull(),
-	product_option_id: text().notNull(),
-	value: text().notNull(),
-	sort_order: integer().default(0).notNull(),
-	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-}, (table) => [
-	check("product_option_values_instants_check", sql`(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
-	foreignKey({ columns: [table.organization_id, table.product_id, table.product_option_id], foreignColumns: [product_options.organization_id, product_options.product_id, product_options.id], name: "product_option_values_option_scope_fk" }).onDelete("cascade"),
-	unique("product_option_values_option_id_unique").on(table.organization_id, table.product_id, table.product_option_id, table.id),
-	unique("product_option_values_option_value_unique").on(table.organization_id, table.product_option_id, table.value),
-	index("product_option_values_option_sort_idx").on(table.product_option_id, table.sort_order),
-	check("product_option_values_value_not_blank_check", sql`trim(value) <> ''`),
-	check("product_option_values_sort_order_check", sql`sort_order >= 0`),
-]);
-
-// Which option value each variant selects.
-// Row meaning: variant X answers option Y with value Z.
-// Enforced in SQL: value, option and variant all belong to the same Product
-//   (every foreign key below matches on product_id), and a variant selects at
-//   most ONE value per option (the composite primary key).
-// Enforced by the domain layer, with real-boundary coverage: required
-//   selections are complete, and two variants of one Product cannot select the
-//   same combination. Neither is expressible as a SQLite constraint.
-// Read/write: server/utils/product-management.ts.
-export const product_variant_option_values = sqliteTable("product_variant_option_values", {
-	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
-	product_id: text().notNull(),
-	product_variant_id: text().notNull(),
-	product_option_id: text().notNull(),
-	product_option_value_id: text().notNull(),
-}, (table) => [
-	primaryKey({ columns: [table.product_variant_id, table.product_option_id], name: "product_variant_option_values_pk" }),
-	foreignKey({ columns: [table.organization_id, table.product_id, table.product_variant_id], foreignColumns: [product_variants.organization_id, product_variants.product_id, product_variants.id], name: "product_variant_option_values_variant_scope_fk" }).onDelete("cascade"),
-	foreignKey({ columns: [table.organization_id, table.product_id, table.product_option_id], foreignColumns: [product_options.organization_id, product_options.product_id, product_options.id], name: "product_variant_option_values_option_scope_fk" }).onDelete("cascade"),
-	foreignKey({ columns: [table.organization_id, table.product_id, table.product_option_id, table.product_option_value_id], foreignColumns: [product_option_values.organization_id, product_option_values.product_id, product_option_values.product_option_id, product_option_values.id], name: "product_variant_option_values_value_scope_fk" }).onDelete("cascade"),
-	index("product_variant_option_values_variant_idx").on(table.product_variant_id),
 ]);
 
 // A monetary offer on one variant.
@@ -2085,10 +2010,6 @@ export const stripe_connected_accounts = sqliteTable("stripe_connected_accounts"
 	check("stripe_connected_accounts_instants_check", sql`(stripe_refreshed_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', stripe_refreshed_at, '+0 days') IS stripe_refreshed_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
 ]);
 
-
-
-
-
 export const oauthAccessToken = sqliteTable("oauthAccessToken", {
 	id: text().primaryKey(),
 	clientId: text().notNull(),
@@ -2399,8 +2320,6 @@ export const rate_limits = sqliteTable("rate_limits", {
 	index("idx_rate_limits_expires").on(table.expires_at),
 ]);
 
-
-
 export const review_requests = sqliteTable("review_requests", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" } ),
@@ -2429,7 +2348,6 @@ export const review_requests = sqliteTable("review_requests", {
 	index("idx_review_requests_send_due").on(table.organization_id, table.first_sent_at, table.reminder_sent_at, table.submitted_at, table.expires_at),
 	index("review_requests_organization_id_idx").on(table.organization_id),
 ]);
-
 
 export const reviews = sqliteTable("reviews", {
 	id: text().primaryKey(),
@@ -2611,8 +2529,6 @@ export const team_messages = sqliteTable("team_messages", {
 	check("team_messages_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
 ]);
 
-
-
 // A member's report of a guest conversation or a team message (App Store
 // guideline 1.2), and what platform staff decided. `excerpt` keeps what was
 // reported, so the decision can be reviewed after the message is removed.
@@ -2666,7 +2582,6 @@ export const organization_redirects = sqliteTable("organization_redirects", {
 	index("organization_redirects_organization_id_idx").on(table.organization_id),
 	index("organization_redirects_owner_idx").on(table.owner_type, table.owner_id),
 ]);
-
 
 export const organization_domains = sqliteTable("organization_domains", {
 	id: text().primaryKey(),
@@ -2724,8 +2639,6 @@ export const organization_domains = sqliteTable("organization_domains", {
 	uniqueIndex("organization_domains_one_active_subdomain").on(table.organization_id).where(sql`type = 'subdomain' AND status = 'active'`),
 	index("idx_organization_domains_reconcile").on(table.status, table.next_check_at),
 ]);
-
-
 
 export const organization_locales = sqliteTable("organization_locales", {
 	id: text().primaryKey(),
@@ -2788,7 +2701,6 @@ export const mcp_tool_call_events = sqliteTable("mcp_tool_call_events", {
 	index("idx_mcp_tool_call_events_unknown").on(table.unknown_tool_name, table.created_at),
 ]);
 
-
 export const stripe_webhook_events = sqliteTable("stripe_webhook_events", {
 	id: text().primaryKey(),
 	stripe_event_id: text().notNull().unique(),
@@ -2808,7 +2720,6 @@ export const stripe_webhook_events = sqliteTable("stripe_webhook_events", {
 	check("stripe_webhook_events_instants_check", sql`(claimed_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', claimed_at, '+0 days') IS claimed_at) AND (lease_expires_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', lease_expires_at, '+0 days') IS lease_expires_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at)`),
 	check("stripe_webhook_events_payload_check", sql`payload IS NULL OR (json_valid(payload))`),
 ]);
-
 
 export const stripe_ga4_subscription_intents = sqliteTable("stripe_ga4_subscription_intents", {
 	id: text().primaryKey(),
@@ -2891,9 +2802,6 @@ export const verification = sqliteTable("verification", {
 	updatedAt: integer({ mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
 });
 
-
-
-
 export const user_workspace_state = sqliteTable("user_workspace_state", {
 	user_id: text().primaryKey().references(() => user.id, { onDelete: "cascade" } ),
 	organization_id: text().references(() => organization.id, { onDelete: "set null" } ),
@@ -2907,8 +2815,6 @@ export const user_workspace_state = sqliteTable("user_workspace_state", {
 	check("user_workspace_state_instants_check", sql`(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at) AND (whatsapp_updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', whatsapp_updated_at, '+0 days') IS whatsapp_updated_at)`),
 	check("user_workspace_state_whatsapp_pending_check", sql`whatsapp_pending_confirmation IS NULL OR (json_valid(whatsapp_pending_confirmation) AND json_type(whatsapp_pending_confirmation) IS 'object')`),
 ]);
-
-
 
 export const content_documents = sqliteTable("content_documents", {
 	id: text().primaryKey(),
@@ -3272,7 +3178,6 @@ export const analytics_summaries = sqliteTable("analytics_summaries", {
   index("analytics_summaries_session_seen_idx").on(table.organization_id, sql`(payload_json ->> '$.last_seen_at')`).where(sql`kind = 'session'`),
   index("analytics_summaries_session_visitor_idx").on(table.organization_id, sql`(payload_json ->> '$.visitor_id')`, sql`(payload_json ->> '$.started_at')`).where(sql`kind = 'session'`),
 ]);
-
 
 // Which categories of notification a person wants, and over which channel.
 //
