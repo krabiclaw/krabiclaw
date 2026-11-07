@@ -1,8 +1,9 @@
 // One-time derivation of existing data (tasks-and-opportunities.md, "Existing
 // data"): opens the tasks that writes open from now on, for what is already
 // there — turnovers for confirmed stays checking out today or later, reply
-// tasks for conversations with a guest question nobody has answered, and
-// delivery tasks for scheduled messages that failed or need review. Each uses
+// tasks for conversations with a guest question nobody has answered, review and
+// change tasks for decisions the business still owes, and delivery tasks for
+// scheduled messages that failed or need review. Each uses
 // the same statements the live writes use, and each is idempotent by its
 // dedupe_key. --dry-run reads only and reports what it would open.
 //
@@ -39,18 +40,23 @@ async function backfill(db: DbClient) {
      WHERE r.archived_at IS NULL AND r.blocked_at IS NULL AND ${GUEST_QUESTION_SQL}
        AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}
        ${absent("SELECT 1 FROM tasks t WHERE t.kind = 'guest_reply' AND t.subject_type = 'request' AND t.subject_id = r.id AND t.status = 'open'")}`)
+  // A booking awaiting approval, or a change or refused calendar move: conversationTaskQueries decides what is still work.
+  const decisions = await queryAll<{ id: string }>(db, `
+    SELECT b.request_id AS id FROM bookings b WHERE b.status = 'pending'
+    UNION
+    SELECT e.request_id AS id FROM activity_entries e WHERE e.event_name IN ('booking_change.requested', 'calendar_sync.move_refused')`)
   const messages = await queryAll<{ id: string }>(db, `SELECT id FROM scheduled_guest_messages m WHERE m.status IN ('failed', 'needs_review')
     ${absent("SELECT 1 FROM tasks t WHERE t.dedupe_key = 'message_delivery:' || m.id")}`)
   const report = {
     tasksTableExists: migrated,
-    turnovers: stays.length, guestReplies: conversations.length, messageDeliveries: messages.length,
+    turnovers: stays.length, guestReplies: conversations.length, messageDeliveries: messages.length, conversationsWithDecisions: decisions.length,
   }
   if (dryRun) return report
   const at = now.toISOString()
   for (const stay of stays) {
     await executeBatch(db, await turnoverTaskQueries(db, { organizationId: stay.organization_id, after: stay, before: null, now: at }), { operation: 'Backfill turnover task' })
   }
-  for (const conversation of conversations) await executeBatch(db, conversationTaskQueries(conversation.id, at), { operation: 'Backfill reply task' })
+  for (const id of new Set([...conversations, ...decisions].map(conversation => conversation.id))) await executeBatch(db, conversationTaskQueries(id, at), { operation: 'Backfill conversation tasks' })
   for (const message of messages) await executeBatch(db, messageDeliveryTaskQueries(message.id, at), { operation: 'Backfill delivery task' })
   const opened = await queryAll<{ kind: string; count: number }>(db, "SELECT kind, COUNT(*) AS count FROM tasks WHERE created_at >= ? GROUP BY kind ORDER BY kind", [at])
   return { ...report, opened }
