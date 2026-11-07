@@ -94,6 +94,10 @@ export function productEditorPath(orgSlug: string, productId: string, locationId
   return scopedTo(`${organizationBase(orgSlug)}/products/${encodeURIComponent(productId)}`, locationId)
 }
 
+export function productPaymentPath(orgSlug: string, productId: string): string {
+  return `${productEditorPath(orgSlug, productId)}/booking/payment`
+}
+
 export function collectionEditorPath(orgSlug: string, collectionId: string, locationId?: string | null): string {
   return scopedTo(`${organizationBase(orgSlug)}/products/menu/${encodeURIComponent(collectionId)}`, locationId)
 }

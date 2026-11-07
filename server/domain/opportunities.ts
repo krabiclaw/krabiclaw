@@ -41,7 +41,7 @@ export interface OpportunityView {
 const AREA: Record<BusinessProgressOperation, string> = {
   'article.create': 'Website', 'article.update': 'Website', 'article.publish': 'Website', 'article.distribute': 'Social',
   'post.create': 'Social', 'post.publish': 'Social', 'social.connect': 'Social', 'google_ads.connect': 'Marketing',
-  'payments.connect': 'Payments', 'product.payment': 'Payments', 'stay.gap': 'Calendar', 'guest_thread.reply': 'Messages',
+  'payments.connect': 'Payments', 'product.payment': 'Payments', 'product.host': 'Bookings', 'product.description': 'Catalog', 'product.preparation': 'Catalog', 'stay.gap': 'Calendar', 'guest_thread.reply': 'Messages',
 }
 
 function fail(statusCode: number, code: string, message: string, field?: string): never {
@@ -149,7 +149,9 @@ export async function acceptOpportunity(db: DbClient, principal: MemberAccessPri
   const subjectId = subjectType === null ? null : row.operation === 'stay.gap' ? item.productId : row.subject_id
   const taskId = crypto.randomUUID()
   const results = await executeBatch(db, [
-    { query: `UPDATE opportunities SET status = 'accepted', decided_at = ?, decided_by_user_id = ?, updated_at = ? WHERE organization_id = ? AND id = ? AND status = 'open'`,
+    { query: `UPDATE opportunities SET status = 'accepted', decided_at = ?, decided_by_user_id = ?, updated_at = ? WHERE organization_id = ? AND id = ? AND status = 'open'
+      AND (operation <> 'product.payment' OR EXISTS (SELECT 1 FROM product_booking_configs c
+        WHERE c.organization_id = opportunities.organization_id AND c.product_id = opportunities.subject_id AND c.online_payment_required = 0))`,
       params: [now.toISOString(), principal.userId, now.toISOString(), principal.organizationId, id] },
     opportunityTaskInsert({ organizationId: principal.organizationId, opportunityId: id, title: item.headline, subject: subjectType && subjectId ? { type: subjectType, id: subjectId } : null,
       productId: item.productId, locationId: item.locationId, assigned, dueAt, timezone, userId: principal.userId, now: now.toISOString(), taskId }),

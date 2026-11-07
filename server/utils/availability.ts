@@ -1,5 +1,6 @@
 import { assertResponsibilityTarget } from '~/server/utils/member-access'
-import { publishAccessInvalidation } from '~/server/cloudflare/guest-inbox-events'
+import { opportunityDoneQuery } from '~/server/domain/tasks'
+import { publishAccessInvalidation, publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { assertPublishedHost } from '~/server/utils/public-provider'
 import { creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
@@ -132,7 +133,7 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   productInSameBatch?: boolean
   productKind?: string
   patch: { duration_minutes?: unknown; default_capacity?: unknown; confirmation_mode?: unknown; online_payment_required?: unknown; held_online?: unknown; scheduling_mode?: unknown; assigned_member_id?: unknown; assigned_team_id?: unknown; questions?: unknown; expected_questions_revision?: unknown }
-}): Promise<{ query: BatchQuery; config: ProductBookingConfigRecord }> {
+}): Promise<{ queries: BatchQuery[]; config: ProductBookingConfigRecord }> {
   const product = input.productInSameBatch ? null : await requireOrganizationProduct(db, input)
   if (input.productInSameBatch && !['experience', 'service'].includes(input.productKind ?? '')) badRequest('The scheduled product kind is required before preparing booking setup')
   if (product && !['experience', 'service'].includes(product.kind)) badRequest('Only experiences and services take scheduled bookings')
@@ -203,7 +204,7 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   // A rejected configuration must abort the entire native D1 batch, including
   // its sessions and publication. An INSERT ... SELECT that selects no row
   // would instead let those other writes commit.
-  return { config, query: {
+  return { config, queries: [{
     query: `INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, assigned_team_id, questions, created_at, updated_at, created_by, updated_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN (${unchanged.query})
         AND (? IS NOT NULL OR NOT EXISTS (SELECT 1 FROM products p JOIN product_publications pub ON pub.product_id=p.id AND pub.organization_id=p.organization_id WHERE p.id=? AND p.organization_id=? AND p.kind='experience' AND NULLIF(p.order_url,'') IS NULL AND pub.published=1))
@@ -222,7 +223,7 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
       config.confirmation_mode, config.online_payment_required ? 1 : 0, config.held_online ? 1 : 0, config.scheduling_mode, config.assigned_member_id, config.assigned_team_id, JSON.stringify(questions), now,
       ...unchanged.params!, config.duration_minutes, input.productId, input.organizationId, config.assigned_team_id, config.assigned_team_id, input.organizationId, config.scheduling_mode, config.scheduling_mode, config.assigned_member_id, config.assigned_member_id, input.organizationId, config.scheduling_mode, input.organizationId, input.productId, now, input.organizationId, input.productId, now,
       now, input.actorId, input.actorId],
-  } }
+  }, ...(patch.online_payment_required === true ? [opportunityDoneQuery(input.organizationId, ['product.payment'], input.productId, now)] : [])] }
 }
 
 export function bookingConfigurationWriteError(error: unknown): unknown {
@@ -237,11 +238,11 @@ export async function setProductBookingConfig(db: DbClient, input: Omit<Paramete
   if (questionsOnly && !await queryFirst(db, 'SELECT 1 FROM product_booking_configs WHERE organization_id = ? AND product_id = ?', [input.organizationId, input.productId])) {
     throw new HTTPError({ statusCode: 404, statusMessage: 'This product does not take bookings. Set up its booking before adding questions.', data: { code: 'BOOKING_CONFIG_NOT_FOUND', field: 'product_id' } })
   }
-  const { query, config } = await prepareProductBookingConfig(db, input)
+  const { queries: configQueries, config } = await prepareProductBookingConfig(db, input)
   // Questions are not scheduling: a question-only edit writes the questions and
   // leaves every session, rule and provider-hours occurrence where it was.
   if (questionsOnly) {
-    await executeBatch(db, [query, publicResourceCacheInvalidationQuery(input.organizationId, 'product-booking-questions')], { operation: 'Set product booking questions' }).catch(error => { throw bookingConfigurationWriteError(error) })
+    await executeBatch(db, [...configQueries, publicResourceCacheInvalidationQuery(input.organizationId, 'product-booking-questions')], { operation: 'Set product booking questions' }).catch(error => { throw bookingConfigurationWriteError(error) })
     return requireBookingConfig(db, input.organizationId, input.productId)
   }
   const rules = await listAvailabilityRules(db, input.organizationId, input.productId)
@@ -249,13 +250,15 @@ export async function setProductBookingConfig(db: DbClient, input: Omit<Paramete
   const throughDate = rules.map(rule => addLocalDays(localNow(rule.timezone).date, PUBLIC_BOOKING_WINDOW_DAYS)).sort().at(-1)
   const materialized = throughDate ? prepareSessionMaterialization({ ...input, throughDate }, config, rules, new Map(locations.map(location => [location.id, location])), await sessionProviders(db, config)).queries : []
   const online = config.held_online ? await prepareProviderHoursSessions(db, config, { actorId: input.actorId, now: new Date().toISOString() }) : []
-  const queries = [query, ...materialized, ...online, publicResourceCacheInvalidationQuery(input.organizationId, 'product-booking-config')]
+  const paymentEnabled = input.patch.online_payment_required === true
+  const queries = [...configQueries, ...materialized, ...online, publicResourceCacheInvalidationQuery(input.organizationId, 'product-booking-config')]
   if (queries.length > MAX_D1_BATCH_STATEMENTS) badRequest('This schedule exceeds one atomic update; reduce the requested times or team size')
   await executeBatch(db, queries, { operation: 'Set product booking config' }).catch(error => { throw bookingConfigurationWriteError(error) })
   if (input.patch.assigned_member_id !== undefined || input.patch.assigned_team_id !== undefined) {
     if (!input.env) throw new HTTPError({ statusCode: 503, message: 'The saved responsibility requires its organization environment', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', committed: true } })
     await publishAccessInvalidation(input.env, { organizationId: input.organizationId })
   }
+  if (paymentEnabled) await publishBusinessInvalidation(input.env!, input.organizationId)
   return requireBookingConfig(db, input.organizationId, input.productId)
 }
 
@@ -718,10 +721,10 @@ export async function prepareProductBookingSetup(db: DbClient, input: {
   if (!Number.isSafeInteger(booking.duration_minutes) || booking.duration_minutes <= 0) badRequest('Provide the session duration before creating a bookable offering')
   if (booking.default_capacity !== null && (!Number.isSafeInteger(booking.default_capacity) || booking.default_capacity <= 0)) badRequest('Provide places per session, or explicit null for unlimited places')
   const { location_id: locationId, weekly_slots: weeklySlots, sessions: oneOffSessions, ...patch } = booking
-  const { query: configQuery, config } = await prepareProductBookingConfig(db, { ...input, patch: { ...patch, held_online: locationId === null }, productInSameBatch: input.productInSameBatch })
+  const { queries: configQueries, config } = await prepareProductBookingConfig(db, { ...input, patch: { ...patch, held_online: locationId === null }, productInSameBatch: input.productInSameBatch })
   // Setting up bookings publishes the offering, and guests see who hosts it.
   await assertPublishedHost(db, input.organizationId, config)
-  const queries: BatchQuery[] = [configQuery]
+  const queries: BatchQuery[] = [...configQueries]
   // The offering is created only if a guest could book something now, at the location as it was read.
   let locationGuard: BatchQuery = { query: 's.location_id IS NULL', params: [] }
   if (locationId === null) {

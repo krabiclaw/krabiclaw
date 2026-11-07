@@ -33,7 +33,7 @@ export const BUSINESS_OUTCOME_EVENTS = [
 export type BusinessOutcomeEvent = typeof BUSINESS_OUTCOME_EVENTS[number]
 export const BUSINESS_PROGRESS_OPERATIONS = [
   'article.create', 'article.update', 'article.publish', 'article.distribute',
-  'post.create', 'post.publish', 'social.connect', 'google_ads.connect', 'payments.connect', 'product.payment', 'stay.gap', 'guest_thread.reply',
+  'post.create', 'post.publish', 'social.connect', 'google_ads.connect', 'payments.connect', 'product.payment', 'product.host', 'product.description', 'product.preparation', 'stay.gap', 'guest_thread.reply',
 ] as const
 export type BusinessProgressOperation = typeof BUSINESS_PROGRESS_OPERATIONS[number]
 
@@ -134,6 +134,9 @@ export interface BusinessProgressReference {
     updatedAt: string
     paymentRequired: boolean | null
     configurationUpdatedAt: string | null
+  } | {
+    kind: 'product_readiness'
+    missing: 'host' | 'description' | 'preparation'
   } | {
     kind: 'stay_home'
     updatedAt: string

@@ -8,7 +8,8 @@ import { businessGoalStrategySchema, createBusinessGoalSchema, updateBusinessGoa
 import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { queryOrganizationAnalytics } from '~/server/utils/analytics-query'
 import { addLocalDays, formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
-import { articleSocialPostPath, blogCreatePath, blogEditorPath, postEditorPath, productEditorPath } from '~/server/utils/dashboard-links'
+import { publicProductHosts } from '~/server/utils/public-provider'
+import { articleSocialPostPath, blogCreatePath, blogEditorPath, postEditorPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
 import { listSessions } from '~/server/utils/availability'
 import { listReservationSlots } from '~/server/utils/reservations'
 import { readStayGapCandidates, stayAccessFor } from '~/server/domain/stays'
@@ -348,7 +349,30 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
         `${base}/payments/payout-method`, 100, { goal: paymentGoal, icon: 'i-lucide-credit-card' })
       if (!setup.missing.length) for (const product of unpaid) offer('product.payment', product.id, `Take payment when ${organization.vertical === 'service' ? 'clients' : 'guests'} book “${product.name}”`,
         `Payments are ready, but this offering does not require advance payment. Enable it for a priced offering to collect before ${organization.vertical === 'service' ? 'confirming a consultation' : 'reserving places'}.`,
-        `${productEditorPath(organization.slug, product.id)}/booking/payment`, 100, { productId: product.id, goal: paymentGoal, icon: 'i-lucide-credit-card' })
+        productPaymentPath(organization.slug, product.id), 100, { productId: product.id, goal: paymentGoal, icon: 'i-lucide-credit-card' })
+    }
+  }
+  if (organization.vertical === 'experience' && await roleAllows({ ...principal, permissions: { products: ['update'] } })) {
+    const experiences = await queryAll<{ id: string; name: string; description: string; has_preparation: number; bookable: number; assigned_member_id: string | null }>(db, `
+      SELECT p.id, p.name, p.description,
+        EXISTS (SELECT 1 FROM json_each(p.details_json, '$.what_to_bring') WHERE type='text' AND length(trim(value))>0) has_preparation,
+        (c.product_id IS NOT NULL AND NULLIF(trim(p.order_url), '') IS NULL) bookable, c.assigned_member_id
+      FROM products p LEFT JOIN product_booking_configs c ON c.organization_id=p.organization_id AND c.product_id=p.id
+      WHERE p.organization_id=? AND p.kind='experience' AND p.id IN (SELECT value FROM json_each(?))`,
+    [organizationId, JSON.stringify(products.map(product => product.id))])
+    for (const product of experiences) {
+      const editor = productEditorPath(organization.slug, product.id)
+      const options = { productId: product.id }
+      if (product.bookable && !(await publicProductHosts(db, organizationId, product.id)).length) {
+        offer('product.host', product.id, `Set a published host for “${product.name}”`,
+          'Guests should be able to see who runs this experience.',
+          product.assigned_member_id ? `${base}/team/${encodeURIComponent(product.assigned_member_id)}/profile` : `${editor}/booking/assignment`, 95,
+          { ...options, icon: 'i-lucide-user-round' })
+      }
+      if (!product.description.trim()) offer('product.description', product.id, `Describe what guests will do at “${product.name}”`,
+        'Tell guests what to expect before they book.', `${editor}/description`, 65, { ...options, icon: 'i-lucide-file-text' })
+      if (!product.has_preparation) offer('product.preparation', product.id, `Add what to bring for “${product.name}”`,
+        'If guests need to bring anything, add it to their preparation details.', `${editor}/attributes/what_to_bring`, 35, { ...options, icon: 'i-lucide-backpack' })
     }
   }
   if (canOperate && organization.vertical === 'lodging') {

@@ -161,27 +161,25 @@ Business Today and Upcoming show two stored things
   task a person adds are closed by a person.
 - **Opportunities** (`opportunities`, `server/domain/opportunities.ts`): what
   `readBusinessRecommendations` finds the business could do, recorded against
-  its evidence revision. Accept makes it a task; Not now dismisses it or sets
-  it aside until a time. A manager sees them; a member never does.
+  its evidence revision. Owners and admins see suggestions in the same card
+  layout as tasks. A card opens the editor or record that owns the work. The
+  top-right dismiss control records a decision about the current evidence.
 
-`GET /api/dashboard/today` returns `{ tasks, opportunities, assignees,
-resolvedAt }`. Every string a card or sheet shows is in that view model, so the
-web page and the app draw the same response and compose no text.
+`GET /api/dashboard/today` returns task sections, opportunities, assignees
+and the resolved time. The server supplies each card's content and destination.
+The task sheet holds assignment and completion controls for work that a person
+tracks there. A reply card opens the conversation. A payment card opens that
+offering's Payment settings. Saving the payment requirement completes its
+accepted task in the booking configuration batch.
 
-`TaskCard` is the one Today card (`.tc`, design system
-`project/components/TodayTasks`), with three faces. A **photo** card is a
-turnover or a task at a home, ending in Done. A **compact** card is a failed
-message, a reply, or a task without a home; it has an avatar and a pill that
-opens its subject, because it closes when that subject does. A reply also has
-Dismiss, which needs no note. An
-**insight** card is an opportunity, with a white Accept and an underlined Not
-now. Cards use the record surface. A finished task shows a filled check that
-undoes Done. An error line states only what our record knows; it never blames a
-provider or asks for a guest email.
+Experience suggestions can identify a missing published host, an empty
+description or absent preparation details. The host suggestion uses the same
+published profile evidence guests see. Preparation is optional and can be
+dismissed when guests need to bring nothing.
 
 An open reply with an authorized linked stay includes reservation context in
 the same TaskView. TaskCard shows its dates, guest portrait, group, internal
-home name and status above the original reply action and message preview.
+home name, status and message preview. The card opens the conversation.
 Unknown clocks read "Time not set". The task ID, schedule and actions remain
 owned by the stored task. An inquiry without a stay remains a compact reply.
 

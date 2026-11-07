@@ -59,6 +59,13 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
       return (await read.json() as BusinessToday).tasks.map(section => ({ section: section.id, tasks: section.tasks.filter(task => task.requestId === threadId) })).filter(section => section.tasks.length)
     }
     const todayReplies = await replyTasks('today')
+    expect((await page.goto(ORG))?.status()).toBe(200)
+    const replyCard = page.getByTestId('today-task').filter({ hasText: marker })
+    const replyLink = replyCard.getByRole('link', { name: marker, exact: true })
+    await expect(replyLink).toHaveAttribute('href', `${ORG}/messages/${threadId}`)
+    await replyLink.click()
+    await expect(page).toHaveURL(new RegExp(`/messages/${threadId}(?:[?#]|$)`))
+
     expect(todayReplies).toEqual([{ section: 'open', tasks: [expect.objectContaining({
       kind: 'guest_reply', status: 'open', title: marker, detail: 'Can you accommodate a group for dinner next week?', requestId: threadId, startsAt: null, dueAt: null,
       action: { type: 'open', label: 'Reply', path: `${ORG}/messages/${threadId}` },
