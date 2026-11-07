@@ -39,15 +39,14 @@
             <h2 v-if="part.section.title" class="wh2">{{ part.section.title }}<small v-if="part.section.subtitle">{{ part.section.subtitle }}</small></h2>
             <ul class="wgrid" role="list" :data-testid="`today-section-${part.section.id}`">
               <li v-for="task in part.section.tasks" :key="task.id">
-                <TaskCard :task="task" :assignees="business.assignees" :busy="taskBusy[task.id] !== undefined" @open="openTask(task)" @complete="complete(task)" @skip="skip(task)" @reopen="reopen(task)" @assign="person => assign(task, person)" />
+                <TaskCard :task="task" :busy="taskBusy[task.id] !== undefined" @open="openTask(task)" @skip="skip(task)" />
               </li>
             </ul>
           </template>
           <template v-else>
-            <h2 class="wh2">Opportunities</h2>
             <ul class="wgrid" role="list" data-testid="today-opportunities">
               <li v-for="opportunity in business.opportunities" :key="opportunity.id">
-                <TaskCard :opportunity="opportunity" :busy="opportunityBusy[opportunity.id] !== undefined" @accept="accept(opportunity)" @dismiss="dismiss(opportunity)" @defer="until => defer(opportunity, until)" />
+                <TaskCard :opportunity="opportunity" :busy="opportunityBusy[opportunity.id] !== undefined" @dismiss="dismiss(opportunity)" />
               </li>
             </ul>
           </template>
@@ -214,8 +213,8 @@ watch(sheetOpen, (isOpen) => {
 async function taskChanged() { await refresh() }
 
 const actionError = ref<unknown>(null)
-const taskBusy = ref<Record<string, 'assign' | 'complete' | 'skip' | 'reopen'>>({})
-const opportunityBusy = ref<Record<string, 'accept' | 'later'>>({})
+const taskBusy = ref<Record<string, 'skip'>>({})
+const opportunityBusy = ref<Record<string, 'later'>>({})
 const tasksApi = computed(() => `/api/organizations/${encodeURIComponent(organizationId ?? '')}`)
 
 async function act<T extends Record<string, string>>(busy: Ref<T>, id: string, state: T[string], request: () => Promise<unknown>) {
@@ -231,15 +230,9 @@ async function act<T extends Record<string, string>>(busy: Ref<T>, id: string, s
     busy.value = rest as T
   }
 }
-const complete = (task: TaskView) => act(taskBusy, task.id, 'complete', () => applicationFetch(`${tasksApi.value}/tasks/${encodeURIComponent(task.id)}/complete`, { method: 'POST', validate: isTaskResult, body: {} }))
 const skip = (task: TaskView) => act(taskBusy, task.id, 'skip', () => applicationFetch(`${tasksApi.value}/tasks/${encodeURIComponent(task.id)}/skip`, { method: 'POST', validate: isTaskResult, body: {} }))
-const reopen = (task: TaskView) => act(taskBusy, task.id, 'reopen', () => applicationFetch(`${tasksApi.value}/tasks/${encodeURIComponent(task.id)}/reopen`, { method: 'POST', validate: isTaskResult, body: { expectedVersion: task.version } }))
-const assign = (task: TaskView, person: TaskPerson | null) => act(taskBusy, task.id, 'assign', () => applicationFetch(`${tasksApi.value}/tasks/${encodeURIComponent(task.id)}`, { method: 'PATCH', validate: isTaskResult,
-  body: { expectedVersion: task.version, assignedMemberId: person?.type === 'member' ? person.id : null, assignedTeamId: person?.type === 'team' ? person.id : null } }))
 const isOpportunityResult = (value: unknown): value is { opportunity: { id: string } } => isRecord(value) && isRecord(value.opportunity) && typeof value.opportunity.id === 'string'
-const accept = (opportunity: OpportunityView) => act(opportunityBusy, opportunity.id, 'accept', () => applicationFetch(`${tasksApi.value}/opportunities/${encodeURIComponent(opportunity.id)}/accept`, { method: 'POST', validate: isTaskResult, body: {} }))
 const dismiss = (opportunity: OpportunityView) => act(opportunityBusy, opportunity.id, 'later', () => applicationFetch(`${tasksApi.value}/opportunities/${encodeURIComponent(opportunity.id)}/dismiss`, { method: 'POST', validate: isOpportunityResult, body: {} }))
-const defer = (opportunity: OpportunityView, until: string) => act(opportunityBusy, opportunity.id, 'later', () => applicationFetch(`${tasksApi.value}/opportunities/${encodeURIComponent(opportunity.id)}/defer`, { method: 'POST', validate: isOpportunityResult, body: { until } }))
 
 // Business goals steer which opportunities the selector finds.
 const isProgress = (value: unknown): value is { goals: BusinessGoal[] } => isRecord(value) && Array.isArray(value.goals)
@@ -325,5 +318,6 @@ onBeforeUnmount(() => {
 .wh2 { margin: 28px 2px 16px; font-size: 22px; line-height: 28px; font-weight: 700; letter-spacing: -.02em; color: var(--ui-text-highlighted); }
 .wh2 small { margin-left: 8px; font-size: 15px; line-height: 20px; font-weight: 400; letter-spacing: 0; color: var(--ui-text-muted); }
 .wgrid { display: grid; gap: 20px; }
-@media (max-width: 767px) { .wgrid { gap: 12px; } }
+.wgrid + .wgrid { margin-top: 20px; }
+@media (max-width: 767px) { .wgrid { gap: 12px; } .wgrid + .wgrid { margin-top: 12px; } }
 </style>

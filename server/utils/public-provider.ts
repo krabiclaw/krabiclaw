@@ -34,9 +34,13 @@ export async function publicProductHosts(db: DbClient, organizationId: string, p
 }
 
 /** A guest-facing offering is published only with a host whose profile guests can see. */
-export async function assertPublishedHost(db: DbClient, organizationId: string, host: { assigned_member_id: string | null; assigned_team_id: string | null } | null): Promise<void> {
+export async function hasPublishedHost(db: DbClient, organizationId: string, host: { assigned_member_id: string | null; assigned_team_id: string | null } | null): Promise<boolean> {
   const published = host && (host.assigned_member_id || host.assigned_team_id) ? await queryFirst<{ id: string }>(db, `SELECT ms.member_id id
     FROM member_scheduling ms WHERE ms.organization_id=? AND ${PUBLISHED_PROFILE_SQL} AND ms.member_id IN (${HOST_MEMBERS_SQL}) LIMIT 1`,
   [organizationId, organizationId, host.assigned_member_id, host.assigned_team_id]) : null
-  if (!published) throw new HTTPError({ statusCode: 409, statusMessage: 'Choose a host with a published profile before publishing. Guests see who hosts it.', data: { code: 'HOST_REQUIRED', field: 'host' } })
+  return Boolean(published)
+}
+
+export async function assertPublishedHost(db: DbClient, organizationId: string, host: { assigned_member_id: string | null; assigned_team_id: string | null } | null): Promise<void> {
+  if (!await hasPublishedHost(db, organizationId, host)) throw new HTTPError({ statusCode: 409, statusMessage: 'Choose a host with a published profile before publishing. Guests see who hosts it.', data: { code: 'HOST_REQUIRED', field: 'host' } })
 }

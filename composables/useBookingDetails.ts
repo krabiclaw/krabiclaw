@@ -37,6 +37,11 @@ const PURCHASE: BookingPresentation = {
 
 export async function useBookingDetails(bookingType: DashboardRecordType, bookingId: string, personalScope = false) {
   const route = useRoute()
+  // The heading follows the clock while the page stays open.
+  const now = ref(new Date())
+  let clock: ReturnType<typeof setInterval> | undefined
+  onMounted(() => { clock = setInterval(() => { now.value = new Date() }, 60_000) })
+  onBeforeUnmount(() => clearInterval(clock))
   // The account reads its own booking from the account API; the business reads the organization's.
   const dashboardApi = personalScope ? applicationFetch : useDashboardApi()
   const endpoint = `/api/${personalScope ? 'account' : 'dashboard'}/bookings/${bookingType}/${encodeURIComponent(bookingId)}`
@@ -62,18 +67,18 @@ export async function useBookingDetails(bookingType: DashboardRecordType, bookin
     : null)
   const noun = computed(() => presentation.value?.noun ?? '')
 
-  const referenceDay = computed(() => booking.value ? localDateAt(new Date(), booking.value.timeZone) : '')
+  const referenceDay = computed(() => booking.value ? localDateAt(now.value, booking.value.timeZone) : '')
   const pageTitle = computed(() => {
     if (!booking.value) return purchase ? 'Purchase' : 'Booking details'
     // A purchase's state is the money's: Paid, Refunded, Pending — as the visit's is Coming up or Cancelled.
     if (purchase) return booking.value.payments?.[0] ? paymentStateLabel(booking.value.payments[0].payment) : 'Purchase'
     if (booking.value.status === 'pending') return 'Awaiting review'
     if (booking.value.status === 'cancelled') return 'Cancelled'
-    if (booking.value.bookingDate === referenceDay.value) {
-      const now = new Date().toISOString()
-      const underway = booking.value.startsAt !== null && booking.value.endsAt !== null && booking.value.startsAt <= now && now < booking.value.endsAt
-      return underway && !personalScope && booking.value.vertical !== 'service' ? 'Currently hosting' : 'Today'
-    }
+    // Under way by the instant, so a visit past midnight is still being hosted.
+    const instant = now.value.toISOString()
+    const underway = booking.value.startsAt !== null && booking.value.endsAt !== null && booking.value.startsAt <= instant && instant < booking.value.endsAt
+    if (underway && !booking.value.noShowAt && !personalScope && booking.value.vertical !== 'service') return 'Currently hosting'
+    if (booking.value.bookingDate === referenceDay.value) return 'Today'
     if (booking.value.bookingDate > referenceDay.value) return 'Coming up'
     return `Past ${noun.value}`
   })

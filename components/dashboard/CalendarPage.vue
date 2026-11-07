@@ -120,7 +120,7 @@
                 >{{ day.number }}</component>
                 <ol v-if="itemsOn(day.key).length" class="mt-2 space-y-0.5">
                   <li v-for="item in itemsOn(day.key).slice(0, 2)" :key="item.id">
-                    <NuxtLink :to="(!personalScope && calendarRecordPath(`${level.path.value}/${day.key}`, item)) || item.to" :data-session-id="item.kind === 'session' ? item.session.id : undefined" class="group/item flex" :class="item.status === 'cancelled' ? 'text-muted line-through' : ''">
+                    <NuxtLink :to="rowTo(item, day.key) ?? item.to" :data-session-id="item.kind === 'session' ? item.session.id : undefined" class="group/item flex" :class="item.status === 'cancelled' ? 'text-muted line-through' : ''">
                       <p class="flex-auto truncate font-medium" :class="item.status === 'cancelled' ? '' : 'text-highlighted group-hover/item:text-primary'">{{ item.kind === 'session' ? timeOf(item) : item.title }}</p>
                       <time v-if="item.kind !== 'session'" :datetime="item.startsAt" class="ml-3 hidden flex-none text-muted xl:block">{{ timeOf(item) }}</time>
                     </NuxtLink>
@@ -590,7 +590,8 @@ function dayTo(dayKey: string) {
   return { path: `${level.path.value}/${dayKey}`, query: route.query }
 }
 function rowTo(item: CalendarItem, dayKey: string): string | undefined {
-  return item.kind === 'session' || props.personalScope ? undefined : `${level.path.value}/${dayKey}/${item.kind}/${encodeURIComponent(item.stayId ?? item.id.slice(item.kind.length + 1))}`
+  const path = props.personalScope ? undefined : calendarRecordPath(`${level.path.value}/${dayKey}`, item)
+  return path && router.resolve({ path, query: route.query }).fullPath
 }
 function openDayAt(dayKey: string): void {
   void navigateTo(dayTo(dayKey))

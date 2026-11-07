@@ -108,6 +108,8 @@ export interface DashboardBookingDetails {
   bookingTime: string | null
   /** Null for a purchase. */
   bookingEndTime: string | null
+  /** The local day the visit ends, or null for a purchase. */
+  bookingEndDate: string | null
   startsAt: string | null
   endsAt: string | null
   timeZone: string
@@ -360,6 +362,7 @@ async function composeBookingDetails(
     bookingDate: localDateOf(row),
     bookingTime: localTimeOf(row),
     bookingEndTime: localTimeOf({ starts_at: row.ends_at, timezone: row.timezone }),
+    bookingEndDate: localDateOf({ starts_at: row.ends_at, timezone: row.timezone }),
     startsAt: row.starts_at,
     endsAt: row.ends_at,
     timeZone,
@@ -521,6 +524,7 @@ async function composePurchaseDetails(db: DbClient, scope: BookingScope, payment
     bookingDate: localDateOf({ starts_at: payment.created_at, timezone: 'UTC' }),
     bookingTime: null,
     bookingEndTime: null,
+    bookingEndDate: null,
     startsAt: null,
     endsAt: null,
     timeZone: 'UTC',

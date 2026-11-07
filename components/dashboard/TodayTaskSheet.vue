@@ -47,7 +47,7 @@
     <template #footer>
       <div v-if="task" class="flex w-full items-center justify-between gap-4">
         <template v-if="task.status === 'open'">
-          <button v-if="task.can.skip" type="button" class="font-semibold underline underline-offset-3 disabled:opacity-50" :disabled="busy !== null" data-testid="today-task-skip" @click="close('skipped')">{{ task.can.complete ? 'Skip' : 'Dismiss' }}</button>
+          <button v-if="task.dismiss" type="button" class="font-semibold underline underline-offset-3 disabled:opacity-50" :disabled="busy !== null" data-testid="today-task-skip" @click="close('skipped')">{{ task.dismiss.label }}</button>
           <span v-else />
           <NuxtLink v-if="task.action?.type === 'open'" :to="task.action.path" class="rounded-full bg-inverted px-8 py-3 font-semibold text-inverted">{{ task.action.label }}</NuxtLink>
           <button v-else-if="task.can.complete" type="button" class="rounded-full bg-inverted px-8 py-3 font-semibold text-inverted disabled:opacity-60" :disabled="busy !== null" data-testid="today-task-sheet-done" @click="close('done')">Done</button>

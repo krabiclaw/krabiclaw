@@ -49,6 +49,7 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     const margherita = await seedMedia(owner, tenant, 'margherita', 'dish.avif', 'Margherita pizza with basil')
     const burrata = await seedMedia(owner, tenant, 'burrata', 'venue.avif', 'Burrata with tomatoes')
     const diningRoom = await seedMedia(owner, tenant, 'dining-room', 'room.avif', 'The Brooklyn dining room')
+    await tool('set_media', { placement: { owner_type: 'business_location', owner_id: brooklyn.id, slot: 'hero' }, asset_id: diningRoom.id })
     const logo = await seedMedia(owner, tenant, 'logo', 'dish.avif', 'Ember & Slice')
     await tool('set_media', { placement: { owner_type: 'organization', owner_id: tenant.organizationId, slot: 'logo' }, asset_id: logo.id })
     for (const asset of [burrata, diningRoom]) {

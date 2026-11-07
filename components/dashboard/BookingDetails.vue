@@ -320,7 +320,13 @@ const formattedDate = computed(() => booking.value ? formatCalendarDate(booking.
 const formattedTime = computed(() => {
   if (!booking.value?.bookingTime) return ''
   const start = formatTime(booking.value.bookingTime, 'en')
-  return booking.value.bookingEndTime ? `${start} – ${formatTime(booking.value.bookingEndTime, 'en')}` : start
+  const { bookingDate, bookingEndDate, bookingEndTime } = booking.value
+  if (!bookingEndTime) return start
+  // A visit past midnight says which day it ends.
+  const endDay = bookingEndDate && bookingEndDate !== bookingDate
+    ? `${formatCalendarDate(bookingEndDate, 'en', { month: 'short', day: 'numeric', ...(bookingEndDate.slice(0, 4) !== bookingDate.slice(0, 4) ? { year: 'numeric' } : {}) })}, `
+    : ''
+  return `${start} – ${endDay}${formatTime(bookingEndTime, 'en')}`
 })
 // Airbnb's host-side stay page titles the party, not the listing: "Chris's
 // group of 2". A single guest is just their name.
