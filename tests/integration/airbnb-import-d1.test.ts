@@ -23,6 +23,8 @@ import syncGetRoute from '../../server/api/organizations/[organizationId]/integr
 import { requestAirbnbSync, runAirbnbSyncJobs } from '../../server/integrations/channex/airbnb-sync.ts'
 import listingsRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/listings.get.ts'
 import { errorChainForTelemetry } from '../../shared/error-telemetry.ts'
+import { PUBLIC_CACHE_REVISION_SQL } from '../../server/utils/edge-cache.ts'
+import { buildPublicResourceCacheKey } from '../../server/utils/public-resource-cache.ts'
 
 // An Airbnb listing imported as a home, through every stage, against a fake
 // Channex: the location, the stay product and its price, the imported nights,
@@ -559,7 +561,27 @@ test('actual dated, weekday and weekend rules survive default edits, protected r
     const authoredRules = { day_of_week_min_nights: [3, -1, -1, -1, -1, -1, -1], weekend_price_minor: 25000 }
     await updateStayHome(env, db, manager, productId, { calendar_rules: authoredRules })
     await setStayNights(db, env, manager, { product_id: productId, from: monday, to: addDays(monday, 1), min_stay_arrival: 4, price_minor: 23000 })
-    const refreshed = await connection.refreshContent(productId)
+    const revision = () => db.prepare(`SELECT ${PUBLIC_CACHE_REVISION_SQL} AS revision FROM organization o WHERE id = ?`).bind(ORG).first<string>('revision')
+    const oldRevision = await revision()
+    assert(oldRevision)
+    const kv = env.ORGANIZATION_CACHE!
+    const pageCacheKey = (version: string) => buildPublicResourceCacheKey(ORG, {
+      contract: 'page', page: '/stays', location: null, datasets: ['products'], blogSlug: null, locale: 'en',
+    }, version)
+    await kv.put(pageCacheKey(oldRevision), 'cached prior revision')
+    const rateLimitedKv = new Proxy(kv, {
+      get(target, property) {
+        if (property === 'delete') return async () => { throw new Error('KV DELETE failed: 429 Too Many Requests') }
+        const value = Reflect.get(target, property, target)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+    const refreshed = await new AirbnbConnection(db, { ...env, ORGANIZATION_CACHE: rateLimitedKv }, ORG, OWNER).refreshContent(productId)
+    assert.equal(refreshed.stage, 'complete')
+    const newRevision = await revision()
+    assert(newRevision)
+    assert.notEqual(newRevision, oldRevision)
+    assert.equal(await kv.get(pageCacheKey(newRevision)), null)
     assert(refreshed.content.kept_host_edits.includes('calendar_rules'))
     assert.deepEqual((await readStayHome(db, manager, productId)).calendar_rules, authoredRules)
     assert.deepEqual(await db.prepare('SELECT source, min_stay_arrival, price_minor FROM product_nights WHERE product_id = ? AND date = ?').bind(productId, monday).first(), { source: 'host', min_stay_arrival: 4, price_minor: 23000 })

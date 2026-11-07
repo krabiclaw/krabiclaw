@@ -22,7 +22,7 @@ import { approveRefundAuthorization, requestRefundAuthorization } from '../../se
 import { createProduct, getProduct, updateProduct } from '../../server/utils/product-management.ts'
 import { buildPublicResourceCacheKey } from '../../server/utils/public-resource-cache.ts'
 import { PUBLIC_CACHE_REVISION_SQL } from '../../server/utils/edge-cache.ts'
-import { cancelStay, createStay, getStay } from '../../server/domain/stays.ts'
+import { cancelStay, createStay, getStay, readPublicStayHome } from '../../server/domain/stays.ts'
 import { buildBuyerRequestActivityUrl } from '../../server/utils/dashboard-notification-links.ts'
 import { memberAccessPrincipal, organizationAdapter, resolveMembership } from '../../server/utils/member-access.ts'
 import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
@@ -505,7 +505,7 @@ test('a failed stay cancellation email retries its recorded content after displa
       "INSERT INTO business_locations (id, organization_id, slug, title, timezone, status) VALUES ('location-stay-cancel', 'org-stay-cancel', 'retreat', 'Retreat', 'Asia/Bangkok', 'active')",
     ]) await db.prepare(statement).run()
     const access = { organizationId: 'org-stay-cancel', actorId: 'owner-stay-cancel', manage: true }
-    const home = await createProduct(db, { env, organizationId: access.organizationId, actor: { actorId: access.actorId }, product: {
+    const home = await createProduct(db, { env, organizationId: access.organizationId, actor: { actorId: access.actorId }, publication: { published: true }, product: {
       kind: 'stay', name: 'Original Cabin', variants: [{ name: 'Original Cabin', prices: [{ unit_amount: 15000, currency: 'USD' }] }],
       stay: { location_id: 'location-stay-cancel', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: null },
     } })
@@ -558,13 +558,17 @@ test('a failed stay cancellation email retries its recorded content after displa
     assert.match((await getDeliveryById(db, deliveryId))!.error!, /Cancellation delivery rejected/u)
 
     assert(env.ORGANIZATION_CACHE)
-    const revision = await db.prepare(`SELECT ${PUBLIC_CACHE_REVISION_SQL} AS revision FROM organization o WHERE o.id = ?`).bind(access.organizationId).first<string | null>('revision')
-    const cachedPageKey = buildPublicResourceCacheKey(access.organizationId, { contract: 'page', page: 'stays', location: null, datasets: ['products'], blogSlug: null, locale: 'en' }, revision)
-    await env.ORGANIZATION_CACHE.put(cachedPageKey, JSON.stringify({ product: home }))
+    const revision = () => db.prepare(`SELECT ${PUBLIC_CACHE_REVISION_SQL} AS revision FROM organization o WHERE o.id = ?`).bind(access.organizationId).first<string | null>('revision')
+    const pageKey = (version: string | null) => buildPublicResourceCacheKey(access.organizationId, { contract: 'page', page: 'stays', location: null, datasets: ['products'], blogSlug: null, locale: 'en' }, version)
+    const originalRevision = await revision()
+    await env.ORGANIZATION_CACHE.put(pageKey(originalRevision), JSON.stringify({ product: home }))
     await updateProduct(db, { env, organizationId: access.organizationId, productId: home.id, actor: { actorId: access.actorId }, patch: { name: 'Renamed Cabin' } })
-    assert.equal(await env.ORGANIZATION_CACHE.get(cachedPageKey), null)
+    const renamedRevision = await revision()
+    assert.notEqual(renamedRevision, originalRevision)
+    assert.equal(await env.ORGANIZATION_CACHE.get(pageKey(renamedRevision)), null)
     await (await organizationAdapter(env)).updateOrganization(access.organizationId, { name: 'Renamed Retreat' })
-    assert.equal((await getProduct(db, access.organizationId, home.id)).name, 'Renamed Cabin')
+    const renamed = await getProduct(db, access.organizationId, home.id)
+    assert.equal((await readPublicStayHome(db, access.organizationId, renamed.slug)).name, 'Renamed Cabin')
     assert.equal(await db.prepare('SELECT name FROM organization WHERE id = ?').bind(access.organizationId).first('name'), 'Renamed Retreat')
     reject = false
     await notifyStayCancelled(env, db, access.organizationId, stay.id, 'host', 0)

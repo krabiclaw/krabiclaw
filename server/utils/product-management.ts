@@ -13,11 +13,11 @@ import { buildDeleteOwnerPlacementsQuery, hydrateMediaAssetRefs, readMediaPlacem
 import { isStayBedAllocationConflict, prepareArrangeProductPhotos, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, stayBedAllocationGuardQuery } from '~/server/utils/media-placement'
 import { parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay-photos'
 import { isStayHomeAccessibility, type StayHomeAccessibility, type StayRoomAccessibility } from '~/shared/stay-accessibility'
-import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
+import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, resolvePublishedTenantPageIdentity, type TenantPageEditorInput } from '~/server/utils/content/pages'
 import { loadOrganizationSite } from '~/server/utils/content/publishing'
-import { publishAccessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
+import { publishAccessInvalidation, publishBusinessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
 import type { AirbnbSettingSections, pushStayHomeChannel } from '~/server/domain/stays'
 import { executeWithinCapacity, liveHomeSql, reportBillingUsage } from '~/server/utils/billing'
@@ -1814,7 +1814,7 @@ export async function updateProduct(db: DbClient, input: {
     }
     return completeChannelPush(channelPush, { product_id: product.id, updated_at: product.updated_at }, async () => {
       if (photoPlan) await photoPlan.complete()
-      if (product.kind === 'stay') await purgePublicResourceCacheNow(env, input.organizationId)
+      if (product.kind === 'stay') await publishBusinessInvalidation(env, input.organizationId)
       await publishStayProducts(env, [product])
       return product
     })
