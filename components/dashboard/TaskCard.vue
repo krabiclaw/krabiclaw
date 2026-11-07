@@ -31,7 +31,7 @@
         <template v-if="task">
           <UDropdownMenu v-if="task.can.assign && assignees.length" :items="assignItems" :content="{ align: 'start' }">
             <button type="button" class="tc-who" :aria-label="`Assigned to ${task.person?.name ?? 'nobody'}. Change`" data-testid="today-task-assignee">
-              <UIcon v-if="reservation" name="i-lucide-ellipsis" class="size-5" />
+              <UIcon v-if="reservation" name="i-lucide-user" class="size-5" />
               <template v-else><i>{{ task.person?.initial ?? '?' }}</i><span>{{ task.person?.name ?? 'Unassigned' }}</span></template>
             </button>
           </UDropdownMenu>
@@ -101,12 +101,12 @@ const laterItems = [
 <style scoped>
 .tc { display: flex; flex-direction: column; overflow: hidden; border-radius: 20px; background: var(--ui-bg); color: var(--ui-text-highlighted); text-align: left; box-shadow: 0 0 0 1px rgb(0 0 0 / 4%), 0 6px 20px rgb(0 0 0 / 8%); font-size: 15px; line-height: 20px; }
 .tc.is-insight { background: var(--ui-bg-elevated); box-shadow: none; }
-.tc.is-reservation { position: relative; border: 1px solid var(--ui-border); border-radius: 24px; background: var(--ui-bg-elevated); box-shadow: none; }
+.tc.is-reservation { border: 1px solid var(--ui-border); border-radius: 24px; background: var(--ui-bg-elevated); box-shadow: none; }
 .tc-reservation-main { display: block; width: 100%; padding: 28px 24px; text-align: center; }
-.tc.is-reservation .tc-body, .tc.is-reservation .tc-foot { padding: 0; }
-.tc.is-reservation .tc-foot { flex-wrap: wrap; gap: 0; }
-.tc.is-reservation .tc-who { position: absolute; top: 8px; right: 8px; display: flex; min-width: 36px; min-height: 36px; justify-content: center; padding: 4px; border-radius: 999px; }
-.tc-reservation-link { display: flex; width: 100%; align-items: center; gap: 12px; border-top: 1px solid var(--ui-border); padding: 20px 24px; }
+.tc.is-reservation .tc-body { padding: 0; }
+.tc.is-reservation .tc-foot { border-top: 1px solid var(--ui-border); padding: 0 24px; }
+.tc.is-reservation button.tc-who { flex: none; width: 36px; min-height: 36px; justify-content: center; border-radius: 999px; }
+.tc-reservation-link { display: flex; flex: 1; min-width: 0; align-items: center; gap: 12px; padding: 20px 0; }
 .tc-reservation-link:hover, .tc-reservation-main:hover, .tc.is-reservation button.tc-who:hover { background: var(--ui-bg-accented); }
 .tc-reservation-main:focus-visible, .tc-reservation-link:focus-visible { outline: 2px solid var(--ui-text-highlighted); outline-offset: -2px; }
 .tc-media { position: relative; display: block; flex: none; aspect-ratio: 3 / 2; max-height: 220px; background: var(--ui-bg-accented); }
