@@ -178,12 +178,19 @@ now. Black is Done and nothing else. A finished task shows a filled check that
 undoes Done. An error line states only what our record knows; it never blames a
 provider or asks for a guest email.
 
+An open reply with an authorized linked stay includes reservation context in
+the same TaskView. TaskCard shows its dates, guest portrait, group, internal
+home name and status above the original reply action and message preview.
+Unknown clocks read "Time not set". The task ID, schedule and actions remain
+owned by the stored task. An inquiry without a stay remains a compact reply.
+
 Owner Today orders failed deliveries, then turnovers, then replies, in two
 columns on web. Opportunities follow full width, then Done. A member sees only
-their own tasks and Done. A round + beside Today/Upcoming adds a task
-(`TodayTaskCreate`). `TodayTaskSheet` follows Airbnb's reservation detail: a
-Checkout | Check-in split, Assigned with Change, "What you found", then Skip and
-Done. Upcoming groups by day ("Tomorrow · Sat, Nov 7"). Arrivals and bookings
+their own tasks and Done. The shared header holds Today/Upcoming, a round +
+for the permitted Add task and Add stay actions, and a task kind filter.
+`TodayTaskSheet` uses Airbnb's Checkout | Check-in split, followed by Assigned
+with Change, "What you found", Skip and Done. Upcoming groups by day
+("Tomorrow · Sat, Nov 7"). Arrivals and bookings
 stay in Calendar.
 
 The page re-reads on `business.changed`, `stay.changed` and conversation
@@ -397,11 +404,18 @@ published on the site; there is no second publish flag for it.
 ### Places to stay
 
 A place to stay is a Product of kind `stay`, edited in the one Product editor.
+Its operator-only `stay.internal_name` identifies the home in Catalog,
+Calendar, Today and Messages. Product `name` is the public listing title used
+for translations and Airbnb. The existing Product writer owns both fields and
+applies the same 240-character limit. Existing homes initialize the internal
+name from their actual title once. The home creation form accepts separate
+Internal name and Listing title values, and the Product editor reads each
+saved value through its own leaf.
 Its Stay settings row owns its one location (chosen once, when it is created),
 check-in and checkout times, how many it sleeps, the minimum nights and the
 team who look after it; it has no Scheduling or Locations rows. Its price row
-is the base nightly price. Its stays are on Today and the Calendar, on the day
-guests arrive and the day they leave, and open at the booking route as
+is the base nightly price. Calendar shows stays on the day guests arrive and
+the day they leave. A stay opens at the booking route as
 `bookings/stay/:stayId`. A stay taken by the host records offline payments and
 is cancelled there, and is not refused by closed nights or minimum stays —
 those are what guests and channels are offered; a stay from Airbnb or another channel is read-only and

@@ -273,7 +273,7 @@ export async function listAgenda(
   const stayRows = requestedKinds.has('stay') ? queryAll<{
     id: string; request_id: string | null; organization_id: string; organization_name: string; product_id: string; product_name: string; status: string; overbooked: number; check_in_date: string; check_out_date: string
     owner: 'app' | 'channel'; channel: Stay['channel']; guest_name: string | null; guest_surname: string | null; party_size: number; location_id: string; location_title: string; timezone: string; check_in_time: string | null; check_out_time: string | null; same_day_arrival: number
-  }>(db, `SELECT st.id, st.request_id, st.organization_id, o.name AS organization_name, st.product_id, p.name AS product_name, st.status, st.overbooked, st.check_in_date, st.check_out_date, st.owner, st.channel, st.guest_name, ${staff ? 'NULL' : 'st.guest_surname'} AS guest_surname,
+  }>(db, `SELECT st.id, st.request_id, st.organization_id, o.name AS organization_name, st.product_id, ${scope.buyerUserId ? 'p.name' : 'c.internal_name'} AS product_name, st.status, st.overbooked, st.check_in_date, st.check_out_date, st.owner, st.channel, st.guest_name, ${staff ? 'NULL' : 'st.guest_surname'} AS guest_surname,
         st.adults + st.children AS party_size, c.location_id, l.title AS location_title, l.timezone, c.check_in_time, c.check_out_time,
         EXISTS (SELECT 1 FROM stays next_stay WHERE next_stay.organization_id = st.organization_id AND next_stay.product_id = st.product_id
           AND next_stay.id <> st.id AND next_stay.status <> 'cancelled' AND next_stay.check_in_date = st.check_out_date) AS same_day_arrival
@@ -337,6 +337,7 @@ export async function listAgenda(
   const organizationPath = query.organizationSlug ?? scope.organizationId
   for (const stay of query.assignedMemberId ? [] : stays) {
     if (!isValidTimezone(stay.timezone)) throw new Error(`Timezone is not configured for stay ${stay.id}`)
+    if (!stay.product_name?.trim()) throw new Error(`Home ${stay.product_id} has no name for this agenda`)
     // Only a channel may withhold the guest's name (stays_app_guest_check).
     // A member reads the guest as their turnover names them: by first name.
     const named = staff ? stayGuestFirstName(stay.guest_name) ?? '' : [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ')

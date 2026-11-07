@@ -1221,6 +1221,8 @@ export const reservations = sqliteTable("reservations", {
 //   and nothing else; NULL means only organization-wide roles do.
 // Deletion: cascades from Product; refused while stays exist (see stays).
 export const product_stay_configs = sqliteTable("product_stay_configs", {
+	// Operator-only identity; initialized from the listing title on creation, then independently editable.
+	internal_name: text(),
 	product_id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	location_id: text().notNull(),

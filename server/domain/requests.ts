@@ -116,6 +116,7 @@ export interface ThreadOperationalRecord {
   location_id: string | null
   product_id: string | null
   product_name: string | null
+  product_internal_name: string | null
   organization_id: string
   user_id: string | null
   check_in_date: string | null
@@ -176,7 +177,7 @@ export async function getGuestRequest(db: DbClient, id: string, organizationId?:
 export async function getThreadOperationalRecord(db: DbClient, requestId: string): Promise<ThreadOperationalRecord | null> {
   const record = await queryFirst<ThreadOperationalRecord>(db, `
     SELECT 'booking' AS kind, b.id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone,
-           s.location_id, b.product_id, p.name AS product_name, b.assigned_member_id, b.organization_id, b.user_id,
+           s.location_id, b.product_id, p.name AS product_name, NULL AS product_internal_name, b.assigned_member_id, b.organization_id, b.user_id,
            NULL AS check_in_date, NULL AS check_out_date, b.no_show_at, owner.review_id
       FROM bookings b
       JOIN requests owner ON owner.id = b.request_id AND owner.kind = 'booking' AND owner.organization_id = b.organization_id
@@ -185,13 +186,13 @@ export async function getThreadOperationalRecord(db: DbClient, requestId: string
      WHERE b.request_id = ?
     UNION ALL
     SELECT 'reservation', r.id, r.status, r.party_size, r.starts_at, r.ends_at, r.timezone,
-           r.location_id, NULL, NULL, NULL, r.organization_id, r.user_id, NULL, NULL, r.no_show_at, owner.review_id
+           r.location_id, NULL, NULL, NULL, NULL, r.organization_id, r.user_id, NULL, NULL, r.no_show_at, owner.review_id
       FROM reservations r
       JOIN requests owner ON owner.id = r.request_id AND owner.kind = 'reservation' AND owner.organization_id = r.organization_id
      WHERE r.request_id = ?
     UNION ALL
     SELECT 'stay', st.id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone,
-           c.location_id, st.product_id, p.name, c.assigned_member_id, st.organization_id, st.user_id, st.check_in_date, st.check_out_date, st.no_show_at, owner.review_id
+           c.location_id, st.product_id, p.name, c.internal_name, c.assigned_member_id, st.organization_id, st.user_id, st.check_in_date, st.check_out_date, st.no_show_at, owner.review_id
       FROM stays st
       JOIN requests owner ON owner.id = st.request_id AND owner.kind = 'stay' AND owner.organization_id = st.organization_id
       JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id

@@ -124,6 +124,14 @@ const OPERATIONAL_RECORDS_SQL = `(
 const OPERATIONAL_RECORD_SQL = `
   LEFT JOIN ${OPERATIONAL_RECORDS_SQL} op ON op.request_id = gt.id`
 
+/** Business inbox labels use the home's private identity; buyer labels keep the location's public title. */
+function threadLocationTitleSql(buyerAudience = false): string {
+  if (buyerAudience) return 'bl.title'
+  return `CASE WHEN gt.kind = 'stay' OR EXISTS (SELECT 1 FROM channel_threads channel WHERE channel.organization_id = gt.organization_id AND channel.request_id = gt.id AND channel.product_id IS NOT NULL)
+    THEN (SELECT home.internal_name FROM product_stay_configs home WHERE home.organization_id = gt.organization_id AND home.product_id = COALESCE(op.product_id,
+      (SELECT channel.product_id FROM channel_threads channel WHERE channel.organization_id = gt.organization_id AND channel.request_id = gt.id))) ELSE bl.title END`
+}
+
 /**
  * The mailbox filter, `resolveGuestThreadMailbox` said to the database
  * (mailbox.ts `pastSql`) for the viewer. A blocked guest's thread is in
@@ -283,7 +291,7 @@ async function inboxWhere(organizationId: string | null, opts: ListGuestThreadsO
     where += ` AND (LOWER(COALESCE(json_extract(gt.payload_json, '$.guest.name'), '')) LIKE ? ESCAPE '\\'
       OR LOWER(COALESCE(json_extract(gt.payload_json, '$.message'), json_extract(gt.payload_json, '$.notes'), '')) LIKE ? ESCAPE '\\'
       OR LOWER(COALESCE(json_extract(gt.payload_json, '$.participant.title'), '')) LIKE ? ESCAPE '\\'
-      OR LOWER(COALESCE(bl.title, '')) LIKE ? ESCAPE '\\'
+      OR LOWER(COALESCE(${threadLocationTitleSql(opts.buyerAudience)}, '')) LIKE ? ESCAPE '\\'
       OR EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind IN ('message', 'submission')
         AND (LOWER(COALESCE(e.body, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(json_extract(e.payload_json, '$.meta.name'), '')) LIKE ? ESCAPE '\\')))`
     params.push(like, like, like, like, like, like)
@@ -329,7 +337,7 @@ export async function listGuestThreads(
   const limit = Math.max(1, Math.min(opts.limit ?? 100, 200))
   const rows = await queryAll<InboxListRow>(db, `
     SELECT gt.*, ${REPLY_CHANNEL_SQL} AS reply_channel, ${SUPPORT_THREAD_SQL} AS support,
-      o.name AS organization_name, bl.title AS location_title, COALESCE(bl.timezone, o.timezone) AS time_zone,
+      o.name AS organization_name, ${threadLocationTitleSql(opts.buyerAudience)} AS location_title, COALESCE(bl.timezone, o.timezone) AS time_zone,
       (SELECT json_extract(e.payload_json, '$.meta.name') FROM activity_entries e
         WHERE e.request_id = gt.id AND e.kind = 'message' AND e.actor_kind = 'guest' AND e.event_name = 'channel.message_mirrored'
           AND json_extract(e.payload_json, '$.meta.name') IS NOT NULL ORDER BY e.sequence DESC LIMIT 1) AS airbnb_name,
@@ -486,7 +494,7 @@ export async function listOrganizationGuestThreads(
     SELECT
       gt.*, ${rule.sql} AS past_by_rule, ${OPEN_REPLY_TASK_SQL} AS needs_reply,
       ${SOURCE_GUEST_NAME_SQL} AS guest_name,
-      bl.title AS location_title,
+      ${threadLocationTitleSql(opts.buyerAudience)} AS location_title,
       (
         SELECT body FROM activity_entries
         WHERE request_id = gt.id AND kind = 'message'

@@ -18,7 +18,7 @@ import type { InjectionKey, Ref, ComputedRef } from 'vue'
 import type { MessageTemplate, GuestMessageSchedule } from '~/lib/components/workspace/messages/guest-messaging-client'
 export interface AutomaticMessageEditor {
   draft: Ref<{ title: string; body: string; schedule: GuestMessageSchedule }>
-  homes: ComputedRef<{ product_id: string; name: string; timezone: string }[]>
+  homes: ComputedRef<{ product_id: string; name: string; internal_name: string; timezone: string }[]>
   homesError: ComputedRef<string>
   manage: ComputedRef<boolean>
   saving: Ref<boolean>
@@ -66,7 +66,7 @@ const deleteOpen = ref(false)
 const loadError = computed(() => readError.value ? getErrorMessage(readError.value, 'The automatic message could not be loaded') : '')
 const error = computed(() => loadError.value || actionError.value)
 const { data: homesData, error: homesReadError } = await useAsyncData(`automatic-message-homes:${dashboard.organizationId.value}`, () => api('/api/dashboard/stay-homes', {
-  validate: (value): value is { homes: { product_id: string; name: string; timezone: string }[] } => isRecord(value) && Array.isArray(value.homes) && value.homes.every(home => isRecord(home) && typeof home.product_id === 'string' && typeof home.name === 'string' && typeof home.timezone === 'string'),
+  validate: (value): value is { homes: { product_id: string; name: string; internal_name: string; timezone: string }[] } => isRecord(value) && Array.isArray(value.homes) && value.homes.every(home => isRecord(home) && typeof home.product_id === 'string' && typeof home.name === 'string' && typeof home.internal_name === 'string' && typeof home.timezone === 'string'),
 }))
 const homes = computed(() => homesData.value?.homes ?? [])
 const homesError = computed(() => homesReadError.value ? getErrorMessage(homesReadError.value, 'Homes could not be loaded') : '')

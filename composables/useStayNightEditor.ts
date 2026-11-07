@@ -11,7 +11,7 @@ export type NightEditField = 'price_minor' | 'price_change_percent' | 'min_stay_
 export type NightDraft = Record<NightEditField, string>
 export type NightPriceMode = 'set' | 'percent'
 export type NightPatch = Record<string, boolean | number | null>
-export type NightEditorHome = Pick<StayHome, 'product_id' | 'name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules'>
+export type NightEditorHome = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules'>
 
 /** One unit a calendar selection edits: a night at a home, or a day at a restaurant location or an offering. */
 export interface CalendarSlot { date: string; closed: boolean }
@@ -275,7 +275,7 @@ export function useStayNightEditor<R extends { name: string }, S extends Calenda
     }
     if (failures.length) {
       error.value = rows > 1
-        ? `${rows - new Set(failures.map(failure => source.id(failure.home))).size} of ${rows} ${source.nouns.rows} saved. ${failures.map(failure => `${failure.home.name}: ${failure.message}`).join(' ')}`
+        ? `${rows - new Set(failures.map(failure => source.id(failure.home))).size} of ${rows} ${source.nouns.rows} saved. ${failures.map(failure => `${'internal_name' in failure.home ? failure.home.internal_name : failure.home.name}: ${failure.message}`).join(' ')}`
         : `${savedSlots ? `${savedSlots} of ${nights.value.length} ${source.nouns.units} saved. ` : ''}${failures.map(failure => failure.message).join(' ')}`
     }
     busy.value = false

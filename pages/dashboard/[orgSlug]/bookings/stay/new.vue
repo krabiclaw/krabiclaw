@@ -2,14 +2,14 @@
   <DashboardLeafPanel id="new-stay" :title="title" :save-label="action" :saving="saving" :disabled="Boolean(loadError) || Boolean(formError)" :error="actionError || loadError || ''" @cancel="reset" @save="commit">
     <UForm v-if="!loadError" :state="draft" :disabled="saving || Boolean(draft.attempt)" class="space-y-6" @submit="commit">
       <fieldset class="space-y-5">
-        <p v-if="suppliedHome && home" class="text-base text-highlighted">{{ home.name }} · {{ home.timezone }}</p>
+        <p v-if="suppliedHome && home" class="text-base text-highlighted">{{ home.internal_name }} · {{ home.timezone }}</p>
         <UFormField v-else label="Home" name="product_id" required>
           <USelect v-model="draft.product_id" :items="homeItems" placeholder="Choose a home" aria-label="Home" class="w-full" />
         </UFormField>
       </fieldset>
       <fieldset class="space-y-5">
         <legend class="mb-5 text-lg font-semibold text-highlighted">Dates</legend>
-        <p v-if="home" class="text-sm text-muted">{{ home.name }} · {{ home.timezone }}</p>
+        <p v-if="home" class="text-sm text-muted">{{ home.internal_name }} · {{ home.timezone }}</p>
         <UFormField label="Check-in" name="check_in_date" required><UInput v-model="draft.check_in_date" type="date" class="w-full" /></UFormField>
         <UFormField label="Checkout" name="check_out_date" required><UInput v-model="draft.check_out_date" type="date" :min="draft.check_in_date || undefined" class="w-full" /></UFormField>
         <UFormField label="Arrival time" name="arrival_time"><UInput v-model="draft.arrival_time" type="time" class="w-full" /></UFormField>
@@ -58,7 +58,7 @@ import { getErrorMessage } from '~/utils/errors'
 
 definePageMeta({ layout: 'dashboard', tab: 'today', back: 'dashboard-orgSlug', key: route => `stay-create:${String(route.params.orgSlug)}:${String(route.query.product_id ?? '')}:${String(route.query.check_in_date ?? '')}:${String(route.query.check_out_date ?? '')}` })
 const { title, action } = newRecordLabels('stay')
-type Home = Pick<StayHome, 'product_id' | 'name' | 'currency' | 'timezone' | 'max_guests'>
+type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'currency' | 'timezone' | 'max_guests'>
 const route = useRoute()
 const nuxtApp = useNuxtApp()
 const orgSlug = String(route.params.orgSlug)
@@ -79,7 +79,7 @@ const queryError = computed(() => {
 })
 const { data, error } = await useAsyncData(`stay-create-homes:${orgSlug}`, () => api('/api/dashboard/stay-homes', {
   validate: (value): value is { homes: Home[]; manage: boolean } => isRecord(value) && typeof value.manage === 'boolean' && Array.isArray(value.homes)
-    && value.homes.every(home => isRecord(home) && typeof home.product_id === 'string' && Boolean(home.product_id) && typeof home.name === 'string' && isCurrencyCode(home.currency) && typeof home.timezone === 'string' && isValidTimezone(home.timezone) && Number.isInteger(home.max_guests) && Number(home.max_guests) > 0),
+    && value.homes.every(home => isRecord(home) && typeof home.product_id === 'string' && Boolean(home.product_id) && typeof home.internal_name === 'string' && isCurrencyCode(home.currency) && typeof home.timezone === 'string' && isValidTimezone(home.timezone) && Number.isInteger(home.max_guests) && Number(home.max_guests) > 0),
 }))
 const loadError = computed(() => queryError.value || (error.value ? getErrorMessage(error.value, 'Homes could not be loaded') : !data.value ? 'Homes could not be loaded.' : !data.value.manage ? 'Only owners and admins can add stays.' : suppliedHome && !data.value.homes.some(home => home.product_id === suppliedHome) ? 'That home is not available in this organization.' : !data.value.homes.length ? 'Add a home in Catalog before recording a stay.' : null))
 function initialDraft() {
@@ -92,7 +92,7 @@ function initialDraft() {
 }
 const draft = useState(draftKey, initialDraft)
 const home = computed(() => data.value?.homes.find(home => home.product_id === draft.value.product_id))
-const homeItems = computed(() => data.value?.homes.map(home => ({ label: home.name, value: home.product_id })) ?? [])
+const homeItems = computed(() => data.value?.homes.map(home => ({ label: home.internal_name, value: home.product_id })) ?? [])
 watch(home, value => { if (value && (!draft.value.record_payment || !draft.value.payment_date)) draft.value.payment_date = localDateAt(new Date(), value.timezone) }, { immediate: true })
 const paymentMethods = STAY_PAYMENT_METHODS.map(value => ({ value, label: STAY_PAYMENT_METHOD_LABELS[value] }))
 function amount(value: string): number {

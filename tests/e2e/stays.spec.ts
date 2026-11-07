@@ -4,7 +4,7 @@ import sharp from 'sharp'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpRequest, publishOwnHostProfile } from './helpers/mcp'
 import { waitForNuxtHydration } from './helpers'
-import { seededSiteHeaders } from './test-env'
+import { seededSiteHeaders, devLoginHeaders } from './test-env'
 import { seededTenant } from './seed/manifest'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations'
 import type { Product } from '../../server/types/products'
@@ -16,7 +16,7 @@ import type { PublicLocationDisclosure } from '../../types/public-location'
 import type { StayPhotoRoom } from '../../shared/stay-photos'
 import type { StayHomeAccessibility } from '../../shared/stay-accessibility'
 import { formatMinorAmount } from '../../shared/prices'
-import type { TaskPerson, TaskSection } from '../../server/domain/tasks'
+import type { TaskPerson, TaskSection, TaskView } from '../../server/domain/tasks'
 import type { OpportunityView } from '../../server/domain/opportunities'
 
 // A host's place to stay, end to end through the surfaces that own it: the
@@ -49,7 +49,7 @@ async function expectStatus(response: Pick<APIResponse, 'status' | 'text'>, stat
   expect(response.status(), response.status() === status ? undefined : await response.text()).toBe(status)
 }
 
-async function createStayHome(page: Page, baseURL: string, selectDifferentLocation = false) {
+async function createStayHome(page: Page, baseURL: string, selectDifferentLocation = false, internalName = 'Cliff Cabin') {
   const request = page.request
   await loginAs(request, baseURL, 'user-e2e-lodging-host')
   const headers = authRequestHeaders(baseURL)
@@ -84,7 +84,8 @@ async function createStayHome(page: Page, baseURL: string, selectDifferentLocati
     await page.getByRole('combobox', { name: 'Location*', exact: true }).click()
     await page.getByRole('option', { name: location.title, exact: true }).click()
   }
-  await page.getByRole('textbox', { name: 'Title', exact: true }).fill('Cliff Cabin')
+  await page.getByRole('textbox', { name: 'Internal name', exact: true }).fill(internalName)
+  await page.getByRole('textbox', { name: 'Listing title', exact: true }).fill('Cliff Cabin')
   await page.getByRole('textbox', { name: 'Sleeps' }).fill('4')
   await page.getByRole('textbox', { name: 'Minimum nights' }).fill('2')
   const creation = page.waitForResponse(response => response.request().method() === 'POST'
@@ -101,7 +102,7 @@ async function createStayHome(page: Page, baseURL: string, selectDifferentLocati
   const unknownPropertyFacts = { listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null }
   const home = await call<{ product: { kind: string; unit_label: string; stay: Record<string, unknown> } }>('get_product', { product_id: productId })
   expect(home.error).toBeNull()
-  expect(home.data!.product).toMatchObject({ kind: 'stay', unit_label: 'night', stay: { location_id: location.id, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, ...unknownPropertyFacts } })
+  expect(home.data!.product).toMatchObject({ kind: 'stay', unit_label: 'night', stay: { internal_name: internalName, location_id: location.id, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, ...unknownPropertyFacts } })
   const api = (path: string) => `${baseURL}/api/dashboard/${path}${path.includes('?') ? '&' : '?'}org=${encodeURIComponent(slug)}`
   return { request, headers, slug, organizationId, location, homeAddress, call, api, productId, unknownPropertyFacts, home }
 }
@@ -114,11 +115,6 @@ function previewLocators(page: Page) {
   return { previewLink, previewModal, previewIframe, preview: previewIframe.contentFrame() }
 }
 
-// A member responsible for a home reads its stays as Turnovers shows them, on
-// every surface: dates, arrival time, the guest's first name and party. The
-// guest's contact, money and conversation stay with owners and admins. This
-// replaces the earlier premise that a responsible member opened the stay's
-// guest conversation: members now never do.
 test('a home keeps zero beds and unknown provider times through editing and the guest page', async ({ page, baseURL }) => {
   test.setTimeout(90_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Uses disposable local home data')
@@ -154,6 +150,169 @@ test('a home keeps zero beds and unknown provider times through editing and the 
   await expect(preview.locator('article')).not.toContainText('Checkout before')
 })
 
+test('a home keeps its operator name independent from its public title across CMS, calendar and reservation-backed tasks', async ({ page, baseURL }, testInfo) => {
+  test.setTimeout(120_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const { request, slug, organizationId, call, api, productId } = await createStayHome(page, baseURL!, false, 'Cabin 3')
+  const internalName = 'Cabin 4'
+  const publicTitle = 'A quiet cabin above the sea'
+  const productPath = `/dashboard/${slug}/products/${productId}`
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`${productPath}/internal-name`)
+  const namePanel = page.locator('#dashboard-panel-product-internal-name')
+  await namePanel.getByRole('textbox', { name: 'Internal name', exact: true }).fill(internalName)
+  await waitForNuxtHydration(page)
+  await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-internal-name-editor.png') })
+  await namePanel.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(namePanel).not.toBeVisible()
+  const renamed = await call<{ product: Product }>('get_product', { product_id: productId })
+  expect(renamed.error).toBeNull()
+  expect(renamed.data!.product).toMatchObject({ name: 'Cliff Cabin', slug: 'cliff-cabin', stay: { internal_name: internalName } })
+
+  await page.goto(`${productPath}/name`)
+  const titlePanel = page.locator('#dashboard-panel-product-name')
+  await titlePanel.getByRole('textbox', { name: 'Listing title', exact: true }).fill(publicTitle)
+  await waitForNuxtHydration(page)
+  await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-public-title-editor.png') })
+  await titlePanel.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(titlePanel).not.toBeVisible()
+  const homeRead = await request.get(api(`stay-homes/${productId}`))
+  await expectStatus(homeRead, 200)
+  expect(await homeRead.json()).toMatchObject({ home: { internal_name: internalName, name: publicTitle } })
+  const invalid = await request.patch(api(`stay-homes/${productId}`), { data: { internal_name: ' ' } })
+  await expectStatus(invalid, 422)
+
+  const { previewLink, previewModal, preview } = previewLocators(page)
+  await previewLink.click()
+  await expect(preview.getByRole('heading', { name: publicTitle, exact: true }).first()).toBeVisible()
+  await expect(preview.getByText(internalName, { exact: true })).toHaveCount(0)
+  await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.goto(`/dashboard/${slug}/products`)
+  await expect(page.getByTestId(`selector-item-${productId}`)).toHaveAccessibleName(internalName)
+
+  // This is the actual initial calendar route, without a view query.
+  await page.goto(`/dashboard/${slug}/calendar`)
+  const grid = page.getByTestId('stay-homes-grid')
+  await expect(grid).toBeVisible()
+  await waitForNuxtHydration(page)
+  await expect(page.getByRole('link', { name: 'Calendar', exact: true })).toBeVisible()
+  await expect(grid.locator(`[data-home="${productId}"]`)).toContainText(internalName)
+  expect(await grid.locator('[data-row-index] button').first().evaluate(element => element.getBoundingClientRect().height)).toBe(64)
+  await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-calendar-default.png') })
+
+  const created = await request.post(api('stays'), { data: { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 3, children: 0, infants: 0,
+    guest_name: 'Ana', guest_surname: 'Silva', guest_phone: '+66812345001', guest_email: `ana-${slug}@playwright.example`, total_minor: 300_00, idempotency_key: crypto.randomUUID() } })
+  await expectStatus(created, 201)
+  const { stay } = await created.json() as { stay: StayDetail }
+  expect(stay.request_id).toBeTruthy()
+  const questionText = 'Can you send the check-in instructions?'
+  const question = await request.post('/api/dev/inbound-whatsapp', { headers: devLoginHeaders(), data: {
+    organizationId, from: '+66812345001', body: questionText, messageId: crypto.randomUUID(),
+  } })
+  await expectStatus(question, 200)
+  const today = await request.get(api('today'))
+  await expectStatus(today, 200)
+  const todayTasks = (await today.json() as BusinessToday).tasks.flatMap(section => section.tasks)
+  const task = todayTasks.find(item => item.kind === 'guest_reply' && item.requestId === stay.request_id)!
+  expect(task).toMatchObject({
+    status: 'open',
+    stayId: stay.id,
+    action: { type: 'open', label: 'Reply', path: `/dashboard/${slug}/messages/${stay.request_id}` },
+    detail: questionText,
+    reservation: {
+      groupHeadline: 'Ana’s group of 3', homeName: internalName, statusLabel: 'Checking in · 3:00 PM',
+      conversation: { label: 'Reply', description: questionText, to: `/dashboard/${slug}/messages/${stay.request_id}` },
+    },
+  })
+  expect(task.can.edit).toBe(true)
+  await page.goto(`/dashboard/${slug}`)
+  const replyCard = page.locator(`[data-task-id="${task.id}"]`)
+  await expect(replyCard).toContainText('Ana’s group of 3')
+  await expect(replyCard.getByText(questionText, { exact: true })).toHaveCount(1)
+  await waitForNuxtHydration(page)
+  await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-today-reservation-task.png') })
+  const taskPath = `/api/organizations/${organizationId}/tasks/${task.id}`
+  const startsAt = new Date(Date.now() + 86_400_000).toISOString()
+  const scheduled = await request.patch(taskPath, { data: { expectedVersion: task.version, startsAt, dueAt: startsAt } })
+  await expectStatus(scheduled, 200)
+  expect((await scheduled.json() as { task: TaskView }).task).toMatchObject({ id: task.id, version: task.version + 1, startsAt, dueAt: startsAt, action: task.action })
+  const upcoming = await request.get(api('today?range=upcoming'))
+  await expectStatus(upcoming, 200)
+  const upcomingTasks = (await upcoming.json() as BusinessToday).tasks.flatMap(section => section.tasks)
+  expect(upcomingTasks.filter(item => item.stayId === stay.id).map(item => item.kind).sort()).toEqual(['guest_reply', 'turnover'])
+  expect(upcomingTasks.find(item => item.id === task.id)).toMatchObject({
+    version: task.version + 1, action: task.action, detail: task.detail, reservation: task.reservation,
+  })
+  expect(upcomingTasks.find(item => item.kind === 'turnover' && item.stayId === stay.id)).toMatchObject({
+    face: 'photo', action: { type: 'complete', label: 'Done' },
+  })
+  const remaining = await request.get(api('today?kind=guest_reply'))
+  await expectStatus(remaining, 200)
+  expect((await remaining.json() as BusinessToday).tasks.flatMap(section => section.tasks).some(item => item.id === task.id)).toBe(false)
+
+  await page.goto(`/dashboard/${slug}?range=upcoming`)
+  await waitForNuxtHydration(page)
+  await page.getByRole('button', { name: 'Filter tasks' }).click()
+  await page.getByRole('menuitemcheckbox', { name: 'Guest replies', exact: true }).click()
+  await expect(page).toHaveURL(url => url.searchParams.get('range') === 'upcoming' && url.searchParams.get('kind') === 'guest_reply')
+  await expect(page.locator('[data-task-kind="turnover"]')).toHaveCount(0)
+  await expect(replyCard).toContainText('Ana’s group of 3')
+  await expect(replyCard.getByText(questionText, { exact: true })).toHaveCount(1)
+  await waitForNuxtHydration(page)
+  await expect(page.getByRole('link', { name: 'Calendar', exact: true })).toBeVisible()
+  await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-upcoming-reservation-task.png') })
+  await replyCard.getByRole('link', { name: /^Reply/ }).click()
+  await expect(page).toHaveURL(url => url.pathname === `/dashboard/${slug}/messages/${stay.request_id}`)
+  await expect(page.getByText(internalName, { exact: true }).first()).toBeVisible()
+  await waitForNuxtHydration(page)
+  await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-messages-internal-name.png') })
+  const after = await call<{ product: Product }>('get_product', { product_id: productId })
+  expect(after.error).toBeNull()
+  expect(after.data!.product).toMatchObject({ name: publicTitle, stay: { internal_name: internalName } })
+  expect(after.data!.product.id).toBe(productId)
+
+  const boundaryTitle = publicTitle.padEnd(240, '!')
+  const maximum = await request.patch(api(`stay-homes/${productId}`), { data: { name: boundaryTitle } })
+  await expectStatus(maximum, 200)
+  const boundaryRead = await call<{ product: Product }>('get_product', { product_id: productId })
+  expect(boundaryRead.error).toBeNull()
+  expect(boundaryRead.data!.product).toMatchObject({ name: boundaryTitle, stay: { internal_name: internalName } })
+  const tooLong = await request.patch(api(`stay-homes/${productId}`), { data: { name: `${boundaryTitle}!` } })
+  await expectStatus(tooLong, 422)
+  const restored = await request.patch(api(`stay-homes/${productId}`), { data: { name: publicTitle } })
+  await expectStatus(restored, 200)
+
+  const unsetClocks = await request.patch(api(`stay-homes/${productId}`), { data: { check_in_time: null, check_out_time: null } })
+  await expectStatus(unsetClocks, 200)
+  const savedClocks = await call<{ product: Product }>('get_product', { product_id: productId })
+  expect(savedClocks.error).toBeNull()
+  expect(savedClocks.data!.product.stay).toMatchObject({ check_in_time: null, check_out_time: null })
+  await page.goto(`/dashboard/${slug}?range=upcoming&kind=guest_reply`)
+  await expect(replyCard.getByText('Checking in · Time not set', { exact: true })).toBeVisible()
+  await expect(replyCard.getByText(questionText, { exact: true })).toHaveCount(1)
+
+  const cancelled = await call<{ stay: StayDetail }>('cancel_stay', { stay_id: stay.id, expected_version: stay.version })
+  expect(cancelled.error).toBeNull()
+  expect(cancelled.data!.stay.status).toBe('cancelled')
+  const cancelledWork = await request.get(taskPath)
+  await expectStatus(cancelledWork, 200)
+  expect((await cancelledWork.json() as { task: TaskView }).task).toMatchObject({ id: task.id, action: task.action, reservation: { statusLabel: 'Cancelled' } })
+  const past = await request.post(api('stays'), { data: { product_id: productId, check_in_date: localDay(-5), check_out_date: localDay(-3), adults: 1, children: 0, infants: 0,
+    guest_name: 'Bo', guest_phone: '+66812345002', guest_email: `bo-${slug}@playwright.example`, total_minor: 100_00, idempotency_key: crypto.randomUUID() } })
+  await expectStatus(past, 201)
+  const pastStay = (await past.json() as { stay: StayDetail }).stay
+  const pastQuestion = await request.post('/api/dev/inbound-whatsapp', { headers: devLoginHeaders(), data: {
+    organizationId, from: '+66812345002', body: 'Can you send the receipt for my stay?', messageId: crypto.randomUUID(),
+  } })
+  await expectStatus(pastQuestion, 200)
+  const pastWork = await request.get(api('today'))
+  await expectStatus(pastWork, 200)
+  expect((await pastWork.json() as BusinessToday).tasks.flatMap(section => section.tasks).find(item => item.kind === 'guest_reply' && item.requestId === pastStay.request_id)?.reservation)
+    .toMatchObject({ homeName: internalName, groupHeadline: 'Bo', statusLabel: 'Stay ended' })
+})
+
+// A member responsible for a home reads turnover details while owners and
+// admins retain the guest's contact, money and conversation.
 test('a responsible home team reads its stays as turnovers on every surface until Better Auth removes its membership', async ({ page, browser, baseURL }) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Home responsibility uses disposable local data only')
@@ -316,7 +475,9 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   const checkIn = localDay(0)
   const checkOut = localDay(2)
   await page.goto(`/dashboard/${slug}`)
-  await page.getByRole('link', { name: 'Add stay', exact: true }).click()
+  await waitForNuxtHydration(page)
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Add stay', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'New stay', exact: true })).toBeVisible()
   await page.getByRole('combobox', { name: 'Home', exact: true }).click()
   await page.getByRole('option', { name: 'Cliff Cabin', exact: true }).click()
@@ -1011,7 +1172,7 @@ test('a host saves cancellation policies, guests, minimum nights and arrival tim
     await expectStatus(homes, 200)
     // The editor created the home without a nightly price, so it has no base price; its currency is the organization's.
     expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
-      product_id: productId, product_updated_at: settingsRead.data!.product.updated_at, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
+      product_id: productId, product_updated_at: settingsRead.data!.product.updated_at, name: 'Cliff Cabin', internal_name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
       // A home the editor creates has a flexible check-in end until the host chooses one.
       check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 6, min_nights: 1, calendar_rules: null, assigned_member_id: null, assigned_team_id: null, channel: null,
       check_in_instructions: null, photos: [], photo_rooms: [],
@@ -1297,7 +1458,7 @@ test('a host previews the saved guest page around an unsaved draft without recor
   const titlePath = `/dashboard/${slug}/products/${productId}/name?location_id=${encodeURIComponent(location.id)}`
   await page.goto(titlePath)
   const titlePanel = page.locator('#dashboard-panel-product-name')
-  const titleInput = titlePanel.getByRole('textbox', { name: 'Title', exact: true })
+  const titleInput = titlePanel.getByRole('textbox', { name: 'Listing title', exact: true })
   await expect(titleInput).toHaveValue('Cliff Cabin')
   await titleInput.fill('An unsaved cliff cabin title')
   const previewSource = page.url()
@@ -1967,7 +2128,7 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
     .toEqual(uploadedPhotos.map((photo, position) => ({ id: photo.id, position })))
   const projectedCalendar = await call<{ home: Record<string, unknown> }>('get_stay_calendar', { product_id: productId, from: checkIn, to: checkOut })
   expect(projectedCalendar.error).toBeNull()
-  expect(projectedCalendar.data!.home).toEqual({ product_id: productId, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null, check_in_time: '15:00', check_in_end_time: null, check_out_time: '11:00', max_guests: 4, min_nights: 2, calendar_rules: null, channel: null })
+  expect(projectedCalendar.data!.home).toEqual({ product_id: productId, name: 'Cliff Cabin', internal_name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null, check_in_time: '15:00', check_in_end_time: null, check_out_time: '11:00', max_guests: 4, min_nights: 2, calendar_rules: null, channel: null })
   await previewLink.click()
   await expect(previewModal).toBeVisible()
   await expect(preview.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
@@ -3948,7 +4109,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const guideRead = await call<{ home: Record<string, unknown> }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
       expect(guideRead.error).toBeNull()
       expect(validateCalendar(guideRead.data), JSON.stringify(validateCalendar.errors)).toBe(true)
-      expect(guideRead.data!.home).toEqual({ product_id: assignedHome.product_id, name: 'Assigned Cabin', location_id: assignedHome.location_id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: 320_000, base_price_tax_behavior: 'unspecified', check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 5, min_nights: 1, calendar_rules: null, channel: null })
+      expect(guideRead.data!.home).toEqual({ product_id: assignedHome.product_id, name: 'Assigned Cabin', internal_name: 'Assigned Cabin', location_id: assignedHome.location_id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: 320_000, base_price_tax_behavior: 'unspecified', check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 5, min_nights: 1, calendar_rules: null, channel: null })
       const guideSaved = await call<{ product_id: string; guide: { directions: string }; channel_push: unknown; airbnb_unsynced: unknown[] }>('update_stay_arrival_guide', { product_id: assignedHome.product_id, directions: guide.directions })
       expect(guideSaved.error).toBeNull()
       expect(validateArrival(guideSaved.data), JSON.stringify(validateArrival.errors)).toBe(true)

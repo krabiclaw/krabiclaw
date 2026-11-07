@@ -69,7 +69,7 @@ function days(from: string, to: string): string[] {
   return Array.from({ length }, (_, offset) => new Date(Date.parse(`${from}T00:00:00Z`) + offset * 86_400_000).toISOString().slice(0, 10))
 }
 function homeFields(home: StayHome): MigrationHome {
-  return { product_id: home.product_id, name: home.name, currency: home.currency, timezone: home.timezone, channel_connected: home.channel?.status === 'connected' }
+  return { product_id: home.product_id, name: home.internal_name, currency: home.currency, timezone: home.timezone, channel_connected: home.channel?.status === 'connected' }
 }
 async function migrationHomes(db: DbClient, access: StayAccess) {
   manager(access)
@@ -177,7 +177,7 @@ function validateBlocks(input: MigrationInput, homes: StayHome[]): string[] {
   const mapped = [...new Set([...Object.values(input.homes), ...input.blocks.map(block => block.product_id)])]
   for (const productId of mapped) {
     if (!homes.some(home => home.product_id === productId)) issues.push('A property match names a home outside this business')
-    else if (!input.blocks_reviewed.includes(productId)) issues.push(`Check manual blocked dates for ${homes.find(home => home.product_id === productId)!.name}`)
+    else if (!input.blocks_reviewed.includes(productId)) issues.push(`Check manual blocked dates for ${homes.find(home => home.product_id === productId)!.internal_name}`)
   }
   if (input.blocks_reviewed.some(id => !homes.some(home => home.product_id === id))) issues.push('Manual-block review names a home outside this business')
   return issues

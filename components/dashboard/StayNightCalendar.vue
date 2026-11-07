@@ -153,11 +153,11 @@ import { addLocalDays, formatCalendarDate, isValidCalendarDate, isValidTimezone 
 import { CHANNEL_MARKS, channelNote, isStayNight, stayNightSource, useStayNightEditor } from '~/composables/useStayNightEditor'
 import { getErrorMessage } from '~/utils/errors'
 
-type Home = Pick<StayHome, 'product_id' | 'name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'cancellation_policy' | 'long_term_cancellation_policy'>
+type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'cancellation_policy' | 'long_term_cancellation_policy'>
 // A manager reads each stay's surname and channel; a member's turnover has neither.
 type CalendarStay = Pick<StayTurnover, 'id' | 'product_id' | 'check_in_date' | 'check_out_date' | 'guest_name' | 'status'> & Partial<Pick<Stay, 'guest_surname' | 'channel'>>
 interface CalendarPayload { home: Home; nights: StayNight[]; stays: CalendarStay[]; channel_push?: SuccessfulChannelPush | null }
-const props = defineProps<{ productId: string; homes: Pick<StayHome, 'product_id' | 'name' | 'timezone'>[]; manage: boolean; homeError: string; offeringItems: { label: string; value: string }[]; offeringsError?: string }>()
+const props = defineProps<{ productId: string; homes: Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone'>[]; manage: boolean; homeError: string; offeringItems: { label: string; value: string }[]; offeringsError?: string }>()
 const route = useRoute()
 const level = useRouteLevel()
 const router = useRouter()
@@ -217,7 +217,7 @@ const nullableText = (value: unknown) => value === null || typeof value === 'str
 function isCalendar(value: unknown): value is CalendarPayload {
   if (!isRecord(value) || !isRecord(value.home) || !Array.isArray(value.nights) || !Array.isArray(value.stays)) return false
   const home = value.home
-  if (home.product_id !== props.productId || typeof home.name !== 'string' || typeof home.timezone !== 'string' || !isCurrencyCode(home.currency)
+  if (home.product_id !== props.productId || typeof home.name !== 'string' || typeof home.internal_name !== 'string' || typeof home.timezone !== 'string' || !isCurrencyCode(home.currency)
     || !nullableAmount(home.base_price_minor) || typeof home.min_nights !== 'number' || !nullableRule(home.min_nights, MAX_STAY_NIGHTS)
     || !(home.cancellation_policy === null || typeof home.cancellation_policy === 'string' && Object.hasOwn(STAY_CANCELLATION_POLICIES, home.cancellation_policy))
     || !(home.long_term_cancellation_policy === null || typeof home.long_term_cancellation_policy === 'string' && Object.hasOwn(STAY_LONG_TERM_CANCELLATION_POLICIES, home.long_term_cancellation_policy))) return false

@@ -211,8 +211,8 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
          AND NOT EXISTS (SELECT 1 FROM team_messages n WHERE n.thread_id = m.thread_id
            AND (n.created_at > m.created_at OR (n.created_at = m.created_at AND n.id > m.id)))`, [access.memberId, access.organizationId, ids]),
     stayIds.length ? queryAll<{ id: string; product_id: string; home_name: string; check_in_date: string; check_out_date: string; status: TeamStaySummary['status'] }>(db, `
-      SELECT s.id, s.product_id, p.name AS home_name, s.check_in_date, s.check_out_date, s.status FROM stays s
-        JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
+      SELECT s.id, s.product_id, p.internal_name AS home_name, s.check_in_date, s.check_out_date, s.status FROM stays s
+        JOIN product_stay_configs p ON p.organization_id = s.organization_id AND p.product_id = s.product_id
        WHERE s.organization_id = ? AND s.id IN (SELECT value FROM json_each(?))`, [access.organizationId, d1JsonStringSet(stayIds)]) : [],
     locationIds.length ? queryAll<{ id: string; title: string; slug: string; timezone: string }>(db, `
       SELECT id, title, slug, timezone FROM business_locations

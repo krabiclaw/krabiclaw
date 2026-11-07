@@ -61,7 +61,7 @@
               <div role="rowheader" class="sticky left-0 z-20 flex min-w-0 items-center gap-2 border-b border-r border-default bg-default px-2 py-1 sm:px-3 sm:py-2" :class="selectedRow(row.id) ? 'shadow-[inset_3px_0_0_var(--ui-primary)]' : undefined">
                 <UCheckbox v-if="selection" :model-value="selectedRow(row.id)" :aria-label="`Include ${row.name}`" :disabled="editor.busy.value" @update:model-value="includeRow(row.id, Boolean($event))" />
                 <NuxtLink :to="row.to" class="flex min-w-0 flex-col hover:underline" :data-home="row.home?.product_id" :data-place="row.place ? `${row.place.kind}:${row.place.id}` : undefined">
-                  <span class="truncate text-sm font-medium text-highlighted">{{ row.name }}</span>
+                  <span class="line-clamp-2 text-sm font-medium text-highlighted">{{ row.name }}</span>
                   <span class="hidden truncate text-xs text-muted sm:block">{{ row.detail }}</span>
                 </NuxtLink>
               </div>
@@ -74,7 +74,7 @@
                   :aria-selected="inSelection(rowIndex, index)"
                   :aria-label="cell.title"
                   :tabindex="cursor.row === rowIndex && cursor.day === index ? 0 : -1"
-                  class="relative flex h-7 flex-col justify-end border-r border-default px-1.5 py-1 text-left text-xs leading-4 tabular-nums sm:h-14 outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-inverted"
+                  class="relative flex h-16 flex-col justify-end border-r border-default px-1.5 py-1 text-left text-xs leading-4 tabular-nums sm:h-18 outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-inverted"
                   :class="[cell.open ? 'bg-default text-highlighted' : 'bg-elevated/60 text-muted', inSelection(rowIndex, index) && !chosenWeekday(cell.date) ? 'text-dimmed' : '']"
                   :style="{ gridRow: 1, gridColumn: index + 1 }"
                   :title="cell.title"
@@ -161,7 +161,7 @@ import { getErrorMessage } from '~/utils/errors'
 import { CHANNEL_MARKS, channelNote, isBookedNight, isPlaceDay, isStayNight, nightWeekday, placeDaySource, stayNightSource, useStayNightEditor } from '~/composables/useStayNightEditor'
 import StayNightInspector from './StayNightInspector.vue'
 
-type Home = Pick<StayHome, 'product_id' | 'name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'address'>
+type Home = Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'calendar_rules' | 'address'>
 // A manager reads each stay's surname and channel; a member's turnover has neither.
 type GridStay = Pick<StayTurnover, 'id' | 'product_id' | 'guest_name' | 'adults' | 'children' | 'check_in_date' | 'check_out_date'> & Partial<Pick<Stay, 'guest_surname' | 'channel'>>
 interface HomesPayload { from: string; to: string; homes: { home: Home; nights: StayNight[] }[]; stays: GridStay[]; manage: boolean }
@@ -286,7 +286,7 @@ const matches = (name: string, detail: string) => !appliedSearch.value || `${nam
 const homeRows = computed<GridRow[]>(() => {
   const stays = new Map((homesData.value?.stays ?? []).map(stay => [stay.id, stay]))
   return (homesData.value?.homes ?? [])
-    .filter(entry => (city.value === ALL_CITIES || (cityOf(entry.home) ?? NO_CITY) === city.value) && matches(entry.home.name, addressOf(entry.home)) && (!freeOnly.value || !entry.nights.some(isBookedNight)))
+    .filter(entry => (city.value === ALL_CITIES || (cityOf(entry.home) ?? NO_CITY) === city.value) && matches(entry.home.internal_name, addressOf(entry.home)) && (!freeOnly.value || !entry.nights.some(isBookedNight)))
     .map(({ home, nights }) => {
       const bars: GridBar[] = []
       nights.forEach((night, index) => {
@@ -310,7 +310,7 @@ const homeRows = computed<GridRow[]>(() => {
         date: night.date, open: night.available, held: isBookedNight(night), strike: night.closed, mark: channelState(night),
         label: !isBookedNight(night) || night.held_until ? freeLabel(home, night) : '', title: nightTitle(home, night, gaps.get(index)?.text),
       }))
-      return { id: home.product_id, name: home.name, detail: addressOf(home), to: homeTo(home.product_id), cells, bars, gaps, home, nights }
+      return { id: home.product_id, name: home.internal_name, detail: addressOf(home), to: homeTo(home.product_id), cells, bars, gaps, home, nights }
     })
 })
 // A place's day: its reservations or booked sessions as a bar that opens the day; what is free, blocked or closed in the cell.
@@ -361,7 +361,7 @@ const channelState = (night: StayNight) => night.channel?.state === 'pending' ||
 function nightTitle(home: Home, night: StayNight, gap?: string) {
   const state = night.stay_id ? 'Booked' : night.held_until ? 'Checkout hold' : night.calendar ? `Unavailable from ${STAY_CHANNEL_LABELS[night.calendar]}` : night.closed ? 'Blocked' : 'Available'
   const note = channelNote(night)
-  return `${home.name} · ${formatCalendarDate(night.date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })} · ${state} · ${price(home, night)}${gap ? ` · ${gap}` : ''}${note ? ` · ${note}` : night.channel?.state === 'pushed' ? ' · On Airbnb' : ''}`
+  return `${home.internal_name} · ${formatCalendarDate(night.date, 'en', { weekday: 'short', month: 'short', day: 'numeric' })} · ${state} · ${price(home, night)}${gap ? ` · ${gap}` : ''}${note ? ` · ${note}` : night.channel?.state === 'pushed' ? ' · On Airbnb' : ''}`
 }
 function homeTo(productId: string, date?: string) {
   return { path: `/dashboard/${orgSlug}/calendar`, query: { product_id: productId, ...(date ? { month: date.slice(0, 7), date } : {}) } }
@@ -507,7 +507,7 @@ const selectionLabel = computed(() => {
   return `${formatCalendarDate(first, 'en', options)}${first === last ? '' : ` – ${formatCalendarDate(last, 'en', options)}`}`
 })
 const countLabel = (count: number) => `${count} ${count === 1 ? words.unit : words.units}`
-const scopeLabel = computed(() => `${targets.value.length === 1 ? targets.value[0]!.home.name : `${targets.value.length} ${words.rows}`} · ${countLabel(dayCount.value)}`)
+const scopeLabel = computed(() => `${targets.value.length === 1 ? ('internal_name' in targets.value[0]!.home ? targets.value[0]!.home.internal_name : targets.value[0]!.home.name) : `${targets.value.length} ${words.rows}`} · ${countLabel(dayCount.value)}`)
 /** What blocks the one selected row's days: a minimum's gap at a home (its action selects the run), or the hours at a place (its action opens them). */
 const blocker = computed(() => {
   if (!span.value || selectedRows.value.length !== 1) return null

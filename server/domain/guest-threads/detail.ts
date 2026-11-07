@@ -47,8 +47,8 @@ export async function getGuestThreadDetail(
   const [entryRows, deliveryRows, channelThread, answers] = await Promise.all([
     listThreadEntries(db, threadId),
     listThreadDeliveries(db, threadId),
-    queryFirst(db, `SELECT request_id FROM channel_threads WHERE organization_id = ? AND request_id = ?
-      UNION ALL SELECT request_id FROM stays WHERE organization_id = ? AND request_id = ? AND owner = 'channel' LIMIT 1`, [organizationId, threadId, organizationId, threadId]),
+    queryFirst<{ request_id: string; product_id: string | null }>(db, `SELECT request_id, product_id FROM channel_threads WHERE organization_id = ? AND request_id = ?
+      UNION ALL SELECT request_id, product_id FROM stays WHERE organization_id = ? AND request_id = ? AND owner = 'channel' LIMIT 1`, [organizationId, threadId, organizationId, threadId]),
     threadAnswers(db, thread),
   ])
 
@@ -121,6 +121,11 @@ export async function getGuestThreadDetail(
   })
 
   const summary = await requestSummary(db, thread, record)
+  if (!audience) {
+    const home = record?.kind === 'stay' ? { internal_name: record.product_internal_name } : channelThread?.product_id
+      ? await queryFirst<{ internal_name: string }>(db, 'SELECT internal_name FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, channelThread.product_id]) : null
+    if (home) { summary.productTitle = home.internal_name; summary.locationTitle = home.internal_name }
+  }
   // A member's unread alerts keep an ended conversation in Current for them; a guest's inbox reads no member alerts.
   const mailbox = resolveGuestThreadMailbox(thread, record, now, await readMailboxActivity(db, thread.id, audience ? null : viewerUserId ?? null), audience?'buyer':'member')
 
