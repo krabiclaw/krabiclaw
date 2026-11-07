@@ -33,7 +33,7 @@ import {
 } from '~/server/utils/content/documents'
 import { prepareTenantBlogContentBlocks } from '~/server/utils/content/publishing'
 import { executeBatch, queryFirst } from '~/server/db'
-import { resolvePublicSite } from '~/utils/site-routing'
+import { hasPublicLocationPages, isPublicLocationPath, resolvePublicSite } from '~/utils/site-routing'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { renderStructuredResponse } from '~/server/utils/mcp-render'
@@ -444,7 +444,7 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
         if (!organizationSite) throw new HTTPError({ statusCode: 404, message: 'Organization not found' });
         const site = resolvePublicSite({ themeId: organizationSite.theme_id });
         const paths = new Set([...site.sitemap.exactPaths, ...Object.values(site.pageDocuments.recipes)]);
-        const built_in_pages = [...paths].map(path => ({ path, recipe: Object.entries(site.pageDocuments.recipes).find(([, value]) => value === path)?.[0] ?? null, public_url: organization.publicUrl ? new URL(path, organization.publicUrl).toString() : null }));
+        const built_in_pages = [...paths].filter(path => !isPublicLocationPath(path) || hasPublicLocationPages(organizationSite.vertical)).map(path => ({ path, recipe: Object.entries(site.pageDocuments.recipes).find(([, value]) => value === path)?.[0] ?? null, public_url: organization.publicUrl ? new URL(path, organization.publicUrl).toString() : null }));
         return { built_in_pages, pages: page.items.map(row => ({ ...row, admin_edit_url: pageEditUrl(organization.organizationSlug, row) })), page_info: page.page_info };
       } catch (error) {
         return rethrowAsInvalidParams(error);

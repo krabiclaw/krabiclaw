@@ -67,7 +67,7 @@ import { catalogNavigation, publicLocationPath } from '~/utils/product-presentat
 import { getActiveSpecialClosure } from '~/utils/formatters'
 import { getTodayHoursLabel, type OpeningHours, type SpecialHours } from '~/shared/reservation-hours'
 import { formatPostalAddress, type PostalAddress } from '~/utils/postal-address'
-import { isLegalPractice } from '~/utils/site-routing'
+import { hasPublicLocationPages, isLegalPractice } from '~/utils/site-routing'
 
 const props = withDefaults(defineProps<{
   organization: ApiRecord | null
@@ -141,7 +141,7 @@ const footerGroups = computed(() => [
   { label: t('site.footer.legal'), items: linksFor(['/third-party-notices', '/policies/privacy', '/policies/terms', '/policies/acceptable-use']) },
 ].filter(group => group.items.length))
 
-const venueLocations = computed(() => (props.locations || []).filter(location => !location.home_slug))
+const venueLocations = computed(() => hasPublicLocationPages(props.organization?.vertical as string | undefined) ? props.locations : [])
 
 const formattedLocations = computed(() =>
   venueLocations.value.map((loc: ApiRecord) => {
@@ -161,6 +161,6 @@ function formatLocAddress(loc: ApiRecord): string {
 
 // A legal practice's offices are on its contact page; a venue's on their own pages.
 function locationLink(loc: ApiRecord): string {
-  return legalPractice.value ? '/contact' : publicLocationPath(loc as { slug: string, home_slug?: string | null })
+  return legalPractice.value ? '/contact' : publicLocationPath(loc as { slug: string })
 }
 </script>

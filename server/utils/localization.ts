@@ -28,7 +28,7 @@ import { STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, parseStayAmenityAnswers }
 import { isRecord } from '~/server/utils/type-guards'
 import { PUBLIC_LOCATION_SECTIONS, type PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
-import { isLegalPracticeSite } from '~/utils/site-routing'
+import { hasPublicLocationPages, isLegalPracticeSite, isPublicLocationPath } from '~/utils/site-routing'
 import { sanitizeAdditionalNotesHtml } from '~/server/utils/reservations'
 
 
@@ -253,7 +253,9 @@ function canonicalResourceQuery(resourceType: LocalizedResourceType, scope: 'one
   const { table, tenantScope } = RESOURCE_LOCALIZATION_REGISTRY[resourceType]
   const one = scope === 'one'
   if (tenantScope === 'self') return `SELECT id, theme_id, vertical FROM ${table} WHERE id = ?${one ? ' AND id = ?' : ''}`
-  return `SELECT id${resourceType === 'product' ? ', kind' : resourceType === 'business_location' ? ', slug' : ''} FROM ${table} WHERE organization_id = ?${one ? ' AND id = ?' : ''}`
+  if (resourceType === 'business_location') return `SELECT l.id, l.slug, o.vertical FROM ${table} l
+    JOIN organization o ON o.id = l.organization_id WHERE l.organization_id = ?${one ? ' AND l.id = ?' : ''}`
+  return `SELECT id${resourceType === 'product' ? ', kind' : ''} FROM ${table} WHERE organization_id = ?${one ? ' AND id = ?' : ''}`
 }
 
 async function assertCanonicalResourceExists(
@@ -344,7 +346,8 @@ export async function resolveLocalizedPublicRoute(
   }
   const { listPublicLocaleRepresentations, listPublicResourceLocaleRepresentations } = await import('~/server/utils/public-locale-representations')
 
-  const siteProduct = parseSiteProductPath(routePath.slice(locale.length + 1))
+  const sourcePath = routePath.slice(locale.length + 1)
+  const siteProduct = parseSiteProductPath(sourcePath)
   if (siteProduct) {
     // Site-wide experiences and homes use the same published offer as their public page.
     const { loadPublicSiteProductDetail } = await import('~/server/utils/public-products')
@@ -364,8 +367,11 @@ export async function resolveLocalizedPublicRoute(
   // route is read the way its English route is: by its segments. Nothing is
   // stored to match against, which is what lets one Product answer at every
   // location it is offered at.
-  const productRoute = parseProductRouteSegments(routePath.slice(locale.length + 1),
-    await getOrganizationVertical(db, organizationId))
+  const vertical = await getOrganizationVertical(db, organizationId)
+  if (!hasPublicLocationPages(vertical) && isPublicLocationPath(sourcePath)) {
+    localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Localized route was not found', { locale, route_path: routePath })
+  }
+  const productRoute = parseProductRouteSegments(sourcePath, vertical)
   if (productRoute) {
     const product = await findPublishedProductAtRoute(db, organizationId, productRoute)
     if (!product) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Localized route was not found', { locale, route_path: routePath })
@@ -393,7 +399,7 @@ export async function resolveLocalizedPublicRoute(
 
   // A location's section uses its location's saved representation, just as
   // the public page loader does. The section has no separate translation row.
-  const locationChild = /^\/locations\/([^/]+)\/([^/]+)$/.exec(routePath.slice(locale.length + 1))
+  const locationChild = /^\/locations\/([^/]+)\/([^/]+)$/.exec(sourcePath)
   if (locationChild) {
     const section = PUBLIC_LOCATION_SECTIONS.find(value => value === locationChild[2])
     if (!section && locationChild[2] !== 'contact') localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Localized route was not found', { locale, route_path: routePath })
@@ -459,7 +465,7 @@ export async function resolveLocalizedPublicRoute(
       },
     }
   }
-  const documentPath = routePath.slice(locale.length + 1) || '/'
+  const documentPath = sourcePath || '/'
   const document = await queryFirst<{ id: string; root_id: string; kind: ContentDocumentKind }>(db, `
     SELECT d.id, d.root_id, d.kind FROM content_documents d JOIN content_documents root ON root.id = d.root_id
      WHERE d.organization_id = ?  AND d.locale = ? AND d.path = ?
@@ -573,7 +579,7 @@ export async function putResourceLocalization(
      WHERE organization_id = ?  AND resource_type = ? AND resource_id = ? AND locale = ?
      LIMIT 1
   `, [input.organizationId, resourceType, input.resourceId, locale])
-  const routePath = validateLocalizedRoutePath(resourceType, locale, input.routePath, canonical.slug, existing?.route_path)
+  const routePath = validateLocalizedRoutePath(resourceType, locale, input.routePath, canonical.slug, existing?.route_path, canonical.vertical)
   const id = existing?.id ?? crypto.randomUUID()
   const now = new Date().toISOString()
   const statements: BatchQuery[] = resourceLocalizationWriteQueries({
@@ -870,7 +876,7 @@ export async function replaceResourceLocalizations(
       resourceId: item.resourceId,
       values: validateLocalizedValues(resourceType, item.values, resource.kind,
         status === 'published' && resourceType === 'organization' ? { publishedLegalPractice: isLegalPracticeSite({ themeId: resource.theme_id, vertical: resource.vertical }) } : undefined),
-      routePath: validateLocalizedRoutePath(resourceType, locale, item.routePath, resource.slug, byResource.get(item.resourceId)?.route_path),
+      routePath: validateLocalizedRoutePath(resourceType, locale, item.routePath, resource.slug, byResource.get(item.resourceId)?.route_path, resource.vertical),
     }
   })
   for (const item of validated) await sanitizeLocalizedNotes(resourceType, item.values)

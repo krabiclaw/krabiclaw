@@ -127,13 +127,12 @@ test('homes are their own surface, counted apart from products', () => {
   assert.equal(isCatalogSurface('lodging', 'stays'), true)
 })
 
-test('a home is named by its own slug, and a location that is one home is that home', () => {
+test('a home is named by its own slug, separately from a business branch', () => {
   assert.deepEqual(parseSiteProductPath('/stays/ocean-studio'), { surface: 'stays', slug: 'ocean-studio' })
   assert.deepEqual(parseSiteProductPath('/experiences/pizza%20class'), { surface: 'experiences', slug: 'pizza class' })
   assert.equal(parseSiteProductPath('/locations/beach/products/ocean-studio'), null)
   assert.equal(parseSiteProductPath('/stays/%E0%A4%A'), null)
-  assert.equal(publicLocationPath({ slug: 'beach', home_slug: 'ocean-studio' }), '/stays/ocean-studio')
-  assert.equal(publicLocationPath({ slug: 'beach', home_slug: null }), '/locations/beach')
+  assert.equal(publicLocationPath({ slug: 'beach' }), '/locations/beach')
   assert.equal(locationSurfacePath('beach', 'stays'), '/stays')
   assert.equal(locationSurfacePath('beach', 'menu'), '/locations/beach/menu')
 })

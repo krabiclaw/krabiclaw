@@ -94,6 +94,24 @@ for (const [name, baseURL] of [['Strut', strutBaseURL], ['NCLS', blawbyBaseURL]]
   test(`${name} home → blog → article uses the shared navigation`, async ({ page }) => {
     test.skip(name === 'Strut' && new URL(testBaseUrl()).hostname !== 'krabiclaw.com', 'Strut is a production-only tenant; staging has no Strut organization.')
     expect((await openTenantPage(page, `${baseURL}/`, {}))?.status()).toBe(200)
+    if (name === 'Strut') {
+      await expect(page.locator('header a[href^="/locations"], footer a[href^="/locations"]')).toHaveCount(0)
+      const homes = await openTenantPage(page, `${baseURL}/stays`, {})
+      expect(homes?.status()).toBe(200)
+      const homeCard = page.locator('main article a[href="/stays/43a-a-great-find-heart-of-capitol-hill-2-bedroom-2"]')
+      await expect(homeCard).toContainText(/99(?:\.00)?/)
+      await expect(homeCard).not.toContainText('Unavailable')
+      for (const path of ['/locations', '/locations/43a-a-great-find-heart-of-capitol-hill-2-bedroom-2', '/api/public/locations']) {
+        const removed = await page.request.get(`${baseURL}${path}`)
+        expect(removed.status(), await removed.text()).toBe(404)
+      }
+      const sitemap = await page.request.get(`${baseURL}/sitemap.xml`)
+      expect(sitemap.status(), await sitemap.text()).toBe(200)
+      const xml = await sitemap.text()
+      expect(xml).toContain('/stays/43a-a-great-find-heart-of-capitol-hill-2-bedroom-2')
+      expect(xml).not.toContain('/locations')
+      expect((await openTenantPage(page, `${baseURL}/`, {}))?.status()).toBe(200)
+    }
     const consent = page.locator('.consent-notice')
     if (await consent.isVisible()) {
       await consent.getByRole('button', { name: 'Reject', exact: true }).click()

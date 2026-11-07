@@ -1,3 +1,4 @@
+import { hasPublicLocationPages } from '~/utils/site-routing'
 // Get public business locations for a site
 import { defineHandler } from 'nitro'
 import { queryAll, queryFirst } from '~/server/db'
@@ -15,6 +16,7 @@ interface JsonObject {
 interface OrganizationRow {
   id: string
   status: 'active'
+  vertical: string
 }
 
 interface LocationRow extends PublicLocationPrivacySource {
@@ -57,12 +59,12 @@ export default defineHandler(async (event) => {
 
   try {
     const organization = await queryFirst<OrganizationRow>(db, `
-      SELECT id, status FROM organization
+      SELECT id, status, vertical FROM organization
       WHERE id = ? AND status = 'active'
       LIMIT 1
     `, [organizationId])
 
-    if (!organization) {
+    if (!organization || !hasPublicLocationPages(organization.vertical)) {
       return jsonResponse({
         error: 'Organization not found or inactive'
       }, { status: 404 })

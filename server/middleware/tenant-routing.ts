@@ -5,6 +5,8 @@ import { redirect } from 'nitro/h3'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { isTenantOnlySeoPath } from '~/server/utils/seo-policy'
 import { platformHostname } from '~/server/utils/domains'
+import { hasPublicLocationPages, isPublicLocationPath } from '~/utils/site-routing'
+import { splitLocalePrefix } from '~/utils/tenant-locale-path'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
 
 export default defineHandler((event) => {
@@ -14,7 +16,15 @@ export default defineHandler((event) => {
     if (isTenantOnlySeoPath(pathname)) throw new HTTPError({ statusCode: 404, statusMessage: 'Page not found' })
     return
   }
-  if (tenantType !== TENANT_TYPES.TENANT || event.context.previewAuthorized === true) return
+  if (tenantType !== TENANT_TYPES.TENANT) return
+  const organization = event.context.organization as { vertical?: string | null } | undefined
+  const { sourcePath } = splitLocalePrefix(pathname)
+  if (!hasPublicLocationPages(organization?.vertical)
+    && (isPublicLocationPath(sourcePath)
+      || pathname === '/api/public/locations' || pathname.startsWith('/api/public/locations/'))) {
+    throw new HTTPError({ statusCode: 404, statusMessage: 'Page not found' })
+  }
+  if (event.context.previewAuthorized === true) return
 
   const freeDomain = platformHostname(cloudflareEnv(event))
   if (canonicalDomain && !String(canonicalDomain).endsWith(`.${freeDomain}`)

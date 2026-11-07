@@ -33,7 +33,7 @@ const calendarMutation = { ...locationMutation, properties: { ...locationMutatio
 export const LOCATIONS_TOOLS: McpToolDefinition[] = [
   organizationTool({
       name: 'create_location',
-      description: 'Add an active business branch or office. Locations are not billed. It becomes public unless the website has published homes and this location has no published offering. Set hours with update_location; create homes with create_product.',
+      description: 'Add an active business branch or office. Locations are not billed. Lodging publishes homes at /stays and has no public location pages. Create homes with create_product; their address records stay part of the home. Set branch hours with update_location.',
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {

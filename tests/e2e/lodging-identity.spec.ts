@@ -703,16 +703,7 @@ test.describe('lodging identity boundary', () => {
     const home = await api.get('/', { headers: { 'x-preview-tenant': slug } })
     expect(home.status).toBe(200)
     expect(await home.text()).toContain(name)
-    // The seeded location is described as a lodging business and offers no
-    // availability call to action.
-    const location = await api.get('/locations/main', { headers: { 'x-preview-tenant': slug } })
-    expect(location.status).toBe(200)
-    const locationHtml = await location.text()
-    expect(locationHtml).toContain('"LodgingBusiness"')
-    // The rendered page has no such control; the platform message catalog the shell
-    // payload carries also holds the words, as data, so only element text is checked.
-    expect(locationHtml).not.toMatch(/>\s*Check availability\s*</)
-    // Its location takes no table reservations, so the site has no reservations page.
+    // A lodging site takes no table reservations.
     expect((await api.get('/reservations', { headers: { 'x-preview-tenant': slug } })).status).toBe(404)
 
     // Everything it holds lives in KrabiClaw, so its owner deletes it outright.

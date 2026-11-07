@@ -104,6 +104,7 @@ import { createTenantPageEditorData, validateTenantPageBlock } from '~/utils/ten
 const props = defineProps<{ organizationId: string; pageId: string; blockId: string }>()
 
 const level = useRouteLevel()
+const { organization } = useDashboardOrganization()
 const { error, draft, dirty, revert, commit } = useTenantPageDraft(props.organizationId, props.pageId)
 // The page level reads the page and reports when it could not, as a missing
 // page or as the failure this level and its leaves show.
@@ -139,13 +140,13 @@ watchEffect(() => {
 })
 
 const typeOptions = computed(() => Object.values(TENANT_PAGE_BLOCK_REGISTRY)
-  .filter(definition => isTenantPageBlockAllowed(definition, draft.value.recipe, draft.value.page_type))
+  .filter(definition => isTenantPageBlockAllowed(definition, draft.value.recipe, draft.value.page_type, organization.value?.vertical))
   .map(definition => ({ label: definition.label, value: definition.type, icon: definition.icon })))
 const newType = computed(() => newBlock.value?.type)
 
 function chooseType(value: unknown) {
   const type = String(value) as TenantPageBlockType
-  if (!isTenantPageBlockAllowed(type, draft.value.recipe, draft.value.page_type)) return
+  if (!isTenantPageBlockAllowed(type, draft.value.recipe, draft.value.page_type, organization.value?.vertical)) return
   newBlock.value = createTenantPageBlock(type, createTenantPageEditorData(type), draft.value.blocks.length)
 }
 

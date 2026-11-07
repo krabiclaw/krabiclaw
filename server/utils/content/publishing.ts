@@ -29,7 +29,7 @@ import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { normalizeBlogSlug } from '~/utils/blog-editor'
 import { creationDedupeKey, creationRequestHash, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { mcpPageInfo, type McpPageInfo } from '~/server/utils/mcp-pagination'
-import { resolvePublicSite } from '~/utils/site-routing'
+import { hasPublicLocationPages, resolvePublicSite } from '~/utils/site-routing'
 import { getConfig } from '~/server/utils/organization-config'
 import { resolveSitePalette } from '~/shared/site-palette'
 import { buildSingleMediaPlacementQueries, hydrateMediaPlacementRefs, insertInitialMediaPlacements } from '~/server/utils/media-asset-manager'
@@ -190,11 +190,18 @@ export async function loadOrganizationSite(db: DbClient, organizationId: string)
 
 type NormalizedEditorBlock = ContentBlockInput & { id: string; placement_media: Array<{ asset_id: string; slot: string }> }
 
+export async function assertLocationGridSupported(db: DbClient, organizationId: string, blocks: readonly { type: string }[]) {
+  if (blocks.some(block => block?.type === 'location_grid') && !hasPublicLocationPages((await loadOrganizationSite(db, organizationId)).vertical)) {
+    badRequest('Lodging pages list homes with a product grid; location pages are not available')
+  }
+}
+
 async function normalizeEditorContentBlocks(
   db: D1Database,
   blocks: Array<ContentBlockInput & { id?: string }>,
   scope: { organizationId: string },
 ): Promise<NormalizedEditorBlock[]> {
+  await assertLocationGridSupported(db, scope.organizationId, blocks)
   return await Promise.all(blocks.map(async (block): Promise<NormalizedEditorBlock> => {
     if (!block || typeof block !== 'object' || !block.data || typeof block.data !== 'object' || Array.isArray(block.data)) badRequest('Every content block requires an object data payload')
     if (block.type === 'heading' && (typeof block.data.text !== 'string' || !block.data.text.trim())) badRequest('Heading blocks require non-empty data.text')

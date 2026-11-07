@@ -8,7 +8,7 @@ import { PUBLIC_LOCATION_SECTIONS, PUBLIC_SITE_SECTIONS, type PublicLocationSect
 import { listOrganizationProducts, PUBLIC_PRODUCT_SQL } from '~/server/utils/product-management'
 import type { Product } from '~/server/types/products'
 import { productSurfaceOf } from '~/utils/product-presentation'
-import { publicLocationHomeSlugSql, publicLocationSql } from '~/server/utils/public-locations'
+import { publicLocationSql } from '~/server/utils/public-locations'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode } from '~/shared/currencies'
 import { parsePostalAddress } from '~/utils/postal-address'
@@ -126,8 +126,7 @@ export function appendPublicShellQueries(
                      bl.last_synced_at, bl.seo_title, bl.seo_description,
                      bl.canonical_url,
                      EXISTS (SELECT 1 FROM location_reservation_configs c
-                              WHERE c.organization_id = bl.organization_id AND c.location_id = bl.id) AS has_reservations,
-                     ${publicLocationHomeSlugSql('bl')} AS home_slug
+                              WHERE c.organization_id = bl.organization_id AND c.location_id = bl.id) AS has_reservations
                 FROM business_locations bl
                WHERE bl.organization_id = ? AND ${publicLocationSql('bl')}
                ORDER BY bl.title ASC`, [organizationId]),
@@ -210,7 +209,6 @@ export async function buildPublicShellPayload(
       seo_title: location.seo_title ?? null,
       seo_description: location.seo_description ?? null,
       canonical_url: location.canonical_url ?? null,
-      home_slug: typeof location.home_slug === 'string' ? location.home_slug : null,
       sections: sections.location(String(location.id)),
     }
   })
