@@ -1191,7 +1191,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       return `${price}${(experienceEditor.value || legalEditor.value) && !variant.active ? ' · Unavailable' : ''}`
     }).join('\n') || 'No price set'
     if (experienceEditor.value || legalEditor.value) {
-      const detailKeys = experienceEditor.value || row.booking ? ['meeting_point', 'included_items', 'what_to_bring', 'preparation', 'cancellation_policy'] : []
+      const detailKeys = experienceEditor.value || row.booking ? ['meeting_point', 'included_items', 'what_to_bring', 'preparation'] : []
       const fields = productDetailFields(row.kind)
       const details = fields.filter(field => detailKeys.includes(field.key)).map(field => ({
         id: field.key, label: field.name, icon: field.icon, summary: detailSummary(field.key), placeholder: row.details[field.key] === undefined, to: sectionPath(`attributes/${field.id}`),

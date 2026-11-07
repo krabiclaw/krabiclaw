@@ -8,7 +8,7 @@ import { measurementOutcome, readPageEventId, recordOrganizationConversionEvent 
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import { toE164 } from '~/utils/phone'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
-import { productPolicySummarySource, renderBookingPolicySummary } from '~/server/utils/reservations'
+import { renderBookingPolicySummary, visitPolicySummarySource } from '~/server/utils/reservations'
 import { getProduct, resolveVariantPrice } from '~/server/utils/product-management'
 import { isCurrencyCode } from '~/shared/currencies'
 import { getSourceLocale } from '~/server/utils/organization-locales'
@@ -392,7 +392,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   return creationResult({
     success: true, booking_id: threadId, request_id: threadId, operational_booking_id: operationalBookingId, status: record.status, replayed: false, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, presentation, ...(operator ? {} : { cancellation_token: cancellation.token, quoted_value: quotedValueOf(followUps[1]!), measurement }),
     message: record.status === 'cancelled' ? 'This booking was cancelled.' : record.status === 'pending' ? `Your request for ${record.product_name} on ${whenLabel} is awaiting review.` : `Your ${presentation.noun} for ${record.product_name} on ${whenLabel} is confirmed.`,
-    policy_summary: renderBookingPolicySummary(productPolicySummarySource(full.details), locale, full.kind),
+    policy_summary: renderBookingPolicySummary(visitPolicySummarySource('experience'), locale, full.kind),
   }, { status: 201 })
 }
 

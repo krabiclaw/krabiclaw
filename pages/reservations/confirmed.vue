@@ -16,7 +16,6 @@
       :receipt-rows="receiptRows"
       :next-steps-kicker="resolvedPolicySummary?.heading ?? resCopy.reservationPoliciesHeading"
       :next-steps="policyLines"
-      :next-steps-notes-html="resolvedPolicySummary?.additional_notes_html ?? ''"
       :cta-label="resCopy.reservationExploreLabel"
       :cta-to="menuCtaTo"
       :guest-email="confirmation.guestEmail"

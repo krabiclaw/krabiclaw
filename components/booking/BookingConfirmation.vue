@@ -33,7 +33,7 @@
       </section>
 
       <!-- What happens next: the stated terms, when the business stated any. -->
-      <section v-if="nextSteps.length || nextStepsNotesHtml" class="mt-10 border-t border-default pt-8">
+      <section v-if="nextSteps.length" class="mt-10 border-t border-default pt-8">
         <h3 class="text-lg font-semibold text-default">{{ nextStepsKicker }}</h3>
         <ol v-if="nextStepsStyle === 'numbered'" class="m-0 mt-5 flex list-none flex-col gap-4 p-0">
           <li v-for="(step, i) in nextSteps" :key="i" class="flex gap-4 text-sm leading-relaxed text-muted">
@@ -43,10 +43,6 @@
         </ol>
         <div v-else class="mt-4 flex flex-col gap-3 text-sm leading-relaxed text-muted">
           <p v-for="(step, i) in nextSteps" :key="i" class="m-0">{{ step }}</p>
-        </div>
-        <div v-if="nextStepsNotesHtml" class="mt-5 text-sm leading-relaxed text-muted">
-          <!-- eslint-disable-next-line vue/no-v-html -->
-          <div v-html="nextStepsNotesHtml" />
         </div>
       </section>
 
@@ -75,7 +71,6 @@ withDefaults(defineProps<{
   nextStepsKicker: string
   nextSteps: string[]
   nextStepsStyle?: 'numbered' | 'plain'
-  nextStepsNotesHtml?: string
   ctaLabel?: string
   ctaTo?: string
   /** The email the guest booked with; the account prompt offers it. */
@@ -85,7 +80,6 @@ withDefaults(defineProps<{
   cancelled: false,
   itemSubtitle: '',
   imageUrl: null,
-  nextStepsNotesHtml: '',
   ctaLabel: '',
   ctaTo: '',
   guestEmail: null,

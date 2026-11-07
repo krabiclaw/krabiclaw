@@ -17,7 +17,7 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
 
     // Table reservations: 90-minute seatings, flexible (two-hour) cancellation.
     for (const place of [brooklyn, williamsburg]) {
-      await tool('update_reservation_policy', { location_id: place.id, expected_updated_at: null, duration_minutes: 90, slot_capacity: 40, cancellation_policy: 'flexible' })
+      await tool('update_reservation_policy', { location_id: place.id, expected_updated_at: null, duration_minutes: 90, slot_capacity: 40 })
     }
     // A party of four booked by phone for dinner a week from today in Brooklyn.
     const nextWeek = new Intl.DateTimeFormat('en-CA', { timeZone: tenant.timezone }).format(Date.now() + 7 * 86_400_000)

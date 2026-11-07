@@ -304,7 +304,7 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
         requests: contact.notes || null,
         message: response.message,
         cancelUrl: `${localePath('/bookings/cancel')}?id=${encodeURIComponent(response.booking_id)}#${response.cancellation_token}`,
-        policySummary: response.policy_summary ? { ...response.policy_summary, additional_notes_html: context.value.product.details.cancellation_policy ?? null } : null,
+        policySummary: response.policy_summary,
         locationId: context.value.location?.id ?? null,
         locationName: context.value.location?.title ?? context.value.organizationName,
         locationSlug: context.value.location?.slug ?? null,

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:7a42b0dcdb07c5aaf247bfa26ee022ef1108b7da43d6aaadf590b3498d9e1d04",
-  "documentationFingerprint": "sha256:c16715e68cbdba8675d2b009a36510c8ea876650de0b51c19c906391ea712e61",
+  "fingerprint": "sha256:a837e5db851a54fed017aa38800ed8dcce5179d195e46704bde593ab19992668",
+  "documentationFingerprint": "sha256:74b06b82d47b5360f88be33a9dbb02904d97b762ed140e3cb54dce18ce0edbf7",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -8647,13 +8647,6 @@
                       "type": "array",
                       "uniqueItems": true
                     },
-                    "cancellation_policy": {
-                      "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                      "maxLength": 10000,
-                      "minLength": 1,
-                      "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-                      "type": "string"
-                    },
                     "carbon_monoxide_detector_details": {
                       "description": "Share where each carbon monoxide alarm is located.",
                       "maxLength": 300,
@@ -10174,13 +10167,6 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
-                    },
-                    "cancellation_policy": {
-                      "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                      "maxLength": 10000,
-                      "minLength": 1,
-                      "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-                      "type": "string"
                     },
                     "carbon_monoxide_detector_details": {
                       "description": "Share where each carbon monoxide alarm is located.",
@@ -23552,13 +23538,6 @@
                 "type": "array",
                 "uniqueItems": true
               },
-              "cancellation_policy": {
-                "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                "maxLength": 10000,
-                "minLength": 1,
-                "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-                "type": "string"
-              },
               "carbon_monoxide_detector_details": {
                 "description": "Share where each carbon monoxide alarm is located.",
                 "maxLength": 300,
@@ -27076,13 +27055,6 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
-                  },
-                  "cancellation_policy": {
-                    "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                    "maxLength": 10000,
-                    "minLength": 1,
-                    "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-                    "type": "string"
                   },
                   "carbon_monoxide_detector_details": {
                     "description": "Share where each carbon monoxide alarm is located.",
@@ -53139,13 +53111,6 @@
                     "type": "array",
                     "uniqueItems": true
                   },
-                  "cancellation_policy": {
-                    "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                    "maxLength": 10000,
-                    "minLength": 1,
-                    "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-                    "type": "string"
-                  },
                   "carbon_monoxide_detector_details": {
                     "description": "Share where each carbon monoxide alarm is located.",
                     "maxLength": 300,
@@ -55648,13 +55613,6 @@
                               "type": "array",
                               "uniqueItems": true
                             },
-                            "cancellation_policy": {
-                              "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                              "maxLength": 10000,
-                              "minLength": 1,
-                              "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-                              "type": "string"
-                            },
                             "carbon_monoxide_detector_details": {
                               "description": "Share where each carbon monoxide alarm is located.",
                               "maxLength": 300,
@@ -56018,13 +55976,6 @@
                           "maxItems": 100,
                           "type": "array",
                           "uniqueItems": true
-                        },
-                        "cancellation_policy": {
-                          "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                          "maxLength": 10000,
-                          "minLength": 1,
-                          "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-                          "type": "string"
                         },
                         "carbon_monoxide_detector_details": {
                           "description": "Share where each carbon monoxide alarm is located.",
@@ -56561,29 +56512,10 @@
         "$defs": {},
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
-          "cancellation_policy": {
-            "description": "The named cancellation policy the dashboard shows, or null when the stored cutoffs match none of them.",
-            "enum": [
-              "flexible",
-              "moderate",
-              "firm",
-              null
-            ],
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "policy": {
             "properties": {
               "accessibility_contact_required": {
                 "type": "boolean"
-              },
-              "additional_notes_html": {
-                "type": [
-                  "string",
-                  "null"
-                ]
               },
               "advance_notice_minutes": {
                 "type": [
@@ -56633,12 +56565,6 @@
               "duration_minutes": {
                 "minimum": 1,
                 "type": "integer"
-              },
-              "free_cancellation_until_minutes": {
-                "type": [
-                  "number",
-                  "null"
-                ]
               },
               "location_id": {
                 "type": "string"
@@ -56728,15 +56654,6 @@
                 "description": "Send as expected_questions_revision when replacing questions, and as questions_revision when submitting answers.",
                 "type": "string"
               },
-              "reschedule_allowed": {
-                "type": "boolean"
-              },
-              "reschedule_cutoff_minutes": {
-                "type": [
-                  "number",
-                  "null"
-                ]
-              },
               "slot_capacity": {
                 "description": "Guests seatable at one start time. Null means unlimited.",
                 "type": [
@@ -56751,7 +56668,6 @@
             "required": [
               "location_id",
               "duration_minutes",
-              "reschedule_allowed",
               "deposit_required",
               "accessibility_contact_required",
               "questions",
@@ -56763,12 +56679,6 @@
           },
           "summary": {
             "properties": {
-              "additional_notes_html": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "heading": {
                 "type": "string"
               },
@@ -56793,15 +56703,13 @@
             },
             "required": [
               "heading",
-              "items",
-              "additional_notes_html"
+              "items"
             ],
             "type": "object"
           }
         },
         "required": [
           "policy",
-          "cancellation_policy",
           "summary"
         ],
         "type": "object"
@@ -58774,21 +58682,6 @@
                           "description": {
                             "type": "string"
                           },
-                          "reservation": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "policy": {
-                                "additionalProperties": false,
-                                "properties": {
-                                  "additional_notes_html": {
-                                    "type": "string"
-                                  }
-                                },
-                                "type": "object"
-                              }
-                            },
-                            "type": "object"
-                          },
                           "reservation_questions": {
                             "additionalProperties": {
                               "additionalProperties": false,
@@ -58853,13 +58746,6 @@
                                 "maxItems": 100,
                                 "type": "array",
                                 "uniqueItems": true
-                              },
-                              "cancellation_policy": {
-                                "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                                "maxLength": 10000,
-                                "minLength": 1,
-                                "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-                                "type": "string"
                               },
                               "carbon_monoxide_detector_details": {
                                 "description": "Share where each carbon monoxide alarm is located.",
@@ -77040,21 +76926,6 @@
                   "description": {
                     "type": "string"
                   },
-                  "reservation": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "policy": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "additional_notes_html": {
-                            "type": "string"
-                          }
-                        },
-                        "type": "object"
-                      }
-                    },
-                    "type": "object"
-                  },
                   "reservation_questions": {
                     "additionalProperties": {
                       "additionalProperties": false,
@@ -77133,13 +77004,6 @@
                         "maxItems": 100,
                         "type": "array",
                         "uniqueItems": true
-                      },
-                      "cancellation_policy": {
-                        "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                        "maxLength": 10000,
-                        "minLength": 1,
-                        "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-                        "type": "string"
                       },
                       "carbon_monoxide_detector_details": {
                         "description": "Share where each carbon monoxide alarm is located.",
@@ -79677,13 +79541,6 @@
                     "type": "array",
                     "uniqueItems": true
                   },
-                  "cancellation_policy": {
-                    "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                    "maxLength": 10000,
-                    "minLength": 1,
-                    "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-                    "type": "string"
-                  },
                   "carbon_monoxide_detector_details": {
                     "description": "Share where each carbon monoxide alarm is located.",
                     "maxLength": 300,
@@ -80050,21 +79907,6 @@
                   "type": "object"
                 },
                 "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
-                "type": "object"
-              },
-              "reservation": {
-                "additionalProperties": false,
-                "properties": {
-                  "policy": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "additional_notes_html": {
-                        "type": "string"
-                      }
-                    },
-                    "type": "object"
-                  }
-                },
                 "type": "object"
               },
               "reservation_questions": {
@@ -82104,21 +81946,6 @@
                           "description": {
                             "type": "string"
                           },
-                          "reservation": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "policy": {
-                                "additionalProperties": false,
-                                "properties": {
-                                  "additional_notes_html": {
-                                    "type": "string"
-                                  }
-                                },
-                                "type": "object"
-                              }
-                            },
-                            "type": "object"
-                          },
                           "reservation_questions": {
                             "additionalProperties": {
                               "additionalProperties": false,
@@ -82183,13 +82010,6 @@
                                 "maxItems": 100,
                                 "type": "array",
                                 "uniqueItems": true
-                              },
-                              "cancellation_policy": {
-                                "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                                "maxLength": 10000,
-                                "minLength": 1,
-                                "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-                                "type": "string"
                               },
                               "carbon_monoxide_detector_details": {
                                 "description": "Share where each carbon monoxide alarm is located.",
@@ -85983,13 +85803,6 @@
                       "type": "array",
                       "uniqueItems": true
                     },
-                    "cancellation_policy": {
-                      "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                      "maxLength": 10000,
-                      "minLength": 1,
-                      "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-                      "type": "string"
-                    },
                     "carbon_monoxide_detector_details": {
                       "description": "Share where each carbon monoxide alarm is located.",
                       "maxLength": 300,
@@ -87555,13 +87368,6 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
-                    },
-                    "cancellation_policy": {
-                      "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                      "maxLength": 10000,
-                      "minLength": 1,
-                      "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-                      "type": "string"
                     },
                     "carbon_monoxide_detector_details": {
                       "description": "Share where each carbon monoxide alarm is located.",
@@ -98222,21 +98028,6 @@
                         "description": {
                           "type": "string"
                         },
-                        "reservation": {
-                          "additionalProperties": false,
-                          "properties": {
-                            "policy": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "additional_notes_html": {
-                                  "type": "string"
-                                }
-                              },
-                              "type": "object"
-                            }
-                          },
-                          "type": "object"
-                        },
                         "reservation_questions": {
                           "additionalProperties": {
                             "additionalProperties": false,
@@ -98308,13 +98099,6 @@
                               "maxItems": 100,
                               "type": "array",
                               "uniqueItems": true
-                            },
-                            "cancellation_policy": {
-                              "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                              "maxLength": 10000,
-                              "minLength": 1,
-                              "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-                              "type": "string"
                             },
                             "carbon_monoxide_detector_details": {
                               "description": "Share where each carbon monoxide alarm is located.",
@@ -98818,13 +98602,6 @@
                           "type": "array",
                           "uniqueItems": true
                         },
-                        "cancellation_policy": {
-                          "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                          "maxLength": 10000,
-                          "minLength": 1,
-                          "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-                          "type": "string"
-                        },
                         "carbon_monoxide_detector_details": {
                           "description": "Share where each carbon monoxide alarm is located.",
                           "maxLength": 300,
@@ -99172,21 +98949,6 @@
                         "type": "object"
                       },
                       "description": "Translated question wording keyed by question ID: { label?, help_text?, choices?: { <choice ID>: label } }.",
-                      "type": "object"
-                    },
-                    "reservation": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "policy": {
-                          "additionalProperties": false,
-                          "properties": {
-                            "additional_notes_html": {
-                              "type": "string"
-                            }
-                          },
-                          "type": "object"
-                        }
-                      },
                       "type": "object"
                     },
                     "reservation_questions": {
@@ -99560,6 +99322,10 @@
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
+          },
+          "override_policy": {
+            "description": "True only when the business approves an exception to its change policy.",
+            "type": "boolean"
           },
           "party_size": {
             "maximum": 99,
@@ -115765,21 +115531,6 @@
                 ],
                 "description": "Allergens the merchant states this dish contains."
               },
-              "cancellation_policy": {
-                "anyOf": [
-                  {
-                    "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                    "maxLength": 10000,
-                    "minLength": 1,
-                    "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds."
-              },
               "carbon_monoxide_detector_details": {
                 "anyOf": [
                   {
@@ -117802,13 +117553,6 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
-                  },
-                  "cancellation_policy": {
-                    "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                    "maxLength": 10000,
-                    "minLength": 1,
-                    "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-                    "type": "string"
                   },
                   "carbon_monoxide_detector_details": {
                     "description": "Share where each carbon monoxide alarm is located.",
@@ -120236,45 +119980,12 @@
     {
       "name": "update_reservation_policy",
       "title": "Update reservation policy",
-      "description": "Enable or update table reservations using the location’s saved hours, including the questions asked with each reservation. New setup defaults to two hours, unlimited capacity, no advance notice and no deposit. Use the current updated_at when amending it; omitted fields keep their value. Deposits need an amount, currency, tax treatment and ready Payments.",
+      "description": "Enable or update table reservations using the location’s saved hours, including the questions asked with each reservation. New setup defaults to two hours, unlimited capacity, no advance notice and no deposit. Use the current updated_at when amending it; omitted fields keep their value. Deposits need an amount, currency, tax treatment and ready Payments. Cancellation is not a setting: every reservation, class and consultation is free to cancel until 24 hours before the start.",
       "inputSchema": {
         "additionalProperties": false,
-        "allOf": [
-          {
-            "not": {
-              "anyOf": [
-                {
-                  "required": [
-                    "free_cancellation_until_minutes"
-                  ]
-                },
-                {
-                  "required": [
-                    "reschedule_allowed"
-                  ]
-                },
-                {
-                  "required": [
-                    "reschedule_cutoff_minutes"
-                  ]
-                }
-              ],
-              "required": [
-                "cancellation_policy"
-              ]
-            }
-          }
-        ],
         "properties": {
           "accessibility_contact_required": {
             "type": "boolean"
-          },
-          "additional_notes_html": {
-            "description": "Guest-facing notes. Sanitized on the way in; only basic formatting and links survive.",
-            "type": [
-              "string",
-              "null"
-            ]
           },
           "advance_notice_minutes": {
             "description": "Required notice before the start. Defaults to zero on setup; null removes the rule.",
@@ -120283,15 +119994,6 @@
               "number",
               "null"
             ]
-          },
-          "cancellation_policy": {
-            "description": "Flexible: 2 hours. Moderate: 1 day. Firm: 2 days. Sets the deposit-refund and reschedule cutoffs together; do not also pass those fields.",
-            "enum": [
-              "flexible",
-              "moderate",
-              "firm"
-            ],
-            "type": "string"
           },
           "deposit_amount": {
             "description": "Total deposit per reservation, in deposit_currency minor units.",
@@ -120348,13 +120050,6 @@
             "description": "Current policy updated_at; null when creating.",
             "type": [
               "string",
-              "null"
-            ]
-          },
-          "free_cancellation_until_minutes": {
-            "minimum": 0,
-            "type": [
-              "number",
               "null"
             ]
           },
@@ -120447,16 +120142,6 @@
             },
             "maxItems": 20,
             "type": "array"
-          },
-          "reschedule_allowed": {
-            "type": "boolean"
-          },
-          "reschedule_cutoff_minutes": {
-            "minimum": 0,
-            "type": [
-              "number",
-              "null"
-            ]
           },
           "slot_capacity": {
             "description": "Guests per start time. Defaults to unlimited on setup; null removes the limit.",
@@ -120562,12 +120247,6 @@
           },
           "summary": {
             "properties": {
-              "additional_notes_html": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "heading": {
                 "type": "string"
               },
@@ -120592,8 +120271,7 @@
             },
             "required": [
               "heading",
-              "items",
-              "additional_notes_html"
+              "items"
             ],
             "type": "object"
           },
@@ -129656,18 +129334,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:0cd8b3d2c096b9752c20cd54a15f1b69d905f4635ef3e5f9ab90e4ad92edae49",
-        "get_product": "sha256:64823ed04bb4d2ffb2e4359bb47b79512cbcf199e1317beb4cd951e707a93cc0",
+        "create_product": "sha256:912c8db5ae1435fddcb72ac18140bca66778b05eb41f1523bc649131b6df6386",
+        "get_product": "sha256:a42cc2a6355622aa4b35199655e6076923b056237f5c4a0e29133116ef6c2664",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
         "list_location_products": "sha256:2015626d39e62ce848fe36e9f0b99ac1e50b9afb915d67d7ce067553afb700b6",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
-        "reconcile_products": "sha256:b93a5c02f40b9927c6dcb4bc239b7f4da27dee45a6f6fbf8d2cafe50a18034b6",
+        "reconcile_products": "sha256:cdfb81a442260bd3efbb1bfc8a74cc2d2f3fb6296910b0e4fa652703b8a35a63",
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
         "set_collection_products": "sha256:124140d2c1f17f41c466ca886c7fcabdfa4d9f34d9b6f0da8a1299548ae49289",
         "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
-        "update_product": "sha256:9bb0d4b4de18ad9bf5baa164e72eb5c694e1bed7c9cef9933cf58feaedd63faa"
+        "update_product": "sha256:ffa1d299e527684eb92380cdbf51be23633f94a08b74eb8143ea5e06d78c03b3"
       }
     },
     {
@@ -129712,8 +129390,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:0cd8b3d2c096b9752c20cd54a15f1b69d905f4635ef3e5f9ab90e4ad92edae49",
-        "get_product": "sha256:64823ed04bb4d2ffb2e4359bb47b79512cbcf199e1317beb4cd951e707a93cc0",
+        "create_product": "sha256:912c8db5ae1435fddcb72ac18140bca66778b05eb41f1523bc649131b6df6386",
+        "get_product": "sha256:a42cc2a6355622aa4b35199655e6076923b056237f5c4a0e29133116ef6c2664",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
@@ -129745,7 +129423,7 @@
         "mark_team_conversation_read": "sha256:3ad65b07c9bd78090f9f81aeffa74ac00f1c201ee8b6325cf16cd879f1e2644d",
         "reject_product_booking": "sha256:91a5bee34d02b729a3dacb01885157ce63b443594116d8710ca90313fb76e357",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
-        "request_product_booking_change": "sha256:d09a9c88466237aff04465bbcffa219f28e197cfad0cb4fdd99f41484343d400",
+        "request_product_booking_change": "sha256:8912bbf319cbe44e5e7ba3cc8f6f505a44f3e4cfa724b38e88dbdefbe250382d",
         "request_table_reservation_change": "sha256:71868f28cc9f329b1f44276ae0a223c487c789f4682c3bb8f3a09b96fde9e2dd",
         "send_team_message": "sha256:b9f715f29f98d627cd0e5fa89f873b5623e13d5ba0867cc7dba69216ba886f97",
         "start_team_conversation": "sha256:b297eb76fda6a481f0246ee8c6c39d5481ebe9379dd979ecee747b54c67f0492",
@@ -129784,7 +129462,7 @@
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
         "get_post": "sha256:1bfb415fc3917a3aad29e1b1ae44db4a092b10dd169974b39c89832c4a69017d",
-        "get_product": "sha256:64823ed04bb4d2ffb2e4359bb47b79512cbcf199e1317beb4cd951e707a93cc0",
+        "get_product": "sha256:a42cc2a6355622aa4b35199655e6076923b056237f5c4a0e29133116ef6c2664",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
@@ -129800,7 +129478,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:0cd8b3d2c096b9752c20cd54a15f1b69d905f4635ef3e5f9ab90e4ad92edae49",
+        "create_product": "sha256:912c8db5ae1435fddcb72ac18140bca66778b05eb41f1523bc649131b6df6386",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
@@ -129826,16 +129504,16 @@
       },
       "toolContracts": {
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
-        "get_product": "sha256:64823ed04bb4d2ffb2e4359bb47b79512cbcf199e1317beb4cd951e707a93cc0",
-        "get_reservation_policy": "sha256:671949950829fad652e09245cb65c14b456e28519e4e5f01a0fcbaca2bb3e78f",
+        "get_product": "sha256:a42cc2a6355622aa4b35199655e6076923b056237f5c4a0e29133116ef6c2664",
+        "get_reservation_policy": "sha256:1e70aca37a43c0512b2249b7c26e37844b0c04959bd40d3fbb5a73d711238943",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "replace_product_weekly_schedule": "sha256:cc5f48fb054661e70ce26d988fc12a29f4325c7fc59b5b20852fb98d0e0e2451",
         "set_product_booking_config": "sha256:325fc0b5cb4d6ab6c21227ea94b6d2c22a1192af199b3286145207bbd58b1379",
-        "update_product": "sha256:9bb0d4b4de18ad9bf5baa164e72eb5c694e1bed7c9cef9933cf58feaedd63faa",
-        "update_reservation_policy": "sha256:11892e568dc0af3a9a3bcd0e6ddcf1081e146d1f36dfea443650f602348d30cb"
+        "update_product": "sha256:ffa1d299e527684eb92380cdbf51be23633f94a08b74eb8143ea5e06d78c03b3",
+        "update_reservation_policy": "sha256:33b8ea1a819ab514a06e8bec979fc44a57260e2eb53d39d35be97b74fe092f66"
       }
     },
     {
@@ -129854,7 +129532,7 @@
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_product": "sha256:9bb0d4b4de18ad9bf5baa164e72eb5c694e1bed7c9cef9933cf58feaedd63faa",
+        "update_product": "sha256:ffa1d299e527684eb92380cdbf51be23633f94a08b74eb8143ea5e06d78c03b3",
         "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
       }
     },
@@ -129870,14 +129548,14 @@
         "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
         "get_guest_conversation": "sha256:fabd2b7aa4ccb5f19c1d0a7bdf3bc559a083c9f2547d0c93aeda64ce51f5563c",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
-        "get_product": "sha256:64823ed04bb4d2ffb2e4359bb47b79512cbcf199e1317beb4cd951e707a93cc0",
+        "get_product": "sha256:a42cc2a6355622aa4b35199655e6076923b056237f5c4a0e29133116ef6c2664",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:6d0b00651d62c18f2c881046eb4d7f619ec7aecf85662d0c173af68134fd98cc",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
-        "update_product": "sha256:9bb0d4b4de18ad9bf5baa164e72eb5c694e1bed7c9cef9933cf58feaedd63faa"
+        "update_product": "sha256:ffa1d299e527684eb92380cdbf51be23633f94a08b74eb8143ea5e06d78c03b3"
       }
     }
   ]

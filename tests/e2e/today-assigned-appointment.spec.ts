@@ -55,7 +55,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     scheduleWritten = true
     product = (await body<{ product: Product }>(await page.request.post(`${EDITOR}/products`, { data: {
       kind: 'service', active: true, name: `Today assigned consultation ${Date.now()}`, description: 'A local appointment that verifies the assigned staff dashboard.',
-      details: { preparation: 'Bring your consultation questions.', cancellation_policy: 'Contact us before the appointment to cancel.' },
+      details: { preparation: 'Bring your consultation questions.' },
       variants: [{ name: 'Online', prices: [{ unit_amount: 0, currency: 'USD' }] }],
     } }), 201)).product
     expect(product.image, 'The authored consultation has no Product photo').toBeNull()

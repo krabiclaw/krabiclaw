@@ -1,3 +1,4 @@
+import { freeCancellationUntil } from '~/shared/availability-settings'
 import type Stripe from 'stripe'
 import { HTTPError } from 'nitro'
 import { execute, queryFirst, type DbClient } from '~/server/db'
@@ -69,18 +70,18 @@ async function handoffSubject(db: DbClient, organizationId: string, payment: Pay
   if ((payment.subject_type === 'booking' || payment.subject_type === 'reservation') && !hold) throw new Error('Payment has no checkout hold for its time')
   const productId = snapshot.stay?.product_id ?? snapshot.product_id
   // A payment outlives its product: a deleted product leaves its kind unknown, and the summary omits what depends on it.
-  const product = productId ? await queryFirst<{ kind: string; slug: string; details_json: string }>(db, 'SELECT kind,slug,details_json FROM products WHERE id=? AND organization_id=?', [productId, organizationId]) : null
+  const product = productId ? await queryFirst<{ kind: string; slug: string }>(db, 'SELECT kind,slug FROM products WHERE id=? AND organization_id=?', [productId, organizationId]) : null
   const locationId = hold?.location_id ?? payment.location_id
   const location = locationId ? await queryFirst<{ slug: string }>(db, 'SELECT slug FROM business_locations WHERE id=? AND organization_id=?', [locationId, organizationId]) : null
-  // A booked offering's terms are the ones its page states; a stay's are its booked policy.
-  const cancellation = product ? (JSON.parse(product.details_json) as { cancellation_policy?: unknown }).cancellation_policy : null
+  // Null once it has passed: paying now buys a booking that is already non-refundable. A stay's terms are its booked policy.
+  const freeUntil = hold ? freeCancellationUntil(hold.starts_at) : null
   const [ownerType, ownerId] = productId ? ['product', productId] as const : ['business_location', hold?.location_id ?? payment.location_id] as const
   const picture = ownerId ? (await loadOwnerPictures(db, organizationId, ownerType, [ownerId])).get(ownerId) ?? null : null
   return {
     kind: product?.kind ?? (productId ? null : payment.subject_type), image_url: picture?.imageUrl ?? null, starts_at: hold?.starts_at ?? null, ends_at: hold?.ends_at ?? null, timezone: hold?.timezone ?? null,
     // Where the offering's page is, so the buyer can read its full terms or change what they picked.
     product_slug: product?.slug ?? null, location_slug: location?.slug ?? null,
-    cancellation_policy: typeof cancellation === 'string' && cancellation.trim() ? cancellation.trim() : null,
+    free_cancellation_until: freeUntil && new Date().toISOString() <= freeUntil ? freeUntil : null,
   }
 }
 

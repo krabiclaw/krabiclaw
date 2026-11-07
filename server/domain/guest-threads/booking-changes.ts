@@ -1,4 +1,4 @@
-import { reservationAllocationPredicate, reservationReschedulePolicyPredicate, requireLocationReservationConfig } from '~/server/utils/reservations'
+import { reservationAllocationPredicate, requireLocationReservationConfig, visitReschedulePolicyPredicate } from '~/server/utils/reservations'
 import { refreshProductBusy } from '~/server/domain/member-scheduling'
 import { recordBookingChangeAnswer } from '~/server/domain/booking-analytics'
 import { createHmac, timingSafeEqual } from 'node:crypto'
@@ -50,7 +50,7 @@ async function bookingNoun(db: DbClient, thread: Pick<GuestThreadRow, 'organizat
  * the proposal names it. A reservation has no occurrence row, so it moves to a
  * location, date and time.
  */
-const bookingFieldsSchema = z.object({ kind: z.literal('booking'), sessionId: z.string().min(1), partySize: z.number().int().min(1).max(99), assignedMemberId: z.string().min(1).optional() })
+const bookingFieldsSchema = z.object({ kind: z.literal('booking'), sessionId: z.string().min(1), partySize: z.number().int().min(1).max(99), overridePolicy: z.boolean().optional(), assignedMemberId: z.string().min(1).optional() })
 const reservationFieldsSchema = z.object({
   kind: z.literal('reservation'),
   locationId: z.string().min(1),
@@ -174,6 +174,8 @@ interface Destination { assignedMemberId?: string | null; locationId: string | n
  * capacity for that start time.
  */
 async function validateDestination(db: DbClient, thread: GuestThreadRow, before: Source, after: Fields, decisionDedupeKey?: string): Promise<Destination> {
+  const reschedulePolicy = visitReschedulePolicyPredicate({ startsAt: before.startsAt, overridePolicy: after.overridePolicy })
+  if (!await queryFirst(db, `SELECT 1 WHERE ${reschedulePolicy.query}`, reschedulePolicy.params)) throw new HTTPError({ statusCode: 409, message: 'Changes close 24 hours before the start. The business can explicitly approve an exception.', data: { code: 'policy_exception_required' } })
   if (after.kind === 'booking') {
     if (before.recordKind !== 'booking' || !before.productId) throw new HTTPError({ statusCode: 409, message: 'This conversation is a reservation, not a booking' })
     const [target] = await listSessions(db, {
@@ -225,8 +227,6 @@ async function validateDestination(db: DbClient, thread: GuestThreadRow, before:
 
   if (before.recordKind !== 'reservation') throw new HTTPError({ statusCode: 409, message: 'This conversation is a booking, not a reservation' })
   if (!before.locationId) throw new Error('Reservation has no source location')
-  const reschedulePolicy = reservationReschedulePolicyPredicate({ organizationId: thread.organization_id, locationId: before.locationId, reservationId: before.recordId, startsAt: before.startsAt, overridePolicy: after.overridePolicy })
-  if (!await queryFirst(db, `SELECT 1 WHERE ${reschedulePolicy.query}`, reschedulePolicy.params)) throw new HTTPError({ statusCode: 409, message: 'This reservation’s change policy does not allow this request. The business can explicitly approve an exception.', data: { code: 'policy_exception_required' } })
   const location = await queryFirst<{ id: string; title: string; timezone: string | null }>(db,
     'SELECT id, title, timezone FROM business_locations WHERE id = ? AND organization_id = ?',
     [after.locationId, thread.organization_id])

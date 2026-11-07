@@ -1,7 +1,7 @@
 import { openingMessageQueries } from '~/server/domain/guest-threads/opening'
 import { z } from 'zod'
 import { HTTPError } from 'nitro'
-import { guestReservationRefundQueries } from '~/server/domain/payments/visit-refund'
+import { guestVisitRefundQueries, guestVisitRefundKey } from '~/server/domain/payments/visit-refund'
 import { executeRefund, requirePayment } from '~/server/domain/payments'
 import { paymentsStripe } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -399,14 +399,11 @@ export async function cancelBookingRequest(db: DbClient, input: {
     const before = JSON.parse(entry.payload_json).beforeStatus
     if (!['pending', 'confirmed'].includes(before)) throw new Error('Cancellation audit has no valid prior status')
     if (cancelled.kind === 'booking') await recordBookingCancelled(db, { organizationId: input.organizationId, bookingId: cancelled.id, cancelledBy: 'guest', actorUserId: input.buyerUserId ?? null })
-    if (cancelled.kind === 'reservation') {
-      const refund = await queryFirst<{ payment_id: string; idempotency_key: string }>(db, `SELECT r.payment_id,r.idempotency_key FROM payment_refunds r
-        JOIN payments p ON p.id=r.payment_id WHERE p.organization_id=? AND p.subject_type='reservation' AND p.subject_id=?
-          AND r.idempotency_key='guest-cancelled-reservation:'||p.subject_id`, [input.organizationId, cancelled.id])
-      if (refund) {
-        const payment = await requirePayment(db, input.organizationId, refund.payment_id)
-        await executeRefund(db, paymentsStripe(input.env, Boolean(payment.livemode)), payment, null, refund.idempotency_key, 'requested_by_customer', input.buyerUserId ?? null, input.env)
-      }
+    const refund = await queryFirst<{ payment_id: string; idempotency_key: string }>(db, `SELECT r.payment_id,r.idempotency_key FROM payment_refunds r
+      JOIN payments p ON p.id=r.payment_id WHERE p.organization_id=? AND p.subject_type=? AND p.subject_id=? AND r.idempotency_key=?`, [input.organizationId, cancelled.kind, cancelled.id, guestVisitRefundKey(cancelled.kind, cancelled.id)])
+    if (refund) {
+      const payment = await requirePayment(db, input.organizationId, refund.payment_id)
+      await executeRefund(db, paymentsStripe(input.env, Boolean(payment.livemode)), payment, null, refund.idempotency_key, 'requested_by_customer', input.buyerUserId ?? null, input.env)
     }
     return { request, record: cancelled, wasConfirmed: before === 'confirmed', changed }
   }
@@ -419,9 +416,9 @@ export async function cancelBookingRequest(db: DbClient, input: {
   // moved in between left the guest with a consumed token and a live booking
   // still holding its seats.
   const table = record.kind === 'booking' ? 'bookings' : 'reservations'
-  const refund = record.kind === 'reservation' ? await guestReservationRefundQueries(db, {
-    organizationId: input.organizationId, reservationId: record.id, requestId: input.id, startsAt: record.starts_at, now: input.now, buyerUserId: input.buyerUserId,
-  }) : { queries: [], guard: null }
+  const refund = await guestVisitRefundQueries(db, {
+    organizationId: input.organizationId, subjectType: record.kind, subjectId: record.id, requestId: input.id, startsAt: record.starts_at, now: input.now, buyerUserId: input.buyerUserId,
+  })
   const [consumed, released] = await executeBatch(db, [
     {
       query: `UPDATE requests SET
