@@ -93,7 +93,7 @@ export async function drainPublicResourceCacheInvalidations(
   const failedOrganizations = new Set<string>()
   // Several rows for one site in one drain are one change to converge on: the
   // site's slice is listed and diffed once, and the rest of its rows ride along.
-  const syncedOrganizations = new Set<string>()
+  const drainedOrganizations = new Set<string>()
   for (const row of rows) {
     if (failedOrganizations.has(row.organization_id)) continue
     // An overlapping drain holding this site's claim keeps it; the next run
@@ -112,14 +112,11 @@ export async function drainPublicResourceCacheInvalidations(
     if (Number(claim.meta?.changes ?? 0) !== 1) continue
     const claimedAttemptCount = row.attempt_count + 1
     try {
-      await purgeOrganizationCaches(db, kv, row.organization_id, freeOrganizationDomain)
-      // Off production a row's whole work is the purge that just succeeded, so
-      // the site has converged. In production it converges when a search sync
-      // has uploaded everything that changed.
+      const firstForOrganization = !drainedOrganizations.has(row.organization_id)
+      if (firstForOrganization) await purgeOrganizationCaches(db, kv, row.organization_id, freeOrganizationDomain)
       let converged = !productionSearch
-      if (productionSearch && !syncedOrganizations.has(row.organization_id)) {
+      if (productionSearch && firstForOrganization) {
         const synced = await syncOrganizationSearchIndex(env as CloudflareEnv, db, row.organization_id)
-        syncedOrganizations.add(row.organization_id)
         // A bounded run that left uploads behind is not a failure to retry; it
         // is more of the same change, so it goes back on the queue as a new row.
         if (synced.pending > 0) {
@@ -136,6 +133,7 @@ export async function drainPublicResourceCacheInvalidations(
           converged = true
         }
       }
+      drainedOrganizations.add(row.organization_id)
       if (converged) {
         // A converged site has done the work behind older terminal rows, which
         // the retry selector can no longer claim. Do not clear a failure created
