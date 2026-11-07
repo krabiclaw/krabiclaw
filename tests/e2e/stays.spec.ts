@@ -1195,6 +1195,7 @@ test('a host answers guest safety disclosures and keeps an unanswered choice dis
     await safetySection.getByRole('button', { name: 'Cancel', exact: true }).click()
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.getByRole('tab', { name: 'Arrival guide', exact: true }).click()
+    await expect(page.getByRole('tab', { name: 'Arrival guide', exact: true })).toHaveAttribute('aria-selected', 'true')
     await page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true }).click()
     const safetyGuidePreview = page.getByRole('dialog', { name: 'Arrival guide', exact: true })
     const safetyGuide = safetyGuidePreview.getByTestId('arrival-guide-preview')
