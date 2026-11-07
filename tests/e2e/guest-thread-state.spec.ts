@@ -835,6 +835,7 @@ test('Calendar retains confirmed reservations and their detail sends one change 
   await expectStatus(summaryResponse, 200)
   const summary = (await summaryResponse.json() as { booking: DashboardBookingDetails }).booking
   expect(summary).toMatchObject({ guestName, guestPhone: '+12025550123', partySize: 2 })
+  expect(summary.resourceImageUrl, 'This reservation has its location’s actual authored picture').not.toBeNull()
   expect(summary.threadId).not.toBeNull()
   const priorViewport = page.viewportSize()!
   let desktopCountWidth: number | undefined
@@ -870,17 +871,16 @@ test('Calendar retains confirmed reservations and their detail sends one change 
     expect(countBounds.x + countBounds.width / 2).toBeGreaterThan(avatarBounds.x + avatarBounds.width / 2)
     if (width === 1728) desktopCountWidth = countBounds.width
     else expect(desktopCountWidth, 'The desktop guest counter is larger than the phone counter').toBeGreaterThan(countBounds.width)
-    if (summary.resourceImageUrl) {
-      const picture = detailPanel.locator('img[alt=""]').first()
-      await expect(picture).toHaveAttribute('src', summary.resourceImageUrl)
-      expect(await picture.evaluate(image => (image as HTMLImageElement).naturalWidth), 'The resource photo loads').toBeGreaterThan(0)
-      const pictureBounds = (await picture.boundingBox())!
-      expect(pictureBounds.width, 'The photo leads as a substantial square').toBeGreaterThanOrEqual(280)
-      expect(pictureBounds.height).toBe(pictureBounds.width)
-      expect(Math.abs(pictureBounds.x + pictureBounds.width / 2 - paneCenter)).toBeLessThanOrEqual(1)
-      expect(guestBounds.y, 'The guests overlap the photo’s lower edge').toBeLessThan(pictureBounds.y + pictureBounds.height)
-      expect(guestBounds.y + guestBounds.height).toBeGreaterThan(pictureBounds.y + pictureBounds.height)
-    } else expect(guestBounds.y - bodyBounds.y, 'The guest cluster leads 64px below the record header').toBe(64)
+    const picture = detailPanel.locator('img[alt=""]').first()
+    await expect(picture).toHaveAttribute('src', summary.resourceImageUrl!)
+    await expect.poll(() => picture.evaluate(image => (image as HTMLImageElement).naturalWidth), { message: 'The resource photo loads' }).toBeGreaterThan(0)
+    const pictureBounds = (await picture.boundingBox())!
+    expect(pictureBounds.y, 'The photo leads the record').toBeGreaterThanOrEqual(bodyBounds.y)
+    expect(pictureBounds.width, 'The photo leads as a substantial square').toBeGreaterThanOrEqual(280)
+    expect(pictureBounds.height).toBe(pictureBounds.width)
+    expect(Math.abs(pictureBounds.x + pictureBounds.width / 2 - paneCenter)).toBeLessThanOrEqual(1)
+    expect(guestBounds.y, 'The guests overlap the photo’s lower edge').toBeLessThan(pictureBounds.y + pictureBounds.height)
+    expect(guestBounds.y + guestBounds.height).toBeGreaterThan(pictureBounds.y + pictureBounds.height)
     expect(identityBounds.y - guestBounds.y - guestBounds.height, 'The party title follows the guest cluster at the measured Airbnb spacing').toBe(width === 1728 ? 32 : 24)
     expect(Math.abs(guestBounds.x + guestBounds.width / 2 - paneCenter)).toBeLessThanOrEqual(1)
     expect(Math.abs(identityBounds.x + identityBounds.width / 2 - paneCenter), 'The record header centers in its visible pane').toBeLessThanOrEqual(1)

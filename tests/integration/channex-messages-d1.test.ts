@@ -361,9 +361,10 @@ test('a dismissed question needs no note and stays closed until the guest writes
     const viewer = await taskViewer(db, memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env }))
     const taskId = await db.prepare("SELECT id FROM tasks WHERE kind = 'guest_reply' AND subject_id = ? AND status = 'open'").bind(requestId).first<string>('id')
     assert.ok(taskId)
-    const dismissed = await closeTask(db, viewer, taskId, { status: 'skipped', note: undefined, photos: [], env })
+    const dismissed = await closeTask(db, viewer, taskId, { status: 'skipped', note: '', photos: [], env })
     assert.deepEqual([dismissed.status, dismissed.outcome?.note, dismissed.action], ['skipped', null, { type: 'reopen', label: 'Undo' }])
     assert.match(dismissed.statusLine ?? '', /^Dismissed at /)
+    assert.deepEqual(await db.prepare('SELECT status, outcome_note FROM tasks WHERE id = ?').bind(taskId).first(), { status: 'skipped', outcome_note: null })
 
     // Everything said before the dismissal stays closed, whatever touches the conversation next.
     await executeBatch(db, conversationTaskQueries(requestId, at(0)), { operation: 'Touch conversation' })

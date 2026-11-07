@@ -612,7 +612,9 @@ export async function expireReplyTasks(db: DbClient, now: string): Promise<{ con
   const rows = await queryAll<{ subject_id: string }>(db, `SELECT DISTINCT t.subject_id FROM tasks t
     JOIN activity_entries guest_entry ON guest_entry.id = substr(t.dedupe_key, length('guest_reply:' || t.subject_id || ':') + 1)
     WHERE t.kind = 'guest_reply' AND t.subject_type = 'request' AND t.status = 'open' AND ${guestEntryAskedAtSql('guest_entry')} < ?`, [replyTaskCutoff(now)])
-  for (const row of rows) await executeBatch(db, conversationTaskQueries(row.subject_id, now), { operation: 'Expire reply tasks' })
+  const failures = (await Promise.allSettled(rows.map(row => executeBatch(db, conversationTaskQueries(row.subject_id, now), { operation: 'Expire reply tasks' }))))
+    .flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+  if (failures.length) throw new AggregateError(failures, `${failures.length} of ${rows.length} conversations' reply tasks could not be expired`)
   return { conversations: rows.length }
 }
 
@@ -647,7 +649,8 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
          AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}
          AND ${guestEntryAskedAtSql('guest_entry')} >= ?
          -- A person's Dismiss covers everything said by then; what the guest says next is work.
-         AND NOT EXISTS (SELECT 1 FROM tasks skipped WHERE skipped.kind = 'guest_reply' AND skipped.subject_type = 'request' AND skipped.subject_id = r.id AND skipped.status = 'skipped' AND skipped.closed_at >= guest_entry.occurred_at)
+         AND NOT EXISTS (SELECT 1 FROM tasks skipped WHERE skipped.kind = 'guest_reply' AND skipped.subject_type = 'request' AND skipped.subject_id = r.id AND skipped.status = 'skipped'
+           AND (skipped.closed_at > guest_entry.occurred_at OR skipped.dedupe_key = 'guest_reply:' || r.id || ':' || guest_entry.id))
          AND NOT EXISTS (SELECT 1 FROM tasks open_reply WHERE open_reply.kind = 'guest_reply' AND open_reply.subject_type = 'request' AND open_reply.subject_id = r.id AND open_reply.status = 'open')
        ORDER BY guest_entry.sequence LIMIT 1
       ON CONFLICT (dedupe_key) DO UPDATE SET status = 'open', closed_at = NULL, closed_by_user_id = NULL, version = tasks.version + 1, updated_at = excluded.updated_at
