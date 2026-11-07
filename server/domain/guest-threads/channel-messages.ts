@@ -316,7 +316,7 @@ export type ChannelReplyOutcome = { ok: true } | {
   provider_error?: ChannexError['data']
 }
 
-function assertReplyIntent(entry: GuestThreadEntryRow, body: string, requestHash: string, eventName: string): void {
+export function assertReplyIntent(entry: GuestThreadEntryRow, body: string, requestHash: string, eventName: string): void {
   if (entry.event_name !== eventName) fail(409, 'IDEMPOTENCY_CONFLICT', 'The reply key was already used for a different message', 'idempotencyKey')
   const payload = parseEntryPayload(entry)
   if (typeof payload?.request_hash !== 'string') fail(500, 'CHANNEL_REPLY_INTENT_INVALID', 'The channel reply intent has no recorded request hash', 'payload.request_hash')

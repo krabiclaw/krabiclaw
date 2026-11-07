@@ -18,6 +18,7 @@ import whatsappWebhook from '../../server/api/whatsapp/webhook.post.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { createStay, getStay, updateStay } from '../../server/domain/stays.ts'
 import { getWhatsAppWorkspaceState } from '../../server/utils/mcp-context.ts'
+import { useNitroHooks } from 'nitro/app'
 
 // Real D1 billing, membership, preferences and notification persistence. Only
 // the external Meta HTTP boundary is intercepted; no live messages are sent.
@@ -211,20 +212,26 @@ test('a WhatsApp reply offers the conversations the inbox can write to and refus
       await recordDeliveryOutcome(db, { deliveryId: alert.id, status: 'sent', providerMessageId: `meta-alert-${name}` })
     }
     const sent: string[] = []
+    // Messages Meta refuses, by how they begin: each attempt is still recorded in `sent`.
+    const refuse = new Set<string>()
     globalThis.fetch = async (input, init) => {
       if (!String(input).startsWith('https://graph.facebook.com/')) return originalFetch(input, init)
-      sent.push(JSON.parse(String(init?.body)).text.body)
+      const text = JSON.parse(String(init?.body)).text.body as string
+      sent.push(text)
+      if ([...refuse].some(start => text.startsWith(start))) return Response.json({ error: { message: 'Meta refused the message' } }, { status: 400 })
       return Response.json({ messages: [{ id: `meta-out-${sent.length}` }] })
     }
+    const reported: unknown[] = []
+    useNitroHooks().hook('error', error => { reported.push(error) })
     const app = new H3()
     app.post('/api/whatsapp/webhook', whatsappWebhook)
     let inbound = 0
-    const write = async (text: string, quoting?: string) => {
+    const write = async (text: string, quoting?: string, status = 200) => {
       const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ value: { messages: [{ id: `wamid-${++inbound}`, from: '66812345678', type: 'text', text: { body: text }, ...(quoting && { context: { id: quoting } }) }] } }] }] })
       const response = await app.request(Object.assign(new Request('https://proof.example/api/whatsapp/webhook', {
         method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': `sha256=${createHmac('sha256', 'whatsapp-secret').update(body).digest('hex')}` }, body,
       }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
-      assert.equal(response.status, 200, await response.clone().text())
+      assert.equal(response.status, status, await response.clone().text())
       return sent.at(-1)!
     }
     const pending = async () => (await getWhatsAppWorkspaceState(db, 'owner'))?.pending_confirmation
@@ -252,15 +259,42 @@ test('a WhatsApp reply offers the conversations the inbox can write to and refus
     await updateStay(db, env, manager, bo.id, { expected_version: bo.version, guest_email: null })
     assert.equal(await write(pick(again, 'Bo')), 'Reply not sent: This guest has no email or KrabiClaw account to reply to.')
     assert.equal(await pending(), null)
+    await updateStay(db, env, manager, bo.id, { expected_version: (await getStay(db, manager, bo.id)).version, guest_email: 'bo@example.test' })
+    const repliesToBo = async () => db.prepare("SELECT count(*) AS n FROM activity_entries WHERE request_id = ? AND event_name = 'thread.member_reply'").bind(bo.request_id).first('n')
+
+    // The confirmation is spent before the reply is sent: when Meta refuses "Reply sent.", another
+    // "yes" finds nothing to send, and the guest gets the reply once. The refused notice is reported.
+    assert.equal(await write(pick(await write('Reply to Bo'), 'Bo')), 'Type your reply now — it will be sent by email to b***@example.test.')
+    assert.equal(await write('The gate code is 4512'), 'This reply will be sent by email to b***@example.test. Reply YES to send.')
+    refuse.add('Reply sent.')
+    let before = sent.length
+    const reportedBefore = reported.length
+    await write('YES')
+    assert.deepEqual(sent.slice(before), ['Reply sent.'])
+    assert.equal(reported.length - reportedBefore, 1, 'the refused notice is reported')
+    assert.equal(await repliesToBo(), 1)
+    refuse.delete('Reply sent.')
+    await write('yes')
+    assert.equal(await repliesToBo(), 1, 'a second yes sends nothing')
+
+    // Cancelling drops the confirmation before anything else: when Meta refuses the next prompt,
+    // an "ok" afterwards does not send the reply the manager cancelled.
+    assert.equal(await write(pick(await write('Reply to Bo again'), 'Bo')), 'Type your reply now — it will be sent by email to b***@example.test.')
+    assert.equal(await write('Never mind this one'), 'This reply will be sent by email to b***@example.test. Reply YES to send.')
+    refuse.add('Reply to which?')
+    // The refused question fails the webhook (a question is sent before its state is written); the cancel is already written.
+    assert.equal((await write('no, cancel', undefined, 500)).startsWith('Reply to which?'), true)
+    refuse.delete('Reply to which?')
+    await write('ok')
+    assert.equal(await repliesToBo(), 1, 'the cancelled reply is never sent')
+
     // A member removed after the pick is told their access ended before their reply is read, and nothing of the
     // conversation (where it would go, or why it could not) reaches them.
-    await updateStay(db, env, manager, bo.id, { expected_version: (await getStay(db, manager, bo.id)).version, guest_email: 'bo@example.test' })
-    const third = await write('One more')
-    assert.equal(await write(pick(third, 'Bo')), 'Type your reply now — it will be sent by email to b***@example.test.')
+    assert.equal(await write(pick(await write('One more'), 'Bo')), 'Type your reply now — it will be sent by email to b***@example.test.')
     await db.prepare("DELETE FROM member WHERE id = 'member-paid'").run()
-    const removed = await write('Here is my reply')
-    assert.equal(removed, 'Your WhatsApp access has been revoked. Please contact your organization administrator.')
-    assert.doesNotMatch(removed, /b\*\*\*@|email|KrabiClaw account/u)
+    before = sent.length
+    await write('Here is my reply')
+    assert.deepEqual(sent.slice(before), ['Your WhatsApp access has been revoked. Please contact your organization administrator.'])
     assert.equal(await pending(), null)
   } finally {
     globalThis.fetch = originalFetch

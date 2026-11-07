@@ -8,6 +8,8 @@ export interface DisambiguationCandidate {
 export type PendingWhatsAppReplyState =
   | {
       kind: 'confirm_send'
+      /** This confirmation's own id: the reply it confirms is sent under it, once. */
+      id: string
       threadId: string
       organizationId: string
       locationId: string | null

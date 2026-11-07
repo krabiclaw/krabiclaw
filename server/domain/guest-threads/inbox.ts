@@ -84,8 +84,23 @@ interface ThreadFacts {
   inquiry: { checkIn: string; checkOut: string } | null
 }
 
-async function threadFacts(db: DbClient, raw: GuestThreadDetailViewModel, organizationId: string, now: Date): Promise<ThreadFacts> {
+/**
+ * Who the guest is, as every surface names them: Airbnb Support for a support case; otherwise
+ * the first name Airbnb gives on the guest's messages, else the booked name, else the label.
+ */
+export function inboxGuestNames(raw: GuestThreadDetailViewModel): { kind: InboxThreadKind; guestName: string; guestFullName: string } {
   const kind: InboxThreadKind = isSupportThread(raw.entries) ? 'support' : 'guest'
+  const airbnbName = raw.entries.findLast(entry => entry.actorKind === 'guest' && entry.eventName === 'channel.message_mirrored' && text(meta(entry)?.name))
+  // Airbnb gives the guest's first name on their messages; the stay, once booked, has their full name.
+  const airbnbFirstName = airbnbName ? text(meta(airbnbName)!.name)! : null
+  const guestFullName = kind === 'support' ? 'Airbnb Support' : raw.guestName ?? airbnbFirstName ?? raw.participantLabel
+  const guestName = kind === 'support' ? 'Airbnb Support'
+    : airbnbFirstName ?? (raw.conversationChannel === 'airbnb' && raw.guestName ? firstName(raw.guestName) : guestFullName)
+  return { kind, guestName, guestFullName }
+}
+
+async function threadFacts(db: DbClient, raw: GuestThreadDetailViewModel, organizationId: string, now: Date): Promise<ThreadFacts> {
+  const { kind, guestName, guestFullName } = inboxGuestNames(raw)
   const place = await queryFirst<{ location_timezone: string | null; organization_timezone: string }>(db, `
     SELECT l.timezone AS location_timezone, o.timezone AS organization_timezone
       FROM requests r JOIN organization o ON o.id = r.organization_id
@@ -104,12 +119,6 @@ async function threadFacts(db: DbClient, raw: GuestThreadDetailViewModel, organi
   const inquiryEntry = raw.entries.findLast(entry => entry.eventName === 'channel.inquiry_received')
   const inquiry = inquiryEntry && text(inquiryEntry.payload?.check_in_date) && text(inquiryEntry.payload?.check_out_date)
     ? { checkIn: String(inquiryEntry.payload!.check_in_date), checkOut: String(inquiryEntry.payload!.check_out_date) } : null
-  const airbnbName = raw.entries.findLast(entry => entry.actorKind === 'guest' && entry.eventName === 'channel.message_mirrored' && text(meta(entry)?.name))
-  // Airbnb gives the guest's first name on their messages; the stay, once booked, has their full name.
-  const airbnbFirstName = airbnbName ? text(meta(airbnbName)!.name)! : null
-  const guestFullName = kind === 'support' ? 'Airbnb Support' : raw.guestName ?? airbnbFirstName ?? raw.participantLabel
-  const guestName = kind === 'support' ? 'Airbnb Support'
-    : airbnbFirstName ?? (raw.conversationChannel === 'airbnb' && raw.guestName ? firstName(raw.guestName) : guestFullName)
   const record = raw.operationalRecord
   // A stay is its nights; a booking or reservation is its start, in the home's clock; an inquiry is the dates asked about.
   const when = record?.check_in_date && record.check_out_date ? stayWhen(record.check_in_date, record.check_out_date, now, timeZone)

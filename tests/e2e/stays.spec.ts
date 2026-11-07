@@ -4,6 +4,8 @@ import sharp from 'sharp'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpRequest, publishOwnHostProfile } from './helpers/mcp'
 import { waitForNuxtHydration } from './helpers'
+import { seededSiteHeaders } from './test-env'
+import { seededTenant } from './seed/manifest'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations'
 import type { Product } from '../../server/types/products'
 import type { PublicStayCalendar, StayDetail, StayQuote } from '../../server/domain/stays'
@@ -360,29 +362,67 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   await expectStatus(savedGuide, 200)
   expect((await call('update_product', { product_id: productId, details: { pets_allowed: false, stairs_required: true, stairs_required_details: 'Two steps at the entrance.' } })).error).toBeNull()
 
-  // A buyer with no organization and no bookings is offered onboarding, cannot choose a business
-  // plan, and Personal never asks for organization roles or permissions on any page it can reach.
-  const buyer = await browser.newContext()
+  // Post-login and Personal, for people whose history only this test writes. Personal never asks
+  // for organization roles or permissions on any page either of them reaches.
   const personalOrganizationReads: string[] = []
-  buyer.on('request', request => {
-    const path = new URL(request.url()).pathname
-    if (path === '/api/auth/organization/get-active-member-role' || path === '/api/auth/organization/has-permission') personalOrganizationReads.push(path)
-  })
+  const watchPersonal = async () => {
+    const context = await browser.newContext()
+    context.on('request', request => {
+      const path = new URL(request.url()).pathname
+      if (path === '/api/auth/organization/get-active-member-role' || path === '/api/auth/organization/has-permission') personalOrganizationReads.push(path)
+    })
+    return context
+  }
+  // Nothing booked and no organization: onboarding is offered, and a business plan needs an organization first.
+  const newcomer = await watchPersonal()
   try {
-    await loginAs(buyer.request, baseURL!, 'user-e2e-buyer')
-    const toOnboarding = await buyer.request.get(`${baseURL}/api/post-login`, { maxRedirects: 0 })
+    await loginAs(newcomer.request, baseURL!, 'user-e2e-newcomer')
+    const toOnboarding = await newcomer.request.get(`${baseURL}/api/post-login`, { maxRedirects: 0 })
     await expectStatus(toOnboarding, 302)
     expect(toOnboarding.headers().location).toBe('/dashboard/onboarding')
-    const billingWithoutOrganization = await buyer.request.get(`${baseURL}/api/post-login?plan=business`, { maxRedirects: 0 })
-    await expectStatus(billingWithoutOrganization, 409)
-    const personalPage = await buyer.newPage()
-    for (const path of ['/dashboard/account', '/dashboard/account/calendar?view=list', '/dashboard/account/messages', '/dashboard/account/notifications']) {
-      const response = await personalPage.goto(`${baseURL}${path}`)
-      expect(response?.status(), path).toBe(200)
-      await waitForNuxtHydration(personalPage)
-    }
+    await expectStatus(await newcomer.request.get(`${baseURL}/api/post-login?plan=business`, { maxRedirects: 0 }), 409)
   } finally {
-    await buyer.close()
+    await newcomer.close()
+  }
+  // A table booked signed in, through the restaurant's own site: that guest's post-login is Personal.
+  const tableGuest = await watchPersonal()
+  try {
+    await loginAs(tableGuest.request, baseURL!, 'user-e2e-table-guest')
+    const restaurant = seededSiteHeaders('restaurant')
+    const brooklyn = seededTenant('restaurant').locations.brooklyn!.id
+    let slot: { date: string; time: string } | null = null
+    for (let offset = 1; offset <= 7 && !slot; offset++) {
+      const date = new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
+      const available = await tableGuest.request.get(`${baseURL}/api/public/reservations/availability`, { params: { date, location_id: brooklyn }, headers: restaurant })
+      await expectStatus(available, 200)
+      const { dates } = await available.json() as { dates: Array<{ slots: Array<{ time_slot: string; is_closed: boolean; is_full: boolean }> }> }
+      const time = dates[0]?.slots.find(candidate => !candidate.is_closed && !candidate.is_full)?.time_slot
+      if (time) slot = { date, time }
+    }
+    expect(slot, 'The seeded restaurant has a reservable time this week').not.toBeNull()
+    const booked = await tableGuest.request.post(`${baseURL}/api/public/reservations`, { headers: restaurant,
+      data: { name: 'E2E Table Guest', email: 'table-guest@playwright.example', phone: '+12025550123', ...slot!, guests: '2', location_id: brooklyn, idempotency_key: crypto.randomUUID() } })
+    await expectStatus(booked, 201)
+    const reservationId = (await booked.json() as { request_id: string }).request_id
+    const toAccount = await tableGuest.request.get(`${baseURL}/api/post-login`, { maxRedirects: 0 })
+    await expectStatus(toAccount, 302)
+    expect(toAccount.headers().location).toBe('/dashboard/account')
+    await expectStatus(await tableGuest.request.get(`${baseURL}/api/post-login?plan=business`, { maxRedirects: 0 }), 409)
+    const personal = await tableGuest.newPage()
+    const landed = await personal.goto(`${baseURL}/api/post-login`)
+    expect(landed?.status()).toBe(200)
+    await expect(personal).toHaveURL(`${baseURL}/dashboard/account`)
+    await waitForNuxtHydration(personal)
+    // The guest's own reservation, its conversation and calendar: the Personal pages that hold something.
+    for (const path of ['/dashboard/account/activity', `/dashboard/account/activity/reservation/${reservationId}`, `/dashboard/account/messages/${reservationId}`, `/dashboard/account/calendar/${slot!.date}`, '/dashboard/account/notifications']) {
+      const response = await personal.goto(`${baseURL}${path}`)
+      expect(response?.status(), path).toBe(200)
+      await waitForNuxtHydration(personal)
+    }
+    await personal.goto(`${baseURL}/dashboard/account/messages/${reservationId}`)
+    await expect(personal.getByText(/Table for 2 on /u).first()).toBeVisible()
+  } finally {
+    await tableGuest.close()
   }
   expect(personalOrganizationReads, 'A Personal account without an organization must not request organization roles or permissions').toEqual([])
 

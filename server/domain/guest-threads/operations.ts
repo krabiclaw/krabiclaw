@@ -26,7 +26,7 @@ import { notifyBuyerThread } from '~/server/utils/notification-center'
 import { formatTimestamp } from '~/utils/timezone'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
-import { getChannelThreadMapping, replyThroughChannex, type ChannelThreadMapping } from './channel-messages'
+import { assertReplyIntent, getChannelThreadMapping, replyThroughChannex, type ChannelThreadMapping } from './channel-messages'
 import { respondToStayChangeRequest } from './stay-change-requests'
 import type { ChannexEnv, ChannexError } from '~/server/integrations/channex/client'
 import { announceContentReport, assertSameReport, contentReportId, contentReportInsert, guestThreadExcerpt, reportReason, type ContentReportEnv } from '~/server/domain/content-reports'
@@ -510,14 +510,24 @@ async function executeReply(
   // Where a reply goes is the one rule every surface reads (`guestReplyDestination`);
   // nowhere is refused before anything is sent. Only a reply this key already
   // delivered replays where it went, whatever has changed since.
-  const destination = await guestReplyDestination(db, context.thread)
+  const matchesReply = (entry: GuestThreadEntryRow): boolean => {
+    if (!entryMatchesRequest(entry, eventName, body)) return false
+    const payload = JSON.parse(entry.payload_json ?? '{}') as { request_hash?: string }
+    return payload.request_hash === requestHash
+  }
+  // A recorded reply continues on the channel it was recorded on; a new one goes where the rule says.
   const recorded = await findEntryByDedupeKey(db, operationDedupeKey(input))
+  const destination = await guestReplyDestination(db, context.thread)
+  const recordedMapping = recorded?.channel === 'airbnb' ? await getChannelThreadMapping(db, context.thread.id, context.thread.organization_id) : null
+  if (recorded?.channel === 'airbnb' && !recordedMapping) throw new Error(`Reply ${recorded.id} was recorded on Airbnb but its conversation has no channel mapping`)
+  const channel = recorded ? recordedMapping : destination.channel === 'airbnb' ? destination.mapping : null
+  if (channel && (photoCount > 1 || (photoCount && body))) throw new HTTPError({ statusCode: 400, message: 'Send one Airbnb photo at a time, separately from text', data: { code: 'CHANNEL_PHOTO_MESSAGE_INVALID', field: 'photos' } })
+  // A key names one reply: different words under it are refused before whether it can go is asked.
+  if (recorded?.channel === 'airbnb') assertReplyIntent(recorded, body, requestHash, eventName)
+  else if (recorded && !matchesReply(recorded)) return conflict()
   const delivered = recorded ? await getDeliveryById(db, recorded.channel === 'airbnb' ? `guest-thread-channex:${context.thread.id}:${input.idempotencyKey}` : deliveryDedupeKey(input)) : null
   if (destination.channel === null && !(delivered && isDeliverySent(delivered))) return { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'request_id', message: destination.reason }
-  const channel = destination.channel === 'airbnb' ? destination.mapping
-    : recorded?.channel === 'airbnb' ? await getChannelThreadMapping(db, context.thread.id, context.thread.organization_id) : null
   if (channel) {
-    if (photoCount > 1 || (photoCount && body)) throw new HTTPError({ statusCode: 400, message: 'Send one Airbnb photo at a time, separately from text', data: { code: 'CHANNEL_PHOTO_MESSAGE_INVALID', field: 'photos' } })
     const sent = await replyThroughChannex(db, input.env, { mapping: channel, body, actorUserId, idempotencyKey: input.idempotencyKey!, requestHash,
       photoCount, resolvePhotos: async () => Array.isArray(photoInput) ? photoInput : await photoInput.resolve() }).catch((error: unknown) => {
       if (error instanceof MessagePhotoRejection) return error
@@ -527,12 +537,6 @@ async function executeReply(
     if (!sent.ok) return { ...sent, reason: 'delivery_failed' }
     return successfulOutcome(db, context)
   }
-  const matchesReply = (entry: GuestThreadEntryRow): boolean => {
-    if (!entryMatchesRequest(entry, eventName, body)) return false
-    const payload = JSON.parse(entry.payload_json ?? '{}') as { request_hash?: string }
-    return payload.request_hash === requestHash
-  }
-
   const dedupeKey = operationDedupeKey(input)
   const deliveryKey = deliveryDedupeKey(input)
   let entry = await findEntryByDedupeKey(db, dedupeKey)
