@@ -14,13 +14,13 @@ export type NotificationSeverity = 'info' | 'success' | 'warning' | 'error'
 // conversation can still be a booking, payment or other operational alert.
 const conversationEvents = ['new_contact_msg', 'channel_inquiry']
 const conversationPrefix = 'submission_reply_'
-export const CONVERSATION_NOTIFICATION_SQL = `(n.event_name IN (${conversationEvents.map(event => `'${event}'`).join(', ')}) OR n.event_name GLOB '${conversationPrefix}*')`
+export const CONVERSATION_NOTIFICATION_SQL = `(${conversationEvents.map(event => `n.event_name = '${event}'`).join(' OR ')} OR n.event_name GLOB '${conversationPrefix}*')`
 export const isConversationNotification = (event: string) =>
   conversationEvents.includes(event) || event.startsWith(conversationPrefix)
 
 const scheduleEvents = ['new_reservation', 'new_booking', 'new_stay', 'reservation_cancelled', 'booking_cancelled', 'stay_cancelled']
 const schedulePrefixes = ['channel_stay.', 'calendar_sync.', 'booking.change_', 'reservation.change_', 'stay.change_', 'consultation.change_']
-export const SCHEDULE_NOTIFICATION_SQL = `(n.event_name IN (${scheduleEvents.map(event => `'${event}'`).join(', ')})
+export const SCHEDULE_NOTIFICATION_SQL = `(${scheduleEvents.map(event => `n.event_name = '${event}'`).join(' OR ')}
   OR ${schedulePrefixes.map(prefix => `n.event_name GLOB '${prefix}*'`).join(' OR ')})`
 export const isScheduleNotification = (event: string) =>
   scheduleEvents.includes(event) || schedulePrefixes.some(prefix => event.startsWith(prefix))
