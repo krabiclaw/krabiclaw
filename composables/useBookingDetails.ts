@@ -43,10 +43,12 @@ export async function useBookingDetails(bookingType: DashboardRecordType, bookin
   const orgSlug = computed(() => personalScope ? 'account' : String(route.params.orgSlug || ''))
 
   const key = computed(() => `dashboard-booking:${orgSlug.value}:${bookingType}:${bookingId}`)
-  const { data: resource, error, refresh: reread } = await useAsyncData<{ booking: DashboardBookingDetails }>(
+  const { data: resource, error, refresh: reread } = await useAsyncData<{ booking: DashboardBookingDetails; unreadNotificationIds?: string[] }>(
     key,
     () => dashboardApi(endpoint, {
-      validate: isBookingDetailsResponse,
+      validate: (value): value is { booking: DashboardBookingDetails; unreadNotificationIds?: string[] } =>
+        isBookingDetailsResponse(value) && (personalScope || ('unreadNotificationIds' in value
+          && Array.isArray(value.unreadNotificationIds) && value.unreadNotificationIds.every(id => typeof id === 'string'))),
     }),
   )
 

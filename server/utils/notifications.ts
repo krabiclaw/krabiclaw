@@ -56,12 +56,12 @@ import {
   taskAlertMessage,
 } from '~/server/notifications/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { createCanonicalNotification, notifyBuyerThread, type NotificationSeverity } from '~/server/utils/notification-center'
+import { createCanonicalNotification, isConversationNotification, isScheduleNotification, notifyBuyerThread, type NotificationSeverity } from '~/server/utils/notification-center'
 import { buildOwnerThreadInboxUrl, buildBuyerRequestActivityUrl, dashboardOrigin, destinationUnavailable, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
-import { insightsPath, reviewEditorPath } from '~/server/utils/dashboard-links'
+import { bookingEditorPath, insightsPath, reviewEditorPath } from '~/server/utils/dashboard-links'
 import { createDeliveryReceipt, deliverReceiptEmail, isDeliverySent, recordDeliveryOutcome } from '~/server/domain/guest-threads/deliveries'
 import { appendEntry, findEntryByDedupeKey, getEntryById, parseEntryPayload } from '~/server/domain/guest-threads/entries'
-import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
+import { publishGuestInboxThreadEvent, publishNotificationInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import type { GuestThreadDeliveryPurpose, GuestThreadDeliveryRow, GuestThreadEntryRow } from '~/server/domain/guest-threads/types'
 import { getPersistedSourceLocale } from '~/server/utils/localization'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
@@ -371,7 +371,6 @@ async function resolveOwnerRecipients(
       wantsNotification(db, member.userId, opts.category, 'push')
         .then(wantsPush => wantsPush ? listUserDevices(db, member.userId) : []),
     ])
-    if (!wantsEmail && !wantsWhatsApp && pushDevices.length === 0) return null
     const unsubscribe = wantsEmail ? await buildUnsubscribeUrls(env, { userId: member.userId, category: opts.category }, opts.emailPurpose) : null
     return {
       userId: member.userId,
@@ -383,7 +382,17 @@ async function resolveOwnerRecipients(
       organizationWide: member.organizationWide,
     }
   }))
-  return recipients.filter((recipient): recipient is NotificationRecipient => recipient !== null)
+  return recipients
+}
+
+async function publishAssignedConversationAlert(
+  env: NotificationEnv,
+  recipients: NotificationRecipient[],
+  organizationId: string,
+  locationId: string | null,
+) {
+  await Promise.all(recipients.filter(recipient => !recipient.organizationWide).map(recipient =>
+    publishNotificationInvalidation(env, { type: 'notification.created', organizationId, locationId, targetUserId: recipient.userId })))
 }
 
 
@@ -786,6 +795,17 @@ export async function notifyOwner(
     : opts.submissionType && opts.submissionType !== 'invitation' && opts.submissionId
       ? await getOpeningThreadContext(db, opts.submissionType, opts.submissionId)
       : null
+  const schedule = isScheduleNotification(opts.template)
+  const stayId = opts.stayId ?? opts.memberAlert?.stayId
+  let scheduleUrl: string | null = null
+  if (schedule) {
+    const { orgSlug } = await resolveDashboardSlugs(env, db, { organizationId: opts.organizationId })
+    if (stayId) scheduleUrl = bookingEditorPath(orgSlug, 'stay', stayId)
+    else if (threadContext && (opts.submissionType === 'booking' || opts.submissionType === 'reservation')) {
+      scheduleUrl = bookingEditorPath(orgSlug, opts.submissionType, threadContext.guestThreadId)
+    } else throw new Error(`Schedule notification ${opts.template} has no booking destination`)
+    scheduleUrl = new URL(scheduleUrl, dashboardOrigin(env, { orgSlug, locationSlug: null })).href
+  }
   const notificationId = await createCanonicalNotification(db, {
     publishEnv: env,
     scope: 'organization',
@@ -798,7 +818,8 @@ export async function notifyOwner(
     message: opts.notification?.message ?? opts.message.facts.map(fact => `${fact.label}: ${fact.value}`).join('\n'),
     ...(opts.notification ? { severity: opts.notification.severity } : {}),
     threadId: threadContext?.guestThreadId ?? null,
-    deepLink: opts.payload.deep_link || null,
+    deepLink: scheduleUrl ?? (opts.payload.deep_link || null),
+    stayId,
   })
   const deliveryContext = threadContext ?? { guestThreadId: null, sourceEntryId: notificationId }
 
@@ -814,11 +835,24 @@ export async function notifyOwner(
     memberIds: opts.memberIds ?? [],
     requestId: threadContext?.guestThreadId ?? opts.responsibleRequestId,
   })
+  if (isConversationNotification(opts.template)) await publishAssignedConversationAlert(env, recipients, opts.organizationId, opts.locationId ?? null)
 
   // The owner reads mail sent for their business, framed by its own mark.
   const organizationLogoUrl = await organizationLogo(db, opts.organizationId)
-  const message = { ...opts.message, organizationLogoUrl }
+  const message = {
+    ...opts.message, organizationLogoUrl,
+    primaryAction: scheduleUrl ? { ...opts.message.primaryAction, url: scheduleUrl } : opts.message.primaryAction,
+  }
   const memberMessage = opts.memberAlert ? { ...opts.memberAlert.message, organizationLogoUrl } : message
+  const memberNotificationIds = new Map(await Promise.all(recipients.filter(recipient => !recipient.organizationWide && schedule).map(async recipient =>
+    [recipient.userId, await createCanonicalNotification(db, {
+        publishEnv: env, scope: 'organization', template: opts.template,
+        organizationId: opts.organizationId, locationId: opts.locationId,
+        targetUserId: recipient.userId, stayId, threadId: threadContext?.guestThreadId,
+        idempotencyKey: `${notificationId}:member:${recipient.userId}`,
+        title: memberMessage.title, message: opts.memberAlert ? memberMessage.facts.map(fact => `${fact.label}: ${fact.value}`).join('\n') : null,
+        deepLink: memberMessage.primaryAction.url,
+      })] as const)))
 
   const results = await Promise.allSettled(recipients.flatMap(recipient => {
     const projected = !recipient.organizationWide && opts.memberAlert !== undefined
@@ -827,10 +861,9 @@ export async function notifyOwner(
       context: deliveryContext,
       pushTemplate: opts.template, whatsappTemplate: opts.whatsappTemplate ?? null,
       eventKey: opts.deliveryEventKey,
-      target: projected ? { kind: 'stay', stayId: opts.memberAlert!.stayId }
-        : deliveryContext.guestThreadId ? { kind: 'guest', threadId: deliveryContext.guestThreadId }
-          : opts.stayId ? { kind: 'stay', stayId: opts.stayId }
-            : { kind: 'notification', notificationId },
+      target: stayId ? { kind: 'stay', stayId }
+        : !schedule && deliveryContext.guestThreadId ? { kind: 'guest', threadId: deliveryContext.guestThreadId }
+            : { kind: 'notification', notificationId: memberNotificationIds.get(recipient.userId) ?? notificationId },
     })
   }))
   const memberEmails = new Set(recipients.map(recipient => recipient.email?.toLowerCase()))
@@ -1921,6 +1954,7 @@ export async function notifyGuestThreadReply(
     emailPurpose: ownerMessage.emailPurpose,
     requestId: opts.threadId,
   })
+  await publishAssignedConversationAlert(env, recipients, opts.organizationId, opts.locationId ?? null)
 
   const results = await Promise.allSettled(recipients.flatMap(recipient => memberNotificationSends(env, db, recipient, {
     ...opts, organizationName: business, context: threadContext,

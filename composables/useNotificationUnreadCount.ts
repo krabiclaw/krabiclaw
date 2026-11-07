@@ -8,6 +8,40 @@ import type { DashboardInvalidationConnection } from '~/composables/useDashboard
 export function refreshNotificationUnreadCounts() {
   useState('dashboard-unread-refresh', () => 0).value += 1
 }
+
+/** A detail acknowledges only the alerts that existed when its data was loaded. */
+export function useAcknowledgeScheduleNotifications(ids: () => readonly string[] | undefined) {
+  const scope = useDashboardRouteScope()
+  const error = shallowRef<unknown>(null)
+  let handled = false
+  onMounted(() => {
+    watch(ids, async (snapshot, _, onCleanup) => {
+      if (!snapshot || handled) return
+      const organization = scope.value
+      if (!organization) {
+        error.value = new Error('Dashboard organization scope is required')
+        return
+      }
+      handled = true
+      let cancelled = false
+      onCleanup(() => { cancelled = true })
+      error.value = null
+      try {
+        for (const id of snapshot) {
+          if (cancelled) return
+          await dashboardFetch(`/api/dashboard/notifications/${encodeURIComponent(id)}/read`, organization, {
+            method: 'PATCH',
+            validate: (value): value is { success: true } => isRecord(value) && value.success === true,
+          })
+        }
+        if (!cancelled && snapshot.length) refreshNotificationUnreadCounts()
+      } catch (cause) {
+        if (!cancelled) error.value = cause
+      }
+    }, { immediate: true, flush: 'post' })
+  })
+  return error
+}
 /**
  * The dashboard shell provides the live connection and reads the count itself,
  * so it passes its own connection: a component cannot inject what it provides.

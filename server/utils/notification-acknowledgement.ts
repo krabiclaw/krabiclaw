@@ -1,6 +1,7 @@
 import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import { listThreadEntries, isBuyerVisibleThreadEntry } from '~/server/domain/guest-threads/entries'
-import { d1JsonStringSet, execute, queryFirst, type DbClient } from '~/server/db'
+import { d1JsonStringSet, execute, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { CONVERSATION_NOTIFICATION_SQL, SCHEDULE_NOTIFICATION_SQL } from '~/server/utils/notification-center'
 
 interface NotificationVisibility {
   userId: string
@@ -58,9 +59,34 @@ export async function acknowledgeThreadNotifications(
   return await acknowledgeVisibleNotifications(
     db,
     visibility,
-    'n.parent_id IN (SELECT id FROM activity_entries WHERE request_id = ?)',
+    `${CONVERSATION_NOTIFICATION_SQL} AND n.parent_id IN (SELECT id FROM activity_entries WHERE request_id = ?)`,
     [threadId],
   )
+}
+
+/** Snapshot before loading the detail so later changes cannot be cleared by this visit. */
+export async function unreadScheduleNotificationIds(
+  db: DbClient,
+  visibility: NotificationVisibility,
+  kind: 'stay' | 'reservation' | 'booking',
+  id: string,
+): Promise<string[]> {
+  const recordMatch = kind === 'stay'
+    ? `(json_extract(n.payload_json, '$.stay_id') = ?
+        OR EXISTS (SELECT 1 FROM stays s JOIN activity_entries source ON source.request_id = s.request_id
+          WHERE s.id = ? AND s.organization_id = n.organization_id AND source.id = n.parent_id)
+        OR substr(json_extract(n.payload_json, '$.deep_link'), -length(?)) = ?)`
+    : `EXISTS (SELECT 1 FROM requests r WHERE r.id = json_extract(n.payload_json, '$.thread_id')
+          AND r.organization_id = n.organization_id AND r.id = ? AND r.kind = ?)`
+  const stayPath = `/bookings/stay/${encodeURIComponent(id)}`
+  const params = kind === 'stay' ? [id, id, stayPath, stayPath] : [id, kind]
+  const rows = await queryAll<{ id: string }>(db, `
+    SELECT n.id FROM activity_entries n
+    WHERE ${visibility.whereSql} AND ${SCHEDULE_NOTIFICATION_SQL} AND ${recordMatch}
+      AND NOT EXISTS (SELECT 1 FROM activity_entries ack
+        WHERE ack.kind = 'acknowledgement' AND ack.parent_id = n.id AND ack.actor_user_id = ?)
+  `, [...visibility.whereParams, ...params, visibility.userId])
+  return rows.map(row => row.id)
 }
 
 /** Opening a task reads the alerts that sent its people to it. */

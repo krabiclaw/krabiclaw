@@ -6,6 +6,7 @@
       <UButton v-if="!embedded && recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close stay details" />
     </template>
     <UAlert v-if="error" color="error" variant="soft" title="This stay could not be loaded" :description="getErrorMessage(error, 'Stay request failed')" />
+    <UAlert v-if="notificationReadError" color="error" variant="soft" :description="getErrorMessage(notificationReadError, 'Stay alerts could not be marked read')" />
     <div v-else-if="stay" class="min-w-0 [overflow-wrap:anywhere]">
       <UAlert v-if="actionError" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" :description="actionError" />
       <UAlert v-if="homeError" class="mb-5" color="error" variant="soft" title="The home could not be loaded" :description="getErrorMessage(homeError, 'Home request failed')" />
@@ -259,12 +260,16 @@ const manageOpen = ref(false)
 const isStay = (value: unknown): value is { stay: StayDetail; manage?: boolean } => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
   && (value.stay.guest_image_url === null || typeof value.stay.guest_image_url === 'string')
 /** Managers read the whole stay; a member looking after the home reads its turnover. */
-type DashboardStay = { stay: StayDetail; manage: true } | { stay: StayTurnover; manage: false }
+type DashboardStay = ({ stay: StayDetail; manage: true } | { stay: StayTurnover; manage: false }) & { unreadNotificationIds: string[] }
 const isDashboardStay = (value: unknown): value is DashboardStay => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
+  && Array.isArray(value.unreadNotificationIds) && value.unreadNotificationIds.every(id => typeof id === 'string')
   && (value.manage === false || (value.manage === true && isStay(value)))
-const { data, error, refresh } = await useAsyncData(`${props.personalScope ? 'account' : 'dashboard'}-stay:${props.stayId}`, (): Promise<DashboardStay | GuestStay> => props.personalScope
+const { data, error, refresh } = await useAsyncData(`${props.personalScope ? 'account' : String(route.params.orgSlug)}-stay:${props.stayId}`, (): Promise<DashboardStay | GuestStay> => props.personalScope
   ? applicationFetch(`/api/account/stays/${encodeURIComponent(props.stayId)}`, { validate: isGuestStay })
   : dashboardApi(`/api/dashboard/stays/${encodeURIComponent(props.stayId)}`, { validate: isDashboardStay }))
+const notificationReadError = useAcknowledgeScheduleNotifications(() =>
+  !props.embedded && !props.personalScope && !error.value && data.value && 'unreadNotificationIds' in data.value
+    ? data.value.unreadNotificationIds : undefined)
 const stay = computed(() => data.value?.stay ?? null)
 /** The whole stay: the guest's own, or a manager's. Null for a member's turnover. */
 const detail = computed(() => !data.value ? null : 'home' in data.value ? data.value.stay : data.value.manage ? data.value.stay : null)

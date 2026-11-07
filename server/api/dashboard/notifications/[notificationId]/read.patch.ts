@@ -6,7 +6,7 @@ import { acknowledgeNotification } from '~/server/utils/notification-acknowledge
 import { getNotificationAccess } from '~/server/utils/notification-access'
 
 export default defineHandler(async (event) => {
-  const notificationId = getRouterParam(event, 'notificationId')?.trim()
+  const notificationId = getRouterParam(event, 'notificationId', { decode: true })?.trim()
   if (!notificationId) return jsonResponse({ error: 'Notification id is required' }, { status: 400 })
 
   const access = await getNotificationAccess(event)
