@@ -1,275 +1,124 @@
 #!/usr/bin/env node
+import { createHash, randomUUID } from 'node:crypto'
 import { spawnYarn } from './utils/spawn-yarn.mjs'
 
-const nowIso = () => new Date().toISOString()
-
-function env(name, opts = {}) {
-  const value = process.env[name]
-  if (!value || !value.trim()) {
-    if (opts.optional) return ''
-    throw new Error(`Missing required env var: ${name}`)
-  }
-  return value.trim()
+function required(name) {
+  const value = process.env[name]?.trim()
+  if (!value) throw new Error(`Missing required env var: ${name}`)
+  return value
 }
 
-function sqlEscape(value) {
-  return String(value).replace(/'/g, "''")
-}
+const quote = value => `'${value.replace(/'/g, "''")}'`
+const recipientHash = value => createHash('sha256').update(value.toLowerCase().trim()).digest('hex')
 
-function describeError(error) {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      stack: error.stack ?? null,
-      cause: error.cause ? String(error.cause) : null,
-    }
-  }
-
-  return {
-    name: 'NonError',
-    message: String(error),
-    stack: null,
-    cause: null,
-  }
-}
-
-function parseProviderError(raw) {
-  if (!raw || typeof raw !== 'string') return null
-  try {
-    return JSON.parse(raw)
-  } catch {
-    return null
-  }
-}
-
-function isKnownEmailQuotaFailure(row) {
-  if (!row || row.channel !== 'email' || row.status !== 'failed') return false
-  const parsed = parseProviderError(row.error)
-  return parsed?.statusCode === 429 && parsed?.name === 'daily_quota_exceeded'
-}
-
-function d1Raw(sql, label = 'd1Raw') {
-  const res = spawnYarn(['-s', 'wrangler', 'd1', 'execute', 'DB', '--remote', '--json', '--command', sql], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    encoding: 'utf8',
+function read(sql) {
+  const result = spawnYarn(['-s', 'wrangler', 'd1', 'execute', 'DB', '--remote', '--json', '--command', sql], {
+    stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8',
   })
-  if (res.error) {
-    throw new Error(`${label} failed before execution: ${res.error.message}`, { cause: res.error })
-  }
-  if (res.status !== 0) {
-    throw new Error(`${label} failed with exit ${res.status}: ${(res.stderr || '').trim() || 'no stderr output'}`)
-  }
-  return JSON.parse(res.stdout)?.[0]
+  if (result.error) throw result.error
+  if (result.status !== 0) throw new Error('Production canary database read failed', { cause: result.stderr })
+  const [response] = JSON.parse(result.stdout)
+  if (!response?.success || !Array.isArray(response.results)) throw new Error('Unexpected production canary database response')
+  return response.results
 }
 
-function d1Query(sql, label = 'd1Query') {
-  return d1Raw(sql, label)?.results ?? []
-}
-
-async function postJson(url, data, label) {
-  let res
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-  } catch (error) {
-    throw new Error(`${label} fetch failed for ${url}`, { cause: error })
+async function request(url, expectedStatus, options) {
+  const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(20_000), ...options })
+  const body = await response.json()
+  if (response.status !== expectedStatus) {
+    throw new Error(`${url.pathname}: expected ${expectedStatus}, received ${response.status}: ${body.code ?? body.error ?? 'unknown error'}`)
   }
-  const text = await res.text()
-  let body
-  try { body = text ? JSON.parse(text) : null } catch { body = null }
-  return { res, body, text }
+  return body
 }
 
 async function main() {
-  const baseUrl = env('CANARY_BASE_URL')
-  const orgId = env('CANARY_ORG_ID')
-  const canaryEmail = env('CANARY_NOTIFICATION_EMAIL')
-  const canaryPhone = env('CANARY_NOTIFICATION_PHONE_E164')
+  const organization = required('CANARY_ORG_ID')
+  const email = required('CANARY_NOTIFICATION_EMAIL')
+  const phone = required('CANARY_NOTIFICATION_PHONE_E164')
+  if (!/^\+[1-9]\d{7,14}$/.test(phone)) throw new Error('The canary phone must be in E.164 format')
 
-  const since = nowIso()
-  const suffix = Date.now()
-
-  const contactUrl = `${baseUrl}/api/public/contact`
-  const contact = await postJson(contactUrl, {
-    name: `Prod Canary ${suffix}`,
-    email: canaryEmail,
-    message: 'Hello, this is an automated notification check message to confirm delivery.',
-  }, 'contact trigger')
-
-  if (contact.res.status >= 400) {
-    throw new Error(`Contact canary trigger failed for ${contactUrl} (${contact.res.status}): ${contact.text}`)
+  // Resolve the public origin from the explicitly configured canary organization.
+  // The platform/auth base URL is not necessarily the tenant that accepts bookings.
+  const [target] = read(`
+    SELECT d.domain,
+      EXISTS (SELECT 1 FROM member m JOIN user u ON u.id = m.userId
+        WHERE m.organizationId = o.id AND m.role IN ('owner','admin')
+          AND u.phoneNumberVerified = 1 AND u.phoneNumber = ${quote(phone)}) AS verified_phone
+    FROM organization o JOIN organization_domains d
+      ON d.organization_id = o.id AND d.role = 'canonical' AND d.status = 'active'
+    WHERE o.id = ${quote(organization)} AND o.status = 'active'
+  `)
+  if (!target?.domain || !target.verified_phone) throw new Error('The canary workspace or its verified WhatsApp recipient could not be resolved')
+  const origin = new URL(`https://${target.domain}`)
+  const locations = read(`
+    SELECT location_id FROM location_reservation_configs WHERE organization_id = ${quote(organization)}
+      AND (deposit_required = 0 OR deposit_trigger_party_size > 2) ORDER BY location_id
+  `)
+  let available
+  for (const { location_id } of locations) {
+    const url = new URL('/api/public/reservations/availability', origin)
+    const date = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10)
+    url.search = new URLSearchParams({ location_id, date, days: '7' }).toString()
+    const { dates } = await request(url, 200)
+    for (const day of dates) {
+      const slot = day.slots.find(slot => !slot.is_closed && !slot.is_full && (slot.remaining === null || slot.remaining >= 2))
+      if (!slot) continue
+      available = { location_id, date: day.date, time: slot.time_slot }
+      break
+    }
+    if (available) break
   }
+  if (!available) throw new Error('The canary workspace has no available reservation for two without a deposit')
 
-  const reservationDate = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10)
-  const reservationUrl = `${baseUrl}/api/public/reservations`
-  const reservation = await postJson(reservationUrl, {
-    name: `Prod Canary ${suffix}`,
-    email: canaryEmail,
-    phone: canaryPhone,
-    date: reservationDate,
-    time: '18:00',
-    guests: '2',
-    requests: `notification canary ${suffix}`,
-  }, 'reservation trigger')
+  const post = (path, body, status) => request(new URL(path, origin), status, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  const key = randomUUID()
+  const name = `Notification canary ${key.slice(0, 8)}`
+  const contact = await post('/api/public/contact', { name, email, message: 'Dedicated notification delivery check.' }, 201)
+  const reservation = await post('/api/public/reservations', {
+    ...available, name, email, phone, guests: '2', idempotency_key: key,
+  }, 201)
+  if (!reservation.id || !reservation.cancellationToken) throw new Error('The canary reservation did not return its cancellation capability')
+  const cancelled = await request(new URL(`/api/public/booking-requests/${encodeURIComponent(reservation.id)}/cancel`, origin), 200, {
+    method: 'POST', headers: { authorization: `Bearer ${reservation.cancellationToken}` },
+  })
+  if (cancelled.success !== true || cancelled.kind !== 'reservation') throw new Error('The canary reservation did not confirm cancellation')
+  if (!contact.request_id) throw new Error('The canary contact did not return its request ID')
 
-  if (reservation.res.status >= 400) {
-    throw new Error(`Reservation canary trigger failed for ${reservationUrl} (${reservation.res.status}): ${reservation.text}`)
-  }
-
+  const requiredReceipts = [
+    ['contact_email', contact.request_id, 'email', 'resend', 'guest_acknowledgement', 'contact_customer_received', email],
+    ['reservation_email', reservation.id, 'email', 'resend', 'guest_acknowledgement', 'reservation_customer_received', email],
+    ['reservation_whatsapp', reservation.id, 'whatsapp', 'meta', 'owner_alert', 'new_reservation', phone],
+    ['cancellation_email', reservation.id, 'email', 'resend', 'status_update', 'reservation_customer_cancelled', email],
+    ['cancellation_whatsapp', reservation.id, 'whatsapp', 'meta', 'owner_alert', 'reservation_cancelled', phone],
+  ]
   const deadline = Date.now() + 45_000
-  let emailRow = null
-  let whatsappRow = null
-  let quotaBlockedEmailRows = []
-  while (Date.now() < deadline) {
-    const rows = d1Query(`
-      SELECT d.id, d.channel, d.purpose, d.status, d.provider_message_id, d.error, d.created_at,
-             gt.kind, gt.id
-      FROM guest_thread_deliveries d
-      JOIN activity_entries e ON e.id = d.entry_id
-      JOIN requests gt ON gt.id = e.request_id
-      WHERE gt.organization_id = '${sqlEscape(orgId)}'
-        AND d.purpose = 'owner_alert'
-        AND d.created_at >= '${sqlEscape(since)}'
-      ORDER BY d.created_at DESC
-      LIMIT 100
-    `, 'notification poll')
-
-    emailRow = rows.find((r) => r.channel === 'email' && r.status === 'sent' && r.provider_message_id)
-    whatsappRow = rows.find((r) => r.channel === 'whatsapp' && r.status === 'sent' && r.provider_message_id)
-    quotaBlockedEmailRows = rows.filter(isKnownEmailQuotaFailure)
-
-    if ((emailRow || quotaBlockedEmailRows.length > 0) && whatsappRow) break
-    await new Promise((r) => setTimeout(r, 1500))
-  }
-
-  const emailQuotaBlocked = !emailRow && quotaBlockedEmailRows.length > 0
-
-  if ((!emailRow && !emailQuotaBlocked) || !whatsappRow) {
-    const rows = d1Query(`
-      SELECT d.id, d.channel, d.purpose, d.status, d.provider_message_id, d.error, d.created_at,
-             gt.kind, gt.id
-      FROM guest_thread_deliveries d
-      JOIN activity_entries e ON e.id = d.entry_id
-      JOIN requests gt ON gt.id = e.request_id
-      WHERE gt.organization_id = '${sqlEscape(orgId)}'
-        AND d.purpose = 'owner_alert'
-        AND d.created_at >= '${sqlEscape(since)}'
-      ORDER BY d.created_at DESC
-      LIMIT 100
-    `, 'notification final read')
-    throw new Error(`Provider-level canary assertions failed. email_sent=${Boolean(emailRow)} whatsapp_sent=${Boolean(whatsappRow)} rows=${JSON.stringify(rows)}`)
-  }
-
-  const reservationId = reservation.body?.id
-  const cancellationToken = reservation.body?.cancellationToken
-  if (!reservationId || !cancellationToken) {
-    throw new Error(`Reservation creation response missing id/cancellationToken needed for cancellation canary: ${reservation.text}`)
-  }
-
-  const cancelSince = nowIso()
-  const cancelUrl = `${baseUrl}/api/public/booking-requests/${encodeURIComponent(reservationId)}/cancel`
-  let cancelRes
-  try {
-    cancelRes = await fetch(cancelUrl, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${cancellationToken}` },
-    })
-  } catch (error) {
-    throw new Error(`Reservation cancellation trigger failed for ${cancelUrl}`, { cause: error })
-  }
-  if (cancelRes.status >= 400) {
-    throw new Error(`Reservation cancellation trigger failed for ${cancelUrl} (${cancelRes.status}): ${await cancelRes.text()}`)
-  }
-
-  const cancelDeadline = Date.now() + 45_000
-  let cancelEmailRow = null
-  let cancelWhatsappRow = null
-  let cancelQuotaBlockedEmailRows = []
-  while (Date.now() < cancelDeadline) {
-    const rows = d1Query(`
-      SELECT d.id, d.channel, d.purpose, d.status, d.provider_message_id, d.error, d.created_at,
-             gt.kind, gt.id
-      FROM guest_thread_deliveries d
-      JOIN activity_entries e ON e.id = d.entry_id
-      JOIN requests gt ON gt.id = e.request_id
-      WHERE gt.organization_id = '${sqlEscape(orgId)}'
-        AND gt.kind = 'reservation'
-        AND d.purpose = 'owner_alert'
-        AND d.created_at >= '${sqlEscape(cancelSince)}'
-      ORDER BY d.created_at DESC
-      LIMIT 100
-    `, 'cancellation notification poll')
-
-    cancelEmailRow = rows.find((r) => r.channel === 'email' && r.status === 'sent' && r.provider_message_id)
-    cancelWhatsappRow = rows.find((r) => r.channel === 'whatsapp' && r.status === 'sent' && r.provider_message_id)
-    cancelQuotaBlockedEmailRows = rows.filter(isKnownEmailQuotaFailure)
-
-    if ((cancelEmailRow || cancelQuotaBlockedEmailRows.length > 0) && cancelWhatsappRow) break
-    await new Promise((r) => setTimeout(r, 1500))
-  }
-
-  const cancelEmailQuotaBlocked = !cancelEmailRow && cancelQuotaBlockedEmailRows.length > 0
-
-  const runId = `canary-notify-${crypto.randomUUID()}`
-
-  if ((!cancelEmailRow && !cancelEmailQuotaBlocked) || !cancelWhatsappRow) {
-    const rows = d1Query(`
-      SELECT d.id, d.channel, d.purpose, d.status, d.provider_message_id, d.error, d.created_at,
-             gt.kind, gt.id
-      FROM guest_thread_deliveries d
-      JOIN activity_entries e ON e.id = d.entry_id
-      JOIN requests gt ON gt.id = e.request_id
-      WHERE gt.organization_id = '${sqlEscape(orgId)}'
-        AND gt.kind = 'reservation'
-        AND d.purpose = 'owner_alert'
-        AND d.created_at >= '${sqlEscape(cancelSince)}'
-      ORDER BY d.created_at DESC
-      LIMIT 100
-    `, 'cancellation notification final read')
-    throw new Error(`Provider-level cancellation canary assertions failed. email_sent=${Boolean(cancelEmailRow)} whatsapp_sent=${Boolean(cancelWhatsappRow)} rows=${JSON.stringify(rows)}`)
-  }
-
-  console.log(JSON.stringify({
-    status: 'pass',
-    run_id: runId,
-    started_at: since,
-    completed_at: nowIso(),
-    base_url: baseUrl,
-    triggers: {
-      contact_status: contact.res.status,
-      reservation_status: reservation.res.status,
-      reservation_id: reservationId,
-      reservation_cancel_status: cancelRes.status,
-    },
-    notification_ids: {
-      email: emailRow?.id ?? null,
-      whatsapp: whatsappRow.id,
-      cancellation_email: cancelEmailRow?.id ?? null,
-      cancellation_whatsapp: cancelWhatsappRow?.id ?? null,
-    },
-    provider_message_ids: {
-      email: emailRow?.provider_message_id ?? null,
-      whatsapp: whatsappRow.provider_message_id,
-      cancellation_email: cancelEmailRow?.provider_message_id ?? null,
-      cancellation_whatsapp: cancelWhatsappRow?.provider_message_id ?? null,
-    },
-    provider_degraded: (emailQuotaBlocked || cancelEmailQuotaBlocked) ? {
-      email_daily_quota_exceeded: true,
-      affected_notification_ids: [...quotaBlockedEmailRows, ...cancelQuotaBlockedEmailRows].map(row => row.id),
-    } : null,
-  }, null, 2))
-
-  if (emailQuotaBlocked || cancelEmailQuotaBlocked) {
-    console.warn('canary:notifications passed with degraded email provider capacity (daily quota exceeded)')
-  }
+  let missing
+  do {
+    const rows = read(`
+      SELECT d.id, e.request_id, d.channel, d.provider, d.purpose, d.status, d.provider_message_id
+      FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
+      JOIN requests r ON r.id = e.request_id
+      WHERE r.organization_id = ${quote(organization)} AND r.id IN (${quote(contact.request_id)}, ${quote(reservation.id)})
+    `)
+    const evidence = Object.fromEntries(requiredReceipts.map(([label, requestId, channel, provider, purpose, template, recipient]) => {
+      const suffix = `:${purpose}:${channel}:${template}:${recipientHash(recipient)}`
+      return [label, rows.find(row => row.request_id === requestId && row.provider === provider
+        && ['accepted', 'sent', 'delivered', 'read'].includes(row.status)
+        && row.provider_message_id && row.id.endsWith(suffix))?.provider_message_id]
+    }))
+    missing = Object.keys(evidence).filter(label => !evidence[label])
+    if (!missing.length) {
+      console.log(JSON.stringify({ status: 'pass', contact_id: contact.request_id, reservation_id: reservation.id, provider_message_ids: evidence }, null, 2))
+      return
+    }
+    await new Promise(resolve => setTimeout(resolve, 1500))
+  } while (Date.now() < deadline)
+  throw new Error(`No provider acceptance receipt for: ${missing.join(', ')}`)
 }
 
-main().catch((error) => {
-  console.error('canary:notifications failed')
-  console.error(JSON.stringify(describeError(error), null, 2))
-  process.exit(1)
+main().catch(error => {
+  console.error(error)
+  process.exitCode = 1
 })
