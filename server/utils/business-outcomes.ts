@@ -15,8 +15,7 @@ import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { articleCollectionOf } from '~/server/utils/content/publishing'
 import { getSocialConnections } from '~/server/utils/social-publication'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
-import { publicProductHosts } from '~/server/utils/public-provider'
-import { getProduct } from '~/server/utils/product-management'
+import { experiencePublicationBlocker, getProduct } from '~/server/utils/product-management'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { getSessionAvailability } from '~/server/utils/availability'
 import { listReservationSlots } from '~/server/utils/reservations'
@@ -351,19 +350,12 @@ export async function readBusinessProgressReference(
     ])
     return result({ kind: 'post', status: post.status, updatedAt: post.updated_at, publications }, { post, publications, media: [...media.values()].flat() })
   }
-  if (input.operation === 'product.host' || input.operation === 'product.description' || input.operation === 'product.preparation') {
+  if (input.operation === 'product.readiness') {
     const product = await getProduct(db, principal.organizationId, input.subjectId)
-    if (product.kind !== 'experience' || !product.active) throw missing()
-    if (input.operation === 'product.host') {
-      if (!product.booking || product.order_url || (await publicProductHosts(db, principal.organizationId, product.id)).length) throw missing()
-      return result({ kind: 'product_readiness', missing: 'host' }, { updatedAt: product.updated_at, member: product.booking.assigned_member_id, team: product.booking.assigned_team_id })
-    }
-    if (input.operation === 'product.description') {
-      if (product.description.trim()) throw missing()
-      return result({ kind: 'product_readiness', missing: 'description' }, { updatedAt: product.updated_at })
-    }
-    if (Array.isArray(product.details.what_to_bring) && product.details.what_to_bring.some(value => typeof value === 'string' && value.trim())) throw missing()
-    return result({ kind: 'product_readiness', missing: 'preparation' }, { updatedAt: product.updated_at })
+    const blocker = await experiencePublicationBlocker(db, principal.organizationId, product, principal.env as CloudflareEnv)
+    if (!blocker) throw missing()
+    const evidence = { kind: 'product_readiness' as const, missing: blocker }
+    return result(evidence, blocker === 'host' ? { ...evidence, member: product.booking?.assigned_member_id, team: product.booking?.assigned_team_id } : evidence)
   }
   if (input.operation === 'product.payment' || input.operation === 'stay.gap') {
     const interval = input.operation === 'stay.gap' ? coordinates() : null

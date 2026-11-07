@@ -41,7 +41,7 @@ export interface OpportunityView {
 const AREA: Record<BusinessProgressOperation, string> = {
   'article.create': 'Website', 'article.update': 'Website', 'article.publish': 'Website', 'article.distribute': 'Social',
   'post.create': 'Social', 'post.publish': 'Social', 'social.connect': 'Social', 'google_ads.connect': 'Marketing',
-  'payments.connect': 'Payments', 'product.payment': 'Payments', 'product.host': 'Bookings', 'product.description': 'Catalog', 'product.preparation': 'Catalog', 'stay.gap': 'Calendar', 'guest_thread.reply': 'Messages',
+  'payments.connect': 'Payments', 'product.payment': 'Payments', 'product.readiness': 'Catalog', 'stay.gap': 'Calendar', 'guest_thread.reply': 'Messages',
 }
 
 function fail(statusCode: number, code: string, message: string, field?: string): never {
@@ -66,7 +66,8 @@ async function select(db: DbClient, principal: MemberAccessPrincipal, input: { n
   const now = input.now.toISOString(), organizationId = principal.organizationId
   const queries: BatchQuery[] = plan.recommendations.map(item => ({
     query: `INSERT INTO opportunities (id, organization_id, operation, subject_id, evidence_revision, goal_id, goal_revision, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?) ON CONFLICT DO NOTHING`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?) ON CONFLICT DO UPDATE SET status='open', updated_at=excluded.updated_at
+      WHERE opportunities.operation='product.readiness' AND opportunities.status='superseded'`,
     params: [crypto.randomUUID(), organizationId, item.operation, item.subjectId, item.reference.evidenceRevision, item.goal?.id ?? null, item.goal?.revision ?? null, now, now],
   }))
   // A location-filtered read sees only part of the business, so it never supersedes.

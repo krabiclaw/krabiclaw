@@ -271,19 +271,20 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
       assert.equal(save.status, 200, await save.text())
       assert.equal((await getTask(db, viewer, accepted.id)).status, 'done')
 
-      const readinessPaths = (items: typeof opportunities) => items.filter(item => item.path.startsWith(`${editor}/`)).map(item => item.path).sort()
-      assert.deepEqual(readinessPaths(opportunities), [`${editor}/attributes/what_to_bring`, `${editor}/booking/assignment`, `${editor}/booking/payment`, `${editor}/description`])
-      await updateProduct(db, { organizationId: 'org', productId: paid.id, actor: { actorId: 'owner' }, env,
-        patch: { description: 'Learn to throw a bowl on the wheel.', details: { what_to_bring: ['An apron'] } } })
-      assert.deepEqual(readinessPaths((await listOpportunities(db, principal)).opportunities), [`${editor}/booking/assignment`])
-      await setProductBookingConfig(db, { organizationId: 'org', productId: paid.id, actorId: 'owner', env, patch: { assigned_member_id: 'm-owner' } })
-      assert.equal((await listOpportunities(db, principal)).opportunities.find(item => item.productId === paid.id && item.path.includes('/profile'))?.path, '/dashboard/cliff/team/m-owner/profile')
-      await writeMemberScheduling({ env, organizationId: 'org', userId: 'owner' }, 'm-owner', { expected_updated_at: null, public_name: 'Wheel class host', public_approved: true })
-      assert.deepEqual(readinessPaths((await listOpportunities(db, principal)).opportunities), [])
-      assert.equal((await listOpportunities(db, principal)).opportunities.some(item => item.productId === paid.id && item.path.includes('/profile')), false)
-
       assert.equal((await getProduct(db, 'org', paid.id)).booking?.online_payment_required, true, 'ordinary catalog read observes the saved payment setting')
       assert.equal((await recommendations()).some(item => item.operation === 'product.payment'), false, 'actual booking configuration clears payment work on the next read without a day boundary')
+
+      const catalogCards = async () => (await listOpportunities(db, principal)).opportunities
+        .filter(item => item.productId === paid.id && item.statusLine === 'Catalog').map(item => item.path)
+      assert.deepEqual(await catalogCards(), [`${editor}/booking/assignment`])
+      await setProductBookingConfig(db, { organizationId: 'org', productId: paid.id, actorId: 'owner', env, patch: { assigned_member_id: 'm-owner' } })
+      assert.deepEqual(await catalogCards(), ['/dashboard/cliff/team/m-owner/profile'])
+      await writeMemberScheduling({ env, organizationId: 'org', userId: 'owner' }, 'm-owner', { expected_updated_at: null, public_name: 'Wheel class host', public_approved: true })
+      assert.deepEqual(await catalogCards(), [`${editor}/locations`])
+      await updateProduct(db, { organizationId: 'org', productId: paid.id, actor: { actorId: 'owner' }, env,
+        patch: { order_url: 'https://example.com/book/wheel-class' } })
+      assert.deepEqual(await catalogCards(), [])
+
     } finally { fetchMock.mock.restore() }
   } finally {
     await runtime.dispose()

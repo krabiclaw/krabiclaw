@@ -172,10 +172,10 @@ tracks there. A reply card opens the conversation. A payment card opens that
 offering's Payment settings. Saving the payment requirement completes its
 accepted task in the booking configuration batch.
 
-Experience suggestions can identify a missing published host, an empty
-description or absent preparation details. The host suggestion uses the same
-published profile evidence guests see. Preparation is optional and can be
-dismissed when guests need to bring nothing.
+Each active experience can show one catalog suggestion for its current
+publication blocker. The server uses the catalog’s published-host and booking
+readiness checks. The card opens the editor for the current blocker and
+advances or clears as the catalog state changes.
 
 An open reply with an authorized linked stay includes reservation context in
 the same TaskView. TaskCard shows its dates, guest portrait, group, internal
