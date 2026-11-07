@@ -462,14 +462,13 @@ cancellation, allocation release and full refund intent in one guarded D1 batch;
 provider retry and interrupted-refund recovery remain durable. Ordinary cancellation
 is distinct.
 
-Guest cancellation of a paid table reservation automatically refunds the remaining
-deposit unless the cancellation deadline saved with that reservation has passed.
-A saved `free_cancellation_until_minutes: null` means no deadline: cancellation
-still triggers the automatic refund. Cancelling after a configured deadline
-releases the table without an automatic refund. The reservation's saved terms,
-rather than the location's current settings, decide this outcome. Experience and
-service booking terms do not currently define an executable automatic-refund
-deadline; their guests contact the business about a refund.
+Every reservation, class and consultation has one cancellation rule, Airbnb's
+1-day policy, and it is not a setting. A guest who cancels at least 24 hours
+before the start gets the remaining payment back automatically. Later, the
+cancellation releases the seats without a refund; the business can still refund
+by hand. Changes close at the same deadline unless the business approves an
+exception. A booking made inside the 24 hours is non-refundable, and checkout
+says so. Stays use the home's booked policy instead.
 
 Buyer ownership uses Better Auth identity. Signing in on any device reads the same
 owned purchases. A guest acts on a business's own site as an anonymous Better Auth

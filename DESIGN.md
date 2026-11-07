@@ -1123,9 +1123,9 @@ when it is useful, rather than making routing another authoring task.
 
 **Experience details are guest decisions, not another model.** What you’ll do
 edits Product description. Where to meet, What is included, What to bring,
-Before you arrive and Cancellation policy open the existing Product detail
-editors directly. A cancellation description explains the host's terms; it
-does not configure an automatic refund policy.
+and Before you arrive open the existing Product detail editors directly.
+Cancellation is not a setting: every class, consultation and reservation has
+the one 24-hour rule in `shared/availability-settings.ts`.
 
 **Experience availability uses the shared Calendar destination.** The Offering
 selector switches between bookings, nightly stays and configured experiences or

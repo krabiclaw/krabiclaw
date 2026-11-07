@@ -75,10 +75,6 @@
               <p class="text-sm leading-relaxed text-muted">{{ item.text }}</p>
             </div>
           </div>
-          <div v-if="activeReservationPolicySummary.additional_notes_html" class="mt-8 max-w-2xl text-sm leading-relaxed text-muted">
-            <!-- eslint-disable-next-line vue/no-v-html -->
-            <div v-html="activeReservationPolicySummary.additional_notes_html" />
-          </div>
         </div>
       </section>
 
@@ -425,7 +421,7 @@ async function handleReservation(contact: ContactFormState) {
       cancelUrl: res?.id && res?.cancellationToken ? `${localePath('/reservations/cancel')}?id=${encodeURIComponent(res.id)}#${res.cancellationToken}` : null,
       contactPhone: contactPhone.value || null,
       contactEmail: contactEmail.value || null,
-      policySummary: res.policy_summary ? { ...res.policy_summary, additional_notes_html: activeReservationPolicySummary.value?.additional_notes_html ?? null } : null,
+      policySummary: res.policy_summary,
       locationId: selectedLocation.value?.id ? String(selectedLocation.value.id) : null,
       locationName: selectedLocation.value?.title ?? null,
       locationAddress: formatPostalAddress((selectedLocation.value?.address ?? null) as PostalAddress | null) || null,

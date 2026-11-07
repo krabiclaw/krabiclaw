@@ -7,9 +7,10 @@ import { HTTPError } from 'nitro'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { assertResourceAccess, assertAssignedBookingAccess, isOrganizationWideRole, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
-import { productPolicySummarySource, renderBookingPolicySummary, type RenderedBookingPolicySummary } from '~/server/utils/reservations'
+import { renderBookingPolicySummary, visitPolicySummarySource, type RenderedBookingPolicySummary } from '~/server/utils/reservations'
 import type { BookingPolicySummarySource } from '~/server/utils/booking-policy-summary'
-import { assertProductKind, validateProductDetails, type ProductKind } from '~/shared/product-details'
+import { freeCancellationUntil } from '~/shared/availability-settings'
+import { assertProductKind, type ProductKind } from '~/shared/product-details'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { localPartsAt } from '~/utils/timezone'
@@ -20,7 +21,7 @@ import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-ev
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { readPaymentDetails } from '~/server/domain/payments'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
-import { canRetryGuestReservationRefund } from '~/server/domain/payments/visit-refund'
+import { canRetryGuestVisitRefund } from '~/server/domain/payments/visit-refund'
 import {paymentDisplay,paymentRefundsDisplay,paymentOrderDisplay,type PaymentDisplay,type PaymentRefundDisplay,type PaymentOrderDisplay} from '~/shared/payment-display'
 
 export type DashboardBookingType = 'reservation' | 'booking'
@@ -136,6 +137,7 @@ export interface DashboardBookingDetails {
   guestCanCancel: boolean
   /** An interrupted deposit refund can resume the already-recorded guest cancellation. */
   guestCanRetryCancellation: boolean
+  guestCancelRefunds: boolean
   /** The business's phone for this booking, as the guest reaches it. */
   contactPhone: string | null
   /** When staff recorded the guest did not come. */
@@ -303,14 +305,14 @@ async function composeBookingDetails(
   const visibleLocations = locations.filter(location => type === 'reservation' || location.id === row.location_id)
   const locationPictures = await loadOwnerPictures(db, row.organization_id, 'business_location', visibleLocations.map(location => location.id))
 
-  let policy = row.policy_json ? JSON.parse(row.policy_json) as BookingPolicySummarySource : null
+  let policy: BookingPolicySummarySource = row.policy_json ? JSON.parse(row.policy_json) as BookingPolicySummarySource : visitPolicySummarySource('reservation')
   let productKind: ProductKind | undefined
   if (type === 'booking') {
     productKind = assertProductKind(row.product_kind)
-    policy = productPolicySummarySource(validateProductDetails(productKind, JSON.parse(row.product_details_json!)))
+    policy = visitPolicySummarySource('experience')
   }
   const [policyLocale, notes, timeZone, contact] = await Promise.all([
-    policy ? getSourceLocale(db,row.organization_id) : Promise.resolve(null),
+    getSourceLocale(db,row.organization_id),
     reader.buyerUserId ? Promise.resolve([]) : listInternalNotes(db, row.request_id),
     Promise.resolve(row.timezone),
     row.location_id
@@ -329,8 +331,8 @@ async function composeBookingDetails(
   }))
   const now = new Date().toISOString()
   const complete = isBookingComplete({ status: row.status as BookingStatus, ends_at: row.ends_at }, now)
-  const guestCanRetryCancellation = Boolean(reader.buyerUserId && type === 'reservation' && row.status === 'cancelled' && row.cancellation_used_at
-    && await canRetryGuestReservationRefund(db, { organizationId: row.organization_id, reservationId: row.operational_id, requestId: row.id, buyerUserId: reader.buyerUserId }))
+  const guestCanRetryCancellation = Boolean(reader.buyerUserId && row.status === 'cancelled' && row.cancellation_used_at
+    && await canRetryGuestVisitRefund(db, { organizationId: row.organization_id, subjectType: type, subjectId: row.operational_id, requestId: row.id, buyerUserId: reader.buyerUserId }))
   return {
     assignedMemberId: row.assigned_member_id, assignedMemberName:provider?.name??null,providerConflict:Boolean(provider?.conflict),providerCalendarStatus: scheduling?.calendar_ids.length && scheduling.calendar_status !== 'ready' ? scheduling.busy_error || `Busy-calendar status: ${scheduling.calendar_status}` : null,operationalUpdatedAt:row.operational_updated_at,
     canReassignProvider: reader.canReassignProvider === true,
@@ -369,8 +371,7 @@ async function composeBookingDetails(
     threadId: row.request_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    // Products state their current terms; reservations keep their captured location policy.
-    policy: policy && policyLocale ? renderBookingPolicySummary(policy, policyLocale, productKind) : null,
+    policy: renderBookingPolicySummary(policy, policyLocale, productKind),
     notes,
     answers: row.answers_json === null ? [] : formAnswerSnapshotsSchema.parse(JSON.parse(row.answers_json)),
     pendingChange: await pendingBookingChange(db, row.request_id),
@@ -380,6 +381,7 @@ async function composeBookingDetails(
     // does not offer a cancellation the write would refuse.
     guestCanCancel: ['pending', 'confirmed'].includes(row.status) && row.ends_at > now && !complete && !row.cancellation_used_at,
     guestCanRetryCancellation,
+    guestCancelRefunds: now <= freeCancellationUntil(row.starts_at),
     contactPhone: contact?.contactPhone ?? null,
     noShowAt: row.no_show_at,
     canMarkNoShow: !reader.buyerUserId && row.status === 'confirmed' && row.no_show_at === null && row.review_id === null && row.starts_at <= now,
@@ -537,6 +539,7 @@ async function composePurchaseDetails(db: DbClient, scope: BookingScope, payment
     payments: [{ payment: paymentDisplay(detail.payment), refunds: paymentRefundsDisplay(detail.refunds), order: paymentOrderDisplay(detail.order) }],
     guestCanCancel: false,
     guestCanRetryCancellation: false,
+    guestCancelRefunds: false,
     noShowAt: null,
     canMarkNoShow: false,
     reviewInvitation: null,

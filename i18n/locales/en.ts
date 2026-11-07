@@ -63,6 +63,8 @@ export default {
     "agreement": "By selecting the button, I agree to the {terms} and to pay the total shown.",
     "booking_terms": "booking terms",
     "full_policy": "Full policy",
+    "free_cancellation_until": "Free cancellation until {time}. After that, this payment isn't refunded automatically.",
+    "non_refundable": "This booking is non-refundable.",
     "when": "Choose when to pay",
     "pay_now": "Pay {amount} now",
     "pay_later": "Pay later",
@@ -92,16 +94,13 @@ export default {
     "third_party_notices": "Third-Party Notices"
   },
   "booking_policy": {
-    "cancellation_until_start": "Cancel free before the start time.",
-    "reschedule_until_start": "You can reschedule before the start time.",
-    "reschedule_allowed": "You can request a change of time.",
-    "reschedule_disallowed": "Time changes are not allowed.",
+    "cancellation": "Cancel free up to 24 hours before the start time. After that, payments aren't refunded automatically.",
+    "cancel_refund": "You'll get a full refund.",
+    "cancel_no_refund": "It's less than 24 hours before the start time, so your payment won't be refunded.",
     "reservation_heading": "Reservation policies",
     "experience_heading": "Experience policies",
     "consultation_heading": "Consultation policies",
-    "reservation_cancellation": "Cancel free up to {duration} before your booking.",
-    "experience_cancellation": "Free cancellation is available up to {duration} before the experience starts.",
-    "reschedule": "You can reschedule up to {duration} before the start time.",
+    "reschedule": "You can reschedule up to 24 hours before the start time.",
     "deposit_party": "Parties of {count}+ guests require a deposit.",
     "deposit": "A deposit is required before confirmation.",
     "deposit_amount": "Deposit: {amount} per reservation.",
@@ -829,7 +828,9 @@ export default {
       "make_new": "Browse Experiences",
       "toast_cancelled": "Booking cancelled",
       "toast_error": "Error",
-      "toast_cancel_failed": "Failed to cancel booking"
+      "toast_cancel_failed": "Failed to cancel booking",
+      "retry_refund": "Retry refund",
+      "toast_refund_failed": "Could not retry your refund. Please try again."
     }
   }
 } as const

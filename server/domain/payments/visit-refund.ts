@@ -1,12 +1,14 @@
 import {HTTPError} from 'nitro'
 import {queryFirst,type BatchQuery,type DbClient} from '~/server/db'
 import {authorizePayments,requestRefundAuthorization,type Payment} from './index'
-import { isRecord } from '~/server/utils/type-guards'
+import { freeCancellationUntil } from '~/shared/availability-settings'
 
 /** Declining or cancelling a paid visit or stay returns the whole payment, as Airbnb's host cancellation does. */
 export type VisitRefundAction='reject'|'cancel'
 export type VisitRefundSubject='booking'|'reservation'|'stay'
 export const visitRefundKey=(action:VisitRefundAction,subjectType:VisitRefundSubject,subjectId:string)=>`${action==='reject'?'rejected':subjectType==='reservation'?'cancelled-reservation':subjectType==='stay'?'cancelled-stay':'cancelled'}:${subjectId}`
+type GuestRefundSubject='booking'|'reservation'
+export const guestVisitRefundKey=(subjectType:GuestRefundSubject,subjectId:string)=>`guest-cancelled-${subjectType}:${subjectId}`
 const authorizationActionFor=(action:VisitRefundAction,subjectType:VisitRefundSubject)=>subjectType==='stay'?'cancel_stay':subjectType==='reservation'?'cancel_reservation':action==='reject'?'reject_booking':'cancel_booking'
 
 /** Extends the canonical visit operation's batch, never a second booking writer. */
@@ -47,19 +49,14 @@ export async function visitRefundQueries(db:DbClient,input:{action:VisitRefundAc
  ]}
 }
 
-/** A guest's own cancellation inside the quoted deposit terms returns the deposit; cancellation always releases the table. */
-export async function guestReservationRefundQueries(db: DbClient, input: {
- organizationId: string; reservationId: string; requestId: string; startsAt: string; now: string; buyerUserId?: string
+/** A guest's own cancellation before the free-cancellation deadline refunds the payment; cancellation always releases the seats. */
+export async function guestVisitRefundQueries(db: DbClient, input: {
+ organizationId: string; subjectType: GuestRefundSubject; subjectId: string; requestId: string; startsAt: string; now: string; buyerUserId?: string
 }): Promise<{ queries: BatchQuery[]; guard: BatchQuery | null }> {
- const payment = await queryFirst<Payment>(db, "SELECT * FROM payments WHERE organization_id = ? AND subject_type = 'reservation' AND subject_id = ? AND captured_amount > refunded_amount", [input.organizationId, input.reservationId])
+ const payment = await queryFirst<Payment>(db, 'SELECT * FROM payments WHERE organization_id = ? AND subject_type = ? AND subject_id = ? AND captured_amount > refunded_amount', [input.organizationId, input.subjectType, input.subjectId])
  if (!payment) return { queries: [], guard: null }
- const reservation = await queryFirst<{ policy_json: string | null }>(db, 'SELECT policy_json FROM reservations WHERE organization_id = ? AND id = ?', [input.organizationId, input.reservationId])
- const terms: unknown = reservation?.policy_json ? JSON.parse(reservation.policy_json) : null
- if (!isRecord(terms)) throw new Error('Paid reservation has no accepted cancellation terms')
- const cutoff = terms.free_cancellation_until_minutes
- if (cutoff !== null && (!Number.isSafeInteger(cutoff) || Number(cutoff) < 0)) throw new Error('Paid reservation cancellation cutoff is invalid')
- if (cutoff !== null && Date.parse(input.now) > Date.parse(input.startsAt) - Number(cutoff) * 60_000) return { queries: [], guard: null }
- const key = `guest-cancelled-reservation:${input.reservationId}`
+ if (Date.parse(input.now) > Date.parse(freeCancellationUntil(input.startsAt))) return { queries: [], guard: null }
+ const key = guestVisitRefundKey(input.subjectType, input.subjectId)
  // One refund per cancellation: the batch refuses while an earlier one is still with Stripe.
  const guard: BatchQuery = {
   query: `EXISTS (SELECT 1 FROM payments p WHERE p.id = ? AND p.organization_id = ? AND p.captured_amount > p.refunded_amount
@@ -70,21 +67,22 @@ export async function guestReservationRefundQueries(db: DbClient, input: {
   query: `INSERT INTO payment_refunds(id,payment_id,idempotency_key,amount,reason,status,created_by,created_at,updated_at)
     SELECT ?,?,?,NULL,'requested_by_customer','queued',?,?,? WHERE EXISTS (SELECT 1 FROM activity_entries WHERE request_id = ? AND dedupe_key = ?)
     ON CONFLICT(idempotency_key) DO NOTHING`,
-  params: [crypto.randomUUID(), payment.id, key, input.buyerUserId ?? null, input.now, input.now, input.requestId, `reservation:${input.reservationId}:guest-cancel`],
+  params: [crypto.randomUUID(), payment.id, key, input.buyerUserId ?? null, input.now, input.now, input.requestId, `${input.subjectType}:${input.subjectId}:guest-cancel`],
  }] }
 }
 
 /** The caller authorizes the request through its buyer identity or emailed capability. */
-export async function canRetryGuestReservationRefund(db: DbClient, input: {
- organizationId: string; reservationId: string; requestId: string; buyerUserId?: string
+export async function canRetryGuestVisitRefund(db: DbClient, input: {
+ organizationId: string; subjectType: GuestRefundSubject; subjectId: string; requestId: string; buyerUserId?: string
 }): Promise<boolean> {
+ const table = input.subjectType === 'booking' ? 'bookings' : 'reservations'
  return Boolean(await queryFirst(db, `SELECT f.id FROM payment_refunds f JOIN payments p ON p.id = f.payment_id
-  JOIN reservations v ON v.id = p.subject_id AND v.organization_id = p.organization_id
-  JOIN requests r ON r.id = v.request_id AND r.organization_id = v.organization_id AND r.kind = 'reservation'
-  WHERE p.organization_id = ? AND p.subject_type = 'reservation' AND p.subject_id = ? AND r.id = ?
+  JOIN ${table} v ON v.id = p.subject_id AND v.organization_id = p.organization_id
+  JOIN requests r ON r.id = v.request_id AND r.organization_id = v.organization_id AND r.kind = ?
+  WHERE p.organization_id = ? AND p.subject_type = ? AND p.subject_id = ? AND r.id = ?
     AND v.status = 'cancelled' AND json_extract(r.payload_json, '$.cancellation.used_at') IS NOT NULL
-    AND f.idempotency_key = 'guest-cancelled-reservation:' || v.id AND f.status IN ('queued', 'creating')
-    AND EXISTS (SELECT 1 FROM activity_entries WHERE request_id = r.id AND dedupe_key = 'reservation:' || v.id || ':guest-cancel')
+    AND f.idempotency_key = ? AND f.status IN ('queued', 'creating')
+    AND EXISTS (SELECT 1 FROM activity_entries WHERE request_id = r.id AND dedupe_key = ?)
     ${input.buyerUserId ? 'AND r.user_id = ? AND v.user_id = ? AND p.buyer_user_id = ?' : ''}`,
- [input.organizationId, input.reservationId, input.requestId, ...(input.buyerUserId ? [input.buyerUserId, input.buyerUserId, input.buyerUserId] : [])]))
+ [input.subjectType, input.organizationId, input.subjectType, input.subjectId, input.requestId, guestVisitRefundKey(input.subjectType, input.subjectId), `${input.subjectType}:${input.subjectId}:guest-cancel`, ...(input.buyerUserId ? [input.buyerUserId, input.buyerUserId, input.buyerUserId] : [])]))
 }

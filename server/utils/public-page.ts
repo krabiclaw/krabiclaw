@@ -690,19 +690,10 @@ async function loadPublicPageSource(
     : null
   options.signal?.throwIfAborted();
   const policyLocale = locale ?? sourceLocale!;
-  // One localized field, from one place: the location's own translation. The
-  // old resolver had to guess which of three scopes a rendered rule came from
-  // before it could find the right translation for it.
-  const localizeReservationNotes = (locationId: string, config: LocationReservationConfig): LocationReservationConfig => {
-    if (!localizedLocale) return config
-    const localized = publicLocalizations.find(item => item.resourceType === 'business_location' && item.resourceId === locationId)
-    const values = localized?.values as { reservation?: { policy?: { additional_notes_html?: string } } } | undefined
-    return { ...config, additional_notes_html: values?.reservation?.policy?.additional_notes_html ?? null }
-  }
   const reservationPolicyByLocation = Object.fromEntries(
     Array.from(reservationPolicies ?? [], ([locationId, config]) => [
       locationId,
-      config ? renderBookingPolicySummary(reservationPolicySummarySource(localizeReservationNotes(locationId, config)), policyLocale) : null,
+      config ? renderBookingPolicySummary(reservationPolicySummarySource(config), policyLocale) : null,
     ]),
   );
 

@@ -1,17 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { cancellationPatch, cancellationSummary, cancellationTierOf, hoursSummary, noticeSummary, seatsSummary } from '../../shared/availability-settings.ts'
+import { freeCancellationUntil, hoursSummary, noticeSummary, seatsSummary } from '../../shared/availability-settings.ts'
 
-test('a named cancellation policy is its two cutoffs, and only those cutoffs read back as it', () => {
-  for (const tier of ['flexible', 'moderate', 'firm'] as const) {
-    assert.equal(cancellationTierOf(cancellationPatch(tier)), tier)
-  }
-  assert.deepEqual(cancellationPatch('firm'), { free_cancellation_until_minutes: 2880, reschedule_allowed: true, reschedule_cutoff_minutes: 2880 })
-  // Cutoffs no tier names are said as they are, never rounded to a tier.
-  assert.equal(cancellationTierOf({ free_cancellation_until_minutes: 1440, reschedule_allowed: true, reschedule_cutoff_minutes: 240 }), null)
-  assert.equal(cancellationTierOf({ free_cancellation_until_minutes: 1440, reschedule_allowed: false, reschedule_cutoff_minutes: 1440 }), null)
-  assert.equal(cancellationSummary({ free_cancellation_until_minutes: 180, reschedule_allowed: true, reschedule_cutoff_minutes: 180 }), 'Custom · free until 3 hours before')
-  assert.equal(cancellationSummary({ free_cancellation_until_minutes: null }), 'No deadline')
+test('free cancellation closes exactly 24 hours before the start', () => {
+  assert.equal(freeCancellationUntil('2099-10-02T13:00:00.000Z'), '2099-10-01T13:00:00.000Z')
 })
 
 test('settings cards state their values in one line', () => {

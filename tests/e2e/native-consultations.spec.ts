@@ -171,7 +171,7 @@ test('native online review uses canonical Products, holds capacity, and releases
   expect(hours.status(), await hours.text()).toBe(200)
   expect((await hours.json()).scheduling).toMatchObject({ public_name: host.name, public_bio: host.bio, public_approved: 1 })
   for (let index = 0; index < 2; index++) {
-    const create = await page.request.post(`${editor}/products`, { data: { kind: 'service', active: true, details: { preparation: 'Bring a list of questions for your consultation', cancellation_policy: 'Contact us at least one day before your appointment to cancel.' }, name: `Local consultation ${stamp}-${index}`, description: 'A local test service for reviewing the native consultation flow.', variants: [{ name: 'Online', prices: [{ unit_amount: 0, currency: 'USD' }] }] } })
+    const create = await page.request.post(`${editor}/products`, { data: { kind: 'service', active: true, details: { preparation: 'Bring a list of questions for your consultation' }, name: `Local consultation ${stamp}-${index}`, description: 'A local test service for reviewing the native consultation flow.', variants: [{ name: 'Online', prices: [{ unit_amount: 0, currency: 'USD' }] }] } })
     expect(create.status(), await create.text()).toBe(201)
     const product = (await create.json()).product
     products.push(product)
@@ -634,7 +634,8 @@ test('native online review uses canonical Products, holds capacity, and releases
     const pending = await results.find(result => result.status() === 201)!.json()
     expect(pending).toMatchObject({ status: 'pending', booking_id: pending.request_id })
     expect(pending.operational_booking_id).not.toBe(pending.request_id)
-    expect(pending.policy_summary.additional_notes_html).toBe('Contact us at least one day before your appointment to cancel.')
+    const cancellationTerms = 'Cancel free up to 24 hours before the start time. After that, payments aren\'t refunded automatically.'
+    expect(pending.policy_summary.items[0]).toEqual({ id: 'cancellation', text: cancellationTerms })
     const details = await page.request.get(`/api/dashboard/bookings/booking/${pending.request_id}?org=${legal.slug}`)
     expect(details.status(), await details.text()).toBe(200)
     expect((await details.json()).booking).toMatchObject({ locationId: null, locationTitle: 'Online', status: 'pending', operationalBookingId: pending.operational_booking_id, assignedMemberId: self.id, assignedMemberName: host.name, policy: pending.policy_summary })
@@ -674,10 +675,9 @@ test('native online review uses canonical Products, holds capacity, and releases
     const confirmedDetails = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.request_id}?org=${legal.slug}`)
     expect((await confirmedDetails.json()).booking).toMatchObject({ status: 'confirmed', operationalBookingId: browserBooking.operational_booking_id })
     await page.goto(`${dashboard}/bookings/booking/${browserBooking.request_id}`)
-    await page.getByRole('button', { name: `Cancellation policy ${browserBooking.policy_summary.additional_notes_html}`, exact: true }).click()
+    await page.getByRole('button', { name: `Cancellation policy ${cancellationTerms}`, exact: true }).click()
     const policyDialog = page.getByRole('dialog', { name: browserBooking.policy_summary.heading, exact: true })
-    await expect(policyDialog.getByText(browserBooking.policy_summary.additional_notes_html, { exact: true })).toBeVisible()
-    await expect(policyDialog.getByText('No cancellation terms have been configured for this booking.', { exact: true })).toHaveCount(0)
+    await expect(policyDialog.getByText(cancellationTerms, { exact: true })).toBeVisible()
     await policyDialog.getByRole('button', { name: `Close ${browserBooking.policy_summary.heading}`, exact: true }).click()
     await page.getByRole('link', { name: `Attorney or legal team ${host.name}`, exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Attorney or legal team', exact: true })).toBeVisible()
