@@ -2,10 +2,38 @@
 
 KrabiClaw has two distinct records:
 
-- `notifications` is the dashboard acknowledgement feed. A notification is unread for a user until the corresponding `notification_reads` row exists.
+- `activity_entries` records dashboard notifications and each reader's acknowledgement. A notification is unread for a user until the corresponding acknowledgement exists.
 - `guest_thread_deliveries` records external email or WhatsApp outcomes for guest-thread entries. It is not a dashboard feed.
 
 Do not infer an external send from a dashboard notification, or an unread item from a delivery receipt.
+
+## Audience and channel coverage
+
+The following map comes from the event producers and delivery paths. Staff
+external delivery follows the person's category preferences, verified contact
+details and registered devices. Email and WhatsApp use the same message facts
+where the catalog declares an approved template. Push includes iOS APNs and
+browser Web Push where a device is registered.
+
+| Event | Staff path | Guest or account path |
+| --- | --- | --- |
+| Task assigned or starting | Assigned person's Notifications and task detail. Email and push default on. WhatsApp is available by preference. | Staff work only. |
+| New bookings and reservations, guest cancellations, and material changes | Notifications, email and push to workspace managers and responsible recipients. WhatsApp for events with templates, including booking changes. Calendar sync exceptions have email and push. The alert opens the booking record. | Guest transaction email to the booked contact. Owned records can appear in account Notifications and Activity. Guest WhatsApp and push are separate from staff preferences. |
+| New, changed, cancelled or overlapping channel stays | Managers and responsible home staff receive in-app alerts. Staff receive the turnover view and no financial facts. Email and push are eligible. The change event has a WhatsApp template. Historical imports do not alert. | The originating channel owns its guest notices. Direct stays use the transaction email path. |
+| Guest, Airbnb and team messages | Guest and team conversations contribute to the Messages count. Email, approved WhatsApp and push are eligible for responsible recipients. | Guest replies use the conversation's delivery route and receipts. An owned conversation has account unread state. |
+| Payments, refunds, disputes and payouts | Financial events enter the authorized workspace history and use their configured delivery. Organization and billing email defaults on. | Buyer receipts and refunds are transaction email and account Activity for the authorized buyer. |
+| Reviews and review requests | Review alerts use the review preference. Email defaults on. New review has a WhatsApp template. | The opted-in review invitation uses its tracked guest link and email receipt. |
+| Invitations and account security | Better Auth owns sign-in and invitation lifecycle. Account security email is required. | Email goes to the invitee or account holder and opens the invite or verification flow. |
+| Organization, billing and product news | Organization events use category preferences and their declared destination. Product news uses Resend Broadcast and Topic subscriptions. | Product news follows the subscriber's preference. |
+
+The catalog checks cover 64 email renders and 20 email/WhatsApp template
+pairs. They verify content, including required facts and unsubscribe controls.
+Staging runs email and WhatsApp in `log_only` mode because its database contains
+copied tenant data. A staging receipt cannot qualify provider delivery. Use the
+authorized production canary and dedicated test recipients for real Resend and
+WhatsApp delivery. For APNs and Web Push, verify receipt on a registered test
+device or browser, open the link, and compare the provider receipt with the
+actual result.
 
 ## Email purpose
 

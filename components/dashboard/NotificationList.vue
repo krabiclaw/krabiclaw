@@ -90,6 +90,7 @@ interface DashboardNotification {
   deep_link: string | null
   created_at: string
   read_at: string | null
+  read_at_destination: boolean
 }
 
 interface NotificationResponse {
@@ -111,6 +112,7 @@ const isNotificationResponse = (value: unknown): value is NotificationResponse =
     && (notification.message === null || typeof notification.message === 'string')
     && (notification.deep_link === null || typeof notification.deep_link === 'string')
     && typeof notification.created_at === 'string'
+    && typeof notification.read_at_destination === 'boolean'
     && (notification.read_at === null || typeof notification.read_at === 'string'),
   )
   && Number.isSafeInteger(value.unread_count) && Number(value.unread_count) >= 0
@@ -195,7 +197,7 @@ async function openNotification(notification: DashboardNotification) {
   actionError.value = null
   try {
     const destination = notificationDestination(notification.deep_link)
-    await markRead(notification)
+    if (!notification.read_at_destination || !destination) await markRead(notification)
     if (destination) await navigateTo(destination, { external: destination.startsWith('https://') })
   } catch (error) {
     actionError.value = getErrorMessage(error, 'This update could not be opened.')
