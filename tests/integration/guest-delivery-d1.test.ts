@@ -1029,7 +1029,7 @@ test('native Resend test transport persists one delivered financial email throug
   } finally { await runtime.dispose() }
 })
 
-test('each Stripe requirements event that leaves the business action due alerts owners and admins once', { timeout: 120_000 }, async () => {
+test('Stripe account alerts follow what each Stripe event hands the business, not its form steps', { timeout: 120_000 }, async () => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'stripe-account-attention-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
@@ -1058,22 +1058,32 @@ test('each Stripe requirements event that leaves the business action due alerts 
       identity: { country: 'TH' }, configuration: { merchant: { capabilities: { card_payments: capability } } },
       requirements: { entries: requirements },
     }) } } } } as unknown as Stripe
-    const deliver = (id: string, type = 'v2.core.account[requirements].updated') => processStripeConnectEvent(db, stripe, env, {
-      id, type, related_object: { id: 'acct_proof' },
-    } as unknown as Stripe.V2.Core.EventNotification, '{}')
-    const due = (errors: string[]) => [{ awaiting_action_from: 'user', description: 'person.documents.primary_verification', errors: errors.map(description => ({ description })), minimum_deadline: { status: 'past_due' } }]
+    const entry = (description: string, awaiting_action_from: string, errors: string[] = []) => ({ awaiting_action_from, description, errors: errors.map(text => ({ description: text })), minimum_deadline: { status: 'past_due' } })
+    const deliver = (id: string, type: string, changes?: { before: typeof requirements; after: typeof requirements }) => {
+      if (changes) requirements = changes.after
+      return processStripeConnectEvent(db, stripe, env, {
+        id, type, related_object: { id: 'acct_proof' },
+        fetchEvent: async () => ({ changes: changes && { before: { requirements: { entries: changes.before } }, after: { requirements: { entries: changes.after } } } }),
+      } as unknown as Stripe.V2.Core.EventNotification, '{}')
+    }
+    const requirementsEvent = 'v2.core.account[requirements].updated'
     const alerts = async () => (await db.prepare("SELECT body,json_extract(payload_json,'$.severity') severity,json_extract(payload_json,'$.deep_link') deep_link FROM activity_entries WHERE event_name='stripe_account_attention' ORDER BY created_at, id").all()).results
     const status = () => db.prepare("SELECT status FROM stripe_connected_accounts WHERE id='connect'").first('status')
+    const id = 'person.documents.primary_verification'
 
     // Another kind of account event says nothing about what is due.
-    requirements = due([refused])
     assert.equal(await deliver('evt_identity', 'v2.core.account[identity].updated'), true)
+    assert.deepEqual(await alerts(), [])
+
+    // Filling in Stripe's form: the list changes, and the owner is already in the form.
+    assert.equal(await deliver('evt_form', requirementsEvent, { before: [entry('identity.entity_type', 'user')], after: [entry('owners.email', 'user')] }), true)
     assert.deepEqual(await alerts(), [])
     assert.equal(await status(), 'action_required')
 
-    // Stripe refuses a document. Stripe redelivering that event says nothing new.
-    assert.equal(await deliver('evt_refused'), true)
-    assert.equal(await deliver('evt_refused'), true)
+    // Stripe finishes its review and refuses the document. Redelivering that event says nothing new.
+    const refusal = { before: [entry(id, 'stripe'), entry('owners.email', 'user')], after: [entry(id, 'user', [refused]), entry('owners.email', 'user')] }
+    assert.equal(await deliver('evt_refused', requirementsEvent, refusal), true)
+    assert.equal(await deliver('evt_refused', requirementsEvent, refusal), true)
     const told = await alerts()
     assert.equal(told.length, 1)
     assert.match(String(told[0]!.body), /doesn't match information on the document/u)
@@ -1087,16 +1097,23 @@ test('each Stripe requirements event that leaves the business action due alerts 
     assert.match(mail[0]!.html, /match information on the document/u)
     assert.match(mail[0]!.html, /href="https:\/\/proof\.example\/dashboard\/merchant\/payments\/payout-method"/u)
 
+    // Another document goes to review while the refusal stands: the refusal was already told.
+    assert.equal(await deliver('evt_other_review', requirementsEvent, { before: [entry(id, 'user', [refused]), entry('identity.business_details.documents.primary_verification', 'user')], after: [entry(id, 'user', [refused]), entry('identity.business_details.documents.primary_verification', 'stripe')] }), true)
+    assert.equal((await alerts()).length, 1)
+
     // Setup finishes: nothing is due, so the same event type stays quiet.
-    requirements = []
     capability = { status: 'active', status_details: [] }
-    assert.equal(await deliver('evt_cleared'), true)
+    assert.equal(await deliver('evt_cleared', requirementsEvent, { before: [entry(id, 'stripe')], after: [] }), true)
     assert.equal(await status(), 'ready')
     assert.equal((await alerts()).length, 1)
 
-    // Stripe later asks for exactly the same thing again: its new event is a new alert.
-    requirements = due([refused])
-    assert.equal(await deliver('evt_asked_again'), true)
+    // Stripe later asks for exactly the same thing: nothing was due before this event, so it is told.
+    assert.equal(await deliver('evt_asked_again', requirementsEvent, { before: [], after: [entry(id, 'user', [refused])] }), true)
+    assert.equal(await status(), 'action_required')
+    assert.equal((await alerts()).length, 2)
+
+    // An event without Stripe's before and after fails visibly, so Stripe redelivers it.
+    await assert.rejects(deliver('evt_no_changes', requirementsEvent), /no before and after/u)
     assert.equal((await alerts()).length, 2)
 
     // Stripe restricts the capability.

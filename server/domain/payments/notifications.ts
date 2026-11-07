@@ -127,14 +127,40 @@ export async function notifyPayoutState(db: DbClient, env: CloudflareEnv, scope:
   })
 }
 
-/** Stripe's own event says what changed and its id says which change, so each one is told once. */
-export async function notifyStripeAccountAttention(db: DbClient, env: CloudflareEnv, event: { id: string; type: string }, account: StripeConnectedAccount) {
-  const status = event.type === 'v2.core.account[requirements].updated' ? 'action_required'
-    : event.type === 'v2.core.account[configuration.merchant].capability_status_updated' ? 'restricted' : null
-  if (!status || account.status !== status) return
+type RequirementEntry = NonNullable<NonNullable<Stripe.V2.Core.Account['requirements']>['entries']>[number]
+
+const isBusinessActionDue = (entry: RequirementEntry) => entry.awaiting_action_from === 'user'
+  && (entry.minimum_deadline.status === 'currently_due' || entry.minimum_deadline.status === 'past_due')
+
+/**
+ * What a requirements event hands the business, read from Stripe's own before and
+ * after. Filling in Stripe's form also changes the requirements, and is not an alert:
+ * only a requirement Stripe finished reviewing, or the first thing due, is.
+ */
+function requirementsHandedToBusiness(changes: Stripe.V2.Core.Event['changes']): RequirementEntry[] {
+  if (!changes?.before || !changes.after) throw new Error('Stripe requirements event has no before and after')
+  const entries = (side: unknown) => (side as Pick<Stripe.V2.Core.Account, 'requirements'>).requirements?.entries ?? []
+  const before = entries(changes.before)
+  const due = entries(changes.after).filter(isBusinessActionDue)
+  const inReview = new Set(before.filter(entry => entry.awaiting_action_from === 'stripe').map(entry => entry.description))
+  return !before.some(isBusinessActionDue) || due.some(entry => inReview.has(entry.description)) ? due : []
+}
+
+/** Stripe's event says what changed and its id says which change, so each one is told once. */
+export async function notifyStripeAccountAttention(db: DbClient, env: CloudflareEnv, event: Stripe.V2.Core.EventNotification, account: StripeConnectedAccount) {
+  let status: 'action_required' | 'restricted'
+  let reasons: string[] = []
+  if (event.type === 'v2.core.account[requirements].updated') {
+    const handed = requirementsHandedToBusiness((await event.fetchEvent()).changes)
+    if (handed.length === 0) return
+    status = 'action_required'
+    reasons = [...new Set(handed.flatMap(entry => entry.errors.map(error => error.description)))]
+  } else if (event.type === 'v2.core.account[configuration.merchant].capability_status_updated') {
+    status = 'restricted'
+  } else return
+  if (account.status !== status) return
   const organization = await queryFirst<{ name: string; slug: string }>(db, 'SELECT name,slug FROM organization WHERE id=?', [account.organizationId])
   if (!organization) throw new Error('Stripe account attention requires its organization')
-  const reasons = [...new Set(account.requirements.filter(requirement => requirement.awaitingActionFrom === 'user').flatMap(requirement => requirement.errors))]
   const eventKey = `payments:${account.stripeAccountId}:${Number(account.livemode)}:${event.id}`
   const deepLink = `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}/payments/payout-method`
   const message = stripeAccountAttentionMessage({ organizationName: organization.name, status, reasons, action: { url: deepLink, label: 'Review payout setup' } })
