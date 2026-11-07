@@ -252,6 +252,12 @@ test('a home keeps its operator name independent from its public title across CM
 
   await page.goto(`/dashboard/${slug}?range=upcoming`)
   await waitForNuxtHydration(page)
+  const turnoverCard = page.locator(`[data-task-id="${upcomingTasks.find(item => item.kind === 'turnover' && item.stayId === stay.id)!.id}"]`)
+  await expect(turnoverCard.locator('.tc-media')).toHaveCount(0)
+  await expect(turnoverCard.getByText('Turnover', { exact: true })).toBeVisible()
+  await expect(turnoverCard.getByRole('button', { name: 'Done', exact: true })).toBeVisible()
+  await turnoverCard.scrollIntoViewIfNeeded()
+  await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-upcoming-no-photo-turnover.png') })
   await page.getByRole('button', { name: 'Filter tasks' }).click()
   await page.getByRole('menuitemcheckbox', { name: 'Guest replies', exact: true }).click()
   await expect(page).toHaveURL(url => url.searchParams.get('range') === 'upcoming' && url.searchParams.get('kind') === 'guest_reply')

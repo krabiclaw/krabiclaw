@@ -153,6 +153,7 @@ export interface GuestThreadListPage {
 export interface GuestThreadEntryDeliveryViewModel {
   id: string
   channel: GuestThreadDeliveryChannel
+  provider: GuestThreadDeliveryProvider
   purpose: GuestThreadDeliveryPurpose
   status: GuestThreadDeliveryStatus
 }
@@ -302,7 +303,7 @@ export type InboxStreamItem =
     translated: { original: string } | null
     /** Files the message carried that are not photos the conversation can show, such as a PDF. */
     unshownFiles: number
-    /** On the newest business message only: Sending, Sent, Delivered, Read by <name>, Not delivered. */
+    /** On the newest business message only: Sending, Sent, Delivered, Read by <name>, Not delivered, Recorded locally. */
     receipt: string | null
     /** The reply was not delivered and can be sent again as it was (a team member's text reply). */
     retryable: boolean

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:e68e2fa23ead28f69f2538ca4e49df413aad73c47f169c614aaa95c8edfb4364",
-  "documentationFingerprint": "sha256:2863c6851388c3f17f5178a1023fd984fd37d396fc0539b83ccea845514343ec",
+  "fingerprint": "sha256:9c383843727f0eca4b53e45cb0ea08d0da57418a08250f26ed09c5a3168ec24a",
+  "documentationFingerprint": "sha256:c73beb41e7f7688c2e8fbab69609f77234f2c99b15646789d037ef58fb5e79c9",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -48679,6 +48679,10 @@
                           "id": {
                             "type": "string"
                           },
+                          "provider": {
+                            "description": "log_only records the message locally without sending it through a provider.",
+                            "type": "string"
+                          },
                           "purpose": {
                             "type": "string"
                           },
@@ -48689,6 +48693,7 @@
                         "required": [
                           "id",
                           "channel",
+                          "provider",
                           "purpose",
                           "status"
                         ],
@@ -48768,6 +48773,9 @@
                   "phone"
                 ],
                 "type": "object"
+              },
+              "needs_reply": {
+                "type": "boolean"
               },
               "operational_record": {
                 "description": "For a stay, check_in_date and check_out_date are its nights and id is the stay for get_stay; its starts_at and ends_at only order and archive the conversation.",
@@ -48851,12 +48859,6 @@
               },
               "request_id": {
                 "type": "string"
-              },
-              "state": {
-                "type": [
-                  "string",
-                  "null"
-                ]
               },
               "type": {
                 "enum": [
@@ -130322,7 +130324,7 @@
         "cancel_product_booking": "sha256:28d9c2c6be574b460d8711e4040fed5162c439aae2b37e95ca79ea08cd24e62d",
         "cancel_table_reservation": "sha256:9f69a68d495da67c14718dff9208b98d7c28e5a4b8eba2849ded151ad293312a",
         "confirm_product_booking": "sha256:373f9f84360e37716dc1476d28b8f6b47c14001642ebaff8d713d74a7d3a8eaa",
-        "get_guest_conversation": "sha256:de4bdb53bb6d882e4895742a865bea4277209cc00ceb2a516ec50963fa35fe8b",
+        "get_guest_conversation": "sha256:fabd2b7aa4ccb5f19c1d0a7bdf3bc559a083c9f2547d0c93aeda64ce51f5563c",
         "get_product_booking": "sha256:1f0d7f20d207a6fb1aecb169e86483ae515c5b6209fbf9fe948a2be26860968d",
         "get_team_conversation": "sha256:68a4390f99121151a6c3dcca2e3cff8675166b27d958e7a1a71dcd3a4c9a81d0",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
@@ -130457,7 +130459,7 @@
       },
       "toolContracts": {
         "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
-        "get_guest_conversation": "sha256:de4bdb53bb6d882e4895742a865bea4277209cc00ceb2a516ec50963fa35fe8b",
+        "get_guest_conversation": "sha256:fabd2b7aa4ccb5f19c1d0a7bdf3bc559a083c9f2547d0c93aeda64ce51f5563c",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
         "get_product": "sha256:c3d93df0274de203abbdfde2bf45ccc0d3825c6e8d29e558dfba59cf1795d0ef",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",

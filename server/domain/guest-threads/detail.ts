@@ -57,7 +57,7 @@ export async function getGuestThreadDetail(
   const deliveriesByEntry = new Map<string, GuestThreadEntryDeliveryViewModel[]>()
   for (const delivery of deliveryRows) {
     const forEntry = deliveriesByEntry.get(delivery.entry_id) ?? []
-    forEntry.push({ id: delivery.id, channel: delivery.channel, purpose: delivery.purpose, status: delivery.status })
+    forEntry.push({ id: delivery.id, channel: delivery.channel, provider: delivery.provider, purpose: delivery.purpose, status: delivery.status })
     deliveriesByEntry.set(delivery.entry_id, forEntry)
   }
   const deliveryFailureRows = deliveryRows.filter(isVisibleDeliveryFailure)
