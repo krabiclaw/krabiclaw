@@ -3,7 +3,7 @@ import { MAX_STAY_NIGHTS, STAY_CALENDAR_DAYS, parseStayCalendarRules, type StayC
 import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
 import tzLookup from '@photostructure/tz-lookup'
 import { isValidTimezone } from '~/utils/timezone'
-import { DETAIL_FIELDS, type AirbnbPropertyType, type DetailField } from '~/shared/airbnb-import'
+import { DETAIL_FIELDS, type DetailField } from '~/shared/airbnb-import'
 import { AIRBNB_CANCELLATION_CATEGORIES, AIRBNB_LONG_TERM_CANCELLATION_IDS, type StayCancellationPolicy, type StayLongTermCancellationPolicy } from '~/shared/stay-listing'
 import { channexRequest, type ChannexEnv } from './client'
 import { ChannexDataError, integer, object, received, string, type JsonRecord } from './data'
@@ -24,11 +24,12 @@ import { ChannexDataError, integer, object, received, string, type JsonRecord } 
  * whose vacation-rental values Channex documents as apartment, boat, chalet,
  * country_house, farm_stay, holiday_home, homestay and villa (Properties API).
  * Airbnb's apartments group is an apartment; its stand-alone or terraced house
- * is a holiday home. A category not listed here stops the import for review.
+ * is a holiday home. Aliases translate the two provider vocabularies; Channex validates other codes.
  */
-const AIRBNB_PROPERTY_TYPES: Readonly<Record<string, AirbnbPropertyType>> = {
+const AIRBNB_PROPERTY_TYPES: Readonly<Record<string, string>> = {
   apartment: 'apartment', condominium: 'apartment', serviced_apartment: 'apartment', loft: 'apartment',
-  house: 'holiday_home', townhouse: 'holiday_home', villa: 'villa', chalet: 'chalet',
+  house: 'holiday_home', townhouse: 'holiday_home', vacation_home: 'holiday_home', villa: 'villa', chalet: 'chalet',
+  cabin: 'chalet', guest_suite: 'apartment', boutique_hotel: 'hotel', aparthotel: 'apart_hotel',
 }
 
 export interface ListingDetails {
@@ -42,12 +43,12 @@ export interface ListingDetails {
   /** Airbnb's actual listing default, independent of dated calendar exceptions. */
   minimumNights: number
   calendarRules: StayCalendarRules | null
-  fields: Partial<Record<DetailField, string>>
+  fields: Partial<Record<DetailField | 'propertyType', string>>
   missingFields: DetailField[]
   /**
    * Airbnb's check-in window and checkout (`booking_settings.check_in_time_start`,
    * `check_in_time_end`, `check_out_time`) as local HH:MM. A start or checkout
-   * Airbnb has not set is null, and the import refuses it; a flexible or unset
+   * Airbnb has not set is null and remains unset; a flexible or unset
    * end is null.
    */
   checkInTime: string | null
@@ -109,17 +110,9 @@ function hourTime(value: unknown, label: string): string | null {
   return `${String(hour % 24).padStart(2, '0')}:00`
 }
 
-/**
- * Airbnb's code as our policy of the same title and wording, or null when
- * Airbnb sent none. A code with no policy here (read live on 2026-10-29:
- * `flexible`, `better_strict_with_grace_period`, `CANCEL_LONG_TERM_FAIR`,
- * `CANCEL_LONG_TERM_WITH_GRACE_PERIOD`) stops the import for review.
- */
-function airbnbPolicy<T extends string>(codes: Readonly<Partial<Record<T, string>>>, value: unknown, label: string): T | null {
-  if (value === undefined || value === null) return null
-  const policy = (Object.keys(codes) as T[]).find(key => codes[key] === value)
-  if (!policy) fail(422, 'UNSUPPORTED_CANCELLATION_POLICY', `Airbnb ${label} "${received(value)}" has no verified KrabiClaw policy. Import stopped for review.`)
-  return policy
+/** A known provider policy uses its matching local terms; absent or untranslated terms stay unknown. */
+function airbnbPolicy<T extends string>(codes: Readonly<Partial<Record<T, string>>>, value: unknown): T | null {
+  return (Object.keys(codes) as T[]).find(key => codes[key] === value) ?? null
 }
 
 /** The IANA zone at the listing's coordinates. Airbnb sends none of its own. */
@@ -201,7 +194,7 @@ export async function listingDetails(env: ChannexEnv, channelId: string, listing
   const listing = await listingRecord(env, channelId, listingId)
   return provided(() => {
     const pricing = object(listing.pricing_settings, 'Listing pricing')
-    const fields: Partial<Record<DetailField, string>> = {}
+    const fields: Partial<Record<DetailField | 'propertyType', string>> = {}
     const sources: ReadonlyArray<readonly [DetailField, string]> = [
       ['country', 'country_code'], ['state', 'state'], ['city', 'city'], ['address', 'street'], ['zipCode', 'zipcode'],
     ]
@@ -218,9 +211,7 @@ export async function listingDetails(env: ChannexEnv, channelId: string, listing
     const booking = listing.booking_settings === undefined || listing.booking_settings === null ? {} : object(listing.booking_settings, 'Booking settings')
     if (listing.property_type_category !== undefined && listing.property_type_category !== null) {
       const category = string(listing.property_type_category, 'Airbnb property type')
-      const propertyType = Object.hasOwn(AIRBNB_PROPERTY_TYPES, category) ? AIRBNB_PROPERTY_TYPES[category] : undefined
-      if (!propertyType) fail(422, 'UNSUPPORTED_PROPERTY_TYPE', `Airbnb property type "${category}" has no verified KrabiClaw mapping. Import stopped for review.`)
-      fields.propertyType = propertyType
+      fields.propertyType = AIRBNB_PROPERTY_TYPES[category] ?? category
     }
     const cancellation = booking.cancellation_policy_settings === undefined || booking.cancellation_policy_settings === null ? {} : object(booking.cancellation_policy_settings, 'Cancellation policy settings')
     return {
@@ -231,8 +222,8 @@ export async function listingDetails(env: ChannexEnv, channelId: string, listing
       checkInTime: hourTime(booking.check_in_time_start, 'booking_settings.check_in_time_start'),
       checkInEndTime: hourTime(booking.check_in_time_end, 'booking_settings.check_in_time_end'),
       checkOutTime: hourTime(booking.check_out_time, 'booking_settings.check_out_time'),
-      cancellationPolicy: airbnbPolicy<StayCancellationPolicy>(AIRBNB_CANCELLATION_CATEGORIES, cancellation.cancellation_policy_category, 'cancellation policy'),
-      longTermCancellationPolicy: airbnbPolicy<StayLongTermCancellationPolicy>(AIRBNB_LONG_TERM_CANCELLATION_IDS, cancellation.lts_cancellation_policy_id, 'long-term cancellation policy'),
+      cancellationPolicy: airbnbPolicy<StayCancellationPolicy>(AIRBNB_CANCELLATION_CATEGORIES, cancellation.cancellation_policy_category),
+      longTermCancellationPolicy: airbnbPolicy<StayLongTermCancellationPolicy>(AIRBNB_LONG_TERM_CANCELLATION_IDS, cancellation.lts_cancellation_policy_id),
     }
   })
 }

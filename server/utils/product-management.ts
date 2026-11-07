@@ -301,8 +301,8 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     if (product) product.stay = {
       photo_rooms: photoRooms.get(product.id) ?? [],
       accessibility: accessibility.get(product.id)!,
-      location_id: String(row.location_id), check_in_time: String(row.check_in_time),
-      check_in_end_time: row.check_in_end_time === null ? null : String(row.check_in_end_time), check_out_time: String(row.check_out_time),
+      location_id: String(row.location_id), check_in_time: row.check_in_time === null ? null : String(row.check_in_time),
+      check_in_end_time: row.check_in_end_time === null ? null : String(row.check_in_end_time), check_out_time: row.check_out_time === null ? null : String(row.check_out_time),
       max_guests: Number(row.max_guests), min_nights: Number(row.min_nights), calendar_rules: parseStayCalendarRules(row.calendar_rules === null ? null : JSON.parse(String(row.calendar_rules))),
       ...storedStayListing(row),
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
@@ -802,11 +802,11 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
   const locationId = typeof stay.location_id === 'string' ? stay.location_id.trim() : ''
   if (!locationId) invalid('stay.location_id is required')
   for (const field of ['check_in_time', 'check_out_time'] as const) {
-    if (typeof stay[field] !== 'string' || !STAY_TIME.test(stay[field] as string)) invalid(`stay.${field} must be a 24-hour HH:MM time`)
+    if (stay[field] !== null && (typeof stay[field] !== 'string' || !STAY_TIME.test(stay[field] as string))) invalid(`stay.${field} must be a 24-hour HH:MM time`)
   }
   const checkInEnd = stay.check_in_end_time ?? null
   if (checkInEnd !== null && (typeof checkInEnd !== 'string' || !STAY_TIME.test(checkInEnd))) invalidStayField('check_in_end_time', 'stay.check_in_end_time must be a 24-hour HH:MM time, or null for a flexible end')
-  if (checkInEnd === stay.check_in_time) invalidStayField('check_in_end_time', 'stay.check_in_end_time must differ from stay.check_in_time')
+  if (checkInEnd !== null && checkInEnd === stay.check_in_time) invalidStayField('check_in_end_time', 'stay.check_in_end_time must differ from stay.check_in_time')
   const maxGuests = stay.max_guests
   if (typeof maxGuests !== 'number' || !Number.isInteger(maxGuests) || maxGuests < 1 || maxGuests > 99) invalid('stay.max_guests must be a whole number from 1 to 99')
   const minNights = stay.min_nights
@@ -830,7 +830,7 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
     if (!(error instanceof FormQuestionDefinitionError)) throw error
     invalidStayField('questions', error.message)
   }
-  return { location_id: locationId, check_in_time: stay.check_in_time as string, check_in_end_time: checkInEnd as string | null, check_out_time: stay.check_out_time as string, max_guests: maxGuests, min_nights: minNights, calendar_rules: calendarRules,
+  return { location_id: locationId, check_in_time: stay.check_in_time as string | null, check_in_end_time: checkInEnd as string | null, check_out_time: stay.check_out_time as string | null, max_guests: maxGuests, min_nights: minNights, calendar_rules: calendarRules,
     ...planStayListing(stay), ...target, questions, questions_revision: formQuestionsRevision(questions) }
 }
 
@@ -881,7 +881,7 @@ function planStayListing(stay: Record<string, unknown>): Pick<ProductStayConfig,
     property_size: propertySize as number | null,
     property_size_unit: propertySizeUnit,
     bedrooms: stayCount(stay, 'bedrooms', 0, 50, 1),
-    beds: stayCount(stay, 'beds', 1, 50, 1),
+    beds: stayCount(stay, 'beds', 0, Number.MAX_SAFE_INTEGER, 1),
     bathrooms: stayCount(stay, 'bathrooms', 0, 50, 0.5),
     amenities: answers.filter(answer => answer.available).map(answer => answer.code),
     amenity_answers: answers,
@@ -891,12 +891,12 @@ function planStayListing(stay: Record<string, unknown>): Pick<ProductStayConfig,
 }
 
 /**
- * A home always has both policies, as an Airbnb listing does: one left out of
- * a new home is Airbnb's own for a new listing, and none can be cleared. An
- * edit restates the stored policy, so only a new home leaves one out.
+ * New authored homes use the chosen new-listing policies. Explicitly unknown
+ * provider policies remain null rather than acquiring authored defaults.
  */
-function stayPolicy<T extends string>(stay: Record<string, unknown>, field: keyof typeof NEW_HOME_CANCELLATION_POLICIES, codes: readonly T[]): T {
+function stayPolicy<T extends string>(stay: Record<string, unknown>, field: keyof typeof NEW_HOME_CANCELLATION_POLICIES, codes: readonly T[]): T | null {
   const value = stay[field] === undefined ? NEW_HOME_CANCELLATION_POLICIES[field] : stay[field]
+  if (value === null) return null
   if (!codes.includes(value as T)) invalidStayField(field, `stay.${field} must be one of ${codes.join(', ')}`)
   return value as T
 }

@@ -76,10 +76,10 @@ export interface ProductStayConfig {
   /** Listing-wide host-authored answers and Product image evidence, in catalog order. */
   accessibility: StayHomeAccessibility[]
   location_id: string
-  check_in_time: string
+  check_in_time: string | null
   /** The end of the check-in window; null is a flexible end. An end earlier than check_in_time is after midnight. */
   check_in_end_time: string | null
-  check_out_time: string
+  check_out_time: string | null
   max_guests: number
   /** The listing’s required default minimum; dated arrival rules may override it. */
   min_nights: number

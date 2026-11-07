@@ -854,3 +854,21 @@ Report what landed, which environment deployed, which customer journeys were
 actually exercised, and what remains unverified. Do not call platform-only
 checks client-site verification, a rendered login page an auth pass, or a
 scripted request a real ChatGPT tool-usage pass.
+
+The v24-to-v25 replacement allows a home to preserve missing check-in and
+checkout times and a provider's zero bed count. It relaxes the two NOT NULL
+constraints and `product_stay_configs_beds_check`. Stays, nightly inventory
+and channel mappings reference the stay configuration, so the table cannot
+be rebuilt on live D1. The v24 chain is archived in `migrations-history/v24/`.
+A v24 source copies its existing data as recorded, including tasks and
+opportunities. Older sources still advance through their archived transforms.
+
+Staging v25 (`2d7c538b-76ae-4098-a3bc-d93372ffbad8`) was created with
+`--location wnam`; Cloudflare reported WNAM. Apply the new baseline through
+the native migration ledger. Run the snapshot preflight, initial load, and
+verified final delta against the environment's own active source; staging's is
+`krabiclaw-staging-v24`. Keep the copies under
+`~/.codex/krabiclaw-db-replacements/provider-imports-v25/`. Repoint production,
+development and E2E before production promotion, after confirming production's
+actual source binding and preparing its own replacement. Do not load a source
+whose preceding cutover is still missing writes.

@@ -32,9 +32,9 @@
             <USelect v-else v-model="form.stay_location_id" :items="creationLocations" placeholder="Choose a location" class="w-full" />
           </UFormField>
           <div class="grid gap-6 sm:grid-cols-2">
-            <UFormField label="Check-in from" required><UInput v-model="form.check_in_time" type="time" class="w-full" /></UFormField>
+            <UFormField label="Check-in from"><UInput v-model="form.check_in_time" type="time" class="w-full" /></UFormField>
             <UFormField label="Check-in until"><StayCheckInEndSelect v-model="form.check_in_end_time" /></UFormField>
-            <UFormField label="Checkout by" required><UInput v-model="form.check_out_time" type="time" class="w-full" /></UFormField>
+            <UFormField label="Checkout by"><UInput v-model="form.check_out_time" type="time" class="w-full" /></UFormField>
             <UFormField label="Sleeps" required><UInput v-model="form.max_guests" inputmode="numeric" pattern="[0-9]*" class="w-full" /></UFormField>
             <UFormField label="Default minimum nights" required><UInput v-model="form.min_nights" inputmode="numeric" pattern="[0-9]*" class="w-full" /></UFormField>
           </div>
@@ -106,7 +106,7 @@
       <template v-if="summaryCards" #summary="{ item }">
         <span v-if="arrivalTab && item.id === 'arrival-time'" class="grid grid-cols-2 gap-4 text-base">
           <span class="block border-r border-default pr-4"><span class="block font-medium text-highlighted">Check-in</span><span class="mt-1 block">{{ product?.stay ? stayCheckInWindow(product.stay.check_in_time, product.stay.check_in_end_time) : '' }}</span></span>
-          <span class="block"><span class="block font-medium text-highlighted">Checkout</span><span class="mt-1 block">{{ product?.stay?.check_out_time }}</span></span>
+          <span class="block"><span class="block font-medium text-highlighted">Checkout</span><span class="mt-1 block">{{ product?.stay?.check_out_time ?? 'Not set' }}</span></span>
         </span>
         <span v-else-if="item.id === 'name'" class="block text-xl font-medium leading-snug text-highlighted">{{ item.summary }}</span>
         <template v-else-if="stayEditor && item.id === 'photo'">
@@ -175,7 +175,7 @@
             <h2 class="text-xl font-medium text-highlighted">Check-in &amp; checkout</h2>
             <dl class="mt-4 grid grid-cols-2 gap-6">
               <div><dt class="text-sm text-muted">Check-in</dt><dd class="mt-1 text-base text-highlighted">{{ product?.stay ? stayCheckInWindow(product.stay.check_in_time, product.stay.check_in_end_time) : '' }}</dd></div>
-              <div><dt class="text-sm text-muted">Checkout by</dt><dd class="mt-1 text-base text-highlighted">{{ product?.stay?.check_out_time }}</dd></div>
+              <div><dt class="text-sm text-muted">Checkout by</dt><dd class="mt-1 text-base text-highlighted">{{ product?.stay?.check_out_time ?? 'Not set' }}</dd></div>
             </dl>
           </section>
           <StayArrivalGuideView :guide="arrivalHome" :rules="savedHouseRules" :safety="arrivalSafety" />
@@ -764,8 +764,8 @@ const stayConfigError = computed(() => {
   if (!stay) return 'This place to stay has no stay settings.'
   const invalid = [
     !stay.location_id && 'location',
-    !MINUTE_TIME_PATTERN.test(stay.check_in_time) && 'check-in time',
-    !MINUTE_TIME_PATTERN.test(stay.check_out_time) && 'checkout time',
+    stay.check_in_time !== null && !MINUTE_TIME_PATTERN.test(stay.check_in_time) && 'check-in time',
+    stay.check_out_time !== null && !MINUTE_TIME_PATTERN.test(stay.check_out_time) && 'checkout time',
     !(Number.isInteger(stay.max_guests) && stay.max_guests >= 1 && stay.max_guests <= 99) && 'sleeps',
     !(Number.isInteger(stay.min_nights) && stay.min_nights >= 1 && stay.min_nights <= MAX_STAY_NIGHTS) && 'minimum nights',
     !Array.isArray(stay.photo_rooms) && 'photo tour',
@@ -990,9 +990,9 @@ function loadForm(row: Product) {
   form.online_payment_required = row.booking?.online_payment_required ?? false
   form.held_online = row.booking?.held_online ?? false
   form.booking_capacity = row.booking?.default_capacity === null || row.booking === null ? '' : String(row.booking.default_capacity)
-  form.check_in_time = stay ? stay.check_in_time : ''
+  form.check_in_time = stay?.check_in_time ?? ''
   form.check_in_end_time = stay?.check_in_end_time ?? ''
-  form.check_out_time = stay ? stay.check_out_time : ''
+  form.check_out_time = stay?.check_out_time ?? ''
   form.max_guests = stay ? String(stay.max_guests) : ''
   form.min_nights = stay ? String(stay.min_nights) : ''
   form.stay_team_id = stay ? stay.assigned_team_id : null
@@ -1163,7 +1163,7 @@ const sectionValid = computed(() => {
     const beds = bedsStr ? Number(bedsStr) : null
     const ba = bathroomsStr ? Number(bathroomsStr) : null
     const invalidBedrooms = b !== null && (!Number.isInteger(b) || b < 0 || b > 50)
-    const invalidBeds = beds !== null && (!Number.isInteger(beds) || beds < 1 || beds > 50)
+    const invalidBeds = beds !== null && (!Number.isSafeInteger(beds) || beds < 0)
     const invalidBaths = ba !== null && (ba < 0 || ba > 50 || (ba * 2) % 1 !== 0)
     return !invalidBedrooms && !invalidBeds && !invalidBaths
   }
@@ -1181,7 +1181,7 @@ function stayIncomplete(): boolean {
 }
 /** Start and checkout are times; the end is a time other than the start, or empty for a flexible end. */
 function checkInWindowValid(): boolean {
-  return MINUTE_TIME_PATTERN.test(form.check_in_time) && MINUTE_TIME_PATTERN.test(form.check_out_time)
+  return (form.check_in_time === '' || MINUTE_TIME_PATTERN.test(form.check_in_time)) && (form.check_out_time === '' || MINUTE_TIME_PATTERN.test(form.check_out_time))
     && (form.check_in_end_time === '' || (MINUTE_TIME_PATTERN.test(form.check_in_end_time) && form.check_in_end_time !== form.check_in_time))
 }
 function stayTeamSummary(): string {
@@ -1377,7 +1377,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
     const home = arrivalHome.value
     if (!home || arrivalError.value) return []
     return [{ id: 'arrival', items: [
-      { id: 'arrival-time', label: '', summary: `${stayCheckInWindow(product.value.stay!.check_in_time, product.value.stay!.check_in_end_time)} · ${product.value.stay!.check_out_time}`, to: sectionPath('arrival-time') },
+      { id: 'arrival-time', label: '', summary: `${stayCheckInWindow(product.value.stay!.check_in_time, product.value.stay!.check_in_end_time)} · ${product.value.stay!.check_out_time ?? 'Checkout time not set'}`, to: sectionPath('arrival-time') },
       { id: 'directions', label: 'Directions', summary: home.directions || 'Add details', placeholder: !home.directions, to: sectionPath('directions') },
       { id: 'check-in-method', label: 'Check-in method', summary: home.check_in_method ? STAY_CHECK_IN_METHODS[home.check_in_method].label : 'Add details', placeholder: !home.check_in_method, to: sectionPath('check-in-method') },
       { id: 'wifi', label: 'Wifi details', summary: home.wifi_network || 'Add details', placeholder: !home.wifi_network, to: sectionPath('wifi') },
@@ -1633,7 +1633,7 @@ function payload(concern?: ProductConcern) {
   }
   if (concern === 'arrival-time') {
     if (!product.value?.stay) throw new Error('Arrival times require a place to stay.')
-    return { stay: { check_in_time: form.check_in_time, check_in_end_time: form.check_in_end_time || null, check_out_time: form.check_out_time } }
+    return { stay: { check_in_time: form.check_in_time || null, check_in_end_time: form.check_in_end_time || null, check_out_time: form.check_out_time || null } }
   }
   if (concern === 'house-rules' || concern === 'additional-rules') {
     const stay = product.value?.stay
@@ -1683,9 +1683,9 @@ function payload(concern?: ProductConcern) {
     // each leaf updates only the stay fields it owns.
     ...(form.kind === 'stay' && isNew.value ? { stay: {
       location_id: form.stay_location_id,
-      check_in_time: form.check_in_time,
+      check_in_time: form.check_in_time || null,
       check_in_end_time: form.check_in_end_time || null,
-      check_out_time: form.check_out_time,
+      check_out_time: form.check_out_time || null,
       max_guests: Number(form.max_guests),
       min_nights: Number(form.min_nights),
       assigned_member_id: form.stay_member_id,
@@ -1795,7 +1795,7 @@ async function commit(concern?: ProductConcern) {
     stay_property_size: form.stay_property_size,
     stay_property_size_unit: form.stay_property_size_unit,
   } : null
-  const arrivalTimeDraft = concern === 'arrival-time' ? { check_in_time: form.check_in_time, check_in_end_time: form.check_in_end_time, check_out_time: form.check_out_time } : null
+  const arrivalTimeDraft = concern === 'arrival-time' ? { check_in_time: form.check_in_time || null, check_in_end_time: form.check_in_end_time, check_out_time: form.check_out_time || null } : null
   const safetyDraft = isSafetyConcern(concern) ? { keys: staySafetySectionKeys(concern), details: { ...form.details }, answers: form.stay_amenity_answers.map(answer => ({ ...answer })) } : null
   const locationDetailKey = editorKey.value === 'location' ? STAY_LOCATION_DETAIL_KEYS.find(key => key === route.params.field) : undefined
   const locationDraft = locationDetailKey ? { key: locationDetailKey, value: form.details[locationDetailKey] } : null

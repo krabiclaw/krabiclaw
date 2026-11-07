@@ -573,7 +573,7 @@ function countFor(dayKey: string): number {
   return itemsOn(dayKey).filter(item => item.status !== 'cancelled').length
 }
 function timeOf(item: CalendarItem): string {
-  return formatTimestamp(item.startsAt, 'en', item.timeZone, { hour: 'numeric', minute: '2-digit' })
+  return item.startsAt.includes('T') ? formatTimestamp(item.startsAt, 'en', item.timeZone, { hour: 'numeric', minute: '2-digit' }) : 'Time not set'
 }
 
 // The open day is the route below this level, so a reload and a deep link ring

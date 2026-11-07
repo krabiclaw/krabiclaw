@@ -20,7 +20,7 @@ import { isStayCheckInMethod, STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LI
 import { stayNightlyGroups, AIRBNB_CANCELLATION_CATEGORIES, AIRBNB_LONG_TERM_CANCELLATION_IDS, isStayAmenity, parseStayAmenityAnswers, parseStayMapSharing, STAY_ALARM_DETAIL_KEYS, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, type StayAmenityAnswer, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
 import { validateProductDetails, validateStayAlarmDetails, stayHouseRuleLines } from '~/shared/product-details'
 import { staySafetyLines, stayAlarmLines } from '~/shared/stay-safety'
-import { formatTime, isValidTimezone, localDateTimeToInstant } from '~/utils/timezone'
+import { formatTime, isValidTimezone, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import { createProduct, getProduct, setProductPublication, stayImportWrittenQuery, updateProduct, type StayImportWrite } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -178,10 +178,10 @@ export interface StayHome {
   base_price_minor: number | null
   /** How tax relates to the base nightly price; null when the home has no base price. */
   base_price_tax_behavior: PriceTaxBehavior | null
-  check_in_time: string
+  check_in_time: string | null
   /** The end of the check-in window, local HH:MM; null is a flexible end. Earlier than check_in_time is after midnight. */
   check_in_end_time: string | null
-  check_out_time: string
+  check_out_time: string | null
   max_guests: number
   min_nights: number
   calendar_rules: StayCalendarRules | null
@@ -438,7 +438,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
     return {
       product_id: String(row.product_id), product_updated_at: String(row.product_updated_at), name: String(row.name), location_id: String(row.location_id), timezone: String(row.timezone),
       currency: row.default_currency, base_price_minor: base ? base.unit_amount : null, base_price_tax_behavior: base ? base.tax_behavior : null,
-      check_in_time: String(row.check_in_time), check_in_end_time: nullableText(row.check_in_end_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights), calendar_rules: parseStayCalendarRules(row.calendar_rules === null ? null : JSON.parse(String(row.calendar_rules))),
+      check_in_time: nullableText(row.check_in_time), check_in_end_time: nullableText(row.check_in_end_time), check_out_time: nullableText(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights), calendar_rules: parseStayCalendarRules(row.calendar_rules === null ? null : JSON.parse(String(row.calendar_rules))),
       description: String(row.description), published: Number(row.published) === 1, live: Number(row.live) === 1,
       address: stayAddress(row.address), latitude: nullableNumber(row.latitude), longitude: nullableNumber(row.longitude), stay_map_sharing: parseStayMapSharing(row.stay_map_sharing),
       property_type_group: nullableText(row.property_type_group) as StayPropertyTypeGroup | null,
@@ -540,17 +540,17 @@ export interface NewStayHome {
   zip_code: string | null
   phone: string | null
   email: string | null
-  check_in_time: string
+  check_in_time: string | null
   /** Null is a flexible end. */
   check_in_end_time: string | null
-  check_out_time: string
+  check_out_time: string | null
   max_guests: number
   min_nights: number
   calendar_rules?: StayCalendarRules | null
   base_price_minor: number | null
   /** Left out, a new home starts on Airbnb's own: NEW_HOME_CANCELLATION_POLICIES. */
-  cancellation_policy?: StayCancellationPolicy
-  long_term_cancellation_policy?: StayLongTermCancellationPolicy
+  cancellation_policy?: StayCancellationPolicy | null
+  long_term_cancellation_policy?: StayLongTermCancellationPolicy | null
 }
 
 /** A home's details read from a request body; each problem names its field. */
@@ -600,6 +600,7 @@ export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
   const policy = <K extends 'cancellation_policy' | 'long_term_cancellation_policy'>(key: K, codes: Record<NonNullable<NewStayHome[K]>, unknown>): Partial<Pick<NewStayHome, K>> => {
     const value = body[key]
     if (value === undefined) return {}
+    if (value === null) return { [key]: null } as Partial<Pick<NewStayHome, K>>
     if (typeof value !== 'string' || !Object.hasOwn(codes, value)) fail(422, 'INVALID_DETAIL', `${key} must be one of ${Object.keys(codes).join(', ')}`, key)
     return { [key]: value } as Partial<Pick<NewStayHome, K>>
   }
@@ -607,7 +608,7 @@ export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
     name: name(true)!, timezone: timezone(true)!,
     ...homeAddress(body, ''),
     phone: text('phone', 32, false), email: text('email', 254, false),
-    check_in_time: time('check_in_time', true)!, check_in_end_time: time('check_in_end_time', false), check_out_time: time('check_out_time', true)!,
+    check_in_time: time('check_in_time', false), check_in_end_time: time('check_in_end_time', false), check_out_time: time('check_out_time', false),
     max_guests: maxGuests(true)!, min_nights: minNights(true)!,
     ...('calendar_rules' in body ? { calendar_rules: homeCalendarRules(body.calendar_rules) } : {}),
     base_price_minor: basePrice(),
@@ -726,7 +727,7 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   const unknown = Object.keys(body).find(key => !(EDITABLE_HOME_FIELDS as readonly string[]).includes(key))
   if (unknown) fail(422, 'INVALID_DETAIL', `${unknown} cannot be changed here`, unknown)
   if (!Object.keys(body).length) fail(422, 'INVALID_DETAIL', 'Name at least one detail to change')
-  for (const key of ['name', 'timezone', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights'] as const) {
+  for (const key of ['name', 'timezone', 'max_guests', 'min_nights'] as const) {
     const value = body[key]
     if (key in body && (value === null || (typeof value === 'string' && !value.trim()))) fail(422, 'INVALID_DETAIL', `${key} cannot be empty`, key)
   }
@@ -734,12 +735,10 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   // Every field is checked before anything is written.
   const zone = timezone(false)
   const stay: NonNullable<UpdateProductInput['stay']> = {}
-  const checkIn = time('check_in_time', false)
-  if (checkIn !== null) stay.check_in_time = checkIn
+  if ('check_in_time' in body) stay.check_in_time = time('check_in_time', false)
   // null is a real value here: the check-in window has a flexible end.
   if ('check_in_end_time' in body) stay.check_in_end_time = time('check_in_end_time', false)
-  const checkOut = time('check_out_time', false)
-  if (checkOut !== null) stay.check_out_time = checkOut
+  if ('check_out_time' in body) stay.check_out_time = time('check_out_time', false)
   const guests = maxGuests(false)
   if (guests !== null) stay.max_guests = guests
   const nights = minNights(false)
@@ -1476,23 +1475,27 @@ function airbnbBookingSettings(home: AirbnbHomeSettings, details: Product['detai
     const [hh, mm] = time.split(':')
     return mm === '00' ? Number(hh) : { refusal: `Airbnb takes ${label} in whole hours; ${time} cannot be sent to Airbnb`, field }
   }
-  const start = hour(home.check_in_time, 'check_in_time', 'the check-in start')
-  if (typeof start !== 'number') return start
-  const startHour = start < 8 ? start + 24 : start
-  if (startHour > 26) return { refusal: `Airbnb's check-in start is between 08:00 and 02:00; ${home.check_in_time} cannot be sent to Airbnb`, field: 'check_in_time' }
-  const booking: Record<string, unknown> = { check_in_time_start: String(startHour) }
-  if (home.check_in_end_time === null) booking.check_in_time_end = 'FLEXIBLE'
-  else {
-    const end = hour(home.check_in_end_time, 'check_in_end_time', 'the check-in end')
-    if (typeof end !== 'number') return end
-    // An end earlier than the start is the next day, as is every end of a start after midnight.
-    const endHour = startHour >= 24 || end <= start ? end + 24 : end
-    if (endHour > 27 || endHour <= startHour) return { refusal: `Airbnb's check-in end is after the start and no later than 03:00; ${home.check_in_end_time} cannot be sent to Airbnb`, field: 'check_in_end_time' }
-    booking.check_in_time_end = String(endHour)
+  const booking: Record<string, unknown> = {}
+  if (home.check_in_time !== null) {
+    const start = hour(home.check_in_time, 'check_in_time', 'the check-in start')
+    if (typeof start !== 'number') return start
+    const startHour = start < 8 ? start + 24 : start
+    if (startHour > 26) return { refusal: `Airbnb's check-in start is between 08:00 and 02:00; ${home.check_in_time} cannot be sent to Airbnb`, field: 'check_in_time' }
+    booking.check_in_time_start = String(startHour)
+    if (home.check_in_end_time === null) booking.check_in_time_end = 'FLEXIBLE'
+    else {
+      const end = hour(home.check_in_end_time, 'check_in_end_time', 'the check-in end')
+      if (typeof end !== 'number') return end
+      const endHour = startHour >= 24 || end <= start ? end + 24 : end
+      if (endHour > 27 || endHour <= startHour) return { refusal: `Airbnb's check-in end is after the start and no later than 03:00; ${home.check_in_end_time} cannot be sent to Airbnb`, field: 'check_in_end_time' }
+      booking.check_in_time_end = String(endHour)
+    }
   }
-  const checkout = hour(home.check_out_time, 'check_out_time', 'checkout')
-  if (typeof checkout !== 'number') return checkout
-  booking.check_out_time = checkout
+  if (home.check_out_time !== null) {
+    const checkout = hour(home.check_out_time, 'check_out_time', 'checkout')
+    if (typeof checkout !== 'number') return checkout
+    booking.check_out_time = checkout
+  }
   const controls = Object.fromEntries((Object.entries(AIRBNB_GUEST_CONTROLS) as Array<[keyof typeof AIRBNB_GUEST_CONTROLS, string]>).flatMap(([key, control]) => typeof details[key] === 'boolean' ? [[control, details[key]]] : []))
   if (Object.keys(controls).length) booking.guest_controls = controls
   return booking
@@ -1835,8 +1838,9 @@ async function guestStayCancellation(db: DbClient, organizationId: string, stayI
   const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
   const purchase = isRecord(snapshot) ? snapshot.stay : undefined
   if (!isRecord(purchase) || !Array.isArray(purchase.nightly)) throw new Error(`Stay ${stayId} payment has no nightly prices`)
-  const home = await queryFirst<{ check_in_time: string }>(db, 'SELECT check_in_time FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, stay.product_id])
+  const home = await queryFirst<{ check_in_time: string | null }>(db, 'SELECT check_in_time FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, stay.product_id])
   if (!home) throw new Error(`Stay ${stayId} has no home`)
+  if (home.check_in_time === null) fail(409, 'STAY_CANCELLATION_TIME_REQUIRED', 'The home has no check-in time for calculating the cancellation refund. Contact the host to cancel.', 'check_in_time')
   const held = payment.captured_amount - payment.refunded_amount
   const owed = stayCancellationRefund({ policy: stay.cancellation_policy, nightly: purchase.nightly as StayCancellationInput['nightly'], booked_at: stay.created_at, now, timezone: stay.timezone, check_in_time: home.check_in_time })
   const quote: StayCancellationQuote = { policy: stay.cancellation_policy, paid_minor: payment.captured_amount, refund_minor: Math.min(owed, held), currency: payment.currency }
@@ -1848,14 +1852,14 @@ export interface GuestStay {
   /** The business the stay is with: a business's site shows only its own. */
   organization_id: string
   stay: StayDetail
-  home: { name: string; organization_name: string; check_in_time: string; check_out_time: string; image_url: string | null; location: { address: PostalAddress | null; latitude: number | null; longitude: number | null; maps_url: string | null } | null; arrival_guide: StayArrivalGuide | null; house_rules: string[]; safety: string[] }
+  home: { name: string; organization_name: string; check_in_time: string | null; check_out_time: string | null; image_url: string | null; location: { address: PostalAddress | null; latitude: number | null; longitude: number | null; maps_url: string | null } | null; arrival_guide: StayArrivalGuide | null; house_rules: string[]; safety: string[] }
   /** Null once the stay is cancelled, or for a stay not paid on the site. */
   cancellation: StayCancellationQuote | null
 }
 
 /** The account's stay by its activity ID: its conversation's ID, or the stay's own when it has none. */
 export async function readGuestStay(db: DbClient, buyerUserId: string, activityId: string): Promise<GuestStay> {
-  const owned = await queryFirst<{ id: string; request_id: string | null; organization_id: string; product_id: string; status: string; name: string; organization_name: string; check_in_time: string; check_out_time: string; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; paid_online: number }>(db, `
+  const owned = await queryFirst<{ id: string; request_id: string | null; organization_id: string; product_id: string; status: string; name: string; organization_name: string; check_in_time: string | null; check_out_time: string | null; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; paid_online: number }>(db, `
     SELECT s.id, s.request_id, s.organization_id, s.product_id, s.status, p.name, o.name AS organization_name, c.check_in_time, c.check_out_time, l.address, l.latitude, l.longitude, l.maps_url,
            EXISTS (SELECT 1 FROM payments WHERE organization_id = s.organization_id AND subject_type = 'stay' AND subject_id = s.id AND captured_amount > 0) AS paid_online
       FROM stays s JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
@@ -1870,7 +1874,7 @@ export async function readGuestStay(db: DbClient, buyerUserId: string, activityI
     loadOwnerPictures(db, owned.organization_id, 'product', [owned.product_id], { organizationFallback: false }),
   ])
   if (stay.user_id !== buyerUserId || isChannelManagedStay(stay)) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'stay_id')
-  const cancellation = stay.status !== 'cancelled' && owned.paid_online === 1
+  const cancellation = stay.status !== 'cancelled' && owned.paid_online === 1 && owned.check_in_time !== null
     ? (await guestStayCancellation(db, owned.organization_id, owned.id, buyerUserId, new Date().toISOString())).quote : null
   const pinFailure = stay.status === 'confirmed' ? coordinatesFailure(owned) : null
   if (pinFailure) fail(500, 'INVALID_STORED_LOCATION', pinFailure.error, pinFailure.field)
@@ -1889,7 +1893,7 @@ export async function readGuestStay(db: DbClient, buyerUserId: string, activityI
     ])
     if (!product) throw new Error(`Stay ${owned.id} has no product`)
     const { product_id, check_in_method, check_in_instructions, wifi_network, wifi_password, directions, house_manual, checkout_instructions } = home
-    if (Date.now() < localDateTimeToInstant(stay.check_out_date, home.check_out_time, home.timezone).getTime()) {
+    if (home.check_out_time === null ? localDateAt(new Date(), home.timezone) <= stay.check_out_date : Date.now() < localDateTimeToInstant(stay.check_out_date, home.check_out_time, home.timezone).getTime()) {
       arrivalGuide = { product_id, check_in_method, check_in_instructions, wifi_network, wifi_password, directions, house_manual, checkout_instructions }
     }
     houseRules = stayHouseRuleLines(product.details, value => formatTime(value, 'en'))
@@ -2471,7 +2475,7 @@ export interface PublicStayNight {
 }
 
 export interface PublicStayCalendar {
-  home: { currency: CurrencyCode; timezone: string; today: string; check_in_time: string; check_out_time: string; max_guests: number; min_nights: number; calendar_rules: StayCalendarRules | null; base_price_minor: number | null }
+  home: { currency: CurrencyCode; timezone: string; today: string; check_in_time: string | null; check_out_time: string | null; max_guests: number; min_nights: number; calendar_rules: StayCalendarRules | null; base_price_minor: number | null }
   nights: PublicStayNight[]
 }
 
@@ -2509,8 +2513,8 @@ export interface StayQuote {
   tax_behavior: PriceTaxBehavior
   check_in_date: string
   check_out_date: string
-  check_in_time: string
-  check_out_time: string
+  check_in_time: string | null
+  check_out_time: string | null
   nights: number
   adults: number
   children: number

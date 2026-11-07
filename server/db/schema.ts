@@ -1224,10 +1224,10 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	product_id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	location_id: text().notNull(),
-	check_in_time: text().notNull(),
+	check_in_time: text(),
 	// The end of the check-in window, local HH:MM; null is a flexible end. Earlier than check_in_time means after midnight.
 	check_in_end_time: text(),
-	check_out_time: text().notNull(),
+	check_out_time: text(),
 	max_guests: integer().notNull(),
 	// Imported from the listing’s actual default or explicitly supplied by its host.
 	min_nights: integer().notNull(),
@@ -1291,7 +1291,7 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	check("product_stay_configs_year_built_check", sql`year_built IS NULL OR (typeof(year_built) = 'integer' AND year_built BETWEEN 1 AND 9007199254740991)`),
 	check("product_stay_configs_property_size_check", sql`property_size IS NULL OR (typeof(property_size) IN ('integer', 'real') AND property_size > 0 AND property_size <= 1.7976931348623157e308)`),
 	check("product_stay_configs_property_size_unit_check", sql`(property_size IS NULL AND property_size_unit IS NULL) OR (property_size IS NOT NULL AND property_size_unit IS NOT NULL AND property_size_unit IN ('square_meters', 'square_feet'))`),
-	check("product_stay_configs_beds_check", sql`beds IS NULL OR beds BETWEEN 1 AND 50`),
+	check("product_stay_configs_beds_check", sql`beds IS NULL OR beds >= 0`),
 	check("product_stay_configs_bathrooms_check", sql`bathrooms IS NULL OR (bathrooms BETWEEN 0 AND 50 AND bathrooms * 2 = CAST(bathrooms * 2 AS INTEGER))`),
 	check("product_stay_configs_amenities_check", sql`json_valid(amenities) AND json_type(amenities) = 'array'`),
 	check("product_stay_configs_cancellation_check", sql`cancellation_policy IS NULL OR cancellation_policy IN ('flexible', 'moderate', 'limited', 'firm', 'strict')`),

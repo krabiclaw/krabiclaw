@@ -233,9 +233,9 @@ const detailObject = productDetailsSchema()
 
 const stayTime = { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' }
 const stayRules = {
-  check_in_time: { ...stayTime, description: 'Local 24-hour time guests may arrive from, in the location’s timezone.' },
+  check_in_time: { ...stayTime, type: ['string', 'null'], description: 'Local 24-hour time guests may arrive from, in the location’s timezone.' },
   check_in_end_time: { type: ['string', 'null'], pattern: stayTime.pattern, description: 'Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.' },
-  check_out_time: { ...stayTime, description: 'Local 24-hour time guests leave by.' },
+  check_out_time: { ...stayTime, type: ['string', 'null'], description: 'Local 24-hour time guests leave by.' },
   max_guests: { type: 'integer', minimum: 1, maximum: 99 },
   min_nights: { type: 'integer', minimum: 1, maximum: MAX_STAY_NIGHTS, description: 'The listing’s required default minimum; individual arrival dates may override it.' },
   calendar_rules: STAY_CALENDAR_RULES_SCHEMA,

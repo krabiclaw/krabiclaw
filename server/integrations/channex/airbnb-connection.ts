@@ -21,7 +21,7 @@ import { isStayAmenity, type StayAmenity, type StayCheckInMethod } from '~/share
 import { channexCreate, channexGet, channexRequest, ChannexError, type ChannexEnv } from './client'
 import { ChannexDataError, object, relationship, string, type JsonRecord, type Resource } from './data'
 import { PHOTO_WIDTH, minorUnits, listingCalendar, listingContent, listingDetails, type DescriptionField, type ListingDetails, type ListingImage, type OrganizationContact, type ListingNight } from './airbnb-listing'
-import { DETAIL_FIELDS, IMPORT_STAGES, PROPERTY_TYPES, type DetailField, type ImportStage } from '~/shared/airbnb-import'
+import { DETAIL_FIELDS, IMPORT_STAGES, type DetailField, type ImportStage } from '~/shared/airbnb-import'
 export type { ImportStage } from '~/shared/airbnb-import'
 import { installChannexMessages, uninstallChannexMessages } from './messages'
 import { calendarMinimumDefaults, completeChannelPush, configureStayCalendar, forgetConfirmedNights, type ChannelPushCompletion, withDeliveryLease, withLeaseHeartbeat, type ChannexMapping, type DeliveryLease } from './ari'
@@ -113,7 +113,7 @@ interface ImportProperty {
   title: string
   currency: string
   timezone: string
-  property_type: string
+  property_type?: string
   email: string
   phone: string
   country: string
@@ -491,7 +491,6 @@ export class AirbnbConnection {
         return value.trim()
       }
       const values = Object.fromEntries(DETAIL_FIELDS.map(key => [key, field(key)])) as Record<DetailField, string>
-      if (!(PROPERTY_TYPES as readonly string[]).includes(values.propertyType)) fail(422, 'INVALID_DETAIL', 'Check the property type')
       if (details.defaultOccupancy > details.maxGuests) fail(422, 'INVALID_DETAIL', "The included guest count exceeds the listing's capacity")
       const organization = await queryFirst<{ default_currency: string }>(this.db, 'SELECT default_currency FROM organization WHERE id = ?', [this.organizationId])
       if (!organization || !isCurrencyCode(organization.default_currency)) throw new Error(`Organization ${this.organizationId} has no supported default currency`)
@@ -499,16 +498,11 @@ export class AirbnbConnection {
         fail(422, 'CURRENCY_MISMATCH', `This listing is priced in ${details.currency} and this organization sells in ${organization.default_currency}. Import stopped; nothing was created.`)
       }
       if (!isValidTimezone(values.timezone)) fail(422, 'INVALID_DETAIL', 'Choose a valid time zone')
-      // The check-in window and checkout are Airbnb's; a listing without a start or checkout hour is set on Airbnb first.
-      if (!details.checkInTime) fail(422, 'MISSING_AIRBNB_FIELD', 'Set a check-in start time on Airbnb, then import again.', { field: 'booking_settings.check_in_time_start' })
-      if (!details.checkOutTime) fail(422, 'MISSING_AIRBNB_FIELD', 'Set a checkout time on Airbnb, then import again.', { field: 'booking_settings.check_out_time' })
-      // The home books under the listing's own policies, as a guest on Airbnb would.
-      if (!details.cancellationPolicy) fail(422, 'MISSING_AIRBNB_FIELD', 'Choose a cancellation policy on Airbnb, then import again.', { field: 'booking_settings.cancellation_policy_settings.cancellation_policy_category' })
-      if (!details.longTermCancellationPolicy) fail(422, 'MISSING_AIRBNB_FIELD', 'Choose a long-term cancellation policy on Airbnb, then import again.', { field: 'booking_settings.cancellation_policy_settings.lts_cancellation_policy_id' })
+      // Imported times and policies remain exactly as supplied, including unknown values.
       const calendar = await listingCalendar(this.env, channelId, listingId, values.timezone)
       const contact = this.organizationContactUpdate(details, values)
       const property: ImportProperty = {
-        title: details.title, currency: details.currency, timezone: values.timezone, property_type: values.propertyType, email: values.email, phone: values.phone,
+        title: details.title, currency: details.currency, timezone: values.timezone, ...(details.fields.propertyType ? { property_type: details.fields.propertyType } : {}), email: values.email, phone: values.phone,
         country: values.country, state: values.state, city: values.city, address: values.address, zip_code: values.zipCode, max_guests: details.maxGuests,
         default_occupancy: details.defaultOccupancy, nightly_rate: details.nightlyRate,
       }
@@ -937,8 +931,8 @@ export class AirbnbConnection {
         ? { quiet_hours: false, quiet_hours_start: null, quiet_hours_end: null }
         : { quiet_hours: true, quiet_hours_start: content.quietHours.start, quiet_hours_end: content.quietHours.end })
     }
-    // The window is written whole or not at all: a start or checkout Airbnb has not set leaves the home's.
-    if (content.checkInTime && content.checkOutTime) Object.assign(body, { check_in_time: content.checkInTime, check_in_end_time: content.checkInEndTime, check_out_time: content.checkOutTime })
+    // The import guard below preserves host edits; unknown provider values stay null.
+    Object.assign(body, { check_in_time: content.checkInTime, check_in_end_time: content.checkInEndTime, check_out_time: content.checkOutTime })
     const arrival: Record<keyof typeof STAY_ARRIVAL_TEXT_LIMITS, string | null> = {
       check_in_instructions: paragraphs(content.checkInOption?.instruction),
       house_manual: paragraphs(content.houseManual), directions: paragraphs(content.directions),

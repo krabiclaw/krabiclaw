@@ -1371,6 +1371,35 @@ test('gap recommendations follow live listing state, effective night rules and a
   }
 })
 
+test('unknown home clocks preserve turnover dates without inventing task instants', { timeout: 120_000 }, async t => {
+  const { runtime, db, env } = await boot()
+  try {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-31T12:00:00.000Z') })
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
+    await updateStayHome(env, db, manager, cabin.id, { check_in_time: null, check_out_time: null })
+    const first = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'unknown-first', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
+    const next = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'unknown-next', check_in_date: '2026-11-03', check_out_date: '2026-11-05', ...guest })
+    const membership = await resolveMembership(env, { organizationId: ORG, userId: CLEANER })
+    const viewer = await taskViewer(db, memberAccessPrincipal(membership!, { env }))
+    const before = new Date('2026-11-02T18:00:00.000Z')
+    assert.deepEqual((await listTasks(db, viewer, parseTaskListQuery({}), before)).sections, [])
+    const upcoming = await listTasks(db, viewer, parseTaskListQuery({ range: 'upcoming' }), before)
+    assert.deepEqual(upcoming.sections.map(section => [section.id, section.tasks.map(task => task.stayId)]), [['2026-11-03', [first.id]], ['2026-11-05', [next.id]]])
+    assert.equal(upcoming.sections[0]!.title, 'Tomorrow')
+    const stored = await db.prepare("SELECT starts_at, due_at FROM tasks WHERE dedupe_key = ?").bind(`turnover:${first.id}`).first()
+    assert.deepEqual(stored, { starts_at: null, due_at: null })
+    const today = await listTasks(db, viewer, parseTaskListQuery({}), new Date('2026-11-03T18:00:00.000Z'))
+    const tasks = today.sections.flatMap(section => section.tasks)
+    assert.equal(tasks.length, 1)
+    assert.equal(tasks[0]!.stayId, first.id)
+    assert.equal(tasks[0]!.when, 'Time not set')
+    assert.deepEqual(tasks[0]!.sheet, { heading: 'Turnover', title: 'Cabin', date: 'Tue, Nov 3', checkout: { label: 'Checkout', time: 'Time not set', guest: 'Ana' }, checkin: { label: 'Check-in', time: 'Time not set', guest: 'Ana · 2 guests' } })
+  } finally {
+    t.mock.timers.reset()
+    await runtime.dispose()
+  }
+})
+
 test('members see only the homes they look after and change nothing; a home with stays is not deleted', { timeout: 120_000 }, async t => {
   const { runtime, db, env } = await boot()
   try {

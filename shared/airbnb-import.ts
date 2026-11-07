@@ -6,7 +6,7 @@
  * actually asks for.
  */
 
-export const DETAIL_FIELDS = ['timezone', 'email', 'phone', 'country', 'state', 'city', 'address', 'zipCode', 'propertyType'] as const
+export const DETAIL_FIELDS = ['timezone', 'email', 'phone', 'country', 'state', 'city', 'address', 'zipCode'] as const
 export type DetailField = typeof DETAIL_FIELDS[number]
 
 export const DETAIL_FIELD_TITLES: Readonly<Record<DetailField, string>> = {
@@ -18,14 +18,6 @@ export const DETAIL_FIELD_TITLES: Readonly<Record<DetailField, string>> = {
   city: 'City',
   address: 'Street address',
   zipCode: 'Postal code',
-  propertyType: 'Home type',
-}
-
-export const PROPERTY_TYPES = ['apartment', 'holiday_home', 'villa', 'chalet', 'lodge'] as const
-export type AirbnbPropertyType = typeof PROPERTY_TYPES[number]
-
-export const PROPERTY_TYPE_LABELS: Readonly<Record<AirbnbPropertyType, string>> = {
-  apartment: 'Apartment', holiday_home: 'House', villa: 'Villa', chalet: 'Chalet', lodge: 'Lodge',
 }
 
 /**
