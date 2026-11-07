@@ -32,7 +32,7 @@
             <a v-for="photo in task.outcome.photos" :key="photo.id" :href="photo.url" target="_blank" rel="noopener"><img :src="photo.thumbnailUrl" alt="" class="size-20 rounded-lg object-cover"></a>
           </div>
         </div>
-        <div v-else-if="task.can.complete || task.can.skip" class="sh-card">
+        <div v-else-if="task.can.complete" class="sh-card">
           <h4>What you found</h4>
           <UTextarea v-model="note" :rows="3" :maxlength="5000" placeholder="Add a note" aria-label="What you found" class="mt-3 w-full" data-testid="today-task-note" />
           <label class="mt-3 flex cursor-pointer items-center gap-3 text-muted">
@@ -47,12 +47,12 @@
     <template #footer>
       <div v-if="task" class="flex w-full items-center justify-between gap-4">
         <template v-if="task.status === 'open'">
-          <button v-if="task.can.skip" type="button" class="font-semibold underline underline-offset-3 disabled:opacity-50" :disabled="busy !== null || !note.trim()" :title="note.trim() ? undefined : 'Say why in the note to skip'" data-testid="today-task-skip" @click="close('skipped')">Skip</button>
+          <button v-if="task.can.skip" type="button" class="font-semibold underline underline-offset-3 disabled:opacity-50" :disabled="busy !== null" data-testid="today-task-skip" @click="close('skipped')">{{ task.can.complete ? 'Skip' : 'Dismiss' }}</button>
           <span v-else />
-          <NuxtLink v-if="task.action?.type === 'open'" :to="task.action.path" class="rounded-full bg-elevated px-6 py-3 font-semibold">{{ task.action.label }} ›</NuxtLink>
+          <NuxtLink v-if="task.action?.type === 'open'" :to="task.action.path" class="rounded-full bg-inverted px-8 py-3 font-semibold text-inverted">{{ task.action.label }}</NuxtLink>
           <button v-else-if="task.can.complete" type="button" class="rounded-full bg-inverted px-8 py-3 font-semibold text-inverted disabled:opacity-60" :disabled="busy !== null" data-testid="today-task-sheet-done" @click="close('done')">Done</button>
         </template>
-        <button v-else-if="task.can.reopen" type="button" class="ml-auto rounded-full bg-elevated px-6 py-3 font-semibold disabled:opacity-60" :disabled="busy !== null" @click="reopen">Undo Done</button>
+        <button v-else-if="task.can.reopen" type="button" class="ml-auto rounded-full bg-elevated px-6 py-3 font-semibold disabled:opacity-60" :disabled="busy !== null" @click="reopen">{{ task.action?.type === 'reopen' ? task.action.label : 'Undo' }}</button>
       </div>
     </template>
   </USlideover>
@@ -130,7 +130,7 @@ async function assign(person: TaskPerson | null) {
 </script>
 
 <style scoped>
-.sh-card { border-radius: 16px; padding: 18px 20px; background: var(--ui-bg); box-shadow: 0 0 0 1px rgb(0 0 0 / 4%), 0 6px 20px rgb(0 0 0 / 8%); }
+.sh-card { border-radius: 16px; padding: 18px 20px; background: var(--ui-bg-elevated); box-shadow: 0 0 0 1px rgb(0 0 0 / 4%), 0 6px 20px rgb(0 0 0 / 8%); }
 .sh-card h4 { font-size: 16px; line-height: 20px; font-weight: 600; }
 .split { display: flex; }
 .split > div { flex: 1; min-width: 0; }
@@ -143,5 +143,5 @@ async function assign(person: TaskPerson | null) {
 .sh-row > div { flex: 1; min-width: 0; }
 .sh-row span { display: block; font-size: 14px; line-height: 18px; color: var(--ui-text-muted); }
 .sh-row i { flex: none; width: 40px; height: 40px; border-radius: 50%; background: var(--ui-bg-accented); font-size: 15px; line-height: 40px; font-style: normal; font-weight: 600; text-align: center; }
-.tile { display: flex; flex: none; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; background: var(--ui-bg-elevated); }
+.tile { display: flex; flex: none; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; background: var(--ui-bg); }
 </style>

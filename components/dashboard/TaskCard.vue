@@ -37,6 +37,7 @@
             </button>
           </UDropdownMenu>
           <span v-else-if="task.person" class="tc-who"><i>{{ task.person.initial }}</i><span>{{ task.person.name }}</span></span>
+          <button v-if="canDismiss && !reservation" type="button" class="tc-link tc-dismiss" :disabled="busy" data-testid="today-task-dismiss" @click="emit('skip')">Dismiss</button>
           <NuxtLink v-if="reservation?.conversation" :to="reservation.conversation.to" class="tc-reservation-link">
             <span class="min-w-0 flex-1">
               <span class="block text-sm font-semibold">{{ reservation.conversation.label }}</span>
@@ -44,7 +45,8 @@
             </span>
             <UIcon name="i-lucide-messages-square" class="size-6 shrink-0" aria-hidden="true" />
           </NuxtLink>
-          <NuxtLink v-else-if="task.action?.type === 'open'" :to="task.action.path" class="tc-btn soft">{{ task.action.label }}<b aria-hidden="true">›</b></NuxtLink>
+          <button v-if="canDismiss && reservation" type="button" class="tc-link" :disabled="busy" data-testid="today-task-dismiss" @click="emit('skip')">Dismiss</button>
+          <NuxtLink v-else-if="task.action?.type === 'open'" :to="task.action.path" class="tc-btn">{{ task.action.label }}</NuxtLink>
           <button v-else-if="task.action?.type === 'complete'" type="button" class="tc-btn" :disabled="busy" data-testid="today-task-done" @click="emit('complete')">{{ task.action.label }}</button>
           <button v-else-if="task.action?.type === 'reopen'" type="button" class="tc-check" :aria-label="task.action.label" :title="task.action.label" :disabled="busy" data-testid="today-task-undo" @click="emit('reopen')">
             <UIcon name="i-lucide-check" class="size-5" />
@@ -69,7 +71,7 @@ import { cfImageVariant } from '~/utils/cf-image'
 
 /** The one Today card (`.tc`): a photo or compact task, or an opportunity's insight face. */
 const props = defineProps<{ task?: TaskView; opportunity?: OpportunityView; assignees?: TaskPerson[]; busy?: boolean }>()
-const emit = defineEmits<{ open: []; complete: []; reopen: []; assign: [person: TaskPerson | null]; accept: []; dismiss: []; defer: [until: string] }>()
+const emit = defineEmits<{ open: []; complete: []; skip: []; reopen: []; assign: [person: TaskPerson | null]; accept: []; dismiss: []; defer: [until: string] }>()
 
 const face = computed(() => props.opportunity ? 'insight' : props.task!.face)
 const reservation = computed(() => props.task?.reservation)
@@ -77,10 +79,11 @@ const statusLine = computed(() => props.task?.statusLine ?? props.opportunity?.s
 const title = computed(() => props.task?.title ?? props.opportunity!.title)
 const detail = computed(() => props.task?.detail ?? props.opportunity?.detail ?? null)
 const assignees = computed(() => props.assignees ?? [])
+const canDismiss = computed(() => props.task?.kind === 'guest_reply' && props.task.status === 'open' && props.task.can.skip)
 const mediaSrc = computed(() => cfImageVariant(props.task?.imageUrl, { width: 900, height: 600, fit: 'cover', format: 'auto' }) || props.task?.imageUrl || undefined)
 const avatarSrc = computed(() => cfImageVariant(props.task?.imageUrl, { width: 96, height: 96, fit: 'cover', format: 'auto' }) || props.task?.imageUrl || undefined)
 const guestAvatarSrc = computed(() => cfImageVariant(reservation.value?.guestImageUrl, { width: 224, height: 224, fit: 'cover', format: 'auto' }) || reservation.value?.guestImageUrl || undefined)
-const avatarClass = computed(() => props.task?.avatar ? (props.task.avatar.tone === 'cool' ? 'cool' : '') : 'sq')
+const avatarClass = computed(() => props.task?.avatar ? '' : 'sq')
 const assignItems = computed(() => [
   assignees.value.map(person => ({ label: person.name, avatar: { text: person.initial }, onSelect: () => emit('assign', person) })),
   [{ label: 'Unassigned', icon: 'i-lucide-user-x', onSelect: () => emit('assign', null) }],
@@ -100,7 +103,7 @@ const laterItems = [
 </script>
 
 <style scoped>
-.tc { display: flex; flex-direction: column; overflow: hidden; border-radius: 20px; background: var(--ui-bg); color: var(--ui-text-highlighted); text-align: left; box-shadow: 0 0 0 1px rgb(0 0 0 / 4%), 0 6px 20px rgb(0 0 0 / 8%); font-size: 15px; line-height: 20px; }
+.tc { display: flex; flex-direction: column; overflow: hidden; border-radius: 16px; background: var(--ui-bg-elevated); color: var(--ui-text-highlighted); text-align: left; box-shadow: 0 0 0 1px rgb(0 0 0 / 4%), 0 6px 20px rgb(0 0 0 / 8%); font-size: 15px; line-height: 20px; }
 .tc.is-insight { background: var(--ui-bg-elevated); box-shadow: none; }
 .tc.is-reservation { border: 1px solid var(--ui-border); border-radius: 24px; background: var(--ui-bg-elevated); box-shadow: none; }
 .tc-reservation-main { display: block; width: 100%; padding: 28px 24px; text-align: center; }
@@ -116,8 +119,7 @@ const laterItems = [
 .tc-row { display: flex; gap: 14px; align-items: flex-start; width: 100%; text-align: left; }
 .tc-row:focus-visible, .tc-media:focus-visible, .tc-who:focus-visible { outline: 2px solid var(--ui-text-highlighted); outline-offset: 2px; border-radius: 12px; }
 .tc-main { display: flex; flex: 1; min-width: 0; flex-direction: column; }
-.tc-av { display: flex; flex: none; align-items: center; justify-content: center; width: 48px; height: 48px; overflow: hidden; border-radius: 50%; background: #fbe3d0; color: #7a4a25; font-size: 18px; font-weight: 600; }
-.tc-av.cool { background: #e3ebf3; color: #2e4a66; }
+.tc-av { display: flex; flex: none; align-items: center; justify-content: center; width: 48px; height: 48px; overflow: hidden; border-radius: 50%; background: var(--ui-bg); color: var(--ui-text-highlighted); font-size: 18px; font-weight: 600; }
 .tc-av.sq { border-radius: 12px; background: var(--ui-bg-accented); color: var(--ui-text-muted); }
 .tc-k { font-size: 14px; line-height: 18px; color: var(--ui-text-muted); }
 .tc-t { font-size: 18px; line-height: 24px; font-weight: 600; letter-spacing: -.01em; }
@@ -134,10 +136,10 @@ const laterItems = [
 .tc-who { display: flex; flex: 1; min-width: 0; align-items: center; gap: 8px; font-weight: 500; text-align: left; }
 .tc-who i { flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--ui-bg-accented); font-size: 12px; line-height: 28px; font-style: normal; font-weight: 600; text-align: center; }
 .tc-btn { flex: none; height: 40px; padding: 0 20px; border-radius: 999px; background: var(--ui-bg-inverted); color: var(--ui-text-inverted); font-weight: 600; line-height: 40px; white-space: nowrap; }
-.tc-btn.soft { background: var(--ui-bg-elevated); color: var(--ui-text-highlighted); }
 .tc-btn.white { background: var(--ui-bg); color: var(--ui-text-highlighted); box-shadow: 0 0 0 1px rgb(0 0 0 / 6%), 0 1px 3px rgb(0 0 0 / 8%); }
 .tc-btn b { margin-left: 6px; }
 .tc-link { flex: none; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.tc-dismiss { margin-left: auto; }
 .tc-check { display: flex; flex: none; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; background: var(--ui-bg-inverted); color: var(--ui-text-inverted); }
 .tc button:disabled { opacity: .6; }
 </style>

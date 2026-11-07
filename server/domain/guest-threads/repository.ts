@@ -598,16 +598,34 @@ export const CANCELLED_AFTER_SQL = `(EXISTS (SELECT 1 FROM bookings record WHERE
 /**
  * The reply tasks for one conversation as its ledger now stands: the task for
  * an answered question closes (done, by whoever replied), an archived or
- * blocked conversation's closes (cancelled), and the first question still
+ * blocked conversation's closes (cancelled), a question left unanswered for
+ * REPLY_TASK_EXPIRY_DAYS closes (cancelled), and the first question still
  * unanswered opens one — or reopens its task when the conversation was
- * unarchived or a reply turned out not to be delivered. A person's Skip stays. A failed scheduled message the business has since
- * answered in person is done too.
+ * unarchived or a reply turned out not to be delivered. A person's Dismiss
+ * covers everything the guest had said by then; the guest's next message opens
+ * a new task. A failed scheduled message the business has since answered in
+ * person is done too.
  */
+/** Time passing changes no conversation, so a daily run closes what has aged out and opens any newer question behind it. */
+export async function expireReplyTasks(db: DbClient, now: string): Promise<{ conversations: number }> {
+  const rows = await queryAll<{ subject_id: string }>(db, `SELECT DISTINCT t.subject_id FROM tasks t
+    JOIN activity_entries guest_entry ON guest_entry.id = substr(t.dedupe_key, length('guest_reply:' || t.subject_id || ':') + 1)
+    WHERE t.kind = 'guest_reply' AND t.subject_type = 'request' AND t.status = 'open' AND ${guestEntryAskedAtSql('guest_entry')} < ?`, [replyTaskCutoff(now)])
+  for (const row of rows) await executeBatch(db, conversationTaskQueries(row.subject_id, now), { operation: 'Expire reply tasks' })
+  return { conversations: rows.length }
+}
+
+/** A question nobody answered for this long is no longer anyone's work. */
+const REPLY_TASK_EXPIRY_DAYS = 30
+const replyTaskCutoff = (now: string) => new Date(Date.parse(now) - REPLY_TASK_EXPIRY_DAYS * 86_400_000).toISOString()
+
 /** The reply tasks (server/domain/tasks.ts) for one conversation, for the batch that changes it. */
 export function conversationTaskQueries(requestId: string, now: string): BatchQuery[] {
   const entryOf = `substr(tasks.dedupe_key, length('guest_reply:' || tasks.subject_id || ':') + 1)`
+  const unanswered = `guest_entry.id = ${entryOf} AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}`
   return [{
-    query: `UPDATE tasks SET status = CASE WHEN r.archived_at IS NOT NULL OR r.blocked_at IS NOT NULL THEN 'cancelled' ELSE 'done' END,
+    query: `UPDATE tasks SET status = CASE WHEN r.archived_at IS NOT NULL OR r.blocked_at IS NOT NULL
+          OR EXISTS (SELECT 1 FROM activity_entries guest_entry WHERE ${unanswered}) THEN 'cancelled' ELSE 'done' END,
         closed_at = ?, version = tasks.version + 1, updated_at = ?,
         closed_by_user_id = CASE WHEN r.archived_at IS NOT NULL THEN r.archived_by_user_id WHEN r.blocked_at IS NOT NULL THEN NULL ELSE (
           SELECT reply.actor_user_id FROM activity_entries reply JOIN activity_entries guest_entry ON guest_entry.id = ${entryOf}
@@ -615,9 +633,8 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
       FROM requests r
       WHERE tasks.kind = 'guest_reply' AND tasks.subject_type = 'request' AND tasks.subject_id = ? AND tasks.status = 'open' AND r.id = tasks.subject_id
         AND (r.archived_at IS NOT NULL OR r.blocked_at IS NOT NULL OR NOT EXISTS (
-          SELECT 1 FROM activity_entries guest_entry WHERE guest_entry.id = ${entryOf}
-            AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}))`,
-    params: [now, now, requestId],
+          SELECT 1 FROM activity_entries guest_entry WHERE ${unanswered} AND ${guestEntryAskedAtSql('guest_entry')} >= ?))`,
+    params: [now, now, requestId, replyTaskCutoff(now)],
   }, {
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, timezone, status, dedupe_key, version, created_at, updated_at)
       SELECT ?, r.organization_id, 'guest_reply', 'request', r.id, (SELECT s.product_id FROM stays s WHERE s.request_id = r.id AND s.organization_id = r.organization_id),
@@ -627,13 +644,14 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
         JOIN activity_entries guest_entry ON guest_entry.request_id = r.id
        WHERE r.id = ? AND r.archived_at IS NULL AND r.blocked_at IS NULL AND ${GUEST_QUESTION_SQL}
          AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}
-         -- A question a person skipped stays skipped; the next unanswered one is still work.
-         AND NOT EXISTS (SELECT 1 FROM tasks skipped WHERE skipped.dedupe_key = 'guest_reply:' || r.id || ':' || guest_entry.id AND skipped.status = 'skipped')
+         AND ${guestEntryAskedAtSql('guest_entry')} >= ?
+         -- A person's Dismiss covers everything said by then; what the guest says next is work.
+         AND NOT EXISTS (SELECT 1 FROM tasks skipped WHERE skipped.kind = 'guest_reply' AND skipped.subject_type = 'request' AND skipped.subject_id = r.id AND skipped.status = 'skipped' AND skipped.closed_at >= guest_entry.occurred_at)
          AND NOT EXISTS (SELECT 1 FROM tasks open_reply WHERE open_reply.kind = 'guest_reply' AND open_reply.subject_type = 'request' AND open_reply.subject_id = r.id AND open_reply.status = 'open')
        ORDER BY guest_entry.sequence LIMIT 1
       ON CONFLICT (dedupe_key) DO UPDATE SET status = 'open', closed_at = NULL, closed_by_user_id = NULL, version = tasks.version + 1, updated_at = excluded.updated_at
         WHERE tasks.status IN ('done', 'cancelled')`,
-    params: [crypto.randomUUID(), now, now, requestId],
+    params: [crypto.randomUUID(), now, now, requestId, replyTaskCutoff(now)],
   }, {
     query: `UPDATE tasks SET status = 'done', closed_at = ?, closed_by_user_id = NULL, version = version + 1, updated_at = ?
       WHERE kind = 'message_delivery' AND status = 'open' AND subject_type = 'scheduled_guest_message' AND subject_id IN (

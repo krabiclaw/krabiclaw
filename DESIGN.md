@@ -171,10 +171,11 @@ web page and the app draw the same response and compose no text.
 `TaskCard` is the one Today card (`.tc`, design system
 `project/components/TodayTasks`), with three faces. A **photo** card is a
 turnover or a task at a home, ending in Done. A **compact** card is a failed
-message, a reply, or a task without a home; it has an avatar and a grey pill
-that opens its subject, because it closes when that subject does. An
+message, a reply, or a task without a home; it has an avatar and a pill that
+opens its subject, because it closes when that subject does. A reply also has
+Dismiss, which needs no note. An
 **insight** card is an opportunity, with a white Accept and an underlined Not
-now. Black is Done and nothing else. A finished task shows a filled check that
+now. Cards use the record surface. A finished task shows a filled check that
 undoes Done. An error line states only what our record knows; it never blames a
 provider or asks for a guest email.
 
@@ -184,12 +185,15 @@ home name and status above the original reply action and message preview.
 Unknown clocks read "Time not set". The task ID, schedule and actions remain
 owned by the stored task. An inquiry without a stay remains a compact reply.
 
-Owner Today orders failed deliveries, then turnovers, then replies, in two
-columns on web. Opportunities follow full width, then Done. A member sees only
+Owner Today orders failed deliveries, then turnovers, then replies, in one
+column. Opportunities follow, then Done. A member sees only
 their own tasks and Done. The shared header holds Today/Upcoming, a round +
 for the permitted Add task and Add stay actions, and a task kind filter.
 `TodayTaskSheet` uses Airbnb's Checkout | Check-in split, followed by Assigned
-with Change, "What you found", Skip and Done. Upcoming groups by day
+with Change. A task someone completes adds "What you found", Skip and Done; a
+reply adds Dismiss and Reply. Either close needs no note. A reply closes itself
+30 days after the question, and a dismissed one stays closed until the guest
+writes again. Upcoming groups by day
 ("Tomorrow · Sat, Nov 7"). Arrivals and bookings
 stay in Calendar.
 
@@ -199,13 +203,15 @@ editable below the list in a collapsed disclosure; they steer the selector.
 Personal-account Today/Upcoming project the buyer's own agenda with
 `TodayAgendaCard`; this is separate from the business's tasks.
 
-Calendar stay cards read the canonical agenda and open `O/bookings/stay/:stayId`.
+Calendar cards read the canonical agenda and open beneath their calendar day.
 Booked activity uses the existing detail layout: desktop keeps the agenda beside the
 bounded, vertical record summary; below the pane breakpoint the record is one
 screen and Close returns to the same range and filters. Calendar and Messages
-use the same detail components inside their existing context. Record summaries
-begin with guest identity, without a resource cover. Resource photography
-belongs to its catalog and website surfaces.
+use the same detail components inside their existing context. A record summary
+leads with a 320px square of the resource's own photo, the guest avatars
+overlapping its lower edge; organization artwork never stands in, and an absent
+photo stays absent. Its cards state when, where and what was booked, and its
+contact actions sit in their own bar below the scrolling record.
 The existing stay domain owns homes, assignments, nights and payments; Calendar
 projects its arrivals and departures. Assigned members' agenda cards show the guest's first name, party size, home,
 location and check-in or checkout time. Access to each stay and its conversation

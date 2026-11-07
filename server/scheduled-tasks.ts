@@ -28,6 +28,7 @@ export type ScheduledTaskName =
   | 'stay-calendar-links'
   | 'airbnb-sync'
   | 'channex-ari-delivery'
+  | 'reply-task-expiry'
 
 type TaskLoader = () => Promise<{ default: ScheduledTaskDefinition }>
 
@@ -36,7 +37,7 @@ export const SCHEDULED_TASKS: Readonly<Record<string, readonly ScheduledTaskName
   '*/5 * * * *': ['google-calendar-sync', 'social-card-backfill', 'scheduled-guest-messages', 'stay-checkout-holds', 'stay-calendar-links'],
   '*/2 * * * *': ['public-resource-cache-invalidation', 'airbnb-sync', 'channex-ari-delivery', 'send-later-messages'],
   '*/10 * * * *': ['domain-reconciliation', 'zaraz-analytics-reconciliation', 'channex-revision-feed'],
-  '0 3 * * *': ['domain-reconciliation-daily', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request', 'marketing-ad-spend-daily'],
+  '0 3 * * *': ['reply-task-expiry', 'domain-reconciliation-daily', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request', 'marketing-ad-spend-daily'],
   '0 0 * * SUN': ['google-places-sync'],
   '0 * * * *': ['review-request-automation', 'social-card-cleanup', 'sessions-materialize'],
   // Staging only ([env.staging.triggers]): the Channex certification run needs imports, ARI
@@ -54,6 +55,7 @@ const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
   'stay-calendar-links': async () => import('./tasks/stay-calendar-links'),
   'airbnb-sync': async () => import('./tasks/airbnb-sync'),
   'channex-ari-delivery': async () => import('./tasks/channex-ari-delivery'),
+  'reply-task-expiry': async () => import('./tasks/reply-task-expiry'),
   'social-card-backfill': async () => import('./tasks/social-card-backfill'),
   'social-card-cleanup': async () => import('./tasks/social-card-cleanup'),
   'public-resource-cache-invalidation': async () => import('./tasks/public-resource-cache-invalidation'),

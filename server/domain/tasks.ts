@@ -244,8 +244,8 @@ export interface TaskView {
   /** Who the footer shows: the assignee while open, the person who closed it after. */
   person: TaskPerson | null
   assignee: TaskPerson | null
-  /** Done (black, the only black), a grey pill that opens the subject, or the filled check that undoes Done. */
-  action: { type: 'complete'; label: 'Done' } | { type: 'open'; label: string; path: string } | { type: 'reopen'; label: 'Undo Done' } | null
+  /** Done, a pill that opens the subject, or the filled check that undoes a close. */
+  action: { type: 'complete'; label: 'Done' } | { type: 'open'; label: string; path: string } | { type: 'reopen'; label: 'Undo Done' | 'Undo' } | null
   /** The task sheet. A turnover has its Checkout | Check-in split. */
   sheet: { heading: string; title: string; date: string | null; checkout: TaskSheetSide | null; checkin: TaskSheetSide | null }
   startsAt: string | null
@@ -578,7 +578,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     when = null
     error = null
     const at = sameDay(row.closed_at!, now.toISOString()) ? time(row.closed_at!) : day(row.closed_at!)
-    statusLine = [`${row.status === 'done' ? 'Done' : row.status === 'skipped' ? 'Skipped' : 'Cancelled'} at ${at}`, photos.length ? `${photos.length} ${photos.length === 1 ? 'photo' : 'photos'}` : null].filter(Boolean).join(' · ')
+    statusLine = [`${row.status === 'done' ? 'Done' : row.status === 'skipped' ? ['turnover', 'custom', 'opportunity'].includes(row.kind) ? 'Skipped' : 'Dismissed' : 'Cancelled'} at ${at}`, photos.length ? `${photos.length} ${photos.length === 1 ? 'photo' : 'photos'}` : null].filter(Boolean).join(' · ')
     detail = null
   }
   const mine = assignee?.you ?? false
@@ -591,7 +591,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     assign: viewer.manage && row.status === 'open',
     edit: viewer.manage && row.status === 'open',
   }
-  if (row.status !== 'open') action = can.reopen ? { type: 'reopen', label: 'Undo Done' } : null
+  if (row.status !== 'open') action = can.reopen ? { type: 'reopen', label: row.status === 'done' ? 'Undo Done' : 'Undo' } : null
   else if (action.type === 'complete' && !can.complete) action = null
   return {
     id: row.id, kind: row.kind, status: row.status, version: row.version,
@@ -848,7 +848,7 @@ export async function closeTask(db: DbClient, viewer: TaskViewer, taskId: string
   if (current.status !== 'open') fail(409, 'TASK_CLOSED', `This task is already ${current.status}`, 'status')
   if (input.status === 'done' && !view.can.complete) fail(409, 'TASK_CLOSES_WITH_SUBJECT', 'This task is done when its subject is: open it instead', 'status')
   if (input.status === 'skipped' && !view.can.skip) fail(403, 'TASK_SCOPE_DENIED', 'You cannot skip this task', 'status')
-  const note = text(input.note, 'note', 5000, input.status === 'skipped')
+  const note = text(input.note, 'note', 5000)
   const now = new Date().toISOString()
   const assetIds = input.photos.length ? await uploadMessagePhotos(db, input.env, viewer.principal.organizationId, input.photos, { source: 'uploaded', userId: viewer.principal.userId })
     .catch((error: unknown) => error instanceof MessagePhotoRejection ? fail(422, 'INVALID_PHOTO', error.message, 'photos') : Promise.reject(error)) : []

@@ -67,7 +67,11 @@ export async function useBookingDetails(bookingType: DashboardRecordType, bookin
     if (purchase) return booking.value.payments?.[0] ? paymentStateLabel(booking.value.payments[0].payment) : 'Purchase'
     if (booking.value.status === 'pending') return 'Awaiting review'
     if (booking.value.status === 'cancelled') return 'Cancelled'
-    if (booking.value.bookingDate === referenceDay.value) return personalScope || booking.value.vertical === 'service' ? 'Today' : 'Currently hosting'
+    if (booking.value.bookingDate === referenceDay.value) {
+      const now = new Date().toISOString()
+      const underway = booking.value.startsAt !== null && booking.value.endsAt !== null && booking.value.startsAt <= now && now < booking.value.endsAt
+      return underway && !personalScope && booking.value.vertical !== 'service' ? 'Currently hosting' : 'Today'
+    }
     if (booking.value.bookingDate > referenceDay.value) return 'Coming up'
     return `Past ${noun.value}`
   })

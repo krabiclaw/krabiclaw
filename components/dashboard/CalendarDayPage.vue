@@ -72,7 +72,7 @@ import { closureOnDate, datedHours, getDateIntervals, parseOpeningHours, parseSp
 import { addLocalDays, formatCalendarDate } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 import type { AgendaItem, AgendaPayload } from '~/server/utils/dashboard-agenda'
-import { calendarLocationKey, calendarSessionsKey, type CalendarItem } from './CalendarPage.vue'
+import { calendarLocationKey, calendarRecordPath, calendarSessionsKey, type CalendarItem } from './CalendarPage.vue'
 
 // The business's day can be blocked or opened; the account's day only lists its visits.
 const props = defineProps<{ personalScope?: boolean }>()
@@ -124,8 +124,7 @@ if (!props.personalScope) {
 // A booking opens as a leaf of this day; a post keeps its own screen. The
 // item id is `kind:record`, which is how the agenda names a row; a stay's two rows name their stay.
 function openHere(item: CalendarItem): string | undefined {
-  if (item.kind === 'session' || item.kind === 'post' || props.personalScope) return undefined
-  return `${level.path.value}/${item.kind}/${encodeURIComponent(item.stayId ?? item.id.slice(item.kind.length + 1))}`
+  return props.personalScope ? undefined : calendarRecordPath(level.path.value, item)
 }
 const items = computed(() => sessionProduct.value ? calendarSessions!.itemsOn(day.value) : data.value?.items ?? [])
 const status = computed(() => sessionProduct.value ? calendarSessions!.status.value : agendaStatus.value)

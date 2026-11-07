@@ -16,13 +16,14 @@
     <div v-else class="min-w-0 [overflow-wrap:anywhere]">
       <UAlert v-if="actionError" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" :description="actionError" />
       <template v-if="booking">
-        <div class="flex flex-col items-center pb-12 pt-10 text-center">
-          <div v-if="!personalScope && !purchase && booking.guestName" class="relative mx-auto mb-6 shrink-0 md:mb-8" :class="booking.partySize && booking.partySize > 1 ? 'h-30 w-35 md:h-40 md:w-46' : 'size-27 md:size-36'">
+        <div class="flex flex-col items-center pb-12 text-center" :class="booking.resourceImageUrl ? 'pt-2' : 'pt-10'">
+          <img v-if="booking.resourceImageUrl" :src="booking.resourceImageUrl" alt="" class="aspect-square w-full max-w-80 rounded-2xl bg-elevated object-cover" :class="!personalScope && !purchase && booking.guestName ? '' : 'mb-6'">
+          <div v-if="!personalScope && !purchase && booking.guestName" class="relative mx-auto mb-6 shrink-0 md:mb-8" :class="[booking.resourceImageUrl ? '-mt-12 md:-mt-14' : '', booking.partySize && booking.partySize > 1 ? 'h-30 w-35 md:h-40 md:w-46' : 'size-27 md:size-36']">
             <UAvatar :src="booking.guestImageUrl || undefined" :alt="booking.guestName" :text="booking.guestName.slice(0, 1).toUpperCase()" size="3xl" class="absolute bottom-0 left-0" :class="booking.partySize && booking.partySize > 1 ? 'size-21 md:size-28' : 'size-27 md:size-36'" :ui="{ fallback: 'text-[30px] font-semibold text-highlighted md:text-4xl' }" />
             <span v-if="booking.partySize && booking.partySize > 1" class="absolute right-0 top-0 flex size-16 items-center justify-center rounded-full bg-elevated text-[9px] font-bold text-highlighted md:size-21 md:text-xs" :aria-label="otherGuestLabel">+{{ booking.partySize - 1 }}</span>
           </div>
           <h2 class="max-w-full break-words text-[32px] font-semibold leading-9 tracking-tight text-highlighted">{{ personalScope || purchase ? booking.resourceTitle : partyTitle }}</h2>
-          <p class="mt-4 break-words text-base text-muted">{{ purchase ? `${booking.type === 'order' ? 'Ordered' : 'Paid'} ${formattedDate}` : formattedDate }}</p>
+          <p v-if="purchase || personalScope" class="mt-4 break-words text-base text-muted">{{ purchase ? `${booking.type === 'order' ? 'Ordered' : 'Paid'} ${formattedDate}` : formattedDate }}</p>
           <p v-if="personalScope ? booking.organizationName : purchase ? booking.guestName : booking.resourceTitle" class="mt-1 break-words text-base text-muted">{{ personalScope ? booking.organizationName : purchase ? booking.guestName : booking.resourceTitle }}</p>
         </div>
 
@@ -51,6 +52,17 @@
                 <p class="mt-1 text-sm text-muted">{{ formattedTime }}</p>
               </div>
             </div>
+          </UCard>
+
+          <UCard v-if="!purchase" variant="record">
+            <h3 class="text-base font-semibold text-highlighted">Where</h3>
+            <p class="mt-1 text-sm text-muted">{{ booking.locationTitle }}</p>
+            <p v-if="booking.locationAddress" class="mt-1 text-sm text-muted">{{ booking.locationAddress }}</p>
+          </UCard>
+
+          <UCard v-if="booking.type === 'booking' && !personalScope" variant="record">
+            <h3 class="text-base font-semibold text-highlighted">What’s booked</h3>
+            <p class="mt-1 text-sm text-muted">{{ booking.resourceTitle }}<template v-if="booking.partySize"> · {{ guestCountLabel }}</template></p>
           </UCard>
 
           <template v-if="booking.type === 'booking' && !personalScope">
@@ -311,7 +323,8 @@ watchEffect(() => {
 const formattedDate = computed(() => booking.value ? formatCalendarDate(booking.value.bookingDate, 'en') : '')
 const formattedTime = computed(() => {
   if (!booking.value?.bookingTime) return ''
-  return formatTime(booking.value.bookingTime, 'en')
+  const start = formatTime(booking.value.bookingTime, 'en')
+  return booking.value.bookingEndTime ? `${start} – ${formatTime(booking.value.bookingEndTime, 'en')}` : start
 })
 // Airbnb's host-side stay page titles the party, not the listing: "Chris's
 // group of 2". A single guest is just their name.

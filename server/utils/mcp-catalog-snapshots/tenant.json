@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:55d579f1fe869f2d5df4c3677602e38c15ac15c48d99d63f6514facd003b1eb1",
-  "documentationFingerprint": "sha256:672793f6dfb7c68da1a6b368f328b493c2d8374822443c5ac12d7ba09aeda3aa",
+  "fingerprint": "sha256:7a42b0dcdb07c5aaf247bfa26ee022ef1108b7da43d6aaadf590b3498d9e1d04",
+  "documentationFingerprint": "sha256:c16715e68cbdba8675d2b009a36510c8ea876650de0b51c19c906391ea712e61",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -104298,13 +104298,12 @@
     {
       "name": "skip_task",
       "title": "Skip task",
-      "description": "Skip a task, saying why.",
+      "description": "Skip or dismiss a task, optionally saying why. A dismissed guest question stays dismissed until the guest writes again.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "note": {
             "maxLength": 5000,
-            "minLength": 1,
             "type": "string"
           },
           "organization_id": {
@@ -104319,8 +104318,7 @@
           }
         },
         "required": [
-          "task_id",
-          "note"
+          "task_id"
         ],
         "type": "object"
       },

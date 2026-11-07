@@ -16,7 +16,7 @@
       </UDropdownMenu>
     </template>
 
-    <div class="mx-auto w-full max-w-[848px]">
+    <div class="mx-auto w-full max-w-[640px]">
       <UAlert v-if="loadError" class="mb-6" color="error" variant="soft" :title="`${range === 'today' ? 'Today' : 'Upcoming'} could not be loaded`" :description="getErrorMessage(loadError, 'The request failed')">
         <template #actions><UButton color="error" variant="soft" size="xs" @click="() => refresh()">Retry</UButton></template>
       </UAlert>
@@ -37,9 +37,9 @@
         <template v-for="part in parts" :key="part.key">
           <template v-if="part.section">
             <h2 v-if="part.section.title" class="wh2">{{ part.section.title }}<small v-if="part.section.subtitle">{{ part.section.subtitle }}</small></h2>
-            <ul :class="part.section.id === 'open' ? 'wtasks' : 'wgrid'" role="list" :data-testid="`today-section-${part.section.id}`">
-              <li v-for="task in part.section.tasks" :key="task.id" :class="{ 'is-photo': task.face === 'photo' && part.section.id === 'open' }">
-                <TaskCard :task="task" :assignees="business.assignees" :busy="taskBusy[task.id] !== undefined" @open="openTask(task)" @complete="complete(task)" @reopen="reopen(task)" @assign="person => assign(task, person)" />
+            <ul class="wgrid" role="list" :data-testid="`today-section-${part.section.id}`">
+              <li v-for="task in part.section.tasks" :key="task.id">
+                <TaskCard :task="task" :assignees="business.assignees" :busy="taskBusy[task.id] !== undefined" @open="openTask(task)" @complete="complete(task)" @skip="skip(task)" @reopen="reopen(task)" @assign="person => assign(task, person)" />
               </li>
             </ul>
           </template>
@@ -214,7 +214,7 @@ watch(sheetOpen, (isOpen) => {
 async function taskChanged() { await refresh() }
 
 const actionError = ref<unknown>(null)
-const taskBusy = ref<Record<string, 'assign' | 'complete' | 'reopen'>>({})
+const taskBusy = ref<Record<string, 'assign' | 'complete' | 'skip' | 'reopen'>>({})
 const opportunityBusy = ref<Record<string, 'accept' | 'later'>>({})
 const tasksApi = computed(() => `/api/organizations/${encodeURIComponent(organizationId ?? '')}`)
 
@@ -232,6 +232,7 @@ async function act<T extends Record<string, string>>(busy: Ref<T>, id: string, s
   }
 }
 const complete = (task: TaskView) => act(taskBusy, task.id, 'complete', () => applicationFetch(`${tasksApi.value}/tasks/${encodeURIComponent(task.id)}/complete`, { method: 'POST', validate: isTaskResult, body: {} }))
+const skip = (task: TaskView) => act(taskBusy, task.id, 'skip', () => applicationFetch(`${tasksApi.value}/tasks/${encodeURIComponent(task.id)}/skip`, { method: 'POST', validate: isTaskResult, body: {} }))
 const reopen = (task: TaskView) => act(taskBusy, task.id, 'reopen', () => applicationFetch(`${tasksApi.value}/tasks/${encodeURIComponent(task.id)}/reopen`, { method: 'POST', validate: isTaskResult, body: { expectedVersion: task.version } }))
 const assign = (task: TaskView, person: TaskPerson | null) => act(taskBusy, task.id, 'assign', () => applicationFetch(`${tasksApi.value}/tasks/${encodeURIComponent(task.id)}`, { method: 'PATCH', validate: isTaskResult,
   body: { expectedVersion: task.version, assignedMemberId: person?.type === 'member' ? person.id : null, assignedTeamId: person?.type === 'team' ? person.id : null } }))
@@ -323,11 +324,6 @@ onBeforeUnmount(() => {
 .tog button:focus-visible { outline: 2px solid var(--ui-text-highlighted); outline-offset: 2px; }
 .wh2 { margin: 28px 2px 16px; font-size: 22px; line-height: 28px; font-weight: 700; letter-spacing: -.02em; color: var(--ui-text-highlighted); }
 .wh2 small { margin-left: 8px; font-size: 15px; line-height: 20px; font-weight: 400; letter-spacing: 0; color: var(--ui-text-muted); }
-.wtasks { display: grid; grid-template-columns: 1fr 1fr; grid-auto-flow: row dense; gap: 20px; align-items: start; }
-.wtasks > li { display: flex; }
-.wtasks > li > * { flex: 1; }
-/* A photo card spans two compact rows beside them. */
-.wtasks > li.is-photo { grid-row: span 2; }
 .wgrid { display: grid; gap: 20px; }
-@media (max-width: 767px) { .wtasks { grid-template-columns: 1fr; gap: 12px; } .wtasks > li.is-photo { grid-row: auto; } .wgrid { gap: 12px; } }
+@media (max-width: 767px) { .wgrid { gap: 12px; } }
 </style>

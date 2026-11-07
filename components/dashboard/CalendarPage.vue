@@ -120,7 +120,7 @@
                 >{{ day.number }}</component>
                 <ol v-if="itemsOn(day.key).length" class="mt-2 space-y-0.5">
                   <li v-for="item in itemsOn(day.key).slice(0, 2)" :key="item.id">
-                    <NuxtLink :to="item.to" :data-session-id="item.kind === 'session' ? item.session.id : undefined" class="group/item flex" :class="item.status === 'cancelled' ? 'text-muted line-through' : ''">
+                    <NuxtLink :to="(!personalScope && calendarRecordPath(`${level.path.value}/${day.key}`, item)) || item.to" :data-session-id="item.kind === 'session' ? item.session.id : undefined" class="group/item flex" :class="item.status === 'cancelled' ? 'text-muted line-through' : ''">
                       <p class="flex-auto truncate font-medium" :class="item.status === 'cancelled' ? '' : 'text-highlighted group-hover/item:text-primary'">{{ item.kind === 'session' ? timeOf(item) : item.title }}</p>
                       <time v-if="item.kind !== 'session'" :datetime="item.startsAt" class="ml-3 hidden flex-none text-muted xl:block">{{ timeOf(item) }}</time>
                     </NuxtLink>
@@ -242,6 +242,12 @@ import type { AgendaItem, AgendaKind, AgendaLocation, AgendaPayload } from '~/se
 
 export type CalendarSessionItem = CalendarRowItem & { kind: 'session'; dayKey: string; session: SessionAvailability }
 export type CalendarItem = AgendaItem | CalendarSessionItem
+
+/** A booking opens beneath its calendar day, so the calendar stays beside it. */
+export function calendarRecordPath(dayPath: string, item: CalendarItem): string | undefined {
+  if (item.kind === 'session' || item.kind === 'post') return undefined
+  return `${dayPath}/${item.kind}/${encodeURIComponent(item.stayId ?? item.id.slice(item.kind.length + 1))}`
+}
 
 /** The location the calendar is showing, owned by this level and read by the day leaf below it. */
 export interface CalendarLocation {
