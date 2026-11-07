@@ -5,6 +5,8 @@ import { listSendLaterMessages } from '~/server/domain/send-later'
 import { stayAccessFor } from '~/server/domain/stays'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import { getGuestThreadDetail } from './detail'
+import { guestReplyDestination } from './operations'
+import { getGuestRequest } from '~/server/domain/requests'
 import { OPENING_EVENT } from './opening'
 import { formatFormAnswer } from '~/shared/form-questions'
 import { threadRecordTitle } from '~/lib/components/workspace/messages/guest-thread-client'
@@ -82,8 +84,23 @@ interface ThreadFacts {
   inquiry: { checkIn: string; checkOut: string } | null
 }
 
-async function threadFacts(db: DbClient, raw: GuestThreadDetailViewModel, organizationId: string, now: Date): Promise<ThreadFacts> {
+/**
+ * Who the guest is, as every surface names them: Airbnb Support for a support case; otherwise
+ * the first name Airbnb gives on the guest's messages, else the booked name, else the label.
+ */
+export function inboxGuestNames(raw: GuestThreadDetailViewModel): { kind: InboxThreadKind; guestName: string; guestFullName: string } {
   const kind: InboxThreadKind = isSupportThread(raw.entries) ? 'support' : 'guest'
+  const airbnbName = raw.entries.findLast(entry => entry.actorKind === 'guest' && entry.eventName === 'channel.message_mirrored' && text(meta(entry)?.name))
+  // Airbnb gives the guest's first name on their messages; the stay, once booked, has their full name.
+  const airbnbFirstName = airbnbName ? text(meta(airbnbName)!.name)! : null
+  const guestFullName = kind === 'support' ? 'Airbnb Support' : raw.guestName ?? airbnbFirstName ?? raw.participantLabel
+  const guestName = kind === 'support' ? 'Airbnb Support'
+    : airbnbFirstName ?? (raw.conversationChannel === 'airbnb' && raw.guestName ? firstName(raw.guestName) : guestFullName)
+  return { kind, guestName, guestFullName }
+}
+
+async function threadFacts(db: DbClient, raw: GuestThreadDetailViewModel, organizationId: string, now: Date): Promise<ThreadFacts> {
+  const { kind, guestName, guestFullName } = inboxGuestNames(raw)
   const place = await queryFirst<{ location_timezone: string | null; organization_timezone: string }>(db, `
     SELECT l.timezone AS location_timezone, o.timezone AS organization_timezone
       FROM requests r JOIN organization o ON o.id = r.organization_id
@@ -102,19 +119,13 @@ async function threadFacts(db: DbClient, raw: GuestThreadDetailViewModel, organi
   const inquiryEntry = raw.entries.findLast(entry => entry.eventName === 'channel.inquiry_received')
   const inquiry = inquiryEntry && text(inquiryEntry.payload?.check_in_date) && text(inquiryEntry.payload?.check_out_date)
     ? { checkIn: String(inquiryEntry.payload!.check_in_date), checkOut: String(inquiryEntry.payload!.check_out_date) } : null
-  const airbnbName = raw.entries.findLast(entry => entry.actorKind === 'guest' && entry.eventName === 'channel.message_mirrored' && text(meta(entry)?.name))
-  // Airbnb gives the guest's first name on their messages; the stay, once booked, has their full name.
-  const airbnbFirstName = airbnbName ? text(meta(airbnbName)!.name)! : null
-  const guestFullName = kind === 'support' ? 'Airbnb Support' : raw.guestName ?? airbnbFirstName ?? raw.participantLabel
-  const guestName = kind === 'support' ? 'Airbnb Support'
-    : airbnbFirstName ?? (raw.replyChannel === 'airbnb' && raw.guestName ? firstName(raw.guestName) : guestFullName)
   const record = raw.operationalRecord
   // A stay is its nights; a booking or reservation is its start, in the home's clock; an inquiry is the dates asked about.
   const when = record?.check_in_date && record.check_out_date ? stayWhen(record.check_in_date, record.check_out_date, now, timeZone)
     : record ? `${calendarDate(localDateKey(record.starts_at, timeZone))}, ${clockTime(record.starts_at, timeZone)}`
       : inquiry && kind === 'guest' ? formatCalendarRange(inquiry.checkIn, inquiry.checkOut, 'en-US') : null
   return {
-    raw, kind, guestName, guestFullName, channel: raw.replyChannel === 'airbnb' ? 'airbnb' : 'direct',
+    raw, kind, guestName, guestFullName, channel: raw.conversationChannel,
     home: raw.locationLabel, when, timeZone,
     ownerFirstName: owner ? firstName(owner.name) : null,
     automaticTitles: new Map(automatic.map(row => [row.entry_id, row.template_title])),
@@ -182,7 +193,7 @@ function eventSentence(entry: GuestThreadEntryViewModel, facts: ThreadFacts, vie
 }
 
 /** Builds the stream: day headers, runs of messages with one time each, events as sentences, change requests. */
-function stream(facts: ThreadFacts, viewer: Viewer, now: Date): InboxStreamItem[] {
+function stream(facts: ThreadFacts, viewer: Viewer, now: Date, canReply: boolean): InboxStreamItem[] {
   const { raw, timeZone } = facts
   const items: InboxStreamItem[] = []
   let day: string | null = null
@@ -265,8 +276,9 @@ function stream(facts: ThreadFacts, viewer: Viewer, now: Date): InboxStreamItem[
   if (newestBusiness && viewer.audience === 'member') {
     const { item, entry } = newestBusiness
     item.receipt = receipt(entry, facts.guestName)
-    // A team member's text reply that did not arrive can be sent again under its own key; an automatic or photo reply cannot.
-    item.retryable = item.receipt === 'Not delivered' && entry.eventName === 'thread.member_reply' && !item.photos.length && Boolean(text(item.body))
+    // A team member's text reply that did not arrive can be sent again under its own key, where the reply
+    // operation can still send (`guestReplyDestination`); an automatic or photo reply cannot.
+    item.retryable = canReply && item.receipt === 'Not delivered' && entry.eventName === 'thread.member_reply' && !item.photos.length && Boolean(text(item.body))
   }
   return items
 }
@@ -296,7 +308,8 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
   const raw = await rawThread(db, threadId, organizationId, viewer)
   if (!raw) return null
   const facts = await threadFacts(db, raw, organizationId, now)
-  const items = stream(facts, viewer, now)
+  const replyComposer = await composer(db, raw.id, organizationId, viewer, facts.channel)
+  const items = stream(facts, viewer, now, replyComposer.available)
   const record = raw.operationalRecord
   return {
     id: raw.id,
@@ -313,11 +326,21 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
     activityPath: raw.activityPath,
     stream: items,
     pending: viewer.audience === 'member' ? await pendingMessages(db, raw.id, organizationId, viewer.principal, facts.timeZone, now.toISOString()) : [],
-    composer: {
-      channel: viewer.audience === 'member' && raw.replyChannel === 'airbnb' ? 'airbnb' : 'email',
-      available: viewer.audience === 'buyer' || raw.replyChannel === 'airbnb' || Boolean(raw.guestEmail) || raw.guestAccountLinked,
-    },
+    composer: replyComposer,
   }
+}
+
+/**
+ * A guest writes to the business. A member writes wherever the reply operation
+ * would send (`guestReplyDestination`); where it cannot, there is no composer and
+ * its reason shows instead. An Airbnb conversation is always Airbnb's.
+ */
+async function composer(db: DbClient, threadId: string, organizationId: string, viewer: Viewer, conversation: 'airbnb' | 'direct'): Promise<InboxThread['composer']> {
+  if (viewer.audience === 'buyer') return { channel: 'email', available: true, reason: null }
+  const request = await getGuestRequest(db, threadId, organizationId)
+  if (!request) throw new Error(`Guest thread ${threadId} has no request`)
+  const destination = await guestReplyDestination(db, request)
+  return { channel: conversation === 'airbnb' ? 'airbnb' : 'email', available: destination.channel !== null, reason: destination.channel === null ? destination.reason : null }
 }
 
 /**

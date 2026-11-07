@@ -747,7 +747,9 @@ The v23-to-v24 replacement stores work and opportunities (`tasks`,
 `opportunities`) and retires `requests.conversation_state` and `resolved_at`.
 Both columns are named by table CHECKs on `requests`, a parent many tables
 reference, so they cannot be dropped in place. The immutable v23 chain,
-including its nine forward migrations, is archived in `migrations-history/v23/`.
+including its ten forward migrations, is archived in `migrations-history/v23/`;
+a source that has not yet run `0010_drop_guest_thread_invites.sql` runs it on the
+transfer's private copy.
 The transfer maps every `recommendation_feedback` row into `opportunities`
 (the latest decision about a reference is the business's: accept becomes
 accepted with its task, dismiss and correct become dismissed with the note,
@@ -758,10 +760,15 @@ it is derived from the conversation ledger, not from the stored guess. On
 2026-11-06 both v23 sources held no feedback rows. Their read-only preflights
 passed: staging 120 tables, 114,687 rows; production 120 tables, 180,710 rows.
 
-Create `krabiclaw-staging-v24` and `krabiclaw-production-v24` with
-`--location wnam`, verify Cloudflare reports WNAM, bind them in
-`wrangler.toml`, and apply the generated baseline with `wrangler d1 migrations
-apply`. Load each through the canonical snapshot command from its own named v23
+Both v24 databases were created with `--location wnam` on 2026-11-07, and
+Cloudflare reported WNAM before binding or loading:
+
+- `krabiclaw-staging-v24`: `61de6b4f-f663-4564-a14b-d2ee422532f5`
+- `krabiclaw-production-v24`: `3a497791-f131-418d-9bfe-052dd2467762`
+
+Bind each in `wrangler.toml` and apply the generated baseline with `wrangler d1
+migrations apply`. The staging binding moves with this release; production,
+development and E2E move together immediately before promotion. Load each through the canonical snapshot command from its own named v23
 source, keeping the initial artifacts privately under
 `~/.codex/krabiclaw-db-replacements/v24/`. A v24 build must not deploy against a
 v23 binding: the v23 ledger already lists `0000_baseline.sql`, so the native
@@ -770,8 +777,8 @@ binding moves and old writers finish, run the verified final delta from v23,
 then open the work that already exists with `yarn db:tasks --staging` and
 `yarn db:tasks --production`: turnovers for confirmed stays checking out today
 or later, reply tasks for conversations with a guest question no successful
-business reply follows, and delivery tasks for scheduled messages that failed or
-need review. Each is idempotent by its `dedupe_key`; run `--dry-run` first.
+business reply follows, review and change tasks for decisions the business still
+owes, and delivery tasks for scheduled messages that failed or need review. Each is idempotent by its `dedupe_key`; run `--dry-run` first.
 Read back Today for an owner and for a member who looks after a home with a
 turnover, schema drift, the native baseline ledger and `PRAGMA
 foreign_key_check` before retiring either v23 database.

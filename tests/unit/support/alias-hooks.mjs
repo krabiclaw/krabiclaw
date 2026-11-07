@@ -26,6 +26,8 @@ function isFile(candidate) {
 // why this resolves to something that throws rather than to an empty value.
 const BUILD_VIRTUAL_MODULES = {
   '#claimed-public-routes': 'tests/unit/support/claimed-public-routes-unavailable.mjs',
+  '#nitro/virtual/app': 'tests/unit/support/nitro-virtual-app.mjs',
+  '#nitro/virtual/routing': 'tests/unit/support/nitro-virtual-routing.mjs',
 }
 
 function resolveAliasedPath(specifier) {

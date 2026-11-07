@@ -8,11 +8,12 @@ export interface DisambiguationCandidate {
 export type PendingWhatsAppReplyState =
   | {
       kind: 'confirm_send'
+      /** This confirmation's own id: the reply it confirms is sent under it, once. */
+      id: string
       threadId: string
       organizationId: string
       locationId: string | null
       replyBody: string
-      guestEmailMasked: string
     }
   | {
       kind: 'disambiguate'
@@ -23,7 +24,6 @@ export type PendingWhatsAppReplyState =
       threadId: string
       organizationId: string
       locationId: string | null
-      guestEmailMasked: string
     }
 
 export interface RoutingDecisionInput {
@@ -107,21 +107,27 @@ export function buildDisambiguationPrompt(candidates: DisambiguationCandidate[])
   ].join('\n')
 }
 
-export function buildConfirmSendPrompt(guestEmailMasked: string): string {
-  return `This reply will be emailed to ${guestEmailMasked}. Reply YES to send.`
+/** `destination` is where the reply goes, as the inbox decides it: "through Airbnb", "by email to a***@x.com", "to their KrabiClaw inbox". */
+export function buildConfirmSendPrompt(destination: string): string {
+  return `This reply will be sent ${destination}. Reply YES to send.`
 }
 
-export const REPLY_SENT_CONFIRMATION = 'Reply sent by email.'
+export const REPLY_SENT_CONFIRMATION = 'Reply sent.'
+/** A reply that failed for a reason the manager cannot act on; the error is reported, never shown. */
+export const REPLY_FAILED_ALERTED_MESSAGE = 'Reply not sent. The team has been alerted.'
+/** A reply whose delivery is unknown: it may already be with the guest. */
+export const REPLY_UNCERTAIN_MESSAGE = 'This reply may have reached the guest. Check the conversation before sending again.'
 
-export function buildReplyFailedMessage(error: string): string {
-  return `Reply failed to send by email: ${error}`
+/** The reply operation's own reason it refused or failed. */
+export function buildReplyFailedMessage(reason: string): string {
+  return `Reply not sent: ${reason}`
 }
 
 export const PROMPT_QUOTE_NOTIFICATION_MESSAGE =
   'To reply to a guest, please quote their notification message. To manage your site, please open your KrabiClaw dashboard.'
 
-export function buildCollectReplyPrompt(guestEmailMasked: string): string {
-  return `Type your reply now — it will be emailed to ${guestEmailMasked}.`
+export function buildCollectReplyPrompt(destination: string): string {
+  return `Type your reply now — it will be sent ${destination}.`
 }
 
 /**

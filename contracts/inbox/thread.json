@@ -5,7 +5,8 @@
     "channel": "airbnb",
     "composer": {
       "available": true,
-      "channel": "airbnb"
+      "channel": "airbnb",
+      "reason": null
     },
     "guestName": "Mililani",
     "home": "74 D · Sky",

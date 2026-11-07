@@ -13,11 +13,12 @@ import { executeGuestThreadOperation } from '../../server/domain/guest-threads/o
 import { listGuestThreads, updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
 import { requestBookingChange, respondToBookingChange } from '../../server/domain/guest-threads/booking-changes.ts'
 import { notifyContactSubmitted, notifyFinancialNotification, notifyStayCancelled, notifyReservationCreated, notifyBookingCreated } from '../../server/utils/notifications.ts'
+import { buyStay } from './support/stay-checkout.ts'
+import { approveRefundAuthorization, requestRefundAuthorization } from '../../server/domain/payments/index.ts'
 import { createProduct, getProduct, updateProduct } from '../../server/utils/product-management.ts'
 import { buildPublicResourceCacheKey } from '../../server/utils/public-resource-cache.ts'
 import { PUBLIC_CACHE_REVISION_SQL } from '../../server/utils/edge-cache.ts'
 import { cancelStay, createStay, getStay } from '../../server/domain/stays.ts'
-import { claimGuestThreadInvite, createGuestThreadInvite } from '../../server/domain/guest-threads/invites.ts'
 import { buildBuyerRequestActivityUrl } from '../../server/utils/dashboard-notification-links.ts'
 import { memberAccessPrincipal, organizationAdapter, resolveMembership } from '../../server/utils/member-access.ts'
 import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
@@ -504,14 +505,21 @@ test('a failed stay cancellation email retries its recorded content after displa
       kind: 'stay', name: 'Original Cabin', variants: [{ name: 'Original Cabin', prices: [{ unit_amount: 15000, currency: 'USD' }] }],
       stay: { location_id: 'location-stay-cancel', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: null },
     } })
-    const stay = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'stay-cancellation-email', check_in_date: '2098-10-01', check_out_date: '2098-10-03',
-      adults: 2, guest_name: 'Ana', guest_email: 'guest@provider-proof.com', total_minor: 30000 })
-    assert(stay.request_id)
-    assert.equal(await buildBuyerRequestActivityUrl(env,db,{organizationId:access.organizationId,threadId:stay.request_id}),null,'a host-entered stay has no buyer management link before it is claimed')
+    const walkIn = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'stay-walk-in', check_in_date: '2098-11-01', check_out_date: '2098-11-03',
+      adults: 2, guest_name: 'Bo', guest_email: 'walkin@provider-proof.com', total_minor: 30000 })
+    assert(walkIn.request_id)
+    assert.equal(await buildBuyerRequestActivityUrl(env,db,{organizationId:access.organizationId,threadId:walkIn.request_id}),null,'a host-entered stay has no buyer management link')
+    // The guest bought this one on the site; the real checkout conversion makes it theirs.
     const signed=await createAuth(env).api.signInAnonymous({headers:new Headers(),returnHeaders:true})
-    const invite=await createGuestThreadInvite(db,env,{organizationId:access.organizationId,threadId:stay.request_id,actorUserId:access.actorId})
-    assert.equal((await claimGuestThreadInvite(db,{token:new URL(invite.url).pathname.split('/').at(-1)!,userId:signed.response!.user.id})).thread_id,stay.request_id)
-    await cancelStay(db, env, access, stay.id, { expected_version: stay.version })
+    const stay = await buyStay(db, { id: 'stay-cancellation-email', organizationId: access.organizationId, productId: home.id, locationId: 'location-stay-cancel', timezone: 'Asia/Bangkok',
+      checkIn: '2098-10-01', checkOut: '2098-10-03', adults: 2, nightlyMinor: 15000, currency: 'USD', buyerUserId: signed.response!.user.id,
+      guest: { name: 'Ana', email: 'guest@provider-proof.com', phone: null, notes: null } })
+    // The host cancels it, with the full refund they approved.
+    const principal = { organizationId: access.organizationId, userId: access.actorId, role: 'owner' }
+    const approval = await requestRefundAuthorization(db, principal, 'stay-cancellation-email-payment', null, 'cancel_stay')
+    await approveRefundAuthorization(db, principal, approval.authorization_id)
+    const boughtVersion = (await getStay(db, access, stay.id)).version
+    await cancelStay(db, env, access, stay.id, { expected_version: boughtVersion, authorization_id: approval.authorization_id, financial_writes_allowed: true })
     assert.equal((await getStay(db, access, stay.id)).status, 'cancelled')
     await assert.rejects(notifyStayCancelled(env, db, access.organizationId, stay.id, 'host', 0), (error: AggregateError) => {
       assert(error instanceof AggregateError)
@@ -571,7 +579,7 @@ test('a failed stay cancellation email retries its recorded content after displa
     assert.deepEqual(await db.prepare('SELECT * FROM activity_entries WHERE dedupe_key = ?').bind(`stay-cancellation:${stay.id}`).first(), entry)
     assert.equal(await db.prepare("SELECT count(*) AS count FROM activity_entries WHERE request_id = ? AND event_name = 'stay.host_cancelled'").bind(stay.request_id).first('count'), 1)
     assert.equal(await db.prepare('SELECT count(*) AS count FROM guest_thread_deliveries WHERE entry_id = ?').bind(entry.id).first('count'), 1)
-    assert.equal((await getStay(db, access, stay.id)).version, stay.version + 1)
+    assert.equal((await getStay(db, access, stay.id)).version, boughtVersion + 1)
   } finally {
     await runtime.dispose()
   }

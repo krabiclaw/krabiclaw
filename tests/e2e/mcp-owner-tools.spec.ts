@@ -383,7 +383,7 @@ test.describe('stateless MCP server', () => {
         const nativeActions = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${contactSubmission!.request_id}/details`)
         expect(nativeActions.status()).toBe(200)
         expect((await nativeActions.json() as InboxThreadDetails).actions).toMatchObject({ archive: !archived, unarchive: archived })
-        expect(nativeConversation.composer).toEqual({ channel: 'email', available: true })
+        expect(nativeConversation.composer).toEqual({ channel: 'email', available: true, reason: null })
         // Day headers are the reader's calendar, not conversation items.
         const earlier = unchangedContactState.stream.filter(item => item.type !== 'day')
         const items = nativeConversation.stream.filter(item => item.type !== 'day')
