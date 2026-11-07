@@ -35,14 +35,14 @@
 
     <template #body>
       <!-- Alone it uses the frame, as Airbnb's listing grid does; beside a child it is a column. -->
-      <div class="w-full" :class="[width, column === 'record' && $slots.footer ? 'pb-28' : undefined, fill ? 'flex min-h-0 flex-1 flex-col' : undefined]">
+      <div class="w-full" :class="[width, fill ? 'flex min-h-0 flex-1 flex-col' : undefined]">
         <slot />
       </div>
     </template>
 
     <!-- A list whose order is itself a draft — sections, links — commits from here. -->
     <template v-if="$slots.footer" #footer>
-      <div class="shrink-0" :class="[dashboardGutterClass, footerClass ?? (column === 'record' ? 'pointer-events-none absolute inset-x-0 bottom-10 z-10' : 'border-t border-default py-3')]">
+      <div class="shrink-0" :class="[dashboardGutterClass, footerClass ?? 'border-t border-default py-3']">
         <div class="w-full" :class="width">
           <slot name="footer" />
         </div>

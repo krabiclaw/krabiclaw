@@ -13,13 +13,14 @@ import { backfillChannexMessages, mirrorChannexMessageEvent, mirrorChannexThread
 import { executeGuestThreadOperation, sendScheduledGuestReply } from '../../server/domain/guest-threads/operations.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
 import { getInboxThread } from '../../server/domain/guest-threads/inbox.ts'
-import { listGuestThreads } from '../../server/domain/guest-threads/repository.ts'
+import { executeBatch } from '../../server/db/index.ts'
+import { conversationTaskQueries, expireReplyTasks, listGuestThreads } from '../../server/domain/guest-threads/repository.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { getGuestRequest } from '../../server/domain/requests.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import todayRoute from '../../server/api/dashboard/today.get.ts'
-import { listTasks, parseTaskListQuery, taskViewer, type TaskSection } from '../../server/domain/tasks.ts'
+import { closeTask, listTasks, parseTaskListQuery, taskViewer, type TaskSection } from '../../server/domain/tasks.ts'
 import type { OpportunityView } from '../../server/domain/opportunities.ts'
 import { guestThreadListPage, parseGuestThreadListQuery } from '../../server/utils/dashboard-guest-threads.ts'
 import { assertAssignedBookingAccess, memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
@@ -338,6 +339,56 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
     // The reply closed its task today, so Today shows it done; the growth opportunities remain.
     assert.deepEqual(afterPhoto.tasks.flatMap(section => section.tasks).map(task => [task.kind, task.status, task.requestId]), [['guest_reply', 'done', requestId]])
     assert.deepEqual((await todayOutline(db, afterPhoto)).opportunities, GROWTH, 'the real photo reply clears only its reply task; useful growth opportunities remain')
+  } finally { globalThis.fetch = realFetch; await runtime.dispose() }
+})
+
+test('a dismissed question needs no note and stays closed until the guest writes again; an unanswered one expires after 30 days', async () => {
+  const { runtime, db, env } = await boot()
+  const provider = new Provider(), realFetch = globalThis.fetch
+  globalThis.fetch = provider.fetch as typeof fetch
+  const at = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString()
+  try {
+    const first = provider.message('first', 'guest', 'Hello', [], at(0))
+    provider.messages = [first]
+    await backfillChannexMessages(db, env, 'property', ORG)
+    const requestId = await db.prepare("SELECT request_id FROM channel_threads WHERE external_thread_id = 'thread'").first<string>('request_id')
+    assert.ok(requestId)
+    const second = provider.message('second', 'guest', 'Are you there?', [], at(0))
+    provider.messages = [first, second]
+    await backfillChannexMessages(db, env, 'property', ORG)
+    assert.deepEqual(await waitingOn(db, requestId), ['channex-message:first'])
+
+    const viewer = await taskViewer(db, memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env }))
+    const taskId = await db.prepare("SELECT id FROM tasks WHERE kind = 'guest_reply' AND subject_id = ? AND status = 'open'").bind(requestId).first<string>('id')
+    assert.ok(taskId)
+    const dismissed = await closeTask(db, viewer, taskId, { status: 'skipped', note: undefined, photos: [], env })
+    assert.deepEqual([dismissed.status, dismissed.outcome?.note, dismissed.action], ['skipped', null, { type: 'reopen', label: 'Undo' }])
+    assert.match(dismissed.statusLine ?? '', /^Dismissed at /)
+
+    // Everything said before the dismissal stays closed, whatever touches the conversation next.
+    await executeBatch(db, conversationTaskQueries(requestId, at(0)), { operation: 'Touch conversation' })
+    assert.deepEqual(await waitingOn(db, requestId), [])
+
+    const third = provider.message('third', 'guest', 'One more question', [], at(0))
+    provider.messages = [first, second, third]
+    await backfillChannexMessages(db, env, 'property', ORG)
+    assert.deepEqual(await waitingOn(db, requestId), ['channex-message:third'])
+
+    // Thirty-one days on the open question has aged out, and the newer one behind it becomes the work.
+    const fourth = provider.message('fourth', 'guest', 'Still hoping to hear back', [], at(29))
+    provider.messages = [first, second, third, fourth]
+    await backfillChannexMessages(db, env, 'property', ORG)
+    assert.deepEqual(await waitingOn(db, requestId), ['channex-message:third'])
+    assert.deepEqual(await expireReplyTasks(db, at(31)), { conversations: 1 })
+    assert.deepEqual(await waitingOn(db, requestId), ['channex-message:fourth'])
+    const expired = await db.prepare("SELECT status, closed_by_user_id FROM tasks WHERE dedupe_key LIKE 'guest_reply:%' AND subject_id = ? AND status <> 'open' AND status <> 'skipped'").bind(requestId).first()
+    assert.deepEqual(expired, { status: 'cancelled', closed_by_user_id: null })
+
+    // Nothing left to expire closes nothing, and an aged question does not reopen when the conversation is touched.
+    assert.deepEqual(await expireReplyTasks(db, at(31)), { conversations: 0 })
+    assert.deepEqual(await expireReplyTasks(db, at(60)), { conversations: 1 })
+    await executeBatch(db, conversationTaskQueries(requestId, at(60)), { operation: 'Touch conversation' })
+    assert.deepEqual(await waitingOn(db, requestId), [])
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
