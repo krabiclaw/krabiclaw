@@ -612,9 +612,19 @@ export async function expireReplyTasks(db: DbClient, now: string): Promise<{ con
   const rows = await queryAll<{ subject_id: string }>(db, `SELECT DISTINCT t.subject_id FROM tasks t
     JOIN activity_entries guest_entry ON guest_entry.id = substr(t.dedupe_key, length('guest_reply:' || t.subject_id || ':') + 1)
     WHERE t.kind = 'guest_reply' AND t.subject_type = 'request' AND t.status = 'open' AND ${guestEntryAskedAtSql('guest_entry')} < ?`, [replyTaskCutoff(now)])
-  const failures = (await Promise.allSettled(rows.map(row => executeBatch(db, conversationTaskQueries(row.subject_id, now), { operation: 'Expire reply tasks' }))))
-    .flatMap(result => result.status === 'rejected' ? [result.reason] : [])
-  if (failures.length) throw new AggregateError(failures, `${failures.length} of ${rows.length} conversations' reply tasks could not be expired`)
+  // One conversation at a time; one that fails does not stop the rest, and every failure is reported.
+  const failures: unknown[] = []
+  for (const row of rows) {
+    try {
+      await executeBatch(db, conversationTaskQueries(row.subject_id, now), { operation: 'Expire reply tasks' })
+    } catch (cause) {
+      failures.push(cause)
+    }
+  }
+  if (failures.length) {
+    const reasons = failures.map(cause => cause instanceof Error ? cause.message : String(cause)).join('; ')
+    throw new AggregateError(failures, `${failures.length} of ${rows.length} conversations' reply tasks could not be expired: ${reasons}`)
+  }
   return { conversations: rows.length }
 }
 

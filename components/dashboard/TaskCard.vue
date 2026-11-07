@@ -11,6 +11,7 @@
       <span class="mt-6 block text-2xl font-semibold leading-tight tracking-tight sm:text-[28px]">{{ reservation.groupHeadline }}</span>
       <span class="mt-3 block text-base font-medium">{{ reservation.homeName }}</span>
       <span class="mt-2 block text-sm text-muted">{{ reservation.statusLabel }}</span>
+      <span v-if="reservation.conversation?.description" class="mt-5 block text-sm text-muted">{{ reservation.conversation.description }}</span>
     </div>
     <div v-else-if="task && face === 'photo' && mediaSrc" type="button" class="tc-media">
       <img :src="mediaSrc" alt="" class="size-full object-cover">

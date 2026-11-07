@@ -323,7 +323,9 @@ const formattedTime = computed(() => {
   const { bookingDate, bookingEndDate, bookingEndTime } = booking.value
   if (!bookingEndTime) return start
   // A visit past midnight says which day it ends.
-  const endDay = bookingEndDate && bookingEndDate !== bookingDate ? `${formatCalendarDate(bookingEndDate, 'en', { month: 'short', day: 'numeric' })}, ` : ''
+  const endDay = bookingEndDate && bookingEndDate !== bookingDate
+    ? `${formatCalendarDate(bookingEndDate, 'en', { month: 'short', day: 'numeric', ...(bookingEndDate.slice(0, 4) !== bookingDate.slice(0, 4) ? { year: 'numeric' } : {}) })}, `
+    : ''
   return `${start} – ${endDay}${formatTime(bookingEndTime, 'en')}`
 })
 // Airbnb's host-side stay page titles the party, not the listing: "Chris's
