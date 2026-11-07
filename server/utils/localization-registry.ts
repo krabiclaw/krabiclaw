@@ -3,6 +3,7 @@ import { validateProductDetails, assertProductKind, ProductDetailError, productD
 
 import { LOCALIZED_RESOURCE_TYPES, type LocalizedResourceType } from '../../shared/content-registries.ts'
 import { formQuestionLocalizationSchema } from '../../shared/form-questions.ts'
+import { hasPublicLocationPages } from '../../utils/site-routing.ts'
 export { LOCALIZED_RESOURCE_TYPES, type LocalizedResourceType } from '../../shared/content-registries.ts'
 
 export type LocalizedValues = Record<string, unknown>
@@ -163,9 +164,9 @@ export function validateLocalizedValues(
   return Object.fromEntries(Object.entries(input).sort(([left], [right]) => left.localeCompare(right)))
 }
 
-export function validateLocalizedRoutePath(resourceType: LocalizedResourceType, locale: string, routePath: unknown, canonicalSlug?: string, savedRoutePath?: string | null): string | null {
+export function validateLocalizedRoutePath(resourceType: LocalizedResourceType, locale: string, routePath: unknown, canonicalSlug?: string, savedRoutePath?: string | null, vertical?: string): string | null {
   const definition = RESOURCE_LOCALIZATION_REGISTRY[resourceType]
-  if (definition.route !== 'stored') {
+  if (definition.route !== 'stored' || (resourceType === 'business_location' && !hasPublicLocationPages(vertical))) {
     if (routePath !== undefined && routePath !== null) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', resourceType + ' does not accept route_path')
     return null
   }

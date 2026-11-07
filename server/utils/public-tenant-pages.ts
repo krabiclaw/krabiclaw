@@ -24,7 +24,7 @@ import { listPublicSocialPosts } from '~/server/utils/post-management'
 import { isLegalPracticeSite, resolvePublicSite } from '~/utils/site-routing'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { EXPERIENCE_PRESENTATION, presentationForProduct, publicLocationPath } from '~/utils/product-presentation'
-import { publicLocationHomeSlugSql, publicLocationSql } from '~/server/utils/public-locations'
+import { publicLocationSql } from '~/server/utils/public-locations'
 import { projectPublicLocation, type PublicLocationPrivacySource } from '~/shared/location-sharing'
 import { publicLocationPrivacySql } from '~/server/utils/public-location-privacy'
 import { formatMinorAmount } from '~/shared/prices'
@@ -280,12 +280,12 @@ async function hydrateBlocks(
     defaultServices ? listOrganizationProducts(db, { organizationId, kind: 'service', publishedOnly: true, env }).then(products => products.map(publicProduct)) : [],
     collectionIds.size || productIds.size || homepage || defaultServices ? loadTenantPageProductCatalog(db, organizationId, locale, localizations, env) : undefined,
     locationIds.size || defaultLocationGrid
-      ? queryAll<PublicLocationPrivacySource & { id: string; title: string; slug: string; home_slug: string | null; address: string | null; latitude: number | null; longitude: number | null; description: string | null; short_description: string | null; asset_id: string | null; public_url: string | null; thumbnail_url: string | null; kind: string | null; alt_text: string | null }>(db, `
-          SELECT bl.id, bl.title, bl.slug, ${publicLocationHomeSlugSql('bl')} AS home_slug, bl.address, bl.latitude, bl.longitude, ${publicLocationPrivacySql('bl')}, bl.description, bl.short_description, ma.id AS asset_id, ma.public_url, ma.thumbnail_url, ma.kind, ma.alt_text
+      ? queryAll<PublicLocationPrivacySource & { id: string; title: string; slug: string; address: string | null; latitude: number | null; longitude: number | null; description: string | null; short_description: string | null; asset_id: string | null; public_url: string | null; thumbnail_url: string | null; kind: string | null; alt_text: string | null }>(db, `
+          SELECT bl.id, bl.title, bl.slug, bl.address, bl.latitude, bl.longitude, ${publicLocationPrivacySql('bl')}, bl.description, bl.short_description, ma.id AS asset_id, ma.public_url, ma.thumbnail_url, ma.kind, ma.alt_text
             FROM business_locations bl
             LEFT JOIN media_placements mp ON mp.organization_id = bl.organization_id AND mp.owner_type = 'business_location' AND mp.owner_id = bl.id AND mp.slot = 'hero' AND mp.sort_order = 0 AND mp.status = 'active'
             LEFT JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = bl.organization_id AND ma.status = 'active'
-           WHERE bl.organization_id = ? AND bl.status = 'active' AND ((? = 1 AND ${publicLocationSql('bl')}) OR bl.id IN (SELECT value FROM json_each(?)))
+           WHERE bl.organization_id = ? AND ${publicLocationSql('bl')} AND (? = 1 OR bl.id IN (SELECT value FROM json_each(?)))
            ORDER BY bl.title, bl.id
         `, [organizationId, defaultLocationGrid ? 1 : 0, d1JsonStringSet([...locationIds])])
       : [],
@@ -507,10 +507,8 @@ async function hydrateBlocks(
           ...(addressVisible ? { city: location.public_area?.locality || addressPlaceName(location.address) || undefined, address: formatPostalAddress(location.address) || undefined } : {}),
           public_area: location.public_area,
           description: location.short_description || location.description || undefined,
-          // A location that is one home is reached as that home.
           url: legalPractice ? pagePath === '/contact' ? undefined : '/contact'
-            : location.home_slug ? `${localizations ? `/${locale}` : ''}${publicLocationPath(location)}`
-              : 'public_path' in location && typeof location.public_path === 'string' ? location.public_path : publicLocationPath(location),
+            : 'public_path' in location && typeof location.public_path === 'string' ? location.public_path : publicLocationPath(location),
           label: locationCopy.visitLocationCta,
           media: location.asset_id
             ? projectLocalizedMediaAlt([{ asset_id: location.asset_id, slot: 'hero', public_url: location.public_url, thumbnail_url: location.thumbnail_url, kind: location.kind, alt_text: location.alt_text }], localizations)

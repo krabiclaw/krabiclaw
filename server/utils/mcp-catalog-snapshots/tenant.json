@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:9c383843727f0eca4b53e45cb0ea08d0da57418a08250f26ed09c5a3168ec24a",
-  "documentationFingerprint": "sha256:c73beb41e7f7688c2e8fbab69609f77234f2c99b15646789d037ef58fb5e79c9",
+  "fingerprint": "sha256:9743290424f69576fdaf9411cb024b0e1ec1702f65bf7450b69852bdbc454650",
+  "documentationFingerprint": "sha256:47e74f460ef7cc9fffb21921c49938aa0d06bd1f1d7d9544da0e1084c9d475b5",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -20783,7 +20783,7 @@
     {
       "name": "create_location",
       "title": "Create location",
-      "description": "Add an active business branch or office. Locations are not billed. It becomes public unless the website has published homes and this location has no published offering. Set hours with update_location; create homes with create_product.",
+      "description": "Add an active business branch or office. Locations are not billed. Lodging publishes homes at /stays and has no public location pages. Create homes with create_product; their address records stay part of the home. Set branch hours with update_location.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

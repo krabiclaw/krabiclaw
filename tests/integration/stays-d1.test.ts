@@ -23,6 +23,7 @@ import paymentReturnRoute from '../../server/api/public/payments/[paymentId]/ret
 import { tokenHash } from '../../server/domain/payments/buyer.ts'
 import { createLocation, updateLocation } from '../../server/utils/location-management.ts'
 import publicLocationsRoute from '../../server/api/public/locations.get.ts'
+import publicLocalizedRoute from '../../server/api/public/localized-route.get.ts'
 import publicLocationRoute from '../../server/api/public/locations/[slug].get.ts'
 import publicPageRoute from '../../server/api/public/page.get.ts'
 import { loadPublicShellSource } from '../../server/utils/public-shell.ts'
@@ -1852,6 +1853,7 @@ test('home location sharing protects every public projection after localization 
     app.use(event => { event.context.organizationId = ORG })
     app.get('/api/public/locations', publicLocationsRoute)
     app.get('/api/public/locations/:slug', publicLocationRoute)
+    app.get('/api/public/localized-route', publicLocalizedRoute)
     app.get('/api/public/page', publicPageRoute)
     app.get('/shell', event => loadPublicShellSource(event, ORG, { locale: getQuery(event).locale as string | undefined }))
     const read = (path: string) => app.request(Object.assign(new Request(`https://org.localhost${path}`), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
@@ -1944,13 +1946,16 @@ test('home location sharing protects every public projection after localization 
     assert.equal((await loadPublicSocialMedia(db, ORG, 'business_location', ['lake-site'])).get('lake-site')?.social_image?.url, publicCard)
     // A lodging organization's location is private before any home is attached.
     await db.prepare("UPDATE organization SET vertical = 'lodging' WHERE id = ?").bind(ORG).run()
-    const unassigned = await read('/api/public/locations/lake-site')
-    assert.equal(unassigned.status, 200)
-    const privateBranch = (await unassigned.json() as { location: PublicProductLocation }).location
-    assert.equal(privateBranch.address, null)
-    assert.equal(privateBranch.maps_url, null)
-    assert.equal(privateBranch.stay_map_sharing, 'general')
-    assert.deepEqual([privateBranch.latitude, privateBranch.longitude], [null, null])
+    assert.equal((await read('/api/public/locations/lake-site')).status, 404)
+    assert.equal((await read('/api/public/locations')).status, 404)
+    assert.equal((await read('/api/public/page?page=locations&datasets=location')).status, 404)
+    assert.equal((await read('/api/public/page?page=location&location=lake-site&datasets=location')).status, 404)
+    assert.equal((await read('/api/public/localized-route?path=/th/locations/cabin-site')).status, 404)
+    const translatedAddress = await putResourceLocalization(env, db, { organizationId: ORG, resourceType: 'business_location', resourceId: 'cabin-site', locale: 'th', userId: OWNER,
+      values: { address: { addressLines: [translatedStreet], locality: 'เมืองกระบี่' } } })
+    assert.deepEqual(await db.prepare('SELECT route_path, values_json FROM resource_localizations WHERE id = ?').bind(translatedAddress.id).first(), {
+      route_path: null, values_json: JSON.stringify({ address: { addressLines: [translatedStreet], locality: 'เมืองกระบี่' } }),
+    })
     const nowProtected = await loadPublicSocialMedia(db, ORG, 'business_location', ['lake-site'])
     assert.equal(nowProtected.get('lake-site')?.social_image?.url, publicHero)
     assert.equal(await db.prepare("SELECT count(*) FROM media_placements WHERE owner_id = 'lake-site' AND slot = 'social_card' AND status = 'active'").first('count(*)'), 1)

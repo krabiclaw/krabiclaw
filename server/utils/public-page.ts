@@ -42,7 +42,7 @@ import { isPublicPagePayload } from '~/utils/public-resource-contracts'
 import type { LocalizedResourceType } from '~/server/utils/localization-registry'
 import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-representations'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
-import { resolvePublicSite } from '~/utils/site-routing'
+import { hasPublicLocationPages, resolvePublicSite } from '~/utils/site-routing'
 import { isPublicSourceRouteRoot } from '~/shared/public-locale-routes'
 import { siteRendersPageDocumentAt } from '~/shared/tenant-page-paths'
 import { getSourceLocale } from '~/server/utils/organization-locales'
@@ -253,6 +253,11 @@ async function loadPublicPageSource(
     throw new HTTPError({ statusCode: 400, statusMessage: "Invalid public page query" });
   }
 
+  const { organization } = await loadPublicBase(event, organizationId, { previewAuthorized: isPreviewAuthorized })
+  if (!hasPublicLocationPages(organization.vertical) && (page === 'locations' || locationSlug !== null)) {
+    throw new HTTPError({ statusCode: 404, statusMessage: 'Page not found' })
+  }
+
   // Read-through KV cache for the D1 batch below. Skipped for preview-authorized
   // requests (isPreviewAuthorized gates the whole read/write, not just the key —
   // omitting the token from the key alone would let a preview response collide
@@ -300,12 +305,7 @@ async function loadPublicPageSource(
     if (mutateResponseHeaders) setHeader(event, "x-bootstrap-cache", "SKIP");
   }
 
-  // The site row and its source locale depend only on the organization id,
-  // so they are read in one round trip rather than one after the other.
-  const [{ organization }, sourceLocale] = await Promise.all([
-    loadPublicBase(event, organizationId, { previewAuthorized: isPreviewAuthorized }),
-    getSourceLocale(db, organizationId),
-  ])
+  const sourceLocale = await getSourceLocale(db, organizationId)
   options.signal?.throwIfAborted();
 
   const orgId = organization.id;
@@ -643,7 +643,7 @@ async function loadPublicPageSource(
     // exactly the drift this replaces.
     products = canonical.filter(product => product.locations.some(location => location.published
       && activeLocationIds.has(location.location_id) && (!locationSlug || location.location_id === locationId))
-      || (!locationSlug && Boolean(product.order_url || product.booking?.held_online))).map((product) => {
+      || (!locationSlug && (product.kind === 'stay' || Boolean(product.order_url || product.booking?.held_online)))).map((product) => {
       const media = mediaByProduct.get(product.id) ?? []
       const image = media.find(item => item.slot === 'image')
       return {

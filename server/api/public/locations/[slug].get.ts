@@ -1,3 +1,4 @@
+import { hasPublicLocationPages } from '~/utils/site-routing'
 // Get public business location by slug
 import { defineHandler } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
@@ -27,14 +28,14 @@ export default defineHandler(async (event) => {
   }
 
   try {
-    const organization = await queryFirst<{ id: string; status: string; default_currency: string }>(
+    const organization = await queryFirst<{ id: string; status: string; vertical: string; default_currency: string }>(
       db, `
-      SELECT id, status, default_currency FROM organization
+      SELECT id, status, vertical, default_currency FROM organization
       WHERE id = ? AND status = 'active'
       LIMIT 1
     `, [organizationId], )
 
-    if (!organization) {
+    if (!organization || !hasPublicLocationPages(organization.vertical)) {
       return jsonResponse({
         error: 'Organization not found or inactive'
       }, { status: 404 })

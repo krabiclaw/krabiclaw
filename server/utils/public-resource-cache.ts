@@ -10,7 +10,7 @@ import { publishBusinessInvalidation, type GuestInboxPublicationEnv } from '~/se
 // params instead of host + pathname — public resources are looked up by organizationId
 // directly, not by tenant hostname, so no hostname resolution is needed here.
 //
-// Cache key: public~<organizationId>~v20~<revision>~<contract>~<page>~<location>~<datasets>~<blogSlug>~<locale>,
+// Cache key: public~<organizationId>~v21~<revision>~<contract>~<page>~<location>~<datasets>~<blogSlug>~<locale>,
 // each field percent-encoded (mirrors composables/usePublicPageRequest.ts's
 // usePublicResourceKey() — cached entries are never preview/draft-authorized,
 // see the preview authorization guard in the shell and page services).
@@ -193,8 +193,8 @@ export function buildPublicResourceCacheKey(organizationId: string, params: Publ
   return [
     'public',
     encodeKeyField(organizationId),
-    // v20: room/listing facts and location privacy, fenced by the committed site revision.
-    'v20',
+    // v21: lodging publishes homes, with no branch aliases in the public shell.
+    'v21',
     encodeKeyField(revision),
     params.contract,
     encodeKeyField(params.page),

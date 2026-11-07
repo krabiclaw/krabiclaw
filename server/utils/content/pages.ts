@@ -30,9 +30,9 @@ import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-reso
 import { buildSingleMediaPlacementQueries, insertInitialMediaPlacements, hydrateMediaAssetRefs } from '~/server/utils/media-asset-manager'
 import { isSingleMediaPlacement } from '~/shared/media-placement-contract'
 import { getMediaPlacements } from '~/server/utils/media-placement'
-import { loadOrganizationSite } from '~/server/utils/content/publishing'
+import { assertLocationGridSupported, loadOrganizationSite } from '~/server/utils/content/publishing'
 import { siteAllowsPageDocumentAt, sitePageDocumentPaths } from '~/shared/tenant-page-paths'
-import type { PublicSiteDefinition } from '~/utils/site-routing'
+import { hasPublicLocationPages, isPublicLocationPath, type PublicSiteDefinition } from '~/utils/site-routing'
 import { CLAIMED_PUBLIC_ROUTES } from '#claimed-public-routes'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import { creationRequestHash, organizationEventQuery } from '~/server/utils/organization-events'
@@ -144,6 +144,7 @@ async function assertTenantPageSupport(env: CloudflareEnv, db: DbClient, organiz
   if (pageType === 'custom' && options.checkCustomPageEntitlement !== false && !(await organizationMayHoldCustomPages(env, db, organizationId))) {
     throw new HTTPError({ statusCode: 402, statusMessage: 'Custom tenant pages require the Growth plan or higher' })
   }
+  await assertLocationGridSupported(db, organizationId, blocks)
   const recipe = input.recipe?.trim() || null
   if (pageType === 'recipe' && !recipe) badRequest('recipe is required for recipe pages')
   if (recipe && !TENANT_PAGE_RECIPE_REGISTRY.has(recipe)) badRequest(`Recipe "${recipe}" is not supported`)
@@ -323,6 +324,7 @@ export async function assertTenantPagePathAvailable(
   }
   // A venue's location overview may carry an authored page; it needs its location.
   const locationPath = (input.site.pageDocuments.patterns ?? []).includes('/locations/:slug()') ? /^\/locations\/([^/]+)$/.exec(path) : null
+  if (isPublicLocationPath(path) && !hasPublicLocationPages((await loadOrganizationSite(db, input.organizationId)).vertical)) conflict('Lodging homes use /stays; location pages are not available')
   if (locationPath && !await queryFirst(db, 'SELECT id FROM business_locations WHERE organization_id = ? AND slug = ? LIMIT 1', [input.organizationId, locationPath[1]!])) {
     notFound('The location for this page was not found')
   }

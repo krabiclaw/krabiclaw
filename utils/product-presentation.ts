@@ -73,14 +73,9 @@ export function locationSurfacePath(locationSlug: string, surface: ProductSurfac
   return surface === 'stays' ? STAY_PRESENTATION.collectionPath : `/locations/${encodeURIComponent(locationSlug)}/${surface}`
 }
 
-/**
- * A location's public page. A location that holds one home and nothing else
- * is that home, so its page is the home's listing.
- */
-export function publicLocationPath(location: { slug: string, home_slug?: string | null }): string {
-  return location.home_slug
-    ? STAY_PRESENTATION.productPath('', location.home_slug)
-    : `/locations/${encodeURIComponent(location.slug)}`
+/** A business branch's public page. */
+export function publicLocationPath(location: { slug: string }): string {
+  return `/locations/${encodeURIComponent(location.slug)}`
 }
 
 /** The site-wide item page a path names — /experiences/<slug> or /stays/<slug> — or null. */
@@ -134,7 +129,8 @@ export function resolveProductPresentation(vertical: string | null | undefined, 
       structuredDataType: 'MenuItem',
     }
   }
-  if (normalized === 'experience' || normalized === 'service' || normalized === 'lodging') {
+  if (normalized === 'lodging') return STAY_PRESENTATION
+  if (normalized === 'experience' || normalized === 'service') {
     return {
       feature: 'products',
       // A legal practice lists its practice areas at /services; it has no /products.
@@ -160,7 +156,7 @@ export function requireProductPresentation(vertical: string | null | undefined, 
 
 export function productLocationCollectionPath(vertical: string | null | undefined, locationSlug: string): string {
   const presentation = requireProductPresentation(vertical)
-  return `/locations/${encodeURIComponent(locationSlug)}/${presentation.locationCollectionSegment}`
+  return locationSurfacePath(locationSlug, presentation.locationCollectionSegment)
 }
 
 /** Counts used to name the catalog’s menu, experience, stay and product surfaces. */
