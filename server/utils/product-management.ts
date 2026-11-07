@@ -13,11 +13,11 @@ import { buildDeleteOwnerPlacementsQuery, hydrateMediaAssetRefs, readMediaPlacem
 import { isStayBedAllocationConflict, prepareArrangeProductPhotos, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, stayBedAllocationGuardQuery } from '~/server/utils/media-placement'
 import { parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay-photos'
 import { isStayHomeAccessibility, type StayHomeAccessibility, type StayRoomAccessibility } from '~/shared/stay-accessibility'
-import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
+import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, resolvePublishedTenantPageIdentity, type TenantPageEditorInput } from '~/server/utils/content/pages'
 import { loadOrganizationSite } from '~/server/utils/content/publishing'
-import { publishAccessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
+import { publishAccessInvalidation, publishBusinessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
 import type { AirbnbSettingSections, pushStayHomeChannel } from '~/server/domain/stays'
 import { executeWithinCapacity, liveHomeSql, reportBillingUsage } from '~/server/utils/billing'
@@ -52,7 +52,6 @@ import type {
   CreateCollectionInput,
   CreateProductInput,
   Product,
-  ProductOption,
   ProductSource,
   ProductStayConfig,
   StayListingField,
@@ -72,11 +71,9 @@ import {
   requireTrimmedProductString,
   validateProductMarketingFeatures,
   validateProductMetadata,
-  validateProductOptions,
   validateProductOrderUrl,
   validateProductUnitLabel,
   validateProductVariants,
-  type NormalizedProductOption,
   type NormalizedProductVariant,
 } from '~/server/utils/product-validation'
 
@@ -191,7 +188,6 @@ function mapProductRow(row: Row): Product {
     marketing_features: parseJsonArray<string>(row.marketing_features, 'marketing_features'),
     metadata: parseJsonObject(row.metadata, 'metadata'),
     tax_code: row.tax_code === null ? null : String(row.tax_code),
-    options: [],
     variants: [],
     kind: assertProductKind(row.kind),
     details: validateProductDetails(assertProductKind(row.kind), JSON.parse(String(row.details_json))),
@@ -253,14 +249,8 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
   // Workers that read them, so each extra statement is real latency on every
   // catalog page; D1 charges one round trip for the batch.
   const [batched, photoRooms, accessibility] = await Promise.all([executeBatch(db, [
-    { query: `SELECT id, product_id, name, sort_order FROM product_options
-      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY sort_order, id`, params: [organizationId, ids] },
-    { query: `SELECT id, product_id, product_option_id, value, sort_order FROM product_option_values
-      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY sort_order, id`, params: [organizationId, ids] },
     { query: `SELECT id, product_id, name, sku, active, sort_order FROM product_variants
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY sort_order, id`, params: [organizationId, ids] },
-    { query: `SELECT product_variant_id, product_option_id, product_option_value_id FROM product_variant_option_values
-      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
     // Variants first, then each one's prices by index. Joined the other way
     // the planner walked every price of the site and re-read the product list
     // for each: 184,000 rows for one 365-dish menu.
@@ -286,17 +276,14 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       WHERE c.organization_id = ? AND c.product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
   ], { operation: 'Hydrate products' }), readStayPhotoRooms(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id)), readStayHomeAccessibility(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id))])
   const rowsAt = (index: number): Row[] => (batched[index] as { results?: Row[] })?.results ?? []
-  const optionRows = rowsAt(0)
-  const valueRows = rowsAt(1)
-  const variantRows = rowsAt(2)
-  const selectionRows = rowsAt(3)
-  const priceRows = rowsAt(4)
-  const publicationRows = rowsAt(5)
-  const locationRows = rowsAt(6)
-  const collectionRows = rowsAt(7)
-  const bookingRows = rowsAt(8)
-  const pageRows = rowsAt(9)
-  for (const row of rowsAt(10)) {
+  const variantRows = rowsAt(0)
+  const priceRows = rowsAt(1)
+  const publicationRows = rowsAt(2)
+  const locationRows = rowsAt(3)
+  const collectionRows = rowsAt(4)
+  const bookingRows = rowsAt(5)
+  const pageRows = rowsAt(6)
+  for (const row of rowsAt(7)) {
     const product = byId.get(String(row.product_id))
     if (product) product.stay = {
       photo_rooms: photoRooms.get(product.id) ?? [],
@@ -334,26 +321,6 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     }
   }
 
-  const valuesByOption = new Map<string, { id: string; value: string; sort_order: number }[]>()
-  for (const row of valueRows) {
-    const list = valuesByOption.get(String(row.product_option_id)) ?? []
-    list.push({ id: String(row.id), value: String(row.value), sort_order: Number(row.sort_order) })
-    valuesByOption.set(String(row.product_option_id), list)
-  }
-  for (const row of optionRows) {
-    const option: ProductOption = {
-      id: String(row.id), name: String(row.name), sort_order: Number(row.sort_order),
-      values: valuesByOption.get(String(row.id)) ?? [],
-    }
-    byId.get(String(row.product_id))?.options.push(option)
-  }
-
-  const selectionsByVariant = new Map<string, Record<string, string>>()
-  for (const row of selectionRows) {
-    const current = selectionsByVariant.get(String(row.product_variant_id)) ?? {}
-    current[String(row.product_option_id)] = String(row.product_option_value_id)
-    selectionsByVariant.set(String(row.product_variant_id), current)
-  }
   const pricesByVariant = new Map<string, Price[]>()
   for (const row of priceRows) {
     const list = pricesByVariant.get(String(row.product_variant_id)) ?? []
@@ -365,7 +332,6 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       id: String(row.id), product_id: String(row.product_id), name: String(row.name),
       sku: row.sku === null ? null : String(row.sku), active: Number(row.active) === 1,
       sort_order: Number(row.sort_order),
-      option_values: selectionsByVariant.get(String(row.id)) ?? {},
       prices: pricesByVariant.get(String(row.id)) ?? [],
     }
     byId.get(String(row.product_id))?.variants.push(variant)
@@ -752,15 +718,12 @@ export function normalizePriceInput(input: PriceInput, defaultCurrency: Currency
   return normalized
 }
 
-interface PlannedOption { id: string; name: string; sort_order: number; values: { id: string; value: string; sort_order: number }[] }
 interface PlannedVariant {
   id: string
   name: string
   sku: string | null
   active: boolean
   sort_order: number
-  /** Resolved to concrete option and value row ids. */
-  option_values: Record<string, string>
   prices: NormalizedPrice[]
 }
 
@@ -776,7 +739,6 @@ interface PlannedProduct {
   marketing_features: string[]
   metadata: Record<string, string>
   tax_code: string | null
-  options: PlannedOption[]
   variants: PlannedVariant[]
   details: Record<string, ProductDetailValue>
   source: ProductSource
@@ -949,48 +911,6 @@ async function assertBookableOffering(db: DbClient, organizationId: string, prod
  * rather than being deleted and recreated as a stranger.
  */
 /**
- * Give every option and value its real id, and restate each variant's
- * selections in those ids.
- *
- * A value label is unique within its option, never across them: a mug with
- * "Inside colour: White" and "Outside colour: White" has two different values
- * that read the same. Resolution is therefore per option, and a reference that
- * resolves to nothing is rejected here rather than passed through as a raw key
- * for a foreign key to refuse later.
- */
-function resolveIds(options: NormalizedProductOption[], variants: NormalizedProductVariant[]): { options: PlannedOption[]; variantOptionValues: Map<string, Record<string, string>> } {
-  const optionIds = new Map<string, string>()
-  const valueIdsByOption = new Map<string, Map<string, string>>()
-  const planned = options.map((option) => {
-    const id = option.id ?? crypto.randomUUID()
-    const optionKey = option.id ?? option.name
-    optionIds.set(optionKey, id)
-    const valueIds = new Map<string, string>()
-    valueIdsByOption.set(optionKey, valueIds)
-    return {
-      id, name: option.name, sort_order: option.sort_order,
-      values: option.values.map((value) => {
-        const valueId = value.id ?? crypto.randomUUID()
-        valueIds.set(value.id ?? value.value, valueId)
-        return { id: valueId, value: value.value, sort_order: value.sort_order }
-      }),
-    }
-  })
-  const variantOptionValues = new Map<string, Record<string, string>>()
-  variants.forEach((variant, index) => {
-    variantOptionValues.set(variant.id ?? String(index), Object.fromEntries(
-      Object.entries(variant.option_values).map(([optionKey, valueKey]) => {
-        const optionId = optionIds.get(optionKey)
-        const valueId = valueIdsByOption.get(optionKey)?.get(valueKey)
-        if (!optionId || !valueId) invalid(`variants[${index}] selects ${optionKey} = ${valueKey}, which this product does not define`)
-        return [optionId, valueId]
-      }),
-    ))
-  })
-  return { options: planned, variantOptionValues }
-}
-
-/**
  * Every id the caller supplied is either new or already this product's.
  *
  * The writes below upsert by primary key, so an id belonging to another
@@ -998,74 +918,50 @@ function resolveIds(options: NormalizedProductOption[], variants: NormalizedProd
  * caller is editing says nothing about an id in the body, so each one is
  * checked against the product being written.
  */
-const SUPPLIED_ID_TABLES = ['product_options', 'product_option_values', 'product_variants'] as const
-type SuppliedIdTable = typeof SUPPLIED_ID_TABLES[number]
-/** Who owns each supplied id today: table → id → `<organization>:<product>`. */
-export type SuppliedIdOwners = ReadonlyMap<SuppliedIdTable, ReadonlyMap<string, string>>
-
-function suppliedIds(options: NormalizedProductOption[], variants: NormalizedProductVariant[]): Record<SuppliedIdTable, string[]> {
-  return {
-    product_options: options.map(option => option.id).filter((id): id is string => Boolean(id)),
-    product_option_values: options.flatMap(option => option.values.map(value => value.id)).filter((id): id is string => Boolean(id)),
-    product_variants: variants.map(variant => variant.id).filter((id): id is string => Boolean(id)),
-  }
-}
+/** Who owns each supplied variant id today: id → `<organization>:<product>`. */
+export type SuppliedIdOwners = ReadonlyMap<string, string>
 
 /**
- * Load the owner of every id a batch supplies, in one query per table.
+ * Load the owner of every id a batch supplies, in one query.
  *
  * The check below is the same either way; this only decides whether it costs
- * three round trips for the whole batch or three for every product in it.
+ * one round trip for the whole batch or one for every product in it.
  */
-async function loadSuppliedIdOwners(db: DbClient, ids: Record<SuppliedIdTable, string[]>): Promise<SuppliedIdOwners> {
-  const owners = new Map<SuppliedIdTable, Map<string, string>>()
-  for (const table of SUPPLIED_ID_TABLES) {
-    const table_ids = ids[table]
-    const index = new Map<string, string>()
-    owners.set(table, index)
-    if (table_ids.length === 0) continue
-    const rows = await queryAll<{ id: string; organization_id: string; product_id: string | null }>(db, `
-      SELECT id, organization_id, product_id FROM ${table} WHERE id IN (SELECT value FROM json_each(?))
-    `, [d1JsonArray(table_ids)])
-    for (const row of rows) index.set(String(row.id), `${row.organization_id}:${row.product_id ?? ''}`)
-  }
-  return owners
+async function loadSuppliedIdOwners(db: DbClient, ids: string[]): Promise<SuppliedIdOwners> {
+  if (ids.length === 0) return new Map()
+  const rows = await queryAll<{ id: string; organization_id: string; product_id: string }>(db, `
+    SELECT id, organization_id, product_id FROM product_variants WHERE id IN (SELECT value FROM json_each(?))
+  `, [d1JsonArray(ids)])
+  return new Map(rows.map(row => [String(row.id), `${row.organization_id}:${row.product_id}`]))
 }
 
 async function assertSuppliedIdsBelongHere(
   db: DbClient,
   organizationId: string,
   productId: string | null,
-  options: NormalizedProductOption[],
   variants: NormalizedProductVariant[],
   owners?: SuppliedIdOwners,
 ): Promise<void> {
-  const supplied = suppliedIds(options, variants)
+  const ids = variants.map(variant => variant.id).filter((id): id is string => Boolean(id))
+  if (ids.length === 0) return
   const here = `${organizationId}:${productId ?? ''}`
-  for (const table of SUPPLIED_ID_TABLES) {
-    const ids = supplied[table]
-    if (ids.length === 0) continue
-    const foreign = owners
-      ? ids.filter((id) => {
-          const owner = owners.get(table)?.get(id)
-          return owner !== undefined && owner !== here
-        })
-      : (await queryAll<{ id: string }>(db, `
-          SELECT id FROM ${table}
-           WHERE id IN (SELECT value FROM json_each(?))
-             AND NOT (organization_id = ? AND product_id IS ?)
-        `, [d1JsonArray(ids), organizationId, productId])).map(row => String(row.id))
-    if (foreign.length > 0) {
-      notFound(`${table.replace('product_', '').replaceAll('_', ' ')} ${foreign.join(', ')} does not belong to this product`)
-    }
-  }
+  const foreign = owners
+    ? ids.filter((id) => {
+        const owner = owners.get(id)
+        return owner !== undefined && owner !== here
+      })
+    : (await queryAll<{ id: string }>(db, `
+        SELECT id FROM product_variants
+         WHERE id IN (SELECT value FROM json_each(?))
+           AND NOT (organization_id = ? AND product_id IS ?)
+      `, [d1JsonArray(ids), organizationId, productId])).map(row => String(row.id))
+  if (foreign.length > 0) notFound(`variants ${foreign.join(', ')} does not belong to this product`)
 }
 
 /**
  * Turn an input into the exact rows a product needs.
  *
- * A product with no customer-selectable options still gets one real default
- * variant. That variant is not a placeholder and not a special case in the
+ * A product that declares no variants still gets one real default variant. That variant is not a placeholder and not a special case in the
  * read path — every purchase, price and booking goes through variant identity,
  * so there is exactly one purchase path in the system.
  */
@@ -1091,15 +987,11 @@ async function planProduct(
   try { kind = assertProductKind(input.kind); validateProductDetails(kind, input.details ?? {}) }
   catch (error) { if (!(error instanceof ProductDetailError)) throw error; invalid(error.message) }
   const name = requireTrimmedProductString(input.name, 'name', PRODUCT_LIMITS.name)
-  const options = validateProductOptions(input.options)
   const variants = input.variants === undefined
-    ? [{ name, sku: null, active: true, sort_order: 0, option_values: {} } satisfies NormalizedProductVariant]
-    : validateProductVariants(input.variants, options)
-  if (options.length > 0 && input.variants === undefined) {
-    invalid('a product with options must declare the variants that select them')
-  }
+    ? [{ name, sku: null, active: true, sort_order: 0 } satisfies NormalizedProductVariant]
+    : validateProductVariants(input.variants)
 
-  await assertSuppliedIdsBelongHere(db, organizationId, context.existingId ?? null, options, variants, context.idOwners)
+  await assertSuppliedIdsBelongHere(db, organizationId, context.existingId ?? null, variants, context.idOwners)
 
   // One site has one default currency: a batch resolves it once and hands it
   // down, rather than asking the same question for every product in it.
@@ -1107,14 +999,12 @@ async function planProduct(
     ? context.defaultCurrency
     : context.organizationId ? await organizationDefaultCurrency(db, organizationId) : null
   const declaredVariants = input.variants ?? []
-  const resolved = resolveIds(options, variants)
   const plannedVariants: PlannedVariant[] = variants.map((variant, index) => ({
     id: variant.id ?? crypto.randomUUID(),
     name: variant.name,
     sku: variant.sku,
     active: variant.active,
     sort_order: variant.sort_order,
-    option_values: resolved.variantOptionValues.get(variant.id ?? String(index)) ?? {},
     prices: (declaredVariants[index]?.prices ?? []).map((price, priceIndex) =>
       normalizePriceInput(price, defaultCurrency, `variants[${index}].prices[${priceIndex}]`)),
   }))
@@ -1140,7 +1030,6 @@ async function planProduct(
     marketing_features: validateProductMarketingFeatures(input.marketing_features),
     metadata: validateProductMetadata(input.metadata),
     tax_code: normalizeOptionalProductString(input.tax_code, 'tax_code', PRODUCT_LIMITS.taxCode),
-    options: resolved.options,
     variants: plannedVariants,
     kind,
     details: validateProductDetails(kind, input.details ?? {}),
@@ -1165,7 +1054,7 @@ function productWrites(
   // Prices are rewritten only by a caller that actually supplied variants.
   // Saving a description restates nothing about money, and must not retire and
   // remint every offer a product has.
-  options: { writePrices: boolean; priceIds?: ReadonlySet<string>; writeOptions?: boolean; variantIds?: ReadonlySet<string>; expectedUpdatedAt?: string; stayFields?: readonly (keyof ProductStayConfig)[] } = { writePrices: true },
+  options: { writePrices: boolean; priceIds?: ReadonlySet<string>; variantIds?: ReadonlySet<string>; expectedUpdatedAt?: string; stayFields?: readonly (keyof ProductStayConfig)[] } = { writePrices: true },
 ): BatchQuery[] {
   const upsert = mode === 'upsert'
   const writes: BatchQuery[] = [{
@@ -1249,29 +1138,6 @@ function productWrites(
     })
   }
 
-  for (const option of options.writeOptions === false ? [] : planned.options) {
-    writes.push({
-      query: upsert
-        ? `INSERT INTO product_options (id, organization_id, product_id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT (id) DO UPDATE SET name = excluded.name, sort_order = excluded.sort_order, updated_at = excluded.updated_at
-             WHERE product_options.organization_id = excluded.organization_id AND product_options.product_id = excluded.product_id`
-        : `INSERT INTO product_options (id, organization_id, product_id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      params: [option.id, organizationId, planned.id, option.name, option.sort_order, now, now],
-    })
-    for (const value of option.values) {
-      writes.push({
-        query: upsert
-          ? `INSERT INTO product_option_values (id, organization_id, product_id, product_option_id, value, sort_order, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT (id) DO UPDATE SET value = excluded.value, sort_order = excluded.sort_order, updated_at = excluded.updated_at
-               WHERE product_option_values.organization_id = excluded.organization_id AND product_option_values.product_id = excluded.product_id`
-          : `INSERT INTO product_option_values (id, organization_id, product_id, product_option_id, value, sort_order, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        params: [value.id, organizationId, planned.id, option.id, value.value, value.sort_order, now, now],
-      })
-    }
-  }
-
   for (const variant of planned.variants) {
     if (!options.variantIds || options.variantIds.has(variant.id)) writes.push({
       query: upsert
@@ -1284,13 +1150,6 @@ function productWrites(
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       params: [variant.id, organizationId, planned.id, variant.name, variant.sku, variant.active ? 1 : 0, variant.sort_order, now, now, actor.actorId, actor.actorId],
     })
-    for (const [optionId, valueId] of Object.entries(variant.option_values)) {
-      writes.push({
-        query: `INSERT INTO product_variant_option_values (organization_id, product_id, product_variant_id, product_option_id, product_option_value_id)
-                VALUES (?, ?, ?, ?, ?)`,
-        params: [organizationId, planned.id, variant.id, optionId, valueId],
-      })
-    }
     for (const price of options.writePrices ? variant.prices : []) {
       if (options.priceIds && !options.priceIds.has(price.id)) continue
       // A restated price keeps its row: payments and checkout holds reference
@@ -1560,11 +1419,7 @@ export async function planProductCreateWrites(db: DbClient, input: {
   // hundred round trips before a single row was written.
   const [knownSlugs, idOwners] = await Promise.all([
     loadProductSlugs(db, input.organizationId),
-    loadSuppliedIdOwners(db, {
-      product_options: input.products.flatMap(product => (product.options ?? []).map(option => option.id).filter((id): id is string => Boolean(id))),
-      product_option_values: input.products.flatMap(product => (product.options ?? []).flatMap(option => (option.values ?? []).map(value => typeof value === 'string' ? null : value.id)).filter((id): id is string => Boolean(id))),
-      product_variants: input.products.flatMap(product => (product.variants ?? []).map(variant => variant.id).filter((id): id is string => Boolean(id))),
-    }),
+    loadSuppliedIdOwners(db, input.products.flatMap(product => (product.variants ?? []).map(variant => variant.id).filter((id): id is string => Boolean(id)))),
   ])
   for (const [slug, id] of knownSlugs) if (input.replacedProductIds?.has(id)) knownSlugs.delete(slug)
   const defaultCurrency = input.organizationId ? await organizationDefaultCurrency(db, input.organizationId) : null
@@ -1743,10 +1598,6 @@ async function planProductUpdate(db: DbClient, input: {
     marketing_features: patch.marketing_features ?? current.marketing_features,
     metadata: patch.metadata ?? current.metadata,
     tax_code: patch.tax_code === undefined ? current.tax_code : patch.tax_code,
-    options: patch.options ?? current.options.map(option => ({
-      id: option.id, name: option.name, sort_order: option.sort_order,
-      values: option.values.map(value => ({ id: value.id, value: value.value, sort_order: value.sort_order })),
-    })),
     variants,
     details,
     // The location a home is at is fixed: a patch naming another one is refused, never merged.
@@ -1776,18 +1627,14 @@ async function planProductUpdate(db: DbClient, input: {
 
   const comparableCurrent: Record<string, unknown> = {
     ...current,
-    options: current.options.map(option => ({ id: option.id, name: option.name, sort_order: option.sort_order,
-      values: option.values.map(value => ({ id: value.id, value: value.value, sort_order: value.sort_order })) })),
     variants: current.variants.map(variant => ({ ...variantInput(variant), prices: variant.prices.map(priceInput) })),
     stay: planned.stay && current.stay ? Object.fromEntries(Object.keys(planned.stay).map(key => [key, current.stay![key as keyof ProductStayConfig]])) : current.stay,
   }
   const changedFields: string[] = [...(input.additionalChangedFields ?? [])]
-  for (const field of ['kind', 'name', 'description', 'active', 'order_url', 'unit_label', 'marketing_features', 'metadata', 'tax_code', 'options', 'variants', 'details', 'stay'] as const) {
+  for (const field of ['kind', 'name', 'description', 'active', 'order_url', 'unit_label', 'marketing_features', 'metadata', 'tax_code', 'variants', 'details', 'stay'] as const) {
     if (await creationRequestHash(planned[field]) !== await creationRequestHash(comparableCurrent[field])) changedFields.push(field)
   }
 
-  const keptOptions = d1JsonArray(planned.options.map(option => option.id))
-  const keptValues = d1JsonArray(planned.options.flatMap(option => option.values.map(value => value.id)))
   const keptVariants = d1JsonArray(planned.variants.map(variant => variant.id))
 
   // A patch that says nothing about variants says nothing about money. Its
@@ -1804,25 +1651,21 @@ async function planProductUpdate(db: DbClient, input: {
     return !before || variant.name !== before.name || variant.sku !== before.sku || variant.active !== before.active || variant.sort_order !== before.sort_order
   }).map(variant => variant.id))
   const writes: BatchQuery[] = changedFields.length ? [
-    // Option selections are rebuilt from the validated variant plan.
-    { query: 'DELETE FROM product_variant_option_values WHERE organization_id = ? AND product_id = ?', params: [organizationId, productId] },
     // Only explicit replacement removes prices; merged omissions remain in the plan.
     ...(writesPrices
       ? [{ query: 'DELETE FROM prices WHERE organization_id = ? AND product_variant_id IN (SELECT id FROM product_variants WHERE organization_id = ? AND product_id = ?) AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, organizationId, productId, keptPrices] }]
       : []),
-    // Options, values and variants are UPSERTED, never dropped and recreated:
+    // Variants are UPSERTED, never dropped and recreated:
     // bookings reference variant identity, and recreating a variant under a
     // fresh id is the same as deleting it as far as they are concerned. Only
     // rows the caller actually removed are deleted — and a booking RESTRICTS
     // that delete, so a booking taken after the check above raises here and
     // takes the whole rewrite down with it. Keeping the variant row while the
-    // statements around it deleted its prices and selections would preserve an
-    // id and nothing it meant.
+    // statements around it deleted its prices would preserve an id and nothing
+    // it meant.
     { query: 'DELETE FROM product_variants WHERE organization_id = ? AND product_id = ? AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, productId, keptVariants] },
-    { query: 'DELETE FROM product_option_values WHERE organization_id = ? AND product_id = ? AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, productId, keptValues] },
-    { query: 'DELETE FROM product_options WHERE organization_id = ? AND product_id = ? AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, productId, keptOptions] },
     ...productWrites(organizationId, planned, input.actor, now, 'upsert', {
-      writePrices: writesPrices, priceIds, writeOptions: patch.options !== undefined, variantIds,
+      writePrices: writesPrices, priceIds, variantIds,
       stayFields: Object.keys(patch.stay ?? {}) as (keyof ProductStayConfig)[],
       // A narrow edit still restates the Product it read, including its details.
       expectedUpdatedAt: current.updated_at,
@@ -1849,7 +1692,7 @@ async function planProductUpdate(db: DbClient, input: {
 }
 
 const variantInput = (variant: ProductVariant) => ({
-  id: variant.id, name: variant.name, sku: variant.sku, active: variant.active, sort_order: variant.sort_order, option_values: variant.option_values,
+  id: variant.id, name: variant.name, sku: variant.sku, active: variant.active, sort_order: variant.sort_order,
 })
 const priceInput = (price: Price): PriceInput => ({
   id: price.id, unit_amount: price.unit_amount, currency: price.currency, location_id: price.location_id, active: price.active,
@@ -1971,7 +1814,7 @@ export async function updateProduct(db: DbClient, input: {
     }
     return completeChannelPush(channelPush, { product_id: product.id, updated_at: product.updated_at }, async () => {
       if (photoPlan) await photoPlan.complete()
-      if (product.kind === 'stay') await purgePublicResourceCacheNow(env, input.organizationId)
+      if (product.kind === 'stay') await publishBusinessInvalidation(env, input.organizationId)
       await publishStayProducts(env, [product])
       return product
     })
@@ -2655,18 +2498,14 @@ async function planProductReconciliation(db: DbClient, input: {
     listProductsByIds(db, input.organizationId, requestedIds),
   ])
   const defaultCurrency = input.organizationId ? await organizationDefaultCurrency(db, input.organizationId) : null
-  const idOwners = await loadSuppliedIdOwners(db, {
-    product_options: input.products.flatMap(entry => (entry.options ?? []).map(option => option.id).filter((id): id is string => Boolean(id))),
-    product_option_values: input.products.flatMap(entry => (entry.options ?? []).flatMap(option => (option.values ?? []).map(value => typeof value === 'string' ? null : value.id)).filter((id): id is string => Boolean(id))),
-    product_variants: input.products.flatMap(entry => (entry.variants ?? []).map(variant => variant.id).filter((id): id is string => Boolean(id))),
-  })
+  const idOwners = await loadSuppliedIdOwners(db, input.products.flatMap(entry => (entry.variants ?? []).map(variant => variant.id).filter((id): id is string => Boolean(id))))
   const byId = new Map(existingProducts.map(product => [product.id, product]))
 
   const taken = new Set<string>()
   const now = new Date().toISOString()
   const touched: string[] = []
-  // Kept per product, not flattened: rewriting a product deletes its prices and
-  // selections before restating them, so a batch boundary in the middle of one
+  // Kept per product, not flattened: rewriting a product deletes its prices
+  // before restating them, so a batch boundary in the middle of one
   // leaves that product half-rewritten. Whole products are what a batch is
   // filled with.
   const perProduct: BatchQuery[][] = []

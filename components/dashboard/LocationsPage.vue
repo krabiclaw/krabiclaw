@@ -35,7 +35,7 @@
       v-else
       :items="tiles"
       missing-image-label="No hero photo"
-      missing-image-hint="Add one under this location's photos."
+      missing-image-hint="Add one under this location's media."
     />
   </DashboardIndexPanel>
 </template>

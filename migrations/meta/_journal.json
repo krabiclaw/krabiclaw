@@ -15,6 +15,13 @@
       "when": 1794020860858,
       "tag": "0001_home_internal_name",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794037718860,
+      "tag": "0002_optional_task_skip_note",
+      "breakpoints": true
     }
   ]
 }

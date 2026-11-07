@@ -8,7 +8,9 @@
   -->
   <DashboardIndexPanel id="organization-billing" title="Plan and billing" lead="What you pay KrabiClaw. Money you take from guests is under Earnings." :auto-open="firstLeaf">
     <div class="pb-10">
-      <p v-if="!dashboard.canUpdateBilling.value && owner" class="mb-6 text-sm text-muted" data-testid="billing-owner-line">{{ owner }} is the owner and changes the plan and billing.</p>
+      <p v-if="!dashboard.canUpdateBilling.value" class="mb-6 text-sm text-muted" data-testid="billing-owner-line">
+        Only the organization owner can manage billing.<template v-if="owner"> Contact {{ owner }} to change or cancel your plan.</template>
+      </p>
       <UAlert v-if="billingError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(billingError, 'Failed to load billing')" />
       <p v-if="homesPending" role="status" class="mb-6 text-sm text-muted">Loading home cost…</p>
       <UAlert v-else-if="homesError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(homesError, 'Homes could not be loaded')" />
@@ -167,8 +169,8 @@ const serviceState = computed<Record<string, { on: boolean } | undefined>>(() =>
   : {})
 
 // Stripe's portal owns the card, invoices, receipts and cancelling; the row opens it.
-const portalRow = computed<EditorNavigationItem | null>(() => billing.value?.stripeCustomerId
-  ? { id: 'portal', label: 'Manage billing', summary: 'Card, invoices and receipts, cancel', ...(dashboard.canUpdateBilling.value ? { action: { opens: true } } : {}) }
+const portalRow = computed<EditorNavigationItem | null>(() => dashboard.canUpdateBilling.value && billing.value?.stripeCustomerId
+  ? { id: 'portal', label: 'Manage billing', summary: 'Card, invoices and receipts, cancel', action: { opens: true } }
   : null)
 
 const groups = computed<EditorNavigationGroup[]>(() => [{

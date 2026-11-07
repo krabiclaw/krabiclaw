@@ -11,7 +11,7 @@ import { getMediaUploadReplay, replaceR2ImageFile, uploadResolvedMediaToAssetSto
 import { getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { imagePixelSize, MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
 import { getProduct, updateProduct } from '~/server/utils/product-management'
-import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
+import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { creationDedupeKey, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import type { ProductDetailKey } from '~/shared/product-details'
 import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
@@ -27,7 +27,7 @@ import { installChannexMessages, uninstallChannexMessages } from './messages'
 import { calendarMinimumDefaults, completeChannelPush, configureStayCalendar, forgetConfirmedNights, type ChannelPushCompletion, withDeliveryLease, withLeaseHeartbeat, type ChannexMapping, type DeliveryLease } from './ari'
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import { backfillChannexMessages } from '~/server/domain/guest-threads/channel-messages'
-import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
+import { publishBusinessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { requireStays } from '~/server/utils/cms-capabilities'
 
 /**
@@ -803,7 +803,7 @@ export class AirbnbConnection {
         const result = await execute(this.db, "UPDATE product_channel_mappings SET import_content = ?, import_written = ?, updated_at = ? WHERE product_id = ? AND provider = 'channex' AND import_stage = 'complete'", [JSON.stringify(report), JSON.stringify(written), now(), productId])
         if (!result.meta.changes) fail(409, 'IMPORT_CHANGED', 'The import changed. Refresh and try again.')
         const home = await readStayHome(this.db, this.manager(), productId)
-        await purgePublicResourceCacheNow(this.env, this.organizationId)
+        await publishBusinessInvalidation(this.env, this.organizationId)
         await publishStayInvalidation(this.env, { type: 'nights.changed', organizationId: this.organizationId, productId, locationId: home.location_id, stayId: null }, { updated_at: now() })
         return { product_id: productId, stage: 'complete' as const, content: report }
       })
@@ -851,51 +851,39 @@ export class AirbnbConnection {
     const onHome = new Set(home.photos.map(photo => photo.id))
     let capacity = MAX_ORDERED_MEDIA_ASSETS - home.photos.length
     const assetIds: string[] = []
-    // A photo's new file shows on the site's cached pages only once they are purged, including when a later photo stops the stage.
-    const purgeUpgraded = async () => { if (report.photos_upgraded.length) await purgePublicResourceCacheNow(this.env, this.organizationId) }
-    try {
-      for (const image of content.images) {
-        this.checkSlice()
-        if (report.photos_removed.includes(image.id)) continue
-        const assetId = stored.get(image.id)
-        if (assetId && onHome.has(assetId)) {
-          if (!await this.keep(assetId, image, report, budget, earlier)) { pending = true; break }
-          assetIds.push(assetId)
-          continue
-        }
-        if (capacity <= 0) {
-          report.photos_unplaced.push(image.id)
-          continue
-        }
-        capacity -= 1
-        if (assetId) {
-          if (!await this.keep(assetId, image, report, budget, earlier)) { pending = true; break }
-          assetIds.push(assetId)
-          continue
-        }
-        if (budget.left <= 0) { pending = true; break }
-        budget.left -= 1
-        const identity = { idempotencyKey: `airbnb-photo:${mapping.listing_id}:${image.id}`, sourceFileId: image.id }
-        const photo = await this.photo(image)
-        this.checkSlice()
-        // Imported photos live in R2 in every environment; Cloudflare Images holds credentials in production only.
-        const uploaded = await uploadResolvedMediaToAssetStore({
-          db: this.db, env: this.env, organizationId: this.organizationId, userId: null, source: 'external', kind: 'image', provider: 'cloudflare_r2',
-          ...photo, idempotencyKey: identity.idempotencyKey, sourceFileId: identity.sourceFileId,
-        })
-        await this.caption(uploaded.assetId, image)
-        assetIds.push(uploaded.assetId)
-        report.photos_imported.push(image.id)
+    for (const image of content.images) {
+      this.checkSlice()
+      if (report.photos_removed.includes(image.id)) continue
+      const assetId = stored.get(image.id)
+      if (assetId && onHome.has(assetId)) {
+        if (!await this.keep(assetId, image, report, budget, earlier)) { pending = true; break }
+        assetIds.push(assetId)
+        continue
       }
-    } catch (error) {
-      try {
-        await purgeUpgraded()
-      } catch (purgeError) {
-        throw new AggregateError([error, purgeError], 'The content stage stopped and the photos it had already upgraded could not be purged from the cached pages', { cause: purgeError })
+      if (capacity <= 0) {
+        report.photos_unplaced.push(image.id)
+        continue
       }
-      throw error
+      capacity -= 1
+      if (assetId) {
+        if (!await this.keep(assetId, image, report, budget, earlier)) { pending = true; break }
+        assetIds.push(assetId)
+        continue
+      }
+      if (budget.left <= 0) { pending = true; break }
+      budget.left -= 1
+      const identity = { idempotencyKey: `airbnb-photo:${mapping.listing_id}:${image.id}`, sourceFileId: image.id }
+      const photo = await this.photo(image)
+      this.checkSlice()
+      // Imported photos live in R2 in every environment; Cloudflare Images holds credentials in production only.
+      const uploaded = await uploadResolvedMediaToAssetStore({
+        db: this.db, env: this.env, organizationId: this.organizationId, userId: null, source: 'external', kind: 'image', provider: 'cloudflare_r2',
+        ...photo, idempotencyKey: identity.idempotencyKey, sourceFileId: identity.sourceFileId,
+      })
+      await this.caption(uploaded.assetId, image)
+      assetIds.push(uploaded.assetId)
+      report.photos_imported.push(image.id)
     }
-    await purgeUpgraded()
     if (pending) return { report, done: false, written: {} }
     if (assetIds.length) {
       this.checkSlice()
@@ -975,9 +963,11 @@ export class AirbnbConnection {
     }
     // NULL inherits the canonical home, even after a global host edit leaves this row source='import'.
     // Airbnb's calendar echoes our resolved ARI values; importing those would freeze inheritance.
-    await execute(this.db, `UPDATE product_nights SET min_stay_arrival = CASE WHEN product_nights.min_stay_arrival IS NULL THEN NULL ELSE json_extract(value, '$.min_stay_arrival') END, price_minor = CASE WHEN product_nights.price_minor IS NULL THEN NULL ELSE json_extract(value, '$.price_minor') END
-      FROM json_each(?) WHERE organization_id = ? AND product_id = ? AND source = 'import' AND date = json_extract(value, '$.date')`,
-    [JSON.stringify(inherited), this.organizationId, mapping.product_id])
+    await executeBatch(this.db, [{
+      query: `UPDATE product_nights SET min_stay_arrival = CASE WHEN product_nights.min_stay_arrival IS NULL THEN NULL ELSE json_extract(value, '$.min_stay_arrival') END, price_minor = CASE WHEN product_nights.price_minor IS NULL THEN NULL ELSE json_extract(value, '$.price_minor') END
+        FROM json_each(?) WHERE organization_id = ? AND product_id = ? AND source = 'import' AND date = json_extract(value, '$.date')`,
+      params: [JSON.stringify(inherited), this.organizationId, mapping.product_id],
+    }, publicResourceCacheInvalidationQuery(this.organizationId, 'airbnb-calendar-content')], { operation: 'Refresh imported Airbnb calendar' })
     const homeWrite = await unedited(body)
     const detailsWrite = await unedited(details)
     const stayImport = { channelId, listingId: mapping.listing_id, written }
@@ -1010,7 +1000,7 @@ export class AirbnbConnection {
     }
     if (budget.left <= 0) return false
     budget.left -= 1
-    // Counted when the photo names its new file, so a failure deleting the old one still purges the cached pages.
+    // Count the photo when the saved asset names the new file.
     await replaceR2ImageFile({ db: this.db, env: this.env, organizationId: this.organizationId, assetId, ...await this.photo(image), onSwitched: () => report.photos_upgraded.push(image.id) })
     return true
   }

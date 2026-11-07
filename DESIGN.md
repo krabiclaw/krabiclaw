@@ -171,10 +171,11 @@ web page and the app draw the same response and compose no text.
 `TaskCard` is the one Today card (`.tc`, design system
 `project/components/TodayTasks`), with three faces. A **photo** card is a
 turnover or a task at a home, ending in Done. A **compact** card is a failed
-message, a reply, or a task without a home; it has an avatar and a grey pill
-that opens its subject, because it closes when that subject does. An
+message, a reply, or a task without a home; it has an avatar and a pill that
+opens its subject, because it closes when that subject does. A reply also has
+Dismiss, which needs no note. An
 **insight** card is an opportunity, with a white Accept and an underlined Not
-now. Black is Done and nothing else. A finished task shows a filled check that
+now. Cards use the record surface. A finished task shows a filled check that
 undoes Done. An error line states only what our record knows; it never blames a
 provider or asks for a guest email.
 
@@ -184,12 +185,15 @@ home name and status above the original reply action and message preview.
 Unknown clocks read "Time not set". The task ID, schedule and actions remain
 owned by the stored task. An inquiry without a stay remains a compact reply.
 
-Owner Today orders failed deliveries, then turnovers, then replies, in two
-columns on web. Opportunities follow full width, then Done. A member sees only
+Owner Today orders failed deliveries, then turnovers, then replies, in one
+column. Opportunities follow, then Done. A member sees only
 their own tasks and Done. The shared header holds Today/Upcoming, a round +
 for the permitted Add task and Add stay actions, and a task kind filter.
 `TodayTaskSheet` uses Airbnb's Checkout | Check-in split, followed by Assigned
-with Change, "What you found", Skip and Done. Upcoming groups by day
+with Change. A task someone completes adds "What you found", Skip and Done; a
+reply adds Dismiss and Reply. Either close needs no note. A reply closes itself
+30 days after the question, and a dismissed one stays closed until the guest
+writes again. Upcoming groups by day
 ("Tomorrow · Sat, Nov 7"). Arrivals and bookings
 stay in Calendar.
 
@@ -199,13 +203,15 @@ editable below the list in a collapsed disclosure; they steer the selector.
 Personal-account Today/Upcoming project the buyer's own agenda with
 `TodayAgendaCard`; this is separate from the business's tasks.
 
-Calendar stay cards read the canonical agenda and open `O/bookings/stay/:stayId`.
+Calendar cards read the canonical agenda and open beneath their calendar day.
 Booked activity uses the existing detail layout: desktop keeps the agenda beside the
 bounded, vertical record summary; below the pane breakpoint the record is one
 screen and Close returns to the same range and filters. Calendar and Messages
-use the same detail components inside their existing context. Record summaries
-begin with guest identity, without a resource cover. Resource photography
-belongs to its catalog and website surfaces.
+use the same detail components inside their existing context. A record summary
+leads with a 320px square of the resource's own photo, the guest avatars
+overlapping its lower edge; organization artwork never stands in, and an absent
+photo stays absent. Its cards state when, where and what was booked, and its
+contact actions sit in their own bar below the scrolling record.
 The existing stay domain owns homes, assignments, nights and payments; Calendar
 projects its arrivals and departures. Assigned members' agenda cards show the guest's first name, party size, home,
 location and check-in or checkout time. Access to each stay and its conversation
@@ -290,10 +296,8 @@ with Assigned team member (the booking assignment concern: who guests' bookable
 consultations are with — not case ownership, and changing it never reassigns
 existing appointments), Consultation pricing, Bookings, Description, Page
 content, Locations and Website visibility. Pricing has one entrance. Its index
-names the saved prices and any real choices; a single amount opens beside it
-on desktop, while several amounts leave the choice to the host. Named priced
-versions remain valid without choice dimensions. Adding a dimension requires
-an explicit value for each saved version and preserves its identity and prices.
+names the saved prices; a single amount opens beside it on desktop, while
+several amounts leave the choice to the host.
 Typed facts open their own editors from the record; they do not need another
 overview card. Show authored optional facts; missing optional facts are offered
 through the existing registry's Add detail action, not a permanent stack of
@@ -304,8 +308,10 @@ informational practice area; real memberships, pricing and terms remain
 editable through their existing owners.
 
 Price summaries read the actual saved offers across their explicit scopes.
-No shared price is different from no price anywhere. Editing names the shared
-or selected location scope and never chooses another location for the caller.
+An offering at locations is priced at each location, and an offering at none
+has one price of its own. A location-neutral price is an API and MCP convenience
+for bulk writes, not a row on this screen. Editing names the selected location
+and never chooses another location for the caller.
 Website visibility states publication; consultation availability is independent.
 
 ### Tabs, parents and exits
@@ -337,7 +343,7 @@ pane and Back, including on reload and deep links.
 | --- | --- |
 | Product, its variants and prices | what is sold: kind, pricing, booking, publication, locations, collections, its page |
 | A page, article or post | its own content |
-| Location | its place, hours, photos and reservation policy |
+| Location | its place, hours, media and reservation policy |
 | Organization member | that member's public profile and independently authored availability in the named organization |
 | Organization | the shared site: brand, domains, languages, connections |
 | User | account name, avatar, personal preferences and security |
@@ -646,7 +652,7 @@ the available frame.
 **A level alone in the frame is one of three things, and the empty right side
 of a desktop window is never the fourth.** Content that scales — a grid, a
 table, a calendar, a chart, cards — takes the frame: Today, Calendar, Catalog,
-Insights, Photos, Transactions name no column. A settings index pairs with its
+Insights, Media, Transactions name no column. A settings index pairs with its
 first row where there is a pane, as Account settings, Connections,
 Plan and billing and Earnings do: its rows are leaves beside it and `autoOpen` names the first.
 Only a list of records with nothing of its own to open — Notifications, Past
@@ -891,10 +897,9 @@ A URL names a record, a concern, a keyed item, a tab or a mode, and a direct
 entry or a reload reconstructs it. A control's temporary state — a picker, a
 popover, a filter chip, a confirmation — is not in it.
 
-- **Keyed items use their ids.** A price choice is `price/choices/:optionId`, an amount
-  `price/amounts/:variantId`, a block `sections/:blockId`; never an index, a
-  name or a combination label, so reordering or renaming never changes which
-  item a saved URL edits.
+- **Keyed items use their ids.** An amount is `price/amounts/:variantId`, a block
+  `sections/:blockId`; never an index or a name, so reordering or renaming never
+  changes which item a saved URL edits.
 - **Views keep their query.** Blog or Docs is `?collection=`, Q&A or Reviews
   is `?tab=`, a catalog kind is `?kind=`.
 - **Data is awaited, not lazy.** A level's data is `await useAsyncData` in its

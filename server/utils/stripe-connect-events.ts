@@ -1,5 +1,7 @@
 import type Stripe from 'stripe'
 import type { DbClient } from '~/server/db'
+import { notifyStripeAccountAttention } from '~/server/domain/payments/notifications'
+import type { CloudflareEnv } from '~/server/utils/auth'
 import { getStripeConnectedAccountByStripeId, refreshStripeConnectedAccount } from '~/server/utils/stripe-connect'
 import { processStripeWebhookEvent } from '~/server/utils/stripe-webhook-events'
 
@@ -25,6 +27,7 @@ async function connectedAccountId(notification: Stripe.V2.Core.EventNotification
 export async function processStripeConnectEvent(
   db: DbClient,
   stripe: Stripe,
+  env: CloudflareEnv,
   notification: Stripe.V2.Core.EventNotification,
   payload: string,
 ): Promise<boolean> {
@@ -44,6 +47,7 @@ export async function processStripeConnectEvent(
       console.info('stripe_connect_event_account_not_managed', { stripeEventId: notification.id, stripeAccountId })
       return
     }
-    await refreshStripeConnectedAccount(db, stripe, connected, notification.context)
+    const account = await refreshStripeConnectedAccount(db, stripe, connected, notification.context)
+    await notifyStripeAccountAttention(db, env, notification, account)
   })
 }

@@ -13,6 +13,7 @@ import { assertProductKind, validateProductDetails, type ProductKind } from '~/s
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { localPartsAt } from '~/utils/timezone'
+import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
 import { appendEntry, getEntryById, GuestThreadEntryDedupeConflictError } from '~/server/domain/guest-threads/entries'
 import { moveBooking, requestBookingChange, bookingChangeViews } from '~/server/domain/guest-threads/booking-changes'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
@@ -37,6 +38,7 @@ interface BookingRow {
   location_id: string | null
   location_slug: string | null
   location_title: string | null
+  location_address: string | null
   guest_name: string
   guest_email: string
   guest_phone: string | null
@@ -89,7 +91,9 @@ export interface DashboardBookingDetails {
   locationId: string | null
   locationSlug: string | null
   locationTitle: string
+  locationAddress: string | null
   resourceTitle: string
+  resourceImageUrl: string | null
   /** Null for a purchase made without an account. */
   guestName: string | null
   guestEmail: string | null
@@ -101,6 +105,10 @@ export interface DashboardBookingDetails {
   bookingDate: string
   /** Null for a purchase. */
   bookingTime: string | null
+  /** Null for a purchase. */
+  bookingEndTime: string | null
+  startsAt: string | null
+  endsAt: string | null
   timeZone: string
   status: string
   /** Derived, never stored: confirmed and its end has passed. */
@@ -173,7 +181,7 @@ async function loadBookingRow(
   // refers to — a reservation or a booking — not on the thread. The thread
   // carries the conversation and the guest.
   return queryFirst<BookingRow>(db, `SELECT r.id, record.id AS operational_id, r.organization_id, s.name AS organization_name, s.vertical,
-    record.assigned_member_id, record.operational_updated_at, record.policy_json, record.product_kind, record.product_details_json, record.scheduling_mode, record.session_status, record.location_id, l.slug AS location_slug, l.title AS location_title,
+    record.assigned_member_id, record.operational_updated_at, record.policy_json, record.product_kind, record.product_details_json, record.scheduling_mode, record.session_status, record.location_id, l.slug AS location_slug, l.title AS location_title, l.address AS location_address,
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
     (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, record.party_size, record.starts_at, record.ends_at, record.timezone, record.status, json_extract(r.payload_json, '$.notes') AS requests,
     record.product_id AS experience_id, record.product_name AS experience_title, record.product_session_id AS session_id,
@@ -262,6 +270,15 @@ export async function loadDashboardBookingDetails(
  * request's current buyer, the team's private notes and scheduling stay with
  * the team, and the payments are the ones this account made.
  */
+// A booking shows its experience's picture and a reservation its location's. Organization artwork never stands in.
+async function loadResourceImage(db: DbClient, row: BookingRow, type: DashboardBookingType) {
+  const [ownerType, ownerId] = type === 'booking' && row.experience_id
+    ? ['product' as const, row.experience_id]
+    : ['business_location' as const, row.location_id]
+  if (!ownerId) return null
+  return (await loadOwnerPictures(db, row.organization_id, ownerType, [ownerId], { organizationFallback: false })).get(ownerId)?.imageUrl ?? null
+}
+
 export async function loadBuyerBookingDetails(
   db: DbClient,
   userId: string,
@@ -326,6 +343,8 @@ async function composeBookingDetails(
     locationId: row.location_id,
     locationSlug: row.location_slug,
     locationTitle: row.location_id === null ? 'Online' : row.location_title!,
+    locationAddress: row.location_address ? formatPostalAddress(parsePostalAddress(row.location_address)) || null : null,
+    resourceImageUrl: await loadResourceImage(db, row, type),
     resourceTitle: row.experience_title || (row.location_id === null ? 'Online' : row.location_title!),
     guestName: row.guest_name,
     guestEmail: row.guest_email,
@@ -338,6 +357,9 @@ async function composeBookingDetails(
     // alongside it and kept in step.
     bookingDate: localDateOf(row),
     bookingTime: localTimeOf(row),
+    bookingEndTime: localTimeOf({ starts_at: row.ends_at, timezone: row.timezone }),
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
     timeZone,
     status: row.status,
     complete,
@@ -465,6 +487,11 @@ async function composePurchaseDetails(db: DbClient, scope: BookingScope, payment
   if (!payment) throw new HTTPError({ statusCode: 404, message: 'Purchase not found' })
   const detail = await readPaymentDetails(db, payment.organization_id, paymentId)
   const snapshot: unknown = JSON.parse(detail.payment.price_snapshot_json)
+  const line = detail.order ? await queryFirst<{ product_id: string | null }>(db, 'SELECT product_id FROM payment_order_lines WHERE order_id = ? ORDER BY rowid LIMIT 1', [detail.order.id]) : null
+  // A purchase keeps the item's own photo or the place it was sold.
+  const resourceImageUrl = (line?.product_id ? (await loadOwnerPictures(db, payment.organization_id, 'product', [line.product_id], { organizationFallback: false })).get(line.product_id)?.imageUrl : null)
+    ?? (payment.location_id ? (await loadOwnerPictures(db, payment.organization_id, 'business_location', [payment.location_id], { organizationFallback: false })).get(payment.location_id)?.imageUrl : null)
+    ?? null
   if (!snapshot || typeof snapshot !== 'object' || !('title' in snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()) throw new Error('Purchase has no immutable title')
   const contact = payment.location_id ? await resolveLocationContact(db, payment.organization_id, payment.location_id) : { contactPhone: payment.contact_phone }
   return {
@@ -481,6 +508,8 @@ async function composePurchaseDetails(db: DbClient, scope: BookingScope, payment
     locationId: payment.location_id,
     locationSlug: payment.location_slug,
     locationTitle: payment.location_id === null ? 'Online' : payment.location_title ?? 'Online',
+    locationAddress: null,
+    resourceImageUrl,
     resourceTitle: snapshot.title,
     guestName: payment.buyer_name,
     guestEmail: payment.buyer_email,
@@ -489,6 +518,9 @@ async function composePurchaseDetails(db: DbClient, scope: BookingScope, payment
     partySize: null,
     bookingDate: localDateOf({ starts_at: payment.created_at, timezone: 'UTC' }),
     bookingTime: null,
+    bookingEndTime: null,
+    startsAt: null,
+    endsAt: null,
     timeZone: 'UTC',
     status: detail.payment.state,
     complete: true,

@@ -223,20 +223,9 @@ export interface ProductLocationDraft { active: boolean; published: boolean }
 
 export interface ScheduleSlotDraft { weekday: number; start_time: string }
 
-export interface OptionValueDraft { id: string | null; value: string }
-export interface OptionDraft { id: string; name: string; values: OptionValueDraft[] }
 export interface VariantDraft {
-  /**
-   * The combination of option values this variant selects, not its row id.
-   *
-   * A rebuild after an option edit looks a variant up by the combination it
-   * describes; keying by id here made every surviving combination look new,
-   * which took its id and its prices with it.
-   */
-  key: string
-  id: string | null
+  id: string
   name: string
-  selections: Record<string, string>
   /** Restated on save: a submitted variant is its complete state. */
   sku: string | null
   active: boolean
@@ -255,7 +244,6 @@ export interface ProductForm {
   name: string
   description: string
   order_url: string
-  options: OptionDraft[]
   variants: VariantDraft[]
   details: Record<string, ProductDetailValue>
   active: boolean
@@ -367,11 +355,6 @@ export interface ProductEditor {
   removeStayPhotos: (photoIds: string[]) => Promise<boolean>
   /** Make the page this product owns, when it has none; opening Page content never does. */
   createPage: () => Promise<void>
-  addOption: () => void
-  removeOption: (index: number) => void
-  setOptionValues: (index: number, values: string[]) => void
-  setOptionSelection: (variant: VariantDraft, optionId: string, value: string) => void
-  validChoiceSelections: (variants: readonly VariantDraft[]) => boolean
   setDetail: (definition: ProductDetailField, value: ProductDetailValue) => void
   listValue: (definition: ProductDetailField) => string[]
   textValue: (definition: ProductDetailField) => string
@@ -385,7 +368,7 @@ export interface ProductEditor {
   revert: (concern?: 'additional-rules' | 'arrival-time' | StaySafetySection) => void
   /**
    * Commit the draft, then close the open leaf. A leaf nested below a section
-   * (one option, one combination's price) names its own parent, so the save
+   * (one amount) names its own parent, so the save
    * lands where its Close would rather than back on the product.
    */
   save: (closeTo?: string, concern?: ProductConcern) => Promise<void>
@@ -508,7 +491,7 @@ const { priceLabel } = useCatalogPrice(computed(() => priceLocationId()), allOrg
 
 const sectionLabels: Record<SectionKey, string> = {
   'kind': 'Type',
-  'photo': 'Photos',
+  'photo': 'Media',
   'name': 'Name',
   'internal-name': 'Internal name',
   get price() { return product.value?.kind === 'service' ? 'Consultation pricing' : 'Price' },
@@ -844,7 +827,6 @@ const draft = useState<ProductForm>(draftKey, () => ({
   name: '', internal_name: '',
   description: '',
   order_url: '',
-  options: [] as OptionDraft[],
   variants: [] as VariantDraft[],
   details: {} as Record<string, ProductDetailValue>,
   active: true,
@@ -937,7 +919,7 @@ function variantPriceMajor(variant: Product['variants'][number]): string {
   return price ? minorAmountToMajor(price.unit_amount, price.currency) : ''
 }
 
-/** The options, variants and prices as loaded, so a save can tell what changed. */
+/** The variants and prices as loaded, so a save can tell what changed. */
 const loadedCatalogShape = ref('')
 const baselineFormSnapshot = ref<string>('')
 function isFormDirty(): boolean {
@@ -961,16 +943,9 @@ function loadForm(row: Product) {
   form.name = row.name
   form.description = row.description
   form.order_url = row.order_url ?? ''
-  form.options = row.options.map(option => ({
-    id: option.id,
-    name: option.name,
-    values: option.values.map(value => ({ id: value.id, value: value.value })),
-  }))
   form.variants = row.variants.map(variant => ({
-    key: form.options.length ? combinationKey(variant.option_values) : variant.id,
     id: variant.id,
     name: variant.name,
-    selections: { ...variant.option_values },
     sku: variant.sku,
     active: variant.active,
     sort_order: variant.sort_order,
@@ -1022,12 +997,6 @@ function loadForm(row: Product) {
   baselineFormSnapshot.value = JSON.stringify(form)
 }
 
-/** Option and value identities keep a saved configuration's prices through edits. */
-function combinationKey(selections: Record<string, string>): string {
-  return JSON.stringify(form.options.filter(option => option.name.trim() && option.values.length)
-    .map(option => [option.id, selections[option.id] ?? null]))
-}
-
 function setDetail(definition: ProductDetailField, value: ProductDetailValue) {
   const key = productDetailKey(definition)
   if ((typeof value === 'string' && !value.trim()) || (Array.isArray(value) && !value.length)) Reflect.deleteProperty(form.details, key)
@@ -1041,102 +1010,6 @@ function textValue(definition: ProductDetailField): string {
   const value = form.details[productDetailKey(definition)]
   return typeof value === 'string' ? value : ''
 }
-// ── Options and the combinations they produce ───────────
-function addOption() {
-  form.options.push({ id: `new-option-${form.options.length + 1}`, name: '', values: [] })
-}
-function removeOption(index: number) {
-  const removed = form.options.splice(index, 1)[0]
-  if (!removed) return
-  form.variants = form.variants.map(variant => {
-    const selections = { ...variant.selections }
-    Reflect.deleteProperty(selections, removed.id)
-    return { ...variant, selections, key: form.options.length ? combinationKey(selections) : variant.id ?? variant.key }
-  })
-}
-function setOptionValues(index: number, values: string[]) {
-  const option = form.options[index]
-  if (!option) return
-  // Keep the ids of values that survived the edit, so the variants selecting
-  // them keep pointing at the same rows.
-  const existing = new Map(option.values.map(value => [value.value, value.id]))
-  option.values = values.map(value => ({ id: existing.get(value) ?? null, value }))
-  // A new dimension needs an explicit value for each saved version. Naming
-  // its values cannot replace the things already sold.
-  if (product.value && !product.value.options.some(saved => saved.id === option.id)) {
-    const allowed = new Set(option.values.map(value => value.id ?? value.value))
-    for (const variant of form.variants) if (!allowed.has(variant.selections[option.id] ?? '')) Reflect.deleteProperty(variant.selections, option.id)
-    return
-  }
-  rebuildVariants()
-}
-function setOptionSelection(variant: VariantDraft, optionId: string, value: string) {
-  variant.selections[optionId] = value
-  rebuildVariants()
-}
-
-/** Every retained version explicitly selects one valid, distinct combination. */
-function validChoiceSelections(variants: readonly VariantDraft[]): boolean {
-  if (!form.options.length) return true
-  const keys = new Set<string>()
-  return form.options.every(option => option.name.trim() && option.values.length)
-    && variants.every(variant => {
-      if (!form.options.every(option => option.values.some(value => (value.id ?? value.value) === variant.selections[option.id]))) return false
-      const key = combinationKey(variant.selections)
-      if (keys.has(key)) return false
-      keys.add(key)
-      return true
-    })
-}
-
-/**
- * Every combination of option values, once each.
- *
- * Prices already typed survive by combination, not by position: reordering an
- * option's values must not move a price onto a different thing.
- */
-function rebuildVariants() {
-  // Clearing or removing an existing dimension can invalidate saved mappings
-  // just as adding one can. Retain every saved row until the host resolves it.
-  if (!validChoiceSelections(form.variants.filter(variant => variant.id))) return
-  const options = form.options.filter(option => option.name.trim() && option.values.length)
-  if (!options.length) {
-    // Removing a dimension retains the things sold under it, including their
-    // identities, names, bookings, SKU and every price.
-    form.variants = form.variants.map(variant => ({ ...variant, key: variant.id ?? variant.key, selections: {} }))
-    return
-  }
-  const draftByKey = new Map<string, VariantDraft>()
-  for (const variant of form.variants) {
-    const key = combinationKey(variant.selections)
-    if (variant.id || !draftByKey.has(key)) draftByKey.set(key, variant)
-  }
-  let combinations: Array<{ selections: Record<string, string>; labels: string[] }> = [{ selections: {}, labels: [] }]
-  for (const option of options) {
-    combinations = combinations.flatMap(combination => option.values.map(value => ({
-      selections: { ...combination.selections, [option.id]: value.id ?? value.value },
-      labels: [...combination.labels, value.value],
-    })))
-  }
-  const nextOrder = Math.max(-1, ...form.variants.map(variant => variant.sort_order)) + 1
-  form.variants = combinations.map((combination, index) => {
-    const key = combinationKey(combination.selections)
-    const prior = draftByKey.get(key)
-    return {
-      key,
-      id: prior?.id ?? null,
-      name: prior?.name ?? combination.labels.join(' / '),
-      selections: combination.selections,
-      sku: prior?.sku ?? null,
-      active: prior?.active ?? true,
-      sort_order: prior?.sort_order ?? nextOrder + index,
-      price_major: prior?.price_major ?? '',
-      loaded_price_major: prior?.loaded_price_major ?? '',
-      prices: prior?.prices ?? [],
-    }
-  })
-}
-
 const propertyTypeErrors = computed(() => {
   const errors: Record<string, string> = {}
   if ((form.stay_property_type_group || form.stay_property_type) && !(form.stay_property_type_group && form.stay_property_type && isStayPropertyType(form.stay_property_type_group, form.stay_property_type))) errors.property_type = 'Choose a property type in this group, or clear both.'
@@ -1175,7 +1048,6 @@ const sectionValid = computed(() => {
     return !invalidBedrooms && !invalidBeds && !invalidBaths
   }
   if (editorKey.value === 'team') return true
-  if (editorKey.value === 'price' && typeof route.params.optionId === 'string') return validChoiceSelections(form.variants)
   return true
 })
 
@@ -1288,7 +1160,7 @@ const additionalDetails = computed(() => {
       ...(!visible.has('price') ? [{ id: 'price', label: sectionLabels.price, to: sectionPath('price') }] : []),
       ...(!row.booking ? [{ id: 'booking', label: 'Set up consultations', to: sectionPath('booking') }] : []),
       ...(!visible.has('locations') ? [{ id: 'locations', label: 'Offices', to: sectionPath('locations') }] : []),
-      ...(!visible.has('photo') ? [{ id: 'photo', label: 'Photos', to: sectionPath('photo') }] : []),
+      ...(!visible.has('photo') ? [{ id: 'photo', label: 'Media', to: sectionPath('photo') }] : []),
     ] : []),
   ]
 })
@@ -1333,7 +1205,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
         return collection.name
       })
       const cover = photoAssets.value[0]
-      const photoItem = { id: 'photo', label: 'Photos', image: cover ? mediaStillUrl(cover) || undefined : undefined, summary: photoAssets.value.length ? `${photoAssets.value.length} ${photoAssets.value.length === 1 ? 'photo' : 'photos'}` : 'No photo', placeholder: !photoAssets.value.length, to: sectionPath('photo') }
+      const photoItem = { id: 'photo', label: 'Media', image: cover ? mediaStillUrl(cover) || undefined : undefined, summary: photoAssets.value.length ? `${photoAssets.value.length} ${photoAssets.value.length === 1 ? 'item' : 'items'}` : 'No media', placeholder: !photoAssets.value.length, to: sectionPath('photo') }
       const pageItems = row.page || legalEditor.value ? [{ id: 'page', label: 'Page content', summary: row.page?.title || 'No page', placeholder: !row.page, ...(canPreview.value ? { to: row.page ? `/dashboard/${String(route.params.orgSlug)}/website/pages/${encodeURIComponent(row.page.id)}` : sectionPath('page') } : {}) }] : []
       return [{ id: legalEditor.value ? 'legal' : 'experience', items: [
         ...(legalEditor.value ? [] : [photoItem]),
@@ -1367,7 +1239,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       return section.name
     })
     return [{ id: 'dish', items: [
-      { id: 'photo', label: 'Photos', image: image ? mediaStillUrl(image) || undefined : undefined, summary: photoAssets.value.length ? `${photoAssets.value.length} ${photoAssets.value.length === 1 ? 'photo' : 'photos'}` : 'Add your first photo', placeholder: !image, to: sectionPath('photo') },
+      { id: 'photo', label: 'Media', image: image ? mediaStillUrl(image) || undefined : undefined, summary: photoAssets.value.length ? `${photoAssets.value.length} ${photoAssets.value.length === 1 ? 'item' : 'items'}` : 'Add media', placeholder: !image, to: sectionPath('photo') },
       { id: 'name', label: 'Name', summary: row.name, to: sectionPath('name') },
       { id: 'price', label: location.value ? `Price at ${location.value.title}` : 'Price', summary: prices, placeholder: prices === 'No price set', to: sectionPath('price') },
       { id: 'description', label: 'Description', summary: row.description || 'Nothing written yet', placeholder: !row.description, to: sectionPath('description') },
@@ -1525,13 +1397,8 @@ function carryPrice(price: Price) {
   }
 }
 
-/** The options, variants and prices this form is describing, exactly as they would be sent. */
+/** The variants and prices this form is describing, exactly as they would be sent. */
 function buildCatalog() {
-  const declaredOptions = form.options.filter(option => option.name.trim() && option.values.length)
-  const submittedOptionKeys = new Map(declaredOptions.map(option => [
-    option.id,
-    option.id.startsWith('new-option-') ? option.name.trim() : option.id,
-  ]))
   // This box shows one amount: what this location pays, in this site's
   // currency. Every other offer the variant carries — another location's
   // price, another currency, a recurring term — is restated untouched, with
@@ -1552,27 +1419,16 @@ function buildCatalog() {
       ? { ...carryPrice(price), unit_amount: majorAmountToMinor(typed, price.currency) }
       : carryPrice(price)))
   }
-  const options = declaredOptions.map((option, index) => ({
-      id: option.id.startsWith('new-option-') ? undefined : option.id,
-      name: option.name.trim(),
-      sort_order: index,
-      values: option.values.map((value, valueIndex) => ({ id: value.id ?? undefined, value: value.value, sort_order: valueIndex })),
-  }))
   const variants = form.variants.map(variant => ({
-    id: variant.id ?? undefined,
+    id: variant.id,
     name: variant.name,
     // The form supplies the full intended variant state.
     sku: variant.sku,
     active: variant.active,
     sort_order: variant.sort_order,
-      // A selection names its option the same way the declaration above does:
-      // a saved option by id, one being created by its name.
-      option_values: Object.fromEntries(Object.entries(variant.selections)
-        .filter(([draftOptionId]) => submittedOptionKeys.has(draftOptionId))
-        .map(([draftOptionId, valueKey]) => [submittedOptionKeys.get(draftOptionId)!, valueKey])),
     prices: priceFor(variant),
   }))
-  return { options, variants }
+  return { variants }
 }
 
 function catalogShapeOf() {
@@ -1607,7 +1463,7 @@ function payload(concern?: ProductConcern) {
     if (editorKey.value === 'kind') return { ...version, kind: assertProductKind(form.kind) }
     if (editorKey.value === 'price' && typeof route.params.variantId === 'string') {
       const variant = form.variants.find(entry => entry.id === route.params.variantId)
-      if (!variant?.id) throw new Error('Choose a saved variant before editing its price.')
+      if (!variant) throw new Error('Choose a saved variant before editing its price.')
       const selection = { currency, location_id: priceLocationId(), at: new Date().toISOString() }
       const governing = selectPrice(variant.prices.filter(price => price.location_id === selection.location_id), selection)
       const displayed = selectPrice(variant.prices, selection)
@@ -1618,10 +1474,6 @@ function payload(concern?: ProductConcern) {
       return { ...version, ...(prices.length ? { variants: [{ id: variant.id, prices }] } : {}),
         ...(form.variants.length === 1 ? { details_mode: 'merge', details: { [PRICING_NOTE_HANDLE]: form.details[PRICING_NOTE_HANDLE] || null } } : {}),
       }
-    }
-    if (editorKey.value === 'price' && typeof route.params.optionId === 'string') {
-      const catalog = buildCatalog()
-      return { ...version, options: catalog.options, variants_mode: 'replace', variants: catalog.variants.map(({ prices: _prices, ...variant }) => variant) }
     }
     throw new Error('This product setting has its own save action.')
   }
@@ -1665,7 +1517,7 @@ function payload(concern?: ProductConcern) {
     property_size: form.stay_property_size.trim() ? Number(form.stay_property_size) : null,
     property_size_unit: form.stay_property_size_unit,
   } }
-  // Options, variants and prices are restated only when they changed. A save
+  // Variants and prices are restated only when they changed. A save
   // that renames a product says nothing about what it costs, and a patch that
   // omits variants leaves every offer exactly as it is.
   const catalog = buildCatalog()
@@ -1755,7 +1607,6 @@ const sectionUnchanged = computed(() => {
     return Boolean(field && JSON.stringify(form.details[field.key] ?? null) === JSON.stringify(row.details[field.key] ?? null))
   }
   if (editorKey.value === 'price') {
-    if (typeof route.params.optionId === 'string') return catalogShapeOf() === loadedCatalogShape.value
     const variant = typeof route.params.variantId === 'string' ? form.variants.find(entry => entry.id === route.params.variantId) : stayEditor.value ? form.variants[0] : null
     return Boolean(variant && variant.price_major.trim() === variant.loaded_price_major.trim() && (form.details[PRICING_NOTE_HANDLE] ?? null) === (row.details[PRICING_NOTE_HANDLE] ?? null))
   }
@@ -1941,7 +1792,7 @@ async function commit(concern?: ProductConcern) {
     if (ordinaryDraft) {
       const draft = ordinaryDraft.values
       if (editorKey.value === 'attributes' || editorKey.value === 'price') form.details = draft.details
-      if (editorKey.value === 'price') { form.options = draft.options; form.variants = draft.variants }
+      if (editorKey.value === 'price') form.variants = draft.variants
       if (editorKey.value === 'internal-name') form.internal_name = draft.internal_name
       if (editorKey.value === 'name') form.name = draft.name
       if (editorKey.value === 'description') { form.description = draft.description; form.details = draft.details }
@@ -2133,7 +1984,7 @@ async function changeGallery(change: () => Promise<void>) {
   try {
     await change()
   } catch (error) {
-    photoError.value = getErrorMessage(error, 'Failed to update the photos')
+    photoError.value = getErrorMessage(error, 'Failed to update the media')
   }
   choosingGalleryPhoto.value = false
   // Whatever the outcome: a failed change may have made part of its writes.
@@ -2141,7 +1992,7 @@ async function changeGallery(change: () => Promise<void>) {
     await reload()
     if (product.value) loadForm(product.value)
   } catch (error) {
-    photoError.value ??= getErrorMessage(error, 'Failed to read the photos again')
+    photoError.value ??= getErrorMessage(error, 'Failed to read the media again')
   }
 }
 
@@ -2440,11 +2291,6 @@ provide(productEditorKey, {
   describeStayPhoto,
   removeStayPhotos,
   createPage,
-  addOption,
-  removeOption,
-  setOptionValues,
-  setOptionSelection,
-  validChoiceSelections,
   setDetail,
   listValue,
   textValue,

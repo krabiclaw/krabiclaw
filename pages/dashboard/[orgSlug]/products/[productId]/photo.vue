@@ -55,7 +55,7 @@
         testid="product-photo"
         @update:model-value="p.setPrimaryImage"
       />
-      <UFormField v-if="p.product.value" label="More photos">
+      <UFormField v-if="p.product.value" label="More media">
         <DashboardMediaGalleryField
           :items="p.galleryRows.value"
           :organization-id="p.organizationId"

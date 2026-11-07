@@ -180,7 +180,7 @@ const cards = computed<HubCard[]>(() => {
   const contact = [loc.phone && formatPhone(loc.phone), loc.email].filter((value): value is string => Boolean(value?.trim())).join(' · ')
   const policy = resource.reservationConfig
   return [
-    { id: 'photos', title: 'Photos', description: countSummary(counts.photos, 'photo', 'Add photos'), to: `${locationPath.value}/photos`, image: locationImage.value || undefined, visible: hasFeature('photos') },
+    { id: 'photos', title: 'Media', description: countSummary(counts.photos, 'item', 'Add media'), to: `${locationPath.value}/photos`, image: locationImage.value || undefined, visible: hasFeature('photos') },
     { id: 'name', title: 'Name', description: loc.title, to: `${locationPath.value}/name`, visible: true },
     { id: 'description', title: 'Description', description: loc.short_description?.trim() || loc.description?.trim() || 'Describe this location', to: `${locationPath.value}/description`, visible: true },
     { id: 'hours', icon: 'i-lucide-clock', title: 'Hours', description: currentOpeningState.value, to: `${locationPath.value}/hours`, visible: true },

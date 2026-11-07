@@ -2,8 +2,9 @@ import type Stripe from 'stripe'
 import { queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode } from '~/shared/currencies'
-import { ownerPaymentMessage, guestPaymentMessage, type GuestPaymentNotificationKind, type PaymentNotificationEvent } from '~/server/notifications/payment-events'
-import { notifyFinancialNotification } from '~/server/utils/notifications'
+import { ownerPaymentMessage, guestPaymentMessage, stripeAccountAttentionMessage, type GuestPaymentNotificationKind, type PaymentNotificationEvent } from '~/server/notifications/payment-events'
+import { notifyFinancialNotification, notifyOwner } from '~/server/utils/notifications'
+import type { StripeConnectedAccount } from '~/server/utils/stripe-connect'
 import { appendEntry } from '~/server/domain/guest-threads/entries'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { dashboardOrigin } from '~/server/utils/dashboard-notification-links'
@@ -123,5 +124,56 @@ export async function notifyPayoutState(db: DbClient, env: CloudflareEnv, scope:
     eventKey: `payments:${scope.stripeAccountId}:${Number(scope.livemode)}:${payout.id}:${payout.status}`,
     ownerMessage: ownerPaymentMessage({ ...event, action: details.action }),
     deepLink,
+  })
+}
+
+type RequirementEntry = NonNullable<NonNullable<Stripe.V2.Core.Account['requirements']>['entries']>[number]
+
+const isBusinessActionDue = (entry: RequirementEntry) => entry.awaiting_action_from === 'user'
+  && (entry.minimum_deadline.status === 'currently_due' || entry.minimum_deadline.status === 'past_due')
+
+/**
+ * What a requirements event hands the business, read from Stripe's own before and
+ * after. Filling in Stripe's form also changes the requirements, and is not an alert:
+ * only a requirement Stripe finished reviewing, or the first thing due, is.
+ */
+function requirementsHandedToBusiness(changes: Stripe.V2.Core.Event['changes']): RequirementEntry[] {
+  if (!changes?.before || !changes.after) throw new Error('Stripe requirements event has no before and after')
+  const entries = (side: unknown) => (side as Pick<Stripe.V2.Core.Account, 'requirements'>).requirements?.entries ?? []
+  const before = entries(changes.before)
+  const due = entries(changes.after).filter(isBusinessActionDue)
+  const inReview = new Set(before.filter(entry => entry.awaiting_action_from === 'stripe').map(entry => entry.description))
+  return !before.some(isBusinessActionDue) || due.some(entry => inReview.has(entry.description)) ? due : []
+}
+
+/** Stripe's event says what changed and its id says which change, so each one is told once. */
+export async function notifyStripeAccountAttention(db: DbClient, env: CloudflareEnv, event: Stripe.V2.Core.EventNotification, account: StripeConnectedAccount) {
+  let status: 'action_required' | 'restricted'
+  let reasons: string[] = []
+  if (event.type === 'v2.core.account[requirements].updated') {
+    const handed = requirementsHandedToBusiness((await event.fetchEvent()).changes)
+    if (handed.length === 0) return
+    status = 'action_required'
+    reasons = [...new Set(handed.flatMap(entry => entry.errors.map(error => error.description)))]
+  } else if (event.type === 'v2.core.account[configuration.merchant].capability_status_updated') {
+    status = 'restricted'
+  } else return
+  if (account.status !== status) return
+  const organization = await queryFirst<{ name: string; slug: string }>(db, 'SELECT name,slug FROM organization WHERE id=?', [account.organizationId])
+  if (!organization) throw new Error('Stripe account attention requires its organization')
+  const eventKey = `payments:${account.stripeAccountId}:${Number(account.livemode)}:${event.id}`
+  const deepLink = `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}/payments/payout-method`
+  const message = stripeAccountAttentionMessage({ organizationName: organization.name, status, reasons, action: { url: deepLink, label: 'Review payout setup' } })
+  await notifyOwner(env, db, {
+    organizationId: account.organizationId,
+    organizationName: organization.name,
+    template: 'stripe_account_attention',
+    title: message.title,
+    payload: { deep_link: deepLink },
+    message,
+    whatsappTemplate: 'guest_thread_reply_whatsapp',
+    notification: { message: message.facts.find(fact => fact.key === 'message')!.value, severity: 'warning' },
+    idempotencyKey: `${eventKey}:owner`,
+    deliveryEventKey: `${eventKey}:owner`,
   })
 }

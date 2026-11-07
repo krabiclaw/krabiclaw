@@ -2,7 +2,7 @@ import type { WhatsAppTemplate } from '~/server/utils/whatsapp'
 import { reviewEditorPath } from '~/server/utils/dashboard-links'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import type { NotificationMessage } from './messages'
-import { guestPaymentMessage, ownerPaymentMessage } from './payment-events'
+import { guestPaymentMessage, ownerPaymentMessage, stripeAccountAttentionMessage } from './payment-events'
 import type { GuestPaymentNotificationEvent, PaymentNotificationEvent } from './payment-events'
 import {
   bookingCancelledMessage,
@@ -348,6 +348,17 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
       { date: 'Jul 21, 2026', time: '2:00 PM', nights: null, partySize: '2 guests', location: 'Main Studio', total: null, assignee: 'Priya Shah' },
       { date: 'Jul 22, 2026', time: '2:00 PM', nights: null, partySize: '3 guests', location: 'Main Studio', total: null, assignee: 'Sam Rivera' },
     ))),
+  },
+  {
+    id: 'stripe-account-attention',
+    audience: 'owner',
+    title: 'Owner — Stripe needs something from the business',
+    whatsappTemplate: 'guest_thread_reply_whatsapp',
+    message: ownerAlert(stripeAccountAttentionMessage({
+      organizationName: 'Ember & Slice', status: 'action_required',
+      reasons: ['Information on the account doesn\'t match information on the document. Verify the account and upload the document again.'],
+      action: { url: 'https://demo.krabiclaw.com/dashboard/ember-slice/payments/payout-method', label: 'Review payout setup' },
+    })),
   },
   {
     id: 'domain-update',

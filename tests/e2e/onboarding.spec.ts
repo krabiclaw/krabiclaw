@@ -738,7 +738,7 @@ test('a location is created by walking its own record', async ({ page, baseURL, 
     createdLocationId = location.id
     expect(location.slug).toBe('raleigh-annex')
     await expect(page).toHaveURL(`/dashboard/${org}/locations/raleigh-annex/photos`)
-    await expect(page.locator('#dashboard-panel-location-photos').getByRole('heading', { name: 'Photos', exact: true, level: 1 })).toBeVisible()
+    await expect(page.locator('#dashboard-panel-location-photos').getByRole('heading', { name: 'Media', exact: true, level: 1 })).toBeVisible()
 
     const created = await page.request.get(`/api/dashboard/locations?org=${org}`)
     expect(created.status(), await created.text()).toBe(200)
