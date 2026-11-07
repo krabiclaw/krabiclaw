@@ -384,9 +384,6 @@ async function sendStatusUpdate(
     deliveryError = describeErrorForTelemetry(error)
   }
   if (deliveryError === undefined && isDeliverySent(outcome)) {
-    const subject = parseEntryPayload(entry)?.subject
-    if (typeof subject !== 'string' || !subject.trim()) return conflict('Status update has no recorded subject')
-    await notifyBuyerThread(db, { threadId: context.thread.id, entryId: entry.id, title: subject })
     if (input.action === 'confirm') {
       // Confirming answers the booking request, not a separate guest message.
       // A retry must also leave newer conversation activity on its own state.
