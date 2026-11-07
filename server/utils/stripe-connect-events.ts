@@ -1,6 +1,8 @@
 import type Stripe from 'stripe'
 import type { DbClient } from '~/server/db'
-import { getStripeConnectedAccountByStripeId, refreshStripeConnectedAccount } from '~/server/utils/stripe-connect'
+import { notifyStripeAccountAttention } from '~/server/domain/payments/notifications'
+import type { CloudflareEnv } from '~/server/utils/auth'
+import { getStripeConnectedAccountByStripeId, projectStripeConnectedAccount, retrieveStripeConnectProjection } from '~/server/utils/stripe-connect'
 import { processStripeWebhookEvent } from '~/server/utils/stripe-webhook-events'
 
 const CONNECT_ACCOUNT_EVENT_TYPES = new Set([
@@ -25,6 +27,7 @@ async function connectedAccountId(notification: Stripe.V2.Core.EventNotification
 export async function processStripeConnectEvent(
   db: DbClient,
   stripe: Stripe,
+  env: CloudflareEnv,
   notification: Stripe.V2.Core.EventNotification,
   payload: string,
 ): Promise<boolean> {
@@ -44,6 +47,9 @@ export async function processStripeConnectEvent(
       console.info('stripe_connect_event_account_not_managed', { stripeEventId: notification.id, stripeAccountId })
       return
     }
-    await refreshStripeConnectedAccount(db, stripe, connected, notification.context)
+    const projection = await retrieveStripeConnectProjection(stripe, connected, notification.context)
+    // Told before the status is saved, so Stripe's retry of a failed alert still sees the change.
+    await notifyStripeAccountAttention(db, env, connected.status, projection)
+    await projectStripeConnectedAccount(db, projection)
   })
 }

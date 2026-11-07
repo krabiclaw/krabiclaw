@@ -12,6 +12,10 @@ import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { listGuestThreads, updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
 import { requestBookingChange, respondToBookingChange } from '../../server/domain/guest-threads/booking-changes.ts'
+import type Stripe from 'stripe'
+import { processStripeConnectEvent } from '../../server/utils/stripe-connect-events.ts'
+import { toWhatsAppVars } from '../../server/notifications/whatsapp-mapping.ts'
+import { buildWhatsAppTemplatePayload } from '../../server/utils/whatsapp.ts'
 import { notifyContactSubmitted, notifyFinancialNotification, notifyStayCancelled, notifyReservationCreated, notifyBookingCreated } from '../../server/utils/notifications.ts'
 import { buyStay } from './support/stay-checkout.ts'
 import { approveRefundAuthorization, requestRefundAuthorization } from '../../server/domain/payments/index.ts'
@@ -27,7 +31,7 @@ import { buildNotificationVisibilityFilter, type NotificationVisibilityPrincipal
 import { acknowledgeNotification } from '../../server/utils/notification-acknowledgement.ts'
 import { setNotificationPreference } from '../../server/domain/notification-preferences.ts'
 import { registerDevice } from '../../server/domain/devices.ts'
-import { guestPaymentMessage, ownerPaymentMessage } from '../../server/notifications/payment-events.ts'
+import { guestPaymentMessage, ownerPaymentMessage, stripeAccountAttentionMessage } from '../../server/notifications/payment-events.ts'
 import { getResendClient, resendData } from '../../server/utils/resend.ts'
 import { getReviewBookingContext } from '../../server/utils/review-requests.ts'
 import { renderNotificationEmail } from '../../server/emails/render.ts'
@@ -1022,5 +1026,84 @@ test('native Resend test transport persists one delivered financial email throug
       threaded_message_id: threadedReadback.message_id, threaded_replay_provider_id_unchanged: threadedReplay.provider_message_id === threaded.provider_message_id,
       persisted_notifications: 2, persisted_deliveries: 2, replay_provider_id_unchanged: true,
       actual_financial_trigger_qualified: false, actual_owner_inbox_qualified: false }))
+  } finally { await runtime.dispose() }
+})
+
+test('Stripe account events alert owners once for a refused document or a new ask, never during first onboarding', { timeout: 120_000 }, async () => {
+  const runtime = new Miniflare({ workers: [{ config: {
+    name: 'stripe-account-attention-proof', compatibilityDate: '2024-11-01',
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
+    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stripe-account-attention-proof', exportName: 'Hub' } },
+  } }] })
+  try {
+    const db = await runtime.getD1Database('DB')
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+      STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example',
+      EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
+    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    await db.batch([
+      "INSERT INTO organization (id,name,slug, default_currency, timezone) VALUES ('merchant','Merchant','merchant', 'USD', 'UTC')",
+      ...['owner', 'admin', 'staff'].map(id => `INSERT INTO user (id,name,email,emailVerified) VALUES ('${id}','${id}','${id}@proof.example',1)`),
+      ...['owner', 'admin', 'member'].map((role, index) => `INSERT INTO member (id,organizationId,userId,role) VALUES ('member-${index}','merchant','${['owner', 'admin', 'staff'][index]}','${role}')`),
+      "INSERT INTO stripe_connected_accounts (id,organization_id,stripe_account_id,livemode,status) VALUES ('connect','merchant','acct_proof',0,'action_required')",
+    ].map(statement => db.prepare(statement)))
+
+    const refused = 'Information on the account doesn\'t match information on the document.'
+    let requirements: Array<{ awaiting_action_from: string; description: string; errors: Array<{ description: string }>; minimum_deadline: { status: string } }> = []
+    let capability = { status: 'restricted', status_details: [] as Array<{ resolution: string }> }
+    const stripe = { v2: { core: { accounts: { retrieve: async () => ({
+      id: 'acct_proof', livemode: false, dashboard: 'express',
+      defaults: { responsibilities: { fees_collector: 'application', losses_collector: 'stripe' } },
+      identity: { country: 'TH' }, configuration: { merchant: { capabilities: { card_payments: capability } } },
+      requirements: { entries: requirements },
+    }) } } } } as unknown as Stripe
+    let events = 0
+    const deliver = () => processStripeConnectEvent(db, stripe, env, {
+      id: `evt_${++events}`, type: 'v2.core.account[requirements].updated', related_object: { id: 'acct_proof' },
+    } as unknown as Stripe.V2.Core.EventNotification, '{}')
+    const due = (errors: string[]) => [{ awaiting_action_from: 'user', description: 'person.documents.primary_verification', errors: errors.map(description => ({ description })), minimum_deadline: { status: 'past_due' } }]
+    const alerts = async () => (await db.prepare("SELECT body,json_extract(payload_json,'$.severity') severity,json_extract(payload_json,'$.deep_link') deep_link FROM activity_entries WHERE event_name='stripe_account_attention' ORDER BY created_at, id").all()).results
+    const status = () => db.prepare("SELECT status FROM stripe_connected_accounts WHERE id='connect'").first('status')
+
+    // First onboarding: the owner is in Stripe's form, and each step changes what is due.
+    requirements = due([])
+    assert.equal(await deliver(), true)
+    assert.deepEqual(await alerts(), [])
+    assert.equal(await status(), 'action_required')
+
+    // Stripe refuses the submitted document: said once, however many events carry it.
+    requirements = due([refused])
+    assert.equal(await deliver(), true)
+    assert.equal(await deliver(), true)
+    const told = await alerts()
+    assert.equal(told.length, 1)
+    assert.match(String(told[0]!.body), /doesn't match information on the document/u)
+    assert.equal(told[0]!.severity, 'warning')
+    assert.equal(told[0]!.deep_link, 'https://proof.example/dashboard/merchant/payments/payout-method')
+    const receipts = (await db.prepare('SELECT channel,purpose,status,email_json FROM guest_thread_deliveries').all<{ channel: string; purpose: string; status: string; email_json: string }>()).results
+    assert.deepEqual(receipts.map(row => [row.channel, row.purpose, row.status]), [['email', 'owner_alert', 'sent'], ['email', 'owner_alert', 'sent']])
+    const mail = receipts.map(row => JSON.parse(row.email_json).message as { to: string | string[]; subject: string; html: string })
+    assert.deepEqual(mail.map(sent => String(sent.to)).sort(), ['admin@proof.example', 'owner@proof.example'], 'owners and admins hear; a plain member does not')
+    assert.equal(mail[0]!.subject, 'Stripe needs more information')
+    assert.match(mail[0]!.html, /match information on the document/u)
+    assert.match(mail[0]!.html, /href="https:\/\/proof\.example\/dashboard\/merchant\/payments\/payout-method"/u)
+
+    // Setup finishes, then Stripe later asks for something new: entering the state is the alert.
+    requirements = []
+    capability = { status: 'active', status_details: [] }
+    assert.equal(await deliver(), true)
+    assert.equal(await status(), 'ready')
+    assert.equal((await alerts()).length, 1)
+    requirements = due([])
+    assert.equal(await deliver(), true)
+    assert.equal(await status(), 'action_required')
+    assert.equal((await alerts()).length, 2)
+
+    // The approved WhatsApp template can carry this message, button included.
+    const message = stripeAccountAttentionMessage({ organizationName: 'Merchant', status: 'action_required', reasons: [refused], action: { url: 'https://proof.example/dashboard/merchant/payments/payout-method', label: 'Review payout setup' } })
+    const template = buildWhatsAppTemplatePayload('guest_thread_reply_whatsapp', toWhatsAppVars(message, 'guest_thread_reply_whatsapp').vars)
+    assert.equal(template.name, 'new_contact_msg_no_email')
+    assert.deepEqual(template.components.at(-1), { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: 'merchant/payments/payout-method' }] })
   } finally { await runtime.dispose() }
 })

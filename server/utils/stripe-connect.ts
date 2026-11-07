@@ -193,14 +193,17 @@ export function buildStripeConnectOnboardingUrls(
  * status being determined) is under review, not waiting on the business; only
  * `provide_info` asks the business to act, and `contact_stripe` restricts it.
  */
+export function isUserActionDue(requirement: StripeConnectRequirement): boolean {
+  return requirement.awaitingActionFrom === 'user'
+    && (requirement.deadlineStatus === 'currently_due' || requirement.deadlineStatus === 'past_due')
+}
+
 export function deriveStripeConnectStatus(input: {
   cardPaymentsStatus: StripeCapabilityStatus | null
   cardPaymentsResolutions: StripeCapabilityResolution[]
   requirements: StripeConnectRequirement[]
 }): Exclude<StripeConnectStatus, 'creating' | 'creation_failed'> {
-  const userActionDue = input.requirements.some(requirement =>
-    requirement.awaitingActionFrom === 'user'
-    && (requirement.deadlineStatus === 'currently_due' || requirement.deadlineStatus === 'past_due'))
+  const userActionDue = input.requirements.some(isUserActionDue)
   if (userActionDue || input.cardPaymentsResolutions.includes('provide_info')) return 'action_required'
   if (input.cardPaymentsStatus === 'active') return 'ready'
   if (input.cardPaymentsStatus === 'unsupported' || input.cardPaymentsResolutions.includes('contact_stripe')) return 'restricted'
@@ -324,11 +327,15 @@ async function recordStripeConnectedAccountId(
   return connected
 }
 
+export function projectedStripeConnectStatus(input: StripeConnectProjection) {
+  return input.financialContractSupported === false ? 'restricted' : deriveStripeConnectStatus(input)
+}
+
 export async function projectStripeConnectedAccount(
   db: DbClient,
   input: StripeConnectProjection,
 ): Promise<StripeConnectedAccount> {
-  const status = input.financialContractSupported === false ? 'restricted' : deriveStripeConnectStatus(input)
+  const status = projectedStripeConnectStatus(input)
   const updated = await execute(db, `
     UPDATE stripe_connected_accounts
     SET stripe_account_id = ?, country = ?, status = ?, card_payments_status = ?,
@@ -480,17 +487,24 @@ export async function requireStripeCheckoutAcceptance(db: DbClient, env: Cloudfl
   return { connected: { ...connected, stripeAccountId: account.id }, methodConfigurationId: methods.configuration.id, automaticTax: readiness.automaticTax }
 }
 
-export async function refreshStripeConnectedAccount(
-  db: DbClient,
+export async function retrieveStripeConnectProjection(
   stripe: Stripe,
   connected: StripeConnectedAccount,
   stripeContext?: Stripe.V2.Core.EventNotification['context'],
-): Promise<StripeConnectedAccount> {
+): Promise<StripeConnectProjection> {
   if (!connected.stripeAccountId) throw new Error('Stripe Connect account has not been created')
   const account = await stripe.v2.core.accounts.retrieve(connected.stripeAccountId, {
     include: STRIPE_CONNECT_ACCOUNT_INCLUDE,
   }, stripeContext === undefined ? {} : { stripeContext })
-  return await projectStripeConnectedAccount(db, accountProjection(connected, account))
+  return accountProjection(connected, account)
+}
+
+export async function refreshStripeConnectedAccount(
+  db: DbClient,
+  stripe: Stripe,
+  connected: StripeConnectedAccount,
+): Promise<StripeConnectedAccount> {
+  return await projectStripeConnectedAccount(db, await retrieveStripeConnectProjection(stripe, connected))
 }
 
 export async function ensureStripeConnectedAccount(

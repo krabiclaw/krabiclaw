@@ -2,8 +2,9 @@ import type Stripe from 'stripe'
 import { queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode } from '~/shared/currencies'
-import { ownerPaymentMessage, guestPaymentMessage, type GuestPaymentNotificationKind, type PaymentNotificationEvent } from '~/server/notifications/payment-events'
-import { notifyFinancialNotification } from '~/server/utils/notifications'
+import { ownerPaymentMessage, guestPaymentMessage, stripeAccountAttentionMessage, type GuestPaymentNotificationKind, type PaymentNotificationEvent } from '~/server/notifications/payment-events'
+import { notifyFinancialNotification, notifyOwner } from '~/server/utils/notifications'
+import { isUserActionDue, projectedStripeConnectStatus, type StripeConnectProjection, type StripeConnectStatus } from '~/server/utils/stripe-connect'
 import { appendEntry } from '~/server/domain/guest-threads/entries'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { dashboardOrigin } from '~/server/utils/dashboard-notification-links'
@@ -123,5 +124,37 @@ export async function notifyPayoutState(db: DbClient, env: CloudflareEnv, scope:
     eventKey: `payments:${scope.stripeAccountId}:${Number(scope.livemode)}:${payout.id}:${payout.status}`,
     ownerMessage: ownerPaymentMessage({ ...event, action: details.action }),
     deepLink,
+  })
+}
+
+/**
+ * Tell owners and admins when Stripe asks for something after setup, or refuses
+ * something they submitted. An account still in its first onboarding is not an
+ * alert: its owner is in Stripe's form, and every step changes the requirements.
+ * The key names what was asked, so Stripe's several events for one change alert once.
+ */
+export async function notifyStripeAccountAttention(db: DbClient, env: CloudflareEnv, previous: StripeConnectStatus, projection: StripeConnectProjection) {
+  const status = projectedStripeConnectStatus(projection)
+  if (status !== 'action_required' && status !== 'restricted') return
+  const reasons = [...new Set(projection.requirements.filter(isUserActionDue).flatMap(requirement => requirement.errors))].sort()
+  const entered = previous !== status && previous !== 'creating' && previous !== 'creation_failed'
+  if (!entered && reasons.length === 0) return
+  const organization = await queryFirst<{ name: string; slug: string }>(db, 'SELECT name,slug FROM organization WHERE id=?', [projection.organizationId])
+  if (!organization) throw new Error('Stripe account attention requires its organization')
+  const asked = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(reasons))))
+  const eventKey = `payments:${projection.stripeAccountId}:${Number(projection.livemode)}:account:${status}:${Array.from(asked.slice(0, 8), byte => byte.toString(16).padStart(2, '0')).join('')}`
+  const deepLink = `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}/payments/payout-method`
+  const message = stripeAccountAttentionMessage({ organizationName: organization.name, status, reasons, action: { url: deepLink, label: 'Review payout setup' } })
+  await notifyOwner(env, db, {
+    organizationId: projection.organizationId,
+    organizationName: organization.name,
+    template: 'stripe_account_attention',
+    title: message.title,
+    payload: { deep_link: deepLink },
+    message,
+    whatsappTemplate: 'guest_thread_reply_whatsapp',
+    notification: { message: message.facts.find(fact => fact.key === 'message')!.value, severity: 'warning' },
+    idempotencyKey: `${eventKey}:owner`,
+    deliveryEventKey: `${eventKey}:owner`,
   })
 }

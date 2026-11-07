@@ -136,3 +136,32 @@ export function ownerPaymentMessage(event: PaymentNotificationEvent & { action: 
 export function guestPaymentMessage(event: GuestPaymentNotificationEvent): NotificationMessage {
   return paymentMessage(event, 'guest')
 }
+
+/** Stripe asking the business for something: no money moved, so it states what Stripe says instead of an amount. */
+export function stripeAccountAttentionMessage(input: {
+  organizationName: string
+  status: 'action_required' | 'restricted'
+  /** Stripe's own words for what it refused. */
+  reasons: readonly string[]
+  action: NotificationAction
+}): MemberAlertMessage {
+  const required = input.status === 'action_required'
+  const statement = required ? 'Stripe needs more information from the business.' : 'Stripe has restricted card payments. Open Stripe onboarding to review the required action.'
+  return {
+    title: required ? 'Stripe needs more information' : 'Stripe restricted card payments',
+    preheader: `Stripe account · ${input.organizationName}`,
+    hero: null,
+    intro: statement,
+    // These keys are the ones the approved WhatsApp alert template carries.
+    facts: [
+      { key: 'guestName', label: 'Business', value: input.organizationName, lead: true },
+      { key: 'subject', label: 'Stripe account', value: required ? 'Action required' : 'Restricted', lead: true },
+      { key: 'message', label: 'Stripe says', value: input.reasons.join(' ') || statement, lead: true },
+    ],
+    primaryAction: input.action,
+    category: 'organization_and_billing',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because you receive payment account notifications for ${input.organizationName}.`,
+    organizationName: input.organizationName,
+  }
+}
