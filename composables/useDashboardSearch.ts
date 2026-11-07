@@ -18,7 +18,7 @@ const RESULT_GROUP_LABEL: Partial<Record<PublicSearchResult['type'], string>> = 
   blog: 'Articles',
   thread: 'Messages',
   member: 'Team',
-  media: 'Photos',
+  media: 'Media',
   doc: 'Guides',
   faq: 'Help answers',
 }

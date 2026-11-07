@@ -337,7 +337,7 @@ pane and Back, including on reload and deep links.
 | --- | --- |
 | Product, its variants and prices | what is sold: kind, pricing, booking, publication, locations, collections, its page |
 | A page, article or post | its own content |
-| Location | its place, hours, photos and reservation policy |
+| Location | its place, hours, media and reservation policy |
 | Organization member | that member's public profile and independently authored availability in the named organization |
 | Organization | the shared site: brand, domains, languages, connections |
 | User | account name, avatar, personal preferences and security |
@@ -646,7 +646,7 @@ the available frame.
 **A level alone in the frame is one of three things, and the empty right side
 of a desktop window is never the fourth.** Content that scales — a grid, a
 table, a calendar, a chart, cards — takes the frame: Today, Calendar, Catalog,
-Insights, Photos, Transactions name no column. A settings index pairs with its
+Insights, Media, Transactions name no column. A settings index pairs with its
 first row where there is a pane, as Account settings, Connections,
 Plan and billing and Earnings do: its rows are leaves beside it and `autoOpen` names the first.
 Only a list of records with nothing of its own to open — Notifications, Past

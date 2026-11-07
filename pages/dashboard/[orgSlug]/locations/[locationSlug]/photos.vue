@@ -1,18 +1,18 @@
 <template>
-  <DashboardIndexPanel id="location-photos" title="Photos">
+  <DashboardIndexPanel id="location-photos" title="Media">
     <div>
       <div class="space-y-6">
 
       <DashboardGridEditor
         v-model:selecting="selecting"
         v-model:selected="selectedIds"
-        title="Photos"
+        title="Media"
         :items="gridItems"
-        :error="photosError ? getErrorMessage(photosError, 'Failed to load photos') : null"
+        :error="photosError ? getErrorMessage(photosError, 'Failed to load media') : null"
         empty-title="No location media yet"
         empty-icon="i-lucide-image"
-        add-label="Add photos"
-        selection-title="Select photos"
+        add-label="Add media"
+        selection-title="Select media"
         grid-class="grid grid-cols-[repeat(auto-fill,minmax(min(100%,9rem),1fr))] gap-3"
         :removing="galleryMutating"
         @add="openAttachModal"
@@ -49,7 +49,7 @@
 
       <DashboardListItemDialog
         v-model:open="photoOpen"
-        :title="openPhotoAsset?.file_name || 'Photo'"
+        :title="openPhotoAsset?.file_name || 'Media'"
         removable
         :saving="galleryMutating"
         :removing="galleryMutating"
@@ -263,7 +263,7 @@ async function uploadSelectedFile(file: File, existingOptions?: { category?: str
 
     const attached = await attachPhotoById(result.asset_id)
     if (!attached && !uploadError.value) {
-      uploadError.value = attachError.value || 'Failed to attach photo to gallery'
+      uploadError.value = attachError.value || 'Failed to attach media'
     }
   } catch (error) {
     if (!uploadError.value) {

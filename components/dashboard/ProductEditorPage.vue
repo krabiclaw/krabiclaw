@@ -508,7 +508,7 @@ const { priceLabel } = useCatalogPrice(computed(() => priceLocationId()), allOrg
 
 const sectionLabels: Record<SectionKey, string> = {
   'kind': 'Type',
-  'photo': 'Photos',
+  'photo': 'Media',
   'name': 'Name',
   'internal-name': 'Internal name',
   get price() { return product.value?.kind === 'service' ? 'Consultation pricing' : 'Price' },
@@ -1288,7 +1288,7 @@ const additionalDetails = computed(() => {
       ...(!visible.has('price') ? [{ id: 'price', label: sectionLabels.price, to: sectionPath('price') }] : []),
       ...(!row.booking ? [{ id: 'booking', label: 'Set up consultations', to: sectionPath('booking') }] : []),
       ...(!visible.has('locations') ? [{ id: 'locations', label: 'Offices', to: sectionPath('locations') }] : []),
-      ...(!visible.has('photo') ? [{ id: 'photo', label: 'Photos', to: sectionPath('photo') }] : []),
+      ...(!visible.has('photo') ? [{ id: 'photo', label: 'Media', to: sectionPath('photo') }] : []),
     ] : []),
   ]
 })
@@ -1333,7 +1333,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
         return collection.name
       })
       const cover = photoAssets.value[0]
-      const photoItem = { id: 'photo', label: 'Photos', image: cover ? mediaStillUrl(cover) || undefined : undefined, summary: photoAssets.value.length ? `${photoAssets.value.length} ${photoAssets.value.length === 1 ? 'photo' : 'photos'}` : 'No photo', placeholder: !photoAssets.value.length, to: sectionPath('photo') }
+      const photoItem = { id: 'photo', label: 'Media', image: cover ? mediaStillUrl(cover) || undefined : undefined, summary: photoAssets.value.length ? `${photoAssets.value.length} ${photoAssets.value.length === 1 ? 'item' : 'items'}` : 'No media', placeholder: !photoAssets.value.length, to: sectionPath('photo') }
       const pageItems = row.page || legalEditor.value ? [{ id: 'page', label: 'Page content', summary: row.page?.title || 'No page', placeholder: !row.page, ...(canPreview.value ? { to: row.page ? `/dashboard/${String(route.params.orgSlug)}/website/pages/${encodeURIComponent(row.page.id)}` : sectionPath('page') } : {}) }] : []
       return [{ id: legalEditor.value ? 'legal' : 'experience', items: [
         ...(legalEditor.value ? [] : [photoItem]),
@@ -1367,7 +1367,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       return section.name
     })
     return [{ id: 'dish', items: [
-      { id: 'photo', label: 'Photos', image: image ? mediaStillUrl(image) || undefined : undefined, summary: photoAssets.value.length ? `${photoAssets.value.length} ${photoAssets.value.length === 1 ? 'photo' : 'photos'}` : 'Add your first photo', placeholder: !image, to: sectionPath('photo') },
+      { id: 'photo', label: 'Media', image: image ? mediaStillUrl(image) || undefined : undefined, summary: photoAssets.value.length ? `${photoAssets.value.length} ${photoAssets.value.length === 1 ? 'item' : 'items'}` : 'Add media', placeholder: !image, to: sectionPath('photo') },
       { id: 'name', label: 'Name', summary: row.name, to: sectionPath('name') },
       { id: 'price', label: location.value ? `Price at ${location.value.title}` : 'Price', summary: prices, placeholder: prices === 'No price set', to: sectionPath('price') },
       { id: 'description', label: 'Description', summary: row.description || 'Nothing written yet', placeholder: !row.description, to: sectionPath('description') },
@@ -2133,7 +2133,7 @@ async function changeGallery(change: () => Promise<void>) {
   try {
     await change()
   } catch (error) {
-    photoError.value = getErrorMessage(error, 'Failed to update the photos')
+    photoError.value = getErrorMessage(error, 'Failed to update the media')
   }
   choosingGalleryPhoto.value = false
   // Whatever the outcome: a failed change may have made part of its writes.
@@ -2141,7 +2141,7 @@ async function changeGallery(change: () => Promise<void>) {
     await reload()
     if (product.value) loadForm(product.value)
   } catch (error) {
-    photoError.value ??= getErrorMessage(error, 'Failed to read the photos again')
+    photoError.value ??= getErrorMessage(error, 'Failed to read the media again')
   }
 }
 
