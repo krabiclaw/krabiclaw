@@ -2,7 +2,7 @@
   <article class="tc" :class="[`is-${face}`, { 'is-closed': task && task.status !== 'open', 'is-reservation': reservation }]" :data-testid="opportunity ? 'today-opportunity' : 'today-task'" :data-task-id="task?.id" :data-task-kind="task?.kind" :data-opportunity-id="opportunity?.id">
     <NuxtLink v-if="destination" :to="destination" class="tc-target" :aria-label="title" />
     <button v-else type="button" class="tc-target" :aria-label="title" @click="emit('open')" />
-    <button v-if="opportunity || canDismiss" type="button" class="tc-dismiss" :aria-label="opportunity ? 'Dismiss suggestion' : 'Dismiss task'" :disabled="busy" :data-testid="opportunity ? 'today-opportunity-dismiss' : 'today-task-dismiss'" @click="opportunity ? emit('dismiss') : emit('skip')">
+    <button v-if="opportunity || task?.dismiss?.card" type="button" class="tc-dismiss" :aria-label="opportunity ? 'Dismiss suggestion' : `${task!.dismiss!.label} task`" :disabled="busy" :data-testid="opportunity ? 'today-opportunity-dismiss' : 'today-task-dismiss'" @click="opportunity ? emit('dismiss') : emit('skip')">
       <UIcon name="i-lucide-x" class="size-4" />
     </button>
     <div v-if="reservation" class="tc-reservation-main">
@@ -56,7 +56,6 @@ const reservation = computed(() => props.task?.reservation)
 const statusLine = computed(() => props.task?.statusLine ?? (props.opportunity ? `Suggested · ${props.opportunity.statusLine}` : null))
 const title = computed(() => props.task?.title ?? props.opportunity!.title)
 const detail = computed(() => props.task?.detail ?? props.opportunity?.detail ?? null)
-const canDismiss = computed(() => props.task?.kind === 'guest_reply' && props.task.status === 'open' && props.task.can.skip)
 const mediaSrc = computed(() => cfImageVariant(props.task?.imageUrl, { width: 900, height: 600, fit: 'cover', format: 'auto' }) || props.task?.imageUrl || undefined)
 const avatarSrc = computed(() => cfImageVariant(props.task?.imageUrl, { width: 96, height: 96, fit: 'cover', format: 'auto' }) || props.task?.imageUrl || undefined)
 const guestAvatarSrc = computed(() => cfImageVariant(reservation.value?.guestImageUrl, { width: 224, height: 224, fit: 'cover', format: 'auto' }) || reservation.value?.guestImageUrl || undefined)

@@ -92,7 +92,7 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
     // The same task read through the tasks route.
     const taskRead = await page.request.get(`/api/organizations/${organizationId}/tasks/${replyTask.id}`)
     expect(taskRead.status(), await taskRead.text()).toBe(200)
-    expect((await taskRead.json() as { task: TaskView }).task).toMatchObject({ id: replyTask.id, kind: 'guest_reply', status: 'open', requestId: threadId, can: { complete: false } })
+    expect((await taskRead.json() as { task: TaskView }).task).toMatchObject({ id: replyTask.id, kind: 'guest_reply', status: 'open', requestId: threadId, can: { complete: false }, dismiss: { label: 'Dismiss', card: true } })
     // A reply task closes with its subject, not with Done.
     const refused = await page.request.post(`/api/organizations/${organizationId}/tasks/${replyTask.id}/complete`, { data: {} })
     expect(refused.status(), await refused.text()).toBe(409)
@@ -475,7 +475,7 @@ test('opportunities follow explicit strategy, the owner’s decisions and actual
     expect((await taskRead.json() as { task: TaskView }).task).toMatchObject({
       id: acceptedTask.id, kind: 'opportunity', status: 'open', statusLine: 'Accepted opportunity', title: `Publish “${title}”`,
       assignee: { type: 'member', name: 'You', you: true }, dueAt: expect.any(String), action: { type: 'complete', label: 'Done' },
-      can: { complete: true, skip: true, reopen: false, assign: true, edit: true },
+      can: { complete: true, skip: true, reopen: false, assign: true, edit: true }, dismiss: { label: 'Skip', card: false },
     })
     expect((await readToday()).tasks.find(section => section.id === 'open')?.tasks.map(task => task.id)).toContain(acceptedTask.id)
 
@@ -487,7 +487,7 @@ test('opportunities follow explicit strategy, the owner’s decisions and actual
     expect((await readBack.json() as { post: { status: string } }).post.status).toBe('published')
     const after = await readToday()
     expect(after.tasks.find(section => section.id === 'done')?.tasks.find(task => task.id === acceptedTask.id)).toMatchObject({
-      status: 'done', outcome: { note: null, photos: [], closedAt: expect.any(String), closedBy: null }, can: { complete: false, skip: false, reopen: false },
+      status: 'done', outcome: { note: null, photos: [], closedAt: expect.any(String), closedBy: null }, can: { complete: false, skip: false, reopen: false }, dismiss: null,
     })
     expect(await draftOpportunity()).toBeUndefined()
     const next = after.opportunities.find(value => ['Website', 'Social'].includes(value.statusLine) && !value.title.startsWith('Publish “'))

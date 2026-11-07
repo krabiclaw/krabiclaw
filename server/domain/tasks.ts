@@ -261,6 +261,8 @@ export interface TaskView {
   stayId: string | null
   requestId: string | null
   can: { complete: boolean; skip: boolean; reopen: boolean; assign: boolean; edit: boolean }
+  /** How an open task is set aside, and whether its card offers it as well as its sheet. Null when it cannot be. */
+  dismiss: { label: 'Skip' | 'Dismiss'; card: boolean } | null
 }
 
 /** A run of cards: Today's open work has no header; "Done"; Upcoming's "Tomorrow" with "Sat, Nov 7" in grey. */
@@ -589,7 +591,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     when = null
     error = null
     const at = sameDay(row.closed_at!, now.toISOString()) ? time(row.closed_at!) : day(row.closed_at!)
-    statusLine = [`${row.status === 'done' ? 'Done' : row.status === 'skipped' ? ['turnover', 'custom', 'opportunity'].includes(row.kind) ? 'Skipped' : 'Dismissed' : 'Cancelled'} at ${at}`, photos.length ? `${photos.length} ${photos.length === 1 ? 'photo' : 'photos'}` : null].filter(Boolean).join(' · ')
+    statusLine = [`${row.status === 'done' ? 'Done' : row.status === 'skipped' ? PERSON_WORK.has(row.kind) ? 'Skipped' : 'Dismissed' : 'Cancelled'} at ${at}`, photos.length ? `${photos.length} ${photos.length === 1 ? 'photo' : 'photos'}` : null].filter(Boolean).join(' · ')
     detail = null
   }
   const mine = assignee?.you ?? false
@@ -613,6 +615,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     startsAt: row.starts_at, dueAt: row.due_at, timezone: zone, notes: row.notes,
     outcome: row.status === 'open' ? null : { note: row.outcome_note, photos, closedAt: row.closed_at!, closedBy: closerName },
     path, productId: row.product_id, locationId: row.location_id, stayId, requestId, can,
+    dismiss: can.skip ? { label: PERSON_WORK.has(row.kind) ? 'Skip' : 'Dismiss', card: row.kind === 'guest_reply' } : null,
   }
 }
 
@@ -636,6 +639,8 @@ export function parseTaskListQuery(query: Record<string, unknown>, defaults: Par
 }
 
 /** Today's open work in the owner's order: failed deliveries, turnovers, replies, then everything else. */
+/** Work a person does and closes themselves: they Skip it, and say what they found when they finish. Everything else is Dismissed. */
+const PERSON_WORK: ReadonlySet<TaskKind> = new Set(['turnover', 'custom', 'opportunity'])
 const TODAY_ORDER: Record<TaskKind, number> = { message_delivery: 0, turnover: 1, guest_reply: 2, booking_review: 2, booking_change: 2, custom: 3, opportunity: 3 }
 
 /** Today: open work due or starting today or earlier, or with no date; then what was closed today. Upcoming: open work later than today, by day. */
