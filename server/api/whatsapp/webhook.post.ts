@@ -152,7 +152,8 @@ async function replyDestination(db: D1Database, threadId: string, organizationId
   const destination = await guestReplyDestination(db, thread)
   if (destination.channel === null) return { refused: destination.reason }
   if (destination.channel === 'airbnb') return { destination: 'through Airbnb' }
-  return { destination: destination.channel === 'email' ? `by email to ${maskEmailForDisplay(destination.email)}` : 'to their KrabiClaw inbox' }
+  if (destination.channel === 'email') return { destination: `by email to ${maskEmailForDisplay(destination.email)}` }
+  return { destination: destination.email ? `to their KrabiClaw inbox and by email to ${maskEmailForDisplay(destination.email)}` : 'to their KrabiClaw inbox' }
 }
 
 async function resolveQuotedDelivery(
