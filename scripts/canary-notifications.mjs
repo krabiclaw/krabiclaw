@@ -12,11 +12,11 @@ const quote = value => `'${value.replace(/'/g, "''")}'`
 const recipientHash = value => createHash('sha256').update(value.toLowerCase().trim()).digest('hex')
 
 function read(sql) {
-  const result = spawnYarn(['-s', 'wrangler', 'd1', 'execute', 'DB', '--remote', '--json', '--command', sql], {
+  const result = spawnYarn(['wrangler', 'd1', 'execute', 'DB', '--remote', '--json', '--command', sql], {
     stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8',
   })
   if (result.error) throw result.error
-  if (result.status !== 0) throw new Error('Production canary database read failed', { cause: result.stderr })
+  if (result.status !== 0) throw new Error('Production canary database read failed', { cause: result.stderr || result.stdout })
   const [response] = JSON.parse(result.stdout)
   if (!response?.success || !Array.isArray(response.results)) throw new Error('Unexpected production canary database response')
   return response.results
