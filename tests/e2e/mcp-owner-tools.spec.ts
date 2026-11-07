@@ -1421,7 +1421,7 @@ test.describe('stateless MCP server', () => {
         expect(Object.keys(section.collection).sort()).toEqual(['id', 'organization_id', 'location_id', 'name', 'slug', 'description', 'image', 'sort_order'].sort())
         for (const product of section.products) {
           expect(product.kind).toBe('dish')
-          expect(Object.keys(product).sort()).toEqual(['id', 'kind', 'name', 'slug', 'description', 'active', 'order_url', 'unit_label', 'marketing_features', 'metadata', 'tax_code', 'options', 'variants', 'details', 'publications', 'locations', 'collections', 'updated_at'].sort())
+          expect(Object.keys(product).sort()).toEqual(['id', 'kind', 'name', 'slug', 'description', 'active', 'order_url', 'unit_label', 'marketing_features', 'metadata', 'tax_code', 'variants', 'details', 'publications', 'locations', 'collections', 'updated_at'].sort())
           for (const variant of product.variants) for (const price of variant.prices) {
             for (const field of ['organization_id', 'product_variant_id', 'created_by', 'updated_by', 'created_at', 'updated_at', 'source']) expect(price).not.toHaveProperty(field)
           }
