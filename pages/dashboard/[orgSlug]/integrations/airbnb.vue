@@ -173,7 +173,7 @@ const details = ref<Record<string, AirbnbListingDetails>>({})
 const needsDetails = (listing: AirbnbListing) => {
   const known = details.value[listing.id]
   return listing.import.status === 'not_imported' && known !== undefined && !entered.value[listing.id]
-    && (known.missingFields.length > 0 || !known.checkInTime || !known.checkOutTime)
+    && known.missingFields.length > 0
 }
 
 /** "Backup" in the title, or a title already used by an earlier listing on the account. */
