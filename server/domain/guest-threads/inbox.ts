@@ -137,10 +137,13 @@ const RECEIPT_RANK = ['pending', 'sending', 'uncertain', 'accepted', 'sent', 'de
 
 /** What became of a reply, said once under the newest one as Airbnb says it. */
 function receipt(entry: GuestThreadEntryViewModel, guestName: string): string | null {
-  const replies = entry.deliveries.filter(delivery => delivery.purpose === 'member_reply' || delivery.purpose === 'scheduled_message')
+  const attempts = entry.deliveries.filter(delivery => delivery.purpose === 'member_reply' || delivery.purpose === 'scheduled_message')
+  const providerReplies = attempts.filter(delivery => delivery.provider !== 'log_only')
+  const replies = providerReplies.length ? providerReplies : attempts
   if (!replies.length) return null
   if (replies.every(delivery => delivery.status === 'failed' || delivery.status === 'skipped')) return 'Not delivered'
   const best = replies.reduce((top, delivery) => RECEIPT_RANK.indexOf(delivery.status as typeof RECEIPT_RANK[number]) > RECEIPT_RANK.indexOf(top.status as typeof RECEIPT_RANK[number]) ? delivery : top)
+  if (best.provider === 'log_only') return 'Recorded locally'
   switch (best.status) {
     case 'read': return `Read by ${guestName}`
     case 'delivered': return 'Delivered'

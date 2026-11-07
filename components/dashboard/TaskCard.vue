@@ -7,8 +7,8 @@
       <span class="mt-3 block text-base font-medium">{{ reservation.homeName }}</span>
       <span class="mt-2 block text-sm text-muted">{{ reservation.statusLabel }}</span>
     </button>
-    <button v-else-if="task && face === 'photo'" type="button" class="tc-media" :aria-label="`Open ${task.title}`" @click="emit('open')">
-      <img v-if="mediaSrc" :src="mediaSrc" alt="" class="size-full object-cover">
+    <button v-else-if="task && face === 'photo' && mediaSrc" type="button" class="tc-media" :aria-label="`Open ${task.title}`" @click="emit('open')">
+      <img :src="mediaSrc" alt="" class="size-full object-cover">
       <span v-if="task.tag" class="tc-tag">{{ task.tag }}</span>
     </button>
     <div class="tc-body">
@@ -19,6 +19,7 @@
           <UIcon v-else :name="opportunity?.icon ?? 'i-lucide-list-checks'" class="size-5" />
         </span>
         <span class="tc-main">
+          <span v-if="face === 'photo' && !mediaSrc && task?.tag" class="mb-2 text-sm font-semibold">{{ task.tag }}</span>
           <span v-if="statusLine" class="tc-k">{{ statusLine }}</span>
           <span v-if="task?.when" class="tc-head"><span class="tc-t">{{ title }}</span><span class="tc-when">{{ task.when }}</span></span>
           <span v-else class="tc-t">{{ title }}</span>

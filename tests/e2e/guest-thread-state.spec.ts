@@ -406,7 +406,7 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     // server's word for a message the reading member wrote, so it is the owner's.
     const afterReplies = await loadThreadDetail(owner, threadId)
     const replyEntries = streamMessages(afterReplies).filter(item => item.body === replyBody)
-    expect(replyEntries).toMatchObject([{ side: 'business', author: 'You' }])
+    expect(replyEntries).toMatchObject([{ side: 'business', author: 'You', receipt: 'Recorded locally' }])
     expect((await loadLedger(owner, threadId)).entries.filter(entry => entry.body === replyBody)).toMatchObject([{
       id: replyEntries[0]!.id,
       kind: 'message',
