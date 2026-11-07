@@ -281,12 +281,11 @@ test.describe('Plan and billing', () => {
           await open(admin, '/dashboard/ember-slice-demo/billing')
           const index = admin.locator('#dashboard-panel-organization-billing')
           // One line names who changes it; the plan card has no button and Stripe's portal is not offered.
-          await expect(index.getByTestId('billing-owner-line')).toContainText('is the owner and changes the plan and billing.')
+          await expect(index.getByTestId('billing-owner-line')).toContainText('Only the organization owner can manage billing.')
           await expect(index.getByTestId('billing-plan-card')).toContainText('Business')
           await expect(index.getByTestId('billing-plan-card').getByRole('button')).toHaveCount(0)
           await expect(index.getByTestId('billing-plan-card').getByRole('link')).toHaveCount(0)
-          await expect(index.getByTestId('editor-row-portal')).toContainText('Manage billing')
-          await expect(index.locator('button[data-testid="editor-row-portal"]')).toHaveCount(0)
+          await expect(index.getByTestId('editor-row-portal')).toHaveCount(0)
           // A service leaf reads the same, with no consent to give.
           await open(admin, '/dashboard/ember-slice-demo/billing/strategy')
           const strategy = admin.locator('#dashboard-panel-organization-strategy')
