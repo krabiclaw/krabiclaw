@@ -271,6 +271,7 @@ interface StayContextFacts extends StayFacts {
   guest_surname: string | null
   guest_image_url: string | null
   home_timezone: string | null
+  arrival_time: string | null
   check_in_time: string | null
   check_out_time: string | null
   status: StayWindow['status']
@@ -338,7 +339,7 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
   const stays = await queryAll<StayContextFacts>(db, `
     SELECT s.id, s.product_id, s.guest_name, s.guest_surname, s.adults, s.children, s.check_in_date, s.check_out_date,
       s.request_id, s.status, s.channel, s.overbooked, u.image AS guest_image_url, l.timezone AS home_timezone,
-      c.check_in_time, c.check_out_time, EXISTS (
+      s.arrival_time, c.check_in_time, c.check_out_time, EXISTS (
         SELECT 1 FROM stays next WHERE next.organization_id = s.organization_id AND next.product_id = s.product_id
           AND next.status = 'confirmed' AND next.id <> s.id AND next.check_in_date = s.check_out_date
       ) AS same_day_arrival
@@ -474,7 +475,8 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
         if (stay.status === 'cancelled') statusLabel = 'Cancelled'
         else if (localDay > stay.check_out_date) statusLabel = 'Stay ended'
         else if (localDay <= stay.check_in_date) {
-          statusLabel = `Checking in · ${stay.check_in_time === null ? 'Time not set' : formatTime(stay.check_in_time, 'en')}`
+          const clock = stay.arrival_time ?? stay.check_in_time
+          statusLabel = `Checking in · ${clock === null ? 'Time not set' : formatTime(clock, 'en')}`
         } else if (localDay === stay.check_out_date) {
           const clock = stay.check_out_time === null ? 'Time not set' : formatTime(stay.check_out_time, 'en')
           statusLabel = stay.same_day_arrival ? `Checking out · Next guests arrive the same day · ${clock}` : `Checking out · ${clock}`
