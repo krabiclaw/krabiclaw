@@ -88,6 +88,7 @@ class FakeChannex {
   airbnbDown = false
   /** Whether listing_details carries the listing's content; off, it is the record as the import read it before the content stage existed. */
   content = true
+  bedCount = 3
   /** An Airbnb image id whose CDN fetch answers 503. */
   failPhoto: string | null = null
   /** Extra uncaptioned photos after PHOTOS, for a listing with more photos than a home holds. */
@@ -167,7 +168,7 @@ class FakeChannex {
         amenities: { WIRELESS_INTERNET: { instruction: '', is_present: true }, SMOKE_DETECTOR: { instruction: '', is_present: true }, HOVERBOARD_DOCK: { instruction: '', is_present: true }, CRIB: { instruction: '', is_present: false } },
         listing_views: ['MOUNTAIN_VIEW'],
         rooms: [{ id: 'r1', listing_id: listingId, room_type: 'bedroom', is_private: true, beds: [{ quantity: 1, type: 'queen_bed' }], accessibility_features: [] }, { id: 'r2', listing_id: listingId, room_type: 'bedroom', is_private: true, beds: [{ quantity: 2, type: 'queen_bed' }], accessibility_features: [] }],
-        bedrooms: 2, beds: 3, bathrooms: 1, house_manual: 'Unit 63A. Shoes off, please.', directions: 'Behind the capitol.', wifi_network: '5 Star', wifi_password: 'open sesame',
+        bedrooms: 2, beds: this.bedCount, bathrooms: 1, house_manual: 'Unit 63A. Shoes off, please.', directions: 'Behind the capitol.', wifi_network: '5 Star', wifi_password: 'open sesame',
         check_in_option: { category: 'smartlock', instruction: 'Door code 0126' },
         quiet_hours: [{ start_time: '23', end_time: '7' }],
       } : { rooms: [], images: null, descriptions: null }
@@ -326,12 +327,12 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
     // Children and infants are not asked: Airbnb counts neither.
     assert.deepEqual(details.missingFields, ['email', 'phone'])
     assert.deepEqual({ timezone: details.fields.timezone, checkIn: details.checkInTime, checkInEnd: details.checkInEndTime, checkOut: details.checkOutTime }, { timezone: TZ, checkIn: '16:00', checkInEnd: '21:00', checkOut: '10:00' })
-    // Airbnb's category is not a Channex property type: a townhouse or house is Channex's holiday home, and a category with no mapping stops the import.
+    // Translate provider aliases without rejecting categories Channex can validate itself.
     assert.equal(details.fields.propertyType, 'holiday_home')
     channex.category = 'house'
     assert.equal((await connection.details(LISTING)).fields.propertyType, 'holiday_home')
     channex.category = 'treehouse'
-    await assert.rejects(connection.details(LISTING), { status: 422, data: { code: 'UNSUPPORTED_PROPERTY_TYPE' } })
+    assert.equal((await connection.details(LISTING)).fields.propertyType, 'treehouse')
     channex.category = 'townhouse'
 
     const started = await connection.prepare(LISTING, form)
@@ -1791,7 +1792,7 @@ test('an in-flight stop cannot mark a newer sync request done', { timeout: 120_0
   }
 })
 
-test('the import asks only for what Airbnb leaves out, and stops when Airbnb has no check-in start or checkout', { timeout: 120_000 }, async () => {
+test('the import asks only for required contact details and preserves provider booking settings', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
@@ -1816,21 +1817,12 @@ test('the import asks only for what Airbnb leaves out, and stops when Airbnb has
     channex.availabilityRules = realRules
     // Only the fields Airbnb left out may be supplied.
     await assert.rejects(connection.prepare(LISTING, { missingDetails: { ...form.missingDetails, city: 'Elsewhere' } }), { status: 422, data: { code: 'ONLY_MISSING_DETAILS' } })
-    // "FLEXIBLE" or "NOT_SELECTED" is no start: the import stops naming Airbnb's field, and nothing is made.
     const policies = channex.booking.cancellation_policy_settings
-    for (const [setting, field] of [
-      [{ check_in_time_start: 'NOT_SELECTED' }, 'booking_settings.check_in_time_start'], [{ check_out_time: null }, 'booking_settings.check_out_time'],
-      [{ cancellation_policy_settings: null }, 'booking_settings.cancellation_policy_settings.cancellation_policy_category'],
-      [{ cancellation_policy_settings: { cancellation_policy_category: 'flexible' } }, 'booking_settings.cancellation_policy_settings.lts_cancellation_policy_id'],
-    ] as const) {
-      channex.booking = { ...channex.booking, check_in_time_start: '16', check_out_time: 10, cancellation_policy_settings: policies, ...setting }
-      await assert.rejects(connection.prepare(LISTING, form), (error: { status?: number; data?: Record<string, unknown> }) => error.status === 422 && error.data?.code === 'MISSING_AIRBNB_FIELD' && error.data.field === field)
-      assert.deepEqual([await count(db, 'business_locations'), await count(db, 'products'), await count(db, 'product_channel_mappings')], [0, 0, 0])
-    }
-    // A policy Airbnb names that has none of ours stops the import for review, and nothing is made.
+    // Untranslated provider terms do not block the home or acquire a different local policy.
     channex.booking = { ...channex.booking, cancellation_policy_settings: { cancellation_policy_category: 'super_strict_30', lts_cancellation_policy_id: 'CANCEL_LONG_TERM_FAIR' } }
-    await assert.rejects(connection.prepare(LISTING, form), { status: 422, data: { code: 'UNSUPPORTED_CANCELLATION_POLICY' } })
-    assert.deepEqual([await count(db, 'business_locations'), await count(db, 'products'), await count(db, 'product_channel_mappings')], [0, 0, 0])
+    const untranslated = await connection.details(LISTING)
+    assert.equal(untranslated.cancellationPolicy, null)
+    assert.equal(untranslated.longTermCancellationPolicy, 'firm')
     channex.booking = { ...channex.booking, cancellation_policy_settings: policies }
     // A flexible end is a home whose check-in window has no end; an hour after midnight is that hour.
     channex.booking = { ...channex.booking, check_in_time_start: '16', check_in_time_end: 'FLEXIBLE', check_out_time: 10 }
@@ -1857,6 +1849,38 @@ test('the import asks only for what Airbnb leaves out, and stops when Airbnb has
     await advanceTo(connection, db, channex, started.product_id, 'draft')
     assert.equal((await readStayHome(db, manager, started.product_id)).min_nights, 9)
     assert((JSON.parse(String(await db.prepare('SELECT import_content FROM product_channel_mappings WHERE product_id = ?').bind(started.product_id).first('import_content'))) as ImportContentReport).kept_host_edits.includes('min_nights'))
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+// Unknown arrival metadata and zero beds are valid provider state, not reasons
+// to prevent its listing, photos and calendar from becoming a synced home.
+test('a provider home syncs with zero beds and unknown arrival times and policies', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  const channex = new FakeChannex()
+  channex.category = 'boutique_hotel'
+  channex.bedCount = 0
+  channex.booking = { ...channex.booking, check_in_time_start: 'NOT_SELECTED', check_in_time_end: 'NOT_SELECTED', check_out_time: null, cancellation_policy_settings: null }
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const connection = await connected(db, env, channex)
+    const home = await connection.prepare(LISTING, form)
+    await importAll(connection, db, channex, home.product_id)
+    const saved = await getProduct(db, ORG, home.product_id)
+    assert.ok(saved)
+    assert.deepEqual({ start: saved.stay?.check_in_time, end: saved.stay?.check_in_end_time, checkout: saved.stay?.check_out_time, beds: saved.stay?.beds, policy: saved.stay?.cancellation_policy, longTerm: saved.stay?.long_term_cancellation_policy },
+      { start: null, end: null, checkout: null, beds: 0, policy: null, longTerm: null })
+    assert.equal(saved.description, 'A cabin on the cliff.')
+    assert.equal(channex.properties[0]?.property_type, 'hotel')
+    const calendar = await readStayCalendar(db, manager, { productId: home.product_id, from: today(), to: addDays(today(), 2) })
+    assert.equal(calendar.home.check_in_time, null)
+    assert.equal(calendar.home.check_out_time, null)
+    assert.equal((await connection.listings())[0]?.import.status, 'imported')
+    const mapping = await db.prepare("SELECT enabled, import_stage FROM product_channel_mappings WHERE product_id = ?").bind(home.product_id).first()
+    assert.deepEqual(mapping, { enabled: 1, import_stage: 'complete' })
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

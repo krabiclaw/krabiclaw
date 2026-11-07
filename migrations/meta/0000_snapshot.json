@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6373aef7-5f87-4134-8e8b-443a0d1b2357",
+  "id": "df84b7dc-a7f8-4648-881d-d08e68b8d913",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -13067,7 +13067,7 @@
           "name": "check_in_time",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "check_in_end_time": {
@@ -13081,7 +13081,7 @@
           "name": "check_out_time",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "max_guests": {
@@ -13461,7 +13461,7 @@
         },
         "product_stay_configs_beds_check": {
           "name": "product_stay_configs_beds_check",
-          "value": "beds IS NULL OR beds BETWEEN 1 AND 50"
+          "value": "beds IS NULL OR beds >= 0"
         },
         "product_stay_configs_bathrooms_check": {
           "name": "product_stay_configs_bathrooms_check",

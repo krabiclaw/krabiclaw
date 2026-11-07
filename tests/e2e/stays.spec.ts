@@ -119,6 +119,41 @@ function previewLocators(page: Page) {
 // guest's contact, money and conversation stay with owners and admins. This
 // replaces the earlier premise that a responsible member opened the stay's
 // guest conversation: members now never do.
+test('a home keeps zero beds and unknown provider times through editing and the guest page', async ({ page, baseURL }) => {
+  test.setTimeout(90_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Uses disposable local home data')
+  const { slug, call, productId, request } = await createStayHome(page, baseURL!)
+  const supplied = await call('update_product', { product_id: productId, stay: {
+    beds: 0, check_in_time: null, check_in_end_time: null, check_out_time: null,
+    cancellation_policy: null, long_term_cancellation_policy: null,
+  } })
+  expect(supplied.error).toBeNull()
+  await page.goto(`/dashboard/${slug}/products/${productId}/rooms`)
+  const rooms = page.locator('#dashboard-panel-product-rooms')
+  await expect(rooms.getByRole('spinbutton', { name: 'Beds', exact: true })).toHaveValue('0')
+  await rooms.getByRole('spinbutton', { name: 'Bathrooms', exact: true }).fill('1')
+  const saved = page.waitForResponse(response => response.request().method() === 'PATCH'
+    && new URL(response.url()).pathname.endsWith(`/products/${productId}`))
+  await rooms.getByRole('button', { name: 'Save', exact: true }).click()
+  await expectStatus(await saved, 200)
+  await page.goto(`/dashboard/${slug}/products/${productId}/arrival-time`)
+  const arrival = page.locator('#dashboard-panel-product-arrival-time')
+  await expect(arrival.getByLabel('Start time', { exact: true })).toHaveValue('')
+  await expect(arrival.getByLabel('Time', { exact: true })).toHaveValue('')
+  await page.goto(`/dashboard/${slug}/products/${productId}`)
+  const { previewLink, previewIframe, preview } = previewLocators(page)
+  await previewLink.click()
+  await expect(preview.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
+  const previewURL = new URL((await previewIframe.getAttribute('src'))!, baseURL!)
+  const publicRead = await request.get(new URL(previewURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), previewURL).href)
+  await expectStatus(publicRead, 200)
+  const product = (await publicRead.json() as { product: Product }).product
+  expect(product.stay).toMatchObject({ beds: 0, bathrooms: 1, check_in_time: null, check_out_time: null,
+    cancellation_policy: null, long_term_cancellation_policy: null })
+  await expect(preview.locator('article')).not.toContainText('Check-in after')
+  await expect(preview.locator('article')).not.toContainText('Checkout before')
+})
+
 test('a responsible home team reads its stays as turnovers on every surface until Better Auth removes its membership', async ({ page, browser, baseURL }) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Home responsibility uses disposable local data only')
@@ -3704,8 +3739,9 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(rulesArrivalPanel.getByLabel(/^Start time/)).toHaveValue('15:00')
       await expect(rulesArrivalPanel.getByLabel(/^Time/)).toHaveValue('11:00')
       await rulesArrivalPanel.getByLabel(/^Start time/).fill('')
-      await expect(rulesArrivalPanel.getByText('Choose a check-in start time.', { exact: true })).toBeVisible()
-      await expect(rulesArrivalPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+      // Clearing a provider clock is valid unknown state; the editor must not restore the removed import requirement.
+      await expect(rulesArrivalPanel.getByText('Choose a check-in start time.', { exact: true })).toHaveCount(0)
+      await expect(rulesArrivalPanel.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
       await rulesArrivalPanel.getByLabel(/^Start time/).fill('16:00')
       // Airbnb's check-in window: the end is Flexible until the host chooses an hour.
       const checkInEnd = rulesArrivalPanel.getByRole('combobox', { name: 'End time' })

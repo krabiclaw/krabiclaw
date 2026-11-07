@@ -1,4 +1,4 @@
-import { isValidTimezone, isValidInstant } from '../utils/timezone'
+import { isValidTimezone, isValidInstant, isValidCalendarDate } from '../utils/timezone'
 import { isCurrencyCode } from './currencies'
 
 export type AccountActivityKind = 'booking' | 'reservation' | 'stay' | 'order' | 'payment'
@@ -41,7 +41,7 @@ export function isAccountActivityItem(value: unknown): value is AccountActivityI
     && typeof value.status === 'string' && isValidInstant(value.createdAt)
     && ['requestId', 'operationalId', 'paymentId', 'organizationName', 'organizationSlug', 'startsAt', 'endsAt', 'timeZone', 'imageUrl', 'locationTitle'].every(key => nullableString(value[key]))
     && (value.partySize === null || (typeof value.partySize === 'number' && Number.isSafeInteger(value.partySize) && value.partySize > 0))
-    && ((value.startsAt === null && value.endsAt === null && value.timeZone === null) || (isValidInstant(value.startsAt) && isValidInstant(value.endsAt) && Date.parse(value.endsAt) > Date.parse(value.startsAt) && typeof value.timeZone === 'string' && isValidTimezone(value.timeZone)))
+    && ((value.startsAt === null && value.endsAt === null && value.timeZone === null) || ((isValidInstant(value.startsAt) || (value.kind === 'stay' && isValidCalendarDate(value.startsAt))) && (isValidInstant(value.endsAt) || (value.kind === 'stay' && isValidCalendarDate(value.endsAt))) && typeof value.startsAt === 'string' && typeof value.endsAt === 'string' && (isValidInstant(value.startsAt) && isValidInstant(value.endsAt) ? Date.parse(value.endsAt) > Date.parse(value.startsAt) : value.endsAt.slice(0, 10) > value.startsAt.slice(0, 10)) && typeof value.timeZone === 'string' && isValidTimezone(value.timeZone)))
     && (value.kind === 'payment' ? value.operationalId === null && value.paymentId === value.id : value.kind === 'order' ? value.requestId === null && value.operationalId === null && value.paymentId === value.id && value.startsAt === null && value.endsAt === null && value.timeZone === null : value.id === (value.requestId ?? value.operationalId) && typeof value.operationalId === 'string' && typeof value.startsAt === 'string' && typeof value.endsAt === 'string' && typeof value.timeZone === 'string')
 }
 export function isAccountActivityResponse(value: unknown): value is AccountActivityResponse {

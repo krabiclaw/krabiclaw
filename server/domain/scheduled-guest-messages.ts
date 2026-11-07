@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { execute, executeBatch, queryAllPages, queryFirst, type DbClient } from '~/server/db'
 import { messageDeliveryTaskQueries } from './tasks'
-import { isValidInstant, localDateTimeToInstant } from '~/utils/timezone'
+import { isValidInstant, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import { guestMessageDueAt, messagingError } from './guest-message-schedule'
 import { templateSchedule, type MessageTemplateRow, type ScheduledGuestMessageRow } from './guest-messaging'
 import { sendScheduledGuestReply, type OperationOutcome } from './guest-threads/operations'
@@ -21,7 +21,7 @@ interface PlanningStay {
   updated_at: string
   timezone: string
   timezone_updated_at: string | null
-  check_in_time: string
+  check_in_time: string | null
   check_in_instructions: string | null
 }
 
@@ -152,10 +152,10 @@ async function planCheckInMessage(db: DbClient, stay: PlanningStay, now: string)
     JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
     WHERE s.id = ? AND s.organization_id = ? AND s.version = ? AND s.request_id IS ? AND l.timezone = ? AND c.check_in_instructions IS ?)`
   const guards = [stay.id, stay.organization_id, stay.version, stay.request_id, stay.timezone, stay.check_in_instructions]
-  const arrival = localDateTimeToInstant(stay.check_in_date, stay.check_in_time, stay.timezone, 'earlier').toISOString()
-  if (stay.status !== 'confirmed' || instructions === null || stay.request_id === null || arrival <= now) {
+  const arrived = stay.check_in_time === null ? stay.check_in_date < localDateAt(new Date(now), stay.timezone) : localDateTimeToInstant(stay.check_in_date, stay.check_in_time, stay.timezone, 'earlier').toISOString() <= now
+  if (stay.status !== 'confirmed' || instructions === null || stay.request_id === null || arrived) {
     if (existing?.status === 'pending') await execute(db, `UPDATE scheduled_guest_messages SET status = ?, reason = ?, updated_at = ? WHERE id = ? AND status = 'pending' AND updated_at = ?`,
-      [arrival <= now && stay.status === 'confirmed' && instructions !== null && stay.request_id !== null ? 'skipped' : 'cancelled',
+      [arrived && stay.status === 'confirmed' && instructions !== null && stay.request_id !== null ? 'skipped' : 'cancelled',
         stay.status !== 'confirmed' ? CHECK_IN_NOT_CONFIRMED : instructions === null ? CHECK_IN_NO_INSTRUCTIONS
           : stay.request_id === null ? CHECK_IN_NO_CONVERSATION : 'Check-in had already passed.',
         now, existing.id, existing.updated_at])

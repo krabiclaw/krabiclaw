@@ -46,7 +46,7 @@
         <div class="min-w-0 ps-6 text-right">
           <h3 class="text-base font-semibold text-highlighted">Checkout</h3>
           <p class="mt-1 text-sm text-muted">{{ formatCalendarDate(stay.check_out_date, 'en') }}</p>
-          <p v-if="recordHome" class="mt-1 text-sm text-muted">By {{ formatTime(recordHome.check_out_time, 'en') }}</p>
+          <p v-if="recordHome?.check_out_time" class="mt-1 text-sm text-muted">By {{ formatTime(recordHome.check_out_time, 'en') }}</p>
         </div>
       </div>
       <div v-if="stay.arrival_time" class="mt-6 border-t border-default pt-4">
@@ -214,6 +214,7 @@
       <p v-if="channelManaged" class="py-4 text-base text-muted">{{ t('booking.channel_manage', { channel: channelName }) }}</p>
       <NuxtLink v-if="canRequestChange && messagePath" :to="{ path: messagePath, query: { intent: 'booking-change' } }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>{{ t('booking.request_change') }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
       <NuxtLink v-if="messagePath" :to="messagePath" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>{{ t('stay.message_host') }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
+      <p v-if="personalScope && !channelManaged && recordHome?.check_in_time === null && detail.online_payment && detail.status !== 'cancelled'" class="py-4 text-base text-muted">Contact your host to cancel this stay.</p>
       <UButton v-if="personalScope && !channelManaged && cancellation" color="error" variant="ghost" block class="justify-start py-4" label="Cancel stay" :loading="busy === 'cancel'" @click="manageOpen = false; cancelAsGuest()" />
     </div>
   </DashboardListItemDialog>
@@ -277,7 +278,7 @@ const { data: hostHomeData, error: homeError, refresh: refreshHostHome } = await
     return dashboardApi(`/api/dashboard/stay-homes/${encodeURIComponent(productId)}`, {
       validate: (value: unknown): value is { home: StayHome } => isRecord(value) && isRecord(value.home)
         && value.home.product_id === productId && typeof value.home.name === 'string' && !!value.home.name.trim()
-        && typeof value.home.check_in_time === 'string' && typeof value.home.check_out_time === 'string'
+        && (value.home.check_in_time === null || typeof value.home.check_in_time === 'string') && (value.home.check_out_time === null || typeof value.home.check_out_time === 'string')
         && (value.home.check_in_end_time === null || typeof value.home.check_in_end_time === 'string')
         && Array.isArray(value.home.photos) && value.home.photos.every(photo => isRecord(photo)
           && typeof photo.url === 'string' && !!photo.url && (photo.kind === 'image' || photo.kind === 'video'))
@@ -287,7 +288,7 @@ const { data: hostHomeData, error: homeError, refresh: refreshHostHome } = await
 )
 const hostHome = computed(() => hostHomeData.value?.home ?? null)
 const recordHome = computed(() => home.value ?? hostHome.value)
-const checkInTime = computed(() => recordHome.value
+const checkInTime = computed(() => recordHome.value?.check_in_time
   ? stayCheckInWindow(formatTime(recordHome.value.check_in_time, 'en'), hostHome.value?.check_in_end_time ? formatTime(hostHome.value.check_in_end_time, 'en') : null)
   : null)
 const messagePath = computed(() => detail.value?.request_id
@@ -298,7 +299,7 @@ const callPhone = computed(() => !props.personalScope ? detail.value?.guest_phon
 const guestAddress = computed(() => home.value?.location?.address ? formatPostalAddress(home.value.location.address) : '')
 const cancellation = computed(() => data.value && 'cancellation' in data.value ? data.value.cancellation : null)
 const canRequestChange = computed(() => props.personalScope && detail.value !== null && !isChannelManagedStay(detail.value) && Boolean(messagePath.value) && ['pending', 'confirmed'].includes(detail.value.status)
-  && Boolean(recordHome.value) && localDateTimeToInstant(detail.value.check_out_date, recordHome.value!.check_out_time, detail.value.timezone, 'compatible').getTime() > Date.now())
+  && Boolean(recordHome.value) && (recordHome.value!.check_out_time ? localDateTimeToInstant(detail.value.check_out_date, recordHome.value!.check_out_time, detail.value.timezone, 'compatible').getTime() > Date.now() : detail.value.check_out_date >= localDateAt(new Date(), detail.value.timezone)))
 const policy = computed(() => detail.value?.cancellation_policy ? bookedPolicyTerms(detail.value.cancellation_policy) : null)
 const paymentPath = computed(() => detail.value?.online_payment ? `/dashboard/${route.params.orgSlug}/bookings/payment/${encodeURIComponent(detail.value.online_payment.payment_id)}` : '')
 watch(realtime.event, event => {

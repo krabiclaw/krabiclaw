@@ -45,7 +45,7 @@ function fail(statusCode: number, code: string, message: string, field?: string)
 /** A stay as one write leaves it: the turnover window is computed for this state. */
 export interface StayWindow { id: string; product_id: string; status: 'pending' | 'confirmed' | 'cancelled'; check_in_date: string; check_out_date: string }
 
-interface HomeClock { product_id: string; location_id: string; timezone: string; check_in_time: string; check_out_time: string; assigned_member_id: string | null; assigned_team_id: string | null }
+interface HomeClock { product_id: string; location_id: string; timezone: string; check_in_time: string | null; check_out_time: string | null; assigned_member_id: string | null; assigned_team_id: string | null }
 
 /** The batch guard: the turnover statements apply only if the stay row is what they were computed for. */
 function stayIs(organizationId: string, stay: StayWindow): BatchQuery {
@@ -88,9 +88,9 @@ export async function turnoverTaskQueries(db: DbClient, input: { organizationId:
     }
   }
   for (const { stay, home, next } of windows.values()) {
-    const startsAt = localDateTimeToInstant(stay.check_out_date, home.check_out_time, home.timezone, 'compatible').toISOString()
-    const arrival = next === null ? null : localDateTimeToInstant(next, home.check_in_time, home.timezone, 'compatible').toISOString()
-    const dueAt = arrival === null ? null : arrival < startsAt ? startsAt : arrival
+    const startsAt = home.check_out_time === null ? null : localDateTimeToInstant(stay.check_out_date, home.check_out_time, home.timezone, 'compatible').toISOString()
+    const arrival = next === null || home.check_in_time === null ? null : localDateTimeToInstant(next, home.check_in_time, home.timezone, 'compatible').toISOString()
+    const dueAt = arrival !== null && startsAt !== null && arrival < startsAt ? startsAt : arrival
     const key = `turnover:${stay.id}`
     queries.push({
       query: `UPDATE tasks SET product_id = ?, location_id = ?, timezone = ?, starts_at = ?, due_at = ?,
@@ -319,7 +319,7 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
   ])
   // The next guests at the home, for the turnovers shown.
   const arrivals = new Map<string, StayFacts | null>()
-  for (const row of rows.filter(row => row.kind === 'turnover' && row.due_at !== null && row.product_id !== null)) {
+  for (const row of rows.filter(row => row.kind === 'turnover' && row.product_id !== null)) {
     const stay = stays.find(item => item.id === row.subject_id)
     if (!stay) continue
     arrivals.set(row.id, await queryFirst<StayFacts>(db, `SELECT id, product_id, guest_name, adults, children, check_in_date, check_out_date, request_id FROM stays WHERE organization_id = ? AND product_id = ? AND status = 'confirmed'
@@ -388,19 +388,23 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
   switch (row.kind) {
     case 'turnover': {
       const stay = context.stays.get(row.subject_id!)
-      if (!stay || !product || !row.starts_at) throw new Error(`Turnover ${row.id} has no stay or home`)
+      if (!stay || !product) throw new Error(`Turnover ${row.id} has no stay or home`)
       stayId = stay.id
       face = 'photo'
       tag = 'Turnover'
       title = product.name
       const next = context.arrivals.get(row.id) ?? null
-      const sameDayArrival = next !== null && row.due_at !== null && sameDay(row.starts_at, row.due_at)
-      when = sameDayArrival ? `${time(row.starts_at)} – ${time(row.due_at!)}` : `From ${time(row.starts_at)}`
+      const sameDayArrival = next !== null && (row.starts_at !== null && row.due_at !== null
+        ? sameDay(row.starts_at, row.due_at)
+        : stay.check_out_date === next.check_in_date)
+      const checkoutTime = row.starts_at === null ? 'Time not set' : time(row.starts_at)
+      const checkinTime = row.due_at === null ? 'Time not set' : time(row.due_at)
+      when = sameDayArrival && row.due_at !== null ? `${checkoutTime} – ${checkinTime}` : row.starts_at === null ? 'Time not set' : `From ${checkoutTime}`
       detail = [`${who(stay.guest_name)} out`, next === null ? null : sameDayArrival ? `${who(next.guest_name)} in` : `Next guest ${calendarDay(next.check_in_date)}`].filter(Boolean).join(' · ')
       path = viewer.manage ? stayPath(stay.id) : null
-      sheet = { heading: 'Turnover', title: product.name, date: day(row.starts_at),
-        checkout: { label: 'Checkout', time: time(row.starts_at), guest: who(stay.guest_name) },
-        checkin: next === null ? null : { label: 'Check-in', time: sameDayArrival ? time(row.due_at!) : `${calendarDay(next.check_in_date)}, ${time(row.due_at!)}`, guest: `${who(next.guest_name)} · ${guests(next)}` } }
+      sheet = { heading: 'Turnover', title: product.name, date: row.starts_at === null ? calendarDay(stay.check_out_date) : day(row.starts_at),
+        checkout: { label: 'Checkout', time: checkoutTime, guest: who(stay.guest_name) },
+        checkin: next === null ? null : { label: 'Check-in', time: sameDayArrival ? checkinTime : `${calendarDay(next.check_in_date)}, ${checkinTime}`, guest: `${who(next.guest_name)} · ${guests(next)}` } }
       break
     }
     case 'guest_reply': {
@@ -567,13 +571,20 @@ export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskLis
   const closedSince = new Date(now.getTime() - 2 * 86_400_000).toISOString()
   const statusSql = query.status ? 't.status = ?' : `(t.status = 'open' OR (? = 'today' AND t.status IN ('done', 'skipped') AND t.closed_at >= ?))`
   const statusParams = query.status ? [query.status] : [query.range, closedSince]
-  const rows = await queryAll<TaskRow>(db, `SELECT t.* FROM tasks t WHERE t.organization_id = ? AND ${scope.sql} AND ${statusSql}${filters.map(sql => ` AND ${sql}`).join('')}
+  const rows = await queryAll<TaskRow & { checkout_date: string | null }>(db, `SELECT t.*, s.check_out_date AS checkout_date FROM tasks t
+    LEFT JOIN stays s ON t.kind = 'turnover' AND t.starts_at IS NULL AND s.organization_id = t.organization_id AND s.id = t.subject_id
+    WHERE t.organization_id = ? AND ${scope.sql} AND ${statusSql}${filters.map(sql => ` AND ${sql}`).join('')}
     ORDER BY COALESCE(t.starts_at, t.due_at, t.created_at), t.id`, [organizationId, ...scope.params, ...statusParams, ...params])
   const today = (row: TaskRow) => localDateAt(now, row.timezone)
   const dayOf = (instant: string | null, row: TaskRow) => instant === null ? null : localDateAt(new Date(instant), row.timezone)
-  const isToday = (row: TaskRow) => {
+  const startsOn = (row: typeof rows[number]) => {
+    if (row.starts_at !== null || row.kind !== 'turnover') return dayOf(row.starts_at, row)
+    if (row.checkout_date === null) throw new Error(`Turnover ${row.id} has no stay`)
+    return row.checkout_date
+  }
+  const isToday = (row: typeof rows[number]) => {
     if (row.status !== 'open') return dayOf(row.closed_at, row) === today(row)
-    const start = dayOf(row.starts_at, row), due = dayOf(row.due_at, row)
+    const start = startsOn(row), due = dayOf(row.due_at, row)
     if (start === null && due === null) return true
     return (start !== null && start <= today(row)) || (due !== null && due <= today(row))
   }
@@ -591,13 +602,12 @@ export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskLis
   }
   const byDay = new Map<string, TaskSection>()
   for (const { row, view } of views) {
-    const at = row.starts_at ?? row.due_at!
-    const date = dayOf(at, row)!
+    const date = startsOn(row) ?? dayOf(row.due_at, row)!
     const tomorrow = date === addLocalDays(today(row), 1)
     const section = byDay.get(date) ?? {
       id: date,
-      title: tomorrow ? 'Tomorrow' : formatTimestamp(at, 'en', row.timezone, { weekday: 'long' }),
-      subtitle: formatTimestamp(at, 'en', row.timezone, tomorrow ? { weekday: 'short', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric' }),
+      title: tomorrow ? 'Tomorrow' : formatCalendarDate(date, 'en', { weekday: 'long' }),
+      subtitle: formatCalendarDate(date, 'en', tomorrow ? { weekday: 'short', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric' }),
       tasks: [],
     }
     section.tasks.push(view)

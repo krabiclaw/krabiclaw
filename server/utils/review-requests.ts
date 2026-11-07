@@ -42,7 +42,7 @@ export interface ReviewBookingContext {
   status: string
   no_show_at: string | null
   /** When the visit ended: a reservation's or session's end, a stay's checkout in its home's zone. */
-  completed_at: string
+  completed_at: string | null
   review_request_sent_at: string | null
   review_submitted_at: string | null
   review_id: string | null
@@ -73,6 +73,7 @@ export function addDays(iso: string, days: number): string {
  * been sent or submitted for it.
  */
 export function reviewInvitationDue(context: ReviewBookingContext, now = new Date()): boolean {
+  if (context.completed_at === null) return false
   const ended = Date.parse(context.completed_at)
   return context.status === 'confirmed' && context.no_show_at === null
     && !context.review_request_sent_at && !context.review_submitted_at && !context.review_id
@@ -135,7 +136,7 @@ export async function getReviewBookingContext(
       UNION ALL
       SELECT res.request_id, res.status, res.no_show_at, res.timezone, res.starts_at, res.ends_at, NULL, NULL, res.party_size, NULL, NULL FROM reservations res
       UNION ALL
-      SELECT st.request_id, st.status, st.no_show_at, l.timezone, st.check_in_date || 'T' || c.check_in_time, NULL, st.check_out_date, c.check_out_time, st.adults + st.children, st.product_id, st.guest_email
+      SELECT st.request_id, st.status, st.no_show_at, l.timezone, st.check_in_date || CASE WHEN c.check_in_time IS NULL THEN '' ELSE 'T' || c.check_in_time END, NULL, st.check_out_date, c.check_out_time, st.adults + st.children, st.product_id, st.guest_email
         FROM stays st JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
         JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
        WHERE st.channel = 'direct'
@@ -146,10 +147,10 @@ export async function getReviewBookingContext(
   const { ends_at, check_out_date, check_out_time, ...context } = row
   // A stay ends at its home's checkout time on its checkout date, in the home's own zone.
   const completedAt = bookingType === 'stay'
-    ? localDateTimeToInstant(check_out_date!, check_out_time!, row.visit_timezone, 'compatible').toISOString()
+    ? check_out_time === null ? null : localDateTimeToInstant(check_out_date!, check_out_time, row.visit_timezone, 'compatible').toISOString()
     : ends_at!
   const visitStartsAt = bookingType === 'stay'
-    ? localDateTimeToInstant(row.visit_starts_at.slice(0, 10), row.visit_starts_at.slice(11), row.visit_timezone, 'compatible').toISOString()
+    ? row.visit_starts_at.includes('T') ? localDateTimeToInstant(row.visit_starts_at.slice(0, 10), row.visit_starts_at.slice(11), row.visit_timezone, 'compatible').toISOString() : row.visit_starts_at
     : row.visit_starts_at
   return { ...context, visit_starts_at: visitStartsAt, completed_at: completedAt, subject: reviewSubject(bookingType, row.product_kind) }
 }

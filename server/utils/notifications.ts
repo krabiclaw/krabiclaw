@@ -1440,7 +1440,7 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
   const named = [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ').trim()
   const guestName = named || `${channel} reservation ${stay.channel_booking_id ?? stay.external_booking_id}`
   const guest: { name: string } | { label: string } = named ? { name: named } : { label: guestName }
-  const homes = await queryAll<{ product_id: string; name: string; location_id: string; check_in_time: string; check_out_time: string }>(db, `SELECT p.id AS product_id, p.name, c.location_id, c.check_in_time, c.check_out_time
+  const homes = await queryAll<{ product_id: string; name: string; location_id: string; check_in_time: string | null; check_out_time: string | null }>(db, `SELECT p.id AS product_id, p.name, c.location_id, c.check_in_time, c.check_out_time
     FROM products p JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id WHERE p.organization_id = ? AND p.id IN (?, ?)`,
   [organizationId, terms.product_id, previous?.product_id ?? terms.product_id])
   const homeOf = (productId: string) => {
@@ -1461,7 +1461,7 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
   const eventKey = `channel-stay:${organizationId}:${stay.id}:${input.revisionId}`
   const base = {
     guestName, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name, channel,
-    checkIn: `${day(terms.check_in_date)} · ${formatTime(home.check_in_time, 'en-US')}`, checkOut: `${day(terms.check_out_date)} · ${formatTime(home.check_out_time, 'en-US')}`,
+    checkIn: [day(terms.check_in_date), home.check_in_time ? formatTime(home.check_in_time, 'en-US') : null].filter(Boolean).join(' · '), checkOut: [day(terms.check_out_date), home.check_out_time ? formatTime(home.check_out_time, 'en-US') : null].filter(Boolean).join(' · '),
     stayDates: { checkIn: terms.check_in_date, checkOut: terms.check_out_date }, arrival: audience.arrival, nights: String(stayNights(terms)), guests: stayParty(terms),
     organizationName: studio, heroImageUrl: hero?.imageUrl ?? null, replyUrl: audience.stayUrl,
   }
@@ -1523,7 +1523,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
     stayTurnoverAudience(env, db, organizationId, stay),
   ])
   const nights = stayNights(stay)
-  const when = (date: string, time: string, locale: string) => `${formatCalendarDate(date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · ${formatTime(time, locale)}`
+  const when = (date: string, time: string | null, locale: string) => [formatCalendarDate(date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }), time ? formatTime(time, locale) : null].filter(Boolean).join(' · ')
   const party = stayParty(stay)
   if (paid.currency !== stay.currency) throw new Error('A stay booked on the site was paid in a different currency than it was priced')
   const ownerInput = {
@@ -1599,7 +1599,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
     const guestMessage = guestBookingCancelledMessage({
       manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: stay.request_id }),
       locale: guest.locale, guestName: stay.guest_name, organizationName: guest.organizationName, organizationLogoUrl: logoUrl, productTitle: guest.productTitle ?? home.name,
-      date: `${day(stay.check_in_date, guest.locale)} – ${day(stay.check_out_date, guest.locale)}`, time: formatTime(home.check_in_time, guest.locale),
+      date: `${day(stay.check_in_date, guest.locale)} – ${day(stay.check_out_date, guest.locale)}`, time: home.check_in_time ? formatTime(home.check_in_time, guest.locale) : '',
       partySize: String(stay.adults + stay.children), contactPhone: contact.contactPhone ?? null, contactEmail: contact.contactEmail ?? null, wasConfirmed: true,
     })
     const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain: getPlatformDomain(env) })
@@ -1611,7 +1611,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
         email: { to: stay.guest_email, fromName: studio, replyTo, html: guestEmail.html, text: guestEmail.text },
         owner: {
           guestName: stay.guest_name, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name,
-          checkIn: `${day(stay.check_in_date, 'en-US')} · ${formatTime(home.check_in_time, 'en-US')}`, checkOut: `${day(stay.check_out_date, 'en-US')} · ${formatTime(home.check_out_time, 'en-US')}`,
+          checkIn: [day(stay.check_in_date, 'en-US'), home.check_in_time ? formatTime(home.check_in_time, 'en-US') : null].filter(Boolean).join(' · '), checkOut: [day(stay.check_out_date, 'en-US'), home.check_out_time ? formatTime(home.check_out_time, 'en-US') : null].filter(Boolean).join(' · '),
           nights: String(nights), guests: String(stay.adults + stay.children), refund: formatMinorAmount(refundMinor, stay.currency, 'en-US'),
           organizationName: studio, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
         },

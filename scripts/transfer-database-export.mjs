@@ -557,7 +557,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     assert(applied.size === ledger.length, 'Source migration ledger contains duplicate filenames')
     assert(ledger[0] === '0000_baseline.sql', 'Source migration ledger must start with 0000_baseline.sql')
     let recognized = false
-    for (const directory of [MIGRATIONS_DIRECTORY, 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
+    for (const directory of [MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
       const candidates = readdirSync(resolve(directory)).filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort()
       if (!ledger.every(name => candidates.includes(name))) continue
       const expected = new Database(':memory:')
@@ -663,13 +663,13 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       stage.exec(normalizedTable)
     }
     // An older archived chain reaches v11 through v11's forward migrations, which the v12 baseline absorbed.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v11').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v11', name), 'utf8'))
       }
     }
     // An older archived chain reaches v12 through v12's forward migrations, which the v13 baseline absorbed.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v12').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v12', name), 'utf8'))
       }
@@ -688,7 +688,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // start empty; existing booking commitments and source languages keep every
     // recorded fact. The new nullable fields stay unknown until an owner sets
     // them or a native financial event supplies its actual billing basis.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v13').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v13', name), 'utf8'))
       }
@@ -717,7 +717,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     }
     // v15 relaxes the calendar group CHECK only. Older chains still pass
     // through v14's canonical content data migration before the exact copy.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v14').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v14', name), 'utf8'))
       }
@@ -761,7 +761,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // retired public OAuth flag, team member times, the Google Ads provider,
     // invite links, full-remaining refunds and payment intents). Older chains pass through it before the exact copy; a v16
     // source already ran its pending ones above.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v16').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v16', name), 'utf8'))
       }
@@ -795,13 +795,13 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // v18 absorbs v17's deployed forward chain (Channex connections, channel
     // mappings, the sync log, night pushes and stay threads). Older chains pass
     // through it before the exact copy; a v17 source already ran its pending ones above.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v17/0000_baseline.sql', 'utf8'))
       for (const name of readdirSync('migrations-history/v17').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v17', name), 'utf8'))
       }
     }
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) withBaselineTables(readFileSync('migrations-history/v19/0000_baseline.sql', 'utf8'))
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) withBaselineTables(readFileSync('migrations-history/v19/0000_baseline.sql', 'utf8'))
     // v19 adds facts no older row has: no copied stay was received as a new
     // reservation and no home has private instructions yet. A saved category
     // preference predates push, so its push switch is that category's
@@ -824,7 +824,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     }
     // Older epochs reach v19 through its full archived forward chain before
     // receiving tables and forward migrations from the current baseline.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v19').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v19', name), 'utf8'))
       }
@@ -832,7 +832,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // Older epochs reach v20 the same way: its baseline's tables, then its
     // forward chain. Rehoming an archived forward migration does not make it a
     // second operation: the complete v19 chain already ran on this stage.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v20/0000_baseline.sql', 'utf8'))
       const absorbed = new Set(readdirSync('migrations-history/v19').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)
         .map(name => hash(readFileSync(resolve('migrations-history/v19', name), 'utf8'))))
@@ -844,7 +844,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // v21 widens stays_channel_check to admit Booking.com; every v20 row fits it
     // unchanged. Complete its archived forward chain, including the manual-group
     // backfill, before copying into the replacement's relaxed responsibility CHECK.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v21/0000_baseline.sql', 'utf8'))
       for (const name of readdirSync('migrations-history/v21').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v21', name), 'utf8'))
@@ -852,13 +852,13 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     }
     // v22's pending leaf migrations must run before its tables are copied into
     // the baseline that retires the duplicated nightly rule. No referenced table is dropped remotely.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v23', 'migrations-history/v22'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v22/0000_baseline.sql', 'utf8'))
       for (const name of readdirSync('migrations-history/v22').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v22', name), 'utf8'))
       }
     }
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v23'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23'].includes(sourceDirectory)) {
       // Legacy homes have no recorded weekday/weekend rules. Keep that absence
       // as NULL while advancing the private stage to the v23 schema.
       stage.exec('ALTER TABLE product_stay_configs ADD COLUMN calendar_rules TEXT NULL')
@@ -873,8 +873,8 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // conversation_state and resolved_at are not copied (RETIRED_COLUMNS):
     // an open guest_reply task, derived from the ledger by `yarn db:tasks`,
     // says whether the business owes a reply.
-    if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
-      withBaselineTables(baseSql)
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24'].includes(sourceDirectory)) {
+      withBaselineTables(readFileSync('migrations-history/v24/0000_baseline.sql', 'utf8'))
       const references = stage.prepare("SELECT count(*) AS n FROM (SELECT DISTINCT organization_id, operation, subject_id, evidence_revision, coalesce(goal_id, '') FROM recommendation_feedback)").get().n
       const accepted = stage.prepare("SELECT count(*) AS n FROM (SELECT DISTINCT organization_id, operation, subject_id, evidence_revision, coalesce(goal_id, '') FROM recommendation_feedback f WHERE decision = 'accept' AND updated_at = (SELECT max(updated_at) FROM recommendation_feedback g WHERE g.organization_id = f.organization_id AND g.operation = f.operation AND g.subject_id = f.subject_id AND g.evidence_revision = f.evidence_revision AND g.goal_id IS f.goal_id))").get().n
       stage.exec(RECOMMENDATION_FEEDBACK_TO_OPPORTUNITIES)
@@ -883,6 +883,10 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       assert(opportunities === references && tasks === accepted, `Recommendation feedback mapped ${opportunities} of ${references} references and ${tasks} of ${accepted} accepted tasks; no rows were copied`)
       if (references) manifest.transforms.push({ name: 'recommendation_feedback_to_opportunities', changes: opportunities })
       stage.exec('DROP TABLE recommendation_feedback')
+      for (const name of readdirSync('migrations-history/v24').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) stage.exec(readFileSync(resolve('migrations-history/v24', name), 'utf8'))
+    }
+    if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
+      withBaselineTables(baseSql)
       for (const name of files.slice(1)) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))
     }
     // Airbnb's single minimum was duplicated by the old importer. The owner also
@@ -922,7 +926,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       }
     })
     copy()
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v23'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23'].includes(sourceDirectory)) {
       // Seed the existing content-import edit guard only for a default still
       // equal to the original first imported night. The protected source read
       // can then correct that derivation; this transfer never guesses its value.
@@ -996,7 +1000,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       assert(count(target, 'organization_integrations') === integrations.length, 'organization_integrations differs from the connections it maps')
       manifest.transforms.push({ name: 'integrations_json_to_organization_integrations', changes: integrations.length })
     }
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) {
       const configs = target.prepare('SELECT * FROM product_booking_configs WHERE held_online = 1 ORDER BY product_id').all()
       const previousSourceRows = new Map()
       if (deltaFrom) {

@@ -115,7 +115,7 @@ const quietEnd = computed({
   },
 })
 const groups = computed<EditorNavigationGroup[]>(() => [{ id: 'house-rules', items: [
-  { id: 'arrival-time', label: 'Check-in & checkout', summary: p.product.value?.stay ? `${stayCheckInWindow(p.product.value.stay.check_in_time, p.product.value.stay.check_in_end_time)} · ${p.product.value.stay.check_out_time}` : undefined, to: p.sectionPath('house-rules/arrival-time') },
+  { id: 'arrival-time', label: 'Check-in & checkout', summary: p.product.value?.stay ? `${stayCheckInWindow(p.product.value.stay.check_in_time, p.product.value.stay.check_in_end_time)} · ${p.product.value.stay.check_out_time ?? 'Checkout time not set'}` : undefined, to: p.sectionPath('house-rules/arrival-time') },
   { id: 'additional-rules', label: 'Additional rules', summary: typeof p.product.value?.details.house_rules === 'string' ? p.product.value.details.house_rules : 'Add details', to: p.sectionPath('house-rules/additional-rules') },
 ] }])
 

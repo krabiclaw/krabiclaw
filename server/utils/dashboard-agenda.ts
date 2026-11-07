@@ -272,7 +272,7 @@ export async function listAgenda(
   // read their whole stay interval in Today and Calendar.
   const stayRows = requestedKinds.has('stay') ? queryAll<{
     id: string; request_id: string | null; organization_id: string; organization_name: string; product_id: string; product_name: string; status: string; overbooked: number; check_in_date: string; check_out_date: string
-    owner: 'app' | 'channel'; channel: Stay['channel']; guest_name: string | null; guest_surname: string | null; party_size: number; location_id: string; location_title: string; timezone: string; check_in_time: string; check_out_time: string; same_day_arrival: number
+    owner: 'app' | 'channel'; channel: Stay['channel']; guest_name: string | null; guest_surname: string | null; party_size: number; location_id: string; location_title: string; timezone: string; check_in_time: string | null; check_out_time: string | null; same_day_arrival: number
   }>(db, `SELECT st.id, st.request_id, st.organization_id, o.name AS organization_name, st.product_id, p.name AS product_name, st.status, st.overbooked, st.check_in_date, st.check_out_date, st.owner, st.channel, st.guest_name, ${staff ? 'NULL' : 'st.guest_surname'} AS guest_surname,
         st.adults + st.children AS party_size, c.location_id, l.title AS location_title, l.timezone, c.check_in_time, c.check_out_time,
         EXISTS (SELECT 1 FROM stays next_stay WHERE next_stay.organization_id = st.organization_id AND next_stay.product_id = st.product_id
@@ -345,7 +345,7 @@ export async function listAgenda(
     // Rule 1: a channel stay that landed on held nights shows flagged wherever its arrival and
     // departure do, for the managers who resolve it; a member's turnover carries no booking state.
     const title = !staff && Number(stay.overbooked) === 1 ? `Overbooked · ${guest}` : guest
-    const moments: Array<['arrival' | 'departure' | 'current', string, string]> = scope.buyerUserId ? [['arrival', stay.check_in_date, stay.check_in_time]]
+    const moments: Array<['arrival' | 'departure' | 'current', string, string | null]> = scope.buyerUserId ? [['arrival', stay.check_in_date, stay.check_in_time]]
       : [['arrival', stay.check_in_date, stay.check_in_time], ['departure', stay.check_out_date, stay.check_out_time]]
     if (!scope.buyerUserId && !staff && query.currentStaysAt) {
       const today = localDateAt(query.currentStaysAt, stay.timezone)
@@ -353,10 +353,11 @@ export async function listAgenda(
     }
     for (const [moment, day, time] of moments) {
       if (!scope.buyerUserId && (day < query.from || day > query.to)) continue
-      const instant = localDateTimeToInstant(moment === 'current' ? stay.check_in_date : day, time, stay.timezone, 'compatible').toISOString()
+      const sourceDay = moment === 'current' ? stay.check_in_date : day
+      const instant = time === null ? sourceDay : localDateTimeToInstant(sourceDay, time, stay.timezone, 'compatible').toISOString()
       items.push({
         assignedMemberId: null, assignedMemberName: null, id: scope.buyerUserId ? `stay:${stay.id}` : `stay:${stay.id}:${moment}`, requestId: scope.buyerUserId ? stay.request_id : null, operationalBookingId: null, operationalReservationId: null,
-        stayId: stay.id, productId: stay.product_id, stayChannel: stay.channel, stayMoment: moment === 'departure' && stay.same_day_arrival ? 'turnover' : moment, kind: 'stay', startsAt: instant, endsAt: scope.buyerUserId || moment === 'current' ? localDateTimeToInstant(stay.check_out_date, stay.check_out_time, stay.timezone, 'compatible').toISOString() : null, dayKey: day, timeZone: stay.timezone, showTimeZone: false,
+        stayId: stay.id, productId: stay.product_id, stayChannel: stay.channel, stayMoment: moment === 'departure' && stay.same_day_arrival ? 'turnover' : moment, kind: 'stay', startsAt: instant, endsAt: scope.buyerUserId || moment === 'current' ? stay.check_out_time === null ? stay.check_out_date : localDateTimeToInstant(stay.check_out_date, stay.check_out_time, stay.timezone, 'compatible').toISOString() : null, dayKey: day, timeZone: stay.timezone, showTimeZone: false,
         title: scope.buyerUserId ? stay.product_name : title, subtitle: scope.buyerUserId ? stay.organization_name : [moment === 'arrival' ? 'Checking in' : moment === 'departure' ? 'Checking out' : 'Currently hosting', `${stay.party_size === 1 ? '1 guest' : `${stay.party_size} guests`}`, moment === 'departure' && stay.same_day_arrival ? 'Next guests arrive the same day' : null].filter(Boolean).join(' · '),
         status: stay.status, organizationId: stay.organization_id, locationId: stay.location_id, locationTitle: stay.location_title,
         guestImageUrl: null, resourceImageUrl: pictures.get(`${stay.organization_id}\nproduct\n${stay.product_id}`) ?? null, resourceTitle: stay.product_name, partySize: stay.party_size,
@@ -393,7 +394,7 @@ export async function listTodayAgenda(
     items: nearby.items.filter(item => {
       const today = todayKeyForTimeZone(now, item.timeZone)
       return item.dayKey === today || (scope.buyerUserId && item.kind === 'stay' && item.endsAt !== null
-        && item.dayKey <= today && localDateAt(instantDate(item.endsAt), item.timeZone) >= today)
+        && item.dayKey <= today && (item.endsAt.includes('T') ? localDateAt(instantDate(item.endsAt), item.timeZone) : item.endsAt) >= today)
     }),
     resolvedAt: now.toISOString(),
   }

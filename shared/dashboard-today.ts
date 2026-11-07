@@ -25,11 +25,11 @@ export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string 
   const guests = item.partySize && item.partySize > 0 ? `${item.partySize} ${item.partySize === 1 ? 'guest' : 'guests'}` : ''
   return {
     id: item.id, to: item.to.replace(/^\/dashboard\/account\/activity\//, '/dashboard/account/bookings/'),
-    eyebrow: item.stayMoment === 'current' ? 'Currently hosting' : formatTimestamp(item.startsAt, 'en', item.timeZone, { hour: 'numeric', minute: '2-digit' }),
+    eyebrow: item.stayMoment === 'current' ? 'Currently hosting' : !item.startsAt.includes('T') ? 'Time not set' : formatTimestamp(item.startsAt, 'en', item.timeZone, { hour: 'numeric', minute: '2-digit' }),
     headline: `${item.title} ${when}${guests ? ` for ${guests}` : ''}`,
     description: [...new Set([item.subtitle, item.locationTitle].filter((part): part is string => !!part && part !== item.title))].join(' · ') || null,
     imageUrl: item.resourceImageUrl, imageIcon: item.kind === 'booking' ? 'i-lucide-ticket' : item.kind === 'stay' ? 'i-lucide-house' : 'i-lucide-map-pin',
     locationId: item.locationId, bookingKind: item.kind, stayId: item.stayId, productId: item.productId,
-    occurrenceAt: item.stayMoment === 'current' ? null : item.startsAt, timeZone: item.timeZone,
+    occurrenceAt: item.stayMoment === 'current' || !item.startsAt.includes('T') ? null : item.startsAt, timeZone: item.timeZone,
   }
 }

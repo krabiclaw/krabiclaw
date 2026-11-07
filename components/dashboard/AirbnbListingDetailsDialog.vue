@@ -15,7 +15,6 @@
       <h3 class="text-base font-semibold text-highlighted">{{ group.title }}</h3>
       <UFormField v-for="field in group.fields" :key="field" :label="DETAIL_FIELD_TITLES[field]">
         <USelectMenu v-if="field === 'timezone'" v-model="values.timezone" :items="timezones" value-key="value" placeholder="Choose" class="w-full" />
-        <USelectMenu v-else-if="field === 'propertyType'" v-model="values.propertyType" :items="propertyTypes" value-key="value" placeholder="Choose" class="w-full" />
         <UInput v-else v-model="values[field]" :type="field === 'email' ? 'email' : field === 'phone' ? 'tel' : 'text'" :autocapitalize="field === 'email' ? 'none' : field === 'country' ? 'characters' : 'words'" class="w-full" />
       </UFormField>
     </section>
@@ -26,14 +25,14 @@
         <p class="text-base text-highlighted">{{ stayTimes }}</p>
         <p class="text-sm text-muted">From Airbnb. Change them on Airbnb and they’ll follow.</p>
       </template>
-      <UAlert v-else color="warning" variant="soft" icon="i-lucide-circle-alert" description="This listing has no check-in or checkout time on Airbnb. Set them there, then come back." />
+      <UAlert v-else color="warning" variant="soft" icon="i-lucide-circle-alert" description="Airbnb has not provided all arrival and departure times. They will stay unset." />
     </section>
   </DashboardListItemDialog>
 </template>
 
 <script setup lang="ts">
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
-import { DETAIL_FIELD_TITLES, PROPERTY_TYPES, PROPERTY_TYPE_LABELS, type DetailField } from '~/shared/airbnb-import'
+import { DETAIL_FIELD_TITLES, type DetailField } from '~/shared/airbnb-import'
 import { TIMEZONE_OPTIONS, timezoneLabel } from '~/utils/timezone'
 
 /** GET …/airbnb/listings/:listingId, the part the form reads. */
@@ -66,7 +65,7 @@ watch(() => [props.details, props.entered] as const, ([details, entered]) => {
   values.value = Object.fromEntries(details.missingFields.map(field => [field, entered[field] ?? '']))
 }, { immediate: true })
 
-const LOCATION_FIELDS: DetailField[] = ['propertyType', 'country', 'state', 'city', 'address', 'zipCode', 'timezone']
+const LOCATION_FIELDS: DetailField[] = ['country', 'state', 'city', 'address', 'zipCode', 'timezone']
 const CONTACT_FIELDS: DetailField[] = ['email', 'phone']
 const groups = computed(() => [
   { title: 'Location', fields: LOCATION_FIELDS.filter(field => props.details.missingFields.includes(field)) },
@@ -74,7 +73,6 @@ const groups = computed(() => [
 ].filter(group => group.fields.length))
 
 const timezones = TIMEZONE_OPTIONS.map(zone => ({ value: zone, label: timezoneLabel(zone) }))
-const propertyTypes = PROPERTY_TYPES.map(type => ({ value: type as string, label: PROPERTY_TYPE_LABELS[type] }))
 
 /** Airbnb's times as the home will have them, or null when Airbnb is missing one. */
 const stayTimes = computed(() => {
@@ -83,7 +81,7 @@ const stayTimes = computed(() => {
   return `Check-in ${checkInTime}${checkInEndTime ? `–${checkInEndTime}` : ' onwards'} · Checkout ${checkOutTime}`
 })
 
-const complete = computed(() => stayTimes.value !== null && props.details.missingFields.every(field => values.value[field]?.trim()))
+const complete = computed(() => props.details.missingFields.every(field => values.value[field]?.trim()))
 
 function done() {
   emit('close', Object.fromEntries(props.details.missingFields.map(field => [field, values.value[field]!.trim()])))
