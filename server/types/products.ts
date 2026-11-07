@@ -8,7 +8,7 @@ import type { StayHomeAccessibility } from '~/shared/stay-accessibility'
 
 export type ProductSource = 'manual' | 'template' | 'ai' | 'import' | 'copy'
 
-/** One buyable configuration. A product with no options still has one. */
+/** One buyable configuration. Every product has at least one. */
 export interface ProductVariant {
   id: string
   product_id: string
@@ -16,22 +16,7 @@ export interface ProductVariant {
   sku: string | null
   active: boolean
   sort_order: number
-  /** Which value this variant selects for each of the product's options. */
-  option_values: Record<string, string>
   prices: Price[]
-}
-
-export interface ProductOptionValue {
-  id: string
-  value: string
-  sort_order: number
-}
-
-export interface ProductOption {
-  id: string
-  name: string
-  sort_order: number
-  values: ProductOptionValue[]
 }
 
 /** Site publication state. Absent from the map means the site does not carry it. */
@@ -155,7 +140,6 @@ export interface Product {
   /** Validated string-to-string annotations. No domain behavior reads this. */
   metadata: Record<string, string>
   tax_code: string | null
-  options: ProductOption[]
   variants: ProductVariant[]
   /** Typed descriptive attributes, keyed by '<namespace>.<key>'. */
   details: ProductDetails
@@ -203,16 +187,7 @@ export interface ProductVariantInput {
   sku?: string | null
   active?: boolean
   sort_order?: number
-  /** option id -> option value id. Must answer every option exactly once. */
-  option_values?: Record<string, string>
   prices?: PriceInput[]
-}
-
-export interface ProductOptionInput {
-  id?: string
-  name: string
-  sort_order?: number
-  values: { id?: string; value: string; sort_order?: number }[]
 }
 
 export interface CreateProductInput {
@@ -225,7 +200,6 @@ export interface CreateProductInput {
   marketing_features?: string[]
   metadata?: Record<string, string>
   tax_code?: string | null
-  options?: ProductOptionInput[]
   /** Omitted means one default variant is created. */
   variants?: ProductVariantInput[]
   details?: ProductDetails

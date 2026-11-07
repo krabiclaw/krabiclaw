@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:9743290424f69576fdaf9411cb024b0e1ec1702f65bf7450b69852bdbc454650",
-  "documentationFingerprint": "sha256:47e74f460ef7cc9fffb21921c49938aa0d06bd1f1d7d9544da0e1084c9d475b5",
+  "fingerprint": "sha256:55d579f1fe869f2d5df4c3677602e38c15ac15c48d99d63f6514facd003b1eb1",
+  "documentationFingerprint": "sha256:672793f6dfb7c68da1a6b368f328b493c2d8374822443c5ac12d7ba09aeda3aa",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -9123,53 +9123,6 @@
                 "name": {
                   "type": "string"
                 },
-                "options": {
-                  "items": {
-                    "additionalProperties": false,
-                    "description": "A customer choice such as Size, with values such as Small and Large. Variants combine these choices and carry prices. Descriptive facts belong in details.",
-                    "properties": {
-                      "id": {
-                        "type": "string"
-                      },
-                      "name": {
-                        "type": "string"
-                      },
-                      "sort_order": {
-                        "type": "integer"
-                      },
-                      "values": {
-                        "items": {
-                          "additionalProperties": false,
-                          "properties": {
-                            "id": {
-                              "type": "string"
-                            },
-                            "sort_order": {
-                              "type": "integer"
-                            },
-                            "value": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "value"
-                          ],
-                          "type": "object"
-                        },
-                        "maxItems": 100,
-                        "minItems": 1,
-                        "type": "array"
-                      }
-                    },
-                    "required": [
-                      "name",
-                      "values"
-                    ],
-                    "type": "object"
-                  },
-                  "maxItems": 3,
-                  "type": "array"
-                },
                 "order_url": {
                   "description": "External ordering or booking destination, such as Uber Eats, an experience checkout, or Clio Grow. When set, public actions use this URL instead of native booking. Null restores the configured native flow.",
                   "type": [
@@ -9842,10 +9795,10 @@
                   ]
                 },
                 "variants": {
-                  "description": "Omit to create a single default variant. Required once the product has options.",
+                  "description": "Omit to create a single default variant.",
                   "items": {
                     "additionalProperties": false,
-                    "description": "One priced choice, such as Six pieces or Twelve pieces. Named choices may stand alone or select declared option values. Omitting variants on creation creates one default choice. Keep the id when editing to preserve its bookings.",
+                    "description": "One priced choice, such as Six pieces or Twelve pieces. Omitting variants on creation creates one default choice. Keep the id when editing to preserve its bookings.",
                     "properties": {
                       "active": {
                         "type": "boolean"
@@ -9855,13 +9808,6 @@
                       },
                       "name": {
                         "type": "string"
-                      },
-                      "option_values": {
-                        "additionalProperties": {
-                          "type": "string"
-                        },
-                        "description": "Option id to option value id. Every option must be answered exactly once, and no two variants may answer identically.",
-                        "type": "object"
                       },
                       "prices": {
                         "items": {
@@ -10871,51 +10817,6 @@
                 },
                 "name": {
                   "type": "string"
-                },
-                "options": {
-                  "items": {
-                    "properties": {
-                      "id": {
-                        "type": "string"
-                      },
-                      "name": {
-                        "type": "string"
-                      },
-                      "sort_order": {
-                        "type": "integer"
-                      },
-                      "values": {
-                        "items": {
-                          "properties": {
-                            "id": {
-                              "type": "string"
-                            },
-                            "sort_order": {
-                              "type": "integer"
-                            },
-                            "value": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "id",
-                            "value",
-                            "sort_order"
-                          ],
-                          "type": "object"
-                        },
-                        "type": "array"
-                      }
-                    },
-                    "required": [
-                      "id",
-                      "name",
-                      "sort_order",
-                      "values"
-                    ],
-                    "type": "object"
-                  },
-                  "type": "array"
                 },
                 "order_url": {
                   "type": [
@@ -12199,12 +12100,6 @@
                       "name": {
                         "type": "string"
                       },
-                      "option_values": {
-                        "additionalProperties": {
-                          "type": "string"
-                        },
-                        "type": "object"
-                      },
                       "prices": {
                         "items": {
                           "additionalProperties": false,
@@ -12315,7 +12210,6 @@
                       "sku",
                       "active",
                       "sort_order",
-                      "option_values",
                       "prices"
                     ],
                     "type": "object"
@@ -12330,7 +12224,6 @@
                 "slug",
                 "description",
                 "active",
-                "options",
                 "variants",
                 "details",
                 "publications",
@@ -24141,53 +24034,6 @@
           "name": {
             "type": "string"
           },
-          "options": {
-            "items": {
-              "additionalProperties": false,
-              "description": "A customer choice such as Size, with values such as Small and Large. Variants combine these choices and carry prices. Descriptive facts belong in details.",
-              "properties": {
-                "id": {
-                  "type": "string"
-                },
-                "name": {
-                  "type": "string"
-                },
-                "sort_order": {
-                  "type": "integer"
-                },
-                "values": {
-                  "items": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "id": {
-                        "type": "string"
-                      },
-                      "sort_order": {
-                        "type": "integer"
-                      },
-                      "value": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "value"
-                    ],
-                    "type": "object"
-                  },
-                  "maxItems": 100,
-                  "minItems": 1,
-                  "type": "array"
-                }
-              },
-              "required": [
-                "name",
-                "values"
-              ],
-              "type": "object"
-            },
-            "maxItems": 3,
-            "type": "array"
-          },
           "order_url": {
             "description": "External ordering or booking destination, such as Uber Eats, an experience checkout, or Clio Grow. When set, public actions use this URL instead of native booking. Null restores the configured native flow.",
             "type": [
@@ -26862,10 +26708,10 @@
             ]
           },
           "variants": {
-            "description": "Omit to create a single default variant. Required once the product has options.",
+            "description": "Omit to create a single default variant.",
             "items": {
               "additionalProperties": false,
-              "description": "One priced choice, such as Six pieces or Twelve pieces. Named choices may stand alone or select declared option values. Omitting variants on creation creates one default choice. Keep the id when editing to preserve its bookings.",
+              "description": "One priced choice, such as Six pieces or Twelve pieces. Omitting variants on creation creates one default choice. Keep the id when editing to preserve its bookings.",
               "properties": {
                 "active": {
                   "type": "boolean"
@@ -26875,13 +26721,6 @@
                 },
                 "name": {
                   "type": "string"
-                },
-                "option_values": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "description": "Option id to option value id. Every option must be answered exactly once, and no two variants may answer identically.",
-                  "type": "object"
                 },
                 "prices": {
                   "items": {
@@ -27880,51 +27719,6 @@
               },
               "name": {
                 "type": "string"
-              },
-              "options": {
-                "items": {
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "sort_order": {
-                      "type": "integer"
-                    },
-                    "values": {
-                      "items": {
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "sort_order": {
-                            "type": "integer"
-                          },
-                          "value": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "value",
-                          "sort_order"
-                        ],
-                        "type": "object"
-                      },
-                      "type": "array"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name",
-                    "sort_order",
-                    "values"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
               },
               "order_url": {
                 "type": [
@@ -29208,12 +29002,6 @@
                     "name": {
                       "type": "string"
                     },
-                    "option_values": {
-                      "additionalProperties": {
-                        "type": "string"
-                      },
-                      "type": "object"
-                    },
                     "prices": {
                       "items": {
                         "additionalProperties": false,
@@ -29324,7 +29112,6 @@
                     "sku",
                     "active",
                     "sort_order",
-                    "option_values",
                     "prices"
                   ],
                   "type": "object"
@@ -29339,7 +29126,6 @@
               "slug",
               "description",
               "active",
-              "options",
               "variants",
               "details",
               "publications",
@@ -53100,7 +52886,7 @@
     {
       "name": "get_product",
       "title": "Get product",
-      "description": "Read one site product before reviewing or editing its options, variants, prices, media, publication, locations, collections, named product facts or booking defaults. Prices belong to variants; booking defaults apply to new sessions.",
+      "description": "Read one site product before reviewing or editing its variants, prices, media, publication, locations, collections, named product facts or booking defaults. Prices belong to variants; booking defaults apply to new sessions.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -53995,51 +53781,6 @@
               },
               "name": {
                 "type": "string"
-              },
-              "options": {
-                "items": {
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "sort_order": {
-                      "type": "integer"
-                    },
-                    "values": {
-                      "items": {
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "sort_order": {
-                            "type": "integer"
-                          },
-                          "value": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "value",
-                          "sort_order"
-                        ],
-                        "type": "object"
-                      },
-                      "type": "array"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name",
-                    "sort_order",
-                    "values"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
               },
               "order_url": {
                 "type": [
@@ -55323,12 +55064,6 @@
                     "name": {
                       "type": "string"
                     },
-                    "option_values": {
-                      "additionalProperties": {
-                        "type": "string"
-                      },
-                      "type": "object"
-                    },
                     "prices": {
                       "items": {
                         "additionalProperties": false,
@@ -55439,7 +55174,6 @@
                     "sku",
                     "active",
                     "sort_order",
-                    "option_values",
                     "prices"
                   ],
                   "type": "object"
@@ -55454,7 +55188,6 @@
               "slug",
               "description",
               "active",
-              "options",
               "variants",
               "details",
               "publications",
@@ -86205,7 +85938,7 @@
     {
       "name": "reconcile_products",
       "title": "Reconcile products",
-      "description": "Synchronize complete catalog entries in one atomic local write. Existing product IDs preserve identity; supplied variants, prices and options replace their lists. Omitted products stay unchanged unless deactivate_missing disables them. A new home requires stay settings. Changed connected-home settings and nightly prices are pushed to Airbnb through Channex after saving. Unsupported connected-listing settings are refused before any local writes; a failed channel completion reports committed changes with CHANNEL_PUSH_FAILED. Repeat the same idempotency key for an identical retry. Use update_menu for a restaurant menu and update_product for a partial edit. Increasing the number of live homes requires the dashboard.",
+      "description": "Synchronize complete catalog entries in one atomic local write. Existing product IDs preserve identity; supplied variants and prices replace their lists. Omitted products stay unchanged unless deactivate_missing disables them. A new home requires stay settings. Changed connected-home settings and nightly prices are pushed to Airbnb through Channex after saving. Unsupported connected-listing settings are refused before any local writes; a failed channel completion reports committed changes with CHANNEL_PUSH_FAILED. Repeat the same idempotency key for an identical retry. Use update_menu for a restaurant menu and update_product for a partial edit. Increasing the number of live homes requires the dashboard.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -86725,53 +86458,6 @@
                 },
                 "name": {
                   "type": "string"
-                },
-                "options": {
-                  "items": {
-                    "additionalProperties": false,
-                    "description": "A customer choice such as Size, with values such as Small and Large. Variants combine these choices and carry prices. Descriptive facts belong in details.",
-                    "properties": {
-                      "id": {
-                        "type": "string"
-                      },
-                      "name": {
-                        "type": "string"
-                      },
-                      "sort_order": {
-                        "type": "integer"
-                      },
-                      "values": {
-                        "items": {
-                          "additionalProperties": false,
-                          "properties": {
-                            "id": {
-                              "type": "string"
-                            },
-                            "sort_order": {
-                              "type": "integer"
-                            },
-                            "value": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "value"
-                          ],
-                          "type": "object"
-                        },
-                        "maxItems": 100,
-                        "minItems": 1,
-                        "type": "array"
-                      }
-                    },
-                    "required": [
-                      "name",
-                      "values"
-                    ],
-                    "type": "object"
-                  },
-                  "maxItems": 3,
-                  "type": "array"
                 },
                 "order_url": {
                   "description": "External ordering or booking destination, such as Uber Eats, an experience checkout, or Clio Grow. When set, public actions use this URL instead of native booking. Null restores the configured native flow.",
@@ -87449,10 +87135,10 @@
                   ]
                 },
                 "variants": {
-                  "description": "Omit to create a single default variant. Required once the product has options.",
+                  "description": "Omit to create a single default variant.",
                   "items": {
                     "additionalProperties": false,
-                    "description": "One priced choice, such as Six pieces or Twelve pieces. Named choices may stand alone or select declared option values. Omitting variants on creation creates one default choice. Keep the id when editing to preserve its bookings.",
+                    "description": "One priced choice, such as Six pieces or Twelve pieces. Omitting variants on creation creates one default choice. Keep the id when editing to preserve its bookings.",
                     "properties": {
                       "active": {
                         "type": "boolean"
@@ -87462,13 +87148,6 @@
                       },
                       "name": {
                         "type": "string"
-                      },
-                      "option_values": {
-                        "additionalProperties": {
-                          "type": "string"
-                        },
-                        "description": "Option id to option value id. Every option must be answered exactly once, and no two variants may answer identically.",
-                        "type": "object"
                       },
                       "prices": {
                         "items": {
@@ -88519,51 +88198,6 @@
                 },
                 "name": {
                   "type": "string"
-                },
-                "options": {
-                  "items": {
-                    "properties": {
-                      "id": {
-                        "type": "string"
-                      },
-                      "name": {
-                        "type": "string"
-                      },
-                      "sort_order": {
-                        "type": "integer"
-                      },
-                      "values": {
-                        "items": {
-                          "properties": {
-                            "id": {
-                              "type": "string"
-                            },
-                            "sort_order": {
-                              "type": "integer"
-                            },
-                            "value": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "id",
-                            "value",
-                            "sort_order"
-                          ],
-                          "type": "object"
-                        },
-                        "type": "array"
-                      }
-                    },
-                    "required": [
-                      "id",
-                      "name",
-                      "sort_order",
-                      "values"
-                    ],
-                    "type": "object"
-                  },
-                  "type": "array"
                 },
                 "order_url": {
                   "type": [
@@ -89847,12 +89481,6 @@
                       "name": {
                         "type": "string"
                       },
-                      "option_values": {
-                        "additionalProperties": {
-                          "type": "string"
-                        },
-                        "type": "object"
-                      },
                       "prices": {
                         "items": {
                           "additionalProperties": false,
@@ -89963,7 +89591,6 @@
                       "sku",
                       "active",
                       "sort_order",
-                      "option_values",
                       "prices"
                     ],
                     "type": "object"
@@ -89978,7 +89605,6 @@
                 "slug",
                 "description",
                 "active",
-                "options",
                 "variants",
                 "details",
                 "publications",
@@ -113278,53 +112904,6 @@
                       "name": {
                         "type": "string"
                       },
-                      "options": {
-                        "items": {
-                          "additionalProperties": false,
-                          "description": "A customer choice such as Size, with values such as Small and Large. Variants combine these choices and carry prices. Descriptive facts belong in details.",
-                          "properties": {
-                            "id": {
-                              "type": "string"
-                            },
-                            "name": {
-                              "type": "string"
-                            },
-                            "sort_order": {
-                              "type": "integer"
-                            },
-                            "values": {
-                              "items": {
-                                "additionalProperties": false,
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "sort_order": {
-                                    "type": "integer"
-                                  },
-                                  "value": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "value"
-                                ],
-                                "type": "object"
-                              },
-                              "maxItems": 100,
-                              "minItems": 1,
-                              "type": "array"
-                            }
-                          },
-                          "required": [
-                            "name",
-                            "values"
-                          ],
-                          "type": "object"
-                        },
-                        "maxItems": 3,
-                        "type": "array"
-                      },
                       "order_url": {
                         "description": "External ordering or booking destination, such as Uber Eats, an experience checkout, or Clio Grow. When set, public actions use this URL instead of native booking. Null restores the configured native flow.",
                         "type": [
@@ -113352,7 +112931,7 @@
                         "description": "Partial existing variants by id or new variants. Omitted variants and prices remain; use update_product for intentional removal.",
                         "items": {
                           "additionalProperties": false,
-                          "description": "A partial update to an existing variant by id, or a new variant. Existing variants retain omitted fields and option selections. New variants require a name and complete option selections.",
+                          "description": "A partial update to an existing variant by id, or a new variant. Existing variants retain omitted fields. New variants require a name.",
                           "properties": {
                             "active": {
                               "type": "boolean"
@@ -113362,13 +112941,6 @@
                             },
                             "name": {
                               "type": "string"
-                            },
-                            "option_values": {
-                              "additionalProperties": {
-                                "type": "string"
-                              },
-                              "description": "Option id to option value id. Every option must be answered exactly once, and no two variants may answer identically.",
-                              "type": "object"
                             },
                             "prices": {
                               "description": "Partial existing prices by id or new offers. Omitted prices remain. A new offer requires unit_amount.",
@@ -113828,51 +113400,6 @@
                       "name": {
                         "type": "string"
                       },
-                      "options": {
-                        "items": {
-                          "properties": {
-                            "id": {
-                              "type": "string"
-                            },
-                            "name": {
-                              "type": "string"
-                            },
-                            "sort_order": {
-                              "type": "integer"
-                            },
-                            "values": {
-                              "items": {
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "sort_order": {
-                                    "type": "integer"
-                                  },
-                                  "value": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "value",
-                                  "sort_order"
-                                ],
-                                "type": "object"
-                              },
-                              "type": "array"
-                            }
-                          },
-                          "required": [
-                            "id",
-                            "name",
-                            "sort_order",
-                            "values"
-                          ],
-                          "type": "object"
-                        },
-                        "type": "array"
-                      },
                       "order_url": {
                         "type": [
                           "string",
@@ -113927,12 +113454,6 @@
                             },
                             "name": {
                               "type": "string"
-                            },
-                            "option_values": {
-                              "additionalProperties": {
-                                "type": "string"
-                              },
-                              "type": "object"
                             },
                             "prices": {
                               "items": {
@@ -114044,7 +113565,6 @@
                             "sku",
                             "active",
                             "sort_order",
-                            "option_values",
                             "prices"
                           ],
                           "type": "object"
@@ -114064,7 +113584,6 @@
                       "marketing_features",
                       "metadata",
                       "tax_code",
-                      "options",
                       "variants",
                       "details",
                       "publications",
@@ -116091,7 +115610,7 @@
     {
       "name": "update_product",
       "title": "Update product",
-      "description": "Edit a product and return its updated record. For a price change, supply the variant ID, price ID and unit_amount. Variants and prices merge by ID; omitted entries stay. Supplied options and details replace their current values by default. Use details_mode merge for focused fact edits, preserving unmentioned facts and clearing named facts with null. Booking setup also creates sessions and publishes the offering. For a connected Airbnb home, changed arrival/departure windows, cancellation, pet/smoking/event rules and minimum stays update supported listing settings through Channex. Unsupported connected-listing settings are refused before saving. A failed channel completion reports the committed edit with CHANNEL_PUSH_FAILED; reload before retrying. Increasing the number of live homes requires the dashboard.",
+      "description": "Edit a product and return its updated record. For a price change, supply the variant ID, price ID and unit_amount. Variants and prices merge by ID; omitted entries stay. Supplied details replace their current values by default. Use details_mode merge for focused fact edits, preserving unmentioned facts and clearing named facts with null. Booking setup also creates sessions and publishes the offering. For a connected Airbnb home, changed arrival/departure windows, cancellation, pet/smoking/event rules and minimum stays update supported listing settings through Channex. Unsupported connected-listing settings are refused before saving. A failed channel completion reports the committed edit with CHANNEL_PUSH_FAILED; reload before retrying. Increasing the number of live homes requires the dashboard.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -117078,7 +116597,7 @@
             "type": "string"
           },
           "expected_updated_at": {
-            "description": "The Product updated_at from the read being edited. A stale value refuses the entire update, including options, variants and prices. Omit only for a deliberate update based on current state.",
+            "description": "The Product updated_at from the read being edited. A stale value refuses the entire update, including variants and prices. Omit only for a deliberate update based on current state.",
             "minLength": 1,
             "type": "string"
           },
@@ -117115,54 +116634,6 @@
           },
           "name": {
             "type": "string"
-          },
-          "options": {
-            "description": "Complete option list when supplied; omitted options are removed. Omit to preserve existing options and selections.",
-            "items": {
-              "additionalProperties": false,
-              "description": "A customer choice such as Size, with values such as Small and Large. Variants combine these choices and carry prices. Descriptive facts belong in details.",
-              "properties": {
-                "id": {
-                  "type": "string"
-                },
-                "name": {
-                  "type": "string"
-                },
-                "sort_order": {
-                  "type": "integer"
-                },
-                "values": {
-                  "items": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "id": {
-                        "type": "string"
-                      },
-                      "sort_order": {
-                        "type": "integer"
-                      },
-                      "value": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "value"
-                    ],
-                    "type": "object"
-                  },
-                  "maxItems": 100,
-                  "minItems": 1,
-                  "type": "array"
-                }
-              },
-              "required": [
-                "name",
-                "values"
-              ],
-              "type": "object"
-            },
-            "maxItems": 3,
-            "type": "array"
           },
           "order_url": {
             "description": "External ordering or booking destination, such as Uber Eats, an experience checkout, or Clio Grow. When set, public actions use this URL instead of native booking. Null restores the configured native flow.",
@@ -117910,10 +117381,10 @@
             ]
           },
           "variants": {
-            "description": "Partial existing variants by id or new variants. Omitted variants and their prices/options remain unless variants_mode is replace. Existing variant and price IDs retain their identities.",
+            "description": "Partial existing variants by id or new variants. Omitted variants and their prices remain unless variants_mode is replace. Existing variant and price IDs retain their identities.",
             "items": {
               "additionalProperties": false,
-              "description": "A partial update to an existing variant by id, or a new variant. Existing variants retain omitted fields and option selections. New variants require a name and complete option selections.",
+              "description": "A partial update to an existing variant by id, or a new variant. Existing variants retain omitted fields. New variants require a name.",
               "properties": {
                 "active": {
                   "type": "boolean"
@@ -117923,13 +117394,6 @@
                 },
                 "name": {
                   "type": "string"
-                },
-                "option_values": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "description": "Option id to option value id. Every option must be answered exactly once, and no two variants may answer identically.",
-                  "type": "object"
                 },
                 "prices": {
                   "description": "Partial existing prices by id or new offers. Omitted prices remain unless prices_mode is replace. A new offer requires unit_amount.",
@@ -118983,51 +118447,6 @@
               },
               "name": {
                 "type": "string"
-              },
-              "options": {
-                "items": {
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "sort_order": {
-                      "type": "integer"
-                    },
-                    "values": {
-                      "items": {
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "sort_order": {
-                            "type": "integer"
-                          },
-                          "value": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "value",
-                          "sort_order"
-                        ],
-                        "type": "object"
-                      },
-                      "type": "array"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name",
-                    "sort_order",
-                    "values"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
               },
               "order_url": {
                 "type": [
@@ -120311,12 +119730,6 @@
                     "name": {
                       "type": "string"
                     },
-                    "option_values": {
-                      "additionalProperties": {
-                        "type": "string"
-                      },
-                      "type": "object"
-                    },
                     "prices": {
                       "items": {
                         "additionalProperties": false,
@@ -120427,7 +119840,6 @@
                     "sku",
                     "active",
                     "sort_order",
-                    "option_values",
                     "prices"
                   ],
                   "type": "object"
@@ -120442,7 +119854,6 @@
               "slug",
               "description",
               "active",
-              "options",
               "variants",
               "details",
               "publications",
@@ -130247,18 +129658,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:6b782c6ab1d21047206a463217e0c945b7eb86938bbf84227861aee188db98cd",
-        "get_product": "sha256:c3d93df0274de203abbdfde2bf45ccc0d3825c6e8d29e558dfba59cf1795d0ef",
+        "create_product": "sha256:0cd8b3d2c096b9752c20cd54a15f1b69d905f4635ef3e5f9ab90e4ad92edae49",
+        "get_product": "sha256:64823ed04bb4d2ffb2e4359bb47b79512cbcf199e1317beb4cd951e707a93cc0",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
         "list_location_products": "sha256:2015626d39e62ce848fe36e9f0b99ac1e50b9afb915d67d7ce067553afb700b6",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
-        "reconcile_products": "sha256:68a6d15679ed28f3744a74860dc460b706c61f6e4fa8313c449b2f4989f2a30c",
+        "reconcile_products": "sha256:b93a5c02f40b9927c6dcb4bc239b7f4da27dee45a6f6fbf8d2cafe50a18034b6",
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
         "set_collection_products": "sha256:124140d2c1f17f41c466ca886c7fcabdfa4d9f34d9b6f0da8a1299548ae49289",
-        "update_menu": "sha256:cd6ae334587cddc89c052c08d9f30ce9855bd0394c95eb87d69378a393068269",
-        "update_product": "sha256:9746842c3ad6eccf9b74a5f3074d81d39847bbee81e58b38f8925870d23d39fb"
+        "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
+        "update_product": "sha256:9bb0d4b4de18ad9bf5baa164e72eb5c694e1bed7c9cef9933cf58feaedd63faa"
       }
     },
     {
@@ -130303,8 +129714,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:6b782c6ab1d21047206a463217e0c945b7eb86938bbf84227861aee188db98cd",
-        "get_product": "sha256:c3d93df0274de203abbdfde2bf45ccc0d3825c6e8d29e558dfba59cf1795d0ef",
+        "create_product": "sha256:0cd8b3d2c096b9752c20cd54a15f1b69d905f4635ef3e5f9ab90e4ad92edae49",
+        "get_product": "sha256:64823ed04bb4d2ffb2e4359bb47b79512cbcf199e1317beb4cd951e707a93cc0",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
@@ -130375,7 +129786,7 @@
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
         "get_post": "sha256:1bfb415fc3917a3aad29e1b1ae44db4a092b10dd169974b39c89832c4a69017d",
-        "get_product": "sha256:c3d93df0274de203abbdfde2bf45ccc0d3825c6e8d29e558dfba59cf1795d0ef",
+        "get_product": "sha256:64823ed04bb4d2ffb2e4359bb47b79512cbcf199e1317beb4cd951e707a93cc0",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
@@ -130391,7 +129802,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:6b782c6ab1d21047206a463217e0c945b7eb86938bbf84227861aee188db98cd",
+        "create_product": "sha256:0cd8b3d2c096b9752c20cd54a15f1b69d905f4635ef3e5f9ab90e4ad92edae49",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
@@ -130402,7 +129813,7 @@
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "publish_website": "sha256:6ba702a3293b004e38bcc734ff0b74c3073caaeb12cd831f0f78ddec1a1efaa4",
         "save_website_draft": "sha256:6a7e9c21393133afa96ef5bd80d3ca08ced43fc89e669394496d8d4785ed82ab",
-        "update_menu": "sha256:cd6ae334587cddc89c052c08d9f30ce9855bd0394c95eb87d69378a393068269",
+        "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
         "update_organization_settings": "sha256:7191c77fc0ed6eb5ce818283be58acb26679a8cf793cbba600dccb694e8051a6",
         "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
       }
@@ -130417,7 +129828,7 @@
       },
       "toolContracts": {
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
-        "get_product": "sha256:c3d93df0274de203abbdfde2bf45ccc0d3825c6e8d29e558dfba59cf1795d0ef",
+        "get_product": "sha256:64823ed04bb4d2ffb2e4359bb47b79512cbcf199e1317beb4cd951e707a93cc0",
         "get_reservation_policy": "sha256:671949950829fad652e09245cb65c14b456e28519e4e5f01a0fcbaca2bb3e78f",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
@@ -130425,7 +129836,7 @@
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "replace_product_weekly_schedule": "sha256:cc5f48fb054661e70ce26d988fc12a29f4325c7fc59b5b20852fb98d0e0e2451",
         "set_product_booking_config": "sha256:325fc0b5cb4d6ab6c21227ea94b6d2c22a1192af199b3286145207bbd58b1379",
-        "update_product": "sha256:9746842c3ad6eccf9b74a5f3074d81d39847bbee81e58b38f8925870d23d39fb",
+        "update_product": "sha256:9bb0d4b4de18ad9bf5baa164e72eb5c694e1bed7c9cef9933cf58feaedd63faa",
         "update_reservation_policy": "sha256:11892e568dc0af3a9a3bcd0e6ddcf1081e146d1f36dfea443650f602348d30cb"
       }
     },
@@ -130445,7 +129856,7 @@
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_product": "sha256:9746842c3ad6eccf9b74a5f3074d81d39847bbee81e58b38f8925870d23d39fb",
+        "update_product": "sha256:9bb0d4b4de18ad9bf5baa164e72eb5c694e1bed7c9cef9933cf58feaedd63faa",
         "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
       }
     },
@@ -130461,14 +129872,14 @@
         "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
         "get_guest_conversation": "sha256:fabd2b7aa4ccb5f19c1d0a7bdf3bc559a083c9f2547d0c93aeda64ce51f5563c",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
-        "get_product": "sha256:c3d93df0274de203abbdfde2bf45ccc0d3825c6e8d29e558dfba59cf1795d0ef",
+        "get_product": "sha256:64823ed04bb4d2ffb2e4359bb47b79512cbcf199e1317beb4cd951e707a93cc0",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:6d0b00651d62c18f2c881046eb4d7f619ec7aecf85662d0c173af68134fd98cc",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
-        "update_product": "sha256:9746842c3ad6eccf9b74a5f3074d81d39847bbee81e58b38f8925870d23d39fb"
+        "update_product": "sha256:9bb0d4b4de18ad9bf5baa164e72eb5c694e1bed7c9cef9933cf58feaedd63faa"
       }
     }
   ]
