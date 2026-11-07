@@ -35,8 +35,6 @@ export interface PublicShellLocation {
   stay_map_sharing: StayMapSharing | null
   public_area: PublicLocationArea | null
   social_image?: SocialImageSource | null
-  /** The one home this location holds and nothing besides; its page is the home's. */
-  home_slug: string | null
   sections: Record<PublicLocationSection, boolean>
 }
 
@@ -90,7 +88,6 @@ export const isPublicShellPayload = (value: unknown): value is PublicShellPayloa
         && (location.public_area.radius_meters === null || typeof location.public_area.radius_meters === 'number')))
       && (location.stay_map_sharing === null || (location.address === null && location.maps_url === null))
       && (location.stay_map_sharing !== 'general' || (location.latitude === null && location.longitude === null))
-      && (location.home_slug === null || typeof location.home_slug === 'string')
       && sectionFlags(location.sections, PUBLIC_LOCATION_SECTIONS))) return false
   if (!isRecord(value.config)
     || !Object.values(value.config).every(item => typeof item === 'string')) return false

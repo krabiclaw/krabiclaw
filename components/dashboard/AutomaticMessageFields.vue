@@ -7,7 +7,7 @@
     <template v-if="!concern || concern === 'schedule'">
       <UFormField label="When to send"><USelect :model-value="trigger" :items="triggers" class="w-full" :disabled="!editor.manage.value || editor.saving.value" @update:model-value="setTrigger" /></UFormField>
         <UAlert v-if="editor.homesError.value" color="error" title="Homes could not be loaded" :description="editor.homesError.value" />
-        <UFormField label="Homes"><USelectMenu v-model="editor.draft.value.schedule.productIds" :items="editor.homes.value.map(home => ({ label: home.name, value: home.product_id, description: home.timezone }))" value-key="value" multiple placeholder="Select homes" class="w-full" :disabled="!editor.manage.value || editor.saving.value || !!editor.homesError.value" /></UFormField>
+        <UFormField label="Homes"><USelectMenu v-model="editor.draft.value.schedule.productIds" :items="editor.homes.value.map(home => ({ label: home.internal_name, value: home.product_id, description: home.timezone }))" value-key="value" multiple placeholder="Select homes" class="w-full" :disabled="!editor.manage.value || editor.saving.value || !!editor.homesError.value" /></UFormField>
         <template v-if="editor.draft.value.schedule.trigger !== 'booking_received'">
           <UFormField label="Day"><USelect v-model="editor.draft.value.schedule.offsetDays" :items="days" class="w-full" :disabled="!editor.manage.value || editor.saving.value" /></UFormField>
           <UFormField label="Local time"><UInput v-model="editor.draft.value.schedule.localTime" type="time" class="w-full" :disabled="!editor.manage.value || editor.saving.value" /></UFormField>

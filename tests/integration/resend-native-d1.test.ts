@@ -306,7 +306,6 @@ test('conversation email uses provider-assigned ancestry and freezes each delive
     const now = new Date().toISOString()
     for (const [id, organizationId] of [['conversation', 'thread-owner'], ['other-conversation', 'other-owner']]) {
       await db.batch(requestInsertQueries({ id: id!, kind: 'contact', organization_id: organizationId!, location_id: null, user_id: null, review_id: null,
-        conversation_state: 'needs_attention', resolved_at: null,
         payload: { guest: { name: 'Guest', email: guestEmail, phone: null }, subject: 'Question', message: 'Is there parking?', consent_at: null, ip_hash: null },
         created_at: now, updated_at: now }).map(write => db.prepare(write.query).bind(...write.params)))
     }
@@ -495,7 +494,7 @@ test('Resend delivery events move a guest-thread delivery forward only and publi
   try {
     await db.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('org-proof', 'Proof', 'proof', 'proof', 'USD', 'UTC')").run()
     const now = new Date().toISOString()
-    const opening = requestInsertQueries({ id: 'thread-proof', kind: 'contact', organization_id: 'org-proof', location_id: null, user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null, payload: { guest: { name: 'Guest', email: 'guest@provider-proof.com', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null }, created_at: now, updated_at: now })
+    const opening = requestInsertQueries({ id: 'thread-proof', kind: 'contact', organization_id: 'org-proof', location_id: null, user_id: null, review_id: null, payload: { guest: { name: 'Guest', email: 'guest@provider-proof.com', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null }, created_at: now, updated_at: now })
     await db.batch(opening.map(write => db.prepare(write.query).bind(...write.params)))
     await appendEntry(db, { id: 'entry-proof', threadId: 'thread-proof', kind: 'message', actorKind: 'member', channel: 'email', body: 'Proof reply' })
     await db.prepare("INSERT INTO guest_thread_deliveries (id, entry_id, channel, provider, purpose, status, provider_message_id) VALUES ('delivery-proof', 'entry-proof', 'email', 'resend', 'member_reply', 'sent', 'email-proof')").run()

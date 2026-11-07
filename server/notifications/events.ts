@@ -793,3 +793,36 @@ export function onboardingCompletedMessage(input: OnboardingCompletedInput): Mem
     emailReason: `You received this email because ${input.organizationName} completed setup and you receive KrabiClaw business onboarding alerts.`,
   }
 }
+
+export interface TaskAlertInput {
+  /** Someone gave the reader this task, or its window starts today. */
+  kind: 'assigned' | 'starting'
+  /** Who gave it; null when the business's own records did. */
+  actorName: string | null
+  /** As the task reads on Today: kind and time, the place or person, one line of context. */
+  task: { eyebrow: string; title: string; detail: string | null }
+  organizationName: string
+  taskUrl: string
+}
+
+/** A task the reader now has, or one whose window starts today. */
+export function taskAlertMessage(input: TaskAlertInput): MemberAlertMessage {
+  const assigned = input.kind === 'assigned'
+  const what = `${input.task.eyebrow} · ${input.task.title}`
+  return {
+    title: assigned ? `${input.actorName ? firstName(input.actorName) : 'Someone'} gave you a task: ${input.task.title}` : `Today: ${input.task.title}`,
+    preheader: [input.task.eyebrow, input.task.detail].filter(Boolean).join(' · ').slice(0, 120),
+    hero: null,
+    facts: facts(
+      fact('guestName', assigned ? 'From' : 'Business', assigned ? input.actorName ?? input.organizationName : input.organizationName, true),
+      fact('subject', 'Task', what, true),
+      fact('message', 'Details', input.task.detail ?? input.task.title, true),
+    ),
+    primaryAction: { url: input.taskUrl, label: 'Open task' },
+    category: 'tasks',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because you are assigned work at ${input.organizationName}.`,
+    organizationName: input.organizationName,
+  }
+}
+

@@ -42,9 +42,9 @@ const canReadSessions = computed(() => {
   return Boolean(role && (authClient.organization.checkRolePermission({ role, permissions: { products: ['update'] } }) || authClient.organization.checkRolePermission({ role, permissions: { products: ['assigned'] } })))
 })
 const isProduct = (value: unknown): value is Product => isRecord(value) && typeof value.id === 'string' && typeof value.name === 'string' && typeof value.kind === 'string' && Array.isArray(value.locations) && value.locations.every(entry => isRecord(entry) && typeof entry.location_id === 'string') && (value.booking === null || isRecord(value.booking))
-type Homes = { homes: Pick<StayHome, 'product_id' | 'name' | 'timezone'>[]; manage: boolean }
+type Homes = { homes: Pick<StayHome, 'product_id' | 'name' | 'internal_name' | 'timezone'>[]; manage: boolean }
 const isHomes = (value: unknown): value is Homes => isRecord(value) && typeof value.manage === 'boolean' && Array.isArray(value.homes)
-  && value.homes.every(home => isRecord(home) && typeof home.product_id === 'string' && typeof home.name === 'string' && typeof home.timezone === 'string' && isValidTimezone(home.timezone))
+  && value.homes.every(home => isRecord(home) && typeof home.product_id === 'string' && typeof home.internal_name === 'string' && typeof home.timezone === 'string' && isValidTimezone(home.timezone))
 const { data: homes, error: homesError } = await useAsyncData(
   () => `calendar-homes:${String(route.params.orgSlug)}`,
   () => dashboard.hasFeature('stays') ? api('/api/dashboard/stay-homes', { validate: isHomes }) : Promise.resolve(null),
@@ -84,7 +84,7 @@ const scopeError = computed(() => {
 const stayScope = computed(() => Boolean(knownHome.value || scoped.value?.product.kind === 'stay'))
 const offeringItems = computed(() => [
   { label: 'All activity', value: AGENDA_FILTER_ALL },
-  ...(homes.value?.homes ?? []).map(home => ({ label: `Availability: ${home.name}`, value: home.product_id })),
+  ...(homes.value?.homes ?? []).map(home => ({ label: `Availability: ${home.internal_name}`, value: home.product_id })),
   ...(products.value?.products ?? []).filter(product => ['experience', 'service'].includes(product.kind) && product.booking).map(product => ({ label: `Availability: ${product.name}${product.active ? '' : ' · Paused'}`, value: product.id })),
 ])
 const offeringsError = computed(() => homesError.value ? getErrorMessage(homesError.value, 'The places to stay could not be loaded') : productsError.value ? getErrorMessage(productsError.value, 'The offerings could not be loaded') : placesError.value ? getErrorMessage(placesError.value, 'The places could not be loaded') : '')

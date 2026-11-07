@@ -471,7 +471,7 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
   if (state.status === 'accepted' || state.status === 'declined') return { changeStatus: state.status }
   if (state.status === 'stale' || state.status === 'expired') throw new HTTPError({ statusCode: state.status === 'expired' ? 410 : 409, message: state.message })
   await deliverEmail(db, env, thread, entry.id, entry.id, 'requested', proposal, noun)
-  await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id, { conversationState: 'waiting_on_guest' })
+  await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id)
   const decision = await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)
   if (decision) {
     if (decision.event_name === 'booking_change.accepted') return { changeStatus: 'accepted' as const }
@@ -549,7 +549,7 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
   }
   const noun = await bookingNoun(db, thread)
   await deliverEmail(db, env, thread, entry.id, entry.id, 'moved', proposalSchema.parse(JSON.parse(entry.payload_json || '{}')), noun)
-  await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id, { conversationState: 'resolved' })
+  await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id)
   return { changeStatus: 'moved' as const }
 }
 
@@ -681,7 +681,7 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
   const noun = await bookingNoun(db, thread as GuestThreadRow)
   if (result && input.decision) {
     const accepted = result.event_name === 'booking_change.accepted'
-    await updateThreadProjectionIfLatestEntry(db, thread.id, result.id, { conversationState: 'resolved' })
+    await updateThreadProjectionIfLatestEntry(db, thread.id, result.id)
     if (!result.payload_json) throw new Error('A booking change answer has no recorded payload')
     const answered = JSON.parse(result.payload_json) as { operational_booking_id?: unknown; before?: { assigned_member_id?: string | null }; after?: { assigned_member_id?: string | null } | null }
     if (thread.kind === 'booking' && typeof answered.operational_booking_id === 'string') {

@@ -29,13 +29,13 @@
 import { NuxtLink } from '#components'
 import { authClient } from '~/lib/auth-client'
 import type { AccountActivityItem } from '~/shared/account-activity'
-import { formatTimestamp } from '~/utils/timezone'
+import { formatCalendarDate, formatTimestamp } from '~/utils/timezone'
 import { paymentStateLabel } from '~/shared/payment-display'
 const props = defineProps<{ item: AccountActivityItem }>()
 const session = authClient.useSession()
 // The list knows the payment's state word, not its amounts; the same vocabulary as the record screen.
 const purchaseLabel = (state: string) => paymentStateLabel({ captured_amount: state === 'captured' || state === 'refunded' ? 1 : 0, refunded_amount: state === 'refunded' ? 1 : 0, state })
 const dateLabel = computed(() => props.item.startsAt && props.item.timeZone
-  ? formatTimestamp(props.item.startsAt, 'en', props.item.timeZone, { dateStyle: 'medium', timeStyle: 'short' })
+  ? props.item.startsAt.includes('T') ? formatTimestamp(props.item.startsAt, 'en', props.item.timeZone, { dateStyle: 'medium', timeStyle: 'short' }) : formatCalendarDate(props.item.startsAt, 'en')
   : `${props.item.kind === 'order' ? 'Ordered ' : ''}${formatTimestamp(props.item.createdAt, 'en', 'UTC', { dateStyle: 'medium' })}`)
 </script>

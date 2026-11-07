@@ -4,14 +4,12 @@ import type { GuestThreadMailbox } from './mailbox'
 import type { StayChannel } from '~/shared/bookings'
 import type { BookingChangeView } from './booking-changes'
 
-export type GuestThreadEntryKind = 'submission' | 'message' | 'operation' | 'assignment' | 'resolution'
+export type GuestThreadEntryKind = 'submission' | 'message' | 'operation' | 'assignment'
 export type GuestThreadActorKind = 'guest' | 'member' | 'system'
 export type GuestThreadChannel = 'web' | 'email' | 'whatsapp' | 'airbnb' | 'system'
-export type ConversationState = 'needs_attention' | 'waiting_on_guest' | 'resolved'
 export type GuestThreadSubmissionType = 'contact' | 'reservation' | 'booking' | 'stay'
 export type GuestThreadDeliveryChannel = 'email' | 'whatsapp' | 'airbnb' | 'push'
 export type GuestThreadDeliveryProvider = 'resend' | 'meta' | 'channex' | 'apns' | 'web_push' | 'log_only'
-export type GuestThreadReplyChannel = 'email' | 'airbnb'
 export type GuestThreadDeliveryPurpose = 'owner_alert' | 'guest_acknowledgement' | 'member_reply' | 'scheduled_message' | 'status_update'
 export type GuestThreadDeliveryStatus = 'pending' | 'sending' | 'uncertain' | 'accepted' | 'sent' | 'delivered' | 'read' | 'failed' | 'skipped'
 
@@ -105,7 +103,6 @@ export interface GuestThreadListItemViewModel {
   organizationVertical?: string | null
   guestName: string | null
   participantLabel: string
-  replyChannel: GuestThreadReplyChannel
   submissionType: GuestThreadSubmissionType
   locationLabel: string | null
   locationId: string | null
@@ -115,14 +112,14 @@ export interface GuestThreadListItemViewModel {
   occurrenceAt: string | null
   timeZone: string | null
   latestMessageFromGuest: boolean
-  conversationState: ConversationState | null
+  /** An open guest_reply task: the guest asked something nobody has answered. */
+  needsReply: boolean
   operationalStatus: string | null
   operationalStatusLabel: string | null
   unread: boolean
   unreadCount: number
   preview: { kind: 'message' | 'submission'; text: string } | null
   lastActivityAt: string
-  needsAttention: boolean
   /** The location hero the row leads with. Null when the thread or the location has none. */
   imageUrl: string | null
   /** A business logo its owner shows whole is fitted inside the frame rather than cropped to fill it. */
@@ -156,6 +153,7 @@ export interface GuestThreadListPage {
 export interface GuestThreadEntryDeliveryViewModel {
   id: string
   channel: GuestThreadDeliveryChannel
+  provider: GuestThreadDeliveryProvider
   purpose: GuestThreadDeliveryPurpose
   status: GuestThreadDeliveryStatus
 }
@@ -208,15 +206,15 @@ export interface GuestThreadDetailViewModel {
   activityPath: string | null
   guestName: string | null
   participantLabel: string
-  replyChannel: GuestThreadReplyChannel
-  /** The conversation belongs to a guest account, so a reply reaches its account inbox even without a guest email. */
-  guestAccountLinked: boolean
+  /** Where the conversation lives: Airbnb's own thread, or KrabiClaw directly. Where a reply can go is `guestReplyDestination`'s. */
+  conversationChannel: 'airbnb' | 'direct'
   guestEmail: string | null
   guestPhone: string | null
   submissionType: GuestThreadSubmissionType
   submissionId: string
   locationLabel: string | null
-  conversationState: ConversationState | null
+  /** An open guest_reply task: the guest asked something nobody has answered. */
+  needsReply: boolean
   source: ThreadDetailSourceModel
   operationalRecord: Pick<ThreadOperationalRecord, 'id' | 'kind' | 'status' | 'starts_at' | 'ends_at' | 'timezone' | 'party_size' | 'check_in_date' | 'check_out_date'> | null
   entries: GuestThreadEntryViewModel[]
@@ -233,7 +231,6 @@ export interface GuestThreadDetailViewModel {
   deliveryFailures: GuestThreadDeliveryFailureViewModel[]
   createdAt: string
   updatedAt: string
-  resolvedAt: string | null
 }
 
 /*
@@ -306,7 +303,7 @@ export type InboxStreamItem =
     translated: { original: string } | null
     /** Files the message carried that are not photos the conversation can show, such as a PDF. */
     unshownFiles: number
-    /** On the newest business message only: Sending, Sent, Delivered, Read by <name>, Not delivered. */
+    /** On the newest business message only: Sending, Sent, Delivered, Read by <name>, Not delivered, Recorded locally. */
     receipt: string | null
     /** The reply was not delivered and can be sent again as it was (a team member's text reply). */
     retryable: boolean
@@ -347,7 +344,8 @@ export interface InboxThread {
   stream: InboxStreamItem[]
   pending: InboxPendingMessage[]
   /** Where a reply goes, and whether one can be sent. */
-  composer: { channel: 'airbnb' | 'email'; available: boolean }
+  /** `reason` says why there is no composer: the reply operation's own refusal. */
+  composer: { channel: 'airbnb' | 'email'; available: boolean; reason: string | null }
 }
 
 /** "In this conversation": who is in it, its photos and what can be done to it. */
@@ -365,7 +363,8 @@ export interface ListGuestThreadsOptions {
   principal?: MemberAccessPrincipal | null
   userId: string
   type?: GuestThreadSubmissionType | null
-  conversationState?: ConversationState | null
+  /** Only conversations with an open guest_reply task. */
+  needsReply?: boolean
   unreadOnly?: boolean
   /** Current or Past, as `resolveGuestThreadMailbox` defines them. Null lists both. */
   mailbox?: GuestThreadMailbox | null

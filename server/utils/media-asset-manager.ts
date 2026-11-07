@@ -550,8 +550,8 @@ export async function listMediaAssets(
   const conditions = [`ma.organization_id = ?`, `ma.status = 'active'`, `ma.generation_key IS NULL`]
   const params: SqlBindValue[] = [organizationId]
   // A photo sent in a conversation is the conversation's, not the website's.
-  if (opts.ownerType !== 'activity_entry' && opts.ownerType !== 'team_message') {
-    conditions.push(`NOT EXISTS (SELECT 1 FROM media_placements sent WHERE sent.asset_id = ma.id AND sent.organization_id = ma.organization_id AND sent.owner_type IN ('activity_entry', 'team_message'))`)
+  if (opts.ownerType !== 'activity_entry' && opts.ownerType !== 'team_message' && opts.ownerType !== 'task') {
+    conditions.push(`NOT EXISTS (SELECT 1 FROM media_placements sent WHERE sent.asset_id = ma.id AND sent.organization_id = ma.organization_id AND sent.owner_type IN ('activity_entry', 'team_message', 'task'))`)
   }
   if (opts.kind) { conditions.push(`ma.kind = ?`); params.push(opts.kind) }
   if (opts.search) { conditions.push(`ma.file_name LIKE ? ESCAPE '\\'`); params.push(`%${opts.search.replace(/[\\%_]/g, '\\$&')}%`) }

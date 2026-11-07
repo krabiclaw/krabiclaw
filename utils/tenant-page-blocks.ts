@@ -1,3 +1,4 @@
+import { hasPublicLocationPages } from '~/utils/site-routing'
 import { FAQ_BLOCK_SOURCES } from '../shared/faq-block'
 import { videoUploadDate, youTubeVideoId } from '../shared/youtube-video'
 import { isSupportedMediaPlacement } from '../shared/media-placement-contract'
@@ -660,12 +661,14 @@ export function isTenantPageBlockAllowed(
   definitionOrType: TenantPageBlockDefinition | TenantPageBlockType,
   recipe: string | null | undefined,
   pageType: TenantPageType,
+  vertical?: string | null,
 ): boolean {
   const definition = typeof definitionOrType === 'string'
     ? TENANT_PAGE_BLOCK_REGISTRY[definitionOrType]
     : definitionOrType
   const normalizedRecipe = recipe?.trim().toLowerCase() || 'custom'
   return Boolean(definition)
+    && (definition.type !== 'location_grid' || hasPublicLocationPages(vertical))
     && definition.allowedRecipes.includes(normalizedRecipe)
     && definition.allowedPageTypes.includes(pageType)
 }

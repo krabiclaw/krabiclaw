@@ -20,6 +20,9 @@ const statements = {
   settings: ['read', 'update'],
   integrations: ['read', 'create', 'update', 'delete'],
   operations: ['read', 'reply', 'update', 'assigned'],
+  // Stored work: managers do everything; a member reads and completes the tasks
+  // given to them, their team, or the homes they look after (server/domain/tasks.ts).
+  task: ['read', 'create', 'assign', 'update', 'complete'],
   // Conversations between the organization's own members; every role takes part.
   team_messages: ['read', 'send'],
 } as const
@@ -48,6 +51,7 @@ const adminStatements = {
   blog: ['read', 'create', 'update', 'delete', 'publish'],
   products: ['read', 'create', 'update', 'delete'],
   operations: ['read', 'reply', 'update'],
+  task: ['read', 'create', 'assign', 'update', 'complete'],
   notifications: ['read', 'update', 'send'],
   analytics: ['read'],
   domains: ['read', 'create', 'update', 'delete'],
@@ -73,6 +77,7 @@ export const organizationRoles = {
     products: ['assigned'],
     locations: ['assigned'],
     operations: ['assigned'],
+    task: ['read', 'complete'],
     team_messages: ['read', 'send'],
   }),
   owner: organizationAccessControl.newRole({

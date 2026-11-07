@@ -1,3 +1,4 @@
+import { opportunityDoneQuery } from '~/server/domain/tasks'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { HTTPError } from 'nitro'
@@ -394,6 +395,7 @@ export async function createPost(
             organizationId, locationId: data.location_id ?? null, actorId: createdBy, eventType: 'post.created',
             entityType: 'post', entityId: id, metadata: { request_hash: requestHash }, dedupeKey,
           }),
+          opportunityDoneQuery(organizationId, ['post.create'], organizationId, now),
         ] })
         break
       } catch (error) {

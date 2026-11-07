@@ -320,8 +320,6 @@ const {
 // around a null location answered 200 with an empty shell — a soft 404 a
 // crawler indexes. The sibling menu and product indexes already refuse it.
 if (!location.value) throw createError({ statusCode: 404, statusMessage: 'Location not found' })
-// A location that is one home is that home: its page is the listing.
-if (location.value.home_slug) await navigateTo(localePath(publicLocationPath(location.value)), { redirectCode: 301 })
 const { posts: locationPosts } = await useSocialPostFeed(() => ({ locationId: location.value!.id }), { limit: 3 })
 
 const locationProducts = computed(() => products.value.filter(product =>

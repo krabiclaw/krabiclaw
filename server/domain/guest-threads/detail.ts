@@ -1,4 +1,5 @@
 import { buyerRequestActivityPath } from '~/server/domain/payments/buyer'
+import { OPEN_REPLY_TASK_SQL } from './repository'
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { getGuestRequest, getThreadOperationalRecord, requestSummary, requestActions, stayPreview } from '~/server/domain/requests'
 import { formatOperationalStatusLabel } from './status-labels'
@@ -9,7 +10,6 @@ import { listMessagePhotos } from './attachments'
 import type { GuestThreadDetailViewModel, GuestThreadEntryDeliveryViewModel, GuestThreadEntryRow, GuestThreadEntryViewModel } from './types'
 import { HTTPError } from 'nitro'
 import { providerTimestamp } from '~/server/integrations/channex/messages'
-import { guestThreadConversationState } from './booking-change-state'
 import { bookingChangeViews } from './booking-changes'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
 
@@ -47,8 +47,8 @@ export async function getGuestThreadDetail(
   const [entryRows, deliveryRows, channelThread, answers] = await Promise.all([
     listThreadEntries(db, threadId),
     listThreadDeliveries(db, threadId),
-    queryFirst(db, `SELECT request_id FROM channel_threads WHERE organization_id = ? AND request_id = ?
-      UNION ALL SELECT request_id FROM stays WHERE organization_id = ? AND request_id = ? AND owner = 'channel' LIMIT 1`, [organizationId, threadId, organizationId, threadId]),
+    queryFirst<{ request_id: string; product_id: string | null }>(db, `SELECT request_id, product_id FROM channel_threads WHERE organization_id = ? AND request_id = ?
+      UNION ALL SELECT request_id, product_id FROM stays WHERE organization_id = ? AND request_id = ? AND owner = 'channel' LIMIT 1`, [organizationId, threadId, organizationId, threadId]),
     threadAnswers(db, thread),
   ])
 
@@ -57,7 +57,7 @@ export async function getGuestThreadDetail(
   const deliveriesByEntry = new Map<string, GuestThreadEntryDeliveryViewModel[]>()
   for (const delivery of deliveryRows) {
     const forEntry = deliveriesByEntry.get(delivery.entry_id) ?? []
-    forEntry.push({ id: delivery.id, channel: delivery.channel, purpose: delivery.purpose, status: delivery.status })
+    forEntry.push({ id: delivery.id, channel: delivery.channel, provider: delivery.provider, purpose: delivery.purpose, status: delivery.status })
     deliveriesByEntry.set(delivery.entry_id, forEntry)
   }
   const deliveryFailureRows = deliveryRows.filter(isVisibleDeliveryFailure)
@@ -121,6 +121,11 @@ export async function getGuestThreadDetail(
   })
 
   const summary = await requestSummary(db, thread, record)
+  if (!audience) {
+    const home = record?.kind === 'stay' ? { internal_name: record.product_internal_name } : channelThread?.product_id
+      ? await queryFirst<{ internal_name: string }>(db, 'SELECT internal_name FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, channelThread.product_id]) : null
+    if (home) { summary.productTitle = home.internal_name; summary.locationTitle = home.internal_name }
+  }
   // A member's unread alerts keep an ended conversation in Current for them; a guest's inbox reads no member alerts.
   const mailbox = resolveGuestThreadMailbox(thread, record, now, await readMailboxActivity(db, thread.id, audience ? null : viewerUserId ?? null), audience?'buyer':'member')
 
@@ -131,14 +136,13 @@ export async function getGuestThreadDetail(
     activityPath: audience && thread.kind!=='contact' ? await buyerRequestActivityPath(db,audience.buyerUserId,thread.id) : null,
     guestName: summary.guestName,
     participantLabel: summary.participantLabel,
-    replyChannel: channelThread ? 'airbnb' : 'email',
-    guestAccountLinked: thread.user_id !== null,
+    conversationChannel: channelThread ? 'airbnb' : 'direct',
     guestEmail: summary.guestEmail,
     guestPhone: summary.guestPhone,
     submissionType: thread.kind,
     submissionId: thread.id,
     locationLabel: summary.locationTitle,
-    conversationState: audience ? null : await guestThreadConversationState(db, thread.id, now),
+    needsReply: !audience && Boolean(await queryFirst(db, `SELECT 1 AS open FROM requests gt WHERE gt.id = ? AND ${OPEN_REPLY_TASK_SQL}`, [thread.id])),
     operationalRecord: record ? { id: record.id, kind: record.kind, status: record.status, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, party_size: record.party_size, check_in_date: record.check_in_date, check_out_date: record.check_out_date } : null,
     source: {
       submissionType: thread.kind,
@@ -189,7 +193,6 @@ export async function getGuestThreadDetail(
     })),
     createdAt: thread.created_at,
     updatedAt: thread.updated_at,
-    resolvedAt: audience ? null : thread.resolved_at,
   }
 }
 

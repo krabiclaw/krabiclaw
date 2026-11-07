@@ -162,7 +162,7 @@ export default defineNuxtConfig({
     serverBundle: false,
     clientBundle: {
       scan: {
-        globInclude: ['**/*.{vue,jsx,tsx,md,mdc,mdx}', '{composables,shared,utils}/**/*.ts', 'app.config.ts', 'server/utils/dashboard-today.ts', 'server/domain/business-progress.ts'],
+        globInclude: ['**/*.{vue,jsx,tsx,md,mdc,mdx}', '{composables,shared,utils}/**/*.ts', 'app.config.ts', 'server/domain/tasks.ts', 'server/domain/business-progress.ts'],
       },
       icons: [
         'lucide:menu',

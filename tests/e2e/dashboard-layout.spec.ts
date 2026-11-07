@@ -15,7 +15,6 @@ import type { MemberSchedule } from '../../composables/useMemberAvailabilityEdit
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import type { Collection, Product } from '../../server/types/products'
 import type { DashboardLocation } from '../../composables/useDashboardOrganization'
-import type { TodayFeedPayload } from '../../shared/dashboard-today'
 import { countCatalog, type CatalogCounts } from '../../utils/product-presentation'
 import { seededTenant } from './seed/manifest'
 
@@ -30,7 +29,6 @@ const WIDE = { width: 1440, height: 900 }
 const NARROW = { width: 900, height: 900 }
 const PHONE = { width: 390, height: 844 }
 // A short phone, so the demo owner's real Today cards overflow and the scroll end is measurable.
-const SHORT_PHONE = { width: 390, height: 600 }
 
 /** The panes on screen, left to right, by the id each DashboardIndexPanel/LeafPanel is given. */
 async function visiblePanes(page: Page): Promise<string[]> {
@@ -1549,51 +1547,6 @@ test.describe('dashboard pane hierarchy', () => {
     await panel.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).toHaveURL(productPath)
     expect(pageErrors).toEqual([])
-  })
-
-  test('mobile scroll ends Today after its real final content and one panel padding', async ({ page }) => {
-    const feedRead = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo', locationId: seededTenant('restaurant').locations.brooklyn.id } })
-    expect(feedRead.status(), await feedRead.text()).toBe(200)
-    const feed = await feedRead.json() as TodayFeedPayload
-    expect(feed.cards.length, 'The demo owner has real current work on Today').toBeGreaterThan(0)
-    await page.setViewportSize(SHORT_PHONE)
-    await open(page, `${ORG}?locationId=${seededTenant('restaurant').locations.brooklyn.id}`)
-    const panel = page.locator('#dashboard-panel-org-today')
-    const body = panel.locator(':scope > [data-slot="body"]')
-    const cards = panel.getByTestId('today-list').getByTestId('today-card')
-    await expect(cards.first()).toBeVisible()
-    expect(await body.evaluate(element => element.scrollHeight > element.clientHeight), 'Today overflows the phone, so it has a scroll end to measure').toBe(true)
-    await expect(page.getByTestId('dashboard-mobile-nav')).toBeVisible()
-    const bodyBox = await body.boundingBox()
-    expect(bodyBox).not.toBeNull()
-    await page.mouse.move(bodyBox!.x + 4, bodyBox!.y + bodyBox!.height / 2)
-    while (await cards.count() < feed.cards.length) {
-      const count = await cards.count()
-      await page.mouse.wheel(0, await body.evaluate(element => element.scrollHeight))
-      await expect.poll(() => cards.count()).toBeGreaterThan(count)
-    }
-    expect(await cards.evaluateAll(elements => elements.map(element => element.getAttribute('data-card-id')))).toEqual(feed.cards.map(card => card.id))
-    await page.mouse.wheel(0, await body.evaluate(element => element.scrollHeight))
-    await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
-    const last = cards.last()
-    await expect(last).toContainText(feed.cards.at(-1)!.headline)
-    const finalBody = (await body.boundingBox())!
-    // Business goals now end the list as a collapsed disclosure. Check both
-    // states against the same panel boundary; the old always-visible form is gone.
-    const goals = panel.getByTestId('today-priorities')
-    await expect(goals.locator(':scope > summary')).toBeInViewport({ ratio: 1 })
-    const disclosure = (await goals.boundingBox())!
-    expect(finalBody.y + finalBody.height - disclosure.y - disclosure.height).toBeCloseTo(16, 0)
-    await goals.locator(':scope > summary').click()
-    await page.mouse.wheel(0, await body.evaluate(element => element.scrollHeight))
-    await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
-    const priorityForm = panel.getByTestId('today-priorities').locator('form')
-    await expect(priorityForm).toBeInViewport({ ratio: 1 })
-    const finalItem = (await priorityForm.boundingBox())!
-    expect(finalBody.y + finalBody.height - finalItem.y - finalItem.height, 'Today has the canonical 16px panel padding after its last item').toBeCloseTo(16, 0)
-    const nav = (await page.getByTestId('dashboard-mobile-nav').boundingBox())!
-    expect(finalBody.y + finalBody.height).toBeCloseTo(nav.y, 0)
-    expect(await page.evaluate(() => document.scrollingElement!.scrollTop)).toBe(0)
   })
 
   test('mobile scroll ends Calendar and earnings content at their panel boundary', async ({ page }) => {

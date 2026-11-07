@@ -3,6 +3,7 @@ import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import { H3 } from 'h3'
+import { createHmac } from 'node:crypto'
 import { hashPassword } from 'better-auth/crypto'
 import sharp from 'sharp'
 import * as schema from '../../server/db/schema.ts'
@@ -12,16 +13,21 @@ import { backfillChannexMessages, mirrorChannexMessageEvent, mirrorChannexThread
 import { executeGuestThreadOperation, sendScheduledGuestReply } from '../../server/domain/guest-threads/operations.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
 import { getInboxThread } from '../../server/domain/guest-threads/inbox.ts'
-import { firstUnansweredGuestEntryTimes, listGuestThreads } from '../../server/domain/guest-threads/repository.ts'
+import { listGuestThreads } from '../../server/domain/guest-threads/repository.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { getGuestRequest } from '../../server/domain/requests.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import todayRoute from '../../server/api/dashboard/today.get.ts'
-import type { TodayFeedPayload } from '../../shared/dashboard-today.ts'
+import { listTasks, parseTaskListQuery, taskViewer, type TaskSection } from '../../server/domain/tasks.ts'
+import type { OpportunityView } from '../../server/domain/opportunities.ts'
 import { guestThreadListPage, parseGuestThreadListQuery } from '../../server/utils/dashboard-guest-threads.ts'
 import { assertAssignedBookingAccess, memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
+import whatsappWebhook from '../../server/api/whatsapp/webhook.post.ts'
+import { getWhatsAppWorkspaceState } from '../../server/utils/mcp-context.ts'
+import { useNitroHooks } from 'nitro/app'
+import { ChannexError } from '../../server/integrations/channex/client.ts'
 
 const ORG = 'org', OWNER = 'owner'
 const NOW = '2026-10-16T00:00:00.000Z'
@@ -32,6 +38,22 @@ const RAW = '2026-10-15T23:12:00.123456'
  * which only production configures.
  */
 const GUEST_PHOTO = Uint8Array.from(await sharp({ create: { width: 4, height: 3, channels: 3, background: '#16a34a' } }).avif().toBuffer())
+type TodayPayload = { tasks: TaskSection[]; opportunities: OpportunityView[] }
+/** Today in outline: each task as its kind and conversation, each opportunity as the operation it records. */
+async function todayOutline(db: D1Database, today: TodayPayload) {
+  const operations = new Map((await db.prepare('SELECT id, operation FROM opportunities WHERE organization_id = ?').bind(ORG).all<{ id: string; operation: string }>()).results.map(row => [row.id, row.operation]))
+  return { tasks: today.tasks.flatMap(section => section.tasks.map(task => [task.kind, task.requestId])), opportunities: today.opportunities.map(opportunity => operations.get(opportunity.id)) }
+}
+/** The guest message each open reply task is about, by its ledger dedupe key, and the organization the task belongs to. */
+const openReplies = (db: D1Database, threadId: string) => db.prepare(`SELECT t.organization_id, e.dedupe_key AS entry FROM tasks t JOIN activity_entries e ON t.dedupe_key = 'guest_reply:' || t.subject_id || ':' || e.id
+  WHERE t.kind = 'guest_reply' AND t.subject_type = 'request' AND t.subject_id = ? AND t.status = 'open' ORDER BY e.sequence`).bind(threadId).all<{ organization_id: string; entry: string }>().then(rows => rows.results)
+const waitingOn = async (db: D1Database, threadId: string) => (await openReplies(db, threadId)).map(row => row.entry)
+/** The reply tasks on Today as the owner reads them at `now`: conversation and status line ("Asked 1d ago · home"). */
+async function replyEyebrows(db: D1Database, env: CloudflareEnv, now: Date) {
+  const viewer = await taskViewer(db, memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env }))
+  return (await listTasks(db, viewer, parseTaskListQuery({}), now)).sections.flatMap(section => section.tasks).filter(task => task.kind === 'guest_reply').map(task => [task.requestId, task.statusLine])
+}
+const GROWTH = ['post.create', 'social.connect', 'article.create']
 const code = (expected: string) => (error: unknown) => (error as { data?: { code?: string } }).data?.code === expected
 
 class Provider {
@@ -186,7 +208,7 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     assert.deepEqual(await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay', mailbox: 'past' }), [])
     assert.equal(await db.prepare('SELECT product_id FROM channel_threads WHERE request_id = ?').bind(rows[0]!.id).first('product_id'), productId)
     const detail = (await getGuestThreadDetail(db, rows[0]!.id, ORG))!
-    assert.deepEqual([detail.operationalRecord, detail.guestEmail, detail.guestPhone, detail.guestName, detail.participantLabel, detail.replyChannel], [null, null, null, null, 'Conversation supplied by Airbnb', 'airbnb'])
+    assert.deepEqual([detail.operationalRecord, detail.guestEmail, detail.guestPhone, detail.guestName, detail.participantLabel, detail.conversationChannel], [null, null, null, null, 'Conversation supplied by Airbnb', 'airbnb'])
     assert.deepEqual(detail.entries.map(entry => [entry.body, entry.actorKind, entry.providerTimestamp]), [['Hello', 'guest', RAW], [null, 'system', RAW]])
     // Airbnb's photo is read once when the message lands and kept as the business's own media, placed on that message.
     assert.deepEqual(provider.fileReads, ['/attachment/file'])
@@ -215,17 +237,17 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
       const response = await app.request(Object.assign(new Request('https://proof.example/api/dashboard/today?org=org', { headers: { authorization: `Bearer ${token}` } }),
         { runtime: { name: 'cloudflare', cloudflare: { env } } }))
       assert.equal(response.status, 200)
-      return await response.json() as TodayFeedPayload
+      return await response.json() as TodayPayload
     }
     // The inquiry arrived just now and has no reply: it is due. Today shows its
     // recorded conversation title without inventing a guest identity.
     const today = await readToday()
-    assert.deepEqual(today.cards.filter(card => card.priority === 'attention').map(card => ({ id: card.id, headline: card.headline, reason: card.reason, to: card.to, bookingKind: card.bookingKind,
-      stayId: card.stayId, productId: card.productId, occurrenceAt: card.occurrenceAt, timeZone: card.timeZone, imageIcon: card.imageIcon })), [{
-      id: `attention:${rows[0]!.id}`, headline: 'Review conversation: Conversation supplied by Airbnb', reason: today.cards[0]!.reason, to: `/dashboard/org/messages/${rows[0]!.id}`,
-      bookingKind: null, stayId: null, productId, occurrenceAt: null, timeZone: null, imageIcon: 'i-lucide-message-circle',
+    const replies = today.tasks.flatMap(section => section.tasks).filter(task => task.kind === 'guest_reply')
+    assert.deepEqual(replies.map(task => ({ status: task.status, title: task.title, detail: task.detail, path: task.path, action: task.action, requestId: task.requestId, stayId: task.stayId, startsAt: task.startsAt, dueAt: task.dueAt, avatar: task.avatar })), [{
+      status: 'open', title: 'Conversation supplied by Airbnb', detail: 'Hello', path: `/dashboard/org/messages/${rows[0]!.id}`, action: { type: 'open', label: 'Reply', path: `/dashboard/org/messages/${rows[0]!.id}` },
+      requestId: rows[0]!.id, stayId: null, startsAt: null, dueAt: null, avatar: { initial: 'C', tone: 'warm' },
     }])
-    assert.match(today.cards[0]!.reason!, /^The guest has a message awaiting a business response since .+\.$/)
+    assert.match(replies[0]!.statusLine!, /^Asked .+$/)
     const afterToday = (await getGuestThreadDetail(db, rows[0]!.id, ORG))!
     assert.deepEqual([afterToday.guestName, afterToday.guestEmail, afterToday.guestPhone, afterToday.operationalRecord], [null, null, null, null])
     assert.equal(await db.prepare('SELECT count(*) FROM stays').first('count(*)'), 0)
@@ -266,8 +288,7 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
     const recorded = await db.prepare("SELECT actor_kind, body FROM activity_entries WHERE dedupe_key = 'channex-message:host-action'").first<{ actor_kind: string; body: string | null }>()
     assert.deepEqual(recorded, { actor_kind: 'member', body: null })
 
-    assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [requestId])).get(requestId), guestAt)
-    assert.equal(await db.prepare('SELECT conversation_state FROM requests WHERE id=?').bind(requestId).first('conversation_state'), 'needs_attention')
+    assert.deepEqual(await waitingOn(db, requestId), ['channex-message:first'])
 
     const password = 'EmptyHostActionProof123!'
     await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('owner-credential', ?, 'credential', ?, ?, 0, 0)").bind(OWNER, OWNER, await hashPassword(password)).run()
@@ -281,11 +302,10 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
       const response = await app.request(Object.assign(new Request('https://proof.example/api/dashboard/today?org=org', { headers: { authorization: `Bearer ${token}` } }),
         { runtime: { name: 'cloudflare', cloudflare: { env } } }))
       assert.equal(response.status, 200)
-      return await response.json() as TodayFeedPayload
+      return await response.json() as TodayPayload
     }
     const afterEmpty = await readToday()
-    const growthCardIds = ['recommendation:post.create:org', 'recommendation:social.connect:org', 'recommendation:article.create:org']
-    assert.deepEqual(afterEmpty.cards.map(card => card.id), [`attention:${requestId}`, ...growthCardIds])
+    assert.deepEqual(await todayOutline(db, afterEmpty), { tasks: [['guest_reply', requestId]], opportunities: GROWTH })
 
     // The conversation reads as the guest's words alone, and the list previews them.
     const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
@@ -300,9 +320,9 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
 
     provider.messages.push(provider.message('blank-host-action', 'property', '   ', [], new Date(receivedAt + 2).toISOString()))
     await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [requestId])).get(requestId), guestAt)
+    assert.deepEqual(await waitingOn(db, requestId), ['channex-message:first'])
     const afterBlank = await readToday()
-    assert.deepEqual(afterBlank.cards.map(card => card.id), [`attention:${requestId}`, ...growthCardIds])
+    assert.deepEqual(await todayOutline(db, afterBlank), { tasks: [['guest_reply', requestId]], opportunities: GROWTH })
 
     // A real image-only host reply is downloaded and placed on its message.
     provider.messages.push(provider.message('host-photo', 'property', null, ['/attachment/file'], new Date(receivedAt + 3).toISOString()))
@@ -313,10 +333,11 @@ test('empty Channex host actions stay recorded without clearing reply work; a re
     assert.equal(photoReply.attachments.length, 1)
     assert.ok(photoReply.attachments[0]!.url.startsWith('https://media.example.test/'))
     assert.deepEqual(provider.fileReads, ['/attachment/file'])
-    assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [requestId])).size, 0)
-    assert.equal(await db.prepare('SELECT conversation_state FROM requests WHERE id=?').bind(requestId).first('conversation_state'), 'waiting_on_guest')
+    assert.deepEqual(await waitingOn(db, requestId), [])
     const afterPhoto = await readToday()
-    assert.deepEqual(afterPhoto.cards.map(card => card.id), growthCardIds, 'the real photo reply clears only its attention card; useful growth opportunities remain')
+    // The reply closed its task today, so Today shows it done; the growth opportunities remain.
+    assert.deepEqual(afterPhoto.tasks.flatMap(section => section.tasks).map(task => [task.kind, task.status, task.requestId]), [['guest_reply', 'done', requestId]])
+    assert.deepEqual((await todayOutline(db, afterPhoto)).opportunities, GROWTH, 'the real photo reply clears only its reply task; useful growth opportunities remain')
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
@@ -362,7 +383,7 @@ test('the inbox exposes every page with a stable tie order and validates paginat
   try {
     const payload = JSON.stringify({ guest: { name: 'Guest', email: 'guest@example.test', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null })
     for (const id of ['e', 'c', 'b', 'd', 'a']) {
-      await db.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json, created_at, updated_at) VALUES (?, 'contact', ?, 'needs_attention', ?, ?, ?)").bind(id, ORG, payload, NOW, NOW).run()
+      await db.prepare("INSERT INTO requests (id, kind, organization_id, payload_json, created_at, updated_at) VALUES (?, 'contact', ?, ?, ?, ?)").bind(id, ORG, payload, NOW, NOW).run()
     }
     const first = guestThreadListPage(await listGuestThreads(db, ORG, { userId: OWNER, limit: 4, offset: 0 }), { limit: 3, offset: 0 })
     assert.deepEqual(first.threads.map(thread => thread.id), ['a', 'b', 'c'])
@@ -468,19 +489,20 @@ test('an existing stay timeline is adopted intact; two existing timelines fail e
   globalThis.fetch = provider.fetch as typeof fetch
   try {
     const stay = await applyChannelBooking(db, env, ORG, productId, booking())
-    await db.prepare(`INSERT INTO requests (id, kind, organization_id, location_id, conversation_state, payload_json, created_at, updated_at)
-      VALUES ('history', 'stay', ?, 'location', 'needs_attention', ?, ?, ?)`).bind(ORG, JSON.stringify({ guest: { name: 'Recorded contact', email: 'recorded@example.test', phone: null } }), NOW, NOW).run()
+    await db.prepare(`INSERT INTO requests (id, kind, organization_id, location_id, payload_json, created_at, updated_at)
+      VALUES ('history', 'stay', ?, 'location', ?, ?, ?)`).bind(ORG, JSON.stringify({ guest: { name: 'Recorded contact', email: 'recorded@example.test', phone: null } }), NOW, NOW).run()
     await db.prepare("UPDATE stays SET request_id = 'history' WHERE id = ?").bind(stay.id).run()
     await appendEntry(db, { threadId: 'history', kind: 'message', actorKind: 'guest', channel: 'email', body: 'Historical message', dedupeKey: 'old' })
     const input = { threadId: 'history', organizationId: ORG, action: 'reply', body: 'Hello', idempotencyKey: 'unaddressable', actorUserId: OWNER, env }
-    await assert.rejects(executeGuestThreadOperation(db, input), code('CHANNEL_THREAD_UNADDRESSABLE'))
+    // A channel stay with no addressable conversation is nowhere to reply, refused before anything is recorded or sent.
+    assert.deepEqual(await executeGuestThreadOperation(db, input), { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'request_id', message: 'This Airbnb stay has no conversation to reply in yet.' })
     provider.bookingId = 'booking'
     await mirrorChannexThread(db, env, 'thread', 'property')
     assert.equal(await db.prepare('SELECT request_id FROM channel_threads').first('request_id'), 'history')
     assert.equal((await getGuestThreadDetail(db, 'history', ORG))!.guestName, 'Recorded contact')
     assert.equal(await db.prepare('SELECT count(*) FROM activity_entries WHERE request_id IS NOT NULL').first('count(*)'), 3)
-    await db.prepare(`INSERT INTO requests (id, kind, organization_id, location_id, conversation_state, payload_json, created_at, updated_at)
-      VALUES ('other', 'stay', ?, 'location', 'needs_attention', ?, ?, ?)`).bind(ORG, JSON.stringify({ guest: { name: 'Other contact', email: 'other@example.test', phone: null } }), NOW, NOW).run()
+    await db.prepare(`INSERT INTO requests (id, kind, organization_id, location_id, payload_json, created_at, updated_at)
+      VALUES ('other', 'stay', ?, 'location', ?, ?, ?)`).bind(ORG, JSON.stringify({ guest: { name: 'Other contact', email: 'other@example.test', phone: null } }), NOW, NOW).run()
     await db.prepare("UPDATE stays SET request_id = 'other' WHERE id = ?").bind(stay.id).run()
     await assert.rejects(mirrorChannexThread(db, env, 'thread', 'property'), code('CHANNEL_THREAD_ASSOCIATION_CONFLICT'))
     assert.equal(await db.prepare('SELECT count(*) FROM requests').first('count(*)'), 2)
@@ -852,7 +874,13 @@ test('an in-flight or interrupted reply never blocks actual provider messages an
     assert.equal(await db.prepare('SELECT count(*) FROM activity_entries WHERE request_id IS NOT NULL').first('count(*)'), 6, 'presentation never deletes either immutable fact')
     await db.prepare("UPDATE product_channel_mappings SET enabled = 0").run()
     assert.equal((await executeGuestThreadOperation(db, input)).ok, true, 'an actual recorded receipt replays without a new provider request')
-    await assert.rejects(executeGuestThreadOperation(db, { ...input, idempotencyKey: 'disconnected-new', body: 'Not attempted' }), code('CHANNEL_PROPERTY_NOT_READY'))
+    // A new reply to a disconnected home is nowhere to send, refused before anything is recorded or sent.
+    assert.deepEqual(await executeGuestThreadOperation(db, { ...input, idempotencyKey: 'disconnected-new', body: 'Not attempted' }),
+      { ok: false, status: 409, reason: 'guest_unreachable', code: 'GUEST_UNREACHABLE', field: 'request_id', message: 'This home is disconnected from Airbnb, so its guest cannot be replied to here.' })
+    // The inbox reads the same rule: a disconnected home's Airbnb conversation shows no composer, and says why.
+    const owner = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
+    assert.deepEqual((await getInboxThread(db, mirrored.request_id, ORG, { audience: 'member', userId: OWNER, principal: owner }))!.composer,
+      { channel: 'airbnb', available: false, reason: 'This home is disconnected from Airbnb, so its guest cannot be replied to here.' })
     assert.equal(await db.prepare('SELECT count(*) FROM activity_entries WHERE request_id IS NOT NULL').first('count(*)'), 6, 'failed preflight records no outbound message')
   } finally { release(); globalThis.fetch = realFetch; await runtime.dispose() }
 })
@@ -866,58 +894,52 @@ test('customer work follows actual provider replies, keeps the first waiting ins
     const mirrored = await mirrorChannexThread(db, env, 'thread', 'property')
     if (mirrored.status !== 'mirrored') throw new Error('Expected mapped inquiry')
     const threadId = mirrored.request_id
-    const waiting = () => firstUnansweredGuestEntryTimes(db, ORG, [threadId])
-    const first = await db.prepare("SELECT occurred_at FROM activity_entries WHERE dedupe_key='channex-message:waiting-guest'").first<string>('occurred_at')
-    assert.ok(first)
-    assert.equal((await waiting()).get(threadId), first)
-    assert.equal((await firstUnansweredGuestEntryTimes(db, 'another-organization', [threadId])).size, 0, 'the supplied organization must own the conversation')
+    const waiting = () => waitingOn(db, threadId)
+    const first = 'channex-message:waiting-guest'
+    assert.deepEqual(await openReplies(db, threadId), [{ organization_id: ORG, entry: first }], 'the reply task belongs to the organization that owns the conversation')
 
     provider.messages.push(provider.message('followup-guest', 'guest', 'We would arrive at noon.', [], '2026-10-15T23:13:00.123456'))
     await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.equal((await waiting()).get(threadId), first, 'a follow-up does not reset how long this customer has waited')
+    assert.deepEqual(await waiting(), [first], 'a follow-up does not reset how long this customer has waited')
 
     // An old provider resource can first become visible during a later pull.
     provider.messages.unshift(provider.message('historical-host', 'property', 'A previous conversation reply', [], '2026-10-15T23:10:00.123456'))
     await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.equal((await waiting()).get(threadId), first, 'late-imported history cannot answer a newer guest message')
-    assert.equal(await db.prepare('SELECT conversation_state FROM requests WHERE id=?').bind(threadId).first('conversation_state'), 'needs_attention')
+    assert.deepEqual(await waiting(), [first], 'late-imported history cannot answer a newer guest message')
 
     provider.refuseMessage = true
     const failed = await executeGuestThreadOperation(db, { threadId, organizationId: ORG, action: 'reply', body: 'An attempted reply', idempotencyKey: 'failed-response', actorUserId: OWNER, env })
     assert.equal(failed.ok, false)
-    assert.equal((await waiting()).get(threadId), first, 'a failed delivery leaves the guest waiting')
+    assert.deepEqual(await waiting(), [first], 'a failed delivery leaves the guest waiting')
     provider.refuseMessage = false
 
     const logged = await appendEntry(db, { threadId, kind: 'message', actorKind: 'member', actorUserId: OWNER,
       channel: 'email', eventName: 'thread.member_reply', body: 'Logged response only', dedupeKey: 'logged-response-only' })
     const loggedReceipt = await createDeliveryReceipt(db, { entryId: logged.id, channel: 'email', provider: 'log_only', purpose: 'member_reply', idempotencyKey: 'logged-response-only' })
     await recordDeliveryOutcome(db, { deliveryId: loggedReceipt.id, status: 'sent', providerMessageId: 'log-only:response' })
-    assert.equal((await waiting()).get(threadId), first, 'a log-only send does not reach the guest')
+    assert.deepEqual(await waiting(), [first], 'a log-only send does not reach the guest')
     provider.replyAt = '2026-10-15T23:13:30.123456'
     const automatic = await sendScheduledGuestReply(db, { threadId, organizationId: ORG, body: 'Your scheduled check-in instructions', idempotencyKey: 'automatic-instructions', env })
     assert.equal(automatic.outcome.ok, true)
     await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.equal((await waiting()).get(threadId), first, 'a template and its mirrored provider echo are not a response to this question')
-    assert.equal(await db.prepare('SELECT conversation_state FROM requests WHERE id=?').bind(threadId).first('conversation_state'), 'needs_attention')
+    assert.deepEqual(await waiting(), [first], 'a template and its mirrored provider echo are not a response to this question')
 
     provider.messages.push(provider.message('answered-on-airbnb', 'property', 'Yes, noon is fine.', [], '2026-10-15T23:14:00.123456'))
     await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.equal((await waiting()).has(threadId), false, 'the actual host response on Airbnb clears the outstanding reply')
-    assert.equal(await db.prepare('SELECT conversation_state FROM requests WHERE id=?').bind(threadId).first('conversation_state'), 'waiting_on_guest')
+    assert.deepEqual(await waiting(), [], 'the actual host response on Airbnb clears the outstanding reply')
 
     provider.messages.push(provider.message('new-guest-question', 'guest', 'Can we leave our bags later?', [], '2026-10-15T23:15:00.123456'))
     await mirrorChannexThread(db, env, 'thread', 'property')
-    const newFirst = await db.prepare("SELECT occurred_at FROM activity_entries WHERE dedupe_key='channex-message:new-guest-question'").first<string>('occurred_at')
-    assert.ok(newFirst)
-    assert.equal((await waiting()).get(threadId), newFirst, 'new guest work reopens after a successful response')
+    const newFirst = 'channex-message:new-guest-question'
+    assert.deepEqual(await waiting(), [newFirst], 'new guest work reopens after a successful response')
     provider.messages.push(provider.message('airbnb-agent', 'agent', 'Support has updated the thread.', [], '2026-10-15T23:16:00.123456'))
     await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.equal((await waiting()).get(threadId), newFirst, 'Airbnb Support is not a business response to the customer')
+    assert.deepEqual(await waiting(), [newFirst], 'Airbnb Support is not a business response to the customer')
 
     provider.replyAt = '2026-10-15T23:17:00.123456'
     const replied = await executeGuestThreadOperation(db, { threadId, organizationId: ORG, action: 'reply', body: 'Yes, we can store them.', idempotencyKey: 'successful-response', actorUserId: OWNER, env })
     assert.equal(replied.ok, true)
-    assert.equal((await waiting()).size, 0, 'a provider-accepted reply made through KrabiClaw also clears the work')
+    assert.deepEqual(await waiting(), [], 'a provider-accepted reply made through KrabiClaw also clears the work')
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
@@ -929,9 +951,86 @@ test('explicit provider instants order replies across offsets without losing sub
     provider.messages = [provider.message('offset-guest', 'guest', 'Are you open?', [], '2026-10-15T23:12:00.123456+07:00')]
     const mirrored = await mirrorChannexThread(db, env, 'thread', 'property')
     if (mirrored.status !== 'mirrored') throw new Error('Expected mapped inquiry')
-    assert.deepEqual([...await firstUnansweredGuestEntryTimes(db, ORG, [mirrored.request_id])], [[mirrored.request_id, '2026-10-15T16:12:00.123Z']], 'an explicit original instant supplies the waiting age instead of the later import time')
+    assert.deepEqual(await waitingOn(db, mirrored.request_id), ['channex-message:offset-guest'])
+    // Asked at 2026-10-15T16:12:00.123Z by its explicit offset; read exactly a day later it is a day old, however recently it was imported.
+    assert.deepEqual(await replyEyebrows(db, env, new Date('2026-10-16T16:12:00.123Z')), [[mirrored.request_id, 'Asked 1d ago · Cabin']], 'an explicit original instant supplies the waiting age instead of the later import time')
     provider.messages.push(provider.message('offset-answer', 'property', 'Yes.', [], '2026-10-15T16:12:00.123457Z'))
     await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.equal((await firstUnansweredGuestEntryTimes(db, ORG, [mirrored.request_id])).size, 0)
+    assert.deepEqual(await waitingOn(db, mirrored.request_id), [])
+  } finally { globalThis.fetch = realFetch; await runtime.dispose() }
+})
+
+// A WhatsApp reply to an Airbnb conversation that fails, whether the reply operation throws or
+// returns the failure, is never shown raw: the manager reads a fixed notice (or that it may have
+// reached the guest), the pending reply is cleared, and the failure is reported through the error
+// hook while the message is answered, so Meta's redelivery runs nothing again.
+test('a failed WhatsApp reply tells the manager a fixed notice and reports the failure', async () => {
+  const { runtime, db, env: base } = await boot()
+  const provider = new Provider(), realFetch = globalThis.fetch
+  const sent: string[] = []
+  let failure: 'channex' | 'invariant' | null = null
+  globalThis.fetch = (async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
+    if (url.hostname === 'graph.facebook.com') {
+      sent.push(JSON.parse(String(init.body)).text.body)
+      return Response.json({ messages: [{ id: `meta-out-${sent.length}` }] })
+    }
+    if (failure === 'channex' && url.pathname === `/api/v1/message_threads/${provider.threadId}`) return new Response('<html>Bad gateway from upstream</html>', { status: 502 })
+    return provider.fetch(input, init)
+  }) as typeof fetch
+  try {
+    const env = { ...base, WHATSAPP_DELIVERY_MODE: 'provider', WHATSAPP_PHONE_NUMBER_ID: 'local-proof-phone-id', WHATSAPP_ACCESS_TOKEN: 'local-proof-no-live-token', WHATSAPP_APP_SECRET: 'whatsapp-secret' } as CloudflareEnv
+    await db.prepare("UPDATE user SET phoneNumber = '+66812345678', phoneNumberVerified = 1 WHERE id = ?").bind(OWNER).run()
+    await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, periodEnd) VALUES ('sub', 'growth', ?, 'active', ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86400).run()
+    assert.deepEqual(await backfillChannexMessages(db, env, 'property', ORG), { threads: 1 })
+    const threadId = (await db.prepare('SELECT request_id FROM channel_threads').first<{ request_id: string }>())!.request_id
+    const entry = await appendEntry(db, { threadId, kind: 'message', actorKind: 'guest', channel: 'airbnb', body: 'Is there parking?', dedupeKey: 'whatsapp-alerted' })
+    const alert = await createDeliveryReceipt(db, { entryId: entry.id, channel: 'whatsapp', provider: 'meta', purpose: 'owner_alert', idempotencyKey: 'alert' })
+    await recordDeliveryOutcome(db, { deliveryId: alert.id, status: 'sent', providerMessageId: 'meta-alert' })
+    const app = new H3()
+    app.post('/api/whatsapp/webhook', whatsappWebhook)
+    let inbound = 0
+    const write = async (text: string, quoting?: string) => {
+      const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ value: { messages: [{ id: `wamid-${++inbound}`, from: '66812345678', type: 'text', text: { body: text }, ...(quoting && { context: { id: quoting } }) }] } }] }] })
+      return await app.request(Object.assign(new Request('https://proof.example/api/whatsapp/webhook', {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': `sha256=${createHmac('sha256', 'whatsapp-secret').update(body).digest('hex')}` }, body,
+      }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    }
+    const pending = async () => (await getWhatsAppWorkspaceState(db, OWNER))?.pending_confirmation ?? null
+
+    const alerted = 'Reply not sent. The team has been alerted.'
+    const mayHaveReached = 'This reply may have reached the guest. Check the conversation before sending again.'
+    // Each failure: how it is made, the webhook status it reports with, the exact messages the manager
+    // receives for that YES, and how many writes reached Airbnb.
+    const reported: unknown[] = []
+    useNitroHooks().hook('error', error => { reported.push(error) })
+    const cases = [
+      // Channex answers with an HTML error page: a ChannexError the operation throws before writing.
+      { mode: 'channex', notices: [alerted], writes: 0, reports: (error: unknown) => error instanceof ChannexError },
+      // Channex names a property that is not the home's: the operation's own 502 invariant.
+      { mode: 'invariant', notices: [alerted], writes: 0, reports: code('INVALID_PROVIDER_RESPONSE') },
+      // Airbnb refuses the message: a returned failure, never told in Channex's words.
+      { mode: 'refused', notices: [alerted], writes: 1, reports: (error: unknown) => /CHANNEL_REPLY_FAILED/u.test(String((error as Error).message)) },
+      // Airbnb took the message but the connection ended: it may be with the guest.
+      { mode: 'uncertain', notices: [mayHaveReached], writes: 1, reports: (error: unknown) => /CHANNEL_REPLY_UNCERTAIN/u.test(String((error as Error).message)) },
+    ] as const
+    for (const { mode, notices, writes, reports } of cases) {
+      failure = null
+      Object.assign(provider, { propertyId: 'property', refuseMessage: false, uncertain: false })
+      assert.equal((await write(`Reply for ${mode}`, 'meta-alert')).status, 200)
+      assert.equal(sent.at(-1), 'This reply will be sent through Airbnb. Reply YES to send.')
+      if (mode === 'channex') failure = 'channex'
+      if (mode === 'invariant') provider.propertyId = 'another-property'
+      if (mode === 'refused') provider.refuseMessage = true
+      if (mode === 'uncertain') provider.uncertain = true
+      const [sentBefore, writesBefore, reportedBefore] = [sent.length, provider.sends, reported.length]
+      const confirmed = await write('YES')
+      assert.equal(confirmed.status, 200, `${mode}: the message is answered, so Meta does not redeliver it`)
+      assert.equal(reported.length - reportedBefore, 1, `${mode}: the failure is reported once`)
+      assert.ok(reports(reported.at(-1)), `${mode}: the reported error is the reply's own`)
+      assert.deepEqual(sent.slice(sentBefore), notices, `${mode}: exactly these messages reach the manager, and nothing raw`)
+      assert.equal(await pending(), null, `${mode}: the pending reply is cleared`)
+      assert.equal(provider.sends - writesBefore, writes, `${mode}: writes that reached Airbnb`)
+    }
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })

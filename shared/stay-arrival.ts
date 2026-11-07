@@ -10,7 +10,8 @@ export const STAY_ARRIVAL_TEXT_LIMITS = { check_in_instructions: 5000, wifi_netw
 export const STAY_CHECKOUT_DETAILS_LIMIT = 500
 
 /** A home's check-in window as the listing editor summarises it: its start and end, or its start alone when the end is flexible. */
-export function stayCheckInWindow(start: string, end: string | null): string {
+export function stayCheckInWindow(start: string | null, end: string | null): string {
+  if (start === null) return end === null ? 'Not set' : `Until ${end}`
   return end === null ? `From ${start}` : `${start} – ${end}`
 }
 

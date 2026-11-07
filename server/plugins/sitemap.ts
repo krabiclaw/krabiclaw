@@ -1,7 +1,7 @@
 import type { ProductKind } from '~/shared/product-details'
 import { catalogNavigation, locationSurfacePath, productSurfaceOf, presentationForProduct, resolveProductPresentation } from '~/utils/product-presentation'
 import { PUBLIC_CONTENT_SECTION_QUERIES, PUBLIC_CONTENT_SECTIONS, productCatalogRows, publicContentSectionRows, publicSections, type PublicContentSectionRow } from '~/server/utils/public-shell-query'
-import { publicLocationHomeSlugSql, publicLocationSql } from '~/server/utils/public-locations'
+import { publicLocationSql } from '~/server/utils/public-locations'
 import type { PublicSiteSection } from '~/utils/public-resource-contracts'
 import { publicTenantPageSql } from '~/server/utils/content/pages'
 import type { SitemapUrlInput } from '#sitemap/types'
@@ -244,8 +244,7 @@ export default definePlugin((nitroApp) => {
         db,
         `SELECT bl.id, bl.slug, bl.updated_at,
                 EXISTS (SELECT 1 FROM location_reservation_configs c
-                         WHERE c.organization_id = bl.organization_id AND c.location_id = bl.id) AS has_reservations,
-                ${publicLocationHomeSlugSql('bl')} AS home_slug
+                         WHERE c.organization_id = bl.organization_id AND c.location_id = bl.id) AS has_reservations
          FROM business_locations bl
          WHERE bl.organization_id = ?
            AND ${publicLocationSql('bl')}`,
@@ -281,8 +280,7 @@ export default definePlugin((nitroApp) => {
     for (const item of catalogNavigation(organization.vertical, sections.site)) entries.push({ loc: item.path })
     if (sections.site.reservations) entries.push({ loc: '/reservations' })
 
-    // A location that is one home is listed as that home's page, below.
-    const locationPages = locations.filter(location => location.slug && !location.home_slug)
+    const locationPages = locations.filter(location => location.slug)
     if (locationPages.length > 0) entries.push({ loc: '/locations' })
 
     entries.push(

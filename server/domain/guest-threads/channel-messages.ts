@@ -79,8 +79,8 @@ async function adoptThread(db: DbClient, env: ChannelEnv, home: HomeMapping, thr
       WHERE provider = 'channex' AND external_thread_id = ? AND request_id = ? AND organization_id = ? AND product_id = ?`,
     params: [thread.id, thread.bookingId, thread.updatedAt, now, retired.external_thread_id, requestId, home.organization_id, home.product_id],
   }] : []), {
-    query: `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, conversation_state, resolved_at, payload_json, created_at, updated_at)
-      SELECT ?, 'stay', ?, ?, NULL, NULL, 'needs_attention', NULL, ?, ?, ?
+    query: `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, payload_json, created_at, updated_at)
+      SELECT ?, 'stay', ?, ?, NULL, NULL, ?, ?, ?
       WHERE NOT EXISTS (SELECT 1 FROM requests WHERE id = ?)
         AND NOT EXISTS (SELECT 1 FROM channel_threads WHERE provider = 'channex' AND external_thread_id = ?)`,
     params: [requestId, home.organization_id, home.location_id, JSON.stringify({ participant: { kind: 'channel', title: thread.title }, guest: { name: null, email: null, phone: null } }), now, now, requestId, thread.id],
@@ -140,7 +140,7 @@ async function mirrorMessage(db: DbClient, env: ChannelEnv, mapping: ChannelThre
   })
   // Our own reply's echo carries the photo the reply already holds; only someone else's photos are fetched.
   if (!delivery) await mirrorMessagePhotos(db, env, mapping.organization_id, entry.id, message.attachments)
-  await updateThreadProjectionIfLatestEntry(db, mapping.request_id, entry.id, { conversationState: message.sender === 'property' ? 'waiting_on_guest' : 'needs_attention' })
+  await updateThreadProjectionIfLatestEntry(db, mapping.request_id, entry.id)
 }
 
 /**
@@ -316,7 +316,7 @@ export type ChannelReplyOutcome = { ok: true } | {
   provider_error?: ChannexError['data']
 }
 
-function assertReplyIntent(entry: GuestThreadEntryRow, body: string, requestHash: string, eventName: string): void {
+export function assertReplyIntent(entry: GuestThreadEntryRow, body: string, requestHash: string, eventName: string): void {
   if (entry.event_name !== eventName) fail(409, 'IDEMPOTENCY_CONFLICT', 'The reply key was already used for a different message', 'idempotencyKey')
   const payload = parseEntryPayload(entry)
   if (typeof payload?.request_hash !== 'string') fail(500, 'CHANNEL_REPLY_INTENT_INVALID', 'The channel reply intent has no recorded request hash', 'payload.request_hash')
@@ -344,17 +344,17 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
     if (!receipt || receipt.entry_id !== entry.id) fail(500, 'CHANNEL_RECEIPT_INVALID', 'The reply has no matching delivery receipt', 'delivery')
     if (isDeliverySent(receipt)) {
       if (!receipt.provider_message_id?.trim()) fail(500, 'CHANNEL_RECEIPT_INVALID', 'A successful channel reply has no provider message ID', 'delivery.provider_message_id')
-      await updateThreadProjectionIfLatestEntry(db, input.mapping.request_id, entry.id, { conversationState: 'waiting_on_guest' })
+      await updateThreadProjectionIfLatestEntry(db, input.mapping.request_id, entry.id)
       return { ok: true }
     }
     if (receipt.status !== 'pending' && !(receipt.status === 'failed' && receipt.non_delivery_confirmed === 1)) return reviewRequired()
   }
-  // A failed preflight records no reply that was never attempted. Proven
-  // accepted replays above remain safe even after the home is disconnected.
+  // Whether the home may still be written to is the caller's (guestReplyDestination);
+  // proven accepted replays above remain safe even after it is disconnected.
   const home = await queryFirst<HomeMapping>(db, `SELECT m.*, c.location_id FROM product_channel_mappings m
     JOIN product_stay_configs c ON c.product_id = m.product_id AND c.organization_id = m.organization_id
     WHERE m.provider = 'channex' AND m.organization_id = ? AND m.product_id = ?`, [input.mapping.organization_id, input.mapping.product_id])
-  if (!home || home.enabled !== 1) fail(409, 'CHANNEL_PROPERTY_NOT_READY', 'This home is disconnected from guest messaging', 'product_id')
+  if (!home) throw new Error(`Channel thread ${input.mapping.request_id} names a home with no Channex mapping`)
   const current = await getChannexThread(env, input.mapping.external_thread_id)
   if (current.propertyId !== home.property_id || (current.channelId !== null && current.channelId !== home.channel_id)) fail(502, 'INVALID_PROVIDER_RESPONSE', 'The provider conversation is outside its local property mapping', 'relationships.property')
   if (!entry) {
@@ -396,7 +396,7 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
   if (!receipt || receipt.entry_id !== entry.id) fail(500, 'CHANNEL_RECEIPT_INVALID', 'The reply has no matching delivery receipt', 'delivery')
   if (isDeliverySent(receipt)) {
     if (!receipt.provider_message_id?.trim()) fail(500, 'CHANNEL_RECEIPT_INVALID', 'A successful channel reply has no provider message ID', 'delivery.provider_message_id')
-    await updateThreadProjectionIfLatestEntry(db, input.mapping.request_id, entry.id, { conversationState: 'waiting_on_guest' })
+    await updateThreadProjectionIfLatestEntry(db, input.mapping.request_id, entry.id)
     return { ok: true }
   }
   if (receipt.status !== 'pending' && !(receipt.status === 'failed' && receipt.non_delivery_confirmed === 1)) return reviewRequired()
@@ -439,6 +439,6 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
       mutation_applied: true, operation_completed: false, request_id: input.mapping.request_id, retry_with_same_idempotency_key: !uncertain,
       ...(error instanceof ChannexError ? { provider_error: error.data } : {}) }
   }
-  await updateThreadProjectionIfLatestEntry(db, input.mapping.request_id, entry.id, { conversationState: 'waiting_on_guest' })
+  await updateThreadProjectionIfLatestEntry(db, input.mapping.request_id, entry.id)
   return { ok: true }
 }

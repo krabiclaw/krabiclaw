@@ -584,9 +584,10 @@ test('Airbnb settings preflight the whole catalog and unchanged settings do not 
       assert.deepEqual(channex.settings, [])
     }
 
-    // A new home starts on Airbnb's own policies, and none can be cleared.
+    // Explicitly unknown policies remain unknown rather than acquiring new-home defaults.
     for (const field of ['cancellation_policy', 'long_term_cancellation_policy'] as const) {
-      await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { stay: { [field]: null } } }), { status: 400, data: { code: 'INVALID_STAY_FIELD', field: `stay.${field}` } })
+      await updateProduct(db, { env, organizationId: ORG, productId: local, actor: { actorId: OWNER }, patch: { stay: { [field]: null } } })
+      assert.equal((await getProduct(db, ORG, local)).stay![field], null)
     }
     const unchanged = { check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', min_nights: 2 } as const
     assert.equal((await updateProduct(db, { env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { stay: unchanged } })).channel_push, null)

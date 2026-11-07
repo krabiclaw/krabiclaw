@@ -1,3 +1,4 @@
+import { opportunityDoneQuery } from '~/server/domain/tasks'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { blogEditorPath } from '~/server/utils/dashboard-links'
 import { HTTPError } from 'nitro';
@@ -28,7 +29,7 @@ import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { normalizeBlogSlug } from '~/utils/blog-editor'
 import { creationDedupeKey, creationRequestHash, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { mcpPageInfo, type McpPageInfo } from '~/server/utils/mcp-pagination'
-import { resolvePublicSite } from '~/utils/site-routing'
+import { hasPublicLocationPages, resolvePublicSite } from '~/utils/site-routing'
 import { getConfig } from '~/server/utils/organization-config'
 import { resolveSitePalette } from '~/shared/site-palette'
 import { buildSingleMediaPlacementQueries, hydrateMediaPlacementRefs, insertInitialMediaPlacements } from '~/server/utils/media-asset-manager'
@@ -189,11 +190,18 @@ export async function loadOrganizationSite(db: DbClient, organizationId: string)
 
 type NormalizedEditorBlock = ContentBlockInput & { id: string; placement_media: Array<{ asset_id: string; slot: string }> }
 
+export async function assertLocationGridSupported(db: DbClient, organizationId: string, blocks: readonly { type: string }[]) {
+  if (blocks.some(block => block?.type === 'location_grid') && !hasPublicLocationPages((await loadOrganizationSite(db, organizationId)).vertical)) {
+    badRequest('Lodging pages list homes with a product grid; location pages are not available')
+  }
+}
+
 async function normalizeEditorContentBlocks(
   db: D1Database,
   blocks: Array<ContentBlockInput & { id?: string }>,
   scope: { organizationId: string },
 ): Promise<NormalizedEditorBlock[]> {
+  await assertLocationGridSupported(db, scope.organizationId, blocks)
   return await Promise.all(blocks.map(async (block): Promise<NormalizedEditorBlock> => {
     if (!block || typeof block !== 'object' || !block.data || typeof block.data !== 'object' || Array.isArray(block.data)) badRequest('Every content block requires an object data payload')
     if (block.type === 'heading' && (typeof block.data.text !== 'string' || !block.data.text.trim())) badRequest('Heading blocks require non-empty data.text')
@@ -698,6 +706,7 @@ export async function createBlogPost(
       ...await contentBlockPlacementQueries(db, canonicalBlocks, placementScope, now),
       organizationEventQuery({ organizationId, actorId: authorId, eventType: 'article.created', entityType: 'article', entityId: id,
         metadata: { request_hash: requestHash, evidence_basis: 'persisted_change', public_visibility: 'unverified' }, dedupeKey }),
+      opportunityDoneQuery(organizationId, ['article.create'], organizationId, now),
     ]
   } catch (error) {
     if (HTTPError.isError(error)) throw new HTTPError({ cause: error, body: error.body,
@@ -783,7 +792,8 @@ export async function updateBlogLifecycle(
     beforeState: { status: source.status, updated_at: source.updated_at },
     afterState: { status: 'published', published_at: source.published_at ?? committedAt, updated_at: committedAt },
     metadata: { evidence_basis: 'persisted_change', public_visibility: 'unverified' }, onlyIfPreviousChangedOneRow: true }),
-  publicResourceCacheInvalidationQuery(organizationId, 'article-publication')])
+  publicResourceCacheInvalidationQuery(organizationId, 'article-publication'),
+  opportunityDoneQuery(organizationId, ['article.publish', 'article.update'], source.id, committedAt)])
   if (Number(result?.meta.changes ?? 0) !== 1) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Article was updated by another writer' })
   }

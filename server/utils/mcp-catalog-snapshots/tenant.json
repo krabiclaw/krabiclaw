@@ -1,8 +1,432 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:695eba4dfe89f7718e01ea4b18a80c1c9efc160b3338538b25fc6fcba084e971",
-  "documentationFingerprint": "sha256:dfc4d92a1f922d10c4d43e69dd597e2bceeca7539efa0e0aec8a3fa18d7c146d",
+  "fingerprint": "sha256:9743290424f69576fdaf9411cb024b0e1ec1702f65bf7450b69852bdbc454650",
+  "documentationFingerprint": "sha256:47e74f460ef7cc9fffb21921c49938aa0d06bd1f1d7d9544da0e1084c9d475b5",
   "tools": [
+    {
+      "name": "accept_opportunity",
+      "title": "Accept opportunity",
+      "description": "Take on an opportunity: it becomes a task, given to you and due today unless you say otherwise. Refused when what it was based on has changed; read list_opportunities again.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "assigned_member_id": {
+            "description": "A Better Auth member id from list_tasks assignees; null to unassign.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "assigned_team_id": {
+            "description": "A Better Auth team id from list_tasks assignees. Give a member or a team, not both.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "due_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "opportunity_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "opportunity_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "task": {
+            "properties": {
+              "action": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "assignee": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "avatar": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "can": {
+                "properties": {
+                  "assign": {
+                    "type": "boolean"
+                  },
+                  "complete": {
+                    "type": "boolean"
+                  },
+                  "edit": {
+                    "type": "boolean"
+                  },
+                  "reopen": {
+                    "type": "boolean"
+                  },
+                  "skip": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "complete",
+                  "skip",
+                  "reopen",
+                  "assign",
+                  "edit"
+                ],
+                "type": "object"
+              },
+              "detail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dueAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "face": {
+                "enum": [
+                  "photo",
+                  "compact"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "imageUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "turnover",
+                  "guest_reply",
+                  "message_delivery",
+                  "booking_review",
+                  "booking_change",
+                  "opportunity",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              "locationId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "notes": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "person": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "productId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "requestId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reservation": {
+                "properties": {
+                  "conversation": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "description",
+                          "to"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "dateLabel": {
+                    "type": "string"
+                  },
+                  "groupHeadline": {
+                    "type": "string"
+                  },
+                  "guestImageUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "homeName": {
+                    "type": "string"
+                  },
+                  "statusLabel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "dateLabel",
+                  "groupHeadline",
+                  "homeName",
+                  "statusLabel",
+                  "guestImageUrl",
+                  "conversation"
+                ],
+                "type": "object"
+              },
+              "sheet": {
+                "type": "object"
+              },
+              "startsAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "open",
+                  "done",
+                  "skipped",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "statusLine": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stayId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tag": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "when": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "status",
+              "version",
+              "face",
+              "tag",
+              "imageUrl",
+              "avatar",
+              "statusLine",
+              "title",
+              "when",
+              "detail",
+              "error",
+              "note",
+              "person",
+              "assignee",
+              "sheet",
+              "startsAt",
+              "dueAt",
+              "timezone",
+              "notes",
+              "outcome",
+              "action",
+              "path",
+              "productId",
+              "locationId",
+              "stayId",
+              "requestId",
+              "can"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Accept opportunity"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
     {
       "name": "add_organization_language",
       "title": "Add organization language",
@@ -9146,8 +9570,8 @@
                       ]
                     },
                     "beds": {
-                      "maximum": 50,
-                      "minimum": 1,
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
                       "type": [
                         "integer",
                         "null"
@@ -9188,15 +9612,19 @@
                       ]
                     },
                     "cancellation_policy": {
-                      "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
+                      "description": "Policy shown to guests for stays under 28 nights. Null when the provider has not supplied one. New authored homes start on Flexible. It does not refund by itself.",
                       "enum": [
                         "flexible",
                         "moderate",
                         "limited",
                         "firm",
-                        "strict"
+                        "strict",
+                        null
                       ],
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "check_in_end_time": {
                       "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -9209,11 +9637,23 @@
                     "check_in_time": {
                       "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                       "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "check_out_time": {
                       "description": "Local 24-hour time guests leave by.",
                       "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "internal_name": {
+                      "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                      "maxLength": 240,
+                      "minLength": 1,
                       "type": "string"
                     },
                     "listing_floor": {
@@ -9242,12 +9682,16 @@
                       "type": "string"
                     },
                     "long_term_cancellation_policy": {
-                      "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
+                      "description": "Policy shown to guests for stays of 28 nights or more. Null when the provider has not supplied one. New authored homes start on Firm Long Term.",
                       "enum": [
                         "firm",
-                        "strict"
+                        "strict",
+                        null
                       ],
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "max_guests": {
                       "maximum": 99,
@@ -10998,8 +11442,8 @@
                       ]
                     },
                     "beds": {
-                      "maximum": 50,
-                      "minimum": 1,
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
                       "type": [
                         "integer",
                         "null"
@@ -11040,15 +11484,19 @@
                       ]
                     },
                     "cancellation_policy": {
-                      "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
+                      "description": "Policy shown to guests for stays under 28 nights. Null when the provider has not supplied one. New authored homes start on Flexible. It does not refund by itself.",
                       "enum": [
                         "flexible",
                         "moderate",
                         "limited",
                         "firm",
-                        "strict"
+                        "strict",
+                        null
                       ],
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "check_in_end_time": {
                       "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -11061,11 +11509,23 @@
                     "check_in_time": {
                       "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                       "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "check_out_time": {
                       "description": "Local 24-hour time guests leave by.",
                       "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "internal_name": {
+                      "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                      "maxLength": 240,
+                      "minLength": 1,
                       "type": "string"
                     },
                     "listing_floor": {
@@ -11094,12 +11554,16 @@
                       "type": "string"
                     },
                     "long_term_cancellation_policy": {
-                      "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
+                      "description": "Policy shown to guests for stays of 28 nights or more. Null when the provider has not supplied one. New authored homes start on Firm Long Term.",
                       "enum": [
                         "firm",
-                        "strict"
+                        "strict",
+                        null
                       ],
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "max_guests": {
                       "maximum": 99,
@@ -11672,6 +12136,7 @@
                     }
                   },
                   "required": [
+                    "internal_name",
                     "location_id",
                     "check_in_time",
                     "check_in_end_time",
@@ -12956,10 +13421,6 @@
           },
           "thread": {
             "properties": {
-              "conversation_state": {
-                "minLength": 1,
-                "type": "string"
-              },
               "id": {
                 "minLength": 1,
                 "type": "string"
@@ -12974,8 +13435,7 @@
             },
             "required": [
               "id",
-              "kind",
-              "conversation_state"
+              "kind"
             ],
             "type": "object"
           }
@@ -13534,10 +13994,6 @@
           },
           "thread": {
             "properties": {
-              "conversation_state": {
-                "minLength": 1,
-                "type": "string"
-              },
               "id": {
                 "minLength": 1,
                 "type": "string"
@@ -13552,8 +14008,7 @@
             },
             "required": [
               "id",
-              "kind",
-              "conversation_state"
+              "kind"
             ],
             "type": "object"
           }
@@ -13585,6 +14040,435 @@
       ],
       "domain": "bookings",
       "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "complete_task",
+      "title": "Complete task",
+      "description": "Mark a task done, with what you found and an optional photo. A guest reply or a failed message is done when the reply goes out or the message is fixed, so it cannot be completed here.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "description": "Optional photo of the finished work.",
+            "properties": {
+              "download_url": {
+                "type": "string"
+              },
+              "file_id": {
+                "type": "string"
+              },
+              "file_name": {
+                "type": "string"
+              },
+              "mime_type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "download_url",
+              "file_id"
+            ],
+            "type": "object"
+          },
+          "note": {
+            "maxLength": 5000,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "task": {
+            "properties": {
+              "action": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "assignee": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "avatar": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "can": {
+                "properties": {
+                  "assign": {
+                    "type": "boolean"
+                  },
+                  "complete": {
+                    "type": "boolean"
+                  },
+                  "edit": {
+                    "type": "boolean"
+                  },
+                  "reopen": {
+                    "type": "boolean"
+                  },
+                  "skip": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "complete",
+                  "skip",
+                  "reopen",
+                  "assign",
+                  "edit"
+                ],
+                "type": "object"
+              },
+              "detail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dueAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "face": {
+                "enum": [
+                  "photo",
+                  "compact"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "imageUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "turnover",
+                  "guest_reply",
+                  "message_delivery",
+                  "booking_review",
+                  "booking_change",
+                  "opportunity",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              "locationId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "notes": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "person": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "productId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "requestId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reservation": {
+                "properties": {
+                  "conversation": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "description",
+                          "to"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "dateLabel": {
+                    "type": "string"
+                  },
+                  "groupHeadline": {
+                    "type": "string"
+                  },
+                  "guestImageUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "homeName": {
+                    "type": "string"
+                  },
+                  "statusLabel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "dateLabel",
+                  "groupHeadline",
+                  "homeName",
+                  "statusLabel",
+                  "guestImageUrl",
+                  "conversation"
+                ],
+                "type": "object"
+              },
+              "sheet": {
+                "type": "object"
+              },
+              "startsAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "open",
+                  "done",
+                  "skipped",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "statusLine": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stayId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tag": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "when": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "status",
+              "version",
+              "face",
+              "tag",
+              "imageUrl",
+              "avatar",
+              "statusLine",
+              "title",
+              "when",
+              "detail",
+              "error",
+              "note",
+              "person",
+              "assignee",
+              "sheet",
+              "startsAt",
+              "dueAt",
+              "timezone",
+              "notes",
+              "outcome",
+              "action",
+              "path",
+              "productId",
+              "locationId",
+              "stayId",
+              "requestId",
+              "can"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Complete task"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
+      "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -13719,10 +14603,6 @@
           },
           "thread": {
             "properties": {
-              "conversation_state": {
-                "minLength": 1,
-                "type": "string"
-              },
               "id": {
                 "minLength": 1,
                 "type": "string"
@@ -13737,8 +14617,7 @@
             },
             "required": [
               "id",
-              "kind",
-              "conversation_state"
+              "kind"
             ],
             "type": "object"
           }
@@ -19904,7 +20783,7 @@
     {
       "name": "create_location",
       "title": "Create location",
-      "description": "Add an active business branch or office. Locations are not billed. It becomes public unless the website has published homes and this location has no published offering. Set hours with update_location; create homes with create_product.",
+      "description": "Add an active business branch or office. Locations are not billed. Lodging publishes homes at /stays and has no public location pages. Create homes with create_product; their address records stay part of the home. Set branch hours with update_location.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -25711,8 +26590,8 @@
                 ]
               },
               "beds": {
-                "maximum": 50,
-                "minimum": 1,
+                "maximum": 9007199254740991,
+                "minimum": 0,
                 "type": [
                   "integer",
                   "null"
@@ -25753,15 +26632,19 @@
                 ]
               },
               "cancellation_policy": {
-                "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
+                "description": "Policy shown to guests for stays under 28 nights. Null when the provider has not supplied one. New authored homes start on Flexible. It does not refund by itself.",
                 "enum": [
                   "flexible",
                   "moderate",
                   "limited",
                   "firm",
-                  "strict"
+                  "strict",
+                  null
                 ],
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "check_in_end_time": {
                 "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -25774,11 +26657,23 @@
               "check_in_time": {
                 "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                 "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "check_out_time": {
                 "description": "Local 24-hour time guests leave by.",
                 "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "internal_name": {
+                "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                "maxLength": 240,
+                "minLength": 1,
                 "type": "string"
               },
               "listing_floor": {
@@ -25807,12 +26702,16 @@
                 "type": "string"
               },
               "long_term_cancellation_policy": {
-                "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
+                "description": "Policy shown to guests for stays of 28 nights or more. Null when the provider has not supplied one. New authored homes start on Firm Long Term.",
                 "enum": [
                   "firm",
-                  "strict"
+                  "strict",
+                  null
                 ],
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "max_guests": {
                 "maximum": 99,
@@ -27552,8 +28451,8 @@
                     ]
                   },
                   "beds": {
-                    "maximum": 50,
-                    "minimum": 1,
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
                     "type": [
                       "integer",
                       "null"
@@ -27594,15 +28493,19 @@
                     ]
                   },
                   "cancellation_policy": {
-                    "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
+                    "description": "Policy shown to guests for stays under 28 nights. Null when the provider has not supplied one. New authored homes start on Flexible. It does not refund by itself.",
                     "enum": [
                       "flexible",
                       "moderate",
                       "limited",
                       "firm",
-                      "strict"
+                      "strict",
+                      null
                     ],
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "check_in_end_time": {
                     "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -27615,11 +28518,23 @@
                   "check_in_time": {
                     "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "check_out_time": {
                     "description": "Local 24-hour time guests leave by.",
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "internal_name": {
+                    "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                    "maxLength": 240,
+                    "minLength": 1,
                     "type": "string"
                   },
                   "listing_floor": {
@@ -27648,12 +28563,16 @@
                     "type": "string"
                   },
                   "long_term_cancellation_policy": {
-                    "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
+                    "description": "Policy shown to guests for stays of 28 nights or more. Null when the provider has not supplied one. New authored homes start on Firm Long Term.",
                     "enum": [
                       "firm",
-                      "strict"
+                      "strict",
+                      null
                     ],
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "max_guests": {
                     "maximum": 99,
@@ -28226,6 +29145,7 @@
                   }
                 },
                 "required": [
+                  "internal_name",
                   "location_id",
                   "check_in_time",
                   "check_in_end_time",
@@ -37037,6 +37957,453 @@
       "uiResourceUri": null
     },
     {
+      "name": "create_task",
+      "title": "Create task",
+      "description": "Add a task someone has to do, optionally at a home or location, with a window and an assignee. The assignee is told by their own notification settings. Reuse the same idempotency_key for an identical retry.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "assigned_member_id": {
+            "description": "A Better Auth member id from list_tasks assignees; null to unassign.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "assigned_team_id": {
+            "description": "A Better Auth team id from list_tasks assignees. Give a member or a team, not both.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "due_at": {
+            "description": "An instant with Z or a numeric offset.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "location_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "notes": {
+            "maxLength": 5000,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "product_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "starts_at": {
+            "description": "An instant with Z or a numeric offset.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "idempotency_key"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "task": {
+            "properties": {
+              "action": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "assignee": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "avatar": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "can": {
+                "properties": {
+                  "assign": {
+                    "type": "boolean"
+                  },
+                  "complete": {
+                    "type": "boolean"
+                  },
+                  "edit": {
+                    "type": "boolean"
+                  },
+                  "reopen": {
+                    "type": "boolean"
+                  },
+                  "skip": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "complete",
+                  "skip",
+                  "reopen",
+                  "assign",
+                  "edit"
+                ],
+                "type": "object"
+              },
+              "detail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dueAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "face": {
+                "enum": [
+                  "photo",
+                  "compact"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "imageUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "turnover",
+                  "guest_reply",
+                  "message_delivery",
+                  "booking_review",
+                  "booking_change",
+                  "opportunity",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              "locationId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "notes": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "person": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "productId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "requestId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reservation": {
+                "properties": {
+                  "conversation": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "description",
+                          "to"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "dateLabel": {
+                    "type": "string"
+                  },
+                  "groupHeadline": {
+                    "type": "string"
+                  },
+                  "guestImageUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "homeName": {
+                    "type": "string"
+                  },
+                  "statusLabel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "dateLabel",
+                  "groupHeadline",
+                  "homeName",
+                  "statusLabel",
+                  "guestImageUrl",
+                  "conversation"
+                ],
+                "type": "object"
+              },
+              "sheet": {
+                "type": "object"
+              },
+              "startsAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "open",
+                  "done",
+                  "skipped",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "statusLine": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stayId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tag": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "when": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "status",
+              "version",
+              "face",
+              "tag",
+              "imageUrl",
+              "avatar",
+              "statusLine",
+              "title",
+              "when",
+              "detail",
+              "error",
+              "note",
+              "person",
+              "assignee",
+              "sheet",
+              "startsAt",
+              "dueAt",
+              "timezone",
+              "notes",
+              "outcome",
+              "action",
+              "path",
+              "productId",
+              "locationId",
+              "stayId",
+              "requestId",
+              "can"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Create task"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "create_team",
       "title": "Create team",
       "description": "Create a named team within this business using Better Auth. Existing teammates can then be added to it.",
@@ -37101,6 +38468,80 @@
         }
       ],
       "domain": "organizations",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "defer_opportunity",
+      "title": "Defer opportunity",
+      "description": "Set an opportunity aside until a time; it returns then if it still applies.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "opportunity_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "until": {
+            "description": "An instant with Z or a numeric offset.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "opportunity_id",
+          "until"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "opportunity": {
+            "properties": {
+              "availableAt": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "availableAt"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "opportunity"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Defer opportunity"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
       "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -42216,6 +43657,79 @@
       "uiResourceUri": null
     },
     {
+      "name": "dismiss_opportunity",
+      "title": "Dismiss opportunity",
+      "description": "Decline an opportunity, optionally saying why. It returns only when its evidence changes.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "opportunity_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "opportunity_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "opportunity": {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "status": {
+                "const": "dismissed"
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "opportunity"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Dismiss opportunity"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "get_blog_post",
       "title": "Get blog post",
       "description": "Read one blog or documentation article by ID or slug, including its ordered content_blocks and updated_at token. Use that token when editing or publishing the article.",
@@ -47165,6 +48679,10 @@
                           "id": {
                             "type": "string"
                           },
+                          "provider": {
+                            "description": "log_only records the message locally without sending it through a provider.",
+                            "type": "string"
+                          },
                           "purpose": {
                             "type": "string"
                           },
@@ -47175,6 +48693,7 @@
                         "required": [
                           "id",
                           "channel",
+                          "provider",
                           "purpose",
                           "status"
                         ],
@@ -47255,6 +48774,9 @@
                 ],
                 "type": "object"
               },
+              "needs_reply": {
+                "type": "boolean"
+              },
               "operational_record": {
                 "description": "For a stay, check_in_date and check_out_date are its nights and id is the stay for get_stay; its starts_at and ends_at only order and archive the conversation.",
                 "properties": {
@@ -47317,20 +48839,26 @@
                 "type": "string"
               },
               "reply_channel": {
+                "description": "Where reply_to_guest sends: Airbnb’s conversation, the guest’s email, or their KrabiClaw account inbox. Null when the guest cannot be replied to; reply_not_possible says why.",
                 "enum": [
+                  "airbnb",
                   "email",
-                  "airbnb"
+                  "account",
+                  null
                 ],
-                "type": "string"
-              },
-              "request_id": {
-                "type": "string"
-              },
-              "state": {
                 "type": [
                   "string",
                   "null"
                 ]
+              },
+              "reply_not_possible": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "request_id": {
+                "type": "string"
               },
               "type": {
                 "enum": [
@@ -47348,11 +48876,12 @@
             "required": [
               "request_id",
               "type",
-              "state",
+              "needs_reply",
               "archived",
               "updated_at",
               "participant_label",
               "reply_channel",
+              "reply_not_possible",
               "guest",
               "answers",
               "operational_record",
@@ -53037,8 +54566,8 @@
                     ]
                   },
                   "beds": {
-                    "maximum": 50,
-                    "minimum": 1,
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
                     "type": [
                       "integer",
                       "null"
@@ -53079,15 +54608,19 @@
                     ]
                   },
                   "cancellation_policy": {
-                    "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
+                    "description": "Policy shown to guests for stays under 28 nights. Null when the provider has not supplied one. New authored homes start on Flexible. It does not refund by itself.",
                     "enum": [
                       "flexible",
                       "moderate",
                       "limited",
                       "firm",
-                      "strict"
+                      "strict",
+                      null
                     ],
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "check_in_end_time": {
                     "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -53100,11 +54633,23 @@
                   "check_in_time": {
                     "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "check_out_time": {
                     "description": "Local 24-hour time guests leave by.",
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "internal_name": {
+                    "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                    "maxLength": 240,
+                    "minLength": 1,
                     "type": "string"
                   },
                   "listing_floor": {
@@ -53133,12 +54678,16 @@
                     "type": "string"
                   },
                   "long_term_cancellation_policy": {
-                    "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
+                    "description": "Policy shown to guests for stays of 28 nights or more. Null when the provider has not supplied one. New authored homes start on Firm Long Term.",
                     "enum": [
                       "firm",
-                      "strict"
+                      "strict",
+                      null
                     ],
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "max_guests": {
                     "maximum": 99,
@@ -53711,6 +55260,7 @@
                   }
                 },
                 "required": [
+                  "internal_name",
                   "location_id",
                   "check_in_time",
                   "check_in_end_time",
@@ -64911,14 +66461,22 @@
                 ]
               },
               "check_in_time": {
-                "minLength": 1,
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "check_out_time": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "currency": {
                 "minLength": 1,
                 "type": "string"
               },
-              "currency": {
+              "internal_name": {
                 "minLength": 1,
                 "type": "string"
               },
@@ -64948,6 +66506,7 @@
             "required": [
               "product_id",
               "name",
+              "internal_name",
               "location_id",
               "timezone",
               "currency",
@@ -66873,18 +68432,14 @@
             ],
             "type": "string"
           },
+          "needs_reply": {
+            "description": "Only conversations with an open reply task: a guest question nobody has answered yet.",
+            "type": "boolean"
+          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "state": {
-            "enum": [
-              "needs_attention",
-              "waiting_on_guest",
-              "resolved"
-            ],
             "type": "string"
           },
           "type": {
@@ -66913,6 +68468,9 @@
                     "null"
                   ]
                 },
+                "needs_reply": {
+                  "type": "boolean"
+                },
                 "operational_status": {
                   "type": [
                     "string",
@@ -66929,16 +68487,25 @@
                   ]
                 },
                 "reply_channel": {
+                  "description": "Where reply_to_guest sends; null when the guest cannot be replied to, and reply_not_possible says why.",
                   "enum": [
+                    "airbnb",
                     "email",
-                    "airbnb"
+                    "account",
+                    null
                   ],
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reply_not_possible": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "request_id": {
-                  "type": "string"
-                },
-                "state": {
                   "type": "string"
                 },
                 "type": {
@@ -66953,8 +68520,9 @@
                 "guest_name",
                 "participant_label",
                 "reply_channel",
+                "reply_not_possible",
                 "type",
-                "state",
+                "needs_reply",
                 "operational_status",
                 "preview",
                 "updated_at"
@@ -68202,6 +69770,113 @@
       ],
       "domain": "guest_messaging",
       "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "list_opportunities",
+      "title": "List opportunities",
+      "description": "Read what the business could do now, found from its own records: drafts to finish, posts to share, calendar gaps, payment setup. Each is recorded against its evidence; accept, dismiss or defer it by id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "location_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "opportunities": {
+            "items": {
+              "properties": {
+                "detail": {
+                  "type": "string"
+                },
+                "icon": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "locationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "path": {
+                  "type": "string"
+                },
+                "productId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "statusLine": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "statusLine",
+                "title",
+                "detail",
+                "icon",
+                "path",
+                "productId",
+                "locationId"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "opportunities",
+          "issues"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "List opportunities"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
+      "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -71288,6 +72963,511 @@
       ],
       "domain": "submissions",
       "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "list_tasks",
+      "title": "List tasks",
+      "description": "Read Today or Upcoming as stored tasks: turnovers, guest questions awaiting a reply, scheduled messages that did not send, accepted opportunities and tasks people added. Today is open work starting or due today or earlier plus what was done today; Upcoming is later open work by day. A member sees the tasks given to them or their team and the turnovers at homes they look after. assignees lists who a manager can give work to.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "assignee": {
+            "description": "me, all, or a member id.",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "turnover",
+              "guest_reply",
+              "message_delivery",
+              "booking_review",
+              "booking_change",
+              "opportunity",
+              "custom"
+            ],
+            "type": "string"
+          },
+          "location_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "range": {
+            "enum": [
+              "today",
+              "upcoming"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "done",
+              "skipped",
+              "cancelled"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "assignees": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "initial": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "member",
+                    "team"
+                  ],
+                  "type": "string"
+                },
+                "you": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "type",
+                "id",
+                "name",
+                "initial",
+                "you"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "resolvedAt": {
+            "type": "string"
+          },
+          "sections": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "subtitle": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "tasks": {
+                  "items": {
+                    "properties": {
+                      "action": {
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "assignee": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "initial": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "enum": [
+                                  "member",
+                                  "team"
+                                ],
+                                "type": "string"
+                              },
+                              "you": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "id",
+                              "name",
+                              "initial",
+                              "you"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "avatar": {
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "can": {
+                        "properties": {
+                          "assign": {
+                            "type": "boolean"
+                          },
+                          "complete": {
+                            "type": "boolean"
+                          },
+                          "edit": {
+                            "type": "boolean"
+                          },
+                          "reopen": {
+                            "type": "boolean"
+                          },
+                          "skip": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "complete",
+                          "skip",
+                          "reopen",
+                          "assign",
+                          "edit"
+                        ],
+                        "type": "object"
+                      },
+                      "detail": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "dueAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "face": {
+                        "enum": [
+                          "photo",
+                          "compact"
+                        ],
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "imageUrl": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "kind": {
+                        "enum": [
+                          "turnover",
+                          "guest_reply",
+                          "message_delivery",
+                          "booking_review",
+                          "booking_change",
+                          "opportunity",
+                          "custom"
+                        ],
+                        "type": "string"
+                      },
+                      "locationId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "note": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "notes": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "outcome": {
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "path": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "person": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "initial": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "enum": [
+                                  "member",
+                                  "team"
+                                ],
+                                "type": "string"
+                              },
+                              "you": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "id",
+                              "name",
+                              "initial",
+                              "you"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "productId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "requestId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "reservation": {
+                        "properties": {
+                          "conversation": {
+                            "anyOf": [
+                              {
+                                "properties": {
+                                  "description": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "label": {
+                                    "type": "string"
+                                  },
+                                  "to": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "label",
+                                  "description",
+                                  "to"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "dateLabel": {
+                            "type": "string"
+                          },
+                          "groupHeadline": {
+                            "type": "string"
+                          },
+                          "guestImageUrl": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "homeName": {
+                            "type": "string"
+                          },
+                          "statusLabel": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "dateLabel",
+                          "groupHeadline",
+                          "homeName",
+                          "statusLabel",
+                          "guestImageUrl",
+                          "conversation"
+                        ],
+                        "type": "object"
+                      },
+                      "sheet": {
+                        "type": "object"
+                      },
+                      "startsAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "status": {
+                        "enum": [
+                          "open",
+                          "done",
+                          "skipped",
+                          "cancelled"
+                        ],
+                        "type": "string"
+                      },
+                      "statusLine": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "stayId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "tag": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "timezone": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "integer"
+                      },
+                      "when": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "kind",
+                      "status",
+                      "version",
+                      "face",
+                      "tag",
+                      "imageUrl",
+                      "avatar",
+                      "statusLine",
+                      "title",
+                      "when",
+                      "detail",
+                      "error",
+                      "note",
+                      "person",
+                      "assignee",
+                      "sheet",
+                      "startsAt",
+                      "dueAt",
+                      "timezone",
+                      "notes",
+                      "outcome",
+                      "action",
+                      "path",
+                      "productId",
+                      "locationId",
+                      "stayId",
+                      "requestId",
+                      "can"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "title",
+                "subtitle",
+                "tasks"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "sections",
+          "assignees",
+          "resolvedAt"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List tasks"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
+      "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -84997,8 +87177,8 @@
                       ]
                     },
                     "beds": {
-                      "maximum": 50,
-                      "minimum": 1,
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
                       "type": [
                         "integer",
                         "null"
@@ -85039,15 +87219,19 @@
                       ]
                     },
                     "cancellation_policy": {
-                      "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
+                      "description": "Policy shown to guests for stays under 28 nights. Null when the provider has not supplied one. New authored homes start on Flexible. It does not refund by itself.",
                       "enum": [
                         "flexible",
                         "moderate",
                         "limited",
                         "firm",
-                        "strict"
+                        "strict",
+                        null
                       ],
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "check_in_end_time": {
                       "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -85060,11 +87244,23 @@
                     "check_in_time": {
                       "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                       "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "check_out_time": {
                       "description": "Local 24-hour time guests leave by.",
                       "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "internal_name": {
+                      "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                      "maxLength": 240,
+                      "minLength": 1,
                       "type": "string"
                     },
                     "listing_floor": {
@@ -85093,12 +87289,16 @@
                       "type": "string"
                     },
                     "long_term_cancellation_policy": {
-                      "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
+                      "description": "Policy shown to guests for stays of 28 nights or more. Null when the provider has not supplied one. New authored homes start on Firm Long Term.",
                       "enum": [
                         "firm",
-                        "strict"
+                        "strict",
+                        null
                       ],
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "max_guests": {
                       "maximum": 99,
@@ -86890,8 +89090,8 @@
                       ]
                     },
                     "beds": {
-                      "maximum": 50,
-                      "minimum": 1,
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
                       "type": [
                         "integer",
                         "null"
@@ -86932,15 +89132,19 @@
                       ]
                     },
                     "cancellation_policy": {
-                      "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
+                      "description": "Policy shown to guests for stays under 28 nights. Null when the provider has not supplied one. New authored homes start on Flexible. It does not refund by itself.",
                       "enum": [
                         "flexible",
                         "moderate",
                         "limited",
                         "firm",
-                        "strict"
+                        "strict",
+                        null
                       ],
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "check_in_end_time": {
                       "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -86953,11 +89157,23 @@
                     "check_in_time": {
                       "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                       "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "check_out_time": {
                       "description": "Local 24-hour time guests leave by.",
                       "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "internal_name": {
+                      "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                      "maxLength": 240,
+                      "minLength": 1,
                       "type": "string"
                     },
                     "listing_floor": {
@@ -86986,12 +89202,16 @@
                       "type": "string"
                     },
                     "long_term_cancellation_policy": {
-                      "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
+                      "description": "Policy shown to guests for stays of 28 nights or more. Null when the provider has not supplied one. New authored homes start on Firm Long Term.",
                       "enum": [
                         "firm",
-                        "strict"
+                        "strict",
+                        null
                       ],
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "max_guests": {
                       "maximum": 99,
@@ -87564,6 +89784,7 @@
                     }
                   },
                   "required": [
+                    "internal_name",
                     "location_id",
                     "check_in_time",
                     "check_in_end_time",
@@ -88112,10 +90333,6 @@
           },
           "thread": {
             "properties": {
-              "conversation_state": {
-                "minLength": 1,
-                "type": "string"
-              },
               "id": {
                 "minLength": 1,
                 "type": "string"
@@ -88130,8 +90347,7 @@
             },
             "required": [
               "id",
-              "kind",
-              "conversation_state"
+              "kind"
             ],
             "type": "object"
           }
@@ -97548,7 +99764,7 @@
     {
       "name": "reply_to_guest",
       "title": "Reply to guest",
-      "description": "Reply through this conversation’s reply_channel and save the reply. Airbnb replies accept text or one photo, sent separately; email replies accept text, a photo or both. A stay guest without an email is reached in their KrabiClaw inbox once they accept the host’s invite link; until then the reply is refused with GUEST_INVITE_REQUIRED and the host shares an invite from the KrabiClaw app. Reuse the same key for an identical retry. A failed Airbnb attempt may retry only when retry_with_same_idempotency_key is true. Sending, uncertain or review-required attempts need review and are never blindly resent. Returns saved conversation state; use get_guest_conversation for history and delivery receipts.",
+      "description": "Reply through this conversation’s reply_channel and save the reply. Airbnb replies accept text or one photo, sent separately; email replies accept text, a photo or both. A stay guest without an email is reached in their KrabiClaw inbox when they have an account; with neither, the reply is refused with GUEST_UNREACHABLE. Reuse the same key for an identical retry. A failed Airbnb attempt may retry only when retry_with_same_idempotency_key is true. Sending, uncertain or review-required attempts need review and are never blindly resent. Returns saved conversation state; use get_guest_conversation for history and delivery receipts.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -97625,14 +99841,11 @@
               "archived": {
                 "type": "boolean"
               },
+              "needs_reply": {
+                "type": "boolean"
+              },
               "request_id": {
                 "type": "string"
-              },
-              "state": {
-                "type": [
-                  "string",
-                  "null"
-                ]
               },
               "updated_at": {
                 "type": "string"
@@ -97640,7 +99853,7 @@
             },
             "required": [
               "request_id",
-              "state",
+              "needs_reply",
               "archived",
               "updated_at"
             ],
@@ -99850,14 +102063,11 @@
               "archived": {
                 "type": "boolean"
               },
+              "needs_reply": {
+                "type": "boolean"
+              },
               "request_id": {
                 "type": "string"
-              },
-              "state": {
-                "type": [
-                  "string",
-                  "null"
-                ]
               },
               "updated_at": {
                 "type": "string"
@@ -99865,7 +102075,7 @@
             },
             "required": [
               "request_id",
-              "state",
+              "needs_reply",
               "archived",
               "updated_at"
             ],
@@ -101797,14 +104007,22 @@
                 ]
               },
               "check_in_time": {
-                "minLength": 1,
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "check_out_time": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "currency": {
                 "minLength": 1,
                 "type": "string"
               },
-              "currency": {
+              "internal_name": {
                 "minLength": 1,
                 "type": "string"
               },
@@ -101834,6 +104052,7 @@
             "required": [
               "product_id",
               "name",
+              "internal_name",
               "location_id",
               "timezone",
               "currency",
@@ -102445,6 +104664,415 @@
         }
       ],
       "domain": "context",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "skip_task",
+      "title": "Skip task",
+      "description": "Skip a task, saying why.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "note"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "task": {
+            "properties": {
+              "action": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "assignee": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "avatar": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "can": {
+                "properties": {
+                  "assign": {
+                    "type": "boolean"
+                  },
+                  "complete": {
+                    "type": "boolean"
+                  },
+                  "edit": {
+                    "type": "boolean"
+                  },
+                  "reopen": {
+                    "type": "boolean"
+                  },
+                  "skip": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "complete",
+                  "skip",
+                  "reopen",
+                  "assign",
+                  "edit"
+                ],
+                "type": "object"
+              },
+              "detail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dueAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "face": {
+                "enum": [
+                  "photo",
+                  "compact"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "imageUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "turnover",
+                  "guest_reply",
+                  "message_delivery",
+                  "booking_review",
+                  "booking_change",
+                  "opportunity",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              "locationId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "notes": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "person": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "productId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "requestId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reservation": {
+                "properties": {
+                  "conversation": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "description",
+                          "to"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "dateLabel": {
+                    "type": "string"
+                  },
+                  "groupHeadline": {
+                    "type": "string"
+                  },
+                  "guestImageUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "homeName": {
+                    "type": "string"
+                  },
+                  "statusLabel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "dateLabel",
+                  "groupHeadline",
+                  "homeName",
+                  "statusLabel",
+                  "guestImageUrl",
+                  "conversation"
+                ],
+                "type": "object"
+              },
+              "sheet": {
+                "type": "object"
+              },
+              "startsAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "open",
+                  "done",
+                  "skipped",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "statusLine": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stayId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tag": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "when": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "status",
+              "version",
+              "face",
+              "tag",
+              "imageUrl",
+              "avatar",
+              "statusLine",
+              "title",
+              "when",
+              "detail",
+              "error",
+              "note",
+              "person",
+              "assignee",
+              "sheet",
+              "startsAt",
+              "dueAt",
+              "timezone",
+              "notes",
+              "outcome",
+              "action",
+              "path",
+              "productId",
+              "locationId",
+              "stayId",
+              "requestId",
+              "can"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Skip task"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
       "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -114945,8 +117573,8 @@
                 ]
               },
               "beds": {
-                "maximum": 50,
-                "minimum": 1,
+                "maximum": 9007199254740991,
+                "minimum": 0,
                 "type": [
                   "integer",
                   "null"
@@ -114987,15 +117615,19 @@
                 ]
               },
               "cancellation_policy": {
-                "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
+                "description": "Policy shown to guests for stays under 28 nights. Null when the provider has not supplied one. New authored homes start on Flexible. It does not refund by itself.",
                 "enum": [
                   "flexible",
                   "moderate",
                   "limited",
                   "firm",
-                  "strict"
+                  "strict",
+                  null
                 ],
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "check_in_end_time": {
                 "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -115008,15 +117640,27 @@
               "check_in_time": {
                 "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                 "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "check_out_time": {
                 "description": "Local 24-hour time guests leave by.",
                 "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "expected_questions_revision": {
                 "description": "stay.questions_revision from get_product; required with questions.",
+                "type": "string"
+              },
+              "internal_name": {
+                "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                "maxLength": 240,
+                "minLength": 1,
                 "type": "string"
               },
               "listing_floor": {
@@ -115042,12 +117686,16 @@
                 ]
               },
               "long_term_cancellation_policy": {
-                "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
+                "description": "Policy shown to guests for stays of 28 nights or more. Null when the provider has not supplied one. New authored homes start on Firm Long Term.",
                 "enum": [
                   "firm",
-                  "strict"
+                  "strict",
+                  null
                 ],
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "max_guests": {
                 "maximum": 99,
@@ -116906,8 +119554,8 @@
                     ]
                   },
                   "beds": {
-                    "maximum": 50,
-                    "minimum": 1,
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
                     "type": [
                       "integer",
                       "null"
@@ -116948,15 +119596,19 @@
                     ]
                   },
                   "cancellation_policy": {
-                    "description": "Policy shown to guests for stays under 28 nights. A home always has one: a new home starts on Flexible, as a new Airbnb listing does, and an Airbnb import takes the listing’s own. It does not refund by itself.",
+                    "description": "Policy shown to guests for stays under 28 nights. Null when the provider has not supplied one. New authored homes start on Flexible. It does not refund by itself.",
                     "enum": [
                       "flexible",
                       "moderate",
                       "limited",
                       "firm",
-                      "strict"
+                      "strict",
+                      null
                     ],
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "check_in_end_time": {
                     "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
@@ -116969,11 +119621,23 @@
                   "check_in_time": {
                     "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "check_out_time": {
                     "description": "Local 24-hour time guests leave by.",
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "internal_name": {
+                    "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                    "maxLength": 240,
+                    "minLength": 1,
                     "type": "string"
                   },
                   "listing_floor": {
@@ -117002,12 +119666,16 @@
                     "type": "string"
                   },
                   "long_term_cancellation_policy": {
-                    "description": "Policy shown to guests for stays of 28 nights or more. A home always has one: a new home starts on Firm Long Term, as a new Airbnb listing does, and an Airbnb import takes the listing’s own.",
+                    "description": "Policy shown to guests for stays of 28 nights or more. Null when the provider has not supplied one. New authored homes start on Firm Long Term.",
                     "enum": [
                       "firm",
-                      "strict"
+                      "strict",
+                      null
                     ],
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "max_guests": {
                     "maximum": 99,
@@ -117580,6 +120248,7 @@
                   }
                 },
                 "required": [
+                  "internal_name",
                   "location_id",
                   "check_in_time",
                   "check_in_end_time",
@@ -126893,6 +129562,455 @@
       "uiResourceUri": null
     },
     {
+      "name": "update_task",
+      "title": "Update task",
+      "description": "Reassign, reschedule or edit the notes of an open task. Pass expected_version from list_tasks; a newer version is refused so another change is not overwritten. A new assignee is told.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "assigned_member_id": {
+            "description": "A Better Auth member id from list_tasks assignees; null to unassign.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "assigned_team_id": {
+            "description": "A Better Auth team id from list_tasks assignees. Give a member or a team, not both.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "due_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expected_version": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "notes": {
+            "maxLength": 5000,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "description": "Only for a task someone added or an accepted opportunity.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "expected_version"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "task": {
+            "properties": {
+              "action": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "assignee": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "avatar": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "can": {
+                "properties": {
+                  "assign": {
+                    "type": "boolean"
+                  },
+                  "complete": {
+                    "type": "boolean"
+                  },
+                  "edit": {
+                    "type": "boolean"
+                  },
+                  "reopen": {
+                    "type": "boolean"
+                  },
+                  "skip": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "complete",
+                  "skip",
+                  "reopen",
+                  "assign",
+                  "edit"
+                ],
+                "type": "object"
+              },
+              "detail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dueAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "face": {
+                "enum": [
+                  "photo",
+                  "compact"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "imageUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "turnover",
+                  "guest_reply",
+                  "message_delivery",
+                  "booking_review",
+                  "booking_change",
+                  "opportunity",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              "locationId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "notes": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "person": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "productId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "requestId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reservation": {
+                "properties": {
+                  "conversation": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "description",
+                          "to"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "dateLabel": {
+                    "type": "string"
+                  },
+                  "groupHeadline": {
+                    "type": "string"
+                  },
+                  "guestImageUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "homeName": {
+                    "type": "string"
+                  },
+                  "statusLabel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "dateLabel",
+                  "groupHeadline",
+                  "homeName",
+                  "statusLabel",
+                  "guestImageUrl",
+                  "conversation"
+                ],
+                "type": "object"
+              },
+              "sheet": {
+                "type": "object"
+              },
+              "startsAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "open",
+                  "done",
+                  "skipped",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "statusLine": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stayId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tag": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "when": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "status",
+              "version",
+              "face",
+              "tag",
+              "imageUrl",
+              "avatar",
+              "statusLine",
+              "title",
+              "when",
+              "detail",
+              "error",
+              "note",
+              "person",
+              "assignee",
+              "sheet",
+              "startsAt",
+              "dueAt",
+              "timezone",
+              "notes",
+              "outcome",
+              "action",
+              "path",
+              "productId",
+              "locationId",
+              "stayId",
+              "requestId",
+              "can"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Update task"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "update_team",
       "title": "Update team",
       "description": "Rename a team in this business.",
@@ -127129,18 +130247,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:eda9b539f7bc13fa334ffe44b23c401133640cb949c0c9556b8ae28ddf79c7c0",
-        "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
+        "create_product": "sha256:6b782c6ab1d21047206a463217e0c945b7eb86938bbf84227861aee188db98cd",
+        "get_product": "sha256:c3d93df0274de203abbdfde2bf45ccc0d3825c6e8d29e558dfba59cf1795d0ef",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
         "list_location_products": "sha256:2015626d39e62ce848fe36e9f0b99ac1e50b9afb915d67d7ce067553afb700b6",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
-        "reconcile_products": "sha256:8ade448d4e4bd44500ec34127612e7c5fbf58a6e73f20d3674d8696a079da202",
+        "reconcile_products": "sha256:68a6d15679ed28f3744a74860dc460b706c61f6e4fa8313c449b2f4989f2a30c",
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
         "set_collection_products": "sha256:124140d2c1f17f41c466ca886c7fcabdfa4d9f34d9b6f0da8a1299548ae49289",
         "update_menu": "sha256:cd6ae334587cddc89c052c08d9f30ce9855bd0394c95eb87d69378a393068269",
-        "update_product": "sha256:a6f1e84c2f216c0cf5f12ff3c680f5227a03b34c951caf3cf75f9d5580ca7372"
+        "update_product": "sha256:9746842c3ad6eccf9b74a5f3074d81d39847bbee81e58b38f8925870d23d39fb"
       }
     },
     {
@@ -127185,8 +130303,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:eda9b539f7bc13fa334ffe44b23c401133640cb949c0c9556b8ae28ddf79c7c0",
-        "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
+        "create_product": "sha256:6b782c6ab1d21047206a463217e0c945b7eb86938bbf84227861aee188db98cd",
+        "get_product": "sha256:c3d93df0274de203abbdfde2bf45ccc0d3825c6e8d29e558dfba59cf1795d0ef",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
@@ -127203,21 +130321,21 @@
         "text": "Use get_workspace_context to resolve the requested business. Read all relevant list_guest_conversations pages and get_guest_conversation for full contact messages, table reservation and product booking details, proposals and delivery receipts. For internal team messages use list_team_conversations and get_team_conversation. Select actual teammates with list_team_conversation_recipients. start_team_conversation reuses direct and explicit stay/location conversations; manual groups of at least three people are distinct and require a stable idempotency_key. update_team_group changes only manual internal groups: obey canManage/canLeave; preserve buyer/guest and stay/location participants. New members can read group history; removal and leaving end access while retaining messages. Use send_team_message only for the requested internal message, then read it back. Reading does not mark a thread read; mark_team_conversation_read changes only the caller’s read position. Team chat is separate from guest replies and Better Auth Team/group management. Summarize unanswered messages and pending bookings. Use reply_to_guest with a stable idempotency_key only for the message or photo the user requests. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; use cancel_table_reservation or request_table_reservation_change for an explicitly requested table reservation action. Booking changes email a proposal and leave the existing allocation unchanged until guest acceptance. Financial actions requiring the dashboard remain incomplete; report the returned handoff instead of claiming completion. Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google. Report failed deliveries and actions awaiting guest acceptance accurately."
       },
       "toolContracts": {
-        "cancel_product_booking": "sha256:a90b3075935852ee847849f1774addc7077bac2636dd83439a792db5a98c9ca3",
-        "cancel_table_reservation": "sha256:7c17a97a9f730249ce112981850351006406adab44d5230f8306953e4450b165",
-        "confirm_product_booking": "sha256:d1269994270301b34621918853c929c1e77f702b21fa336ac4dd23dcbf81e18e",
-        "get_guest_conversation": "sha256:d8fb6d75bd38fb53f6bc46dab6207535ffe1c55e57bc1b22b95be6df051aeed8",
+        "cancel_product_booking": "sha256:28d9c2c6be574b460d8711e4040fed5162c439aae2b37e95ca79ea08cd24e62d",
+        "cancel_table_reservation": "sha256:9f69a68d495da67c14718dff9208b98d7c28e5a4b8eba2849ded151ad293312a",
+        "confirm_product_booking": "sha256:373f9f84360e37716dc1476d28b8f6b47c14001642ebaff8d713d74a7d3a8eaa",
+        "get_guest_conversation": "sha256:fabd2b7aa4ccb5f19c1d0a7bdf3bc559a083c9f2547d0c93aeda64ce51f5563c",
         "get_product_booking": "sha256:1f0d7f20d207a6fb1aecb169e86483ae515c5b6209fbf9fe948a2be26860968d",
         "get_team_conversation": "sha256:68a4390f99121151a6c3dcca2e3cff8675166b27d958e7a1a71dcd3a4c9a81d0",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
+        "list_guest_conversations": "sha256:6d0b00651d62c18f2c881046eb4d7f619ec7aecf85662d0c173af68134fd98cc",
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
         "list_team_conversations": "sha256:7d0d80ed5a7b2c7b2d46ce8cac3aadddf63040756dafc586723b6bf623914283",
         "mark_team_conversation_read": "sha256:3ad65b07c9bd78090f9f81aeffa74ac00f1c201ee8b6325cf16cd879f1e2644d",
-        "reject_product_booking": "sha256:d391fc30d744361aecae959a6e0530b4193bb3366cf9da36cc2a7e2011088357",
-        "reply_to_guest": "sha256:28402ef75ec3f1464c60ffbaa91a3781f96f9764994e56b2c7362dbd26eefb80",
+        "reject_product_booking": "sha256:91a5bee34d02b729a3dacb01885157ce63b443594116d8710ca90313fb76e357",
+        "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
         "request_product_booking_change": "sha256:d09a9c88466237aff04465bbcffa219f28e197cfad0cb4fdd99f41484343d400",
         "request_table_reservation_change": "sha256:71868f28cc9f329b1f44276ae0a223c487c789f4682c3bb8f3a09b96fde9e2dd",
         "send_team_message": "sha256:b9f715f29f98d627cd0e5fa89f873b5623e13d5ba0867cc7dba69216ba886f97",
@@ -127257,7 +130375,7 @@
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
         "get_post": "sha256:1bfb415fc3917a3aad29e1b1ae44db4a092b10dd169974b39c89832c4a69017d",
-        "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
+        "get_product": "sha256:c3d93df0274de203abbdfde2bf45ccc0d3825c6e8d29e558dfba59cf1795d0ef",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
@@ -127273,7 +130391,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:eda9b539f7bc13fa334ffe44b23c401133640cb949c0c9556b8ae28ddf79c7c0",
+        "create_product": "sha256:6b782c6ab1d21047206a463217e0c945b7eb86938bbf84227861aee188db98cd",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
@@ -127299,7 +130417,7 @@
       },
       "toolContracts": {
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
-        "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
+        "get_product": "sha256:c3d93df0274de203abbdfde2bf45ccc0d3825c6e8d29e558dfba59cf1795d0ef",
         "get_reservation_policy": "sha256:671949950829fad652e09245cb65c14b456e28519e4e5f01a0fcbaca2bb3e78f",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
@@ -127307,7 +130425,7 @@
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "replace_product_weekly_schedule": "sha256:cc5f48fb054661e70ce26d988fc12a29f4325c7fc59b5b20852fb98d0e0e2451",
         "set_product_booking_config": "sha256:325fc0b5cb4d6ab6c21227ea94b6d2c22a1192af199b3286145207bbd58b1379",
-        "update_product": "sha256:a6f1e84c2f216c0cf5f12ff3c680f5227a03b34c951caf3cf75f9d5580ca7372",
+        "update_product": "sha256:9746842c3ad6eccf9b74a5f3074d81d39847bbee81e58b38f8925870d23d39fb",
         "update_reservation_policy": "sha256:11892e568dc0af3a9a3bcd0e6ddcf1081e146d1f36dfea443650f602348d30cb"
       }
     },
@@ -127327,7 +130445,7 @@
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_product": "sha256:a6f1e84c2f216c0cf5f12ff3c680f5227a03b34c951caf3cf75f9d5580ca7372",
+        "update_product": "sha256:9746842c3ad6eccf9b74a5f3074d81d39847bbee81e58b38f8925870d23d39fb",
         "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
       }
     },
@@ -127341,16 +130459,16 @@
       },
       "toolContracts": {
         "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
-        "get_guest_conversation": "sha256:d8fb6d75bd38fb53f6bc46dab6207535ffe1c55e57bc1b22b95be6df051aeed8",
+        "get_guest_conversation": "sha256:fabd2b7aa4ccb5f19c1d0a7bdf3bc559a083c9f2547d0c93aeda64ce51f5563c",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
-        "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
+        "get_product": "sha256:c3d93df0274de203abbdfde2bf45ccc0d3825c6e8d29e558dfba59cf1795d0ef",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
+        "list_guest_conversations": "sha256:6d0b00651d62c18f2c881046eb4d7f619ec7aecf85662d0c173af68134fd98cc",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
-        "reply_to_guest": "sha256:28402ef75ec3f1464c60ffbaa91a3781f96f9764994e56b2c7362dbd26eefb80",
-        "update_product": "sha256:a6f1e84c2f216c0cf5f12ff3c680f5227a03b34c951caf3cf75f9d5580ca7372"
+        "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
+        "update_product": "sha256:9746842c3ad6eccf9b74a5f3074d81d39847bbee81e58b38f8925870d23d39fb"
       }
     }
   ]

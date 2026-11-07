@@ -19,6 +19,7 @@ import createRoomRoute from '../../server/api/dashboard/stay-homes/[productId]/r
 import updateRoomRoute from '../../server/api/dashboard/stay-homes/[productId]/rooms/[roomId].patch.ts'
 import updateAccessibilityRoute from '../../server/api/dashboard/stay-homes/[productId]/accessibility.patch.ts'
 import { getProduct, hydrateProductMedia } from '../../server/utils/product-management.ts'
+import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
 import publicShellRoute from '../../server/api/public/shell.get.ts'
 import type { StayPhotoRoom } from '../../shared/stay-photos.ts'
 import { STAY_HOME_ACCESSIBILITY_FEATURES, type StayHomeAccessibility } from '../../shared/stay-accessibility.ts'
@@ -94,6 +95,13 @@ test('a home authors room details and manages its product photos through authent
     assert.equal(created.status, 201)
     const productId = (created.body.home as { product_id: string }).product_id
     assert.deepEqual((created.body.home as { photos: unknown[] }).photos, [])
+
+    await writeMemberScheduling({ env, userId: 'owner', organizationId: ORG }, 'm-owner', { expected_updated_at: null, public_name: 'Cabin host', public_approved: true })
+    const priced = await call(owner, 'PATCH', `/${productId}`, { base_price_minor: 15_000, assigned_member_id: 'm-owner' })
+    assert.equal(priced.status, 200, JSON.stringify(priced.body))
+    const published = await call(owner, 'PATCH', `/${productId}`, { published: true })
+    assert.equal(published.status, 200, JSON.stringify(published.body))
+    assert.equal((published.body.home as StayHome).published, true)
 
     // Native Home updates must complete their Location's visibility change,
     // including a public shell already cached by an earlier guest request.

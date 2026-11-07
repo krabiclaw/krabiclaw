@@ -11,8 +11,11 @@
           <DashboardCoverPhotoField v-if="!creationSubmitted" :organization-id="organizationId" :location-id="locationId" :model-value="form.image_asset_id" :preview-url="creationPhoto?.public_url" :preview-alt="form.name" :title="`${itemLabel} photo`" testid="product-create-photo" @change="selectCreationPhoto" />
           <img v-else-if="creationPhoto?.public_url" :src="creationPhoto.public_url" :alt="form.name" class="aspect-[4/3] w-full rounded-xl object-cover">
         </template>
-        <UFormField :label="form.kind === 'stay' ? 'Title' : 'Name'" required>
-          <UInput v-model="form.name" :aria-label="form.kind === 'stay' ? 'Title' : 'Name'" :maxlength="PRODUCT_LIMITS.name" class="w-full" data-testid="product-create-name" />
+        <UFormField v-if="form.kind === 'stay'" label="Internal name" description="A short name for your team." required>
+          <UInput v-model="form.internal_name" aria-label="Internal name" :maxlength="PRODUCT_LIMITS.name" class="w-full" />
+        </UFormField>
+        <UFormField :label="form.kind === 'stay' ? 'Listing title' : 'Name'" required>
+          <UInput v-model="form.name" :aria-label="form.kind === 'stay' ? 'Listing title' : 'Name'" :maxlength="PRODUCT_LIMITS.name" class="w-full" data-testid="product-create-name" />
         </UFormField>
         <UFormField :label="creationDescriptionLabel" hint="Optional">
           <UTextarea v-model="form.description" :aria-label="creationDescriptionLabel" :maxlength="PRODUCT_LIMITS.description" :rows="4" autoresize variant="none" class="w-full" :ui="{ base: 'resize-none' }" />
@@ -32,9 +35,9 @@
             <USelect v-else v-model="form.stay_location_id" :items="creationLocations" placeholder="Choose a location" class="w-full" />
           </UFormField>
           <div class="grid gap-6 sm:grid-cols-2">
-            <UFormField label="Check-in from" required><UInput v-model="form.check_in_time" type="time" class="w-full" /></UFormField>
+            <UFormField label="Check-in from"><UInput v-model="form.check_in_time" type="time" class="w-full" /></UFormField>
             <UFormField label="Check-in until"><StayCheckInEndSelect v-model="form.check_in_end_time" /></UFormField>
-            <UFormField label="Checkout by" required><UInput v-model="form.check_out_time" type="time" class="w-full" /></UFormField>
+            <UFormField label="Checkout by"><UInput v-model="form.check_out_time" type="time" class="w-full" /></UFormField>
             <UFormField label="Sleeps" required><UInput v-model="form.max_guests" inputmode="numeric" pattern="[0-9]*" class="w-full" /></UFormField>
             <UFormField label="Default minimum nights" required><UInput v-model="form.min_nights" inputmode="numeric" pattern="[0-9]*" class="w-full" /></UFormField>
           </div>
@@ -106,7 +109,7 @@
       <template v-if="summaryCards" #summary="{ item }">
         <span v-if="arrivalTab && item.id === 'arrival-time'" class="grid grid-cols-2 gap-4 text-base">
           <span class="block border-r border-default pr-4"><span class="block font-medium text-highlighted">Check-in</span><span class="mt-1 block">{{ product?.stay ? stayCheckInWindow(product.stay.check_in_time, product.stay.check_in_end_time) : '' }}</span></span>
-          <span class="block"><span class="block font-medium text-highlighted">Checkout</span><span class="mt-1 block">{{ product?.stay?.check_out_time }}</span></span>
+          <span class="block"><span class="block font-medium text-highlighted">Checkout</span><span class="mt-1 block">{{ product?.stay?.check_out_time ?? 'Not set' }}</span></span>
         </span>
         <span v-else-if="item.id === 'name'" class="block text-xl font-medium leading-snug text-highlighted">{{ item.summary }}</span>
         <template v-else-if="stayEditor && item.id === 'photo'">
@@ -175,7 +178,7 @@
             <h2 class="text-xl font-medium text-highlighted">Check-in &amp; checkout</h2>
             <dl class="mt-4 grid grid-cols-2 gap-6">
               <div><dt class="text-sm text-muted">Check-in</dt><dd class="mt-1 text-base text-highlighted">{{ product?.stay ? stayCheckInWindow(product.stay.check_in_time, product.stay.check_in_end_time) : '' }}</dd></div>
-              <div><dt class="text-sm text-muted">Checkout by</dt><dd class="mt-1 text-base text-highlighted">{{ product?.stay?.check_out_time }}</dd></div>
+              <div><dt class="text-sm text-muted">Checkout by</dt><dd class="mt-1 text-base text-highlighted">{{ product?.stay?.check_out_time ?? 'Not set' }}</dd></div>
             </dl>
           </section>
           <StayArrivalGuideView :guide="arrivalHome" :rules="savedHouseRules" :safety="arrivalSafety" />
@@ -208,7 +211,7 @@ import type { VerticalCopy } from '~/utils/vertical-copy'
 import { formQuestionsSummary, type FormQuestionWrite } from '~/utils/form-question-editing'
 
 export const SECTION_KEYS = [
-  'photo', 'kind', 'name', 'price', 'description', 'page', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections',
+  'photo', 'kind', 'name', 'internal-name', 'price', 'description', 'page', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections',
   'guests', 'availability', 'arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'house-rules', 'checkout-instructions', 'property-type', 'rooms', 'amenities', 'accessibility', 'cancellation', 'team', 'guest-safety', 'location', 'questions',
 ] as const
 export type SectionKey = typeof SECTION_KEYS[number]
@@ -247,6 +250,7 @@ export interface VariantDraft {
 
 /** The editable shape of one product, as its leaves bind to it. */
 export interface ProductForm {
+  internal_name: string
   kind: ProductKind | ''
   name: string
   description: string
@@ -506,6 +510,7 @@ const sectionLabels: Record<SectionKey, string> = {
   'kind': 'Type',
   'photo': 'Photos',
   'name': 'Name',
+  'internal-name': 'Internal name',
   get price() { return product.value?.kind === 'service' ? 'Consultation pricing' : 'Price' },
   get description() { return product.value?.kind === 'experience' ? 'What you’ll do' : product.value?.kind === 'service' ? 'Short description' : 'Description' },
   'page': 'Page content',
@@ -764,8 +769,8 @@ const stayConfigError = computed(() => {
   if (!stay) return 'This place to stay has no stay settings.'
   const invalid = [
     !stay.location_id && 'location',
-    !MINUTE_TIME_PATTERN.test(stay.check_in_time) && 'check-in time',
-    !MINUTE_TIME_PATTERN.test(stay.check_out_time) && 'checkout time',
+    stay.check_in_time !== null && !MINUTE_TIME_PATTERN.test(stay.check_in_time) && 'check-in time',
+    stay.check_out_time !== null && !MINUTE_TIME_PATTERN.test(stay.check_out_time) && 'checkout time',
     !(Number.isInteger(stay.max_guests) && stay.max_guests >= 1 && stay.max_guests <= 99) && 'sleeps',
     !(Number.isInteger(stay.min_nights) && stay.min_nights >= 1 && stay.min_nights <= MAX_STAY_NIGHTS) && 'minimum nights',
     !Array.isArray(stay.photo_rooms) && 'photo tour',
@@ -836,7 +841,7 @@ const creationScope = [suppliedKind ?? '', locationScope.value ?? '', createColl
 const draftKey = `product-draft:${organizationId}:${productId.value}${isNew.value ? `:${creationScope}` : ''}`
 const draft = useState<ProductForm>(draftKey, () => ({
   kind: '',
-  name: '',
+  name: '', internal_name: '',
   description: '',
   order_url: '',
   options: [] as OptionDraft[],
@@ -952,6 +957,7 @@ function loadForm(row: Product) {
   // Stay settings belong to a place to stay alone; on any other product they do not apply.
   const stay = row.stay
   form.stay_location_id = stay ? stay.location_id : ''
+  form.internal_name = stay?.internal_name ?? ''
   form.name = row.name
   form.description = row.description
   form.order_url = row.order_url ?? ''
@@ -990,9 +996,9 @@ function loadForm(row: Product) {
   form.online_payment_required = row.booking?.online_payment_required ?? false
   form.held_online = row.booking?.held_online ?? false
   form.booking_capacity = row.booking?.default_capacity === null || row.booking === null ? '' : String(row.booking.default_capacity)
-  form.check_in_time = stay ? stay.check_in_time : ''
+  form.check_in_time = stay?.check_in_time ?? ''
   form.check_in_end_time = stay?.check_in_end_time ?? ''
-  form.check_out_time = stay ? stay.check_out_time : ''
+  form.check_out_time = stay?.check_out_time ?? ''
   form.max_guests = stay ? String(stay.max_guests) : ''
   form.min_nights = stay ? String(stay.min_nights) : ''
   form.stay_team_id = stay ? stay.assigned_team_id : null
@@ -1147,6 +1153,7 @@ const propertyTypeErrors = computed(() => {
 
 const sectionValid = computed(() => {
   if (editorKey.value === 'kind') return PRODUCT_KINDS.includes(form.kind as ProductKind)
+  if (editorKey.value === 'internal-name') return Boolean(form.internal_name.trim())
   if (editorKey.value === 'name') return Boolean(form.name.trim())
   if (editorKey.value === 'description') return form.description.length <= PRODUCT_LIMITS.description
   if (editorKey.value === 'guests') return Number.isInteger(Number(form.max_guests)) && Number(form.max_guests) >= 1 && Number(form.max_guests) <= 99
@@ -1163,7 +1170,7 @@ const sectionValid = computed(() => {
     const beds = bedsStr ? Number(bedsStr) : null
     const ba = bathroomsStr ? Number(bathroomsStr) : null
     const invalidBedrooms = b !== null && (!Number.isInteger(b) || b < 0 || b > 50)
-    const invalidBeds = beds !== null && (!Number.isInteger(beds) || beds < 1 || beds > 50)
+    const invalidBeds = beds !== null && (!Number.isSafeInteger(beds) || beds < 0)
     const invalidBaths = ba !== null && (ba < 0 || ba > 50 || (ba * 2) % 1 !== 0)
     return !invalidBedrooms && !invalidBeds && !invalidBaths
   }
@@ -1176,12 +1183,12 @@ const sectionValid = computed(() => {
 function stayIncomplete(): boolean {
   const guests = Number(form.max_guests)
   const nights = Number(form.min_nights)
-  return !form.stay_location_id || !checkInWindowValid()
+  return !form.internal_name.trim() || !form.stay_location_id || !checkInWindowValid()
     || !Number.isInteger(guests) || guests < 1 || guests > 99 || !Number.isInteger(nights) || nights < 1 || nights > MAX_STAY_NIGHTS
 }
 /** Start and checkout are times; the end is a time other than the start, or empty for a flexible end. */
 function checkInWindowValid(): boolean {
-  return MINUTE_TIME_PATTERN.test(form.check_in_time) && MINUTE_TIME_PATTERN.test(form.check_out_time)
+  return (form.check_in_time === '' || MINUTE_TIME_PATTERN.test(form.check_in_time)) && (form.check_out_time === '' || MINUTE_TIME_PATTERN.test(form.check_out_time))
     && (form.check_in_end_time === '' || (MINUTE_TIME_PATTERN.test(form.check_in_end_time) && form.check_in_end_time !== form.check_in_time))
 }
 function stayTeamSummary(): string {
@@ -1377,7 +1384,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
     const home = arrivalHome.value
     if (!home || arrivalError.value) return []
     return [{ id: 'arrival', items: [
-      { id: 'arrival-time', label: '', summary: `${stayCheckInWindow(product.value.stay!.check_in_time, product.value.stay!.check_in_end_time)} · ${product.value.stay!.check_out_time}`, to: sectionPath('arrival-time') },
+      { id: 'arrival-time', label: '', summary: `${stayCheckInWindow(product.value.stay!.check_in_time, product.value.stay!.check_in_end_time)} · ${product.value.stay!.check_out_time ?? 'Checkout time not set'}`, to: sectionPath('arrival-time') },
       { id: 'directions', label: 'Directions', summary: home.directions || 'Add details', placeholder: !home.directions, to: sectionPath('directions') },
       { id: 'check-in-method', label: 'Check-in method', summary: home.check_in_method ? STAY_CHECK_IN_METHODS[home.check_in_method].label : 'Add details', placeholder: !home.check_in_method, to: sectionPath('check-in-method') },
       { id: 'wifi', label: 'Wifi details', summary: home.wifi_network || 'Add details', placeholder: !home.wifi_network, to: sectionPath('wifi') },
@@ -1393,7 +1400,8 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
     id: 'item',
     items: [
       { id: 'photo', label: 'Photos', summary: photoAssets.value.length ? `${photoAssets.value.length} ${photoAssets.value.length === 1 ? 'photo' : 'photos'}` : 'No photos yet', placeholder: !photoAssets.value.length, to: sectionPath('photo') },
-      { id: 'name', label: 'Title', summary: form.name || 'Not named yet', placeholder: !form.name, to: sectionPath('name') },
+      { id: 'internal-name', label: 'Internal name', summary: form.internal_name, to: sectionPath('internal-name') },
+      { id: 'name', label: 'Listing title', summary: form.name || 'Not named yet', placeholder: !form.name, to: sectionPath('name') },
       { id: 'description', label: 'Description', summary: form.description || 'Nothing written yet', placeholder: !form.description, to: sectionPath('description') },
       ...(product.value.page
         ? [{ id: 'page', label: 'Page content', summary: product.value.page.title, ...(canPreview.value ? { to: `/dashboard/${String(route.params.orgSlug)}/website/pages/${encodeURIComponent(product.value.page.id)}` } : {}) }]
@@ -1472,10 +1480,10 @@ const activeNavigationItem = computed(() => {
  * beside this index. A row that leads into a level of its own — Bookings,
  * Pricing — would open that level too and push this index off the screen.
  */
-const LEAF_SECTIONS: readonly string[] = ['photo', 'name', 'description', 'price', 'kind', 'order-url', 'property-type', 'rooms', 'guests', 'availability', 'arrival-time', 'directions', 'wifi', 'house-manual', 'house-rules', 'team']
+const LEAF_SECTIONS: readonly string[] = ['photo', 'internal-name', 'name', 'description', 'price', 'kind', 'order-url', 'property-type', 'rooms', 'guests', 'availability', 'arrival-time', 'directions', 'wifi', 'house-manual', 'house-rules', 'team']
 const autoOpenTarget = computed(() => navigationGroups.value[0]?.items.find(item => LEAF_SECTIONS.includes(item.id) && !(stayEditor.value && item.id === 'description') && item.to === sectionPath(item.id))?.to ?? null)
 
-const STAY_ROW_ORDER = ['publication', 'photo', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'accessibility', 'location', 'house-rules', 'guest-safety', 'cancellation', 'team', 'questions', 'featured', 'collections']
+const STAY_ROW_ORDER = ['publication', 'photo', 'internal-name', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'accessibility', 'location', 'house-rules', 'guest-safety', 'cancellation', 'team', 'questions', 'featured', 'collections']
 function rowRank(id: string) {
   const at = STAY_ROW_ORDER.indexOf(id)
   return at === -1 ? STAY_ROW_ORDER.length : at
@@ -1579,6 +1587,8 @@ function payload(concern?: ProductConcern) {
   if (!isNew.value) {
     if (!editVersion.value) throw new Error('Read the saved product before editing it.')
     const version = { expected_updated_at: editVersion.value }
+    if (editorKey.value === 'internal-name') return { ...version, stay: { internal_name: form.internal_name.trim() } }
+    if (editorKey.value === 'name') return { ...version, name: form.name.trim() }
     if (editorKey.value === 'description') {
       const field = stayEditor.value ? STAY_DESCRIPTION_DETAIL_KEYS.find(key => key === route.params.section) : undefined
       return field ? { ...version, details_mode: 'merge', details: { [field]: form.details[field] ?? null } }
@@ -1633,7 +1643,7 @@ function payload(concern?: ProductConcern) {
   }
   if (concern === 'arrival-time') {
     if (!product.value?.stay) throw new Error('Arrival times require a place to stay.')
-    return { stay: { check_in_time: form.check_in_time, check_in_end_time: form.check_in_end_time || null, check_out_time: form.check_out_time } }
+    return { stay: { check_in_time: form.check_in_time || null, check_in_end_time: form.check_in_end_time || null, check_out_time: form.check_out_time || null } }
   }
   if (concern === 'house-rules' || concern === 'additional-rules') {
     const stay = product.value?.stay
@@ -1682,10 +1692,11 @@ function payload(concern?: ProductConcern) {
     // description save never writes back settings someone else changed, and
     // each leaf updates only the stay fields it owns.
     ...(form.kind === 'stay' && isNew.value ? { stay: {
+      internal_name: form.internal_name.trim(),
       location_id: form.stay_location_id,
-      check_in_time: form.check_in_time,
+      check_in_time: form.check_in_time || null,
       check_in_end_time: form.check_in_end_time || null,
-      check_out_time: form.check_out_time,
+      check_out_time: form.check_out_time || null,
       max_guests: Number(form.max_guests),
       min_nights: Number(form.min_nights),
       assigned_member_id: form.stay_member_id,
@@ -1730,6 +1741,7 @@ function payload(concern?: ProductConcern) {
 const sectionUnchanged = computed(() => {
   const row = product.value
   if (!row) return false
+  if (editorKey.value === 'internal-name') return form.internal_name.trim() === row.stay?.internal_name
   if (editorKey.value === 'name') return form.name.trim() === row.name
   if (editorKey.value === 'kind') return form.kind === row.kind
   if (editorKey.value === 'order-url') return form.order_url === (row.order_url ?? '')
@@ -1795,7 +1807,7 @@ async function commit(concern?: ProductConcern) {
     stay_property_size: form.stay_property_size,
     stay_property_size_unit: form.stay_property_size_unit,
   } : null
-  const arrivalTimeDraft = concern === 'arrival-time' ? { check_in_time: form.check_in_time, check_in_end_time: form.check_in_end_time, check_out_time: form.check_out_time } : null
+  const arrivalTimeDraft = concern === 'arrival-time' ? { check_in_time: form.check_in_time || null, check_in_end_time: form.check_in_end_time, check_out_time: form.check_out_time || null } : null
   const safetyDraft = isSafetyConcern(concern) ? { keys: staySafetySectionKeys(concern), details: { ...form.details }, answers: form.stay_amenity_answers.map(answer => ({ ...answer })) } : null
   const locationDetailKey = editorKey.value === 'location' ? STAY_LOCATION_DETAIL_KEYS.find(key => key === route.params.field) : undefined
   const locationDraft = locationDetailKey ? { key: locationDetailKey, value: form.details[locationDetailKey] } : null
@@ -1815,7 +1827,7 @@ async function commit(concern?: ProductConcern) {
   saving.value = true
   saveError.value = null
   try {
-    if (!isNew.value && concern === undefined && (!stayEditor.value || editorKey.value === 'description' || editorKey.value === 'attributes')) ordinaryDraft = { version: editVersion.value, values: cloneFnJSON(form) }
+    if (!isNew.value && concern === undefined && (!stayEditor.value || editorKey.value === 'description' || editorKey.value === 'attributes' || editorKey.value === 'internal-name' || editorKey.value === 'name')) ordinaryDraft = { version: editVersion.value, values: cloneFnJSON(form) }
     if (isNew.value) {
       // A service is created with the page that shows it, in one write: the
       // name is the page's first title, the server gives it a free
@@ -1930,6 +1942,7 @@ async function commit(concern?: ProductConcern) {
       const draft = ordinaryDraft.values
       if (editorKey.value === 'attributes' || editorKey.value === 'price') form.details = draft.details
       if (editorKey.value === 'price') { form.options = draft.options; form.variants = draft.variants }
+      if (editorKey.value === 'internal-name') form.internal_name = draft.internal_name
       if (editorKey.value === 'name') form.name = draft.name
       if (editorKey.value === 'description') { form.description = draft.description; form.details = draft.details }
       if (editorKey.value === 'order-url') form.order_url = draft.order_url

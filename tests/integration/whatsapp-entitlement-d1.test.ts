@@ -15,6 +15,10 @@ import { requestInsertQueries } from '../../server/domain/requests.ts'
 import { createDeliveryReceipt, getDeliveryById, isDeliverySent, isVisibleDeliveryFailure, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import whatsappWebhook from '../../server/api/whatsapp/webhook.post.ts'
+import { createProduct } from '../../server/utils/product-management.ts'
+import { createStay, getStay, updateStay } from '../../server/domain/stays.ts'
+import { getWhatsAppWorkspaceState } from '../../server/utils/mcp-context.ts'
+import { useNitroHooks } from 'nitro/app'
 
 // Real D1 billing, membership, preferences and notification persistence. Only
 // the external Meta HTTP boundary is intercepted; no live messages are sent.
@@ -88,7 +92,7 @@ test('organization messaging entitlement fences Meta calls while preserving noti
       for (const organizationId of ['free', 'paid']) {
         const id = `contact-${organizationId}`
         const now = new Date().toISOString()
-        await db.batch(requestInsertQueries({ id, kind: 'contact', organization_id: organizationId, location_id: null, user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null, payload: { guest: { name: 'Guest', email: 'guest@proof.example', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null }, created_at: now, updated_at: now }).map(write => db.prepare(write.query).bind(...write.params)))
+        await db.batch(requestInsertQueries({ id, kind: 'contact', organization_id: organizationId, location_id: null, user_id: null, review_id: null, payload: { guest: { name: 'Guest', email: 'guest@proof.example', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null }, created_at: now, updated_at: now }).map(write => db.prepare(write.query).bind(...write.params)))
         const before = metaCalls
         await notifyContactSubmitted(providerEnv, db, { organizationId, organizationName: organizationId, vertical: 'restaurant', locationId: null, contactId: id, guestName: 'Guest', email: 'guest@proof.example', subject: null, message: 'Hello' })
         assert.equal(metaCalls - before, organizationId === 'paid' ? 1 : 0)
@@ -161,6 +165,152 @@ test('the WhatsApp webhook accepts only what Meta signed with the configured app
     assert.equal(accepted.status, 200)
     assert.deepEqual(await accepted.json(), { success: true })
   } finally {
+    await runtime.dispose()
+  }
+})
+
+// A manager replying from WhatsApp is offered exactly the conversations the inbox
+// shows a composer for, and a conversation that changed after it was offered is
+// refused with the reason the reply operation gives. Only Meta's HTTP boundary is intercepted.
+test('a WhatsApp reply offers the conversations the inbox can write to and refuses one that changed', async () => {
+  const runtime = new Miniflare({ workers: [{ config: {
+    name: 'whatsapp-reply-proof', compatibilityDate: '2024-11-01',
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
+    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'whatsapp-reply-proof', exportName: 'Hub' } },
+  } }] })
+  const originalFetch = globalThis.fetch
+  try {
+    const db = await runtime.getD1Database('DB')
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+      STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof',
+      EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'provider', WHATSAPP_PHONE_NUMBER_ID: 'local-proof-phone-id', WHATSAPP_ACCESS_TOKEN: 'local-proof-no-live-token',
+      WHATSAPP_APP_SECRET: 'whatsapp-secret' } as CloudflareEnv
+    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
+      VALUES ('paid', 'Cabins', 'cabins', 'cabins', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'America/Denver')`).run()
+    await db.prepare("INSERT INTO organization_locales (id,organization_id,locale,is_source,status) VALUES ('paid-en','paid','en',1,'published')").run()
+    await db.prepare("INSERT INTO user (id,name,email,emailVerified,phoneNumber,phoneNumberVerified) VALUES ('owner','Owner','owner@proof.example',1,'+66812345678',1)").run()
+    await db.prepare("INSERT INTO member (id,organizationId,userId,role) VALUES ('member-paid','paid','owner','owner')").run()
+    await db.prepare("INSERT INTO subscription (id,plan,referenceId,status,periodEnd) VALUES ('paid-sub','growth','paid','active',?)").bind(Math.floor(Date.now() / 1000) + 86400).run()
+    await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
+      VALUES ('cabin-site', 'paid', 'cabin', 'Cabin', 'active', 'America/Denver', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`).run()
+    const manager = { organizationId: 'paid', actorId: 'owner', manage: true }
+    const cabin = await createProduct(db, { env, organizationId: 'paid', actor: { actorId: 'owner' }, product: {
+      kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
+      stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null, assigned_team_id: null },
+    } })
+    const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
+    // Ana and Bo can be emailed; Dee left only a phone and has no KrabiClaw account, so the inbox shows her no composer.
+    const ana = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'ana', check_in_date: day(3), check_out_date: day(5), adults: 1, guest_name: 'Ana', guest_email: 'ana@example.test', guest_phone: '+61491570150', total_minor: 30_000 })
+    const bo = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'bo', check_in_date: day(6), check_out_date: day(8), adults: 1, guest_name: 'Bo', guest_email: 'bo@example.test', guest_phone: '+61491570152', total_minor: 30_000 })
+    const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(10), check_out_date: day(12), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 30_000 })
+    // Each guest wrote, and the owner was alerted on WhatsApp about each.
+    for (const [stay, name] of [[ana, 'ana'], [bo, 'bo'], [dee, 'dee']] as const) {
+      const entry = await appendEntry(db, { threadId: stay.request_id!, kind: 'message', actorKind: 'guest', channel: 'email', body: `Hi from ${name}`, dedupeKey: `guest-${name}` })
+      const alert = await createDeliveryReceipt(db, { entryId: entry.id, channel: 'whatsapp', provider: 'meta', purpose: 'owner_alert', idempotencyKey: `alert-${name}` })
+      await recordDeliveryOutcome(db, { deliveryId: alert.id, status: 'sent', providerMessageId: `meta-alert-${name}` })
+    }
+    const sent: string[] = []
+    // Messages Meta refuses, by how they begin: each attempt is still recorded in `sent`.
+    const refuse = new Set<string>()
+    globalThis.fetch = async (input, init) => {
+      if (!String(input).startsWith('https://graph.facebook.com/')) return originalFetch(input, init)
+      const text = JSON.parse(String(init?.body)).text.body as string
+      sent.push(text)
+      if ([...refuse].some(start => text.startsWith(start))) return Response.json({ error: { message: 'Meta refused the message' } }, { status: 400 })
+      return Response.json({ messages: [{ id: `meta-out-${sent.length}` }] })
+    }
+    const reported: unknown[] = []
+    useNitroHooks().hook('error', error => { reported.push(error) })
+    const app = new H3()
+    app.post('/api/whatsapp/webhook', whatsappWebhook)
+    let inbound = 0
+    const write = async (text: string, quoting?: string, status = 200) => {
+      const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ value: { messages: [{ id: `wamid-${++inbound}`, from: '66812345678', type: 'text', text: { body: text }, ...(quoting && { context: { id: quoting } }) }] } }] }] })
+      const response = await app.request(Object.assign(new Request('https://proof.example/api/whatsapp/webhook', {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': `sha256=${createHmac('sha256', 'whatsapp-secret').update(body).digest('hex')}` }, body,
+      }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+      assert.equal(response.status, status, await response.clone().text())
+      return sent.at(-1)!
+    }
+    const pending = async () => (await getWhatsAppWorkspaceState(db, 'owner'))?.pending_confirmation
+    const pick = (list: string, name: string) => list.split('\n').find(line => line.endsWith(`from ${name}`))!.split('.')[0]!
+
+    // Quoting Dee's alert names her conversation: it cannot be replied to, and the manager is told why, not offered another.
+    assert.equal(await write('Hello Dee', 'meta-alert-dee'), 'Reply not sent: This guest has no email or KrabiClaw account to reply to.')
+    assert.equal(await pending(), null)
+    // Dee is never offered either: there is nothing to reply to her through.
+    const offered = await write('Can I reply?')
+    assert.match(offered, /Reply to which\?/u)
+    assert.match(offered, /from Ana/u)
+    assert.match(offered, /from Bo/u)
+    assert.doesNotMatch(offered, /Dee/u)
+    // Picking Ana says where the reply goes, as the reply operation would send it.
+    assert.equal(await write(pick(offered, 'Ana')), 'Type your reply now — it will be sent by email to a***@example.test.')
+    assert.equal(await write('See you at 4'), 'This reply will be sent by email to a***@example.test. Reply YES to send.')
+    // The host takes Ana's email off her stay before YES: the reply operation refuses, and its reason reaches the manager.
+    await updateStay(db, env, manager, ana.id, { expected_version: ana.version, guest_email: null })
+    assert.equal(await write('YES'), 'Reply not sent: This guest has no email or KrabiClaw account to reply to.')
+    assert.equal(await pending(), null)
+    // Ana is no longer offered. Bo loses his email after the list and before the pick: refused the same way.
+    const again = await write('Another reply')
+    assert.doesNotMatch(again, /Ana/u)
+    await updateStay(db, env, manager, bo.id, { expected_version: bo.version, guest_email: null })
+    assert.equal(await write(pick(again, 'Bo')), 'Reply not sent: This guest has no email or KrabiClaw account to reply to.')
+    assert.equal(await pending(), null)
+    await updateStay(db, env, manager, bo.id, { expected_version: (await getStay(db, manager, bo.id)).version, guest_email: 'bo@example.test' })
+    const repliesToBo = async () => db.prepare("SELECT count(*) AS n FROM activity_entries WHERE request_id = ? AND event_name = 'thread.member_reply'").bind(bo.request_id).first('n')
+
+    // The confirmation is spent before the reply is sent: when Meta refuses "Reply sent.", another
+    // "yes" finds nothing to send, and the guest gets the reply once. The refused notice is reported.
+    assert.equal(await write(pick(await write('Reply to Bo'), 'Bo')), 'Type your reply now — it will be sent by email to b***@example.test.')
+    assert.equal(await write('The gate code is 4512'), 'This reply will be sent by email to b***@example.test. Reply YES to send.')
+    refuse.add('Reply sent.')
+    let before = sent.length
+    const reportedBefore = reported.length
+    await write('YES')
+    assert.deepEqual(sent.slice(before), ['Reply sent.'])
+    assert.equal(reported.length - reportedBefore, 1, 'the refused notice is reported')
+    assert.equal(await repliesToBo(), 1)
+    refuse.delete('Reply sent.')
+    await write('yes')
+    assert.equal(await repliesToBo(), 1, 'a second yes sends nothing')
+
+    // Cancelling drops the confirmation before anything else: when Meta refuses the next prompt,
+    // an "ok" afterwards does not send the reply the manager cancelled.
+    assert.equal(await write(pick(await write('Reply to Bo again'), 'Bo')), 'Type your reply now — it will be sent by email to b***@example.test.')
+    assert.equal(await write('Never mind this one'), 'This reply will be sent by email to b***@example.test. Reply YES to send.')
+    refuse.add('Reply to which?')
+    // The refused question fails the webhook (a question is sent before its state is written); the cancel is already written.
+    assert.equal((await write('no, cancel', undefined, 500)).startsWith('Reply to which?'), true)
+    refuse.delete('Reply to which?')
+    await write('ok')
+    assert.equal(await repliesToBo(), 1, 'the cancelled reply is never sent')
+
+    // The reply went and only the inbox refresh failed: the manager still reads "Reply sent.", and the failure is reported.
+    assert.equal(await write(pick(await write('Reply to Bo once more'), 'Bo')), 'Type your reply now — it will be sent by email to b***@example.test.')
+    assert.equal(await write('The porch light is on'), 'This reply will be sent by email to b***@example.test. Reply YES to send.')
+    const hubs = env.GUEST_INBOX_HUBS!
+    env.GUEST_INBOX_HUBS = { idFromName: (name: string) => hubs.idFromName(name), get: (id: Parameters<typeof hubs.get>[0]) => ({
+      fetch: (url: string, init: RequestInit) => JSON.parse(String(init.body)).type === 'thread.changed' ? Promise.resolve(new Response(null, { status: 500 })) : hubs.get(id).fetch(url, init),
+    }) } as unknown as typeof hubs
+    const reportedBeforeRefresh = reported.length
+    assert.equal(await write('YES'), 'Reply sent.')
+    env.GUEST_INBOX_HUBS = hubs
+    assert.equal(reported.length - reportedBeforeRefresh, 1, 'the failed refresh is reported')
+    assert.equal(await repliesToBo(), 2)
+
+    // A member removed after the pick is told their access ended before their reply is read, and nothing of the
+    // conversation (where it would go, or why it could not) reaches them.
+    assert.equal(await write(pick(await write('One more'), 'Bo')), 'Type your reply now — it will be sent by email to b***@example.test.')
+    await db.prepare("DELETE FROM member WHERE id = 'member-paid'").run()
+    before = sent.length
+    await write('Here is my reply')
+    assert.deepEqual(sent.slice(before), ['Your WhatsApp access has been revoked. Please contact your organization administrator.'])
+    assert.equal(await pending(), null)
+  } finally {
+    globalThis.fetch = originalFetch
     await runtime.dispose()
   }
 })

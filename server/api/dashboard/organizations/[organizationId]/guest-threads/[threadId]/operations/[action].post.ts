@@ -5,7 +5,7 @@ import { queryFirst } from '~/server/db'
 import { parseSuggestionUse, recordSuggestionAccepted, suggestedDraft } from '~/server/domain/suggested-reply'
 
 // Canonical guest-thread operation endpoint (issue #442 Locked Decision #8). Every
-// state-mutating guest-thread action — confirm/cancel/complete/resolve/reopen/reply —
+// state-mutating guest-thread action in GUEST_THREAD_ACTIONS (confirm, cancel, reply, archive, …)
 // flows through here. The inbox must never call source-specific editor endpoints
 // directly.
 import { jsonResponse } from '~/server/utils/api-response'
@@ -117,10 +117,7 @@ export default defineHandler(async (event) => {
     if (outcome.reason === 'invalid_transition') {
       return jsonResponse({ error: outcome.message, code: 'INVALID_TRANSITION', field: 'action' }, { status: 409 })
     }
-    if (outcome.reason === 'no_guest_email') {
-      return jsonResponse({ error: 'This guest has no email on file', code: 'NO_GUEST_EMAIL', field: 'guest.email' }, { status: 400 })
-    }
-    if (outcome.reason === 'guest_invite_required') {
+    if (outcome.reason === 'guest_unreachable') {
       return jsonResponse({ error: outcome.message, code: outcome.code, field: outcome.field }, { status: outcome.status })
     }
     if (outcome.reason === 'empty_body') {

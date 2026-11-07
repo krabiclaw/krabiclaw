@@ -13,8 +13,8 @@ import type { GuestThreadEntryAttachmentViewModel } from './types'
 
 export const MAX_MESSAGE_PHOTOS = 10
 
-/** A guest-thread message (an activity entry) or a team-conversation message. */
-export type MessageOwnerType = 'activity_entry' | 'team_message'
+/** A guest-thread message (an activity entry), a team-conversation message, or a task someone closed with photos. */
+export type MessageOwnerType = 'activity_entry' | 'team_message' | 'task'
 
 /** The rules every message photo meets, however it arrived: count, size and real image type. */
 export function assertMessagePhotos(photos: MessagePhoto[]): Array<MessagePhoto & { contentType: string }> {

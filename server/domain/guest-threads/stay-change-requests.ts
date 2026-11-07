@@ -69,7 +69,7 @@ async function recordOutcome(db: DbClient, env: AnswerEnv, entry: GuestThreadEnt
     body: actorUserId ? answer.host : proposal.initiated_by === 'guest' ? answer.guest : answer.airbnb,
     payloadJson: { requestId: entry.id, outcome },
   })
-  await updateThreadProjectionIfLatestEntry(db, entry.request_id, decision.id, { conversationState: 'resolved', preserveUnansweredGuestMessages: true })
+  await updateThreadProjectionIfLatestEntry(db, entry.request_id, decision.id)
   await publishGuestInboxThreadEvent(env, db, { threadId: entry.request_id, type: 'thread.changed' })
 }
 
@@ -148,7 +148,7 @@ export async function takeAlterationRequest(db: DbClient, env: CloudflareEnv, re
       body: `${guest ? 'Asked' : 'Proposed'} on Airbnb to change the stay to ${nightsLabel(request.after, 'en')} for ${request.after.adults + request.after.children} guests (${formatMinorAmount(request.after.total_minor, request.after.currency, 'en-US')}).`,
       payloadJson: proposal,
     })
-    await updateThreadProjectionIfLatestEntry(db, threadId, entry.id, { conversationState: guest ? 'needs_attention' : 'waiting_on_guest' })
+    await updateThreadProjectionIfLatestEntry(db, threadId, entry.id)
     await publishGuestInboxThreadEvent(env, db, { threadId, type: 'thread.changed' })
   }
   const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))

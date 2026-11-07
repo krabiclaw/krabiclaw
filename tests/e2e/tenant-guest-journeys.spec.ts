@@ -7,7 +7,7 @@ import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import type { Product, PublicProduct } from '../../server/types/products'
 import type { InboxThread } from '../../server/domain/guest-threads/types'
-import type { TodayFeedPayload } from '../../shared/dashboard-today'
+import type { TaskSection } from '../../server/domain/tasks'
 
 type NotificationRow = { template: string }
 type DeliveryRow = { channel: 'email' | 'whatsapp'; purpose: string; status: string }
@@ -326,17 +326,18 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const pendingThread = await request.get(threadURL)
     expect(pendingThread.status(), await pendingThread.text()).toBe(200)
     expect((await pendingThread.json() as { thread: InboxThread }).thread).toMatchObject({ id: body.booking_id, guestName: 'Cancel Once', recordKind: 'booking' })
-    // The conversation's state is the ledger's, which MCP reads out; the inbox view keeps it on the server.
+    // Whether a reply is owed is the ledger's, which MCP reads out; the inbox view keeps it on the server.
     const conversationLedger = async () => {
       const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_guest_conversation', args: { organization_id: wheel.organizationId, request_id: body.booking_id } })
       expect(response.status()).toBe(200)
-      return mcpData<{ conversation: { state: string; operational_record: { status: string } | null; entries: Array<{ id: string; event: string | null }> } }>(await response.json()).conversation
+      return mcpData<{ conversation: { needs_reply: boolean; operational_record: { status: string } | null; entries: Array<{ id: string; event: string | null }> } }>(await response.json()).conversation
     }
-    expect((await conversationLedger()).state).toBe('needs_attention')
+    // The booking carries no question from the guest: no reply is owed, and Today holds no task for it (Calendar has it).
+    expect((await conversationLedger()).needs_reply).toBe(false)
     const todayBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
     expect(todayBefore.status(), await todayBefore.text()).toBe(200)
-    const todayBeforePayload = await todayBefore.json() as TodayFeedPayload
-    expect(todayBeforePayload.cards.some(card => card.id === `attention:${body.booking_id}`)).toBe(false)
+    const todayBeforePayload = await todayBefore.json() as { tasks: TaskSection[] }
+    expect(todayBeforePayload.tasks.flatMap(section => section.tasks).filter(task => task.requestId === body.booking_id)).toEqual([])
     const day = persistedBooking.bookingDate
     // Calendar owns confirmed commitments; quests do not repeat its agenda.
     const scheduleParams = { org: wheel.slug, from: day, to: day }
@@ -362,7 +363,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const thread = (await cancelledThread.json() as { thread: InboxThread }).thread
     // A cancel and its replay are one cancellation: one ledger entry, said once in the conversation.
     const cancelledLedger = await conversationLedger()
-    expect(cancelledLedger).toMatchObject({ state: 'resolved', operational_record: { status: 'cancelled' } })
+    expect(cancelledLedger).toMatchObject({ needs_reply: false, operational_record: { status: 'cancelled' } })
     const cancelEntries = cancelledLedger.entries.filter(entry => entry.event === 'booking.cancel')
     expect(cancelEntries).toHaveLength(1)
     expect(thread.stream.filter(item => item.type === 'event' && item.id === cancelEntries[0]!.id)).toMatchObject([{ text: expect.stringMatching(/ canceled the booking$/) }])

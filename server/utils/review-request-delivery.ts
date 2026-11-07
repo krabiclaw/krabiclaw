@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import type { DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { formatTimestamp } from '~/utils/timezone'
+import { formatCalendarDate, formatTimestamp } from '~/utils/timezone'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { notifyReviewRequest } from '~/server/utils/notifications'
 import { appendEntry } from '~/server/domain/guest-threads/entries'
@@ -54,7 +54,7 @@ export async function sendReviewRequestForBooking(
       guestName: context.guest_name || 'there',
       email: recipientEmail,
       locationName: context.location_title,
-      visitAt: formatTimestamp(context.visit_starts_at, 'en', context.visit_timezone),
+      visitAt: context.visit_starts_at.includes('T') ? formatTimestamp(context.visit_starts_at, 'en', context.visit_timezone) : formatCalendarDate(context.visit_starts_at, 'en'),
       partySize: resolveBookingPresentation(bookingType === 'reservation' ? 'reservation' : 'booking', context.organization_vertical).formatCount(context.party_size),
       partyLabel: resolveBookingPresentation(bookingType === 'reservation' ? 'reservation' : 'booking', context.organization_vertical).partyLabel,
       reviewUrl,

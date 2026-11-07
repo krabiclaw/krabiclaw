@@ -20,6 +20,8 @@ export const BUSINESS_ACTIVITY_EVENTS = [
   'reservation.confirm', 'reservation.reject', 'reservation.cancel', 'reservation.no_show', 'stay.no_show',
   'booking_change.requested', 'booking_change.accepted', 'booking_change.declined', 'booking_change.withdrawn', 'booking_change.moved',
   'review.requested',
+  // Work the business recorded doing: a turnover or task done or skipped, an opportunity taken on.
+  'task.completed', 'task.skipped', 'opportunity.accepted',
   'payment.payment_captured', 'payment.payment_failed', 'payment.refund_pending', 'payment.refund_succeeded', 'payment.refund_failed', 'payment.refund_canceled',
 ] as const
 export const BUSINESS_MEASUREMENT_EVENTS = (Object.keys(CONVERSION_EVENT_CATALOG) as OrganizationConversionEventName[])
@@ -138,7 +140,6 @@ export interface BusinessProgressReference {
     configurationUpdatedAt: string
   } | {
     kind: 'guest_thread'
-    conversationState: string
     archivedAt: string | null
     blockedAt: string | null
     latestGuestEntryId: string | null

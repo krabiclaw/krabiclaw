@@ -29,7 +29,7 @@ test('suggested replies meter each generation and one acceptance per generation,
     await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Owner Person', 'owner@example.test', 1, 0, 0)").bind(OWNER).run()
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('m-owner', ?, ?, 'owner', 0)").bind(ORG, OWNER).run()
     const payload = JSON.stringify({ guest: { name: 'Jamie Rivera', email: 'jamie@example.test', phone: null }, subject: null, message: 'Is early check-in possible?', consent_at: null, ip_hash: null })
-    await db.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json, created_at, updated_at) VALUES (?, 'contact', ?, 'needs_attention', ?, ?, ?)").bind(THREAD, ORG, payload, NOW, NOW).run()
+    await db.prepare("INSERT INTO requests (id, kind, organization_id, payload_json, created_at, updated_at) VALUES (?, 'contact', ?, ?, ?, ?)").bind(THREAD, ORG, payload, NOW, NOW).run()
     await db.prepare(`INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, channel, body, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
       VALUES ('opening', ?, 'submission', 'request', 'guest', 'web', NULL, NULL, '{}', 'opening', 1, ?, ?)`).bind(THREAD, NOW, NOW).run()
 

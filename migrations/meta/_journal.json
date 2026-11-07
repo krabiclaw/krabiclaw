@@ -5,71 +5,15 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1793344617365,
+      "when": 1794019251883,
       "tag": "0000_baseline",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "6",
-      "when": 1793346068942,
-      "tag": "0001_required_delivery_fields",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1793358981589,
-      "tag": "0002_social_publication_attribution",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1793436281752,
-      "tag": "0003_team_message_channels",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1793440184801,
-      "tag": "0004_unified_messages",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1793443941216,
-      "tag": "0005_canonical_message_deliveries",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1793605711629,
-      "tag": "0006_pre_tax_payment_reviews",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "6",
-      "when": 1793619531425,
-      "tag": "0007_form_questions",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "6",
-      "when": 1793851525829,
-      "tag": "0008_review_invitation_token",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "6",
-      "when": 1793949302651,
-      "tag": "0009_light_lake",
+      "when": 1794020860858,
+      "tag": "0001_home_internal_name",
       "breakpoints": true
     }
   ]

@@ -743,6 +743,46 @@ baseline ledger and `PRAGMA foreign_key_check`, then walk the representative
 tenant booking journeys. The bindings and initial copies alone do not complete
 the cutover.
 
+The v23-to-v24 replacement stores work and opportunities (`tasks`,
+`opportunities`) and retires `requests.conversation_state` and `resolved_at`.
+Both columns are named by table CHECKs on `requests`, a parent many tables
+reference, so they cannot be dropped in place. The immutable v23 chain,
+including its ten forward migrations, is archived in `migrations-history/v23/`;
+a source that has not yet run `0010_drop_guest_thread_invites.sql` runs it on the
+transfer's private copy.
+The transfer maps every `recommendation_feedback` row into `opportunities`
+(the latest decision about a reference is the business's: accept becomes
+accepted with its task, dismiss and correct become dismissed with the note,
+defer becomes `available_at`) and refuses to copy when any reference or accepted
+task is unmapped; the table is not carried. The two request columns are not
+copied: an open `guest_reply` task says whether the business owes a reply, and
+it is derived from the conversation ledger, not from the stored guess. On
+2026-11-06 both v23 sources held no feedback rows. Their read-only preflights
+passed: staging 120 tables, 114,687 rows; production 120 tables, 180,710 rows.
+
+Both v24 databases were created with `--location wnam` on 2026-11-07, and
+Cloudflare reported WNAM before binding or loading:
+
+- `krabiclaw-staging-v24`: `61de6b4f-f663-4564-a14b-d2ee422532f5`
+- `krabiclaw-production-v24`: `3a497791-f131-418d-9bfe-052dd2467762`
+
+Bind each in `wrangler.toml` and apply the generated baseline with `wrangler d1
+migrations apply`. The staging binding moves with this release; production,
+development and E2E move together immediately before promotion. Load each through the canonical snapshot command from its own named v23
+source, keeping the initial artifacts privately under
+`~/.codex/krabiclaw-db-replacements/v24/`. A v24 build must not deploy against a
+v23 binding: the v23 ledger already lists `0000_baseline.sql`, so the native
+apply would skip the new baseline and schema drift fails the deploy. After the
+binding moves and old writers finish, run the verified final delta from v23,
+then open the work that already exists with `yarn db:tasks --staging` and
+`yarn db:tasks --production`: turnovers for confirmed stays checking out today
+or later, reply tasks for conversations with a guest question no successful
+business reply follows, review and change tasks for decisions the business still
+owes, and delivery tasks for scheduled messages that failed or need review. Each is idempotent by its `dedupe_key`; run `--dry-run` first.
+Read back Today for an owner and for a member who looks after a home with a
+turnover, schema drift, the native baseline ledger and `PRAGMA
+foreign_key_check` before retiring either v23 database.
+
 Imports and provider setting writes reject non-empty Airbnb seasonal-minimum
 rules visibly. Their range endpoints and precedence are not established by the
 published API contract; no local seasonal feature or guessed interpretation is
@@ -814,3 +854,26 @@ Report what landed, which environment deployed, which customer journeys were
 actually exercised, and what remains unverified. Do not call platform-only
 checks client-site verification, a rendered login page an auth pass, or a
 scripted request a real ChatGPT tool-usage pass.
+
+The v24-to-v25 replacement allows a home to preserve missing check-in and
+checkout times and a provider's zero bed count. It relaxes the two NOT NULL
+constraints and `product_stay_configs_beds_check`. Stays, nightly inventory
+and channel mappings reference the stay configuration, so the table cannot
+be rebuilt on live D1. The v24 chain is archived in `migrations-history/v24/`.
+A v24 source copies its existing data as recorded, including tasks and
+opportunities. Older sources still advance through their archived transforms.
+
+Staging v25 (`2d7c538b-76ae-4098-a3bc-d93372ffbad8`) was created with
+`--location wnam`; Cloudflare reported WNAM. Apply the new baseline through
+the native migration ledger. Run the snapshot preflight, initial load, and
+verified final delta against the environment's own active source; staging's is
+`krabiclaw-staging-v24`. Keep the copies under
+`~/.codex/krabiclaw-db-replacements/provider-imports-v25/`. Production v25 (`9657b8e8-3c5f-43ea-9e97-c8517facf082`) was also created
+with `--location wnam` and verified as WNAM. The production, development and
+E2E bindings move with the production promotion. Check the deployed Worker's
+actual source binding before the load and again before the final delta.
+Do not cut over from a source whose preceding cutover is still missing writes.
+Production's active source for this release is v23. The canonical transfer
+applies the archived v24 transform on the private copy; after production's
+final delta and reconciliation, run the existing `yarn db:tasks --production`
+backfill and verify Today as an owner and an assigned member.

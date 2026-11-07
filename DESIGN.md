@@ -151,61 +151,53 @@ never changes it.
 
 ### Today and Upcoming
 
-Business Today and Upcoming are a single column of actionable goals and
-opportunities. They do not duplicate Calendar's booked activity. Today shows
-current customer work, delivery/publication failures and continuously selected
-growth opportunities. Upcoming shows explicitly planned or deferred work at its
-action time. Passive reservations, ongoing stays and healthy background sends
-remain in their canonical Calendar, Inbox and automation surfaces.
+Business Today and Upcoming show two stored things
+(`project/tasks-and-opportunities.md` in the design system):
 
-The server supplies every card's required `presentation.type` in the shared
-Today contract. `TodayAgendaCard` renders that selection without choosing a
-business policy itself:
+- **Tasks** (`tasks`, `server/domain/tasks.ts`): work someone has to do, with
+  an assignee, a window, and who closed it and when. A turnover, a guest's
+  unanswered question and a scheduled message that did not send are opened and
+  closed by the batch that changes their subject; an accepted opportunity and a
+  task a person adds are closed by a person.
+- **Opportunities** (`opportunities`, `server/domain/opportunities.ts`): what
+  `readBusinessRecommendations` finds the business could do, recorded against
+  its evidence revision. Accept makes it a task; Not now dismisses it or sets
+  it aside until a time. A manager sees them; a member never does.
 
-- `minimal`: an ordinary customer reply, with a short horizontal composition;
-- `compact`: existing draft/gap work or a delivery/publication failure;
-- `detailed`: a pending customer decision or existing content tied to an explicit
-  owner goal, with centered artwork and a prominent title;
-- `opportunity`: new growth work or a prerequisite such as connecting a channel.
+`GET /api/dashboard/today` returns `{ tasks, opportunities, assignees,
+resolvedAt }`. Every string a card or sheet shows is in that view model, so the
+web page and the app draw the same response and compose no text.
 
-The geometry, typography hierarchy, radii and shadows come from the extracted
-Airbnb Detailed, Condensed, Minimal and Opportunity components. KrabiClaw keeps
-its own font, icons and actual tenant images. Airbnb's private backend selection
-policy was not extracted; the above policy is KrabiClaw's explicit selection.
-Cards are whole links to the existing action/detail/editor. There are no
-category sections, repeated navigation chevrons, inline editors or completed
-history. A small options menu exposes the supporting reason and existing
-accept/defer/dismiss/correct feedback. Business goals remain editable below the
-list in a collapsed disclosure. Both views keep the server order.
+`TaskCard` is the one Today card (`.tc`, design system
+`project/components/TodayTasks`), with three faces. A **photo** card is a
+turnover or a task at a home, ending in Done. A **compact** card is a failed
+message, a reply, or a task without a home; it has an avatar and a grey pill
+that opens its subject, because it closes when that subject does. An
+**insight** card is an opportunity, with a white Accept and an underlined Not
+now. Black is Done and nothing else. A finished task shows a filled check that
+undoes Done. An error line states only what our record knows; it never blames a
+provider or asks for a guest email.
 
-Growth comes from `readBusinessRecommendations`: the organization's vertical,
-explicit owner strategy, canonical content, native analytics, connected provider
-results and actual bookable capacity. Missing measurements never mean zero
-customers. Blog/social opportunities remain available with little history.
-Draft publication, article distribution and payment/calendar prerequisites lead
-to their existing editors/settings. Eligibility is continuous, with no midnight
-release, game rewards or new task ledger.
+An open reply with an authorized linked stay includes reservation context in
+the same TaskView. TaskCard shows its dates, guest portrait, group, internal
+home name and status above the original reply action and message preview.
+Unknown clocks read "Time not set". The task ID, schedule and actions remain
+owned by the stored task. An inquiry without a stay remains a compact reply.
 
-Existing `organization_goals` and evidence-bound `recommendation_feedback` stay
-canonical. A dismissal/correction suppresses that evidence; a deferral moves the
-card to its chosen time. Source/goal changes or an elapsed deferral reconcile
-eligibility. Feedback never completes or mutates the underlying conversation,
-article or automation. Assigned members retain their canonical authorization;
-Calendar and Inbox continue to show authorized booking activity.
+Owner Today orders failed deliveries, then turnovers, then replies, in two
+columns on web. Opportunities follow full width, then Done. A member sees only
+their own tasks and Done. The shared header holds Today/Upcoming, a round +
+for the permitted Add task and Add stay actions, and a task kind filter.
+`TodayTaskSheet` uses Airbnb's Checkout | Check-in split, followed by Assigned
+with Change, "What you found", Skip and Done. Upcoming groups by day
+("Tomorrow · Sat, Nov 7"). Arrivals and bookings
+stay in Calendar.
 
-Current domain state clears work: a successful business reply, including a
-mirrored property reply, or publication removes its card on the next read. A
-scheduled template cannot answer an unrelated guest question. Reading a
-notification cannot finish work. Failures remain actionable until their
-canonical outcome changes. Review invitations and scheduled correspondence run
-without an owner task when healthy; schedulers, capture and delivery records
-remain intact.
-
-The page re-reads on relevant dashboard invalidations, including
-`business.changed` after source writes, focus, due instants and the existing
-visible-page minute boundary. Provider/analytics failures remain visible.
-Personal-account Today/Upcoming continue to project the personal agenda with
-compact cards; this is separate from the business goal feed.
+The page re-reads on `business.changed`, `stay.changed` and conversation
+invalidations. Opening a task (`?task=`) reads its alerts. Business goals stay
+editable below the list in a collapsed disclosure; they steer the selector.
+Personal-account Today/Upcoming project the buyer's own agenda with
+`TodayAgendaCard`; this is separate from the business's tasks.
 
 Calendar stay cards read the canonical agenda and open `O/bookings/stay/:stayId`.
 Booked activity uses the existing detail layout: desktop keeps the agenda beside the
@@ -412,11 +404,18 @@ published on the site; there is no second publish flag for it.
 ### Places to stay
 
 A place to stay is a Product of kind `stay`, edited in the one Product editor.
+Its operator-only `stay.internal_name` identifies the home in Catalog,
+Calendar, Today and Messages. Product `name` is the public listing title used
+for translations and Airbnb. The existing Product writer owns both fields and
+applies the same 240-character limit. Existing homes initialize the internal
+name from their actual title once. The home creation form accepts separate
+Internal name and Listing title values, and the Product editor reads each
+saved value through its own leaf.
 Its Stay settings row owns its one location (chosen once, when it is created),
 check-in and checkout times, how many it sleeps, the minimum nights and the
 team who look after it; it has no Scheduling or Locations rows. Its price row
-is the base nightly price. Its stays are on Today and the Calendar, on the day
-guests arrive and the day they leave, and open at the booking route as
+is the base nightly price. Calendar shows stays on the day guests arrive and
+the day they leave. A stay opens at the booking route as
 `bookings/stay/:stayId`. A stay taken by the host records offline payments and
 is cancelled there, and is not refused by closed nights or minimum stays —
 those are what guests and channels are offered; a stay from Airbnb or another channel is read-only and

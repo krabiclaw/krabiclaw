@@ -75,6 +75,15 @@ export function isLegalPractice(vertical: string | null | undefined): boolean {
   return String(vertical ?? '').trim().toLowerCase() === 'service'
 }
 
+/** Lodging publishes homes at /stays; its address records are not public branch pages. */
+export function hasPublicLocationPages(vertical: string | null | undefined): boolean {
+  return String(vertical ?? '').trim().toLowerCase() !== 'lodging'
+}
+
+export function isPublicLocationPath(path: string): boolean {
+  return path === '/locations' || path.startsWith('/locations/')
+}
+
 /**
  * Is this site a legal practice's? A security gate as well as a rendering
  * decision — the consultation, compliance and consent paths read it — so it

@@ -108,8 +108,8 @@ const receiptRows = computed(() => {
   const { stay, home } = value
   const nights = Math.round((Date.parse(`${stay.check_out_date}T00:00:00Z`) - Date.parse(`${stay.check_in_date}T00:00:00Z`)) / 86_400_000)
   return [
-    { label: t('stay.check_in'), value: `${day(stay.check_in_date)} · ${formatTime(home.check_in_time, locale.value)}` },
-    { label: t('stay.check_out'), value: `${day(stay.check_out_date)} · ${formatTime(home.check_out_time, locale.value)}` },
+    { label: t('stay.check_in'), value: [day(stay.check_in_date), home.check_in_time ? formatTime(home.check_in_time, locale.value) : null].filter(Boolean).join(' · ') },
+    { label: t('stay.check_out'), value: [day(stay.check_out_date), home.check_out_time ? formatTime(home.check_out_time, locale.value) : null].filter(Boolean).join(' · ') },
     { label: t('stay.nights'), value: String(nights) },
     { label: t('stay.guests'), value: String(stay.adults + stay.children) },
     { label: t('payment.paid'), value: paymentMoney(stay.paid_minor, stay.currency) },

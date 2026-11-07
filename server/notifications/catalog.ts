@@ -20,6 +20,7 @@ import {
   contentReportedMessage,
   inquiryReceivedMessage,
   messageReceived,
+  taskAlertMessage,
   reservationCancelledMessage,
   reservationCreatedMessage,
   reviewReceivedMessage,
@@ -175,6 +176,8 @@ const guestPayments: GuestPaymentNotificationEvent[] = [
 
 export const NOTIFICATION_CATALOG: CatalogEntry[] = [
   { id: 'team-message', audience: 'owner', title: 'Team — new message', whatsappTemplate: 'guest_thread_reply_whatsapp', message: ownerAlert(messageReceived({ sender: { kind: 'person', name: 'Alex Carter', email: null }, conversationLabel: 'Team', about: null, messagePreview: 'The home is ready for check-in.', translation: null, record: null, organizationName: studio, replyUrl: inbox })) },
+  { id: 'task-assigned', audience: 'owner', title: 'Tasks — assigned to you', whatsappTemplate: 'guest_thread_reply_whatsapp', message: ownerAlert(taskAlertMessage({ kind: 'assigned', actorName: 'Alex Carter', task: { eyebrow: 'Turnover · 11:00 AM – 3:00 PM', title: '70 2B', detail: 'Next guests arrive 3:00 PM · 2 guests' }, organizationName: studio, taskUrl: inbox })) },
+  { id: 'task-starting', audience: 'owner', title: 'Tasks — turnover starts today', whatsappTemplate: 'guest_thread_reply_whatsapp', message: ownerAlert(taskAlertMessage({ kind: 'starting', actorName: null, task: { eyebrow: '11:00 AM – 3:00 PM', title: '70 2B', detail: 'Next guests arrive 3:00 PM · 2 guests' }, organizationName: studio, taskUrl: inbox })) },
   // Owner alerts — both channels.
   { id: 'reservation-created', audience: 'owner', title: 'Owner — new reservation', whatsappTemplate: 'new_reservation', message: ownerAlert(reservationCreatedMessage(reservation)) },
   { id: 'reservation-cancelled', audience: 'owner', title: 'Owner — reservation cancelled', whatsappTemplate: 'reservation_cancelled', message: ownerAlert(reservationCancelledMessage({ ...reservation, wasConfirmed: true })) },

@@ -53,6 +53,7 @@ import {
   stayBookedMessage,
   stayCancelledMessage,
   stayTurnoverAlert,
+  taskAlertMessage,
 } from '~/server/notifications/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { createCanonicalNotification, notifyBuyerThread, type NotificationSeverity } from '~/server/utils/notification-center'
@@ -1439,7 +1440,7 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
   const named = [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ').trim()
   const guestName = named || `${channel} reservation ${stay.channel_booking_id ?? stay.external_booking_id}`
   const guest: { name: string } | { label: string } = named ? { name: named } : { label: guestName }
-  const homes = await queryAll<{ product_id: string; name: string; location_id: string; check_in_time: string; check_out_time: string }>(db, `SELECT p.id AS product_id, p.name, c.location_id, c.check_in_time, c.check_out_time
+  const homes = await queryAll<{ product_id: string; name: string; location_id: string; check_in_time: string | null; check_out_time: string | null }>(db, `SELECT p.id AS product_id, p.name, c.location_id, c.check_in_time, c.check_out_time
     FROM products p JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id WHERE p.organization_id = ? AND p.id IN (?, ?)`,
   [organizationId, terms.product_id, previous?.product_id ?? terms.product_id])
   const homeOf = (productId: string) => {
@@ -1460,7 +1461,7 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
   const eventKey = `channel-stay:${organizationId}:${stay.id}:${input.revisionId}`
   const base = {
     guestName, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name, channel,
-    checkIn: `${day(terms.check_in_date)} · ${formatTime(home.check_in_time, 'en-US')}`, checkOut: `${day(terms.check_out_date)} · ${formatTime(home.check_out_time, 'en-US')}`,
+    checkIn: [day(terms.check_in_date), home.check_in_time ? formatTime(home.check_in_time, 'en-US') : null].filter(Boolean).join(' · '), checkOut: [day(terms.check_out_date), home.check_out_time ? formatTime(home.check_out_time, 'en-US') : null].filter(Boolean).join(' · '),
     stayDates: { checkIn: terms.check_in_date, checkOut: terms.check_out_date }, arrival: audience.arrival, nights: String(stayNights(terms)), guests: stayParty(terms),
     organizationName: studio, heroImageUrl: hero?.imageUrl ?? null, replyUrl: audience.stayUrl,
   }
@@ -1522,7 +1523,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
     stayTurnoverAudience(env, db, organizationId, stay),
   ])
   const nights = stayNights(stay)
-  const when = (date: string, time: string, locale: string) => `${formatCalendarDate(date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · ${formatTime(time, locale)}`
+  const when = (date: string, time: string | null, locale: string) => [formatCalendarDate(date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }), time ? formatTime(time, locale) : null].filter(Boolean).join(' · ')
   const party = stayParty(stay)
   if (paid.currency !== stay.currency) throw new Error('A stay booked on the site was paid in a different currency than it was priced')
   const ownerInput = {
@@ -1598,7 +1599,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
     const guestMessage = guestBookingCancelledMessage({
       manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: stay.request_id }),
       locale: guest.locale, guestName: stay.guest_name, organizationName: guest.organizationName, organizationLogoUrl: logoUrl, productTitle: guest.productTitle ?? home.name,
-      date: `${day(stay.check_in_date, guest.locale)} – ${day(stay.check_out_date, guest.locale)}`, time: formatTime(home.check_in_time, guest.locale),
+      date: `${day(stay.check_in_date, guest.locale)} – ${day(stay.check_out_date, guest.locale)}`, time: home.check_in_time ? formatTime(home.check_in_time, guest.locale) : '',
       partySize: String(stay.adults + stay.children), contactPhone: contact.contactPhone ?? null, contactEmail: contact.contactEmail ?? null, wasConfirmed: true,
     })
     const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain: getPlatformDomain(env) })
@@ -1610,7 +1611,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
         email: { to: stay.guest_email, fromName: studio, replyTo, html: guestEmail.html, text: guestEmail.text },
         owner: {
           guestName: stay.guest_name, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name,
-          checkIn: `${day(stay.check_in_date, 'en-US')} · ${formatTime(home.check_in_time, 'en-US')}`, checkOut: `${day(stay.check_out_date, 'en-US')} · ${formatTime(home.check_out_time, 'en-US')}`,
+          checkIn: [day(stay.check_in_date, 'en-US'), home.check_in_time ? formatTime(home.check_in_time, 'en-US') : null].filter(Boolean).join(' · '), checkOut: [day(stay.check_out_date, 'en-US'), home.check_out_time ? formatTime(home.check_out_time, 'en-US') : null].filter(Boolean).join(' · '),
           nights: String(nights), guests: String(stay.adults + stay.children), refund: formatMinorAmount(refundMinor, stay.currency, 'en-US'),
           organizationName: studio, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
         },
@@ -2228,3 +2229,92 @@ export async function notifyGuestCancellation(env: NotificationEnv, db: DbClient
   }
 
 }
+
+/**
+ * Tell the people a task is now theirs, or that its window starts today: an
+ * in-app notification addressed to each, and their own Email, WhatsApp and
+ * Push for the Tasks category. The task opens on Today.
+ */
+async function notifyTaskPeople(env: NotificationEnv, db: DbClient, input: { organizationId: string; taskId: string; recipientUserIds: string[]; kind: 'assigned' | 'starting'; actorUserId: string | null; eventKey: string }): Promise<void> {
+  const recipientIds = new Set(input.recipientUserIds)
+  if (!recipientIds.size) return
+  const { describeTaskForAlert } = await import('~/server/domain/tasks')
+  const organization = await queryFirst<{ name: string }>(db, 'SELECT name FROM organization WHERE id = ?', [input.organizationId])
+  if (!organization) throw new Error(`Task ${input.taskId} names a missing organization`)
+  const actor = input.actorUserId ? await queryFirst<{ name: string }>(db, 'SELECT name FROM user WHERE id = ?', [input.actorUserId]) : null
+  const members = await queryAll<{ id: string; userId: string }>(db, 'SELECT id, userId FROM member WHERE organizationId = ?', [input.organizationId])
+  const taskUrl = await dashboardPathUrl(env, db, input.organizationId, `?task=${encodeURIComponent(input.taskId)}`)
+  const organizationLogoUrl = await organizationLogo(db, input.organizationId)
+  const recipients = (await resolveOwnerRecipients(env, db, {
+    organizationId: input.organizationId, category: 'tasks', emailPurpose: 'transactional',
+    memberIds: members.filter(member => recipientIds.has(member.userId)).map(member => member.id),
+  })).filter(recipient => recipientIds.has(recipient.userId))
+  const results = await Promise.allSettled([...recipientIds].map(async (userId) => {
+    const task = await describeTaskForAlert(db, input.organizationId, input.taskId, userId)
+    const message = { ...taskAlertMessage({ kind: input.kind, actorName: actor?.name ?? null, task, organizationName: organization.name, taskUrl }), organizationLogoUrl }
+    const notificationId = await createCanonicalNotification(db, {
+      publishEnv: env, scope: 'organization', template: input.kind === 'assigned' ? 'task_assigned' : 'task_starting',
+      organizationId: input.organizationId, locationId: task.locationId, targetUserId: userId,
+      idempotencyKey: `${input.eventKey}:${userId}`, title: message.title,
+      message: message.facts.map(fact => `${fact.label}: ${fact.value}`).join('\n'), deepLink: taskUrl,
+    })
+    const recipient = recipients.find(item => item.userId === userId)
+    if (!recipient) return
+    const sends = memberNotificationSends(env, db, recipient, {
+      organizationId: input.organizationId, organizationName: organization.name, locationId: task.locationId,
+      context: { guestThreadId: null, sourceEntryId: notificationId }, template: input.kind === 'assigned' ? 'task_assigned' : 'task_starting', pushTemplate: input.kind === 'assigned' ? 'task_assigned' : 'task_starting',
+      whatsappTemplate: 'guest_thread_reply_whatsapp', payload: { task_id: input.taskId, deep_link: taskUrl }, message,
+      target: { kind: 'notification', notificationId },
+    })
+    const outcomes = await Promise.allSettled(sends)
+    raiseUnrecordedOwnerAlertFailures('notifyTaskPeople', `task ${input.taskId}`, outcomes.map(result => ({ result, task: 'taskAlert' })))
+  }))
+  raiseUnrecordedOwnerAlertFailures('notifyTaskPeople', `task ${input.taskId}`, results.map(result => ({ result, task: 'taskAlert' })))
+}
+
+export async function notifyTaskAssigned(env: NotificationEnv, db: DbClient, input: { organizationId: string; taskId: string; actorUserId: string; recipientUserIds: string[] }): Promise<void> {
+  const version = await queryFirst<{ version: number }>(db, 'SELECT version FROM tasks WHERE organization_id = ? AND id = ?', [input.organizationId, input.taskId])
+  if (!version) throw new Error(`Task ${input.taskId} disappeared before its assignment alert`)
+  await notifyTaskPeople(env, db, { ...input, kind: 'assigned', eventKey: `task-assigned:${input.taskId}:${version.version}` })
+}
+
+/**
+ * Turnovers whose window starts today, told to their people once, at the start
+ * of the home's working day (its location's opening hours that day), or at the
+ * window's own start when the location keeps no hours. Run by the scheduler
+ * that sends automatic guest messages.
+ */
+export async function notifyStartingTurnovers(env: NotificationEnv, db: DbClient, now = new Date()): Promise<{ alerted: number }> {
+  const { getDateIntervals, parseOpeningHours, parseSpecialHours } = await import('~/shared/reservation-hours')
+  const { localDateAt, localDateTimeToInstant } = await import('~/utils/timezone')
+  const soon = new Date(now.getTime() + 36 * 3_600_000).toISOString()
+  const rows = await queryAll<{ id: string; organization_id: string; starts_at: string; timezone: string; assigned_member_id: string | null; assigned_team_id: string | null; opening_hours: string | null; special_hours: string | null }>(db, `
+    SELECT t.id, t.organization_id, t.starts_at, t.timezone, t.assigned_member_id, t.assigned_team_id, l.opening_hours, l.special_hours
+      FROM tasks t LEFT JOIN business_locations l ON l.organization_id = t.organization_id AND l.id = t.location_id
+     WHERE t.kind = 'turnover' AND t.status = 'open' AND t.starts_at IS NOT NULL AND t.starts_at <= ?
+       AND (t.assigned_member_id IS NOT NULL OR t.assigned_team_id IS NOT NULL)`, [soon])
+  let alerted = 0
+  const failures: unknown[] = []
+  for (const row of rows) {
+    const day = localDateAt(now, row.timezone)
+    if (localDateAt(new Date(row.starts_at), row.timezone) !== day) continue
+    const intervals = getDateIntervals(parseOpeningHours(row.opening_hours ? JSON.parse(row.opening_hours) : null), parseSpecialHours(row.special_hours ? JSON.parse(row.special_hours) : null), day)
+    const opens = intervals?.find(interval => interval.start >= 0)
+    const workday = opens ? localDateTimeToInstant(day, `${String(Math.floor(opens.start / 60)).padStart(2, '0')}:${String(opens.start % 60).padStart(2, '0')}`, row.timezone, 'compatible').toISOString() : row.starts_at
+    if (now.toISOString() < (workday < row.starts_at ? workday : row.starts_at)) continue
+    const eventKey = `task-starting:${row.id}:${day}`
+    if (await queryFirst(db, "SELECT id FROM activity_entries WHERE kind = 'notification' AND dedupe_key LIKE ? LIMIT 1", [`notification:${eventKey}:%`])) continue
+    const recipients = row.assigned_member_id
+      ? await queryAll<{ userId: string }>(db, 'SELECT userId FROM member WHERE organizationId = ? AND id = ?', [row.organization_id, row.assigned_member_id])
+      : await queryAll<{ userId: string }>(db, 'SELECT tm.userId FROM teamMember tm JOIN team t ON t.id = tm.teamId WHERE t.organizationId = ? AND t.id = ?', [row.organization_id, row.assigned_team_id])
+    try {
+      await notifyTaskPeople(env, db, { organizationId: row.organization_id, taskId: row.id, recipientUserIds: recipients.map(recipient => recipient.userId), kind: 'starting', actorUserId: null, eventKey })
+      alerted += 1
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length) throw new AggregateError(failures, `${failures.length} turnover start alerts failed`)
+  return { alerted }
+}
+

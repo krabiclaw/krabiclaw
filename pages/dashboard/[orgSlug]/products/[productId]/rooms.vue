@@ -29,8 +29,7 @@
           <UInput
             :model-value="p.form.stay_beds"
             type="number"
-            min="1"
-            max="50"
+            min="0"
             step="1"
             placeholder="e.g. 3"
             class="w-full"

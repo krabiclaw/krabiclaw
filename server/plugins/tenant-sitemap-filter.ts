@@ -1,7 +1,7 @@
 import type { H3Event } from 'nitro'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { queryAll, type DbClient } from '~/server/db'
-import { resolvePublicSite } from '~/utils/site-routing'
+import { hasPublicLocationPages, isPublicLocationPath, resolvePublicSite } from '~/utils/site-routing'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
 import { definePlugin } from 'nitro';
 
@@ -44,9 +44,11 @@ function isAllowedTenantPath(event: H3Event, path: string, scope: { paths: Set<s
   })
   const exactPaths = new Set(site.sitemap.exactPaths)
   const normalized = path === '/' ? '/' : path.replace(/\/$/, '')
-  if (scope.paths.has(normalized)) return true
   const locale = normalized.split('/')[1] ?? ''
   const route = scope.locales.has(locale) ? normalized.slice(locale.length + 1) || '/' : normalized
+  const organization = event.context.organization as { vertical?: string | null } | undefined
+  if (!hasPublicLocationPages(organization?.vertical) && isPublicLocationPath(route)) return false
+  if (scope.paths.has(normalized)) return true
   return exactPaths.has(route) || site.sitemap.dynamicPrefixes.some(prefix => route.startsWith(prefix))
 }
 

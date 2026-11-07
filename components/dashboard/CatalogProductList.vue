@@ -23,7 +23,7 @@ export function catalogProductItem(product: Product, context: {
 }): OrganizationLocationSelectorItem {
   return {
     id: product.id,
-    label: product.name,
+    label: product.stay ? product.stay.internal_name : product.name,
     eyebrow: [...product.collections.map(membership => {
       const collection = context.collections.find(row => row.id === membership.collection_id)
       if (!collection) throw createError({ statusCode: 500, statusMessage: 'An item’s section could not be loaded' })

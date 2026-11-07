@@ -120,11 +120,11 @@
 
           <!-- Key highlights for Stays -->
           <div v-if="isStay" class="border-t border-default py-6 space-y-4">
-            <div class="flex items-start gap-4">
+            <div v-if="product.stay?.check_in_time || product.stay?.check_out_time" class="flex items-start gap-4">
               <TenantIcon name="clock" class="size-5 text-default shrink-0 mt-0.5" />
               <div>
-                <p class="font-medium text-default text-sm">{{ stayCheckIn }}</p>
-                <p class="text-xs text-muted">{{ t('stay.check_out_before', { time: formatTime(product.stay!.check_out_time, locale) }) }}</p>
+                <p v-if="product.stay?.check_in_time" class="font-medium text-default text-sm">{{ stayCheckIn }}</p>
+                <p v-if="product.stay?.check_out_time" class="text-xs text-muted">{{ t('stay.check_out_before', { time: formatTime(product.stay!.check_out_time, locale) }) }}</p>
               </div>
             </div>
             <div class="flex items-start gap-4">
@@ -939,8 +939,8 @@ const stayCheckIn = computed(() => {
   const stay = props.product.stay
   if (!stay) return ''
   return stay.check_in_end_time === null
-    ? t('stay.check_in_after', { time: formatTime(stay.check_in_time, locale.value) })
-    : t('stay.check_in_window', { start: formatTime(stay.check_in_time, locale.value), end: formatTime(stay.check_in_end_time, locale.value) })
+    ? (stay.check_in_time ? t('stay.check_in_after', { time: formatTime(stay.check_in_time, locale.value) }) : '')
+    : t('stay.check_in_window', { start: stay.check_in_time ? formatTime(stay.check_in_time, locale.value) : '', end: formatTime(stay.check_in_end_time, locale.value) })
 })
 const thingsToKnow = computed(() => visibleDetails.value.filter((detail) => {
   const definition = productDetailFields(props.product.kind).find(entry => entry.id === detail.key)
@@ -1092,9 +1092,9 @@ const stayStructuredData = computed(() => {
       ...stay.accessibility.flatMap(answer => answer.available === null ? [] : [{ '@type': 'LocationFeatureSpecification', name: t(`stay.home_accessibility_features.${answer.feature}.label`), value: answer.available }]),
     ] } : {}),
     additionalProperty: [
-      { '@type': 'PropertyValue', name: 'checkinTime', value: stay.check_in_time },
+      ...(stay.check_in_time !== null ? [{ '@type': 'PropertyValue' as const, name: 'checkinTime', value: stay.check_in_time }] : []),
       ...(stay.check_in_end_time !== null ? [{ '@type': 'PropertyValue' as const, name: 'checkinEndTime', value: stay.check_in_end_time }] : []),
-      { '@type': 'PropertyValue', name: 'checkoutTime', value: stay.check_out_time },
+      ...(stay.check_out_time !== null ? [{ '@type': 'PropertyValue' as const, name: 'checkoutTime', value: stay.check_out_time }] : []),
       { '@type': 'PropertyValue', name: 'minimumNights', value: stay.min_nights },
       ...(stay.total_floors !== null ? [{ '@type': 'PropertyValue' as const, name: 'totalFloors', value: stay.total_floors }] : []),
       ...(stay.listing_floor !== null ? [{ '@type': 'PropertyValue' as const, name: 'listingFloor', value: stay.listing_floor }] : []),

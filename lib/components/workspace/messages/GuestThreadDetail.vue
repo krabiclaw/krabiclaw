@@ -118,9 +118,10 @@
         </p>
 
         <UAlert v-if="requestingChange" class="mb-3" color="info" variant="soft" :description="t(changeRequestSent ? 'booking.change_request_sent' : 'booking.change_request_help')" />
-        <MessageComposer v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :disabled="!thread.composer.available" :sending="sending" :channel="thread.composer.channel" :send-later="!personalScope" :suggestions-hidden="suggestionsHidden" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : 'Send reply'" @send="sendReply" @show-suggestions="recallSuggestions" />
+        <!-- Where the reply operation cannot send (no email, account or connected Airbnb home), there is no composer: its reason shows instead. -->
+        <p v-if="!thread.composer.available" class="rounded-2xl bg-elevated px-4 py-3 text-sm text-muted">{{ thread.composer.reason }}</p>
+        <MessageComposer v-else v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :sending="sending" :channel="thread.composer.channel" :send-later="!personalScope" :suggestions-hidden="suggestionsHidden" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : 'Send reply'" @send="sendReply" @show-suggestions="recallSuggestions" />
         <MessagePhotoViewer v-model="viewer" />
-        <p v-if="!thread.composer.available" class="mt-2 text-xs text-warning">This guest has no email on file. Once they accept an invite to this conversation, your replies reach their KrabiClaw inbox.</p>
       </div>
     </template>
   </div>
@@ -237,9 +238,11 @@ const usedSuggestion = ref<{ generationId: string; index: number } | null>(null)
 const suggestionError = ref<string | null>(null)
 const suggestionAttempt = ref(0)
 const dismissedFor = ref<string | null>(null)
+// None for a conversation nobody can reply to: it has no composer, so nothing is drafted for it.
 const latestGuestMessage = computed(() => {
-  const last = thread.value?.stream.findLast(item => item.type === 'message')
-  return last?.type === 'message' && last.side === 'guest' && thread.value?.kind === 'guest' ? last.id : null
+  if (!thread.value?.composer.available) return null
+  const last = thread.value.stream.findLast(item => item.type === 'message')
+  return last?.type === 'message' && last.side === 'guest' && thread.value.kind === 'guest' ? last.id : null
 })
 // Typing or × puts them away; the composer's + brings them back until the guest writes again.
 const recalledFor = ref<string | null>(null)

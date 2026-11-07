@@ -139,8 +139,8 @@ export function publicProduct<T extends Product>(product: T): PublicProduct<T> {
     const { assigned_member_id: _member, assigned_team_id: _team, ...shown } = config
     return shown
   }
-  const publicStay = (config: ProductStayConfig): Omit<ProductStayConfig, StaffAssignment | 'live'> => {
-    const { live: _live, ...shown } = strip(config)
+  const publicStay = (config: ProductStayConfig): Omit<ProductStayConfig, StaffAssignment | 'live' | 'internal_name'> => {
+    const { live: _live, internal_name: _internalName, ...shown } = strip(config)
     return shown
   }
   return { ...rest, booking: booking ? strip(booking) : null, stay: stay ? publicStay(stay) : null }
@@ -279,7 +279,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
       WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
-    { query: `SELECT c.product_id, c.location_id, c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, c.calendar_rules, c.property_type_group, c.property_type,
+    { query: `SELECT c.product_id, c.internal_name, c.location_id, c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, c.calendar_rules, c.property_type_group, c.property_type,
         c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
         c.cancellation_policy, c.long_term_cancellation_policy, c.assigned_member_id, c.assigned_team_id, c.questions, ${liveHomeSql('p')} AS live
       FROM product_stay_configs c JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
@@ -301,8 +301,9 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     if (product) product.stay = {
       photo_rooms: photoRooms.get(product.id) ?? [],
       accessibility: accessibility.get(product.id)!,
-      location_id: String(row.location_id), check_in_time: String(row.check_in_time),
-      check_in_end_time: row.check_in_end_time === null ? null : String(row.check_in_end_time), check_out_time: String(row.check_out_time),
+      internal_name: requireTrimmedProductString(row.internal_name, 'stay.internal_name', PRODUCT_LIMITS.name),
+      location_id: String(row.location_id), check_in_time: row.check_in_time === null ? null : String(row.check_in_time),
+      check_in_end_time: row.check_in_end_time === null ? null : String(row.check_in_end_time), check_out_time: row.check_out_time === null ? null : String(row.check_out_time),
       max_guests: Number(row.max_guests), min_nights: Number(row.min_nights), calendar_rules: parseStayCalendarRules(row.calendar_rules === null ? null : JSON.parse(String(row.calendar_rules))),
       ...storedStayListing(row),
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
@@ -802,11 +803,11 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
   const locationId = typeof stay.location_id === 'string' ? stay.location_id.trim() : ''
   if (!locationId) invalid('stay.location_id is required')
   for (const field of ['check_in_time', 'check_out_time'] as const) {
-    if (typeof stay[field] !== 'string' || !STAY_TIME.test(stay[field] as string)) invalid(`stay.${field} must be a 24-hour HH:MM time`)
+    if (stay[field] !== null && (typeof stay[field] !== 'string' || !STAY_TIME.test(stay[field] as string))) invalid(`stay.${field} must be a 24-hour HH:MM time`)
   }
   const checkInEnd = stay.check_in_end_time ?? null
   if (checkInEnd !== null && (typeof checkInEnd !== 'string' || !STAY_TIME.test(checkInEnd))) invalidStayField('check_in_end_time', 'stay.check_in_end_time must be a 24-hour HH:MM time, or null for a flexible end')
-  if (checkInEnd === stay.check_in_time) invalidStayField('check_in_end_time', 'stay.check_in_end_time must differ from stay.check_in_time')
+  if (checkInEnd !== null && checkInEnd === stay.check_in_time) invalidStayField('check_in_end_time', 'stay.check_in_end_time must differ from stay.check_in_time')
   const maxGuests = stay.max_guests
   if (typeof maxGuests !== 'number' || !Number.isInteger(maxGuests) || maxGuests < 1 || maxGuests > 99) invalid('stay.max_guests must be a whole number from 1 to 99')
   const minNights = stay.min_nights
@@ -830,7 +831,7 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
     if (!(error instanceof FormQuestionDefinitionError)) throw error
     invalidStayField('questions', error.message)
   }
-  return { location_id: locationId, check_in_time: stay.check_in_time as string, check_in_end_time: checkInEnd as string | null, check_out_time: stay.check_out_time as string, max_guests: maxGuests, min_nights: minNights, calendar_rules: calendarRules,
+  return { internal_name: requireTrimmedProductString(stay.internal_name, 'stay.internal_name', PRODUCT_LIMITS.name), location_id: locationId, check_in_time: stay.check_in_time as string | null, check_in_end_time: checkInEnd as string | null, check_out_time: stay.check_out_time as string | null, max_guests: maxGuests, min_nights: minNights, calendar_rules: calendarRules,
     ...planStayListing(stay), ...target, questions, questions_revision: formQuestionsRevision(questions) }
 }
 
@@ -881,7 +882,7 @@ function planStayListing(stay: Record<string, unknown>): Pick<ProductStayConfig,
     property_size: propertySize as number | null,
     property_size_unit: propertySizeUnit,
     bedrooms: stayCount(stay, 'bedrooms', 0, 50, 1),
-    beds: stayCount(stay, 'beds', 1, 50, 1),
+    beds: stayCount(stay, 'beds', 0, Number.MAX_SAFE_INTEGER, 1),
     bathrooms: stayCount(stay, 'bathrooms', 0, 50, 0.5),
     amenities: answers.filter(answer => answer.available).map(answer => answer.code),
     amenity_answers: answers,
@@ -891,12 +892,12 @@ function planStayListing(stay: Record<string, unknown>): Pick<ProductStayConfig,
 }
 
 /**
- * A home always has both policies, as an Airbnb listing does: one left out of
- * a new home is Airbnb's own for a new listing, and none can be cleared. An
- * edit restates the stored policy, so only a new home leaves one out.
+ * New authored homes use the chosen new-listing policies. Explicitly unknown
+ * provider policies remain null rather than acquiring authored defaults.
  */
-function stayPolicy<T extends string>(stay: Record<string, unknown>, field: keyof typeof NEW_HOME_CANCELLATION_POLICIES, codes: readonly T[]): T {
+function stayPolicy<T extends string>(stay: Record<string, unknown>, field: keyof typeof NEW_HOME_CANCELLATION_POLICIES, codes: readonly T[]): T | null {
   const value = stay[field] === undefined ? NEW_HOME_CANCELLATION_POLICIES[field] : stay[field]
+  if (value === null) return null
   if (!codes.includes(value as T)) invalidStayField(field, `stay.${field} must be one of ${codes.join(', ')}`)
   return value as T
 }
@@ -1117,7 +1118,7 @@ async function planProduct(
     prices: (declaredVariants[index]?.prices ?? []).map((price, priceIndex) =>
       normalizePriceInput(price, defaultCurrency, `variants[${index}].prices[${priceIndex}]`)),
   }))
-  const stay = await planStayConfig(db, organizationId, kind, input.stay, context.stayResponsibility)
+  const stay = await planStayConfig(db, organizationId, kind, input.stay && { ...input.stay, internal_name: Object.hasOwn(input.stay, 'internal_name') ? input.stay.internal_name : name }, context.stayResponsibility)
   if (stay) {
     try { validateStayAlarmDetails(input.details ?? {}, stay.amenity_answers) }
     catch (error) { if (!(error instanceof ProductDetailError)) throw error; invalid(error.message) }
@@ -1190,7 +1191,7 @@ function productWrites(
   // unrelated save never restates settings someone else changed.
   if (planned.stay && (options.stayFields === undefined || options.stayFields.length)) {
     const columns = [
-      'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'property_type_group', 'property_type',
+      'internal_name', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'property_type_group', 'property_type',
       'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit',
       'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy', 'assigned_member_id', 'assigned_team_id', 'questions',
     ] as const satisfies readonly (keyof ProductStayConfig)[]
@@ -1205,13 +1206,13 @@ function productWrites(
                VALUES (?, ?, ?, 1, 1, ?, ?, ?, ?) ON CONFLICT (product_id, location_id) DO NOTHING`,
       params: [organizationId, planned.id, planned.stay.location_id, now, now, actor.actorId, actor.actorId],
     }, {
-      query: `INSERT INTO product_stay_configs (product_id, organization_id, location_id, check_in_time, check_in_end_time, check_out_time, max_guests, min_nights, calendar_rules,
+      query: `INSERT INTO product_stay_configs (product_id, organization_id, internal_name, location_id, check_in_time, check_in_end_time, check_out_time, max_guests, min_nights, calendar_rules,
                  property_type_group, property_type, listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit,
                  bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id, questions, created_at, updated_at, created_by, updated_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (product_id) DO UPDATE SET ${[...assignments, 'updated_at = excluded.updated_at', 'updated_by = excluded.updated_by'].join(', ')}
                WHERE product_stay_configs.organization_id = excluded.organization_id AND product_stay_configs.location_id = excluded.location_id`,
-      params: [planned.id, organizationId, planned.stay.location_id, planned.stay.check_in_time, planned.stay.check_in_end_time, planned.stay.check_out_time,
+      params: [planned.id, organizationId, planned.stay.internal_name, planned.stay.location_id, planned.stay.check_in_time, planned.stay.check_in_end_time, planned.stay.check_out_time,
         planned.stay.max_guests, planned.stay.min_nights, planned.stay.calendar_rules === null ? null : JSON.stringify(planned.stay.calendar_rules), planned.stay.property_type_group, planned.stay.property_type,
         planned.stay.listing_type, planned.stay.total_floors, planned.stay.listing_floor, planned.stay.year_built, planned.stay.property_size, planned.stay.property_size_unit,
         planned.stay.bedrooms, planned.stay.beds, planned.stay.bathrooms,
