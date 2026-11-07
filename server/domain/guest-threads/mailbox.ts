@@ -1,3 +1,4 @@
+import { CONVERSATION_NOTIFICATION_SQL } from '~/server/utils/notification-center'
 import type { GuestRequest, ThreadOperationalRecord } from '~/server/domain/requests'
 import { queryFirst, type DbClient } from '~/server/db'
 
@@ -87,7 +88,7 @@ export const UNREAD_FOR_VIEWER_SQL = `EXISTS (
         LEFT JOIN activity_entries nr ON nr.parent_id = n.id AND nr.actor_user_id = ? AND nr.kind = 'acknowledgement'
         WHERE notification_entry.request_id = gt.id
           AND (n.target_user_id IS NULL OR n.target_user_id = ?)
-          AND nr.id IS NULL AND n.kind = 'notification'
+          AND nr.id IS NULL AND n.kind = 'notification' AND ${CONVERSATION_NOTIFICATION_SQL}
       )`
 
 /**

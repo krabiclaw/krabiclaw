@@ -1,3 +1,4 @@
+import { CONVERSATION_NOTIFICATION_SQL } from '~/server/utils/notification-center'
 import { REQUEST_CURRENT_BUYER_SQL, STAY_THREAD_ENDS_SQL, STAY_THREAD_STARTS_SQL, stayPreview, parseGuestRequest, participantLabel } from '~/server/domain/requests'
 import { BUYER_UNREAD_THREAD_SQL, buyerUnreadThreadParams } from './entries'
 import { messagePreview } from './attachments'
@@ -264,7 +265,7 @@ const UNREAD_FOR_MEMBER_SQL = `EXISTS (
         LEFT JOIN activity_entries nr ON nr.parent_id = n.id AND nr.actor_user_id = ? AND nr.kind = 'acknowledgement'
         WHERE notification_entry.request_id = gt.id
           AND (n.target_user_id IS NULL OR n.target_user_id = ?)
-          AND nr.id IS NULL AND n.kind = 'notification'
+          AND nr.id IS NULL AND n.kind = 'notification' AND ${CONVERSATION_NOTIFICATION_SQL}
       )`
 
 /** The scope every inbox read shares: whose threads, which location, which mailbox, which kind, what was searched. */
@@ -484,7 +485,7 @@ export async function listOrganizationGuestThreads(
         LEFT JOIN activity_entries nr ON nr.parent_id = n.id AND nr.actor_user_id = ? AND nr.kind = 'acknowledgement'
         WHERE notification_entry.request_id = gt.id
           AND (n.target_user_id IS NULL OR n.target_user_id = ?)
-          AND nr.id IS NULL AND n.kind = 'notification'
+          AND nr.id IS NULL AND n.kind = 'notification' AND ${CONVERSATION_NOTIFICATION_SQL}
       )
     `
     : ''
@@ -582,7 +583,7 @@ async function listUnreadThreadIds(db: DbClient, threadIds: string[], userId: st
         LEFT JOIN activity_entries nr ON nr.parent_id = n.id AND nr.actor_user_id = ? AND nr.kind = 'acknowledgement'
         WHERE notification_entry.request_id = gt.id
           AND ${buyerAudience ? 'n.target_user_id = ?' : '(n.target_user_id IS NULL OR n.target_user_id = ?)'}
-          AND nr.id IS NULL AND n.kind = 'notification'
+          AND nr.id IS NULL AND n.kind = 'notification' AND ${CONVERSATION_NOTIFICATION_SQL}
       )
   `, [d1JsonStringSet(threadIds), userId, userId])
   return (rows ?? []).map(row => row.request_id)

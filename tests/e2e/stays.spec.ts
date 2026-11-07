@@ -375,7 +375,7 @@ test('a responsible home team reads its stays as turnovers on every surface unti
     const stayPath = api(`stays/${stay.id}`)
     const memberStay = await memberContext.request.get(stayPath)
     await expectStatus(memberStay, 200)
-    expect(await memberStay.json()).toEqual({ stay: turnover, manage: false })
+    expect(await memberStay.json()).toEqual({ stay: turnover, manage: false, unreadNotificationIds: [] })
     const memberList = await memberContext.request.get(api(`stays?from=${localDay(0)}&to=${localDay(3)}`))
     await expectStatus(memberList, 200)
     expect(await memberList.json()).toEqual({ stays: [turnover], manage: false })
