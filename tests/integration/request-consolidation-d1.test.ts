@@ -189,7 +189,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     // A notification is acknowledged only by someone the visibility filter
     // admits, and the acknowledgement is an entry of its own.
     const entryId = await db.prepare("SELECT id FROM activity_entries WHERE request_id=? LIMIT 1").bind(winner).first<string>('id')
-    const notification = buildCanonicalNotificationInsert({ scope: 'organization', organizationId: ORG, title: 'Reply', template: 'guest.reply', sourceEntryId: entryId }, 'notification-proof')
+    const notification = buildCanonicalNotificationInsert({ scope: 'organization', organizationId: ORG, title: 'Reply', template: 'submission_reply_email', sourceEntryId: entryId }, 'notification-proof')
     await db.prepare(notification.query).bind(...notification.params).run()
     const visibility = { userId: ACTOR, whereSql: 'n.organization_id = ?', whereParams: [ORG] }
     assert.deepEqual(await acknowledgeNotification(db, visibility, notification.id), { newlyRead: true })
@@ -308,7 +308,7 @@ test('archive and unarchive file a conversation without touching its booking, st
     // Each message is written at its conversation's own activity time.
     for (const [id, at] of [['future', '2026-09-02T00:00:00.000Z'], ['ended', '2026-09-04T00:00:00.000Z']] as const) {
       const message = await appendEntry(db, { threadId: id, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Is parking nearby?', occurredAt: at })
-      const alert = buildCanonicalNotificationInsert({ scope: 'organization', organizationId: ORG, title: 'Message', template: 'guest.reply', sourceEntryId: message.id }, `alert-${id}`)
+      const alert = buildCanonicalNotificationInsert({ scope: 'organization', organizationId: ORG, title: 'Message', template: 'submission_reply_email', sourceEntryId: message.id }, `alert-${id}`)
       await db.prepare(alert.query).bind(...alert.params).run()
     }
     const CURRENT = ['newest', 'booking-future', 'ended', 'ongoing', 'future', 'contact']
