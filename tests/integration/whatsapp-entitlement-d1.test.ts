@@ -288,6 +288,19 @@ test('a WhatsApp reply offers the conversations the inbox can write to and refus
     await write('ok')
     assert.equal(await repliesToBo(), 1, 'the cancelled reply is never sent')
 
+    // The reply went and only the inbox refresh failed: the manager still reads "Reply sent.", and the failure is reported.
+    assert.equal(await write(pick(await write('Reply to Bo once more'), 'Bo')), 'Type your reply now — it will be sent by email to b***@example.test.')
+    assert.equal(await write('The porch light is on'), 'This reply will be sent by email to b***@example.test. Reply YES to send.')
+    const hubs = env.GUEST_INBOX_HUBS!
+    env.GUEST_INBOX_HUBS = { idFromName: (name: string) => hubs.idFromName(name), get: (id: Parameters<typeof hubs.get>[0]) => ({
+      fetch: (url: string, init: RequestInit) => JSON.parse(String(init.body)).type === 'thread.changed' ? Promise.resolve(new Response(null, { status: 500 })) : hubs.get(id).fetch(url, init),
+    }) } as unknown as typeof hubs
+    const reportedBeforeRefresh = reported.length
+    assert.equal(await write('YES'), 'Reply sent.')
+    env.GUEST_INBOX_HUBS = hubs
+    assert.equal(reported.length - reportedBeforeRefresh, 1, 'the failed refresh is reported')
+    assert.equal(await repliesToBo(), 2)
+
     // A member removed after the pick is told their access ended before their reply is read, and nothing of the
     // conversation (where it would go, or why it could not) reaches them.
     assert.equal(await write(pick(await write('One more'), 'Bo')), 'Type your reply now — it will be sent by email to b***@example.test.')

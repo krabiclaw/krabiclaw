@@ -450,8 +450,11 @@ async function routeManagerWhatsAppMessage(
       const verdict = 'error' in attempt
         ? await thrownReplyVerdict(db, attempt.error, pendingState.threadId, idempotencyKey)
         : returnedReplyVerdict(attempt.outcome)
-      if ('outcome' in attempt && attempt.outcome.ok) await publishGuestInboxThreadEvent(env, db, { threadId: attempt.outcome.thread.id, type: 'thread.changed' })
-      await settle(verdict.notice, 'Failed to send WhatsApp reply outcome', verdict.report)
+      // The reply has gone: the manager is told so even when refreshing the inbox fails, and that failure is reported.
+      const refreshFailure = 'outcome' in attempt && attempt.outcome.ok
+        ? await publishGuestInboxThreadEvent(env, db, { threadId: attempt.outcome.thread.id, type: 'thread.changed' }).then(() => null, (error: unknown) => error)
+        : null
+      await settle(verdict.notice, 'Failed to send WhatsApp reply outcome', verdict.report ?? refreshFailure)
       return
     }
     // Non-affirmative reply: the pending confirmation is dropped before anything else, so a

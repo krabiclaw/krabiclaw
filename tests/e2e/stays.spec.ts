@@ -418,6 +418,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
       const response = await personal.goto(`${baseURL}${path}`)
       expect(response?.status(), path).toBe(200)
       await waitForNuxtHydration(personal)
+      await expect(personal).toHaveURL(`${baseURL}${path}`)
     }
     await personal.goto(`${baseURL}/dashboard/account/messages/${reservationId}`)
     await expect(personal.getByText(/Table for 2 on /u).first()).toBeVisible()
