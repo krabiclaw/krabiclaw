@@ -275,6 +275,7 @@ interface StayContextFacts extends StayFacts {
   check_in_time: string | null
   check_out_time: string | null
   status: StayWindow['status']
+  no_show_at: string | null
   channel: StayChannel
   overbooked: number
   same_day_arrival: number
@@ -338,7 +339,7 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
   const replyRequests = openReplies.length && await roleAllows({ ...viewer.principal, permissions: { operations: ['update'] } }) ? openReplies : []
   const stays = await queryAll<StayContextFacts>(db, `
     SELECT s.id, s.product_id, s.guest_name, s.guest_surname, s.adults, s.children, s.check_in_date, s.check_out_date,
-      s.request_id, s.status, s.channel, s.overbooked, u.image AS guest_image_url, l.timezone AS home_timezone,
+      s.request_id, s.status, s.no_show_at, s.channel, s.overbooked, u.image AS guest_image_url, l.timezone AS home_timezone,
       s.arrival_time, c.check_in_time, c.check_out_time, EXISTS (
         SELECT 1 FROM stays next WHERE next.organization_id = s.organization_id AND next.product_id = s.product_id
           AND next.status = 'confirmed' AND next.id <> s.id AND next.check_in_date = s.check_out_date
@@ -473,6 +474,8 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
         const localDay = localDateAt(now, stay.home_timezone)
         let statusLabel: string
         if (stay.status === 'cancelled') statusLabel = 'Cancelled'
+        else if (stay.no_show_at !== null) statusLabel = 'No-show recorded'
+        else if (stay.status === 'pending') statusLabel = 'Pending confirmation'
         else if (localDay > stay.check_out_date) statusLabel = 'Stay ended'
         else if (localDay <= stay.check_in_date) {
           const clock = stay.arrival_time ?? stay.check_in_time

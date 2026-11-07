@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:d8609b9014b4ca1c7767ac255e46326278f1972c5b3672a51ceb5d50e6395724",
-  "documentationFingerprint": "sha256:ead94f62174da0a95bd39b204c5aacc71765570251439ae4e9f97b4a35678b8b",
+  "fingerprint": "sha256:e68e2fa23ead28f69f2538ca4e49df413aad73c47f169c614aaa95c8edfb4364",
+  "documentationFingerprint": "sha256:2863c6851388c3f17f5178a1023fd984fd37d396fc0539b83ccea845514343ec",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -255,6 +255,66 @@
                   "string",
                   "null"
                 ]
+              },
+              "reservation": {
+                "properties": {
+                  "conversation": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "description",
+                          "to"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "dateLabel": {
+                    "type": "string"
+                  },
+                  "groupHeadline": {
+                    "type": "string"
+                  },
+                  "guestImageUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "homeName": {
+                    "type": "string"
+                  },
+                  "statusLabel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "dateLabel",
+                  "groupHeadline",
+                  "homeName",
+                  "statusLabel",
+                  "guestImageUrl",
+                  "conversation"
+                ],
+                "type": "object"
               },
               "sheet": {
                 "type": "object"
@@ -9590,6 +9650,12 @@
                         "null"
                       ]
                     },
+                    "internal_name": {
+                      "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                      "maxLength": 240,
+                      "minLength": 1,
+                      "type": "string"
+                    },
                     "listing_floor": {
                       "description": "The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.",
                       "maximum": 9007199254740991,
@@ -11456,6 +11522,12 @@
                         "null"
                       ]
                     },
+                    "internal_name": {
+                      "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                      "maxLength": 240,
+                      "minLength": 1,
+                      "type": "string"
+                    },
                     "listing_floor": {
                       "description": "The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.",
                       "maximum": 9007199254740991,
@@ -12064,6 +12136,7 @@
                     }
                   },
                   "required": [
+                    "internal_name",
                     "location_id",
                     "check_in_time",
                     "check_in_end_time",
@@ -14228,6 +14301,66 @@
                   "string",
                   "null"
                 ]
+              },
+              "reservation": {
+                "properties": {
+                  "conversation": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "description",
+                          "to"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "dateLabel": {
+                    "type": "string"
+                  },
+                  "groupHeadline": {
+                    "type": "string"
+                  },
+                  "guestImageUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "homeName": {
+                    "type": "string"
+                  },
+                  "statusLabel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "dateLabel",
+                  "groupHeadline",
+                  "homeName",
+                  "statusLabel",
+                  "guestImageUrl",
+                  "conversation"
+                ],
+                "type": "object"
               },
               "sheet": {
                 "type": "object"
@@ -26537,6 +26670,12 @@
                   "null"
                 ]
               },
+              "internal_name": {
+                "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                "maxLength": 240,
+                "minLength": 1,
+                "type": "string"
+              },
               "listing_floor": {
                 "description": "The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.",
                 "maximum": 9007199254740991,
@@ -28392,6 +28531,12 @@
                       "null"
                     ]
                   },
+                  "internal_name": {
+                    "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                    "maxLength": 240,
+                    "minLength": 1,
+                    "type": "string"
+                  },
                   "listing_floor": {
                     "description": "The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.",
                     "maximum": 9007199254740991,
@@ -29000,6 +29145,7 @@
                   }
                 },
                 "required": [
+                  "internal_name",
                   "location_id",
                   "check_in_time",
                   "check_in_end_time",
@@ -38084,6 +38230,66 @@
                   "string",
                   "null"
                 ]
+              },
+              "reservation": {
+                "properties": {
+                  "conversation": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "description",
+                          "to"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "dateLabel": {
+                    "type": "string"
+                  },
+                  "groupHeadline": {
+                    "type": "string"
+                  },
+                  "guestImageUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "homeName": {
+                    "type": "string"
+                  },
+                  "statusLabel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "dateLabel",
+                  "groupHeadline",
+                  "homeName",
+                  "statusLabel",
+                  "guestImageUrl",
+                  "conversation"
+                ],
+                "type": "object"
               },
               "sheet": {
                 "type": "object"
@@ -54438,6 +54644,12 @@
                       "null"
                     ]
                   },
+                  "internal_name": {
+                    "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                    "maxLength": 240,
+                    "minLength": 1,
+                    "type": "string"
+                  },
                   "listing_floor": {
                     "description": "The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.",
                     "maximum": 9007199254740991,
@@ -55046,6 +55258,7 @@
                   }
                 },
                 "required": [
+                  "internal_name",
                   "location_id",
                   "check_in_time",
                   "check_in_end_time",
@@ -66261,6 +66474,10 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "internal_name": {
+                "minLength": 1,
+                "type": "string"
+              },
               "location_id": {
                 "minLength": 1,
                 "type": "string"
@@ -66287,6 +66504,7 @@
             "required": [
               "product_id",
               "name",
+              "internal_name",
               "location_id",
               "timezone",
               "currency",
@@ -73058,6 +73276,66 @@
                           "string",
                           "null"
                         ]
+                      },
+                      "reservation": {
+                        "properties": {
+                          "conversation": {
+                            "anyOf": [
+                              {
+                                "properties": {
+                                  "description": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "label": {
+                                    "type": "string"
+                                  },
+                                  "to": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "label",
+                                  "description",
+                                  "to"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "dateLabel": {
+                            "type": "string"
+                          },
+                          "groupHeadline": {
+                            "type": "string"
+                          },
+                          "guestImageUrl": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "homeName": {
+                            "type": "string"
+                          },
+                          "statusLabel": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "dateLabel",
+                          "groupHeadline",
+                          "homeName",
+                          "statusLabel",
+                          "guestImageUrl",
+                          "conversation"
+                        ],
+                        "type": "object"
                       },
                       "sheet": {
                         "type": "object"
@@ -86977,6 +87255,12 @@
                         "null"
                       ]
                     },
+                    "internal_name": {
+                      "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                      "maxLength": 240,
+                      "minLength": 1,
+                      "type": "string"
+                    },
                     "listing_floor": {
                       "description": "The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.",
                       "maximum": 9007199254740991,
@@ -88884,6 +89168,12 @@
                         "null"
                       ]
                     },
+                    "internal_name": {
+                      "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                      "maxLength": 240,
+                      "minLength": 1,
+                      "type": "string"
+                    },
                     "listing_floor": {
                       "description": "The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.",
                       "maximum": 9007199254740991,
@@ -89492,6 +89782,7 @@
                     }
                   },
                   "required": [
+                    "internal_name",
                     "location_id",
                     "check_in_time",
                     "check_in_end_time",
@@ -103729,6 +104020,10 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "internal_name": {
+                "minLength": 1,
+                "type": "string"
+              },
               "location_id": {
                 "minLength": 1,
                 "type": "string"
@@ -103755,6 +104050,7 @@
             "required": [
               "product_id",
               "name",
+              "internal_name",
               "location_id",
               "timezone",
               "currency",
@@ -104608,6 +104904,66 @@
                   "string",
                   "null"
                 ]
+              },
+              "reservation": {
+                "properties": {
+                  "conversation": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "description",
+                          "to"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "dateLabel": {
+                    "type": "string"
+                  },
+                  "groupHeadline": {
+                    "type": "string"
+                  },
+                  "guestImageUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "homeName": {
+                    "type": "string"
+                  },
+                  "statusLabel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "dateLabel",
+                  "groupHeadline",
+                  "homeName",
+                  "statusLabel",
+                  "guestImageUrl",
+                  "conversation"
+                ],
+                "type": "object"
               },
               "sheet": {
                 "type": "object"
@@ -117299,6 +117655,12 @@
                 "description": "stay.questions_revision from get_product; required with questions.",
                 "type": "string"
               },
+              "internal_name": {
+                "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                "maxLength": 240,
+                "minLength": 1,
+                "type": "string"
+              },
               "listing_floor": {
                 "description": "The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.",
                 "maximum": 9007199254740991,
@@ -119270,6 +119632,12 @@
                       "null"
                     ]
                   },
+                  "internal_name": {
+                    "description": "Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.",
+                    "maxLength": 240,
+                    "minLength": 1,
+                    "type": "string"
+                  },
                   "listing_floor": {
                     "description": "The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.",
                     "maximum": 9007199254740991,
@@ -119878,6 +120246,7 @@
                   }
                 },
                 "required": [
+                  "internal_name",
                   "location_id",
                   "check_in_time",
                   "check_in_end_time",
@@ -129468,6 +129837,66 @@
                   "null"
                 ]
               },
+              "reservation": {
+                "properties": {
+                  "conversation": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "description",
+                          "to"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "dateLabel": {
+                    "type": "string"
+                  },
+                  "groupHeadline": {
+                    "type": "string"
+                  },
+                  "guestImageUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "homeName": {
+                    "type": "string"
+                  },
+                  "statusLabel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "dateLabel",
+                  "groupHeadline",
+                  "homeName",
+                  "statusLabel",
+                  "guestImageUrl",
+                  "conversation"
+                ],
+                "type": "object"
+              },
               "sheet": {
                 "type": "object"
               },
@@ -129816,18 +130245,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:83f7187f4ac604f34ec2b61339fa46e0d4764a94eadef25d0b04827988de5ded",
-        "get_product": "sha256:3c5671e6ef78eb8a421a9d1a13f429851045bdef916a8e3191f9a1b2ba8386f9",
+        "create_product": "sha256:6b782c6ab1d21047206a463217e0c945b7eb86938bbf84227861aee188db98cd",
+        "get_product": "sha256:c3d93df0274de203abbdfde2bf45ccc0d3825c6e8d29e558dfba59cf1795d0ef",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
         "list_location_products": "sha256:2015626d39e62ce848fe36e9f0b99ac1e50b9afb915d67d7ce067553afb700b6",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
-        "reconcile_products": "sha256:4967f6fc161d76c80743a20e6cb49cb4e3a316a6e7d08d322a47b382d5030e72",
+        "reconcile_products": "sha256:68a6d15679ed28f3744a74860dc460b706c61f6e4fa8313c449b2f4989f2a30c",
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
         "set_collection_products": "sha256:124140d2c1f17f41c466ca886c7fcabdfa4d9f34d9b6f0da8a1299548ae49289",
         "update_menu": "sha256:cd6ae334587cddc89c052c08d9f30ce9855bd0394c95eb87d69378a393068269",
-        "update_product": "sha256:ed29f5de2716cc7aa506470e2649ac2691619e65e92aace9612d21200d38aae9"
+        "update_product": "sha256:9746842c3ad6eccf9b74a5f3074d81d39847bbee81e58b38f8925870d23d39fb"
       }
     },
     {
@@ -129872,8 +130301,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:83f7187f4ac604f34ec2b61339fa46e0d4764a94eadef25d0b04827988de5ded",
-        "get_product": "sha256:3c5671e6ef78eb8a421a9d1a13f429851045bdef916a8e3191f9a1b2ba8386f9",
+        "create_product": "sha256:6b782c6ab1d21047206a463217e0c945b7eb86938bbf84227861aee188db98cd",
+        "get_product": "sha256:c3d93df0274de203abbdfde2bf45ccc0d3825c6e8d29e558dfba59cf1795d0ef",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
@@ -129944,7 +130373,7 @@
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
         "get_post": "sha256:1bfb415fc3917a3aad29e1b1ae44db4a092b10dd169974b39c89832c4a69017d",
-        "get_product": "sha256:3c5671e6ef78eb8a421a9d1a13f429851045bdef916a8e3191f9a1b2ba8386f9",
+        "get_product": "sha256:c3d93df0274de203abbdfde2bf45ccc0d3825c6e8d29e558dfba59cf1795d0ef",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
@@ -129960,7 +130389,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:83f7187f4ac604f34ec2b61339fa46e0d4764a94eadef25d0b04827988de5ded",
+        "create_product": "sha256:6b782c6ab1d21047206a463217e0c945b7eb86938bbf84227861aee188db98cd",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
@@ -129986,7 +130415,7 @@
       },
       "toolContracts": {
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
-        "get_product": "sha256:3c5671e6ef78eb8a421a9d1a13f429851045bdef916a8e3191f9a1b2ba8386f9",
+        "get_product": "sha256:c3d93df0274de203abbdfde2bf45ccc0d3825c6e8d29e558dfba59cf1795d0ef",
         "get_reservation_policy": "sha256:671949950829fad652e09245cb65c14b456e28519e4e5f01a0fcbaca2bb3e78f",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
@@ -129994,7 +130423,7 @@
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "replace_product_weekly_schedule": "sha256:cc5f48fb054661e70ce26d988fc12a29f4325c7fc59b5b20852fb98d0e0e2451",
         "set_product_booking_config": "sha256:325fc0b5cb4d6ab6c21227ea94b6d2c22a1192af199b3286145207bbd58b1379",
-        "update_product": "sha256:ed29f5de2716cc7aa506470e2649ac2691619e65e92aace9612d21200d38aae9",
+        "update_product": "sha256:9746842c3ad6eccf9b74a5f3074d81d39847bbee81e58b38f8925870d23d39fb",
         "update_reservation_policy": "sha256:11892e568dc0af3a9a3bcd0e6ddcf1081e146d1f36dfea443650f602348d30cb"
       }
     },
@@ -130014,7 +130443,7 @@
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_product": "sha256:ed29f5de2716cc7aa506470e2649ac2691619e65e92aace9612d21200d38aae9",
+        "update_product": "sha256:9746842c3ad6eccf9b74a5f3074d81d39847bbee81e58b38f8925870d23d39fb",
         "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
       }
     },
@@ -130030,14 +130459,14 @@
         "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
         "get_guest_conversation": "sha256:de4bdb53bb6d882e4895742a865bea4277209cc00ceb2a516ec50963fa35fe8b",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
-        "get_product": "sha256:3c5671e6ef78eb8a421a9d1a13f429851045bdef916a8e3191f9a1b2ba8386f9",
+        "get_product": "sha256:c3d93df0274de203abbdfde2bf45ccc0d3825c6e8d29e558dfba59cf1795d0ef",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:6d0b00651d62c18f2c881046eb4d7f619ec7aecf85662d0c173af68134fd98cc",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
-        "update_product": "sha256:ed29f5de2716cc7aa506470e2649ac2691619e65e92aace9612d21200d38aae9"
+        "update_product": "sha256:9746842c3ad6eccf9b74a5f3074d81d39847bbee81e58b38f8925870d23d39fb"
       }
     }
   ]
