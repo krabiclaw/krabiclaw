@@ -16,6 +16,7 @@ import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { countActiveHomes } from '../../server/utils/billing.ts'
 import { publishedCatalogResponse } from './support/stripe-published-catalog.ts'
 import { returnExtrasToDraftsForPlanEnd } from '../../server/utils/billing-plan-end.ts'
+import publicPageRoute from '../../server/api/public/page.get.ts'
 import contentRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/imports/[productId]/content.post.ts'
 import calendarRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/imports/[productId]/calendar.post.ts'
 import syncPostRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/sync.post.ts'
@@ -23,8 +24,6 @@ import syncGetRoute from '../../server/api/organizations/[organizationId]/integr
 import { requestAirbnbSync, runAirbnbSyncJobs } from '../../server/integrations/channex/airbnb-sync.ts'
 import listingsRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/listings.get.ts'
 import { errorChainForTelemetry } from '../../shared/error-telemetry.ts'
-import { PUBLIC_CACHE_REVISION_SQL } from '../../server/utils/edge-cache.ts'
-import { buildPublicResourceCacheKey } from '../../server/utils/public-resource-cache.ts'
 
 // An Airbnb listing imported as a home, through every stage, against a fake
 // Channex: the location, the stay product and its price, the imported nights,
@@ -561,14 +560,20 @@ test('actual dated, weekday and weekend rules survive default edits, protected r
     const authoredRules = { day_of_week_min_nights: [3, -1, -1, -1, -1, -1, -1], weekend_price_minor: 25000 }
     await updateStayHome(env, db, manager, productId, { calendar_rules: authoredRules })
     await setStayNights(db, env, manager, { product_id: productId, from: monday, to: addDays(monday, 1), min_stay_arrival: 4, price_minor: 23000 })
-    const revision = () => db.prepare(`SELECT ${PUBLIC_CACHE_REVISION_SQL} AS revision FROM organization o WHERE id = ?`).bind(ORG).first<string>('revision')
-    const oldRevision = await revision()
-    assert(oldRevision)
     const kv = env.ORGANIZATION_CACHE!
-    const pageCacheKey = (version: string) => buildPublicResourceCacheKey(ORG, {
-      contract: 'page', page: '/stays', location: null, datasets: ['products'], blogSlug: null, locale: 'en',
-    }, version)
-    await kv.put(pageCacheKey(oldRevision), 'cached prior revision')
+    await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('source-en', ?, 'en', 1, 'published')").bind(ORG).run()
+    const app = new H3()
+    app.use(event => { event.context.organizationId = ORG })
+    app.get('/api/public/page', publicPageRoute)
+    const publicStays = () => app.request(Object.assign(new Request('https://org.proof.example/api/public/page?page=stays&datasets=products&locale=en', {
+      headers: { host: 'org.proof.example' },
+    }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    const initialPage = await publicStays()
+    assert.equal(initialPage.status, 200, await initialPage.clone().text())
+    assert.equal(initialPage.headers.get('x-bootstrap-cache'), 'MISS')
+    const cachedPage = await publicStays()
+    assert.equal(cachedPage.status, 200)
+    assert.equal(cachedPage.headers.get('x-bootstrap-cache'), 'HIT')
     const rateLimitedKv = new Proxy(kv, {
       get(target, property) {
         if (property === 'delete') return async () => { throw new Error('KV DELETE failed: 429 Too Many Requests') }
@@ -578,10 +583,9 @@ test('actual dated, weekday and weekend rules survive default edits, protected r
     })
     const refreshed = await new AirbnbConnection(db, { ...env, ORGANIZATION_CACHE: rateLimitedKv }, ORG, OWNER).refreshContent(productId)
     assert.equal(refreshed.stage, 'complete')
-    const newRevision = await revision()
-    assert(newRevision)
-    assert.notEqual(newRevision, oldRevision)
-    assert.equal(await kv.get(pageCacheKey(newRevision)), null)
+    const refreshedPage = await publicStays()
+    assert.equal(refreshedPage.status, 200, await refreshedPage.clone().text())
+    assert.equal(refreshedPage.headers.get('x-bootstrap-cache'), 'MISS')
     assert(refreshed.content.kept_host_edits.includes('calendar_rules'))
     assert.deepEqual((await readStayHome(db, manager, productId)).calendar_rules, authoredRules)
     assert.deepEqual(await db.prepare('SELECT source, min_stay_arrival, price_minor FROM product_nights WHERE product_id = ? AND date = ?').bind(productId, monday).first(), { source: 'host', min_stay_arrival: 4, price_minor: 23000 })
