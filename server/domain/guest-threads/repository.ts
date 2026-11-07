@@ -1,3 +1,4 @@
+import { CONVERSATION_NOTIFICATION_SQL } from '~/server/utils/notification-center'
 import { REQUEST_CURRENT_BUYER_SQL, STAY_THREAD_ENDS_SQL, STAY_THREAD_STARTS_SQL, stayPreview, parseGuestRequest, participantLabel } from '~/server/domain/requests'
 import { BUYER_UNREAD_THREAD_SQL, buyerUnreadThreadParams } from './entries'
 import { messagePreview } from './attachments'
@@ -255,8 +256,13 @@ const BUYER_VISIBLE_MESSAGE_SQL = `((e.actor_kind='guest' AND e.channel IN ('web
 const SUPPORT_THREAD_SQL = `(EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND e.actor_kind = 'system' AND e.event_name = 'channel.message_mirrored')
   AND NOT EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND e.actor_kind = 'guest'))`
 
-/** A booking lands as a stay, not as a conversation: a stay is in the inbox once someone has written. */
-const HAS_CONVERSATION_SQL = `(gt.kind <> 'stay' OR EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND ${messageHasContentSql('e')}))`
+/**
+ * A booking lands as a stay, not as a conversation: a stay is in the inbox once someone has written.
+ * A checkout's thread waits on the guest: it is a conversation once payment has created its booking or reservation.
+ */
+const HAS_CONVERSATION_SQL = `(gt.kind <> 'stay' OR EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND ${messageHasContentSql('e')}))
+  AND (json_extract(gt.payload_json, '$.provenance.creation_kind') IS NOT 'checkout'
+    OR EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = gt.id) OR EXISTS (SELECT 1 FROM reservations v WHERE v.request_id = gt.id))`
 
 const UNREAD_FOR_MEMBER_SQL = `EXISTS (
         SELECT 1 FROM activity_entries n
@@ -264,7 +270,7 @@ const UNREAD_FOR_MEMBER_SQL = `EXISTS (
         LEFT JOIN activity_entries nr ON nr.parent_id = n.id AND nr.actor_user_id = ? AND nr.kind = 'acknowledgement'
         WHERE notification_entry.request_id = gt.id
           AND (n.target_user_id IS NULL OR n.target_user_id = ?)
-          AND nr.id IS NULL AND n.kind = 'notification'
+          AND nr.id IS NULL AND n.kind = 'notification' AND ${CONVERSATION_NOTIFICATION_SQL}
       )`
 
 /** The scope every inbox read shares: whose threads, which location, which mailbox, which kind, what was searched. */
@@ -484,7 +490,7 @@ export async function listOrganizationGuestThreads(
         LEFT JOIN activity_entries nr ON nr.parent_id = n.id AND nr.actor_user_id = ? AND nr.kind = 'acknowledgement'
         WHERE notification_entry.request_id = gt.id
           AND (n.target_user_id IS NULL OR n.target_user_id = ?)
-          AND nr.id IS NULL AND n.kind = 'notification'
+          AND nr.id IS NULL AND n.kind = 'notification' AND ${CONVERSATION_NOTIFICATION_SQL}
       )
     `
     : ''
@@ -582,7 +588,7 @@ async function listUnreadThreadIds(db: DbClient, threadIds: string[], userId: st
         LEFT JOIN activity_entries nr ON nr.parent_id = n.id AND nr.actor_user_id = ? AND nr.kind = 'acknowledgement'
         WHERE notification_entry.request_id = gt.id
           AND ${buyerAudience ? 'n.target_user_id = ?' : '(n.target_user_id IS NULL OR n.target_user_id = ?)'}
-          AND nr.id IS NULL AND n.kind = 'notification'
+          AND nr.id IS NULL AND n.kind = 'notification' AND ${CONVERSATION_NOTIFICATION_SQL}
       )
   `, [d1JsonStringSet(threadIds), userId, userId])
   return (rows ?? []).map(row => row.request_id)
@@ -611,7 +617,19 @@ export async function expireReplyTasks(db: DbClient, now: string): Promise<{ con
   const rows = await queryAll<{ subject_id: string }>(db, `SELECT DISTINCT t.subject_id FROM tasks t
     JOIN activity_entries guest_entry ON guest_entry.id = substr(t.dedupe_key, length('guest_reply:' || t.subject_id || ':') + 1)
     WHERE t.kind = 'guest_reply' AND t.subject_type = 'request' AND t.status = 'open' AND ${guestEntryAskedAtSql('guest_entry')} < ?`, [replyTaskCutoff(now)])
-  for (const row of rows) await executeBatch(db, conversationTaskQueries(row.subject_id, now), { operation: 'Expire reply tasks' })
+  // One conversation at a time; one that fails does not stop the rest, and every failure is reported.
+  const failures: unknown[] = []
+  for (const row of rows) {
+    try {
+      await executeBatch(db, conversationTaskQueries(row.subject_id, now), { operation: 'Expire reply tasks' })
+    } catch (cause) {
+      failures.push(cause)
+    }
+  }
+  if (failures.length) {
+    const reasons = failures.map(cause => cause instanceof Error ? cause.message : String(cause)).join('; ')
+    throw new AggregateError(failures, `${failures.length} of ${rows.length} conversations' reply tasks could not be expired: ${reasons}`)
+  }
   return { conversations: rows.length }
 }
 
@@ -646,7 +664,8 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
          AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}
          AND ${guestEntryAskedAtSql('guest_entry')} >= ?
          -- A person's Dismiss covers everything said by then; what the guest says next is work.
-         AND NOT EXISTS (SELECT 1 FROM tasks skipped WHERE skipped.kind = 'guest_reply' AND skipped.subject_type = 'request' AND skipped.subject_id = r.id AND skipped.status = 'skipped' AND skipped.closed_at >= guest_entry.occurred_at)
+         AND NOT EXISTS (SELECT 1 FROM tasks skipped WHERE skipped.kind = 'guest_reply' AND skipped.subject_type = 'request' AND skipped.subject_id = r.id AND skipped.status = 'skipped'
+           AND (skipped.closed_at > guest_entry.occurred_at OR skipped.dedupe_key = 'guest_reply:' || r.id || ':' || guest_entry.id))
          AND NOT EXISTS (SELECT 1 FROM tasks open_reply WHERE open_reply.kind = 'guest_reply' AND open_reply.subject_type = 'request' AND open_reply.subject_id = r.id AND open_reply.status = 'open')
        ORDER BY guest_entry.sequence LIMIT 1
       ON CONFLICT (dedupe_key) DO UPDATE SET status = 'open', closed_at = NULL, closed_by_user_id = NULL, version = tasks.version + 1, updated_at = excluded.updated_at

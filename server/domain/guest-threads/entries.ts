@@ -180,15 +180,16 @@ export function isBuyerVisibleThreadEntry(entry:GuestThreadEntryRow):boolean {
   || (entry.kind==='message'&&((entry.actor_kind==='guest'&&['web','email','whatsapp'].includes(entry.channel??''))||(entry.actor_kind==='member'&&entry.event_name==='thread.member_reply')||(entry.actor_kind==='system'&&(entry.event_name==='thread.scheduled_message'||entry.event_name==='thread.opening'))))
   || (entry.kind==='operation'&&(BUYER_OPERATION_EVENTS as readonly string[]).includes(entry.event_name??''))
 }
-/** The same public activity vocabulary, with per-user canonical acknowledgement rows. */
+/** Messages and requests for a reply, with per-user acknowledgement. Booking
+ * and payment status can appear in the timeline without counting as messages. */
 export const BUYER_UNREAD_THREAD_SQL = `EXISTS (
  SELECT 1 FROM activity_entries e WHERE e.request_id=gt.id
   AND (e.actor_user_id IS NULL OR e.actor_user_id<>?)
   AND ((e.kind='message' AND ((e.actor_kind='member' AND e.event_name='thread.member_reply') OR (e.actor_kind='system' AND e.event_name='thread.scheduled_message')))
-    OR (e.kind='operation' AND e.event_name IN (SELECT value FROM json_each(?))))
+    OR (e.kind='operation' AND e.event_name='booking_change.requested'))
   AND NOT EXISTS(SELECT 1 FROM activity_entries a WHERE a.kind='acknowledgement' AND a.parent_id=e.id AND a.actor_user_id=?)
 )`
 
-export function buyerUnreadThreadParams(userId:string):[string,string,string] {
- return [userId,d1JsonStringSet(BUYER_OPERATION_EVENTS),userId]
+export function buyerUnreadThreadParams(userId:string):[string,string] {
+ return [userId,userId]
 }

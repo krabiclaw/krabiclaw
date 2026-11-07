@@ -5,7 +5,7 @@ import { organizationEventQuery } from '~/server/utils/organization-events'
 import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { discardMessagePhotos, listMessagePhotos, messagePhotoPlacements, uploadMessagePhotos, MessagePhotoRejection, type MessagePhoto } from '~/server/domain/guest-threads/attachments'
 import { firstName } from '~/server/domain/guest-threads/presentation'
-import { bookingEditorPath, guestConversationPath } from '~/server/utils/dashboard-links'
+import { bookingEditorPath, guestConversationPath, productPaymentPath } from '~/server/utils/dashboard-links'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { addLocalDays, formatCalendarDate, formatTime, formatTimestamp, isValidInstant, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import { STAY_CHANNEL_LABELS, type StayChannel } from '~/shared/bookings'
@@ -261,6 +261,8 @@ export interface TaskView {
   stayId: string | null
   requestId: string | null
   can: { complete: boolean; skip: boolean; reopen: boolean; assign: boolean; edit: boolean }
+  /** How an open task is set aside, and whether its card offers it as well as its sheet. Null when it cannot be. */
+  dismiss: { label: 'Skip' | 'Dismiss'; card: boolean } | null
 }
 
 /** A run of cards: Today's open work has no header; "Done"; Upcoming's "Tomorrow" with "Sat, Nov 7" in grey. */
@@ -282,6 +284,7 @@ interface StayContextFacts extends StayFacts {
 }
 interface Context {
   slug: string
+  paymentOpportunities: Set<string>
   people: Map<string, { name: string; userId: string }>
   teams: Map<string, string>
   users: Map<string, string>
@@ -317,7 +320,7 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
   const messageIds = ids(row => row.subject_type === 'scheduled_guest_message' ? row.subject_id : null)
   // Stay writers load this module; the conversation repository is loaded when a view is drawn.
   const { guestEntryAskedAtSql } = await import('~/server/domain/guest-threads/repository')
-  const [organization, members, teams, locations, requests, messages, photos] = await Promise.all([
+  const [organization, members, teams, locations, requests, messages, photos, paymentOpportunities] = await Promise.all([
     queryFirst<{ slug: string }>(db, 'SELECT slug FROM organization WHERE id = ?', [organizationId]),
     queryAll<{ id: string; userId: string; name: string }>(db, 'SELECT m.id, m.userId, u.name FROM member m JOIN user u ON u.id = m.userId WHERE m.organizationId = ?', [organizationId]),
     queryAll<{ id: string; name: string }>(db, 'SELECT id, name FROM team WHERE organizationId = ?', [organizationId]),
@@ -332,6 +335,8 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
     queryAll<{ id: string; template_title: string; status: string; request_id: string | null; stay_id: string }>(db,
       'SELECT id, template_title, status, request_id, stay_id FROM scheduled_guest_messages WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', [organizationId, d1JsonStringSet(messageIds)]),
     listMessagePhotos(db, 'task', rows.map(row => row.id)),
+    queryAll<{ id: string }>(db, "SELECT id FROM opportunities WHERE organization_id = ? AND operation = 'product.payment' AND id IN (SELECT value FROM json_each(?))",
+      [organizationId, d1JsonStringSet(ids(row => row.status === 'open' ? row.opportunity_id : null))]),
   ])
   if (!organization) throw new Error(`Organization ${organizationId} is missing`)
   const stayIds = [...new Set([...ids(row => row.subject_type === 'stay' ? row.subject_id : null), ...messages.map(message => message.stay_id)])]
@@ -368,6 +373,7 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
   }
   return {
     slug: organization.slug,
+    paymentOpportunities: new Set(paymentOpportunities.map(row => row.id)),
     people: new Map(members.map(member => [member.id, { name: member.name, userId: member.userId }])),
     teams: new Map(teams.map(team => [team.id, team.name])),
     users: new Map(members.map(member => [member.userId, member.name])),
@@ -556,6 +562,13 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       break
     }
     case 'opportunity':
+      if (row.opportunity_id && context.paymentOpportunities.has(row.opportunity_id)) {
+        if (!row.subject_id || row.subject_type !== 'product') throw new Error(`Payment task ${row.id} has no offering`)
+        if (viewer.manage) {
+          path = productPaymentPath(context.slug, row.subject_id)
+          action = { type: 'open', label: 'Open payment settings', path }
+        } else action = null
+      }
       face = 'compact'
       statusLine = ['Accepted opportunity', place].filter(Boolean).join(' · ')
       title = row.title!
@@ -578,7 +591,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     when = null
     error = null
     const at = sameDay(row.closed_at!, now.toISOString()) ? time(row.closed_at!) : day(row.closed_at!)
-    statusLine = [`${row.status === 'done' ? 'Done' : row.status === 'skipped' ? ['turnover', 'custom', 'opportunity'].includes(row.kind) ? 'Skipped' : 'Dismissed' : 'Cancelled'} at ${at}`, photos.length ? `${photos.length} ${photos.length === 1 ? 'photo' : 'photos'}` : null].filter(Boolean).join(' · ')
+    statusLine = [`${row.status === 'done' ? 'Done' : row.status === 'skipped' ? PERSON_WORK.has(row.kind) ? 'Skipped' : 'Dismissed' : 'Cancelled'} at ${at}`, photos.length ? `${photos.length} ${photos.length === 1 ? 'photo' : 'photos'}` : null].filter(Boolean).join(' · ')
     detail = null
   }
   const mine = assignee?.you ?? false
@@ -592,7 +605,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     edit: viewer.manage && row.status === 'open',
   }
   if (row.status !== 'open') action = can.reopen ? { type: 'reopen', label: row.status === 'done' ? 'Undo Done' : 'Undo' } : null
-  else if (action.type === 'complete' && !can.complete) action = null
+  else if (action?.type === 'complete' && !can.complete) action = null
   return {
     id: row.id, kind: row.kind, status: row.status, version: row.version,
     face, tag, imageUrl: product?.imageUrl ?? null, avatar, statusLine, title, when, detail, error,
@@ -602,6 +615,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     startsAt: row.starts_at, dueAt: row.due_at, timezone: zone, notes: row.notes,
     outcome: row.status === 'open' ? null : { note: row.outcome_note, photos, closedAt: row.closed_at!, closedBy: closerName },
     path, productId: row.product_id, locationId: row.location_id, stayId, requestId, can,
+    dismiss: can.skip ? { label: PERSON_WORK.has(row.kind) ? 'Skip' : 'Dismiss', card: row.kind === 'guest_reply' } : null,
   }
 }
 
@@ -625,6 +639,8 @@ export function parseTaskListQuery(query: Record<string, unknown>, defaults: Par
 }
 
 /** Today's open work in the owner's order: failed deliveries, turnovers, replies, then everything else. */
+/** Work a person does and closes themselves: they Skip it, and say what they found when they finish. Everything else is Dismissed. */
+const PERSON_WORK: ReadonlySet<TaskKind> = new Set(['turnover', 'custom', 'opportunity'])
 const TODAY_ORDER: Record<TaskKind, number> = { message_delivery: 0, turnover: 1, guest_reply: 2, booking_review: 2, booking_change: 2, custom: 3, opportunity: 3 }
 
 /** Today: open work due or starting today or earlier, or with no date; then what was closed today. Upcoming: open work later than today, by day. */

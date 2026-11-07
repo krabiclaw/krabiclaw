@@ -3,6 +3,7 @@ import { buildNotificationVisibilityFilter, type NotificationVisibilityPrincipal
 import { hasPlatformUserPermission } from '~/server/utils/platform-admin-users'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { BUYER_UNREAD_THREAD_SQL, buyerUnreadThreadParams } from '~/server/domain/guest-threads/entries'
+import { CONVERSATION_NOTIFICATION_SQL } from '~/server/utils/notification-center'
 
 /**
  * What a person has not read in one scope: the notifications they can see, and
@@ -16,7 +17,8 @@ export async function unreadNotifications(db: DbClient, principal: NotificationV
     SELECT COUNT(*) AS notifications, COUNT(DISTINCT r.id) AS conversations
     FROM activity_entries n
     LEFT JOIN activity_entries source ON source.id = n.parent_id
-    LEFT JOIN requests r ON r.id = source.request_id AND r.kind IN ('contact', 'reservation', 'booking', 'stay')
+    LEFT JOIN requests r ON r.id = source.request_id AND r.organization_id = n.organization_id
+      AND ${CONVERSATION_NOTIFICATION_SQL}
     LEFT JOIN (SELECT parent_id, MAX(occurred_at) AS read_at FROM activity_entries WHERE kind = 'acknowledgement' AND actor_user_id = ? GROUP BY parent_id) nr ON nr.parent_id = n.id
     WHERE ${filter.whereSql} AND nr.read_at IS NULL
   `, [principal.userId, ...filter.whereParams])

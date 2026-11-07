@@ -8,7 +8,7 @@ import { businessGoalStrategySchema, createBusinessGoalSchema, updateBusinessGoa
 import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { queryOrganizationAnalytics } from '~/server/utils/analytics-query'
 import { addLocalDays, formatCalendarRange, formatTimestamp, localDateAt } from '~/utils/timezone'
-import { articleSocialPostPath, blogCreatePath, blogEditorPath, postEditorPath, productEditorPath } from '~/server/utils/dashboard-links'
+import { articleSocialPostPath, blogCreatePath, blogEditorPath, postEditorPath, productEditorPath, productPaymentPath } from '~/server/utils/dashboard-links'
 import { listSessions } from '~/server/utils/availability'
 import { listReservationSlots } from '~/server/utils/reservations'
 import { readStayGapCandidates, stayAccessFor } from '~/server/domain/stays'
@@ -20,7 +20,7 @@ import { getGoogleAdsReport } from '~/server/utils/google-ads'
 import { querySearchAnalytics } from '~/server/utils/google-search-console'
 import { getSocialConnections } from '~/server/utils/social-publication'
 import { isPublicationPreparationResumable } from '~/shared/posts'
-import { getProduct, resolveVariantPrice } from '~/server/utils/product-management'
+import { experiencePublicationBlocker, getProduct, resolveVariantPrice } from '~/server/utils/product-management'
 import type { CurrencyCode } from '~/shared/currencies'
 
 interface GoalRow {
@@ -348,7 +348,33 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
         `${base}/payments/payout-method`, 100, { goal: paymentGoal, icon: 'i-lucide-credit-card' })
       if (!setup.missing.length) for (const product of unpaid) offer('product.payment', product.id, `Take payment when ${organization.vertical === 'service' ? 'clients' : 'guests'} book “${product.name}”`,
         `Payments are ready, but this offering does not require advance payment. Enable it for a priced offering to collect before ${organization.vertical === 'service' ? 'confirming a consultation' : 'reserving places'}.`,
-        `${productEditorPath(organization.slug, product.id)}/booking/payment`, 100, { productId: product.id, goal: paymentGoal, icon: 'i-lucide-credit-card' })
+        productPaymentPath(organization.slug, product.id), 100, { productId: product.id, goal: paymentGoal, icon: 'i-lucide-credit-card' })
+    }
+  }
+  if (organization.vertical === 'experience' && await roleAllows({ ...principal, permissions: { products: ['update'] } })) {
+    for (const candidate of products.filter(product => product.kind === 'experience')) {
+      const product = await getProduct(db, organizationId, candidate.id)
+      const blocker = await experiencePublicationBlocker(db, organizationId, product, principal.env as CloudflareEnv)
+      if (!blocker) continue
+      const editor = productEditorPath(organization.slug, product.id)
+      const booking = product.booking
+      const fixes: Record<string, [string, string]> = {
+        host: ['Choose a host with a published profile', booking?.assigned_member_id
+          ? `${base}/team/${encodeURIComponent(booking.assigned_member_id)}/profile` : `${editor}/booking/assignment`],
+        booking: ['Set up the booking calendar', `${editor}/booking/enabled`],
+        'booking.duration_minutes': ['Set the session duration', `${editor}/booking/duration`],
+        'variants.prices': booking?.held_online || product.locations.some(location => location.published)
+          ? ['Set a booking price', `${editor}/price`] : ['Set where guests can book', `${editor}/locations`],
+        'booking.schedule': ['Set bookable times', `${editor}/booking/schedule${booking?.held_online ? '?location_id=online' : ''}`],
+        'payments.entitlement': ['Review payment requirements', productPaymentPath(organization.slug, product.id)],
+        'payments.account': ['Connect a payout account', `${base}/payments/payout-method`],
+        'payments.account_mode': ['Review the connected payout account', `${base}/payments/payout-method`],
+      }
+      const fix = fixes[blocker]
+      if (!fix) continue
+      offer('product.readiness', product.id, `${fix[0]} for “${product.name}”`,
+        'This offering needs this step before guests can book it on your site.', fix[1], 95,
+        { productId: product.id, icon: 'i-lucide-list-checks' })
     }
   }
   if (canOperate && organization.vertical === 'lodging') {

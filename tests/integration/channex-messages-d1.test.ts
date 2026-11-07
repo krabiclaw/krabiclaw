@@ -20,7 +20,7 @@ import { createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domai
 import { getGuestRequest } from '../../server/domain/requests.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import todayRoute from '../../server/api/dashboard/today.get.ts'
-import { closeTask, listTasks, parseTaskListQuery, taskViewer, type TaskSection } from '../../server/domain/tasks.ts'
+import { closeTask, listTasks, reopenTask, parseTaskListQuery, taskViewer, type TaskSection } from '../../server/domain/tasks.ts'
 import type { OpportunityView } from '../../server/domain/opportunities.ts'
 import { guestThreadListPage, parseGuestThreadListQuery } from '../../server/utils/dashboard-guest-threads.ts'
 import { assertAssignedBookingAccess, memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
@@ -361,9 +361,10 @@ test('a dismissed question needs no note and stays closed until the guest writes
     const viewer = await taskViewer(db, memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env }))
     const taskId = await db.prepare("SELECT id FROM tasks WHERE kind = 'guest_reply' AND subject_id = ? AND status = 'open'").bind(requestId).first<string>('id')
     assert.ok(taskId)
-    const dismissed = await closeTask(db, viewer, taskId, { status: 'skipped', note: undefined, photos: [], env })
-    assert.deepEqual([dismissed.status, dismissed.outcome?.note, dismissed.action], ['skipped', null, { type: 'reopen', label: 'Undo' }])
+    const dismissed = await closeTask(db, viewer, taskId, { status: 'skipped', note: '', photos: [], env })
+    assert.deepEqual([dismissed.status, dismissed.outcome?.note, dismissed.action, dismissed.dismiss], ['skipped', null, { type: 'reopen', label: 'Undo' }, null])
     assert.match(dismissed.statusLine ?? '', /^Dismissed at /)
+    assert.deepEqual(await db.prepare('SELECT status, outcome_note FROM tasks WHERE id = ?').bind(taskId).first(), { status: 'skipped', outcome_note: null })
 
     // Everything said before the dismissal stays closed, whatever touches the conversation next.
     await executeBatch(db, conversationTaskQueries(requestId, at(0)), { operation: 'Touch conversation' })
@@ -372,6 +373,22 @@ test('a dismissed question needs no note and stays closed until the guest writes
     const third = provider.message('third', 'guest', 'One more question', [], at(0))
     provider.messages = [first, second, third]
     await backfillChannexMessages(db, env, 'property', ORG)
+    assert.deepEqual(await waitingOn(db, requestId), ['channex-message:third'])
+
+    // A message recorded at the dismissal's own instant is still something new to answer.
+    const dismissedAt = await db.prepare('SELECT closed_at FROM tasks WHERE id = ?').bind(taskId).first<string>('closed_at')
+    assert.ok(dismissedAt)
+    await db.prepare("UPDATE activity_entries SET occurred_at = ? WHERE dedupe_key = 'channex-message:third'").bind(dismissedAt).run()
+    await db.prepare("DELETE FROM tasks WHERE kind = 'guest_reply' AND subject_id = ? AND status = 'open'").bind(requestId).run()
+    await executeBatch(db, conversationTaskQueries(requestId, at(0)), { operation: 'Touch conversation' })
+    assert.deepEqual(await waitingOn(db, requestId), ['channex-message:third'])
+
+    // An omitted note dismisses the same way an empty one does.
+    const thirdTask = await db.prepare("SELECT id FROM tasks WHERE kind = 'guest_reply' AND subject_id = ? AND status = 'open'").bind(requestId).first<string>('id')
+    assert.ok(thirdTask)
+    const omitted = await closeTask(db, viewer, thirdTask, { status: 'skipped', note: undefined, photos: [], env })
+    assert.deepEqual(await db.prepare('SELECT status, outcome_note FROM tasks WHERE id = ?').bind(thirdTask).first(), { status: 'skipped', outcome_note: null })
+    await reopenTask(db, viewer, thirdTask, { expectedVersion: omitted.version })
     assert.deepEqual(await waitingOn(db, requestId), ['channex-message:third'])
 
     // Thirty-one days on the open question has aged out, and the newer one behind it becomes the work.

@@ -13,6 +13,7 @@
       <UButton v-if="!embedded && recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close booking details" />
     </template>
     <UAlert v-if="error" color="error" variant="soft" title="Booking details could not be loaded" :description="getErrorMessage(error, 'Booking request failed')" />
+    <UAlert v-if="notificationReadError" color="error" variant="soft" :description="getErrorMessage(notificationReadError, 'Booking alerts could not be marked read')" />
     <div v-else class="min-w-0 [overflow-wrap:anywhere]">
       <UAlert v-if="actionError" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" :description="actionError" />
       <template v-if="booking">
@@ -309,6 +310,8 @@ const openNoteId = ref<string | null>(null)
 const selectedNote = computed(() => booking.value?.notes.find(note => note.id === openNoteId.value))
 
 const { resource, booking, error, presentation, noun, pageTitle, orgSlug, purchase, refresh: refreshDetails } = await useBookingDetails(props.bookingType, props.bookingId, props.personalScope)
+const notificationReadError = useAcknowledgeScheduleNotifications(() =>
+  props.embedded || props.personalScope || error.value ? undefined : resource.value?.unreadNotificationIds)
 watchEffect(() => {
   if (error.value && !booking.value) showError(error.value)
 })
@@ -317,7 +320,13 @@ const formattedDate = computed(() => booking.value ? formatCalendarDate(booking.
 const formattedTime = computed(() => {
   if (!booking.value?.bookingTime) return ''
   const start = formatTime(booking.value.bookingTime, 'en')
-  return booking.value.bookingEndTime ? `${start} – ${formatTime(booking.value.bookingEndTime, 'en')}` : start
+  const { bookingDate, bookingEndDate, bookingEndTime } = booking.value
+  if (!bookingEndTime) return start
+  // A visit past midnight says which day it ends.
+  const endDay = bookingEndDate && bookingEndDate !== bookingDate
+    ? `${formatCalendarDate(bookingEndDate, 'en', { month: 'short', day: 'numeric', ...(bookingEndDate.slice(0, 4) !== bookingDate.slice(0, 4) ? { year: 'numeric' } : {}) })}, `
+    : ''
+  return `${start} – ${endDay}${formatTime(bookingEndTime, 'en')}`
 })
 // Airbnb's host-side stay page titles the party, not the listing: "Chris's
 // group of 2". A single guest is just their name.

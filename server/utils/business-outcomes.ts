@@ -15,7 +15,7 @@ import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { articleCollectionOf } from '~/server/utils/content/publishing'
 import { getSocialConnections } from '~/server/utils/social-publication'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
-import { getProduct } from '~/server/utils/product-management'
+import { experiencePublicationBlocker, getProduct } from '~/server/utils/product-management'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { getSessionAvailability } from '~/server/utils/availability'
 import { listReservationSlots } from '~/server/utils/reservations'
@@ -349,6 +349,16 @@ export async function readBusinessProgressReference(
       readMediaPlacements(db, { organizationId: principal.organizationId, ownerType: 'content_document', ownerIds: [post.id] }),
     ])
     return result({ kind: 'post', status: post.status, updatedAt: post.updated_at, publications }, { post, publications, media: [...media.values()].flat() })
+  }
+  if (input.operation === 'product.readiness') {
+    const product = await getProduct(db, principal.organizationId, input.subjectId)
+    const blocker = await experiencePublicationBlocker(db, principal.organizationId, product, principal.env as CloudflareEnv)
+    if (!blocker) throw missing()
+    const evidence = { kind: 'product_readiness' as const, missing: blocker }
+    // A price is missing where the experience is booked, so where that is belongs to the evidence.
+    const scope = { online: product.booking?.held_online ?? false, locations: product.locations.filter(entry => entry.published).map(entry => entry.location_id).sort() }
+    return result(evidence, blocker === 'host' ? { ...evidence, member: product.booking?.assigned_member_id, team: product.booking?.assigned_team_id }
+      : blocker === 'variants.prices' ? { ...evidence, scope } : evidence)
   }
   if (input.operation === 'product.payment' || input.operation === 'stay.gap') {
     const interval = input.operation === 'stay.gap' ? coordinates() : null

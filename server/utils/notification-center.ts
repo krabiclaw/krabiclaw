@@ -1,6 +1,7 @@
 import { execute, queryFirst, type DbClient } from '~/server/db'
 import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import { publishNotificationInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { accountActivityPath, isAccountActivityKind } from '~/shared/account-activity'
 
 export const NOTIFICATION_EVENT_TYPES = {
   PLATFORM_USER_SIGNUP: 'platform.user_signup',
@@ -8,6 +9,21 @@ export const NOTIFICATION_EVENT_TYPES = {
 
 export type NotificationScope = 'global' | 'organization'
 export type NotificationSeverity = 'info' | 'success' | 'warning' | 'error'
+
+// Shared by the conversation count and acknowledgement. A fact recorded in a
+// conversation can still be a booking, payment or other operational alert.
+const conversationEvents = ['new_contact_msg', 'channel_inquiry']
+const conversationPrefix = 'submission_reply_'
+export const CONVERSATION_NOTIFICATION_SQL = `(${conversationEvents.map(event => `n.event_name = '${event}'`).join(' OR ')} OR n.event_name GLOB '${conversationPrefix}*')`
+export const isConversationNotification = (event: string) =>
+  conversationEvents.includes(event) || event.startsWith(conversationPrefix)
+
+const scheduleEvents = ['new_reservation', 'new_booking', 'new_stay', 'reservation_cancelled', 'booking_cancelled', 'stay_cancelled']
+const schedulePrefixes = ['channel_stay.', 'calendar_sync.', 'booking.change_', 'reservation.change_', 'stay.change_', 'consultation.change_']
+export const SCHEDULE_NOTIFICATION_SQL = `(${scheduleEvents.map(event => `n.event_name = '${event}'`).join(' OR ')}
+  OR ${schedulePrefixes.map(prefix => `n.event_name GLOB '${prefix}*'`).join(' OR ')})`
+export const isScheduleNotification = (event: string) =>
+  scheduleEvents.includes(event) || schedulePrefixes.some(prefix => event.startsWith(prefix))
 
 export interface CreateNotificationInput {
   publishEnv?: GuestInboxPublicationEnv
@@ -24,6 +40,7 @@ export interface CreateNotificationInput {
   threadId?: string | null
   /** A dashboard path or external URL for notifications that are not about a thread. */
   deepLink?: string | null
+  stayId?: string
   /** Stable event identity. Replays reuse the notification instead of adding a second alert. */
   idempotencyKey?: string
 }
@@ -67,7 +84,7 @@ export function buildCanonicalNotificationInsert(
     `,
     params: [id, input.scope, input.organizationId ?? null,
       input.locationId ?? null, input.sourceEntryId ?? null, input.targetUserId ?? null, input.message ?? null, input.template,
-      JSON.stringify({ severity: input.severity ?? 'info', title: input.title, thread_id: input.threadId ?? null, deep_link: input.deepLink ?? null }),
+      JSON.stringify({ severity: input.severity ?? 'info', title: input.title, thread_id: input.threadId ?? null, deep_link: input.deepLink ?? null, stay_id: input.stayId ?? null }),
       `notification:${input.idempotencyKey ?? id}`, now, now],
   }
 }
@@ -104,14 +121,18 @@ export async function notifyBuyerThread(db: DbClient, input: {
   if (!thread) throw new Error('Buyer notification has no matching conversation event')
   if (!thread.user_id) return
   if (!thread.current_buyer) throw new Error('Buyer notification ownership does not match its booking')
-  const destination = input.conversation || thread.kind === 'contact' || thread.event_name?.startsWith('booking_change.')
-    ? 'messages' : `activity/${thread.kind}`
+  // A proposal asks the guest to answer in the conversation. The resulting
+  // booking status belongs to the booking itself.
+  const destination = input.conversation || thread.kind === 'contact' || thread.event_name === 'booking_change.requested'
+    ? `/dashboard/account/messages/${encodeURIComponent(input.threadId)}`
+    : isAccountActivityKind(thread.kind) ? accountActivityPath(thread.kind, input.threadId) : null
+  if (!destination) throw new Error(`Buyer notification has no destination for ${thread.kind}`)
   await createCanonicalNotification(db, {
     scope: 'global', targetUserId: thread.user_id,
     template: 'guest_thread_event',
     idempotencyKey: `buyer-thread:${input.entryId}`,
     title: input.title, message: input.message,
-    deepLink: `/dashboard/account/${destination}/${encodeURIComponent(input.threadId)}`,
+    deepLink: destination,
   })
 }
 

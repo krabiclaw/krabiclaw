@@ -94,6 +94,10 @@ export function productEditorPath(orgSlug: string, productId: string, locationId
   return scopedTo(`${organizationBase(orgSlug)}/products/${encodeURIComponent(productId)}`, locationId)
 }
 
+export function productPaymentPath(orgSlug: string, productId: string): string {
+  return `${productEditorPath(orgSlug, productId)}/booking/payment`
+}
+
 export function collectionEditorPath(orgSlug: string, collectionId: string, locationId?: string | null): string {
   return scopedTo(`${organizationBase(orgSlug)}/products/menu/${encodeURIComponent(collectionId)}`, locationId)
 }
@@ -123,7 +127,7 @@ export function insightsPath(orgSlug: string, query?: { startDate: string; endDa
   return query ? `${path}?${new URLSearchParams(query)}` : path
 }
 
-export function bookingEditorPath(orgSlug: string, kind: 'reservation' | 'booking', requestId: string): string {
+export function bookingEditorPath(orgSlug: string, kind: 'reservation' | 'booking' | 'stay', requestId: string): string {
   return `${organizationBase(orgSlug)}/bookings/${kind}/${encodeURIComponent(requestId)}`
 }
 

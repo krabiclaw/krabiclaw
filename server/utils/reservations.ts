@@ -225,10 +225,6 @@ export function reservationPolicySummarySource(config: LocationReservationConfig
   return {
     policy_type: 'reservation' as const,
     advance_notice_minutes: config.advance_notice_minutes,
-    // reservations_policy_check requires these three in policy_json until its migration.
-    free_cancellation_until_minutes: FREE_CANCELLATION_MINUTES,
-    reschedule_allowed: true,
-    reschedule_cutoff_minutes: FREE_CANCELLATION_MINUTES,
     deposit_required: config.deposit_required,
     deposit_amount: config.deposit_amount,
     deposit_currency: config.deposit_currency,
@@ -412,10 +408,7 @@ export async function reservationClaimQuery(db: DbClient, input: ReservationClai
     ? `SELECT json_extract(price_snapshot_json, '$.reservation') FROM payments WHERE id = ? AND organization_id = ?`
     : `SELECT json_object('policy_type','reservation','advance_notice_minutes',advance_notice_minutes,'minimum_guest_age',minimum_guest_age,
         'deposit_required',json(CASE deposit_required WHEN 1 THEN 'true' ELSE 'false' END),'deposit_amount',deposit_amount,'deposit_currency',deposit_currency,'deposit_tax_behavior',deposit_tax_behavior,'deposit_trigger_party_size',deposit_trigger_party_size,
-        'accessibility_contact_required',json(CASE accessibility_contact_required WHEN 1 THEN 'true' ELSE 'false' END),
-        'free_cancellation_until_minutes', ${FREE_CANCELLATION_MINUTES},
-        'reschedule_allowed', json('true'),
-        'reschedule_cutoff_minutes', ${FREE_CANCELLATION_MINUTES}) FROM location_reservation_configs WHERE location_id = ? AND organization_id = ?`
+        'accessibility_contact_required',json(CASE accessibility_contact_required WHEN 1 THEN 'true' ELSE 'false' END)) FROM location_reservation_configs WHERE location_id = ? AND organization_id = ?`
   return {
     query: `INSERT INTO reservations (id, organization_id, location_id, user_id, request_id, timezone, starts_at, ends_at, party_size, policy_json, status, created_at, updated_at)
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, (${terms}), 'confirmed', ?, ? WHERE ${allocation.query}

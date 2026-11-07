@@ -136,6 +136,20 @@ test('guest table cancellation refunds until 24 hours before the start, through 
  }
 })
 
+test('a checkout thread stays out of Messages until payment creates its booking', { timeout: 120_000 }, async () => {
+ const { db, runtime } = await boot()
+ try {
+  const provenance = { source: 'website', external_reference: null, actor_user_id: null, idempotency_key: 'checkout-key', fingerprint: 'checkout-fingerprint', guest_acknowledgement: true, creation_kind: 'checkout' as const, creation_status: 'confirmed' as const, followups_completed: false }
+  const opening = { id: 'checkout-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'verified', review_id: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com', notes: 'A note before paying' }), provenance }, created_at: NOW, updated_at: NOW }
+  await db.batch(requestInsertQueries(opening, undefined, { body: 'Class for 1 guest' }).map(write => db.prepare(write.query).bind(...write.params)))
+  const owner = async () => (await listGuestThreads(db, ORG, { userId: 'owner-reader' })).map(row => row.id)
+  const buyer = async () => (await listGuestThreads(db, null, { userId: 'verified', buyerAudience: true })).map(row => row.id)
+  assert.deepEqual([await owner(), await buyer()], [[], []])
+  await claimSessionCapacity(db, { organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified', requestId: opening.id })
+  assert.deepEqual([await owner(), await buyer()], [[opening.id], [opening.id]])
+ } finally { await runtime.dispose() }
+})
+
 test('guest class cancellation refunds through Stripe until 24 hours before the start, and later only releases the seat', { timeout: 120_000 }, async t => {
  for (const refundable of [true, false]) {
   const { db, runtime } = await boot()
