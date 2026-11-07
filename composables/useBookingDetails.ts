@@ -77,7 +77,7 @@ export async function useBookingDetails(bookingType: DashboardRecordType, bookin
     // Under way by the instant, so a visit past midnight is still being hosted.
     const instant = now.value.toISOString()
     const underway = booking.value.startsAt !== null && booking.value.endsAt !== null && booking.value.startsAt <= instant && instant < booking.value.endsAt
-    if (underway && !personalScope && booking.value.vertical !== 'service') return 'Currently hosting'
+    if (underway && !booking.value.noShowAt && !personalScope && booking.value.vertical !== 'service') return 'Currently hosting'
     if (booking.value.bookingDate === referenceDay.value) return 'Today'
     if (booking.value.bookingDate > referenceDay.value) return 'Coming up'
     return `Past ${noun.value}`
