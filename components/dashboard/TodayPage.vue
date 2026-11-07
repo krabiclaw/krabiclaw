@@ -1,17 +1,22 @@
 <template>
   <DashboardIndexPanel :id="personalScope ? 'account-today' : 'org-today'" title="Today">
+    <template #center>
+      <div class="tog" role="tablist" aria-label="Work view">
+        <button v-for="item in ranges" :key="item.value" type="button" role="tab" :aria-selected="range === item.value" :tabindex="range === item.value ? 0 : -1" :data-testid="`today-range-${item.value}`" @click="range = item.value" @keydown="onRangeKeydown">{{ item.label }}</button>
+      </div>
+    </template>
     <template #right>
-      <UButton v-if="canAddStay" :to="`/dashboard/${encodeURIComponent(orgSlug)}/bookings/stay/new`" icon="i-lucide-plus" color="neutral" variant="ghost" aria-label="Add stay" />
+      <UDropdownMenu v-if="canCreate && canAddStay" :items="addItems" :content="{ align: 'end' }">
+        <UButton icon="i-lucide-plus" color="neutral" variant="soft" square aria-label="Add" />
+      </UDropdownMenu>
+      <UButton v-else-if="canCreate" icon="i-lucide-plus" color="neutral" variant="soft" square aria-label="Add task" data-testid="today-add-task" @click="createOpen = true" />
+      <UButton v-else-if="canAddStay" :to="addStayPath" icon="i-lucide-plus" color="neutral" variant="soft" square aria-label="Add stay" />
+      <UDropdownMenu v-if="!personalScope" :items="kindItems" :content="{ align: 'end' }">
+        <UButton icon="i-lucide-sliders-horizontal" color="neutral" :variant="taskKind ? 'solid' : 'soft'" square aria-label="Filter tasks" />
+      </UDropdownMenu>
     </template>
 
     <div class="mx-auto w-full max-w-[848px]">
-      <div class="mb-7 flex items-center justify-center gap-3 py-2">
-        <div class="tog" role="tablist" aria-label="Work view">
-          <button v-for="item in ranges" :key="item.value" type="button" role="tab" :aria-selected="range === item.value" :tabindex="range === item.value ? 0 : -1" :data-testid="`today-range-${item.value}`" @click="range = item.value" @keydown="onRangeKeydown">{{ item.label }}</button>
-        </div>
-        <button v-if="canCreate" type="button" class="add" aria-label="Add task" data-testid="today-add-task" @click="createOpen = true"><UIcon name="i-lucide-plus" class="size-4" /></button>
-      </div>
-
       <UAlert v-if="loadError" class="mb-6" color="error" variant="soft" :title="`${range === 'today' ? 'Today' : 'Upcoming'} could not be loaded`" :description="getErrorMessage(loadError, 'The request failed')">
         <template #actions><UButton color="error" variant="soft" size="xs" @click="() => refresh()">Retry</UButton></template>
       </UAlert>
@@ -95,7 +100,7 @@ import TodayTaskCreate from './TodayTaskCreate.vue'
 import { getErrorMessage } from '~/utils/errors'
 import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayFeedPayload } from '~/shared/dashboard-today'
 import type { AgendaPayload } from '~/server/utils/dashboard-agenda'
-import type { TaskPerson, TaskSection, TaskView } from '~/server/domain/tasks'
+import type { TaskKind, TaskPerson, TaskSection, TaskView } from '~/server/domain/tasks'
 import type { OpportunityView } from '~/server/domain/opportunities'
 import type { BusinessGoal, BusinessGoalStrategy } from '~/shared/business-progress'
 import { authClient } from '~/lib/auth-client'
@@ -124,6 +129,29 @@ const canAddStay = computed(() => !props.personalScope && hasFeature('stays') &&
 const canManage = computed(() => !props.personalScope && roleAllows({ task: ['assign'] }))
 const canCreate = computed(() => !props.personalScope && roleAllows({ task: ['create'] }))
 const createOpen = ref(false)
+const addStayPath = computed(() => `/dashboard/${encodeURIComponent(orgSlug.value)}/bookings/stay/new`)
+const addItems = computed(() => [
+  { label: 'Add task', icon: 'i-lucide-list-plus', onSelect: () => { createOpen.value = true } },
+  { label: 'Add stay', icon: 'i-lucide-bed-double', to: addStayPath.value },
+])
+
+const kindLabels: Record<TaskKind, string> = {
+  turnover: 'Turnovers',
+  guest_reply: 'Guest replies',
+  message_delivery: 'Message delivery',
+  booking_review: 'Booking reviews',
+  booking_change: 'Booking changes',
+  opportunity: 'Accepted opportunities',
+  custom: 'Custom tasks',
+}
+const taskKind = computed(() => !props.personalScope && typeof route.query.kind === 'string' ? route.query.kind : undefined)
+const kindItems = computed(() => [[
+  { label: 'All tasks', type: 'checkbox' as const, checked: !taskKind.value, onSelect: () => setTaskKind(undefined) },
+  ...Object.entries(kindLabels).map(([kind, label]) => ({ label, type: 'checkbox' as const, checked: taskKind.value === kind, onSelect: () => setTaskKind(kind) })),
+]])
+function setTaskKind(kind: string | undefined) {
+  void router.replace({ query: { ...route.query, kind } })
+}
 
 const range = computed<Range>({
   get: () => route.query.range === 'upcoming' ? 'upcoming' : 'today',
@@ -142,9 +170,9 @@ const isFeed = (value: unknown): value is TodayFeedPayload => todayFeedSchema.sa
 const isAgenda = (value: unknown): value is AgendaPayload => isRecord(value) && Array.isArray(value.items)
 
 const { data, pending, error: loadError, refresh } = await useAsyncData(
-  () => `today-${orgSlug.value}-${range.value}`,
+  () => `today-${orgSlug.value}-${range.value}-${taskKind.value ?? 'all'}`,
   async (): Promise<{ business: BusinessToday | null; visits: TodayCard[] }> => {
-    if (!props.personalScope) return { business: await dashboardApi<BusinessToday>('/api/dashboard/today', { query: { range: range.value }, validate: isBusinessToday }), visits: [] }
+    if (!props.personalScope) return { business: await dashboardApi<BusinessToday>('/api/dashboard/today', { query: { range: range.value, kind: taskKind.value }, validate: isBusinessToday }), visits: [] }
     if (range.value === 'today') return { business: null, visits: (await applicationFetch<TodayFeedPayload>('/api/account/today', { validate: isFeed })).cards }
     // A guest's upcoming visits: the next year of their own agenda, after today.
     const now = new Date()
@@ -289,11 +317,10 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.tog { display: flex; width: 340px; max-width: 100%; padding: 4px; border-radius: 999px; background: var(--ui-bg-elevated); }
-.tog button { flex: 1; height: 32px; border-radius: 999px; font-size: 15px; font-weight: 500; color: var(--ui-text-highlighted); }
-.tog button[aria-selected="true"] { background: var(--ui-bg); font-weight: 600; box-shadow: 0 1px 4px rgb(0 0 0 / 14%); }
-.tog button:focus-visible, .add:focus-visible { outline: 2px solid var(--ui-text-highlighted); outline-offset: 2px; }
-.add { display: flex; flex: none; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; background: var(--ui-bg-elevated); color: var(--ui-text-highlighted); }
+.tog { display: flex; min-width: 0; gap: 12px; }
+.tog button { min-height: 46px; padding: 0 clamp(12px, 5vw, 24px); border-radius: 999px; background: var(--ui-bg-elevated); color: var(--ui-text-highlighted); font-size: 15px; font-weight: 600; }
+.tog button[aria-selected="true"] { background: var(--ui-bg-inverted); color: var(--ui-text-inverted); box-shadow: 0 3px 8px rgb(0 0 0 / 14%); }
+.tog button:focus-visible { outline: 2px solid var(--ui-text-highlighted); outline-offset: 2px; }
 .wh2 { margin: 28px 2px 16px; font-size: 22px; line-height: 28px; font-weight: 700; letter-spacing: -.02em; color: var(--ui-text-highlighted); }
 .wh2 small { margin-left: 8px; font-size: 15px; line-height: 20px; font-weight: 400; letter-spacing: 0; color: var(--ui-text-muted); }
 .wtasks { display: grid; grid-template-columns: 1fr 1fr; grid-auto-flow: row dense; gap: 20px; align-items: start; }

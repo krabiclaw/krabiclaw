@@ -66,6 +66,36 @@ test('the migration chain applies from zero and builds every table the schema de
   }
 })
 
+test('the v25 forward migration initializes the internal name of an existing home', () => {
+  const database = new Database(':memory:')
+  database.pragma('foreign_keys = ON')
+  try {
+    database.exec(readFileSync('migrations/0000_baseline.sql', 'utf8'))
+    database.exec(`
+      INSERT INTO organization (id, name, slug, default_currency, timezone)
+        VALUES ('host', 'Host', 'host', 'USD', 'America/Denver');
+      INSERT INTO user (id, name, email) VALUES ('owner', 'Owner', 'owner@example.test');
+      INSERT INTO business_locations (id, organization_id, slug, title, timezone)
+        VALUES ('site', 'host', 'site', 'Cabin site', 'America/Denver');
+      INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by)
+        VALUES ('home', 'host', 'stay', 'A cabin by the lake', 'cabin', 'owner', 'owner');
+      INSERT INTO product_locations (organization_id, product_id, location_id, created_by, updated_by)
+        VALUES ('host', 'home', 'site', 'owner', 'owner');
+      INSERT INTO product_stay_configs (organization_id, product_id, location_id, check_in_time, check_out_time, max_guests, min_nights, beds, created_by, updated_by)
+        VALUES ('host', 'home', 'site', NULL, NULL, 4, 1, 0, 'owner', 'owner');
+    `)
+    database.exec(readFileSync('migrations/0001_home_internal_name.sql', 'utf8'))
+    assert.deepEqual(database.prepare(`
+      SELECT p.name, c.internal_name, c.check_in_time, c.check_out_time, c.beds
+      FROM product_stay_configs c JOIN products p ON p.id = c.product_id AND p.organization_id = c.organization_id
+      WHERE p.id = 'home'
+    `).get(), { name: 'A cabin by the lake', internal_name: 'A cabin by the lake', check_in_time: null, check_out_time: null, beds: 0 })
+    assert.equal(database.pragma('foreign_key_check').length, 0)
+  } finally {
+    database.close()
+  }
+})
+
 test('publication attribution retains historical receipts as unknown and references the exact initiating activity', () => {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')

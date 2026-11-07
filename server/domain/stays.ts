@@ -1,5 +1,6 @@
 import { HTTPError } from 'nitro'
 import { turnoverTaskQueries } from '~/server/domain/tasks'
+import { PRODUCT_LIMITS } from '~/shared/product-limits'
 import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevision, parseStoredFormQuestions, type FormAnswerSnapshot, type FormQuestion } from '~/shared/form-questions'
 import { acceptFormAnswers } from '~/server/domain/form-questions'
 import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CALENDAR_DAYS, changeNightPrice, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNELS, STAY_CHANNEL_LABELS, isChannelManagedStay, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
@@ -171,7 +172,9 @@ export interface StayHome {
   product_id: string
   /** The Product version used when saving listing accessibility. */
   product_updated_at: string
+  /** Public listing title, independently editable from the operator name. */
   name: string
+  internal_name: string
   location_id: string
   timezone: string
   currency: CurrencyCode
@@ -401,7 +404,7 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
 
 async function stayHomesWhere(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHome[]> {
   const rows = await queryAll<Record<string, unknown>>(db, `
-    SELECT p.id AS product_id, p.updated_at AS product_updated_at, p.name, p.description, p.details_json, c.location_id, l.timezone, l.address, l.latitude, l.longitude, l.stay_map_sharing, o.default_currency,
+    SELECT p.id AS product_id, p.updated_at AS product_updated_at, p.name, c.internal_name, p.description, p.details_json, c.location_id, l.timezone, l.address, l.latitude, l.longitude, l.stay_map_sharing, o.default_currency,
            c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, c.calendar_rules, c.property_type_group, c.property_type,
            c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
            c.cancellation_policy, c.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
@@ -414,7 +417,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       JOIN organization o ON o.id = c.organization_id
       LEFT JOIN product_channel_mappings m ON m.organization_id = c.organization_id AND m.product_id = c.product_id AND m.provider = 'channex'
      WHERE c.organization_id = ? ${productId !== null ? 'AND c.product_id = ?' : ''} AND ${scope.sql}
-     ORDER BY p.name, p.id`, [organizationId, ...(productId !== null ? [productId] : []), ...scope.params])
+     ORDER BY c.internal_name, p.id`, [organizationId, ...(productId !== null ? [productId] : []), ...scope.params])
   if (!rows.length) return []
   const prices = await queryAll<Price & { product_id: string }>(db, `
     SELECT pr.*, v.product_id FROM prices pr
@@ -429,6 +432,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
     readStayHomeAccessibility(db, organizationId, productIds),
   ])
   return rows.map((row) => {
+    if (typeof row.internal_name !== 'string' || !row.internal_name.trim()) throw new Error(`Home ${row.product_id} has no internal name`)
     const amenityAnswers = parseStayAmenityAnswers(JSON.parse(String(row.amenities)))
     const details = validateProductDetails('stay', JSON.parse(String(row.details_json)))
     validateStayAlarmDetails(details, amenityAnswers)
@@ -436,7 +440,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
     const own = prices.filter(price => price.product_id === row.product_id).map(price => ({ ...price, active: Number(price.active) === 1 }))
     const base = selectPrice(own, { currency: row.default_currency, location_id: String(row.location_id) })
     return {
-      product_id: String(row.product_id), product_updated_at: String(row.product_updated_at), name: String(row.name), location_id: String(row.location_id), timezone: String(row.timezone),
+      product_id: String(row.product_id), product_updated_at: String(row.product_updated_at), name: String(row.name), internal_name: String(row.internal_name), location_id: String(row.location_id), timezone: String(row.timezone),
       currency: row.default_currency, base_price_minor: base ? base.unit_amount : null, base_price_tax_behavior: base ? base.tax_behavior : null,
       check_in_time: nullableText(row.check_in_time), check_in_end_time: nullableText(row.check_in_end_time), check_out_time: nullableText(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights), calendar_rules: parseStayCalendarRules(row.calendar_rules === null ? null : JSON.parse(String(row.calendar_rules))),
       description: String(row.description), published: Number(row.published) === 1, live: Number(row.live) === 1,
@@ -530,6 +534,7 @@ export async function readStayHome(db: DbClient, access: StayAccess, productId: 
 
 /** A new place to stay: the location it is at and its stay rules, checked. */
 export interface NewStayHome {
+  internal_name?: string
   name: string
   timezone: string
   address: string
@@ -587,7 +592,7 @@ function homeDetails(body: Record<string, unknown>) {
   }
   return {
     text, timezone, time,
-    name: (required: boolean) => text('name', 200, required),
+    name: (required: boolean) => text('name', PRODUCT_LIMITS.name, required),
     maxGuests: (required: boolean) => whole('max_guests', 1, 99, required),
     minNights: (required: boolean) => whole('min_nights', 1, MAX_STAY_NIGHTS, required),
     basePrice: () => whole('base_price_minor', 0, Number.MAX_SAFE_INTEGER, false),
@@ -605,7 +610,7 @@ export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
     return { [key]: value } as Partial<Pick<NewStayHome, K>>
   }
   const home: NewStayHome = {
-    name: name(true)!, timezone: timezone(true)!,
+    name: name(true)!, ...(Object.hasOwn(body, 'internal_name') ? { internal_name: text('internal_name', PRODUCT_LIMITS.name, true)! } : {}), timezone: timezone(true)!,
     ...homeAddress(body, ''),
     phone: text('phone', 32, false), email: text('email', 254, false),
     check_in_time: time('check_in_time', false), check_in_end_time: time('check_in_end_time', false), check_out_time: time('check_out_time', false),
@@ -653,7 +658,7 @@ const LISTING_FIELDS = ['property_type_group', 'property_type', 'listing_type', 
 /** The arrival guide: private columns only this module reads and writes. */
 const ARRIVAL_FIELDS = [...Object.keys(STAY_ARRIVAL_TEXT_LIMITS) as Array<keyof typeof STAY_ARRIVAL_TEXT_LIMITS>, 'check_in_method', 'checkout_instructions'] as const
 const LOCATION_FIELDS = ['address', 'latitude', 'longitude', 'stay_map_sharing'] as const
-const EDITABLE_HOME_FIELDS = ['name', 'description', 'published', 'timezone', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'base_price_minor',
+const EDITABLE_HOME_FIELDS = ['internal_name', 'name', 'description', 'published', 'timezone', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'base_price_minor',
   'assigned_member_id', 'assigned_team_id', 'questions', 'expected_questions_revision', ...LISTING_FIELDS, ...Object.values(STAY_ALARM_DETAIL_KEYS), ...ARRIVAL_FIELDS, ...LOCATION_FIELDS] as const
 
 /** The arrival guide fields a request names, checked; each problem names its field. */
@@ -727,7 +732,7 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   const unknown = Object.keys(body).find(key => !(EDITABLE_HOME_FIELDS as readonly string[]).includes(key))
   if (unknown) fail(422, 'INVALID_DETAIL', `${unknown} cannot be changed here`, unknown)
   if (!Object.keys(body).length) fail(422, 'INVALID_DETAIL', 'Name at least one detail to change')
-  for (const key of ['name', 'timezone', 'max_guests', 'min_nights'] as const) {
+  for (const key of ['internal_name', 'name', 'timezone', 'max_guests', 'min_nights'] as const) {
     const value = body[key]
     if (key in body && (value === null || (typeof value === 'string' && !value.trim()))) fail(422, 'INVALID_DETAIL', `${key} cannot be empty`, key)
   }
@@ -735,6 +740,10 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   // Every field is checked before anything is written.
   const zone = timezone(false)
   const stay: NonNullable<UpdateProductInput['stay']> = {}
+  if ('internal_name' in body) {
+    if (typeof body.internal_name !== 'string' || !body.internal_name.trim() || body.internal_name.trim().length > PRODUCT_LIMITS.name) fail(422, 'INVALID_DETAIL', `internal_name must contain 1 to ${PRODUCT_LIMITS.name} characters`, 'internal_name')
+    stay.internal_name = body.internal_name.trim()
+  }
   if ('check_in_time' in body) stay.check_in_time = time('check_in_time', false)
   // null is a real value here: the check-in window has a flexible end.
   if ('check_in_end_time' in body) stay.check_in_end_time = time('check_in_end_time', false)
@@ -844,7 +853,7 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
     product: {
       kind: 'stay', name: home.name,
       ...(home.base_price_minor === null ? {} : { variants: [{ name: home.name, prices: [{ unit_amount: home.base_price_minor }] }] }),
-      stay: { location_id: locationId, check_in_time: home.check_in_time, check_in_end_time: home.check_in_end_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, calendar_rules: home.calendar_rules, assigned_member_id: null, assigned_team_id: null,
+      stay: { ...(home.internal_name === undefined ? {} : { internal_name: home.internal_name }), location_id: locationId, check_in_time: home.check_in_time, check_in_end_time: home.check_in_end_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, calendar_rules: home.calendar_rules, assigned_member_id: null, assigned_team_id: null,
         ...(home.cancellation_policy === undefined ? {} : { cancellation_policy: home.cancellation_policy }),
         ...(home.long_term_cancellation_policy === undefined ? {} : { long_term_cancellation_policy: home.long_term_cancellation_policy }) },
     },

@@ -12,6 +12,17 @@ const person = { type: 'object', properties: { type: { type: 'string', enum: ['m
 const task = { type: 'object', properties: {
   id: text, kind: { type: 'string', enum: [...TASK_KINDS] }, status: { type: 'string', enum: ['open', 'done', 'skipped', 'cancelled'] }, version: { type: 'integer' },
   face: { type: 'string', enum: ['photo', 'compact'] }, tag: nullableText, imageUrl: nullableText, avatar: { type: ['object', 'null'] },
+  reservation: {
+    type: 'object',
+    properties: {
+      dateLabel: text, groupHeadline: text, homeName: text, statusLabel: text, guestImageUrl: nullableText,
+      conversation: { anyOf: [
+        { type: 'object', properties: { label: text, description: nullableText, to: text }, required: ['label', 'description', 'to'] },
+        { type: 'null' },
+      ] },
+    },
+    required: ['dateLabel', 'groupHeadline', 'homeName', 'statusLabel', 'guestImageUrl', 'conversation'],
+  },
   statusLine: nullableText, title: text, when: nullableText, detail: nullableText, error: nullableText, note: nullableText,
   person: { anyOf: [person, { type: 'null' }] }, assignee: { anyOf: [person, { type: 'null' }] }, sheet: { type: 'object' },
   startsAt: nullableText, dueAt: nullableText, timezone: text, notes: nullableText,

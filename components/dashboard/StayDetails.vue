@@ -31,7 +31,7 @@
         <h2 v-else-if="guest.state === 'unnamed'" class="text-2xl font-semibold text-muted">Guest</h2>
         <p v-if="personalScope && home" class="mt-1 text-base text-muted">{{ home.organization_name }}</p>
         <p class="mt-4 text-base text-muted">{{ stayDates }}</p>
-        <p v-if="!personalScope && recordHome" class="mt-1 text-base text-muted">{{ recordHome.name }}</p>
+        <p v-if="!personalScope && hostHome" class="mt-1 text-base text-muted">{{ hostHome.internal_name }}</p>
         <UBadge v-if="personalScope" class="mt-3" :color="stay.status === 'cancelled' ? 'neutral' : 'success'" variant="soft" :label="statusLabel" />
       </div>
 
@@ -277,7 +277,7 @@ const { data: hostHomeData, error: homeError, refresh: refreshHostHome } = await
     const productId = stay.value.product_id
     return dashboardApi(`/api/dashboard/stay-homes/${encodeURIComponent(productId)}`, {
       validate: (value: unknown): value is { home: StayHome } => isRecord(value) && isRecord(value.home)
-        && value.home.product_id === productId && typeof value.home.name === 'string' && !!value.home.name.trim()
+        && value.home.product_id === productId && typeof value.home.internal_name === 'string' && !!value.home.internal_name.trim() && typeof value.home.name === 'string' && !!value.home.name.trim()
         && (value.home.check_in_time === null || typeof value.home.check_in_time === 'string') && (value.home.check_out_time === null || typeof value.home.check_out_time === 'string')
         && (value.home.check_in_end_time === null || typeof value.home.check_in_end_time === 'string')
         && Array.isArray(value.home.photos) && value.home.photos.every(photo => isRecord(photo)

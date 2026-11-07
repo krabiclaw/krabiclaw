@@ -233,6 +233,7 @@ const detailObject = productDetailsSchema()
 
 const stayTime = { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' }
 const stayRules = {
+  internal_name: { type: 'string', minLength: 1, maxLength: PRODUCT_LIMITS.name, description: 'Short operator-only home name. Initially the listing title; edited independently from Product.name and never sent to Airbnb or guests.' },
   check_in_time: { ...stayTime, type: ['string', 'null'], description: 'Local 24-hour time guests may arrive from, in the location’s timezone.' },
   check_in_end_time: { type: ['string', 'null'], pattern: stayTime.pattern, description: 'Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.' },
   check_out_time: { ...stayTime, type: ['string', 'null'], description: 'Local 24-hour time guests leave by.' },
@@ -248,7 +249,7 @@ const stayObject = { type: ['object', 'null'], description: 'Non-null exactly fo
   assigned_team_id: { type: ['string', 'null'], description: 'Better Auth team ID assigned to host and look after the home; null when no team is selected.' },
   photo_rooms: { type: 'array', items: STAY_PHOTO_ROOM_SCHEMA }, accessibility: STAY_HOME_ACCESSIBILITY_SCHEMA,
   questions: { ...questionsRead, description: 'The host\'s own questions asked with each direct stay booking.' }, questions_revision: questionsRevisionRead },
-  required: ['location_id', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'assigned_member_id', 'assigned_team_id', 'photo_rooms', 'accessibility', 'questions', 'questions_revision', ...Object.keys(STAY_LISTING_SCHEMA)] }
+  required: ['internal_name', 'location_id', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'assigned_member_id', 'assigned_team_id', 'photo_rooms', 'accessibility', 'questions', 'questions_revision', ...Object.keys(STAY_LISTING_SCHEMA)] }
 const staySetup = { type: 'object', description: 'Required for kind stay and refused for every other kind: the location the home is at (fixed once created) and its stay settings. Guest-facing house rules go in details.house_rules. Base nightly rate is the variant price.',
   properties: { location_id: { type: 'string' }, ...stayRules, ...STAY_LISTING_WRITE_SCHEMA }, required: ['location_id', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights'], additionalProperties: false }
 const stayPatch = { type: 'object', description: 'Stay settings to change on a place to stay. Its location is fixed.', properties: { ...stayRules, ...STAY_LISTING_WRITE_SCHEMA,

@@ -824,7 +824,7 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
     await db.prepare("INSERT INTO business_locations(id,organization_id,slug,title,timezone) VALUES('cabin-site',?,'cabin-site','Cabin','UTC')").bind(ORG).run()
     await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('stay','cabin',?,'Cabin','cabin','host','host')").bind(ORG).run()
     await db.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,created_by,updated_by) VALUES(?,'cabin','cabin-site','host','host')").bind(ORG).run()
-    await db.prepare("INSERT INTO product_stay_configs(product_id,organization_id,location_id,check_in_time,check_out_time,max_guests,min_nights,created_by,updated_by) VALUES('cabin',?,'cabin-site','15:00','11:00',4,1,'host','host')").bind(ORG).run()
+    await db.prepare("INSERT INTO product_stay_configs(product_id,organization_id,internal_name,location_id,check_in_time,check_out_time,max_guests,min_nights,created_by,updated_by) VALUES('cabin',?,'Cabin','cabin-site','15:00','11:00',4,1,'host','host')").bind(ORG).run()
     const claims = new Map<string, string>()
     for (const [id, from, to] of [['changing', '2099-10-01', '2099-10-03'], ['other-stay', '2099-10-03', '2099-10-04']]) {
       await payable(db, id!)

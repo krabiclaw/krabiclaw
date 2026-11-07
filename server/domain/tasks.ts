@@ -7,7 +7,8 @@ import { discardMessagePhotos, listMessagePhotos, messagePhotoPlacements, upload
 import { firstName } from '~/server/domain/guest-threads/presentation'
 import { bookingEditorPath, guestConversationPath } from '~/server/utils/dashboard-links'
 import { loadOwnerPictures } from '~/server/notifications/hero'
-import { addLocalDays, formatCalendarDate, formatTimestamp, isValidInstant, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
+import { addLocalDays, formatCalendarDate, formatTime, formatTimestamp, isValidInstant, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
+import { STAY_CHANNEL_LABELS, type StayChannel } from '~/shared/bookings'
 import type { CloudflareEnv } from '~/server/utils/auth'
 
 /*
@@ -219,6 +220,15 @@ export interface TaskView {
   imageUrl: string | null
   /** A compact card's round avatar when there is a person rather than a home. */
   avatar: { initial: string; tone: 'warm' | 'cool' } | null
+  /** The linked reservation on an open guest reply, when the viewer can read it. */
+  reservation?: {
+    dateLabel: string
+    groupHeadline: string
+    homeName: string
+    statusLabel: string
+    guestImageUrl: string | null
+    conversation: { label: string; description: string | null; to: string } | null
+  }
   /** The grey line above the title: "Arriving tomorrow · 45B", "Asked 2h ago · Penthouse", "Done at 11:48 AM · 1 photo". Never repeats the section's day. */
   statusLine: string | null
   /** The place, person or task, at 18 semibold, wrapping. */
@@ -257,6 +267,19 @@ export interface TaskView {
 export interface TaskSection { id: string; title: string | null; subtitle: string | null; tasks: TaskView[] }
 
 interface StayFacts { id: string; product_id: string; guest_name: string | null; adults: number; children: number; check_in_date: string; check_out_date: string; request_id: string | null }
+interface StayContextFacts extends StayFacts {
+  guest_surname: string | null
+  guest_image_url: string | null
+  home_timezone: string | null
+  arrival_time: string | null
+  check_in_time: string | null
+  check_out_time: string | null
+  status: StayWindow['status']
+  no_show_at: string | null
+  channel: StayChannel
+  overbooked: number
+  same_day_arrival: number
+}
 interface Context {
   slug: string
   people: Map<string, { name: string; userId: string }>
@@ -265,6 +288,7 @@ interface Context {
   products: Map<string, { name: string; imageUrl: string | null }>
   locations: Map<string, string>
   stays: Map<string, StayFacts>
+  replyStays: Map<string, StayContextFacts>
   arrivals: Map<string, StayFacts | null>
   requests: Map<string, { guest_name: string | null; participant: string | null; preview: string | null; asked_at: string | null }>
   messages: Map<string, { title: string; status: string; request_id: string | null; stay_id: string }>
@@ -311,10 +335,27 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
   ])
   if (!organization) throw new Error(`Organization ${organizationId} is missing`)
   const stayIds = [...new Set([...ids(row => row.subject_type === 'stay' ? row.subject_id : null), ...messages.map(message => message.stay_id)])]
-  const stays = await queryAll<StayFacts>(db, 'SELECT id, product_id, guest_name, adults, children, check_in_date, check_out_date, request_id FROM stays WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', [organizationId, d1JsonStringSet(stayIds)])
+  const openReplies = ids(row => row.kind === 'guest_reply' && row.status === 'open' ? row.subject_id : null)
+  const replyRequests = openReplies.length && await roleAllows({ ...viewer.principal, permissions: { operations: ['update'] } }) ? openReplies : []
+  const stays = await queryAll<StayContextFacts>(db, `
+    SELECT s.id, s.product_id, s.guest_name, s.guest_surname, s.adults, s.children, s.check_in_date, s.check_out_date,
+      s.request_id, s.status, s.no_show_at, s.channel, s.overbooked, u.image AS guest_image_url, l.timezone AS home_timezone,
+      s.arrival_time, c.check_in_time, c.check_out_time, EXISTS (
+        SELECT 1 FROM stays next WHERE next.organization_id = s.organization_id AND next.product_id = s.product_id
+          AND next.status = 'confirmed' AND next.id <> s.id AND next.check_in_date = s.check_out_date
+      ) AS same_day_arrival
+    FROM stays s
+    LEFT JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
+    LEFT JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
+    LEFT JOIN user u ON u.id = s.user_id
+    WHERE s.organization_id = ? AND (s.id IN (SELECT value FROM json_each(?)) OR s.request_id IN (SELECT value FROM json_each(?)))`,
+  [organizationId, d1JsonStringSet(stayIds), d1JsonStringSet(replyRequests)])
   const productIds = [...new Set([...ids(row => row.product_id), ...stays.map(stay => stay.product_id)])]
   const [products, pictures] = await Promise.all([
-    queryAll<{ id: string; name: string }>(db, 'SELECT id, name FROM products WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', [organizationId, d1JsonStringSet(productIds)]),
+    queryAll<{ id: string; name: string | null }>(db, `
+      SELECT p.id, CASE WHEN p.kind = 'stay' THEN c.internal_name ELSE p.name END AS name
+      FROM products p LEFT JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
+      WHERE p.organization_id = ? AND p.id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(productIds)]),
     loadOwnerPictures(db, organizationId, 'product', productIds, { organizationFallback: false }),
   ])
   // The next guests at the home, for the turnovers shown.
@@ -330,9 +371,13 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
     people: new Map(members.map(member => [member.id, { name: member.name, userId: member.userId }])),
     teams: new Map(teams.map(team => [team.id, team.name])),
     users: new Map(members.map(member => [member.userId, member.name])),
-    products: new Map(products.map(product => [product.id, { name: product.name, imageUrl: pictures.get(product.id)?.imageUrl ?? null }])),
+    products: new Map(products.map(product => {
+      if (!product.name?.trim()) throw new Error(`Product ${product.id} has no name for this task`)
+      return [product.id, { name: product.name, imageUrl: pictures.get(product.id)?.imageUrl ?? null }]
+    })),
     locations: new Map(locations.map(location => [location.id, location.title])),
     stays: new Map(stays.map(stay => [stay.id, stay])),
+    replyStays: new Map(stays.flatMap(stay => stay.request_id && replyRequests.includes(stay.request_id) ? [[stay.request_id, stay]] : [])),
     arrivals,
     requests: new Map(requests.map(request => [request.id, request])),
     messages: new Map(messages.map(message => [message.id, { title: message.template_title, status: message.status, request_id: message.request_id, stay_id: message.stay_id }])),
@@ -383,6 +428,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
   let face: TaskView['face'] = product ? 'photo' : 'compact', tag: string | null = null, avatar: TaskView['avatar'] = null
   let statusLine: string | null = null, title = '', when: string | null = null, detail: string | null = null, error: string | null = null, path: string | null = null
   let stayId: string | null = null, requestId: string | null = null
+  let reservation: TaskView['reservation']
   let action: TaskView['action'] = { type: 'complete', label: 'Done' }
   let sheet: TaskView['sheet'] = { heading: 'Task', title: '', date: null, checkout: null, checkin: null }
   switch (row.kind) {
@@ -420,6 +466,35 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       path = conversation(row.subject_id)
       action = { type: 'open', label: 'Reply', path: path! }
       sheet = { heading: 'Reply', title, date: null, checkout: null, checkin: null }
+      const stay = row.status === 'open' ? context.replyStays.get(row.subject_id!) : undefined
+      if (stay) {
+        const home = context.products.get(stay.product_id)
+        if (!home || !stay.home_timezone) throw new Error(`Stay ${stay.id} has no home or timezone`)
+        stayId = stay.id
+        const localDay = localDateAt(now, stay.home_timezone)
+        let statusLabel: string
+        if (stay.status === 'cancelled') statusLabel = 'Cancelled'
+        else if (stay.no_show_at !== null) statusLabel = 'No-show recorded'
+        else if (stay.status === 'pending') statusLabel = 'Pending confirmation'
+        else if (localDay > stay.check_out_date) statusLabel = 'Stay ended'
+        else if (localDay <= stay.check_in_date) {
+          const clock = stay.arrival_time ?? stay.check_in_time
+          statusLabel = `Checking in · ${clock === null ? 'Time not set' : formatTime(clock, 'en')}`
+        } else if (localDay === stay.check_out_date) {
+          const clock = stay.check_out_time === null ? 'Time not set' : formatTime(stay.check_out_time, 'en')
+          statusLabel = stay.same_day_arrival ? `Checking out · Next guests arrive the same day · ${clock}` : `Checking out · ${clock}`
+        } else statusLabel = 'Currently hosting'
+        const guest = [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ')
+        const partySize = stay.adults + stay.children
+        reservation = {
+          dateLabel: `${formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric', year: 'numeric' })}`,
+          groupHeadline: stay.guest_name && partySize > 1 ? `${firstName(stay.guest_name)}’s group of ${partySize}` : guest || `Name not provided by ${STAY_CHANNEL_LABELS[stay.channel]}`,
+          homeName: home.name,
+          statusLabel: stay.overbooked ? `Overbooked · ${statusLabel}` : statusLabel,
+          guestImageUrl: stay.guest_image_url,
+          conversation: { label: action.label, description: detail, to: action.path },
+        }
+      }
       break
     }
     case 'message_delivery': {
@@ -521,6 +596,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
   return {
     id: row.id, kind: row.kind, status: row.status, version: row.version,
     face, tag, imageUrl: product?.imageUrl ?? null, avatar, statusLine, title, when, detail, error,
+    ...(reservation ? { reservation } : {}),
     note: row.outcome_note ? `“${row.outcome_note}”` : null,
     person: row.status === 'open' ? assignee : closer, assignee, action, sheet,
     startsAt: row.starts_at, dueAt: row.due_at, timezone: zone, notes: row.notes,

@@ -1,7 +1,7 @@
 <template>
   <DashboardLeafPanel
     id="product-name"
-    :title="stayTitle ? 'Title' : p.sectionLabels['name']"
+    :title="stayTitle ? 'Listing title' : p.sectionLabels['name']"
     :desktop-cancel="!p.isNew.value"
     :saving="p.saving.value"
     :disabled="p.saveDisabled.value"
@@ -12,7 +12,7 @@
   >
     <template v-if="p.isNew.value || p.product.value">
       <p class="mb-2 text-sm font-semibold text-muted">{{ charactersRemaining }}/240 available</p>
-      <UInput v-model="p.form.name" :aria-label="stayTitle ? 'Title' : 'Name'" maxlength="240" autofocus class="w-full" />
+      <UInput v-model="p.form.name" :aria-label="stayTitle ? 'Listing title' : 'Name'" maxlength="240" autofocus class="w-full" />
     </template>
   </DashboardLeafPanel>
 </template>

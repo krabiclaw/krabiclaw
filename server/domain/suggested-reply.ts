@@ -29,7 +29,9 @@ export async function suggestGuestReplies(db: DbClient, env: Record<string, unkn
     .flatMap(item => item.type === 'message' && item.body?.trim() ? [{ from: item.side, at: item.sentAt, text: item.body }] : [])
     .slice(-40)
   if (messages.at(-1)?.from !== 'guest') messagingError(409, 'SUGGESTION_NEEDS_GUEST_MESSAGE', 'A reply is suggested only when the guest wrote last', 'threadId')
-  const facts = JSON.stringify({ guest: thread.guestName, home: context.home, stay: context.stay, messages })
+  // Operator identity must not enter a draft addressed to the guest.
+  const home = context.home ? (({ internal_name: _internalName, ...listing }) => listing)(context.home) : null
+  const facts = JSON.stringify({ guest: thread.guestName, home, stay: context.stay, messages })
   const draft = await runWorkersAiText(env, [
     { role: 'system', content: INSTRUCTIONS },
     { role: 'user', content: `Write the reply using this quoted context:\n${facts}` },
