@@ -256,8 +256,13 @@ const BUYER_VISIBLE_MESSAGE_SQL = `((e.actor_kind='guest' AND e.channel IN ('web
 const SUPPORT_THREAD_SQL = `(EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND e.actor_kind = 'system' AND e.event_name = 'channel.message_mirrored')
   AND NOT EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND e.actor_kind = 'guest'))`
 
-/** A booking lands as a stay, not as a conversation: a stay is in the inbox once someone has written. */
-const HAS_CONVERSATION_SQL = `(gt.kind <> 'stay' OR EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND ${messageHasContentSql('e')}))`
+/**
+ * A booking lands as a stay, not as a conversation: a stay is in the inbox once someone has written.
+ * A checkout's thread waits on the guest: it is a conversation once payment has created its booking or reservation.
+ */
+const HAS_CONVERSATION_SQL = `(gt.kind <> 'stay' OR EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = gt.id AND e.kind = 'message' AND ${messageHasContentSql('e')}))
+  AND (json_extract(gt.payload_json, '$.provenance.creation_kind') IS NOT 'checkout'
+    OR EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = gt.id) OR EXISTS (SELECT 1 FROM reservations v WHERE v.request_id = gt.id))`
 
 const UNREAD_FOR_MEMBER_SQL = `EXISTS (
         SELECT 1 FROM activity_entries n
