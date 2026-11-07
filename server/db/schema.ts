@@ -1052,11 +1052,7 @@ export const location_reservation_configs = sqliteTable("location_reservation_co
 	deposit_currency: text(),
 	deposit_tax_behavior: text().$type<'inclusive' | 'exclusive'>(),
 	deposit_trigger_party_size: integer(),
-	free_cancellation_until_minutes: integer(),
-	reschedule_allowed: integer({ mode: "boolean" }).default(true).notNull(),
-	reschedule_cutoff_minutes: integer(),
 	accessibility_contact_required: integer({ mode: "boolean" }).default(false).notNull(),
-	additional_notes_html: text(),
 	// The tenant's own questions asked with each reservation (shared/form-questions.ts).
 	questions: text().default("[]").notNull(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
@@ -1068,10 +1064,10 @@ export const location_reservation_configs = sqliteTable("location_reservation_co
 	foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: "location_reservation_configs_location_scope_fk" }).onDelete("cascade"),
 	// Parent key for overrides.
 	unique("location_reservation_configs_org_location_unique").on(table.organization_id, table.location_id),
-	check("location_reservation_configs_booleans_check", sql`deposit_required IN (0, 1) AND reschedule_allowed IN (0, 1) AND accessibility_contact_required IN (0, 1)`),
+	check("location_reservation_configs_booleans_check", sql`deposit_required IN (0, 1) AND accessibility_contact_required IN (0, 1)`),
 	check("location_reservation_configs_duration_check", sql`duration_minutes IS NULL OR duration_minutes > 0`),
 	check("location_reservation_configs_slot_capacity_check", sql`slot_capacity IS NULL OR slot_capacity >= 0`),
-	check("location_reservation_configs_minutes_check", sql`(advance_notice_minutes IS NULL OR advance_notice_minutes >= 0) AND (free_cancellation_until_minutes IS NULL OR free_cancellation_until_minutes >= 0) AND (reschedule_cutoff_minutes IS NULL OR reschedule_cutoff_minutes >= 0)`),
+	check("location_reservation_configs_minutes_check", sql`advance_notice_minutes IS NULL OR advance_notice_minutes >= 0`),
 	check("location_reservation_configs_party_check", sql`deposit_trigger_party_size IS NULL OR deposit_trigger_party_size > 0`),
 	check("location_reservation_configs_deposit_check", sql`(deposit_amount IS NULL OR deposit_amount > 0) AND (deposit_currency IS NULL OR (length(deposit_currency) = 3 AND deposit_currency = upper(deposit_currency))) AND (deposit_tax_behavior IS NULL OR deposit_tax_behavior IN ('inclusive', 'exclusive'))`),
 	check("location_reservation_configs_age_check", sql`minimum_guest_age IS NULL OR minimum_guest_age >= 0`),
@@ -1111,7 +1107,7 @@ export const reservations = sqliteTable("reservations", {
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
 	check("reservations_status_check", sql`status IN ('confirmed', 'cancelled')`),
-	check("reservations_policy_check", sql`policy_json IS NULL OR (json_valid(policy_json) AND json_type(policy_json) = 'object' AND json_type(policy_json, '$.reschedule_allowed') IN ('true', 'false') AND json_type(policy_json, '$.free_cancellation_until_minutes') IN ('null', 'integer') AND json_type(policy_json, '$.reschedule_cutoff_minutes') IN ('null', 'integer')) IS 1`),
+	check("reservations_policy_check", sql`policy_json IS NULL OR (json_valid(policy_json) AND json_type(policy_json) = 'object') IS 1`),
 	check("reservations_instants_check", sql`(strftime('%Y-%m-%dT%H:%M:%fZ', starts_at, '+0 days') IS starts_at) AND (strftime('%Y-%m-%dT%H:%M:%fZ', ends_at, '+0 days') IS ends_at) AND (cancelled_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', cancelled_at, '+0 days') IS cancelled_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
 	foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: "reservations_location_scope_fk" }).onDelete("cascade"),
 	foreignKey({ columns: [table.organization_id, table.request_id], foreignColumns: [requests.organization_id, requests.id], name: "reservations_request_scope_fk" }).onDelete("no action"),

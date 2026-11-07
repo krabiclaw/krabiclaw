@@ -29,6 +29,13 @@
       "when": 1794051710729,
       "tag": "0003_drop_product_options",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794053304518,
+      "tag": "0004_drop_retired_cancellation_settings",
+      "breakpoints": true
     }
   ]
 }
