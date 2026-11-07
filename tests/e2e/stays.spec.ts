@@ -269,7 +269,12 @@ test('a home keeps its operator name independent from its public title across CM
   const turnoverCard = page.locator(`[data-task-id="${upcomingTasks.find(item => item.kind === 'turnover' && item.stayId === stay.id)!.id}"]`)
   await expect(turnoverCard.locator('.tc-media')).toHaveCount(0)
   await expect(turnoverCard.getByText('Turnover', { exact: true })).toBeVisible()
-  await expect(turnoverCard.getByRole('button', { name: 'Done', exact: true })).toBeVisible()
+  // The card opens its sheet, which holds Done for work a person completes.
+  await turnoverCard.locator('.tc-target').click()
+  const turnoverSheet = page.getByRole('dialog')
+  await expect(turnoverSheet.getByRole('button', { name: 'Done', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(turnoverSheet).toHaveCount(0)
   await turnoverCard.scrollIntoViewIfNeeded()
   await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-upcoming-no-photo-turnover.png') })
   await page.getByRole('button', { name: 'Filter tasks' }).click()
