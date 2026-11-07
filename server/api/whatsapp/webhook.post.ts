@@ -152,7 +152,8 @@ async function replyDestination(db: D1Database, threadId: string, organizationId
   const destination = await guestReplyDestination(db, thread)
   if (destination.channel === null) return { refused: destination.reason }
   if (destination.channel === 'airbnb') return { destination: 'through Airbnb' }
-  return { destination: destination.channel === 'email' ? `by email to ${maskEmailForDisplay(destination.email)}` : 'to their KrabiClaw inbox' }
+  if (destination.channel === 'email') return { destination: `by email to ${maskEmailForDisplay(destination.email)}` }
+  return { destination: destination.email ? `to their KrabiClaw inbox and by email to ${maskEmailForDisplay(destination.email)}` : 'to their KrabiClaw inbox' }
 }
 
 async function resolveQuotedDelivery(
@@ -637,7 +638,7 @@ async function handleMessage(db: D1Database, env: ApiRecord, message: WhatsAppMe
           dedupeKey: `whatsapp:${message.id}`,
         })
         await attachGuestPhotos(db, env, match.organizationId, entry.id, photos)
-        await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id, { conversationState: 'needs_attention' })
+        await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id)
         // The guest's message is in the thread before the owner is alerted, so an alert that fails cannot hide it.
         await publishGuestInboxThreadEvent(env, db, { threadId: thread.id, type: 'entry.appended' })
 

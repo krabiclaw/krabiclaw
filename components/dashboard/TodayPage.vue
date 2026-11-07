@@ -1,447 +1,306 @@
 <template>
-  <DashboardIndexPanel
-    :id="personalScope ? 'account-today' : 'org-today'"
-    title="Today"
-  >
+  <DashboardIndexPanel :id="personalScope ? 'account-today' : 'org-today'" title="Today">
     <template #right>
-      <!-- An account has one agenda and nothing to narrow it by. -->
-      <AgendaFilters v-if="!personalScope" :locations="todayData?.locations ?? []" :kinds="todayData?.availableKinds ?? []" :organization-id="schedulingOrganizationId" />
       <UButton v-if="canAddStay" :to="`/dashboard/${encodeURIComponent(orgSlug)}/bookings/stay/new`" icon="i-lucide-plus" color="neutral" variant="ghost" aria-label="Add stay" />
     </template>
 
-    <div>
-      <div class="quest-tabs mb-8 flex justify-center gap-3 py-6" role="tablist" aria-label="Work view">
-        <button v-for="range in ranges" :key="range.value" type="button" role="tab" :aria-selected="rangeModel === range.value" :tabindex="rangeModel === range.value ? 0 : -1" :data-testid="`today-range-${range.value}`" class="quest-tab" @click="rangeModel = range.value" @keydown="onRangeKeydown($event)">{{ range.label }}</button>
+    <div class="mx-auto w-full max-w-[848px]">
+      <div class="mb-7 flex items-center justify-center gap-3 py-2">
+        <div class="tog" role="tablist" aria-label="Work view">
+          <button v-for="item in ranges" :key="item.value" type="button" role="tab" :aria-selected="range === item.value" :tabindex="range === item.value ? 0 : -1" :data-testid="`today-range-${item.value}`" @click="range = item.value" @keydown="onRangeKeydown">{{ item.label }}</button>
+        </div>
+        <button v-if="canCreate" type="button" class="add" aria-label="Add task" data-testid="today-add-task" @click="createOpen = true"><UIcon name="i-lucide-plus" class="size-4" /></button>
       </div>
 
-      <UAlert
-        v-if="activeError"
-        class="mb-6"
-        color="error"
-        variant="soft"
-        :title="`${activeLabel} could not be loaded`"
-        :description="getErrorMessage(activeError, `${activeLabel} request failed`)"
-      >
-        <template #actions>
-          <UButton color="error" variant="soft" size="xs" @click="refreshAgenda">Retry</UButton>
-        </template>
+      <UAlert v-if="loadError" class="mb-6" color="error" variant="soft" :title="`${range === 'today' ? 'Today' : 'Upcoming'} could not be loaded`" :description="getErrorMessage(loadError, 'The request failed')">
+        <template #actions><UButton color="error" variant="soft" size="xs" @click="() => refresh()">Retry</UButton></template>
       </UAlert>
+      <UAlert v-if="actionError" class="mb-6" color="error" variant="soft" title="Your change could not be saved" :description="getErrorMessage(actionError, 'The request failed')" />
 
-      <UAlert v-if="decisionError" class="mb-6" color="error" variant="soft" title="Your choice could not be completed" :description="getErrorMessage(decisionError, 'The request failed')" />
-      <UAlert v-if="todayData?.recommendationIssues.length && !activeError" class="mb-6" color="warning" variant="soft" title="Some performance data could not be loaded" :description="todayData.recommendationIssues.join(' ')" />
-
-      <ul v-if="visibleItems.length && !activeError" class="mx-auto w-full max-w-3xl space-y-4" role="list" data-testid="today-list">
-        <li v-for="item in visibleItems" :key="item.id">
-          <TodayAgendaCard :item="item" :surface="activeRange" :on-decide="decide" />
-        </li>
-      </ul>
-
-      <p v-if="!visibleItems.length && !activeLoading && !activeError && !hasMore" class="text-sm text-muted">{{ emptyTitle }}</p>
-
-      <details v-if="!personalScope && activeRange === 'today' && !activeError && priorities" class="mx-auto mt-8 w-full max-w-3xl" role="group" aria-label="Your priority" data-testid="today-priorities">
-        <summary class="cursor-pointer text-sm font-medium">Business goals</summary>
-        <ul v-if="priorities.length" class="mb-4 space-y-2">
-          <li v-for="goal in priorities" :key="goal.id" class="flex items-start justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2" data-testid="today-priority">
-            <div class="min-w-0 text-sm">
-              <span class="text-highlighted">{{ goal.intent }}</span>
-              <p v-if="goal.strategy" class="mt-1 text-muted">{{ strategyDescription(goal.strategy) }}</p>
-            </div>
-            <UButton size="xs" color="neutral" variant="ghost" icon="i-lucide-x" :aria-label="`Remove priority: ${goal.intent}`" :loading="priorityBusy === goal.id" :disabled="priorityBusy !== null" @click="removePriority(goal)" />
-          </li>
+      <!-- A guest account's own visits. -->
+      <template v-if="personalScope">
+        <ul v-if="visits.length" class="space-y-4" role="list" data-testid="today-list">
+          <li v-for="item in visits" :key="item.id"><TodayAgendaCard :item="item" /></li>
         </ul>
-        <form class="space-y-3" @submit.prevent="addPriority">
-          <div class="flex gap-2">
-            <UInput v-model="priorityDraft" class="flex-1" :maxlength="2000" required placeholder="What should the business focus on now?" aria-label="New priority" />
-            <UButton type="submit" color="neutral" variant="soft" label="Add" :loading="priorityBusy === 'new'" :disabled="priorityBusy !== null || !priorityDraft.trim()" />
-          </div>
-          <details>
-            <summary class="cursor-pointer text-sm text-muted">Choose related work (optional)</summary>
-            <div class="mt-3 flex flex-wrap gap-x-5 gap-y-3">
-              <UCheckbox v-for="channel in strategyChannels" :key="channel.value" :model-value="priorityChannels.includes(channel.value)" :label="channel.label" @update:model-value="togglePriorityChannel(channel.value, $event === true)" />
-              <UCheckbox v-model="priorityPayments" label="Accept payments" />
-              <UCheckbox v-model="priorityAvailability" label="Booking availability" />
+        <p v-else-if="!pending && !loadError" class="text-sm text-muted">{{ range === 'today' ? 'No bookings today' : 'No upcoming bookings' }}</p>
+      </template>
+
+      <!-- The business's stored tasks and opportunities. -->
+      <template v-else-if="business">
+        <UAlert v-if="business.opportunityIssues.length" class="mb-6" color="warning" variant="soft" title="Some performance data could not be loaded" :description="business.opportunityIssues.join(' ')" />
+        <!-- Open work, then Opportunities full width, then Done (or Upcoming's days). -->
+        <template v-for="part in parts" :key="part.key">
+          <template v-if="part.section">
+            <h2 v-if="part.section.title" class="wh2">{{ part.section.title }}<small v-if="part.section.subtitle">{{ part.section.subtitle }}</small></h2>
+            <ul :class="part.section.id === 'open' ? 'wtasks' : 'wgrid'" role="list" :data-testid="`today-section-${part.section.id}`">
+              <li v-for="task in part.section.tasks" :key="task.id" :class="{ 'is-photo': task.face === 'photo' && part.section.id === 'open' }">
+                <TaskCard :task="task" :assignees="business.assignees" :busy="taskBusy[task.id] !== undefined" @open="openTask(task)" @complete="complete(task)" @reopen="reopen(task)" @assign="person => assign(task, person)" />
+              </li>
+            </ul>
+          </template>
+          <template v-else>
+            <h2 class="wh2">Opportunities</h2>
+            <ul class="wgrid" role="list" data-testid="today-opportunities">
+              <li v-for="opportunity in business.opportunities" :key="opportunity.id">
+                <TaskCard :opportunity="opportunity" :busy="opportunityBusy[opportunity.id] !== undefined" @accept="accept(opportunity)" @dismiss="dismiss(opportunity)" @defer="until => defer(opportunity, until)" />
+              </li>
+            </ul>
+          </template>
+        </template>
+        <p v-if="!business.tasks.length && !business.opportunities.length && !pending" class="text-sm text-muted" data-testid="today-empty">{{ range === 'today' ? 'Nothing to do today' : 'Nothing planned yet' }}</p>
+
+        <details v-if="canManage && range === 'today'" class="mt-8" role="group" aria-label="Your priority" data-testid="today-priorities">
+          <summary class="cursor-pointer text-sm font-medium">Business goals</summary>
+          <ul v-if="goals.length" class="mb-4 space-y-2">
+            <li v-for="goal in goals" :key="goal.id" class="flex items-start justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2" data-testid="today-priority">
+              <div class="min-w-0 text-sm">
+                <span class="text-highlighted">{{ goal.intent }}</span>
+                <p v-if="goal.strategy" class="mt-1 text-muted">{{ strategyDescription(goal.strategy) }}</p>
+              </div>
+              <UButton size="xs" color="neutral" variant="ghost" icon="i-lucide-x" :aria-label="`Remove priority: ${goal.intent}`" :loading="goalBusy === goal.id" :disabled="goalBusy !== null" @click="removeGoal(goal)" />
+            </li>
+          </ul>
+          <form class="space-y-3" @submit.prevent="addGoal">
+            <div class="flex gap-2">
+              <UInput v-model="goalDraft" class="flex-1" :maxlength="2000" required placeholder="What should the business focus on now?" aria-label="New priority" />
+              <UButton type="submit" color="neutral" variant="soft" label="Add" :loading="goalBusy === 'new'" :disabled="goalBusy !== null || !goalDraft.trim()" />
             </div>
-          </details>
-        </form>
-      </details>
+            <details>
+              <summary class="cursor-pointer text-sm text-muted">Choose related work (optional)</summary>
+              <div class="mt-3 flex flex-wrap gap-x-5 gap-y-3">
+                <UCheckbox v-for="channel in strategyChannels" :key="channel.value" :model-value="goalChannels.includes(channel.value)" :label="channel.label" @update:model-value="toggleChannel(channel.value, $event === true)" />
+                <UCheckbox v-model="goalPayments" label="Accept payments" />
+                <UCheckbox v-model="goalAvailability" label="Booking availability" />
+              </div>
+            </details>
+          </form>
+        </details>
+      </template>
 
-      <div
-        v-if="(hasMore || activeLoading) && !activeError"
-        :key="`${activeRange}-${filterSignature}`"
-        ref="loadMoreSentinel"
-        class="flex min-h-24 items-center justify-center"
-        aria-live="polite"
-      >
-        <UIcon v-if="activeLoading" name="i-lucide-loader-circle" class="size-6 animate-spin text-muted" />
-        <UButton v-else color="neutral" variant="soft" label="Load more" @click="loadMore" />
+      <div v-if="pending && !loadError" class="flex min-h-24 items-center justify-center" aria-live="polite">
+        <UIcon name="i-lucide-loader-circle" class="size-6 animate-spin text-muted" />
       </div>
-
     </div>
+
+    <TodayTaskSheet v-if="!personalScope && organizationId" v-model:open="sheetOpen" :task="openedTask" :organization-id="organizationId" :assignees="business?.assignees ?? []" @changed="taskChanged" />
+    <TodayTaskCreate v-if="canCreate && organizationId" v-model:open="createOpen" :organization-id="organizationId" :assignees="business?.assignees ?? []" @created="taskChanged" />
   </DashboardIndexPanel>
 </template>
 
 <script setup lang="ts">
-import { localDateAt } from '~/utils/timezone'
-import AgendaFilters from './AgendaFilters.vue'
 import TodayAgendaCard from './TodayAgendaCard.vue'
+import TaskCard from './TaskCard.vue'
+import TodayTaskSheet from './TodayTaskSheet.vue'
+import TodayTaskCreate from './TodayTaskCreate.vue'
 import { getErrorMessage } from '~/utils/errors'
-import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayDecisionInput, type TodayFeedPayload, type TodayPriority } from '~/shared/dashboard-today'
-import type { AgendaItem, AgendaPayload } from '~/server/utils/dashboard-agenda'
-import { useDashboardTelemetry } from '~/composables/useDashboardTelemetry'
+import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayFeedPayload } from '~/shared/dashboard-today'
+import type { AgendaPayload } from '~/server/utils/dashboard-agenda'
+import type { TaskPerson, TaskSection, TaskView } from '~/server/domain/tasks'
+import type { OpportunityView } from '~/server/domain/opportunities'
+import type { BusinessGoal, BusinessGoalStrategy } from '~/shared/business-progress'
 import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
-import type { BusinessGoalStrategy } from '~/shared/business-progress'
+import { addLocalDays, localDateAt } from '~/utils/timezone'
 
 useSeoMeta({ title: 'Today | KrabiClaw', robots: 'noindex, nofollow' })
 
 const props = defineProps<{ personalScope?: boolean }>()
-type TodayRange = 'today' | 'upcoming'
-const PAGE_SIZE = 12
-const UPCOMING_WINDOW_DAYS = 30
-const UPCOMING_HORIZON_DAYS = 365
-const ranges: Array<{ label: string; value: TodayRange }> = [
-  { label: 'Today', value: 'today' },
-  { label: 'Upcoming', value: 'upcoming' },
-]
+type Range = 'today' | 'upcoming'
+interface BusinessToday { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
+const ranges: Array<{ label: string; value: Range }> = [{ label: 'Today', value: 'today' }, { label: 'Upcoming', value: 'upcoming' }]
 
 const route = useRoute()
 const router = useRouter()
-const telemetry = useDashboardTelemetry()
-const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
-const apiBase = props.personalScope ? '/api/account' : '/api/dashboard'
 const realtime = useDashboardInvalidations()
 const orgSlug = computed(() => props.personalScope ? 'account' : String(route.params.orgSlug ?? ''))
-const { signature: filterSignature, active: hasActiveFilters, query: filterQuery, range: activeRange, failure: navigationError } = useAgendaFilters()
 const organizationId = props.personalScope ? null : useDashboardOrganizationId()
+const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
 const { organization, hasFeature } = useDashboardOrganization()
-const canAddStay = computed(() => {
+const roleAllows = (permissions: Parameters<typeof authClient.organization.checkRolePermission>[0]['permissions']) => {
   const role = organization.value?.role as keyof typeof organizationRoles | undefined
-  return !props.personalScope && hasFeature('stays') && Boolean(role && authClient.organization.checkRolePermission({ role, permissions: { operations: ['update'] } }))
-})
-const schedulingOrganizationId = computed(() => organization.value?.vertical === 'lodging' ? null : organizationId)
-const todayKey = computed(() => `dashboard-today-${orgSlug.value}-${props.personalScope ? '' : filterSignature.value}`)
-const isTodayFeed = (value: unknown): value is TodayFeedPayload => todayFeedSchema.safeParse(value).success
-const { data: todayData, pending, error: todayError, refresh: refreshToday } = await useAsyncData<TodayFeedPayload>(
-  todayKey,
-  () => dashboardApi<TodayFeedPayload>(`${apiBase}/today`, {
-    query: props.personalScope ? undefined : filterQuery.value,
-    validate: isTodayFeed,
-  }),
-)
+  return Boolean(role && authClient.organization.checkRolePermission({ role, permissions }))
+}
+const canAddStay = computed(() => !props.personalScope && hasFeature('stays') && roleAllows({ operations: ['update'] }))
+const canManage = computed(() => !props.personalScope && roleAllows({ task: ['assign'] }))
+const canCreate = computed(() => !props.personalScope && roleAllows({ task: ['create'] }))
+const createOpen = ref(false)
 
-const rangeModel = computed<string>({
-  get: () => activeRange.value,
-  set: value => {
-    const next = value === 'upcoming' ? 'upcoming' : 'today'
-    if (next !== activeRange.value) {
-      activeRange.value = next
-      if (!props.personalScope) {
-        telemetry.track({
-          action: 'today_range_switch',
-          surface: 'today',
-          range: next,
-          locationId: typeof route.query.locationId === 'string' ? route.query.locationId : undefined,
-        })
-      }
-    }
-  },
+const range = computed<Range>({
+  get: () => route.query.range === 'upcoming' ? 'upcoming' : 'today',
+  set: value => { void router.replace({ query: { ...route.query, range: value === 'upcoming' ? 'upcoming' : undefined } }) },
 })
 function onRangeKeydown(event: KeyboardEvent) {
   if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
   event.preventDefault()
-  const index = event.key === 'Home' ? 0 : event.key === 'End' ? ranges.length - 1
-    : (ranges.findIndex(range => range.value === rangeModel.value) + (event.key === 'ArrowRight' ? 1 : -1) + ranges.length) % ranges.length
-  rangeModel.value = ranges[index]!.value
-  const tabs = (event.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
-  tabs?.[index]?.focus()
+  const index = event.key === 'Home' ? 0 : event.key === 'End' ? 1 : (ranges.findIndex(item => item.value === range.value) + 1) % 2
+  range.value = ranges[index]!.value
+  ;(event.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[index]?.focus()
 }
 
-const todayVisibleCount = ref(PAGE_SIZE)
-const upcomingItems = ref<TodayCard[]>([])
-const upcomingLoading = ref(false)
-const upcomingError = ref<unknown>(null)
-const upcomingCursor = ref<string | null>(null)
-let upcomingEpoch = 0
-const resolvedAt = computed(() => todayData.value?.resolvedAt ?? null)
-const upcomingHorizon = computed(() => resolvedAt.value ? addDays(resolvedAt.value.slice(0, 10), UPCOMING_HORIZON_DAYS + 1) : null)
-const todayCards = computed(() => todayData.value?.cards ?? [])
-const priorities = computed(() => props.personalScope ? null : todayData.value?.priorities ?? null)
-const priorityDraft = ref('')
-const strategyChannels: Array<{ value: BusinessGoalStrategy['channels'][number]; label: string }> = [
-  { value: 'blog', label: 'Blog articles' },
-  { value: 'social', label: 'Social posts' },
-  { value: 'google_ads', label: 'Google Ads' },
-]
-const priorityChannels = ref<BusinessGoalStrategy['channels']>([])
-const priorityPayments = ref(false)
-const priorityAvailability = ref(false)
-const priorityBusy = ref<string | null>(null)
-const decisionError = ref<unknown>(null)
-const visibleItems = computed(() => (activeRange.value === 'today' ? todayCards.value.slice(0, todayVisibleCount.value) : upcomingItems.value).map(cardWithContext))
-const hasMore = computed(() => activeRange.value === 'today'
-  ? todayVisibleCount.value < todayCards.value.length
-  : upcomingCursor.value !== null && upcomingHorizon.value !== null && upcomingCursor.value <= upcomingHorizon.value)
-const activeLoading = computed(() => activeRange.value === 'today' ? pending.value : upcomingLoading.value)
-const activeError = computed(() => navigationError.value ?? todayError.value ?? (activeRange.value === 'upcoming' ? upcomingError.value : null))
-const activeLabel = computed(() => activeRange.value === 'today' ? 'Today' : 'Upcoming')
-const emptyTitle = computed(() => hasActiveFilters.value && !props.personalScope ? 'No items match these filters.' : activeRange.value === 'today'
-  ? props.personalScope ? 'No bookings today' : 'Nothing for today'
-  : props.personalScope ? 'No upcoming bookings' : 'Nothing upcoming')
+const isBusinessToday = (value: unknown): value is BusinessToday => isRecord(value) && Array.isArray(value.tasks) && Array.isArray(value.opportunities) && Array.isArray(value.assignees) && typeof value.resolvedAt === 'string'
+const isFeed = (value: unknown): value is TodayFeedPayload => todayFeedSchema.safeParse(value).success
+const isAgenda = (value: unknown): value is AgendaPayload => isRecord(value) && Array.isArray(value.items)
 
-function resetUpcoming() {
-  upcomingEpoch += 1
-  upcomingItems.value = []
-  upcomingLoading.value = false
-  upcomingError.value = null
-  upcomingCursor.value = resolvedAt.value ? addDays(resolvedAt.value.slice(0, 10), -1) : null
+const { data, pending, error: loadError, refresh } = await useAsyncData(
+  () => `today-${orgSlug.value}-${range.value}`,
+  async (): Promise<{ business: BusinessToday | null; visits: TodayCard[] }> => {
+    if (!props.personalScope) return { business: await dashboardApi<BusinessToday>('/api/dashboard/today', { query: { range: range.value }, validate: isBusinessToday }), visits: [] }
+    if (range.value === 'today') return { business: null, visits: (await applicationFetch<TodayFeedPayload>('/api/account/today', { validate: isFeed })).cards }
+    // A guest's upcoming visits: the next year of their own agenda, after today.
+    const now = new Date()
+    // From yesterday's UTC date, so every zone's tomorrow is inside; each visit is then compared in its own zone.
+    const from = addLocalDays(now.toISOString().slice(0, 10), -1)
+    const agenda = await applicationFetch<AgendaPayload>('/api/account/agenda', { query: { from, to: addLocalDays(from, 364), kinds: 'reservation,booking,stay' }, validate: isAgenda })
+    return { business: null, visits: agenda.items.filter(item => item.dayKey > localDateAt(now, item.timeZone)).map(item => agendaToTodayCard(item, { resolvedAt: now.toISOString() })) }
+  },
+)
+const business = computed(() => data.value?.business ?? null)
+const parts = computed(() => {
+  const sections = business.value?.tasks ?? []
+  const open = sections.filter(section => section.id === 'open'), rest = sections.filter(section => section.id !== 'open')
+  return [...open.map(section => ({ key: section.id, section })),
+    ...(business.value?.opportunities.length ? [{ key: 'opportunities', section: null }] : []),
+    ...rest.map(section => ({ key: section.id, section }))]
+})
+const visits = computed(() => data.value?.visits ?? [])
+
+// The task sheet; `?task=` opens it, which is where an alert's link lands.
+const sheetOpen = ref(false)
+const openedTask = ref<TaskView | null>(null)
+const isTaskResult = (value: unknown): value is { task: TaskView } => isRecord(value) && isRecord(value.task) && typeof value.task.id === 'string'
+function openTask(task: TaskView) {
+  openedTask.value = task
+  sheetOpen.value = true
 }
-
-function cardWithContext(card: TodayCard): TodayCard {
-  if (card.priority !== 'schedule' && card.bookingKind === null) return card
-  const target = router.resolve(card.to)
-  const query = {
-    range: activeRange.value === 'upcoming' ? 'upcoming' : undefined,
-    locationId: route.query.locationId,
-    kinds: route.query.kinds,
-    assigned_member_id: route.query.assigned_member_id,
-    ...target.query,
-  }
-  return { ...card, to: router.resolve({ path: target.path, query, hash: target.hash }).fullPath }
-}
-
-function isPersonalAgenda(value: unknown): value is AgendaPayload {
-  const nullableString = (field: unknown) => field === null || typeof field === 'string'
-  return isRecord(value) && Array.isArray(value.items) && value.items.every((item): item is AgendaItem =>
-    isRecord(item) && typeof item.id === 'string' && (item.kind === 'reservation' || item.kind === 'booking' || item.kind === 'stay')
-    && typeof item.startsAt === 'string' && typeof item.dayKey === 'string' && typeof item.timeZone === 'string'
-    && typeof item.title === 'string' && typeof item.to === 'string'
-    && nullableString(item.subtitle) && nullableString(item.locationTitle)
-    && nullableString(item.guestImageUrl) && nullableString(item.resourceImageUrl) && nullableString(item.resourceTitle)
-    && nullableString(item.locationId) && nullableString(item.assignedMemberId) && nullableString(item.productId) && nullableString(item.stayChannel)
-    && (item.partySize === null || typeof item.partySize === 'number'))
-}
-
-async function loadUpcoming() {
-  if (upcomingLoading.value || !hasMore.value || !resolvedAt.value || !upcomingHorizon.value) return
-  const epoch = upcomingEpoch
-  const reference = resolvedAt.value
-  const horizon = upcomingHorizon.value
-  upcomingLoading.value = true
-  upcomingError.value = null
+watch(() => route.query.task, async (id) => {
+  if (props.personalScope || typeof id !== 'string' || !organizationId) return
   try {
-    while (upcomingCursor.value && upcomingCursor.value <= horizon && epoch === upcomingEpoch) {
-      const from = upcomingCursor.value
-      const to = minDate(addDays(from, UPCOMING_WINDOW_DAYS - 1), horizon)
-      let cards: TodayCard[]
-      if (props.personalScope) {
-        const payload = await dashboardApi<AgendaPayload>(`${apiBase}/agenda`, { query: { from, to, kinds: 'reservation,booking,stay' }, validate: isPersonalAgenda })
-        cards = payload.items.filter(item => item.dayKey > localDateAt(new Date(reference), item.timeZone))
-          .map(item => agendaToTodayCard(item, { resolvedAt: reference, personal: true }))
-      } else {
-        const payload = await dashboardApi<TodayFeedPayload>(`${apiBase}/today`, {
-          query: { ...filterQuery.value, range: 'upcoming', from, to }, validate: isTodayFeed,
-        })
-        cards = payload.cards
-      }
-      if (epoch !== upcomingEpoch) return
-      const existing = new Set(upcomingItems.value.map(item => item.id))
-      const additions = cards.filter(item => !existing.has(item.id))
-      // Each window arrives in the server's order and windows arrive in date order.
-      upcomingItems.value.push(...additions)
-      upcomingCursor.value = addDays(to, 1)
-      if (additions.length) break
-    }
+    openTask((await applicationFetch<{ task: TaskView }>(`/api/organizations/${encodeURIComponent(organizationId)}/tasks/${encodeURIComponent(id)}`, { validate: isTaskResult })).task)
   } catch (cause) {
-    if (epoch === upcomingEpoch) upcomingError.value = cause
+    actionError.value = cause
+  }
+}, { immediate: true })
+watch(sheetOpen, (isOpen) => {
+  if (!isOpen && route.query.task) void router.replace({ query: { ...route.query, task: undefined } })
+})
+async function taskChanged() { await refresh() }
+
+const actionError = ref<unknown>(null)
+const taskBusy = ref<Record<string, 'assign' | 'complete' | 'reopen'>>({})
+const opportunityBusy = ref<Record<string, 'accept' | 'later'>>({})
+const tasksApi = computed(() => `/api/organizations/${encodeURIComponent(organizationId ?? '')}`)
+
+async function act<T extends Record<string, string>>(busy: Ref<T>, id: string, state: T[string], request: () => Promise<unknown>) {
+  busy.value = { ...busy.value, [id]: state }
+  actionError.value = null
+  try {
+    await request()
+    await refresh()
+  } catch (cause) {
+    actionError.value = cause
   } finally {
-    if (epoch === upcomingEpoch) upcomingLoading.value = false
+    const { [id]: _done, ...rest } = busy.value
+    busy.value = rest as T
   }
 }
+const complete = (task: TaskView) => act(taskBusy, task.id, 'complete', () => applicationFetch(`${tasksApi.value}/tasks/${encodeURIComponent(task.id)}/complete`, { method: 'POST', validate: isTaskResult, body: {} }))
+const reopen = (task: TaskView) => act(taskBusy, task.id, 'reopen', () => applicationFetch(`${tasksApi.value}/tasks/${encodeURIComponent(task.id)}/reopen`, { method: 'POST', validate: isTaskResult, body: { expectedVersion: task.version } }))
+const assign = (task: TaskView, person: TaskPerson | null) => act(taskBusy, task.id, 'assign', () => applicationFetch(`${tasksApi.value}/tasks/${encodeURIComponent(task.id)}`, { method: 'PATCH', validate: isTaskResult,
+  body: { expectedVersion: task.version, assignedMemberId: person?.type === 'member' ? person.id : null, assignedTeamId: person?.type === 'team' ? person.id : null } }))
+const isOpportunityResult = (value: unknown): value is { opportunity: { id: string } } => isRecord(value) && isRecord(value.opportunity) && typeof value.opportunity.id === 'string'
+const accept = (opportunity: OpportunityView) => act(opportunityBusy, opportunity.id, 'accept', () => applicationFetch(`${tasksApi.value}/opportunities/${encodeURIComponent(opportunity.id)}/accept`, { method: 'POST', validate: isTaskResult, body: {} }))
+const dismiss = (opportunity: OpportunityView) => act(opportunityBusy, opportunity.id, 'later', () => applicationFetch(`${tasksApi.value}/opportunities/${encodeURIComponent(opportunity.id)}/dismiss`, { method: 'POST', validate: isOpportunityResult, body: {} }))
+const defer = (opportunity: OpportunityView, until: string) => act(opportunityBusy, opportunity.id, 'later', () => applicationFetch(`${tasksApi.value}/opportunities/${encodeURIComponent(opportunity.id)}/defer`, { method: 'POST', validate: isOpportunityResult, body: { until } }))
 
-async function loadMore() {
-  if (activeLoading.value || !hasMore.value || activeError.value) return
-  if (activeRange.value === 'today') todayVisibleCount.value += PAGE_SIZE
-  else await loadUpcoming()
-}
-
-async function refreshAgenda() {
-  await refreshToday()
-}
-
-const organizationApi = computed(() => `/api/organizations/${encodeURIComponent(organizationId ?? '')}`)
-const isSavedGoal = (value: unknown): value is { goal: TodayPriority } => isRecord(value) && isRecord(value.goal) && typeof value.goal.id === 'string' && typeof value.goal.revision === 'string'
-const isSavedFeedback = (value: unknown): value is { feedback: { id: string; decision: string } } => isRecord(value) && isRecord(value.feedback) && typeof value.feedback.id === 'string' && typeof value.feedback.decision === 'string'
-
-/** Saves one decision against the evidence the card was suggested on, then reads Today again. */
-async function decide(item: TodayCard, input: TodayDecisionInput) {
-  if (!item.decision) throw new Error(`Card ${item.id} has no decision to record`)
-  decisionError.value = null
-  const { operation, subjectId, evidenceRevision, goalId, goalRevision, revision } = item.decision
-  try {
-    await applicationFetch(`${organizationApi.value}/recommendation-feedback`, { method: 'PUT', validate: isSavedFeedback, body: {
-      operation, subjectId, evidenceRevision, decision: input.decision, note: input.note, deferUntil: input.deferUntil, revision,
-      ...(goalId && goalRevision ? { goalId, goalRevision } : {}),
-    } })
-  } catch (cause) {
-    decisionError.value = cause
-    return false
-  }
-  await refreshToday()
-  return true
-}
-
-async function changePriorities(busy: string, request: () => Promise<unknown>) {
-  priorityBusy.value = busy
-  decisionError.value = null
+// Business goals steer which opportunities the selector finds.
+const isProgress = (value: unknown): value is { goals: BusinessGoal[] } => isRecord(value) && Array.isArray(value.goals)
+const { data: progress, refresh: refreshGoals } = await useAsyncData(() => `today-goals-${orgSlug.value}`,
+  async () => canManage.value ? (await applicationFetch<{ goals: BusinessGoal[] }>(`${tasksApi.value}/progress`, { query: { limit: 1 }, validate: isProgress })).goals : [],
+  { watch: [canManage] })
+const goals = computed(() => (progress.value ?? []).filter(goal => goal.status === 'active'))
+const goalDraft = ref('')
+const strategyChannels: Array<{ value: BusinessGoalStrategy['channels'][number]; label: string }> = [
+  { value: 'blog', label: 'Blog articles' }, { value: 'social', label: 'Social posts' }, { value: 'google_ads', label: 'Google Ads' },
+]
+const goalChannels = ref<BusinessGoalStrategy['channels']>([])
+const goalPayments = ref(false)
+const goalAvailability = ref(false)
+const goalBusy = ref<string | null>(null)
+const goalRequest = ref<{ signature: string; idempotencyKey: string } | null>(null)
+const isSavedGoal = (value: unknown): value is { goal: BusinessGoal } => isRecord(value) && isRecord(value.goal) && typeof value.goal.id === 'string'
+async function changeGoals(busy: string, request: () => Promise<unknown>): Promise<boolean> {
+  goalBusy.value = busy
+  actionError.value = null
   try {
     await request()
   } catch (cause) {
-    decisionError.value = cause
-    return
+    actionError.value = cause
+    return false
   } finally {
-    priorityBusy.value = null
+    goalBusy.value = null
   }
-  await refreshToday()
+  await Promise.all([refreshGoals(), refresh()])
+  return true
 }
-
-const priorityRequest = ref<{ signature: string; idempotencyKey: string } | null>(null)
-async function addPriority() {
-  const intent = priorityDraft.value.trim()
+async function addGoal() {
+  const intent = goalDraft.value.trim()
   if (!intent) return
-  const strategy: BusinessGoalStrategy | null = priorityChannels.value.length || priorityPayments.value || priorityAvailability.value
-    ? { channels: [...priorityChannels.value], payments: priorityPayments.value, availability: priorityAvailability.value }
-    : null
+  const strategy: BusinessGoalStrategy | null = goalChannels.value.length || goalPayments.value || goalAvailability.value
+    ? { channels: [...goalChannels.value], payments: goalPayments.value, availability: goalAvailability.value } : null
   const signature = JSON.stringify({ intent, strategy })
-  if (priorityRequest.value?.signature !== signature) priorityRequest.value = { signature, idempotencyKey: crypto.randomUUID() }
-  await changePriorities('new', () => applicationFetch(`${organizationApi.value}/goals`, { method: 'POST', validate: isSavedGoal, body: { idempotencyKey: priorityRequest.value!.idempotencyKey, intent, strategy } }))
-  if (!decisionError.value) {
-    priorityRequest.value = null
-    priorityDraft.value = ''
-    priorityChannels.value = []
-    priorityPayments.value = false
-    priorityAvailability.value = false
+  if (goalRequest.value?.signature !== signature) goalRequest.value = { signature, idempotencyKey: crypto.randomUUID() }
+  if (await changeGoals('new', () => applicationFetch(`${tasksApi.value}/goals`, { method: 'POST', validate: isSavedGoal, body: { idempotencyKey: goalRequest.value!.idempotencyKey, intent, strategy } }))) {
+    goalRequest.value = null
+    goalDraft.value = ''
+    goalChannels.value = []
+    goalPayments.value = false
+    goalAvailability.value = false
   }
 }
-
-function togglePriorityChannel(channel: BusinessGoalStrategy['channels'][number], selected: boolean) {
-  priorityChannels.value = selected ? [...new Set([...priorityChannels.value, channel])] : priorityChannels.value.filter(value => value !== channel)
+function toggleChannel(channel: BusinessGoalStrategy['channels'][number], selected: boolean) {
+  goalChannels.value = selected ? [...new Set([...goalChannels.value, channel])] : goalChannels.value.filter(value => value !== channel)
 }
-
 function strategyDescription(strategy: BusinessGoalStrategy): string {
   return [...strategyChannels.filter(channel => strategy.channels.includes(channel.value)).map(channel => channel.label),
     ...(strategy.payments ? ['Accept payments'] : []), ...(strategy.availability ? ['Booking availability'] : [])].join(' · ')
 }
-
-async function removePriority(goal: TodayPriority) {
-  await changePriorities(goal.id, () => applicationFetch(`${organizationApi.value}/goals/${encodeURIComponent(goal.id)}`, { method: 'PATCH', validate: isSavedGoal, body: { revision: goal.revision, status: 'archived' } }))
+async function removeGoal(goal: BusinessGoal) {
+  await changeGoals(goal.id, () => applicationFetch(`${tasksApi.value}/goals/${encodeURIComponent(goal.id)}`, { method: 'PATCH', validate: isSavedGoal, body: { revision: goal.revision, status: 'archived' } }))
 }
-function addDays(dateKey: string, days: number): string {
-  const date = new Date(`${dateKey}T00:00:00Z`)
-  date.setUTCDate(date.getUTCDate() + days)
-  return date.toISOString().slice(0, 10)
-}
-function minDate(left: string, right: string): string { return left < right ? left : right }
 
-resetUpcoming()
-// Nuxt carries the previous async-data value into a new reactive key while
-// fetching. A card for the previous scope must never remain actionable.
-watch(todayKey, () => { todayData.value = undefined }, { flush: 'sync' })
-watch(activeRange, async range => {
-  if (range === 'upcoming' && !upcomingItems.value.length) await loadUpcoming()
+watch(realtime.event, (event) => {
+  if (!event) return
+  if (['business.changed', 'stay.changed', 'access.changed', 'thread.created', 'thread.changed', 'entry.appended', 'delivery.changed'].includes(event.type)) void refresh()
 })
-watch(filterSignature, (newSig, oldSig) => {
-  todayVisibleCount.value = PAGE_SIZE
-  resetUpcoming()
-  upcomingCursor.value = null
-  if (!props.personalScope && oldSig !== undefined && newSig !== oldSig) {
-    telemetry.track({
-      action: 'today_filter_change',
-      surface: activeRange.value,
-      range: activeRange.value,
-      locationId: typeof route.query.locationId === 'string' ? route.query.locationId : undefined,
-      metadata: {
-        filterSignature: newSig,
-      },
-    })
-  }
-}, { flush: 'sync' })
-watch(todayData, async (data) => {
-  const loadedThrough = upcomingItems.value.length ? upcomingCursor.value : null
-  resetUpcoming()
-  if (activeRange.value === 'upcoming') {
-    const epoch = upcomingEpoch
-    do { await loadUpcoming() }
-    while (epoch === upcomingEpoch && loadedThrough && upcomingCursor.value && upcomingCursor.value < loadedThrough && hasMore.value && !upcomingError.value)
-  }
-  if (!props.personalScope && data) {
-    telemetry.track({
-      action: 'today_view',
-      surface: activeRange.value,
-      range: activeRange.value,
-      locationId: typeof route.query.locationId === 'string' ? route.query.locationId : undefined,
-      metadata: {
-        totalCards: data.cards.length,
-        attentionCount: data.cards.filter(c => c.priority === 'attention').length,
-        scheduledCount: data.cards.filter(c => c.priority === 'schedule').length,
-      },
-    })
-  }
-}, { flush: 'post' })
-watch(realtime.event, event => {
-  if (event?.type === 'thread.created' || event?.type === 'thread.changed' || event?.type === 'notification.created'
-    || event?.type === 'entry.appended' || event?.type === 'delivery.changed' || event?.type === 'access.changed'
-    || event?.type === 'stay.changed' || event?.type === 'nights.changed' || event?.type === 'business.changed') void refreshAgenda()
-})
-watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refreshAgenda() })
-
-const loadMoreSentinel = ref<HTMLElement | null>(null)
-let loadMoreObserver: IntersectionObserver | null = null
-let refreshTimer: ReturnType<typeof setTimeout> | null = null
-function scheduleRefresh() {
-  if (refreshTimer) clearTimeout(refreshTimer)
-  if (document.visibilityState !== 'visible') return
-  // Re-read at the next known due instant, including later today, and at least
-  // once a minute for midnight/eligibility changes that have no write event.
-  const now = Date.now()
-  const next = [...todayCards.value, ...upcomingItems.value]
-    .flatMap(card => [card.actionAt, card.occurrenceAt])
-    .filter((at): at is string => at !== null && Date.parse(at) > now)
-    .reduce((soonest, at) => Math.min(soonest, Date.parse(at)), now + 60_000)
-  refreshTimer = setTimeout(() => { void refreshAgenda() }, Math.max(1000, next - now + 100))
-}
-function resumeAgenda() {
-  if (document.visibilityState === 'visible') void refreshAgenda()
-  else if (refreshTimer) clearTimeout(refreshTimer)
-}
-watch([todayData, upcomingItems], () => {
-  if (import.meta.client) scheduleRefresh()
-}, { flush: 'post', deep: true })
+watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refresh() })
+function resume() { if (document.visibilityState === 'visible') void refresh() }
+// Today changes at the viewer's midnight with no write; re-read each minute while visible.
+let minute: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
-  window.addEventListener('focus', resumeAgenda)
-  document.addEventListener('visibilitychange', resumeAgenda)
-  scheduleRefresh()
-  if (activeRange.value === 'upcoming') void loadUpcoming()
-  if (!('IntersectionObserver' in window)) return
-  loadMoreObserver = new IntersectionObserver(entries => {
-    if (entries.some(entry => entry.isIntersecting)) void loadMore()
-  }, { rootMargin: '320px 0px' })
-  if (loadMoreSentinel.value) loadMoreObserver.observe(loadMoreSentinel.value)
+  window.addEventListener('focus', resume)
+  document.addEventListener('visibilitychange', resume)
+  minute = setInterval(resume, 60_000)
 })
-watch(loadMoreSentinel, (element, previous) => {
-  if (previous) loadMoreObserver?.unobserve(previous)
-  if (element) loadMoreObserver?.observe(element)
-}, { flush: 'post' })
 onBeforeUnmount(() => {
-  upcomingEpoch += 1
-  if (refreshTimer) clearTimeout(refreshTimer)
-  window.removeEventListener('focus', resumeAgenda)
-  document.removeEventListener('visibilitychange', resumeAgenda)
-  loadMoreObserver?.disconnect()
+  window.removeEventListener('focus', resume)
+  document.removeEventListener('visibilitychange', resume)
+  if (minute) clearInterval(minute)
 })
 </script>
 
 <style scoped>
-.quest-tab { height: 48px; padding: 14px 24px; border-radius: 9999px; font-size: 16px; line-height: 20px; font-weight: 500; background: rgb(240 240 240 / 86%); color: #000; }
-.quest-tab[aria-selected="true"] { background: rgb(32 32 32 / 86%); color: #fff; box-shadow: 0 4px 16px rgb(0 0 0 / 9%), 0 2px 8px rgb(0 0 0 / 6%); }
-.quest-tab:focus-visible { outline: 2px solid var(--ui-text-highlighted); outline-offset: 4px; }
+.tog { display: flex; width: 340px; max-width: 100%; padding: 4px; border-radius: 999px; background: var(--ui-bg-elevated); }
+.tog button { flex: 1; height: 32px; border-radius: 999px; font-size: 15px; font-weight: 500; color: var(--ui-text-highlighted); }
+.tog button[aria-selected="true"] { background: var(--ui-bg); font-weight: 600; box-shadow: 0 1px 4px rgb(0 0 0 / 14%); }
+.tog button:focus-visible, .add:focus-visible { outline: 2px solid var(--ui-text-highlighted); outline-offset: 2px; }
+.add { display: flex; flex: none; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; background: var(--ui-bg-elevated); color: var(--ui-text-highlighted); }
+.wh2 { margin: 28px 2px 16px; font-size: 22px; line-height: 28px; font-weight: 700; letter-spacing: -.02em; color: var(--ui-text-highlighted); }
+.wh2 small { margin-left: 8px; font-size: 15px; line-height: 20px; font-weight: 400; letter-spacing: 0; color: var(--ui-text-muted); }
+.wtasks { display: grid; grid-template-columns: 1fr 1fr; grid-auto-flow: row dense; gap: 20px; align-items: start; }
+.wtasks > li { display: flex; }
+.wtasks > li > * { flex: 1; }
+/* A photo card spans two compact rows beside them. */
+.wtasks > li.is-photo { grid-row: span 2; }
+.wgrid { display: grid; gap: 20px; }
+@media (max-width: 767px) { .wtasks { grid-template-columns: 1fr; gap: 12px; } .wtasks > li.is-photo { grid-row: auto; } .wgrid { gap: 12px; } }
 </style>

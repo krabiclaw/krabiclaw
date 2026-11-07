@@ -1,4 +1,4 @@
-import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { WebhookEventPayload } from 'resend'
 import { notifyBuyerThread } from '~/server/utils/notification-center'
 import { buildReplyToAddress, type ReplyEmailEnv } from '~/server/utils/submission-messages'
@@ -263,6 +263,15 @@ export function compareDeliveryStatus(current: string | null, incoming: GuestThr
  * delivery cannot both write and a regression cannot land between the read
  * and the write. Returns whether the stored status changed.
  */
+/** Whether a reply reached the guest decides whether the business still owes one: the reply tasks change with the receipt. */
+async function deliveryTaskQueries(db: DbClient, deliveryId: string): Promise<BatchQuery[]> {
+  const entry = await queryFirst<{ request_id: string | null }>(db, 'SELECT e.request_id FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id WHERE d.id = ?', [deliveryId])
+  if (!entry?.request_id) return []
+  // The conversation repository reads receipts through this module; it is loaded when used, not at import.
+  const { conversationTaskQueries } = await import('./repository')
+  return conversationTaskQueries(entry.request_id, new Date().toISOString())
+}
+
 export async function advanceDeliveryStatus(
   db: DbClient,
   delivery: { id: string; status: string },
@@ -270,14 +279,14 @@ export async function advanceDeliveryStatus(
   error: string | null,
 ): Promise<boolean> {
   let observed = delivery.status
+  const tasks = await deliveryTaskQueries(db, delivery.id)
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (!compareDeliveryStatus(observed, incoming)) return false
-    const result = await execute(db, `
-      UPDATE guest_thread_deliveries
-      SET status = ?, error = ?, updated_at = ?
-      WHERE id = ? AND status = ?
-    `, [incoming, error, new Date().toISOString(), delivery.id, observed])
-    if (result.meta.changes > 0) return true
+    const [result] = await executeBatch(db, [{
+      query: `UPDATE guest_thread_deliveries SET status = ?, error = ?, updated_at = ? WHERE id = ? AND status = ?`,
+      params: [incoming, error, new Date().toISOString(), delivery.id, observed],
+    }, ...tasks], { operation: 'Advance delivery status' })
+    if ((result?.meta.changes ?? 0) > 0) return true
     const current = await getDeliveryById(db, delivery.id)
     if (!current) throw new Error(`Guest thread delivery ${delivery.id} disappeared while its status was advanced`)
     observed = current.status
@@ -356,11 +365,12 @@ export async function recordDeliveryOutcome(
     nonDeliveryConfirmed?: boolean
   },
 ): Promise<GuestThreadDeliveryRow> {
-  await execute(db, `
-    UPDATE guest_thread_deliveries
-    SET status = ?, provider_message_id = COALESCE(?, provider_message_id), error = ?, non_delivery_confirmed = ?, updated_at = ?
-    WHERE id = ? AND status NOT IN ('accepted', 'sent', 'delivered', 'read')
-  `, [input.status, input.providerMessageId ?? null, input.error ?? null, input.nonDeliveryConfirmed === undefined ? null : input.nonDeliveryConfirmed ? 1 : 0, new Date().toISOString(), input.deliveryId])
+  await executeBatch(db, [{
+    query: `UPDATE guest_thread_deliveries
+      SET status = ?, provider_message_id = COALESCE(?, provider_message_id), error = ?, non_delivery_confirmed = ?, updated_at = ?
+      WHERE id = ? AND status NOT IN ('accepted', 'sent', 'delivered', 'read')`,
+    params: [input.status, input.providerMessageId ?? null, input.error ?? null, input.nonDeliveryConfirmed === undefined ? null : input.nonDeliveryConfirmed ? 1 : 0, new Date().toISOString(), input.deliveryId],
+  }, ...await deliveryTaskQueries(db, input.deliveryId)], { operation: 'Record delivery outcome' })
   const updated = await getDeliveryById(db, input.deliveryId)
   if (!updated) throw new Error('Guest thread delivery not found')
   return updated

@@ -5,7 +5,7 @@ import { queryFirst } from '~/server/db'
 import { parseSuggestionUse, recordSuggestionAccepted, suggestedDraft } from '~/server/domain/suggested-reply'
 
 // Canonical guest-thread operation endpoint (issue #442 Locked Decision #8). Every
-// state-mutating guest-thread action — confirm/cancel/complete/resolve/reopen/reply —
+// state-mutating guest-thread action in GUEST_THREAD_ACTIONS (confirm, cancel, reply, archive, …)
 // flows through here. The inbox must never call source-specific editor endpoints
 // directly.
 import { jsonResponse } from '~/server/utils/api-response'

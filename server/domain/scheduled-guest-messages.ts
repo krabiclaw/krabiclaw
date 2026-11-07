@@ -1,5 +1,6 @@
 import { HTTPError } from 'nitro'
-import { execute, queryAllPages, queryFirst, type DbClient } from '~/server/db'
+import { execute, executeBatch, queryAllPages, queryFirst, type DbClient } from '~/server/db'
+import { messageDeliveryTaskQueries } from './tasks'
 import { isValidInstant, localDateTimeToInstant } from '~/utils/timezone'
 import { guestMessageDueAt, messagingError } from './guest-message-schedule'
 import { templateSchedule, type MessageTemplateRow, type ScheduledGuestMessageRow } from './guest-messaging'
@@ -110,18 +111,20 @@ async function savePlan(db: DbClient, template: MessageTemplateRow, stay: Planni
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
       WHERE s.id = ? AND s.organization_id = ? AND s.version = ? AND s.request_id IS ? AND l.timezone = ?)`
   const guards = [template.id, template.organization_id, template.version, stay.id, stay.organization_id, stay.version, stay.request_id, stay.timezone]
-  if (existing) {
-    await execute(db, `UPDATE scheduled_guest_messages SET request_id = ?, template_title = ?, template_version = ?, stay_version = ?, body = ?, due_at = ?, timezone = ?, status = ?, reason = ?, error_code = ?, error_field = ?, updated_at = ?
+  // A plan that fails is someone's work: its task is written with it.
+  const id = existing?.id ?? crypto.randomUUID()
+  await executeBatch(db, [existing ? {
+    query: `UPDATE scheduled_guest_messages SET request_id = ?, template_title = ?, template_version = ?, stay_version = ?, body = ?, due_at = ?, timezone = ?, status = ?, reason = ?, error_code = ?, error_field = ?, updated_at = ?
       WHERE id = ? AND status = 'pending' AND updated_at = ? AND ${scope}`,
-    [stay.request_id, template.title, template.version, stay.version, template.body, values.due_at, stay.timezone, values.status, values.reason, values.error_code, values.error_field, now, existing.id, existing.updated_at, ...guards])
-  } else {
-    await execute(db, `INSERT INTO scheduled_guest_messages (id, organization_id, product_id, stay_id, request_id, template_id, template_title, template_version, stay_version,
+    params: [stay.request_id, template.title, template.version, stay.version, template.body, values.due_at, stay.timezone, values.status, values.reason, values.error_code, values.error_field, now, existing.id, existing.updated_at, ...guards],
+  } : {
+    query: `INSERT INTO scheduled_guest_messages (id, organization_id, product_id, stay_id, request_id, template_id, template_title, template_version, stay_version,
       body, due_at, timezone, status, reason, error_code, error_field, created_at, updated_at)
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${scope}
       ON CONFLICT(template_id, stay_id) DO NOTHING`,
-    [crypto.randomUUID(), stay.organization_id, stay.product_id, stay.id, stay.request_id, template.id, template.title, template.version, stay.version,
-      template.body, values.due_at, stay.timezone, values.status, values.reason, values.error_code, values.error_field, now, now, ...guards])
-  }
+    params: [id, stay.organization_id, stay.product_id, stay.id, stay.request_id, template.id, template.title, template.version, stay.version,
+      template.body, values.due_at, stay.timezone, values.status, values.reason, values.error_code, values.error_field, now, now, ...guards],
+  }, ...messageDeliveryTaskQueries(id, now)], { operation: 'Plan scheduled guest message' })
 }
 
 export const CHECK_IN_MESSAGE_TITLE = 'Check-in instructions'
@@ -249,9 +252,12 @@ function sendFailure(outcome: Exclude<OperationOutcome, { ok: true }>): SendFail
 
 async function finishSend(db: DbClient, env: SendEnv, row: ScheduledGuestMessageRow, values: { status: 'sent' | 'failed' | 'needs_review'; reason: string | null; error_code: string | null; error_field: string | null; entry_id: string | null; sent_at: string | null }): Promise<void> {
   const now = new Date().toISOString()
-  const result = await execute(db, `UPDATE scheduled_guest_messages SET status = ?, reason = ?, error_code = ?, error_field = ?, entry_id = ?, sent_at = ?, updated_at = ?
-    WHERE id = ? AND status = 'sending'`, [values.status, values.reason, values.error_code, values.error_field, values.entry_id, values.sent_at, now, row.id])
-  if (result.meta.changes !== 1) messagingError(409, 'SCHEDULED_MESSAGE_NOT_SENDING', 'The scheduled message outcome could not be recorded because it is no longer sending', 'status')
+  const [result] = await executeBatch(db, [{
+    query: `UPDATE scheduled_guest_messages SET status = ?, reason = ?, error_code = ?, error_field = ?, entry_id = ?, sent_at = ?, updated_at = ?
+      WHERE id = ? AND status = 'sending'`,
+    params: [values.status, values.reason, values.error_code, values.error_field, values.entry_id, values.sent_at, now, row.id],
+  }, ...messageDeliveryTaskQueries(row.id, now)], { operation: 'Record scheduled message outcome' })
+  if (result?.meta.changes !== 1) messagingError(409, 'SCHEDULED_MESSAGE_NOT_SENDING', 'The scheduled message outcome could not be recorded because it is no longer sending', 'status')
   await publishScheduledGuestMessageChange(db, env, { ...row, updated_at: now }, values.entry_id === null ? 'thread.changed' : 'entry.appended')
 }
 

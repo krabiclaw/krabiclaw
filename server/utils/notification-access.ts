@@ -32,9 +32,11 @@ export function buildNotificationVisibilityFilter(principal: NotificationVisibil
       visibilityClauses.push(`(n.scope_kind = 'organization' AND n.organization_id = ?)`)
       params.push(principal.organization.id)
     } else if (principal.organization.role === 'member') {
+      // A task alert is addressed to the person whose work it is; anything else follows its booking's assignment.
       visibilityClauses.push(`(n.scope_kind = 'organization' AND n.organization_id = ? AND n.target_user_id = ?
-        AND EXISTS (SELECT 1 FROM activity_entries source JOIN bookings b ON b.request_id = source.request_id
-          WHERE source.id = n.parent_id AND b.organization_id = n.organization_id AND (${assignedBookingSql('b')})))`)
+        AND (n.event_name IN ('task_assigned', 'task_starting')
+          OR EXISTS (SELECT 1 FROM activity_entries source JOIN bookings b ON b.request_id = source.request_id
+            WHERE source.id = n.parent_id AND b.organization_id = n.organization_id AND (${assignedBookingSql('b')}))))`)
       params.push(principal.organization.id, principal.userId, principal.userId)
     }
   }

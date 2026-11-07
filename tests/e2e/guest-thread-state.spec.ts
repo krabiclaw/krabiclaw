@@ -13,7 +13,8 @@ import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededTenant } from './seed/manifest'
 import { devLoginHeaders, seededSiteHeaders, testBaseUrl } from './test-env'
-import type { TodayFeedPayload } from '../../shared/dashboard-today'
+import type { TaskPerson, TaskSection } from '../../server/domain/tasks'
+import type { OpportunityView } from '../../server/domain/opportunities'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 
 interface NotificationView {
@@ -40,6 +41,9 @@ interface DeliveryView {
 interface DeliveryList {
   deliveries: DeliveryView[]
 }
+
+/** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
+type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
 
 const baseURL = testBaseUrl()
 // Contact threads run on the seeded experience business; reservations on the
@@ -203,7 +207,7 @@ interface LedgerEntry {
 }
 
 interface Ledger {
-  state: string
+  needs_reply: boolean
   archived: boolean
   updated_at: string
   guest: { name: string | null; email: string | null; phone: string | null }
@@ -212,7 +216,7 @@ interface Ledger {
 }
 
 /**
- * The conversation's own ledger — state, archive flag, event names and
+ * The conversation's own ledger — whether it needs a reply, archive flag, event names and
  * payloads — which the inbox view model keeps on the server. MCP's
  * get_guest_conversation is the surface that still reads it out, and reading
  * it acknowledges nothing.
@@ -221,6 +225,13 @@ async function loadLedger(request: APIRequestContext, threadId: string, targetOr
   const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_guest_conversation', args: { organization_id: targetOrganizationId, request_id: threadId } })
   await expectStatus(response, 200)
   return mcpData<{ conversation: Ledger }>(await response.json()).conversation
+}
+
+/** The owner's reply tasks on Today, open and done today, for one conversation. */
+async function loadReplyTasks(request: APIRequestContext, slug: string, threadId: string) {
+  const response = await request.get('/api/dashboard/today', { params: { org: slug, kind: 'guest_reply' } })
+  await expectStatus(response, 200)
+  return (await response.json() as BusinessToday).tasks.map(section => ({ section: section.id, tasks: section.tasks.filter(task => task.requestId === threadId) })).filter(section => section.tasks.length)
 }
 
 async function loadNotifications(request: APIRequestContext) {
@@ -343,6 +354,14 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
       event: null,
       payload: { kind: 'contact' },
     })
+    // The guest's question is the business's to answer: one open reply task on Today, which opens the conversation.
+    expect(openingLedger.needs_reply).toBe(true)
+    expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({
+      kind: 'guest_reply', status: 'open', title: `Thread${nonce}`, detail: message, requestId: threadId, outcome: null,
+      action: { type: 'open', label: 'Reply', path: expect.stringContaining(threadId) },
+      can: expect.objectContaining({ complete: false }),
+    })] }])
+    const replyTask = (await loadReplyTasks(owner, organizationSlug(), threadId))[0]!.tasks[0]!
 
     const [ownerListAfterRead, ownerNotificationsAfterRead, secondOwnerListStillUnread, secondOwnerNotificationsStillUnread] = await Promise.all([
       loadThreadList(owner, guestName),
@@ -416,7 +435,11 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
       previewFrom: 'You',
       unread: false,
     })
-    expect((await loadLedger(owner, threadId)).state).toBe('waiting_on_guest')
+    // A reply is an answer once a provider accepted it. This environment delivers email log-only, so the record
+    // shows no delivered answer: the one reply task stays open, for every owner alike.
+    expect((await loadLedger(owner, threadId)).needs_reply).toBe(true)
+    expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({ id: replyTask.id, status: 'open', outcome: null })] }])
+    expect(await loadReplyTasks(secondOwner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({ id: replyTask.id, status: 'open' })] }])
     expect(contactNotification(ownerNotificationsAfterReply, guestName).read_at).toEqual(expect.any(String))
   } finally {
     await Promise.all([owner.dispose(), secondOwner.dispose(), foreignOwner.dispose()])
@@ -487,6 +510,8 @@ test('archive and Move to messages file a conversation without reordering the in
     expect(await loadThreadActions(owner, threadId)).toMatchObject({ archive: true, unarchive: false })
     const before = await loadLedger(owner, threadId)
     expect(before.archived).toBe(false)
+    // The guest's contact message is unanswered: the owner owes a reply.
+    expect(before.needs_reply).toBe(true)
 
     const operationUrl = (action: 'archive' | 'unarchive') =>
       `/api/dashboard/organizations/${organizationId()}/guest-threads/${threadId}/operations/${action}`
@@ -503,8 +528,9 @@ test('archive and Move to messages file a conversation without reordering the in
     const archived = await loadThreadDetail(owner, threadId)
     const archivedEvents = streamEvents(archived, 'You archived this conversation')
     expect(archivedEvents).toHaveLength(1)
-    // Filing it away is not conversation activity: its state and last change are the ones it had.
-    expect(await loadLedger(owner, threadId)).toMatchObject({ archived: true, state: before.state, updated_at: before.updated_at })
+    // Filing it away is not conversation activity: its last change is the one it had. It does close the reply owed.
+    expect(await loadLedger(owner, threadId)).toMatchObject({ archived: true, needs_reply: false, updated_at: before.updated_at })
+    expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([])
     expect(await loadThreadActions(owner, threadId)).toMatchObject({ archive: false, unarchive: true })
     await expectStatus(await archive(), 200)
     const retried = await loadThreadDetail(owner, threadId)
@@ -524,7 +550,9 @@ test('archive and Move to messages file a conversation without reordering the in
     const restored = await loadThreadDetail(owner, threadId)
     expect(streamEvents(restored, 'You moved this conversation back to Messages')).toHaveLength(1)
     expect(streamEvents(restored, 'You archived this conversation')).toEqual(archivedEvents)
-    expect(await loadLedger(owner, threadId)).toMatchObject({ archived: false, updated_at: before.updated_at })
+    // Back in Messages, the question nobody answered is owed again.
+    expect(await loadLedger(owner, threadId)).toMatchObject({ archived: false, needs_reply: true, updated_at: before.updated_at })
+    expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({ kind: 'guest_reply', status: 'open', requestId: threadId })] }])
     expect(await loadThreadActions(owner, threadId)).toMatchObject({ archive: true, unarchive: false })
 
     // Filing it away and back is not conversation activity: the newer thread
@@ -775,11 +803,11 @@ test('Calendar retains confirmed reservations and their detail sends one change 
   await dismissPreviewToolbar(page)
 
   await page.goto(`${baseURL}/dashboard/${demoSlug()}`)
-  // Confirmed bookings are Calendar commitments, not quests for Today.
+  // Confirmed bookings are Calendar commitments, not tasks for Today: neither reservation opened one.
   const todayResponse = await page.request.get('/api/dashboard/today', { params: { org: demoSlug() } })
   await expectStatus(todayResponse, 200)
-  const todayFeed = await todayResponse.json() as TodayFeedPayload
-  expect(todayFeed.cards.some(card => card.id === `attention:${bookingIds[0]}` || card.id === `reservation:${bookingIds[0]}`)).toBe(false)
+  const todayFeed = await todayResponse.json() as BusinessToday
+  expect(todayFeed.tasks.flatMap(section => section.tasks).filter(task => task.requestId !== null && bookingIds.includes(task.requestId))).toEqual([])
   const agendaResponse = await page.request.get('/api/dashboard/agenda', { params: { org: demoSlug(), from: localToday.date, to: localDateAt(new Date(now + 5 * 86_400_000), timezone) } })
   await expectStatus(agendaResponse, 200)
   const agenda = await agendaResponse.json() as { items: Array<{ id: string; to: string; startsAt: string }> }
@@ -787,15 +815,11 @@ test('Calendar retains confirmed reservations and their detail sends one change 
   expect(reservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/reservation/${bookingIds[0]}`)
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Filter activity', exact: true })).toBeVisible()
 
-  const upcomingResponse = await page.request.get('/api/dashboard/today', { params: {
-    org: demoSlug(), range: 'upcoming', from: localToday.date,
-    to: localDateAt(new Date(now + 5 * 86_400_000), timezone),
-  } })
+  const upcomingResponse = await page.request.get('/api/dashboard/today', { params: { org: demoSlug(), range: 'upcoming' } })
   await expectStatus(upcomingResponse, 200)
-  const upcomingFeed = await upcomingResponse.json() as TodayFeedPayload
-  expect(upcomingFeed.cards.some(card => bookingIds.some(id => card.id === `reservation:${id}`))).toBe(false)
+  const upcomingFeed = await upcomingResponse.json() as BusinessToday
+  expect(upcomingFeed.tasks.flatMap(section => section.tasks).filter(task => task.requestId !== null && bookingIds.includes(task.requestId))).toEqual([])
   const upcomingReservation = agenda.items.find(item => item.id === `reservation:${upcomingBookingId}`)
   expect(upcomingReservation?.to).toBe(`/dashboard/${demoSlug()}/bookings/reservation/${upcomingBookingId}`)
   expect(localDateAt(new Date(upcomingReservation!.startsAt), timezone) > localToday.date).toBe(true)
@@ -1162,8 +1186,12 @@ test('buyer conversation approves and declines canonical changes without moving 
     // A guest's request is a message for the business to answer; the reservation itself has not moved.
     const requested = await loadThreadDetail(owner, threadId, demoOrganizationId())
     const requestedLedger = await loadLedger(owner, threadId, demoOrganizationId())
-    expect(requestedLedger.state).toBe('needs_attention')
+    expect(requestedLedger.needs_reply).toBe(true)
     expect(requestedLedger.operational_record).toEqual(finalRecord)
+    // It is the owner's open reply task on Today, quoting the guest's words.
+    expect(await loadReplyTasks(owner, demoSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({
+      kind: 'guest_reply', status: 'open', detail: changeMessage, requestId: threadId,
+    })] }])
     const customerRequest = streamMessages(requested).filter(item => item.side === 'guest' && item.body === changeMessage)
     expect(customerRequest).toMatchObject([{ author: 'E2E Buyer' }])
     const requestDelivery = await owner.get('/api/dev/notifications', { headers: devLoginHeaders(), params: { organization_id: demoOrganizationId(), since: sentAt } })

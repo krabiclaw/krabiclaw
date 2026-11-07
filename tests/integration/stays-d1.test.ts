@@ -11,7 +11,8 @@ import * as schema from '../../server/db/schema.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
 import { addStayHomePhoto, applyChannelBooking, cancelStay, cancelStayAsGuest, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayGapCandidates, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, importStayNights, quoteStay, resumeImportedStay, setStayNights, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
 import { readBusinessProgressReference } from '../../server/utils/business-outcomes.ts'
-import { readBusinessRecommendations, saveRecommendationFeedback } from '../../server/domain/business-progress.ts'
+import { dismissOpportunity, listOpportunities } from '../../server/domain/opportunities.ts'
+import { listTasks, parseTaskListQuery, taskViewer } from '../../server/domain/tasks.ts'
 import { writeMemberScheduling } from '../../server/domain/member-scheduling.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 import { getQuery, H3 } from 'nitro/h3'
@@ -40,7 +41,6 @@ import { handleStaysTools, STAYS_TOOLS } from '../../server/utils/mcp-tools/stay
 import type { McpOrganizationContext } from '../../server/utils/mcp-auth.ts'
 import Ajv from 'ajv'
 import { stayPhotoRoomName, type StayPhotoRoom } from '../../shared/stay-photos.ts'
-import { agendaToTodayCard } from '../../shared/dashboard-today.ts'
 import { STAY_HOME_ACCESSIBILITY_FEATURES } from '../../shared/stay-accessibility.ts'
 import { hashPassword } from 'better-auth/crypto'
 import editNightsRoute from '../../server/api/dashboard/stay-homes/[productId]/nights.put.ts'
@@ -1336,17 +1336,20 @@ test('gap recommendations follow live listing state, effective night rules and a
     for (const [from, to] of [['invalid', gap.to], ['2027-02-30', gap.to], [gap.from, gap.from], [gap.to, gap.from], ['2027-05-03', '2027-08-03'], ['0000-01-01', '0000-01-02'], ['9999-12-30', '9999-12-31']]) {
       await assert.rejects(readBusinessProgressReference(db, principal, { operation: 'stay.gap', subjectId: JSON.stringify([cabin.id, from, to]) }), { status: 404, data: { code: 'PROGRESS_SUBJECT_NOT_FOUND', field: 'subjectId' } })
     }
+    // The gap opportunities Today offers the owner, by the subject each one records.
+    const gapOpportunities = async () => {
+      const listed = (await listOpportunities(db, principal)).opportunities
+      const recorded = new Map((await db.prepare('SELECT id, operation, subject_id FROM opportunities WHERE organization_id = ?').bind(ORG).all<{ id: string; operation: string; subject_id: string }>()).results.map(row => [row.id, row]))
+      return listed.flatMap(item => recorded.get(item.id)!.operation === 'stay.gap' ? [{ id: item.id, subjectId: recorded.get(item.id)!.subject_id }] : [])
+    }
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2027-05-03T12:00:00.000Z') })
-    const firstGap = (await readBusinessRecommendations(db, principal)).recommendations.find(item => item.operation === 'stay.gap')!
+    const [firstGap, ...otherGaps] = await gapOpportunities()
     assert.ok(firstGap)
-    assert.equal(firstGap.subjectId, JSON.stringify([cabin.id, gap.from, gap.to]))
-    await saveRecommendationFeedback(db, principal, { operation: firstGap.operation, subjectId: firstGap.subjectId, evidenceRevision: firstGap.reference.evidenceRevision, decision: 'dismiss' })
-    assert.equal((await readBusinessRecommendations(db, principal)).recommendations.some(item => item.operation === 'stay.gap'), false)
+    assert.deepEqual([firstGap.subjectId, otherGaps], [JSON.stringify([cabin.id, gap.from, gap.to]), []])
+    assert.deepEqual(await dismissOpportunity(db, principal, firstGap.id, {}), { id: firstGap.id, status: 'dismissed' })
+    assert.deepEqual(await gapOpportunities(), [], 'a dismissed gap stays dismissed while its evidence is unchanged')
     t.mock.timers.tick(2 * 86_400_000)
-    const nextGap = (await readBusinessRecommendations(db, principal)).recommendations.find(item => item.operation === 'stay.gap')!
-    assert.ok(nextGap)
-    assert.equal(nextGap.subjectId, JSON.stringify([cabin.id, '2027-05-06', '2027-05-08']))
-    assert.equal(nextGap.feedback, null, 'A prior interval’s dismissal never suppresses this home’s next gap')
+    assert.deepEqual((await gapOpportunities()).map(item => item.subjectId), [JSON.stringify([cabin.id, '2027-05-06', '2027-05-08'])], 'A prior interval’s dismissal never suppresses this home’s next gap')
     t.mock.timers.reset()
 
     // The organization is still on May 3 in Denver; this home's day is May 4.
@@ -1368,9 +1371,11 @@ test('gap recommendations follow live listing state, effective night rules and a
   }
 })
 
-test('members see only the homes they look after and change nothing; a home with stays is not deleted', { timeout: 120_000 }, async () => {
+test('members see only the homes they look after and change nothing; a home with stays is not deleted', { timeout: 120_000 }, async t => {
   const { runtime, db, env } = await boot()
   try {
+    // The stays are booked ahead of their dates, so their turnovers are work rather than history.
+    t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-31T12:00:00.000Z') })
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
     const lake = await home(db, env, { name: 'Lake house', location: 'lake-site' })
     const cabinStay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'c', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
@@ -1387,19 +1392,18 @@ test('members see only the homes they look after and change nothing; a home with
       assert.deepEqual((await ownerToday(now)).items.map(item => item.stayMoment), [moment, moment])
       assert.deepEqual((await cleanerToday(now)).items.map(item => [item.stayId, item.stayMoment]), [[cabinStay.id, moment]])
     }
-    const hostingCard = agendaToTodayCard(hosting.items.find(item => item.stayId === cabinStay.id)!, { resolvedAt: hosting.resolvedAt })
-    assert.equal(hostingCard.eyebrow, 'Currently hosting')
-    assert.equal(hostingCard.headline, 'Ana is staying with 2 guests')
-    assert.equal(hostingCard.occurrenceAt, null)
-    assert.equal(hostingCard.productId, cabin.id)
-    assert.equal(hostingCard.stayChannel, 'direct')
+    // The cleaner's Today is the turnover tasks at the homes they look after.
+    const cleanerTasks = async (now: string) => (await listTasks(db, await taskViewer(db, memberAccessPrincipal(cleanerMembership!, { env })), parseTaskListQuery({}), new Date(now)))
+      .sections.flatMap(section => section.tasks).map(task => [task.kind, task.stayId, task.detail])
+    assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out']])
     const next = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'next', check_in_date: '2026-11-03', check_out_date: '2026-11-05', ...guest })
     const turnover = await cleanerToday('2026-11-03T18:00:00.000Z')
     const departure = turnover.items.find(item => item.stayId === cabinStay.id)!
     assert.equal(departure.stayMoment, 'turnover')
-    assert.equal(agendaToTodayCard(departure, { resolvedAt: turnover.resolvedAt, assigned: true }).description, 'Cabin · cabin-site · Next guests arrive the same day')
+    assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out · Ana in']])
     await cancelStay(db, env, manager, next.id, { expected_version: next.version })
     assert.equal((await cleanerToday('2026-11-03T18:00:00.000Z')).items.find(item => item.stayId === cabinStay.id)!.stayMoment, 'departure')
+    assert.deepEqual(await cleanerTasks('2026-11-03T18:00:00.000Z'), [['turnover', cabinStay.id, 'Ana out']])
     assert.deepEqual((await listStays(db, cleaner, { from: '2026-11-01', to: '2026-11-30' })).map(stay => stay.id), [cabinStay.id])
     assert.deepEqual(await listStays(db, outsider, { from: '2026-11-01', to: '2026-11-30' }), [])
     assert.equal((await getStay(db, cleaner, cabinStay.id)).id, cabinStay.id)
@@ -1410,6 +1414,7 @@ test('members see only the homes they look after and change nothing; a home with
     await assert.rejects(deleteProduct(db, { env, organizationId: ORG, productId: cabin.id }), /has bookings or stays/)
     assert.equal((await getProduct(db, ORG, cabin.id)).id, cabin.id)
   } finally {
+    t.mock.timers.reset()
     await runtime.dispose()
   }
 })

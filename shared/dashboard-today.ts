@@ -1,89 +1,35 @@
 import { z } from 'zod'
-import type { AgendaItem, AgendaLocation } from '~/server/utils/dashboard-agenda'
+import type { AgendaItem } from '~/server/utils/dashboard-agenda'
 import { formatTimestamp, localDateAt } from '~/utils/timezone'
-import { resolveBookingPresentation } from '~/utils/booking-presentation'
-import { STAY_CHANNELS } from '~/shared/bookings'
-import type { BusinessGoal, RecommendationFeedback } from '~/shared/business-progress'
-import { businessGoalStrategySchema, businessProgressReferenceSchema } from '~/shared/business-progress'
 
-/** What the caller can decide about one suggested piece of work, bound to the evidence it was suggested on. */
-const todayDecisionSchema = z.object({
-  operation: businessProgressReferenceSchema.shape.operation, subjectId: z.string(), evidenceRevision: z.string(),
-  goalId: z.string().nullable(), goalRevision: z.string().nullable(),
-  /** The revision of the caller's saved decision under exactly this evidence and goal; null when a decision would be new. */
-  revision: z.string().nullable(),
-  current: z.object({ decision: z.enum(['accept', 'dismiss', 'defer', 'correct']), note: z.string().nullable(), deferUntil: z.string().nullable() }).nullable(),
-})
-export type TodayDecision = z.infer<typeof todayDecisionSchema>
-const todayPrioritySchema = z.object({ id: z.string(), intent: z.string(), constraints: z.string().nullable(), targetAt: z.string().nullable(), strategy: businessGoalStrategySchema.nullable(), revision: z.string() })
-export type TodayPriority = Pick<BusinessGoal, 'id' | 'intent' | 'constraints' | 'targetAt' | 'strategy' | 'revision'>
-export type TodayDecisionInput = Pick<RecommendationFeedback, 'decision' | 'note' | 'deferUntil'>
-
+/** One of the visits a guest account has booked, as the account's Today lists it. The business's Today is tasks (server/domain/tasks.ts). */
 export const todayCardSchema = z.object({
-  presentation: z.object({ type: z.enum(['detailed', 'compact', 'minimal', 'opportunity']) }),
   id: z.string(), to: z.string(), eyebrow: z.string(), headline: z.string(), description: z.string().nullable(),
-  imageUrl: z.string().nullable(), imageFit: z.enum(['cover', 'contain']), imageIcon: z.string(), badgeImageUrl: z.string().nullable(), badgeIcon: z.string().nullable(),
-  locationId: z.string().nullable(), assignedMemberId: z.string().nullable(),
-  bookingKind: z.enum(['reservation', 'booking', 'stay']).nullable(),
+  imageUrl: z.string().nullable(), imageIcon: z.string(),
+  locationId: z.string().nullable(),
+  bookingKind: z.enum(['reservation', 'booking', 'stay']),
   stayId: z.string().nullable(),
   productId: z.string().nullable(),
-  stayChannel: z.enum(STAY_CHANNELS).nullable(),
-  occurrenceAt: z.iso.datetime({ offset: true }).nullable(), timeZone: z.string().nullable(),
-  /** When the work itself should be done, when that differs from the occurrence it serves. Upcoming orders by this before occurrenceAt. */
-  actionAt: z.iso.datetime({ offset: true }).nullable(),
-  /** Active work has no completion instant; completed work leaves the action feed. */
-  completedAt: z.iso.datetime({ offset: true }).nullable(),
-  /** Why this work is here now, in terms of the recorded facts, the owner's priority and their earlier decisions. */
-  reason: z.string().nullable(),
-  decision: todayDecisionSchema.nullable(),
-  priority: z.enum(['attention', 'schedule', 'opportunity']),
+  occurrenceAt: z.iso.datetime({ offset: true }).nullable(), timeZone: z.string(),
 })
 export type TodayCard = z.infer<typeof todayCardSchema>
-export const todayFeedSchema = z.object({
-  cards: z.array(todayCardSchema), availableKinds: z.array(z.enum(['reservation', 'booking', 'stay'])),
-  locations: z.array(z.object({ id: z.string(), organizationId: z.string(), title: z.string(), imageUrl: z.string().nullable() })),
-  resolvedAt: z.string(),
-  /** The owner's active priorities; null when the caller cannot author them. */
-  priorities: z.array(todayPrioritySchema).nullable(),
-  recommendationIssues: z.array(z.string()),
-})
-export interface TodayFeedPayload {
-  cards: TodayCard[]
-  availableKinds: Array<'reservation' | 'booking' | 'stay'>
-  locations: AgendaLocation[]
-  resolvedAt: string
-  priorities: TodayPriority[] | null
-  recommendationIssues: string[]
-}
+export const todayFeedSchema = z.object({ cards: z.array(todayCardSchema), resolvedAt: z.string() })
+export type TodayFeedPayload = z.infer<typeof todayFeedSchema>
 
-/** Personal-account agenda projection; the business feed selects actionable work on the server. */
-export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string; personal?: boolean; vertical?: string | null; assigned?: boolean }): TodayCard {
+/** A guest account's visit as a Today card. */
+export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string }): TodayCard {
   if (item.kind !== 'reservation' && item.kind !== 'booking' && item.kind !== 'stay') throw new Error('Today cards require a booking, reservation or stay')
   const referenceDay = localDateAt(new Date(input.resolvedAt), item.timeZone)
   const distance = Math.round((Date.parse(`${item.dayKey}T00:00:00Z`) - Date.parse(`${referenceDay}T00:00:00Z`)) / 86_400_000)
   const when = distance <= 0 ? 'today' : distance === 1 ? 'tomorrow' : `in ${distance} days`
   const guests = item.partySize && item.partySize > 0 ? `${item.partySize} ${item.partySize === 1 ? 'guest' : 'guests'}` : ''
-  const overbooked = item.kind === 'stay' && item.title.startsWith('Overbooked · ')
-  const guestTitle = overbooked ? item.title.slice('Overbooked · '.length) : item.title
-  const firstName = guestTitle.trim().split(/\s+/)[0] || guestTitle
-  const stayGuest = `${overbooked ? 'Overbooked · ' : ''}${guestTitle.startsWith('Name not provided by ') ? guestTitle : firstName}`
-  const resourceIcon = item.kind === 'booking'
-    ? (input.vertical === 'service' ? 'i-lucide-calendar-clock' : 'i-lucide-ticket')
-    : item.kind === 'stay' ? 'i-lucide-house' : 'i-lucide-map-pin'
-  const presentation = input.personal || item.kind === 'stay' ? null : resolveBookingPresentation(item.kind, input.vertical)
-  const headline = input.personal ? `${item.title} ${when}${guests ? ` for ${guests}` : ''}`
-    : item.kind === 'stay' ? `${stayGuest} ${item.stayMoment === 'current' ? 'is staying' : `${item.stayMoment === 'departure' || item.stayMoment === 'turnover' ? 'leaves' : 'arrives'} ${when}`}${guests ? ` with ${guests}` : ''}`
-    : input.assigned || presentation?.noun === 'consultation' ? `${presentation!.label} with ${firstName} ${when}`
-      : `${firstName} arrives ${when}${guests ? ` · ${guests}` : ''}`
   return {
-    presentation: { type: 'compact' },
-    id: item.id, to: input.personal ? item.to.replace(/^\/dashboard\/account\/activity\//, '/dashboard/account/bookings/') : item.to,
-    eyebrow: item.stayMoment === 'current' ? 'Currently hosting' : formatTimestamp(item.startsAt, 'en', item.timeZone, { hour: 'numeric', minute: '2-digit' }), headline,
-    description: input.personal ? [...new Set([item.subtitle, item.locationTitle].filter((part): part is string => !!part && part !== item.title))].join(' · ')
-      : [...new Set([item.resourceTitle, item.kind === 'booking' && item.locationId === null ? 'Online' : item.locationTitle, item.stayMoment === 'turnover' ? 'Next guests arrive the same day' : null].filter((part): part is string => !!part))].join(' · '),
-    imageUrl: input.personal ? item.resourceImageUrl : item.guestImageUrl, imageFit: 'cover', imageIcon: input.personal ? resourceIcon : 'i-lucide-user',
-    badgeImageUrl: input.personal ? null : item.resourceImageUrl, badgeIcon: input.personal ? null : resourceIcon,
-    locationId: item.locationId, assignedMemberId: item.assignedMemberId, bookingKind: item.kind, stayId: item.stayId, productId: item.productId, stayChannel: item.stayChannel,
-    occurrenceAt: item.stayMoment === 'current' ? null : item.startsAt, timeZone: item.timeZone, actionAt: null, completedAt: null, reason: null, decision: null, priority: 'schedule',
+    id: item.id, to: item.to.replace(/^\/dashboard\/account\/activity\//, '/dashboard/account/bookings/'),
+    eyebrow: item.stayMoment === 'current' ? 'Currently hosting' : formatTimestamp(item.startsAt, 'en', item.timeZone, { hour: 'numeric', minute: '2-digit' }),
+    headline: `${item.title} ${when}${guests ? ` for ${guests}` : ''}`,
+    description: [...new Set([item.subtitle, item.locationTitle].filter((part): part is string => !!part && part !== item.title))].join(' · ') || null,
+    imageUrl: item.resourceImageUrl, imageIcon: item.kind === 'booking' ? 'i-lucide-ticket' : item.kind === 'stay' ? 'i-lucide-house' : 'i-lucide-map-pin',
+    locationId: item.locationId, bookingKind: item.kind, stayId: item.stayId, productId: item.productId,
+    occurrenceAt: item.stayMoment === 'current' ? null : item.startsAt, timeZone: item.timeZone,
   }
 }

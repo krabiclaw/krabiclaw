@@ -1,8 +1,372 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:86c7fdae920511b1fab3487ccdde4dc82b74805e9cdc59b631844231eda04ca9",
-  "documentationFingerprint": "sha256:f36f49c05a06f96995b393abe93670ac2f0d902a423b2ae624f6d3d92494404c",
+  "fingerprint": "sha256:b3c72783efc0c5702ee33c7815b5c716202b04c27be88af0c629468e5f8334fd",
+  "documentationFingerprint": "sha256:22cd84a76758842cd893953d50defd1367b26e5052d6b1a5aec0f929f28815f8",
   "tools": [
+    {
+      "name": "accept_opportunity",
+      "title": "Accept opportunity",
+      "description": "Take on an opportunity: it becomes a task, given to you and due today unless you say otherwise. Refused when what it was based on has changed; read list_opportunities again.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "assigned_member_id": {
+            "description": "A Better Auth member id from list_tasks assignees; null to unassign.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "assigned_team_id": {
+            "description": "A Better Auth team id from list_tasks assignees. Give a member or a team, not both.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "due_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "opportunity_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "opportunity_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "task": {
+            "properties": {
+              "action": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "assignee": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "avatar": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "can": {
+                "properties": {
+                  "assign": {
+                    "type": "boolean"
+                  },
+                  "complete": {
+                    "type": "boolean"
+                  },
+                  "edit": {
+                    "type": "boolean"
+                  },
+                  "reopen": {
+                    "type": "boolean"
+                  },
+                  "skip": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "complete",
+                  "skip",
+                  "reopen",
+                  "assign",
+                  "edit"
+                ],
+                "type": "object"
+              },
+              "detail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dueAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "face": {
+                "enum": [
+                  "photo",
+                  "compact"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "imageUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "turnover",
+                  "guest_reply",
+                  "message_delivery",
+                  "booking_review",
+                  "booking_change",
+                  "opportunity",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              "locationId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "notes": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "person": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "productId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "requestId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sheet": {
+                "type": "object"
+              },
+              "startsAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "open",
+                  "done",
+                  "skipped",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "statusLine": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stayId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tag": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "when": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "status",
+              "version",
+              "face",
+              "tag",
+              "imageUrl",
+              "avatar",
+              "statusLine",
+              "title",
+              "when",
+              "detail",
+              "error",
+              "note",
+              "person",
+              "assignee",
+              "sheet",
+              "startsAt",
+              "dueAt",
+              "timezone",
+              "notes",
+              "outcome",
+              "action",
+              "path",
+              "productId",
+              "locationId",
+              "stayId",
+              "requestId",
+              "can"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Accept opportunity"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
     {
       "name": "add_organization_language",
       "title": "Add organization language",
@@ -12956,10 +13320,6 @@
           },
           "thread": {
             "properties": {
-              "conversation_state": {
-                "minLength": 1,
-                "type": "string"
-              },
               "id": {
                 "minLength": 1,
                 "type": "string"
@@ -12974,8 +13334,7 @@
             },
             "required": [
               "id",
-              "kind",
-              "conversation_state"
+              "kind"
             ],
             "type": "object"
           }
@@ -13534,10 +13893,6 @@
           },
           "thread": {
             "properties": {
-              "conversation_state": {
-                "minLength": 1,
-                "type": "string"
-              },
               "id": {
                 "minLength": 1,
                 "type": "string"
@@ -13552,8 +13907,7 @@
             },
             "required": [
               "id",
-              "kind",
-              "conversation_state"
+              "kind"
             ],
             "type": "object"
           }
@@ -13585,6 +13939,375 @@
       ],
       "domain": "bookings",
       "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "complete_task",
+      "title": "Complete task",
+      "description": "Mark a task done, with what you found and an optional photo. A guest reply or a failed message is done when the reply goes out or the message is fixed, so it cannot be completed here.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "description": "Optional photo of the finished work.",
+            "properties": {
+              "download_url": {
+                "type": "string"
+              },
+              "file_id": {
+                "type": "string"
+              },
+              "file_name": {
+                "type": "string"
+              },
+              "mime_type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "download_url",
+              "file_id"
+            ],
+            "type": "object"
+          },
+          "note": {
+            "maxLength": 5000,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "task": {
+            "properties": {
+              "action": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "assignee": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "avatar": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "can": {
+                "properties": {
+                  "assign": {
+                    "type": "boolean"
+                  },
+                  "complete": {
+                    "type": "boolean"
+                  },
+                  "edit": {
+                    "type": "boolean"
+                  },
+                  "reopen": {
+                    "type": "boolean"
+                  },
+                  "skip": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "complete",
+                  "skip",
+                  "reopen",
+                  "assign",
+                  "edit"
+                ],
+                "type": "object"
+              },
+              "detail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dueAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "face": {
+                "enum": [
+                  "photo",
+                  "compact"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "imageUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "turnover",
+                  "guest_reply",
+                  "message_delivery",
+                  "booking_review",
+                  "booking_change",
+                  "opportunity",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              "locationId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "notes": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "person": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "productId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "requestId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sheet": {
+                "type": "object"
+              },
+              "startsAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "open",
+                  "done",
+                  "skipped",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "statusLine": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stayId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tag": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "when": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "status",
+              "version",
+              "face",
+              "tag",
+              "imageUrl",
+              "avatar",
+              "statusLine",
+              "title",
+              "when",
+              "detail",
+              "error",
+              "note",
+              "person",
+              "assignee",
+              "sheet",
+              "startsAt",
+              "dueAt",
+              "timezone",
+              "notes",
+              "outcome",
+              "action",
+              "path",
+              "productId",
+              "locationId",
+              "stayId",
+              "requestId",
+              "can"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Complete task"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
+      "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -13719,10 +14442,6 @@
           },
           "thread": {
             "properties": {
-              "conversation_state": {
-                "minLength": 1,
-                "type": "string"
-              },
               "id": {
                 "minLength": 1,
                 "type": "string"
@@ -13737,8 +14456,7 @@
             },
             "required": [
               "id",
-              "kind",
-              "conversation_state"
+              "kind"
             ],
             "type": "object"
           }
@@ -37037,6 +37755,393 @@
       "uiResourceUri": null
     },
     {
+      "name": "create_task",
+      "title": "Create task",
+      "description": "Add a task someone has to do, optionally at a home or location, with a window and an assignee. The assignee is told by their own notification settings. Reuse the same idempotency_key for an identical retry.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "assigned_member_id": {
+            "description": "A Better Auth member id from list_tasks assignees; null to unassign.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "assigned_team_id": {
+            "description": "A Better Auth team id from list_tasks assignees. Give a member or a team, not both.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "due_at": {
+            "description": "An instant with Z or a numeric offset.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "location_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "notes": {
+            "maxLength": 5000,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "product_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "starts_at": {
+            "description": "An instant with Z or a numeric offset.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "idempotency_key"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "task": {
+            "properties": {
+              "action": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "assignee": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "avatar": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "can": {
+                "properties": {
+                  "assign": {
+                    "type": "boolean"
+                  },
+                  "complete": {
+                    "type": "boolean"
+                  },
+                  "edit": {
+                    "type": "boolean"
+                  },
+                  "reopen": {
+                    "type": "boolean"
+                  },
+                  "skip": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "complete",
+                  "skip",
+                  "reopen",
+                  "assign",
+                  "edit"
+                ],
+                "type": "object"
+              },
+              "detail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dueAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "face": {
+                "enum": [
+                  "photo",
+                  "compact"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "imageUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "turnover",
+                  "guest_reply",
+                  "message_delivery",
+                  "booking_review",
+                  "booking_change",
+                  "opportunity",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              "locationId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "notes": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "person": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "productId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "requestId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sheet": {
+                "type": "object"
+              },
+              "startsAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "open",
+                  "done",
+                  "skipped",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "statusLine": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stayId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tag": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "when": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "status",
+              "version",
+              "face",
+              "tag",
+              "imageUrl",
+              "avatar",
+              "statusLine",
+              "title",
+              "when",
+              "detail",
+              "error",
+              "note",
+              "person",
+              "assignee",
+              "sheet",
+              "startsAt",
+              "dueAt",
+              "timezone",
+              "notes",
+              "outcome",
+              "action",
+              "path",
+              "productId",
+              "locationId",
+              "stayId",
+              "requestId",
+              "can"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Create task"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "create_team",
       "title": "Create team",
       "description": "Create a named team within this business using Better Auth. Existing teammates can then be added to it.",
@@ -37101,6 +38206,80 @@
         }
       ],
       "domain": "organizations",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "defer_opportunity",
+      "title": "Defer opportunity",
+      "description": "Set an opportunity aside until a time; it returns then if it still applies.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "opportunity_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "until": {
+            "description": "An instant with Z or a numeric offset.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "opportunity_id",
+          "until"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "opportunity": {
+            "properties": {
+              "availableAt": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "availableAt"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "opportunity"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Defer opportunity"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
       "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -42210,6 +43389,79 @@
         }
       ],
       "domain": "locales",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "dismiss_opportunity",
+      "title": "Dismiss opportunity",
+      "description": "Decline an opportunity, optionally saying why. It returns only when its evidence changes.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "opportunity_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "opportunity_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "opportunity": {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "status": {
+                "const": "dismissed"
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "opportunity"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Dismiss opportunity"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
       "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -47360,7 +48612,7 @@
             "required": [
               "request_id",
               "type",
-              "state",
+              "needs_reply",
               "archived",
               "updated_at",
               "participant_label",
@@ -66886,18 +68138,14 @@
             ],
             "type": "string"
           },
+          "needs_reply": {
+            "description": "Only conversations with an open reply task: a guest question nobody has answered yet.",
+            "type": "boolean"
+          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          },
-          "state": {
-            "enum": [
-              "needs_attention",
-              "waiting_on_guest",
-              "resolved"
-            ],
             "type": "string"
           },
           "type": {
@@ -66925,6 +68173,9 @@
                     "string",
                     "null"
                   ]
+                },
+                "needs_reply": {
+                  "type": "boolean"
                 },
                 "operational_status": {
                   "type": [
@@ -66963,9 +68214,6 @@
                 "request_id": {
                   "type": "string"
                 },
-                "state": {
-                  "type": "string"
-                },
                 "type": {
                   "type": "string"
                 },
@@ -66980,7 +68228,7 @@
                 "reply_channel",
                 "reply_not_possible",
                 "type",
-                "state",
+                "needs_reply",
                 "operational_status",
                 "preview",
                 "updated_at"
@@ -68228,6 +69476,113 @@
       ],
       "domain": "guest_messaging",
       "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "list_opportunities",
+      "title": "List opportunities",
+      "description": "Read what the business could do now, found from its own records: drafts to finish, posts to share, calendar gaps, payment setup. Each is recorded against its evidence; accept, dismiss or defer it by id.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "location_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "opportunities": {
+            "items": {
+              "properties": {
+                "detail": {
+                  "type": "string"
+                },
+                "icon": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "locationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "path": {
+                  "type": "string"
+                },
+                "productId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "statusLine": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "statusLine",
+                "title",
+                "detail",
+                "icon",
+                "path",
+                "productId",
+                "locationId"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "opportunities",
+          "issues"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "List opportunities"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
+      "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -71314,6 +72669,451 @@
       ],
       "domain": "submissions",
       "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "list_tasks",
+      "title": "List tasks",
+      "description": "Read Today or Upcoming as stored tasks: turnovers, guest questions awaiting a reply, scheduled messages that did not send, accepted opportunities and tasks people added. Today is open work starting or due today or earlier plus what was done today; Upcoming is later open work by day. A member sees the tasks given to them or their team and the turnovers at homes they look after. assignees lists who a manager can give work to.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "assignee": {
+            "description": "me, all, or a member id.",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "turnover",
+              "guest_reply",
+              "message_delivery",
+              "booking_review",
+              "booking_change",
+              "opportunity",
+              "custom"
+            ],
+            "type": "string"
+          },
+          "location_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "range": {
+            "enum": [
+              "today",
+              "upcoming"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "done",
+              "skipped",
+              "cancelled"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "assignees": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "initial": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "member",
+                    "team"
+                  ],
+                  "type": "string"
+                },
+                "you": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "type",
+                "id",
+                "name",
+                "initial",
+                "you"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "resolvedAt": {
+            "type": "string"
+          },
+          "sections": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "subtitle": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "tasks": {
+                  "items": {
+                    "properties": {
+                      "action": {
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "assignee": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "initial": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "enum": [
+                                  "member",
+                                  "team"
+                                ],
+                                "type": "string"
+                              },
+                              "you": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "id",
+                              "name",
+                              "initial",
+                              "you"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "avatar": {
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "can": {
+                        "properties": {
+                          "assign": {
+                            "type": "boolean"
+                          },
+                          "complete": {
+                            "type": "boolean"
+                          },
+                          "edit": {
+                            "type": "boolean"
+                          },
+                          "reopen": {
+                            "type": "boolean"
+                          },
+                          "skip": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "complete",
+                          "skip",
+                          "reopen",
+                          "assign",
+                          "edit"
+                        ],
+                        "type": "object"
+                      },
+                      "detail": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "dueAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "face": {
+                        "enum": [
+                          "photo",
+                          "compact"
+                        ],
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "imageUrl": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "kind": {
+                        "enum": [
+                          "turnover",
+                          "guest_reply",
+                          "message_delivery",
+                          "booking_review",
+                          "booking_change",
+                          "opportunity",
+                          "custom"
+                        ],
+                        "type": "string"
+                      },
+                      "locationId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "note": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "notes": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "outcome": {
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "path": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "person": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "initial": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "enum": [
+                                  "member",
+                                  "team"
+                                ],
+                                "type": "string"
+                              },
+                              "you": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "id",
+                              "name",
+                              "initial",
+                              "you"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "productId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "requestId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "sheet": {
+                        "type": "object"
+                      },
+                      "startsAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "status": {
+                        "enum": [
+                          "open",
+                          "done",
+                          "skipped",
+                          "cancelled"
+                        ],
+                        "type": "string"
+                      },
+                      "statusLine": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "stayId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "tag": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "timezone": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "integer"
+                      },
+                      "when": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "kind",
+                      "status",
+                      "version",
+                      "face",
+                      "tag",
+                      "imageUrl",
+                      "avatar",
+                      "statusLine",
+                      "title",
+                      "when",
+                      "detail",
+                      "error",
+                      "note",
+                      "person",
+                      "assignee",
+                      "sheet",
+                      "startsAt",
+                      "dueAt",
+                      "timezone",
+                      "notes",
+                      "outcome",
+                      "action",
+                      "path",
+                      "productId",
+                      "locationId",
+                      "stayId",
+                      "requestId",
+                      "can"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "title",
+                "subtitle",
+                "tasks"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "sections",
+          "assignees",
+          "resolvedAt"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List tasks"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
+      "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -88138,10 +89938,6 @@
           },
           "thread": {
             "properties": {
-              "conversation_state": {
-                "minLength": 1,
-                "type": "string"
-              },
               "id": {
                 "minLength": 1,
                 "type": "string"
@@ -88156,8 +89952,7 @@
             },
             "required": [
               "id",
-              "kind",
-              "conversation_state"
+              "kind"
             ],
             "type": "object"
           }
@@ -97651,14 +99446,11 @@
               "archived": {
                 "type": "boolean"
               },
+              "needs_reply": {
+                "type": "boolean"
+              },
               "request_id": {
                 "type": "string"
-              },
-              "state": {
-                "type": [
-                  "string",
-                  "null"
-                ]
               },
               "updated_at": {
                 "type": "string"
@@ -97666,7 +99458,7 @@
             },
             "required": [
               "request_id",
-              "state",
+              "needs_reply",
               "archived",
               "updated_at"
             ],
@@ -99876,14 +101668,11 @@
               "archived": {
                 "type": "boolean"
               },
+              "needs_reply": {
+                "type": "boolean"
+              },
               "request_id": {
                 "type": "string"
-              },
-              "state": {
-                "type": [
-                  "string",
-                  "null"
-                ]
               },
               "updated_at": {
                 "type": "string"
@@ -99891,7 +101680,7 @@
             },
             "required": [
               "request_id",
-              "state",
+              "needs_reply",
               "archived",
               "updated_at"
             ],
@@ -102471,6 +104260,355 @@
         }
       ],
       "domain": "context",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "skip_task",
+      "title": "Skip task",
+      "description": "Skip a task, saying why.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "note"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "task": {
+            "properties": {
+              "action": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "assignee": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "avatar": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "can": {
+                "properties": {
+                  "assign": {
+                    "type": "boolean"
+                  },
+                  "complete": {
+                    "type": "boolean"
+                  },
+                  "edit": {
+                    "type": "boolean"
+                  },
+                  "reopen": {
+                    "type": "boolean"
+                  },
+                  "skip": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "complete",
+                  "skip",
+                  "reopen",
+                  "assign",
+                  "edit"
+                ],
+                "type": "object"
+              },
+              "detail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dueAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "face": {
+                "enum": [
+                  "photo",
+                  "compact"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "imageUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "turnover",
+                  "guest_reply",
+                  "message_delivery",
+                  "booking_review",
+                  "booking_change",
+                  "opportunity",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              "locationId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "notes": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "person": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "productId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "requestId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sheet": {
+                "type": "object"
+              },
+              "startsAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "open",
+                  "done",
+                  "skipped",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "statusLine": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stayId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tag": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "when": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "status",
+              "version",
+              "face",
+              "tag",
+              "imageUrl",
+              "avatar",
+              "statusLine",
+              "title",
+              "when",
+              "detail",
+              "error",
+              "note",
+              "person",
+              "assignee",
+              "sheet",
+              "startsAt",
+              "dueAt",
+              "timezone",
+              "notes",
+              "outcome",
+              "action",
+              "path",
+              "productId",
+              "locationId",
+              "stayId",
+              "requestId",
+              "can"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Skip task"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
       "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -126919,6 +129057,395 @@
       "uiResourceUri": null
     },
     {
+      "name": "update_task",
+      "title": "Update task",
+      "description": "Reassign, reschedule or edit the notes of an open task. Pass expected_version from list_tasks; a newer version is refused so another change is not overwritten. A new assignee is told.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "assigned_member_id": {
+            "description": "A Better Auth member id from list_tasks assignees; null to unassign.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "assigned_team_id": {
+            "description": "A Better Auth team id from list_tasks assignees. Give a member or a team, not both.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "due_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expected_version": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "notes": {
+            "maxLength": 5000,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "description": "Only for a task someone added or an accepted opportunity.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "expected_version"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "task": {
+            "properties": {
+              "action": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "assignee": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "avatar": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "can": {
+                "properties": {
+                  "assign": {
+                    "type": "boolean"
+                  },
+                  "complete": {
+                    "type": "boolean"
+                  },
+                  "edit": {
+                    "type": "boolean"
+                  },
+                  "reopen": {
+                    "type": "boolean"
+                  },
+                  "skip": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "complete",
+                  "skip",
+                  "reopen",
+                  "assign",
+                  "edit"
+                ],
+                "type": "object"
+              },
+              "detail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dueAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "face": {
+                "enum": [
+                  "photo",
+                  "compact"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "imageUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "turnover",
+                  "guest_reply",
+                  "message_delivery",
+                  "booking_review",
+                  "booking_change",
+                  "opportunity",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              "locationId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "notes": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "person": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "initial": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "member",
+                          "team"
+                        ],
+                        "type": "string"
+                      },
+                      "you": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                      "name",
+                      "initial",
+                      "you"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "productId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "requestId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sheet": {
+                "type": "object"
+              },
+              "startsAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "open",
+                  "done",
+                  "skipped",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "statusLine": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stayId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tag": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "when": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "status",
+              "version",
+              "face",
+              "tag",
+              "imageUrl",
+              "avatar",
+              "statusLine",
+              "title",
+              "when",
+              "detail",
+              "error",
+              "note",
+              "person",
+              "assignee",
+              "sheet",
+              "startsAt",
+              "dueAt",
+              "timezone",
+              "notes",
+              "outcome",
+              "action",
+              "path",
+              "productId",
+              "locationId",
+              "stayId",
+              "requestId",
+              "can"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Update task"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "tasks",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "update_team",
       "title": "Update team",
       "description": "Rename a team in this business.",
@@ -127229,21 +129756,21 @@
         "text": "Use get_workspace_context to resolve the requested business. Read all relevant list_guest_conversations pages and get_guest_conversation for full contact messages, table reservation and product booking details, proposals and delivery receipts. For internal team messages use list_team_conversations and get_team_conversation. Select actual teammates with list_team_conversation_recipients. start_team_conversation reuses direct and explicit stay/location conversations; manual groups of at least three people are distinct and require a stable idempotency_key. update_team_group changes only manual internal groups: obey canManage/canLeave; preserve buyer/guest and stay/location participants. New members can read group history; removal and leaving end access while retaining messages. Use send_team_message only for the requested internal message, then read it back. Reading does not mark a thread read; mark_team_conversation_read changes only the caller’s read position. Team chat is separate from guest replies and Better Auth Team/group management. Summarize unanswered messages and pending bookings. Use reply_to_guest with a stable idempotency_key only for the message or photo the user requests. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; use cancel_table_reservation or request_table_reservation_change for an explicitly requested table reservation action. Booking changes email a proposal and leave the existing allocation unchanged until guest acceptance. Financial actions requiring the dashboard remain incomplete; report the returned handoff instead of claiming completion. Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google. Report failed deliveries and actions awaiting guest acceptance accurately."
       },
       "toolContracts": {
-        "cancel_product_booking": "sha256:a90b3075935852ee847849f1774addc7077bac2636dd83439a792db5a98c9ca3",
-        "cancel_table_reservation": "sha256:7c17a97a9f730249ce112981850351006406adab44d5230f8306953e4450b165",
-        "confirm_product_booking": "sha256:d1269994270301b34621918853c929c1e77f702b21fa336ac4dd23dcbf81e18e",
-        "get_guest_conversation": "sha256:98d14cd131136e817e14ceecc25c0619990e2e7ec4fe237bd62c61c9e071122b",
+        "cancel_product_booking": "sha256:28d9c2c6be574b460d8711e4040fed5162c439aae2b37e95ca79ea08cd24e62d",
+        "cancel_table_reservation": "sha256:9f69a68d495da67c14718dff9208b98d7c28e5a4b8eba2849ded151ad293312a",
+        "confirm_product_booking": "sha256:373f9f84360e37716dc1476d28b8f6b47c14001642ebaff8d713d74a7d3a8eaa",
+        "get_guest_conversation": "sha256:de4bdb53bb6d882e4895742a865bea4277209cc00ceb2a516ec50963fa35fe8b",
         "get_product_booking": "sha256:1f0d7f20d207a6fb1aecb169e86483ae515c5b6209fbf9fe948a2be26860968d",
         "get_team_conversation": "sha256:68a4390f99121151a6c3dcca2e3cff8675166b27d958e7a1a71dcd3a4c9a81d0",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:f1a1d47b6c74191b19cf9da049909dc5ed3636f69eb5f59a16ed36f11c4ca9f5",
+        "list_guest_conversations": "sha256:6d0b00651d62c18f2c881046eb4d7f619ec7aecf85662d0c173af68134fd98cc",
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
         "list_team_conversations": "sha256:7d0d80ed5a7b2c7b2d46ce8cac3aadddf63040756dafc586723b6bf623914283",
         "mark_team_conversation_read": "sha256:3ad65b07c9bd78090f9f81aeffa74ac00f1c201ee8b6325cf16cd879f1e2644d",
-        "reject_product_booking": "sha256:d391fc30d744361aecae959a6e0530b4193bb3366cf9da36cc2a7e2011088357",
-        "reply_to_guest": "sha256:602feae35241528647db0e55d087abc9068a854b0d4fda463e57365a63ca0eb8",
+        "reject_product_booking": "sha256:91a5bee34d02b729a3dacb01885157ce63b443594116d8710ca90313fb76e357",
+        "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
         "request_product_booking_change": "sha256:d09a9c88466237aff04465bbcffa219f28e197cfad0cb4fdd99f41484343d400",
         "request_table_reservation_change": "sha256:71868f28cc9f329b1f44276ae0a223c487c789f4682c3bb8f3a09b96fde9e2dd",
         "send_team_message": "sha256:b9f715f29f98d627cd0e5fa89f873b5623e13d5ba0867cc7dba69216ba886f97",
@@ -127367,15 +129894,15 @@
       },
       "toolContracts": {
         "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
-        "get_guest_conversation": "sha256:98d14cd131136e817e14ceecc25c0619990e2e7ec4fe237bd62c61c9e071122b",
+        "get_guest_conversation": "sha256:de4bdb53bb6d882e4895742a865bea4277209cc00ceb2a516ec50963fa35fe8b",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
         "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:f1a1d47b6c74191b19cf9da049909dc5ed3636f69eb5f59a16ed36f11c4ca9f5",
+        "list_guest_conversations": "sha256:6d0b00651d62c18f2c881046eb4d7f619ec7aecf85662d0c173af68134fd98cc",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
-        "reply_to_guest": "sha256:602feae35241528647db0e55d087abc9068a854b0d4fda463e57365a63ca0eb8",
+        "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
         "update_product": "sha256:a6f1e84c2f216c0cf5f12ff3c680f5227a03b34c951caf3cf75f9d5580ca7372"
       }
     }

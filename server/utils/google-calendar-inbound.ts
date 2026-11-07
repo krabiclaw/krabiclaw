@@ -208,7 +208,7 @@ async function flagForReview(env: CloudflareEnv, organizationId: string, link: E
       ? `The ${noun}'s event was deleted in Google Calendar. The ${noun} is still booked for ${whenLabel}, and the event has been put back.`
       : `The ${noun}'s event was moved in Google Calendar, but the ${noun} could not follow${reason ? `: ${reason}` : ''}. It stays at ${whenLabel}, and the event has been moved back.`,
     payloadJson: { kind, reason, event_id: link.event_id, operational_booking_id: subject.operational_id } })
-  if (!existing) await updateThreadProjectionIfLatestEntry(db, subject.request_id, entry.id, { conversationState: 'needs_attention' })
+  if (!existing) await updateThreadProjectionIfLatestEntry(db, subject.request_id, entry.id)
   const request = await queryFirst<{ location_id: string | null }>(db, 'SELECT location_id FROM requests WHERE id=?', [subject.request_id])
   await notifyCalendarSyncOwner(env, db, { organizationId, organizationName: organization?.name, kind, threadId: subject.request_id, submissionType: subject.booking_kind, sourceEntryId: entry.id,
     locationId: request?.location_id ?? null, guestName: subject.guest_name ?? 'The guest', noun, whenLabel, reason,

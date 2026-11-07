@@ -4,10 +4,9 @@ import type { GuestThreadMailbox } from './mailbox'
 import type { StayChannel } from '~/shared/bookings'
 import type { BookingChangeView } from './booking-changes'
 
-export type GuestThreadEntryKind = 'submission' | 'message' | 'operation' | 'assignment' | 'resolution'
+export type GuestThreadEntryKind = 'submission' | 'message' | 'operation' | 'assignment'
 export type GuestThreadActorKind = 'guest' | 'member' | 'system'
 export type GuestThreadChannel = 'web' | 'email' | 'whatsapp' | 'airbnb' | 'system'
-export type ConversationState = 'needs_attention' | 'waiting_on_guest' | 'resolved'
 export type GuestThreadSubmissionType = 'contact' | 'reservation' | 'booking' | 'stay'
 export type GuestThreadDeliveryChannel = 'email' | 'whatsapp' | 'airbnb' | 'push'
 export type GuestThreadDeliveryProvider = 'resend' | 'meta' | 'channex' | 'apns' | 'web_push' | 'log_only'
@@ -113,14 +112,14 @@ export interface GuestThreadListItemViewModel {
   occurrenceAt: string | null
   timeZone: string | null
   latestMessageFromGuest: boolean
-  conversationState: ConversationState | null
+  /** An open guest_reply task: the guest asked something nobody has answered. */
+  needsReply: boolean
   operationalStatus: string | null
   operationalStatusLabel: string | null
   unread: boolean
   unreadCount: number
   preview: { kind: 'message' | 'submission'; text: string } | null
   lastActivityAt: string
-  needsAttention: boolean
   /** The location hero the row leads with. Null when the thread or the location has none. */
   imageUrl: string | null
   /** A business logo its owner shows whole is fitted inside the frame rather than cropped to fill it. */
@@ -213,7 +212,8 @@ export interface GuestThreadDetailViewModel {
   submissionType: GuestThreadSubmissionType
   submissionId: string
   locationLabel: string | null
-  conversationState: ConversationState | null
+  /** An open guest_reply task: the guest asked something nobody has answered. */
+  needsReply: boolean
   source: ThreadDetailSourceModel
   operationalRecord: Pick<ThreadOperationalRecord, 'id' | 'kind' | 'status' | 'starts_at' | 'ends_at' | 'timezone' | 'party_size' | 'check_in_date' | 'check_out_date'> | null
   entries: GuestThreadEntryViewModel[]
@@ -230,7 +230,6 @@ export interface GuestThreadDetailViewModel {
   deliveryFailures: GuestThreadDeliveryFailureViewModel[]
   createdAt: string
   updatedAt: string
-  resolvedAt: string | null
 }
 
 /*
@@ -363,7 +362,8 @@ export interface ListGuestThreadsOptions {
   principal?: MemberAccessPrincipal | null
   userId: string
   type?: GuestThreadSubmissionType | null
-  conversationState?: ConversationState | null
+  /** Only conversations with an open guest_reply task. */
+  needsReply?: boolean
   unreadOnly?: boolean
   /** Current or Past, as `resolveGuestThreadMailbox` defines them. Null lists both. */
   mailbox?: GuestThreadMailbox | null

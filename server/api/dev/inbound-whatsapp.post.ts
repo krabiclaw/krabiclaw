@@ -40,7 +40,7 @@ export default defineHandler(async (event) => {
   if (!thread) throw new Error('Submission not found')
   const entry = await appendEntry(db, {
     threadId: thread.id, kind: 'message', actorKind: 'guest', channel: 'whatsapp', body: text, dedupeKey: `whatsapp:${messageId}`, })
-  await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id, { conversationState: 'needs_attention' })
+  await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id)
   await publishGuestInboxThreadEvent(env, db, { threadId: thread.id, type: 'entry.appended' })
 
   const summary = await requestSummary(db, thread)

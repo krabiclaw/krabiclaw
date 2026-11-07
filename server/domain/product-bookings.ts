@@ -18,6 +18,7 @@ import { buildOwnerThreadInboxUrl } from '~/server/utils/dashboard-notification-
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '~/server/utils/reservation-cancel-token'
 import { ensureInteractionUser, type CloudflareEnv } from '~/server/utils/auth'
 import { getGuestRequest, getThreadOperationalRecord, requestInsertQueries, threadPayloadForGuest, type BookingOperator } from '~/server/domain/requests'
+import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import { openingSentence } from '~/server/domain/guest-threads/opening'
 import { DEFAULT_EMAIL_DAILY_LIMIT as EMAIL_DAILY_LIMIT, DEFAULT_IP_HOURLY_LIMIT as IP_HOURLY_LIMIT, getClientIp, hashClientIp, hashIdentifier, incrementHourlyRateLimit } from '~/server/utils/hourly-rate-limit'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
@@ -287,8 +288,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
       origin: operator ? null : { request: event.req, pageEventId },
       following: paymentId => requestInsertQueries({
         kind: 'booking', id: threadId, organization_id: organizationId, location_id: session.location_id,
-        user_id: userId, review_id: null, conversation_state: 'waiting_on_guest', resolved_at: null,
-        payload, created_at: now, updated_at: now,
+        user_id: userId, review_id: null, payload, created_at: now, updated_at: now,
       }, { query: "SELECT 1 FROM payment_checkout_holds WHERE payment_id = ? AND status = 'active'", params: [paymentId] }, opening),
     })
     return creationResult({ success: true, status: 'checkout', ...checkout }, { status: 201 })
@@ -307,7 +307,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
         ...requestInsertQueries({
           kind: 'booking', id: threadId, organization_id: organization.id,
           location_id: session.location_id, user_id: userId, review_id: null,
-          conversation_state: 'needs_attention', resolved_at: null, payload,
+          payload,
           created_at: now, updated_at: now,
         }, { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }, opening),
         {
@@ -329,6 +329,8 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
                   FROM bookings WHERE id = ? AND request_id IS NOT NULL`,
           params: [crypto.randomUUID(), operator ? 'member' : 'system', operator?.userId ?? null, `booking:${bookingId}:created`, now, now, bookingId],
         },
+        // A booking that waits for the business's approval is its review task.
+        ...conversationTaskQueries(threadId, now),
       ],
     })
     operationalBookingId = claim.bookingId

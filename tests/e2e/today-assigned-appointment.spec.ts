@@ -5,19 +5,23 @@ import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { seededSiteHeaders } from './test-env'
 import { seededTenant } from './seed/manifest'
 import type { Product } from '../../server/types/products'
-import type { TodayFeedPayload } from '../../shared/dashboard-today'
+import type { TaskPerson, TaskSection } from '../../server/domain/tasks'
+import type { OpportunityView } from '../../server/domain/opportunities'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 
 const SLUG = 'harbor-legal-aid'
 const DASHBOARD = `/dashboard/${SLUG}`
 const ACTOR = 'user-e2e-ncls-consultation-owner'
 
+/** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
+type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
+
 async function body<T>(response: APIResponse, status: number): Promise<T> {
   expect(response.status(), await response.text()).toBe(status)
   return response.json() as Promise<T>
 }
 
-test('an assigned staff member reviews a consultation from Today while Calendar retains its occurrence', async ({ page, browser, request, baseURL }, testInfo) => {
+test('an assigned staff member reviews a consultation from Calendar while Today holds only their own work', async ({ page, browser, request, baseURL }, testInfo) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Provider hours and roles use disposable local data only')
   const ORGANIZATION = seededTenant('legal').organizationId
@@ -85,11 +89,16 @@ test('an assigned staff member reviews a consultation from Today while Calendar 
     const providerPath = `/api/dashboard/bookings/booking/${assignedRead.booking.operationalBookingId}/provider`
     await body(await memberContext.request.get(providerPath, { params: { org: SLUG } }), 404)
 
-    const today = await body<TodayFeedPayload>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
-    expect(today.cards.find(card => card.id === `attention:${requestId}`)).toMatchObject({ priority: 'attention', to: bookingPath, assignedMemberId: actor.id, occurrenceAt: session.starts_at, bookingKind: 'booking' })
-    expect(today.cards.every(card => card.assignedMemberId === actor.id && card.bookingKind === 'booking' && (card.priority === 'attention' || card.priority === 'schedule'))).toBe(true)
-    const upcoming = await body<TodayFeedPayload>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG, range: 'upcoming', from: day, to: day } }), 200)
-    expect(upcoming.cards.some(card => card.id === `booking:${requestId}`)).toBe(false)
+    // A member's Today is their own work: no opportunities, nobody to assign to,
+    // and only tasks given to them or replies in conversations they handle.
+    const today = await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
+    expect(today).toMatchObject({ opportunities: [], opportunityIssues: [], assignees: [] })
+    for (const task of today.tasks.flatMap(section => section.tasks)) {
+      expect(task.can, `${task.kind} ${task.id} is not a manager's`).toMatchObject({ assign: false, edit: false })
+      if (task.kind === 'guest_reply') await body(await memberContext.request.get(`/api/dashboard/organizations/${ORGANIZATION}/guest-threads/${task.requestId}`), 200)
+      else expect(task.assignee, `${task.kind} ${task.id} is given to the member`).toMatchObject({ type: 'member', id: actor.id, you: true })
+    }
+    // The consultation is the Calendar's: it is on its day there.
     const agenda = await body<{ items: Array<{ id: string; requestId: string; startsAt: string; to: string }> }>(await memberContext.request.get('/api/dashboard/agenda', { params: { org: SLUG, from: day, to: day } }), 200)
     expect(agenda.items.find(item => item.requestId === requestId)).toMatchObject({ id: `booking:${requestId}`, startsAt: session.starts_at, to: bookingPath })
 
@@ -132,16 +141,8 @@ test('an assigned staff member reviews a consultation from Today while Calendar 
     await expect(memberPage.getByRole('dialog', { name: 'Legal Services preview', exact: true }).getByText('Your role does not have access to website previews.', { exact: true })).toBeVisible()
     await expect(memberPage.getByTestId('content-preview-frame')).toHaveCount(0)
     await memberPage.setViewportSize({ width: 390, height: 844 })
-    expect((await memberPage.goto(new URL(`${DASHBOARD}?range=upcoming`, baseURL!).toString()))?.status()).toBe(200)
+    expect((await memberPage.goto(new URL(bookingPath, baseURL!).toString()))?.status()).toBe(200)
     await waitForNuxtHydration(memberPage)
-    const appointment = memberPage.locator(`[data-card-id="booking:${requestId}"]`)
-    await expect(appointment).toHaveCount(0)
-    await memberPage.getByRole('tab', { name: 'Today', exact: true }).click()
-    const attention = memberPage.locator(`[data-card-id="attention:${requestId}"]`)
-    await expect(attention).toHaveAttribute('href', bookingPath)
-    await expect(attention).toHaveAttribute('data-card-presentation', 'detailed')
-    await attention.click()
-    await expect(memberPage).toHaveURL(new URL(bookingPath, baseURL!).toString())
     const detail = memberPage.locator('#dashboard-panel-booking-details')
     const todayPanel = memberPage.locator('#dashboard-panel-org-today')
     await expect(detail.getByRole('heading', { name: 'Awaiting review', exact: true })).toBeVisible()
@@ -152,7 +153,6 @@ test('an assigned staff member reviews a consultation from Today while Calendar 
     await expect(todayPanel).toBeHidden()
     await memberPage.setViewportSize({ width: 1440, height: 900 })
     await expect(todayPanel).toBeVisible()
-    await expect(attention).toBeVisible()
     await expect(detail).toBeVisible()
     const todayBounds = await todayPanel.boundingBox()
     const detailBounds = await detail.boundingBox()
@@ -198,19 +198,14 @@ test('an assigned staff member reviews a consultation from Today while Calendar 
     const persisted = await body<{ booking: { status: string; assignedMemberId: string } }>(
       await page.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
     expect(persisted.booking).toMatchObject({ status: 'confirmed', assignedMemberId: actor.id })
-    const completed = await body<TodayFeedPayload>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
-    expect(completed.cards.some(card => card.id === `attention:${requestId}`)).toBe(false)
-    // Today stays mounted beside the detail. The actual confirmation clears
-    // its outstanding card through the live canonical-state invalidation.
+    // Confirming the consultation is the review its booking asked for: that task is done, by the member who
+    // confirmed it, and nothing else is left on Today for it; the visit itself is the Calendar's.
+    const after = await body<BusinessToday>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
+    expect(after.tasks.flatMap(section => section.tasks.map(task => ({ section: section.id, task }))).filter(item => item.task.requestId === requestId)).toEqual([{ section: 'done', task: expect.objectContaining({
+      kind: 'booking_review', status: 'done', person: expect.objectContaining({ name: 'You', you: true }), outcome: expect.objectContaining({ closedBy: 'You' }),
+    }) }])
     await memberPage.setViewportSize({ width: 1440, height: 900 })
     await expect(todayPanel).toBeVisible()
-    await expect(attention).toHaveCount(0)
-    if (completed.cards.length) {
-      const first = completed.cards[0]!
-      await expect(todayPanel.getByTestId('today-list').locator(`[data-card-id="${first.id}"]`)).toHaveAttribute('href', first.to)
-    } else {
-      await expect(todayPanel.getByText('Nothing for today', { exact: true })).toBeVisible()
-    }
     await memberPage.clock.setFixedTime(new Date(`${day}T13:00:00.000Z`))
     await memberPage.reload()
     await expect(detail.getByRole('heading', { name: 'Today', exact: true })).toBeVisible()

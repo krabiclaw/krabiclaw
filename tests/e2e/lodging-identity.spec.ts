@@ -11,7 +11,6 @@ import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import type { TeamMember, TeamMessage, TeamThread } from '../../server/domain/team-messages'
 import { ALL_VERTICALS } from '../../utils/vertical-copy'
 import { isDashboardInvalidation } from '../../shared/dashboard-invalidations'
-import type { TodayFeedPayload } from '../../shared/dashboard-today'
 import type { Product } from '../../server/types/products'
 
 // The native app authenticates with a Better Auth bearer session and nothing
@@ -648,9 +647,6 @@ test.describe('lodging identity boundary', () => {
       const memberBooking = await api.get(bookingPath, { headers: memberBearer })
       expect(memberBooking.status, await memberBooking.text()).toBe(200)
       expect(await memberBooking.json()).toMatchObject({ booking: { id: requestId, assignedMemberId: null, experienceId: product.id, guestName } })
-      const today = await api.get(`/api/dashboard/today?org=${slug}`, { headers: memberBearer })
-      expect(today.status, await today.text()).toBe(200)
-      expect((await today.json() as TodayFeedPayload).cards.map(card => card.id)).toContain(`attention:${requestId}`)
       await loginAs(memberContext.request, baseURL!, invitee.id)
       const memberPage = await memberContext.newPage()
       let socket: WebSocket | undefined
@@ -673,9 +669,6 @@ test.describe('lodging identity boundary', () => {
       await expect(memberPage.getByRole('textbox', { name: 'Write a message…', exact: true })).toHaveCount(0)
       expect((await api.get(bookingPath, { headers: memberBearer })).status).toBe(404)
       expect((await api.get(inboxPath, { headers: memberBearer })).status).toBe(404)
-      const afterToday = await api.get(`/api/dashboard/today?org=${slug}`, { headers: memberBearer })
-      expect(afterToday.status, await afterToday.text()).toBe(200)
-      expect((await afterToday.json() as TodayFeedPayload).cards.map(card => card.id)).not.toContain(`attention:${requestId}`)
       const retained = await api.get(bookingPath, { headers: ownerBearer })
       expect(retained.status, await retained.text()).toBe(200)
       expect(await retained.json()).toMatchObject({ booking: { id: requestId, assignedMemberId: null, experienceId: product.id, guestName } })

@@ -42,7 +42,7 @@ test('the migration chain applies from zero and builds every table the schema de
       { token: 'aabb', kind: 'apns', environment: 'production', p256dh: null, auth: null },
       { token: 'https://push.example.test/complete', kind: 'web', environment: null, p256dh: 'recorded-p256dh', auth: 'recorded-auth' },
     ])
-    database.prepare("INSERT INTO requests(id,kind,organization_id,conversation_state,payload_json) VALUES('schema-request','contact','tenant-a','waiting_on_guest',?)").run(JSON.stringify({ guest: { name: 'Recorded guest', email: 'guest@example.test', phone: null }, message: 'Recorded conversation' }))
+    database.prepare("INSERT INTO requests(id,kind,organization_id,payload_json) VALUES('schema-request','contact','tenant-a',?)").run(JSON.stringify({ guest: { name: 'Recorded guest', email: 'guest@example.test', phone: null }, message: 'Recorded conversation' }))
     const at = '2026-10-30T12:30:00.000Z'
     for (const status of ['failed', 'needs_review']) for (const missing of ['reason', 'error_code', 'error_field']) {
       const error = { reason: 'Recorded refusal', error_code: 'delivery_refused', error_field: 'channel', [missing]: null }
@@ -70,15 +70,15 @@ test('publication attribution retains historical receipts as unknown and referen
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
   try {
-    const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
+    const journal = JSON.parse(readFileSync('migrations-history/v23/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
     const at = journal.entries.findIndex(entry => entry.tag === '0002_social_publication_attribution')
     assert.notEqual(at, -1)
-    for (const entry of journal.entries.slice(0, at)) database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
+    for (const entry of journal.entries.slice(0, at)) database.exec(readFileSync(`migrations-history/v23/${entry.tag}.sql`, 'utf8'))
     database.prepare("INSERT INTO organization(id,name,slug,default_currency,timezone) VALUES('publisher-business','Publisher','publisher-business','USD','UTC')").run()
     database.prepare(`INSERT INTO post_publications(id,organization_id,channel,provider_app_id,provider_subject_id,provider_target_id,state,payload_hash)
       VALUES('historical-publication','publisher-business','facebook','app','account','page','preparing','recorded-payload')`).run()
     const historical = database.prepare("SELECT * FROM post_publications WHERE id='historical-publication'").get()
-    database.exec(readFileSync(`migrations/${journal.entries[at]!.tag}.sql`, 'utf8'))
+    database.exec(readFileSync(`migrations-history/v23/${journal.entries[at]!.tag}.sql`, 'utf8'))
     assert.deepEqual(database.prepare("SELECT * FROM post_publications WHERE id='historical-publication'").get(), { ...historical as Record<string, unknown>, initiating_activity_id: null })
 
     database.prepare(`INSERT INTO activity_entries(id,kind,scope_kind,organization_id,actor_kind,event_name,payload_json,dedupe_key,occurred_at)
@@ -90,6 +90,60 @@ test('publication attribution retains historical receipts as unknown and referen
     assert.deepEqual(database.prepare("SELECT * FROM post_publications WHERE id='historical-publication'").get(), { ...historical as Record<string, unknown>, initiating_activity_id: null })
     assert.deepEqual(database.pragma('foreign_key_check'), [])
   } finally { database.close() }
+})
+
+test('a v23 replacement maps every recommendation feedback row into the business\'s opportunities, an accepted one with its task, and retires the stored conversation state', async () => {
+  const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
+  const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-v23-transfer-'))
+  const v23 = JSON.parse(readFileSync('migrations-history/v23/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
+  const sourcePath = join(directory, 'v23.sqlite')
+  try {
+    const source = new Database(sourcePath)
+    for (const file of v23) source.exec(readFileSync(`migrations-history/v23/${file}`, 'utf8'))
+    source.exec(`CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
+      ${v23.map(file => `INSERT INTO d1_migrations(name) VALUES('${file}');`).join('\n')}`)
+    source.prepare("INSERT INTO organization(id,name,slug,default_currency,timezone) VALUES('owner-business','Owner','owner-business','USD','America/Denver')").run()
+    for (const user of ['owner', 'admin']) {
+      source.prepare('INSERT INTO user(id,name,email,emailVerified) VALUES(?,?,?,1)').run(user, user, `${user}@example.test`)
+      source.prepare("INSERT INTO member(id,organizationId,userId,role) VALUES(?, 'owner-business', ?, ?)").run(`${user}-member`, user, user)
+    }
+    source.prepare("INSERT INTO requests(id,kind,organization_id,conversation_state,resolved_at,payload_json) VALUES('conversation','contact','owner-business','resolved','2026-11-01T10:00:00.000Z',?)")
+      .run(JSON.stringify({ guest: { name: 'Recorded guest', email: 'guest@example.test', phone: null }, message: 'Recorded question' }))
+    const revision = (n: number) => String(n).repeat(64)
+    const insert = source.prepare(`INSERT INTO recommendation_feedback(id,organization_id,user_id,operation,subject_id,evidence_revision,decision,note,defer_until,created_at,updated_at)
+      VALUES(?, 'owner-business', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    insert.run('accepted', 'owner', 'article.publish', 'draft-article', revision(1), 'accept', null, null, '2026-11-01T10:00:00.000Z', '2026-11-01T10:00:00.000Z')
+    insert.run('dismissed', 'owner', 'social.connect', 'owner-business', revision(2), 'dismiss', 'We do not use social media', null, '2026-11-01T10:00:00.000Z', '2026-11-01T10:00:00.000Z')
+    insert.run('corrected', 'owner', 'post.create', 'owner-business', revision(3), 'correct', 'Our photos are on the website already', null, '2026-11-01T10:00:00.000Z', '2026-11-01T10:00:00.000Z')
+    insert.run('deferred', 'owner', 'payments.connect', 'owner-business', revision(4), 'defer', null, '2026-11-20T09:00:00.000Z', '2026-11-01T10:00:00.000Z', '2026-11-01T10:00:00.000Z')
+    // Two people decided about one reference: the later decision is the business's.
+    insert.run('earlier', 'admin', 'article.create', 'owner-business', revision(5), 'dismiss', 'Not now', null, '2026-11-01T10:00:00.000Z', '2026-11-01T10:00:00.000Z')
+    insert.run('later', 'owner', 'article.create', 'owner-business', revision(5), 'accept', null, null, '2026-11-02T10:00:00.000Z', '2026-11-02T10:00:00.000Z')
+    source.close()
+
+    const targetPath = join(directory, 'v24.sqlite')
+    const manifest = await transferDatabaseExport(sourcePath, targetPath, { payloadPath: join(directory, 'payload.sql') })
+    assert.deepEqual(manifest.transforms.filter((transform: { name: string }) => transform.name === 'recommendation_feedback_to_opportunities'), [{ name: 'recommendation_feedback_to_opportunities', changes: 5 }])
+    const target = new Database(targetPath, { readonly: true })
+    try {
+      assert.deepEqual(target.prepare('SELECT id,operation,status,available_at,decision_note,decided_at,decided_by_user_id FROM opportunities ORDER BY id').all(), [
+        { id: 'accepted', operation: 'article.publish', status: 'accepted', available_at: null, decision_note: null, decided_at: '2026-11-01T10:00:00.000Z', decided_by_user_id: 'owner' },
+        { id: 'corrected', operation: 'post.create', status: 'dismissed', available_at: null, decision_note: 'Our photos are on the website already', decided_at: '2026-11-01T10:00:00.000Z', decided_by_user_id: 'owner' },
+        { id: 'deferred', operation: 'payments.connect', status: 'open', available_at: '2026-11-20T09:00:00.000Z', decision_note: null, decided_at: null, decided_by_user_id: null },
+        { id: 'dismissed', operation: 'social.connect', status: 'dismissed', available_at: null, decision_note: 'We do not use social media', decided_at: '2026-11-01T10:00:00.000Z', decided_by_user_id: 'owner' },
+        { id: 'later', operation: 'article.create', status: 'accepted', available_at: null, decision_note: null, decided_at: '2026-11-02T10:00:00.000Z', decided_by_user_id: 'owner' },
+      ])
+      assert.deepEqual(target.prepare('SELECT opportunity_id,kind,subject_type,subject_id,title,assigned_member_id,timezone,status,dedupe_key FROM tasks ORDER BY opportunity_id').all(), [
+        { opportunity_id: 'accepted', kind: 'opportunity', subject_type: 'article', subject_id: 'draft-article', title: 'Publish the blog draft', assigned_member_id: 'owner-member', timezone: 'America/Denver', status: 'open', dedupe_key: 'opportunity:accepted' },
+        { opportunity_id: 'later', kind: 'opportunity', subject_type: null, subject_id: null, title: 'Write a blog article', assigned_member_id: 'owner-member', timezone: 'America/Denver', status: 'open', dedupe_key: 'opportunity:later' },
+      ])
+      assert.equal(target.prepare("SELECT name FROM sqlite_schema WHERE name = 'recommendation_feedback'").get(), undefined)
+      // The stored guess about the conversation is not carried; the conversation itself is.
+      assert.deepEqual(target.prepare("SELECT id, kind, organization_id FROM requests").all(), [{ id: 'conversation', kind: 'contact', organization_id: 'owner-business' }])
+      assert.equal((target.prepare("SELECT count(*) AS n FROM pragma_table_info('requests') WHERE name IN ('conversation_state', 'resolved_at')").get() as { n: number }).n, 0)
+      assert.deepEqual(target.pragma('foreign_key_check'), [])
+    } finally { target.close() }
+  } finally { rmSync(directory, { recursive: true, force: true }) }
 })
 
 test('channel retry proof preserves every historical receipt as unknown and leaves old writers unable to assert non-delivery', () => {
@@ -881,16 +935,16 @@ test('a v17 export transfers into the v18 baseline, which admits a stay conversa
       assert.deepEqual(target.prepare("SELECT id, request_id, guest_email FROM stays").all(), [{ id: 'stay', request_id: 'thread', guest_email: 'ana@example.test' }])
       assert.deepEqual(target.prepare("SELECT id, kind, json_extract(payload_json, '$.guest.email') AS email FROM requests").all(), [{ id: 'thread', kind: 'stay', email: 'ana@example.test' }])
       // v18 holds one by phone alone, and still refuses a guest with neither.
-      target.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES ('phone-only', 'stay', 'org', 'needs_attention', '{\"guest\":{\"name\":\"Kai\",\"email\":null,\"phone\":\"+15550000000\"}}')").run()
+      target.prepare("INSERT INTO requests (id, kind, organization_id, payload_json) VALUES ('phone-only', 'stay', 'org', '{\"guest\":{\"name\":\"Kai\",\"email\":null,\"phone\":\"+15550000000\"}}')").run()
       assert.deepEqual(JSON.parse((target.prepare("SELECT payload_json FROM requests WHERE id = 'phone-only'").get() as { payload_json: string }).payload_json).guest, { name: 'Kai', email: null, phone: '+15550000000' })
       // Other inbox kinds still require email at the persistence boundary.
       for (const kind of ['contact', 'reservation', 'booking']) {
-        assert.throws(() => target.prepare('INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES (?, ?, ?, ?, ?)')
-          .run(`phone-only-${kind}`, kind, 'org', 'needs_attention', JSON.stringify({ guest: { name: 'Kai', email: null, phone: '+15550000000' }, message: 'Hello' })), /requests_guest_payload_check/)
+        assert.throws(() => target.prepare('INSERT INTO requests (id, kind, organization_id, payload_json) VALUES (?, ?, ?, ?)')
+          .run(`phone-only-${kind}`, kind, 'org', JSON.stringify({ guest: { name: 'Kai', email: null, phone: '+15550000000' }, message: 'Hello' })), /requests_guest_payload_check/)
       }
       // A payload that leaves the email key out is refused, not read as no email.
-      assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES ('no-key', 'stay', 'org', 'needs_attention', '{\"guest\":{\"name\":\"Lu\",\"phone\":\"+15550000001\"}}')").run(), /requests_guest_payload_check/)
-      assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES ('nobody', 'stay', 'org', 'needs_attention', '{\"guest\":{\"name\":\"Bo\",\"email\":null,\"phone\":null}}')").run(), /requests_guest_payload_check/)
+      assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, payload_json) VALUES ('no-key', 'stay', 'org', '{\"guest\":{\"name\":\"Lu\",\"phone\":\"+15550000001\"}}')").run(), /requests_guest_payload_check/)
+      assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, payload_json) VALUES ('nobody', 'stay', 'org', '{\"guest\":{\"name\":\"Bo\",\"email\":null,\"phone\":null}}')").run(), /requests_guest_payload_check/)
     } finally {
       target.close()
     }
@@ -931,18 +985,18 @@ test('a v18 export preserves its conversations and receipts unchanged in the cha
     try {
       assert.deepEqual(target.pragma('foreign_key_check'), [])
       assert.deepEqual(['requests', 'activity_entries', 'guest_thread_deliveries'].map(table => target.prepare(`SELECT * FROM ${table}`).all()),
-        [before[0]!.map(request => ({ ...request as Record<string, unknown>, blocked_at: null })), before[1], before[2]!.map(receipt => ({ ...receipt as Record<string, unknown>, non_delivery_confirmed: null, email_json: null, email_message_id: null }))])
+        [before[0]!.map(request => { const { conversation_state: _state, resolved_at: _resolved, ...kept } = request as Record<string, unknown>; return { ...kept, blocked_at: null } }), before[1], before[2]!.map(receipt => ({ ...receipt as Record<string, unknown>, non_delivery_confirmed: null, email_json: null, email_message_id: null }))])
       assert.equal(target.prepare('SELECT count(*) AS n FROM channel_threads').get()!.n, 0)
       assert.deepEqual(target.prepare('SELECT category, email_enabled, whatsapp_enabled, push_enabled FROM user_notification_preferences ORDER BY category').all(),
         [{ category: 'messages', email_enabled: 0, whatsapp_enabled: 1, push_enabled: 1 }, { category: 'reviews', email_enabled: 1, whatsapp_enabled: 0, push_enabled: 0 }])
-      target.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES ('channel', 'stay', 'org', 'needs_attention', ?)").run(channel)
+      target.prepare("INSERT INTO requests (id, kind, organization_id, payload_json) VALUES ('channel', 'stay', 'org', ?)").run(channel)
       for (const guest of [undefined, {}, { name: null, email: null }, { name: null, phone: null }, { email: null, phone: null }]) {
-        assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES ('missing-guest', 'stay', 'org', 'needs_attention', ?)")
+        assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, payload_json) VALUES ('missing-guest', 'stay', 'org', ?)")
           .run(JSON.stringify({ participant: { kind: 'channel', title: 'Actual title' }, ...(guest === undefined ? {} : { guest }) })), /requests_guest_payload_check/)
       }
-      assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES ('invalid', 'stay', 'org', 'needs_attention', ?)")
+      assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, payload_json) VALUES ('invalid', 'stay', 'org', ?)")
         .run(JSON.stringify({ participant: { kind: 'channel', title: '' }, guest: { name: null, email: null, phone: null } })), /requests_guest_payload_check/)
-      assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES ('contact', 'contact', 'org', 'needs_attention', ?)").run(channel), /requests_guest_payload_check/)
+      assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, payload_json) VALUES ('contact', 'contact', 'org', ?)").run(channel), /requests_guest_payload_check/)
     } finally { target.close() }
   } finally { rmSync(directory, { recursive: true, force: true }) }
 })
@@ -1219,7 +1273,9 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
       for (const [ownerType, ownerId] of [['team_message', 'team-message'], ['activity_entry', 'guest-message']]) source.prepare("INSERT INTO media_placements(id,organization_id,owner_type,owner_id,slot,asset_id) VALUES(?,'host',?,?,'attachments','message-photo')").run(`photo-${ownerType}`, ownerType, ownerId)
       assert.deepEqual(source.prepare(MEDIA_PLACEMENT_OWNER_AUDIT_QUERY).all(), [], 'both canonical message owner types are in scope')
       assert.throws(() => source.prepare("UPDATE media_placements SET owner_type='invented_owner' WHERE id='photo-team_message'").run(), /media_placements_owner_type_check/)
-      for (const table of preservedTables) recorded[table] = source.prepare(`SELECT * FROM ${table} ORDER BY 1,2`).all()
+      // v24 retires requests' conversation_state and resolved_at; every other recorded value is kept.
+      for (const table of preservedTables) recorded[table] = (source.prepare(`SELECT * FROM ${table} ORDER BY 1,2`).all() as Array<Record<string, unknown>>)
+        .map(row => { if (table !== 'requests') return row; const { conversation_state: _state, resolved_at: _resolved, ...kept } = row; return kept })
       arrivalRules = source.prepare(`SELECT ${nightProjection} FROM product_nights ORDER BY product_id,date`).all()
       homeMinimums = source.prepare('SELECT product_id,min_nights FROM product_stay_configs ORDER BY product_id').all()
       originalPushes = source.prepare(`SELECT ${pushProjection} FROM channel_night_pushes ORDER BY product_id,date`).all() as Array<Record<string, unknown>>

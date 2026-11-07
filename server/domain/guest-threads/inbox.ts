@@ -171,7 +171,6 @@ function eventSentence(entry: GuestThreadEntryViewModel, facts: ThreadFacts, vie
   const actor = actorName(entry, facts, viewer)
   const noun = recordNoun(facts.raw)
   const firstLine = text(entry.body)?.split('\n')[0]?.trim() ?? null
-  if (entry.kind === 'resolution') return `${actor} ${name === 'thread.resolved' ? 'resolved' : 'reopened'} this conversation`
   if (name === 'thread.archived') return `${actor} archived this conversation`
   if (name === 'thread.unarchived') return `${actor} moved this conversation back to Messages`
   if (name.startsWith('booking_change.')) {

@@ -53,7 +53,9 @@ test('a stay opens its guest conversation in the one inbox', async () => {
       kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
       stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: `m-${CLEANER}`, assigned_team_id: null },
     } })
-    const thread = (requestId: string) => db.prepare('SELECT kind, location_id, conversation_state, payload_json FROM requests WHERE id = ?').bind(requestId).first<{ kind: string; location_id: string; conversation_state: string; payload_json: string }>()
+    const thread = (requestId: string) => db.prepare(`SELECT kind, location_id, payload_json,
+      (SELECT count(*) FROM tasks WHERE kind = 'guest_reply' AND subject_type = 'request' AND subject_id = requests.id AND status = 'open') AS open_replies
+      FROM requests WHERE id = ?`).bind(requestId).first<{ kind: string; location_id: string; payload_json: string; open_replies: number }>()
     const opening = (requestId: string) => db.prepare("SELECT actor_kind, actor_user_id, channel FROM activity_entries WHERE request_id = ? AND kind = 'submission'").bind(requestId).first()
 
     // A host stay with a guest email opens a thread the host opened, waiting on the guest.
@@ -62,7 +64,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.ok(ana.request_id)
     const anaThread = await thread(ana.request_id)
     assert.deepEqual({ ...anaThread, payload_json: JSON.parse(anaThread!.payload_json) }, {
-      kind: 'stay', location_id: 'cabin-site', conversation_state: 'waiting_on_guest',
+      kind: 'stay', location_id: 'cabin-site', open_replies: 0,
       payload_json: { guest: { name: 'Ana Silva', email: 'ana@example.test', phone: '+61491570150' } },
     })
     assert.deepEqual(await opening(ana.request_id), { actor_kind: 'member', actor_user_id: OWNER, channel: 'system' })

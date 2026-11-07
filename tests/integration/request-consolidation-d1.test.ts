@@ -22,8 +22,8 @@ const ACTOR = 'user-proof'
 const NOW = '2026-09-11T00:00:00.000Z'
 /** The owner, as every dashboard and MCP read is scoped: through their membership. */
 const OWNER = memberAccessPrincipal({ userId: ACTOR, organizationId: ORG, role: 'owner' }, { env: {} as CloudflareEnv })
-/** The attention read Today and MCP share: conversations that need the business, from their real facts. */
-const needsAttention = (db: D1Database) => listOrganizationGuestThreads(db, { organizationId: ORG, principal: OWNER, userId: ACTOR, conversationState: 'needs_attention' })
+/** The read the inbox and MCP share: conversations with an open reply task, the business's reply owed. */
+const needsReply = (db: D1Database) => listOrganizationGuestThreads(db, { organizationId: ORG, principal: OWNER, userId: ACTOR, needsReply: true })
 
 /**
  * A thread carries the conversation; a booking or reservation holds the seats.
@@ -70,8 +70,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
         following: bookingId => [
           ...requestInsertQueries({
             id, kind: 'booking', organization_id: ORG, location_id: LOCATION,
-            user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null,
-            payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@proof.example', phone: '+66812345678' }),
+            user_id: null, review_id: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@proof.example', phone: '+66812345678' }),
             created_at: NOW, updated_at: NOW,
           }, { query: 'SELECT 1 FROM bookings WHERE id = ?', params: [bookingId] }),
           {
@@ -120,8 +119,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     const reservationThread = 'reservation-proof'
     await db.batch(requestInsertQueries({
       id: reservationThread, kind: 'reservation', organization_id: ORG, location_id: LOCATION,
-      user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null,
-      payload: {
+      user_id: null, review_id: null, payload: {
         ...threadPayloadForGuest({ name: 'Guest', email: 'guest@proof.example', phone: '+66812345678' }),
         cancellation: { token_hash: 'hash', expires_at: '2099-01-01T00:00:00.000Z', used_at: null },
       },
@@ -157,24 +155,16 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     assert.equal(await db.prepare('SELECT status FROM reservations WHERE request_id=?').bind(reservationThread).first('status'), 'cancelled')
     const cancelledThread = await getGuestRequest(db, reservationThread)
     assert.equal(cancelledThread?.payload.cancellation.used_at, '2098-01-01T00:00:00.000Z')
-    assert.equal(cancelledThread?.conversation_state, 'resolved')
-    assert.equal(cancelledThread?.resolved_at, '2098-01-01T00:00:00.000Z')
-
-    // The legacy bug left this exact request state behind after cancellation.
-    // Reading attention must consult its real cancellation fact, without
-    // rewriting the row or treating its older guest message as new work.
-    await db.prepare("UPDATE requests SET conversation_state='needs_attention',resolved_at=NULL WHERE id=?").bind(reservationThread).run()
-    assert.deepEqual((await needsAttention(db)).map(thread => thread.id), [])
-    assert.equal((await getGuestRequest(db, reservationThread))?.conversation_state, 'needs_attention')
+    // The cancellation answers the question asked before it: no reply is owed.
+    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [])
     assert.equal((await listOrganizationGuestThreads(db, { organizationId: ORG, principal: OWNER, userId: ACTOR })).find(thread => thread.id === reservationThread)?.operationalStatus, 'cancelled')
 
     const guestReply = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'When will my refund arrive?', occurredAt: '2098-01-02T00:00:00.000Z' })
-    await updateThreadProjectionIfLatestEntry(db, reservationThread, guestReply.id, { conversationState: 'needs_attention' })
-    assert.deepEqual((await needsAttention(db)).map(thread => thread.id), [reservationThread])
+    await updateThreadProjectionIfLatestEntry(db, reservationThread, guestReply.id)
+    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [reservationThread])
     const retry = await cancelBookingRequest(db, { id: reservationThread, organizationId: ORG, kind: 'reservation', tokenHash: 'hash', now: '2098-01-03T00:00:00.000Z' })
     assert.equal(retry?.changed, false)
-    assert.equal((await getGuestRequest(db, reservationThread))?.conversation_state, 'needs_attention')
-    assert.equal((await getGuestRequest(db, reservationThread))?.resolved_at, null)
+    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [reservationThread], 'a replayed cancellation does not answer a question asked after it')
     assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE request_id=? AND event_name='reservation.cancel'").bind(reservationThread).first('count(*)'), 1)
 
     // A saved reply that failed to send does not answer the guest, even
@@ -182,17 +172,19 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     const failedReply = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'member', actorUserId: ACTOR, channel: 'email', eventName: 'thread.member_reply', body: 'Your refund is on its way.', occurredAt: '2098-01-04T00:00:00.000Z' })
     const receipt = await createDeliveryReceipt(db, { entryId: failedReply.id, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'cancelled-reply-delivery' })
     await recordDeliveryOutcome(db, { deliveryId: receipt.id, status: 'failed', error: 'Delivery refused' })
-    const stillNeedsReply = await needsAttention(db)
+    const stillNeedsReply = await needsReply(db)
     assert.deepEqual(stillNeedsReply.map(thread => thread.id), [reservationThread])
     assert.equal(stillNeedsReply[0]?.latestMessageFromGuest, false)
     await recordDeliveryOutcome(db, { deliveryId: receipt.id, status: 'sent', providerMessageId: 'delivered-cancelled-reply' })
-    assert.deepEqual((await needsAttention(db)).map(thread => thread.id), [])
+    // The reply operation projects its entry once its delivery is recorded.
+    await updateThreadProjectionIfLatestEntry(db, reservationThread, failedReply.id)
+    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [])
     const nextQuestion = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Thank you. Can you send the receipt?', occurredAt: '2098-01-05T00:00:00.000Z' })
-    await updateThreadProjectionIfLatestEntry(db, reservationThread, nextQuestion.id, { conversationState: 'needs_attention' })
+    await updateThreadProjectionIfLatestEntry(db, reservationThread, nextQuestion.id)
+    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [reservationThread])
     const webReply = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'member', actorUserId: ACTOR, channel: 'web', eventName: 'thread.member_reply', body: 'Here is your receipt.', occurredAt: '2098-01-06T00:00:00.000Z' })
-    assert.deepEqual((await needsAttention(db)).map(thread => thread.id), [])
-    await updateThreadProjectionIfLatestEntry(db, reservationThread, webReply.id, { conversationState: 'resolved', preserveUnansweredGuestMessages: true })
-    assert.equal((await getGuestRequest(db, reservationThread))?.conversation_state, 'resolved', 'a committed web reply needs no external delivery receipt')
+    await updateThreadProjectionIfLatestEntry(db, reservationThread, webReply.id)
+    assert.deepEqual((await needsReply(db)).map(thread => thread.id), [], 'a committed web reply needs no external delivery receipt')
 
     // A notification is acknowledged only by someone the visibility filter
     // admits, and the acknowledgement is an entry of its own.
@@ -248,8 +240,8 @@ test('archive and unarchive file a conversation without touching its booking, st
     })
     // A conversation's activity is its last message, or its opening when nobody has written since.
     const thread = (id: string, kind: string, openedAt: string) =>
-      `INSERT INTO requests (id,kind,organization_id,location_id,conversation_state,payload_json,created_at,updated_at)
-       VALUES ('${id}','${kind}','${ORG}','${LOCATION}','needs_attention','${guest(id, kind === 'contact' ? 'Hello' : undefined)}','${openedAt}','${openedAt}')`
+      `INSERT INTO requests (id,kind,organization_id,location_id,payload_json,created_at,updated_at)
+       VALUES ('${id}','${kind}','${ORG}','${LOCATION}','${guest(id, kind === 'contact' ? 'Hello' : undefined)}','${openedAt}','${openedAt}')`
     const reservation = (id: string, [startsAt, endsAt]: string[]) =>
       `INSERT INTO reservations (id,organization_id,location_id,request_id,timezone,starts_at,ends_at,party_size,created_at,updated_at)
        VALUES ('row-${id}','${ORG}','${LOCATION}','${id}','Asia/Bangkok','${startsAt}','${endsAt}',2,'${NOW}','${NOW}')`
@@ -296,7 +288,7 @@ test('archive and unarchive file a conversation without touching its booking, st
       assert.ok(details, id)
       return { archive: details.actions.archive, unarchive: details.actions.unarchive }
     }
-    const row = (id: string) => db.prepare('SELECT archived_at, archived_by_user_id, conversation_state, resolved_at, updated_at FROM requests WHERE id=?').bind(id).first()
+    const row = (id: string) => db.prepare('SELECT archived_at, archived_by_user_id, updated_at FROM requests WHERE id=?').bind(id).first()
     const recordRow = (id: string) => db.prepare('SELECT * FROM reservations WHERE request_id=?').bind(id).first()
     const entries = (id: string, eventName: string) => db.prepare("SELECT count(*) AS n FROM activity_entries WHERE request_id=? AND kind='operation' AND event_name=?").bind(id, eventName).first('n')
     const env = { NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
@@ -333,10 +325,7 @@ test('archive and unarchive file a conversation without touching its booking, st
     const afterArchive = await row('future')
     assert.equal(typeof afterArchive?.archived_at, 'string')
     assert.equal(afterArchive?.archived_by_user_id, ACTOR)
-    assert.deepEqual(
-      [afterArchive?.conversation_state, afterArchive?.resolved_at, afterArchive?.updated_at],
-      [before?.conversation_state, before?.resolved_at, before?.updated_at],
-    )
+    assert.equal(afterArchive?.updated_at, before?.updated_at)
     assert.deepEqual(await recordRow('future'), reservationBefore)
     assert.equal(await entries('future', 'thread.archived'), 1)
     assert.equal((await ids('current')).includes('future'), false)

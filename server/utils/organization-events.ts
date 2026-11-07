@@ -18,7 +18,9 @@ export function organizationEventContext(event: H3Event, source: 'dashboard' | '
 
 export type OrganizationEventType =
   | 'post.created' | 'post.published' | 'post.deleted' | 'post.channel_deleted' | 'post.publication_started' | 'article.created' | 'article.updated' | 'article.published'
-  | 'goal.created' | 'goal.updated' | 'recommendation.feedback'
+  | 'goal.created' | 'goal.updated'
+  | 'task.created' | 'task.assigned' | 'task.updated' | 'task.completed' | 'task.skipped' | 'task.reopened'
+  | 'opportunity.accepted' | 'opportunity.dismissed' | 'opportunity.deferred'
   | 'product.created' | 'product.updated' | 'product.deleted' | 'product.reordered'
   | 'product.category_created' | 'product.category_renamed' | 'product.category_deleted'
   | 'content.updated' | 'content.published' | 'media.uploaded' | 'media.deleted' | 'media.placement_changed'

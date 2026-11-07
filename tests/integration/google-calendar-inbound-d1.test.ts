@@ -38,7 +38,7 @@ test('Google time and exact attorney replacement request client approval while c
     const day = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10)
     const at = (time: string) => `${day}T${time}:00.000Z`
     for (const [id, member, start, end] of [['s','host-org',at('14:00'),at('14:30')], ['s2','host-org',at('15:00'),at('15:30')], ['s3','second-org',at('15:00'),at('15:30')]]) await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES(?,'org','p',?,'America/New_York',?,?,1,'actor','actor')").bind(id,member,start,end).run()
-    await db.prepare(`INSERT INTO requests(id,kind,organization_id,user_id,conversation_state,payload_json) VALUES('thread','booking','org','buyer','resolved','{"guest":{"name":"Jane Doe","email":"jane@example.test","phone":null},"notes":"PRIVATE LEGAL MATTER","party_size_is_minimum":false,"ip_hash":null,"cancellation":{"token_hash":null,"expires_at":null,"used_at":null}}')`).run()
+    await db.prepare(`INSERT INTO requests(id,kind,organization_id,user_id,payload_json) VALUES('thread','booking','org','buyer','{"guest":{"name":"Jane Doe","email":"jane@example.test","phone":null},"notes":"PRIVATE LEGAL MATTER","party_size_is_minimum":false,"ip_hash":null,"cancellation":{"token_hash":null,"expires_at":null,"used_at":null}}')`).run()
     const { bookingId } = await claimSessionCapacity(db, { organizationId:'org', productId:'p', sessionId:'s', productVariantId:'v', partySize:1, requestId:'thread', userId:'buyer' })
     await storeCalendarSelection(db,'org',{account_id:'linked-account',calendar_id:'chosen',calendar_name:'KrabiClaw'})
     const env = { ...await mf.getBindings<CloudflareEnv>(), BETTER_AUTH_URL:'https://proof.example', BETTER_AUTH_SECRET:'local-proof-secret-long-enough-for-auth', STRIPE_SECRET_KEY:'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN:'https://krabiclaw.test', EMAIL_REPLY_SECRET:'reply-secret', EMAIL_DELIVERY_MODE:'log_only' } as CloudflareEnv
@@ -102,7 +102,7 @@ test('Google time and exact attorney replacement request client approval while c
     const firstChange=editEvent({start:{dateTime:at('15:00'),timeZone:'America/New_York'},end:{dateTime:at('15:30'),timeZone:'America/New_York'}})
     assert.deepEqual(await pullCalendarChanges(env,'org',provider),{events:1,applied:1,reviewed:0},JSON.stringify((await db.prepare('SELECT detail FROM channel_sync_log').all()).results))
     assert.equal((await db.prepare('SELECT product_session_id FROM bookings WHERE id=?').bind(bookingId).first())?.product_session_id,'s')
-    assert.equal((await db.prepare("SELECT conversation_state FROM requests WHERE id='thread'").first())?.conversation_state,'waiting_on_guest')
+    assert.equal(await db.prepare("SELECT count(*) n FROM tasks WHERE kind='guest_reply' AND subject_id='thread' AND status='open'").first('n'),0,'an attorney proposal leaves no reply owed to the client')
     assert.deepEqual(events.get(eventId)?.start,{dateTime:at('14:00'),timeZone:'America/New_York'})
     const first=(await db.prepare("SELECT * FROM activity_entries WHERE event_name='booking_change.requested'").first())!
     assert.equal(first.actor_kind,'system')
@@ -182,13 +182,18 @@ test('Google time and exact attorney replacement request client approval while c
     editEvent({start:{dateTime:at('16:00')},end:{dateTime:at('16:30')}})
     assert.deepEqual(await pullCalendarChanges(env,'org',provider),{events:1,applied:0,reviewed:1})
     assert.deepEqual(events.get(eventId)?.start,{dateTime:at('15:00'),timeZone:'America/New_York'})
-    assert.equal((await db.prepare("SELECT conversation_state FROM requests WHERE id='thread'").first())?.conversation_state,'needs_attention')
     const deletion=editEvent({status:'cancelled'})
     changes=[deletion]
     assert.deepEqual(await pullCalendarChanges(env,'org',provider),{events:1,applied:0,reviewed:1})
     assert.equal((await db.prepare('SELECT status FROM bookings WHERE id=?').bind(bookingId).first())?.status,'pending')
     assert.equal(events.get(eventId)?.status,'tentative')
     assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE event_name='calendar_sync.event_deleted' AND kind='operation'").first('n'),1)
+    // Each refused move is an open change task the owner acknowledges; each Google proposal's task closed when it was
+    // answered or replaced; a deleted event the booking put back is nobody's work.
+    const changeTasks = (await db.prepare(`SELECT e.event_name, t.status, count(*) n FROM tasks t JOIN activity_entries e ON t.dedupe_key = 'booking_change:' || e.id
+      WHERE t.kind = 'booking_change' GROUP BY e.event_name, t.status ORDER BY e.event_name, t.status`).all()).results
+    const refused = await db.prepare("SELECT count(*) n FROM activity_entries WHERE event_name='calendar_sync.move_refused' AND kind='operation'").first<number>('n')
+    assert.deepEqual(changeTasks, [{ event_name: 'booking_change.requested', status: 'done', n: 3 }, { event_name: 'calendar_sync.move_refused', status: 'open', n: refused }])
     const deletionInvitations=invitations.length
     changes=[deletion]
     await pullCalendarChanges(env,'org',provider)

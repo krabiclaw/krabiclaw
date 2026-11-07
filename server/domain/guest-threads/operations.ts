@@ -10,13 +10,13 @@ import { deliverGuestThreadEmail, getDeliveryById, isDeliverySent } from './deli
 import { findEntryByDedupeKey, parseEntryPayload } from './entries'
 import { discardMessagePhotos, listMessagePhotos, MessagePhotoRejection, messagePhotoPlacements, uploadMessagePhotos, type MessagePhotoInput } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
-import { mailboxTransitionQueries, updateThreadProjectionIfLatestEntry } from './repository'
+import { conversationTaskQueries, mailboxTransitionQueries, updateThreadProjectionIfLatestEntry } from './repository'
 import { readMailboxActivity, resolveGuestThreadMailbox } from './mailbox'
 import { renderNotificationEmail } from '~/server/emails/render'
 import { guestThreadReplyMessage, guestThreadStatusMessage } from '~/server/notifications/guest-events'
 import { organizationLogo } from '~/server/notifications/hero'
 import { getPlatformDomain, buildBuyerRequestActivityUrl } from '~/server/utils/dashboard-notification-links'
-import { isBookingComplete } from '~/shared/bookings'
+import { isBookingComplete, STAY_CHANNEL_LABELS, type StayChannel } from '~/shared/bookings'
 import { creationRequestHash } from '~/server/utils/organization-events'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { guestPresentation } from '~/server/utils/notifications'
@@ -38,11 +38,9 @@ import type {
   GuestThreadSubmissionType,
 } from './types'
 
-// A thread is never resolved by hand. Booking decisions resolve their review
-// through the booking's own lifecycle; there is no separate resolve/reopen for a
-// member to reach for. Archive and unarchive say where the conversation is
-// filed, not what state it is in, and touch neither the booking nor
-// conversation_state.
+// Whether the business owes a reply is its open guest_reply task
+// (server/domain/tasks.ts): a reply, a cancellation, archiving or blocking
+// closes it. There is no separate resolve or reopen.
 export const GUEST_THREAD_ACTIONS = new Set(['confirm', 'reject', 'cancel', 'no_show', 'reply', 'archive', 'unarchive', 'report', 'block', 'unblock', 'accept_change', 'decline_change', 'retry'])
 
 type SuccessfulOperationOutcome = { ok: true; status: 200; thread: GuestThreadRow; availableActions: string[] }
@@ -257,17 +255,6 @@ function sourceUpdateQuery(context: ThreadContext, plan: SourceMutationPlan, inp
   }
 }
 
-function resolveThreadQuery(threadId: string, entryId: string, now: string): BatchQuery {
-  return {
-    query: `
-      UPDATE requests
-      SET conversation_state = 'resolved', resolved_at = ?, updated_at = ?
-      WHERE id = ? AND EXISTS (SELECT 1 FROM activity_entries WHERE id = ?)
-    `,
-    params: [now, now, threadId, entryId],
-  }
-}
-
 function deliveryReceiptQuery(
   context: ThreadContext,
   input: ExecuteOperationInput,
@@ -400,9 +387,7 @@ async function sendStatusUpdate(
     if (input.action === 'confirm') {
       // Confirming answers the booking request, not a separate guest message.
       // A retry must also leave newer conversation activity on its own state.
-      await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id, {
-        conversationState: 'resolved', preserveUnansweredGuestMessages: true,
-      })
+      await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id)
     }
     return await successfulOutcome(db, context)
   }
@@ -461,8 +446,9 @@ async function executeSourceMutation(
   const queries = [
     operationEntryQuery(context, plan, input, entryId, dedupeKey, now, email,refundPlan.guard),
     sourceUpdateQuery(context, plan, input, entryId, now),
-    ...(plan.afterStatus === 'cancelled' ? [resolveThreadQuery(context.thread.id, entryId, now)] : []),
     ...refundPlan.queries,
+    // An approval closes the booking's review; a cancellation also answers what the guest asked before it.
+    ...conversationTaskQueries(context.thread.id, now),
   ]
   if (plan.afterStatus === 'cancelled') queries.push(revokeReviewRequestQuery(plan.kind, context.thread.id, entryId, now))
   if (plan.requiresNotification) {
@@ -545,7 +531,7 @@ async function executeReply(
     const earlier = await getDeliveryById(db, deliveryKey)
     if (!earlier || earlier.entry_id !== entry.id) throw new Error('Reply delivery receipt does not match its ledger entry')
     if (isDeliverySent(earlier) && !earlier.error) {
-      await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id, { conversationState: 'waiting_on_guest' })
+      await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id)
       return successfulOutcome(db, context)
     }
   }
@@ -614,7 +600,7 @@ async function executeReply(
   if (entry.channel === 'web') {
     const fromName = await getOrganizationBrandName(db, context.thread.organization_id)
     await notifyBuyerThread(db, { threadId: context.thread.id, entryId: entry.id, title: replySubject(context.thread.kind, fromName), message: fromName, conversation: true })
-    await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id, { conversationState: 'waiting_on_guest' })
+    await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id)
     return await successfulOutcome(db, context)
   }
   // A reply saved for email whose address has since been removed is not sent anywhere else.
@@ -622,7 +608,7 @@ async function executeReply(
   const delivery = await getDeliveryById(db, deliveryKey)
   if (!delivery || delivery.entry_id !== entry.id) throw new Error('Reply delivery receipt does not match its ledger entry')
   if (isDeliverySent(delivery) && !delivery.error) {
-    await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id, { conversationState: 'waiting_on_guest' })
+    await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id)
     return successfulOutcome(db, context)
   }
 
@@ -639,7 +625,7 @@ async function executeReply(
   })
 
   if (isDeliverySent(outcome)) {
-    await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id, { conversationState: 'waiting_on_guest' })
+    await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id)
     return await successfulOutcome(db, context)
   }
   if (typeof outcome.error !== 'string' || !outcome.error.trim()) {
@@ -678,9 +664,9 @@ export async function guestReplyDestination(db: DbClient, thread: Pick<GuestRequ
   }
   let email = thread.payload.guest.email?.trim() || null
   if (thread.kind === 'stay') {
-    const stay = await queryFirst<{ guest_email: string | null; owner: string }>(db, 'SELECT guest_email, owner FROM stays WHERE organization_id = ? AND request_id = ?', [thread.organization_id, thread.id])
+    const stay = await queryFirst<{ guest_email: string | null; owner: string; channel: StayChannel }>(db, 'SELECT guest_email, owner, channel FROM stays WHERE organization_id = ? AND request_id = ?', [thread.organization_id, thread.id])
     if (!stay) return { channel: null, reason: 'This conversation’s stay no longer exists.' }
-    if (stay.owner === 'channel') return { channel: null, reason: 'This Airbnb stay has no conversation to reply in yet.' }
+    if (stay.owner === 'channel') return { channel: null, reason: `This ${STAY_CHANNEL_LABELS[stay.channel]} stay has no conversation to reply in yet.` }
     email = stay.guest_email?.trim() || null
   }
   if (email) return { channel: 'email', email }
@@ -732,7 +718,8 @@ async function executeMailboxTransition(
     entryId: crypto.randomUUID(),
     dedupeKey,
     now,
-  }), { operation: `guest thread ${eventName}` })
+  // Archiving closes the open reply task; unarchiving reopens a question still unanswered.
+  }).concat(conversationTaskQueries(context.thread.id, now)), { operation: `guest thread ${eventName}` })
   const recorded = entry?.meta?.changes ?? 0
   const moved = update?.meta?.changes ?? 0
   if (recorded !== moved) throw new Error(`${eventName} recorded ${recorded} entries for ${moved} thread writes`)
@@ -769,7 +756,7 @@ async function executeReport(db: DbClient, context: ThreadContext, input: Execut
     ...(block ? [{
       query: 'UPDATE requests SET blocked_at = COALESCE(blocked_at, ?) WHERE organization_id = ? AND id = ? AND changes() = 1',
       params: [new Date().toISOString(), context.thread.organization_id, context.thread.id],
-    }] : []),
+    }, ...conversationTaskQueries(context.thread.id, new Date().toISOString())] : []),
   ], { operation: block ? 'Block and report a guest' : 'Report a guest conversation' })
   await assertSameReport(db, id, { subject: 'guest_thread', requestId: context.thread.id, teamMessageId: null, reason, blocked: block })
   await announceContentReport(input.env, db, id)
@@ -781,7 +768,7 @@ async function executeUnblock(db: DbClient, context: ThreadContext): Promise<Ope
   const [update] = await executeBatch(db, [{
     query: 'UPDATE requests SET blocked_at = NULL WHERE organization_id = ? AND id = ? AND blocked_at IS NOT NULL',
     params: [context.thread.organization_id, context.thread.id],
-  }], { operation: 'Unblock a guest' })
+  }, ...conversationTaskQueries(context.thread.id, new Date().toISOString())], { operation: 'Unblock a guest' })
   if ((update?.meta?.changes ?? 0) === 0 && context.thread.blocked_at === null) return conflict('This guest is not blocked')
   return await successfulOutcome(db, context)
 }

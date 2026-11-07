@@ -223,7 +223,7 @@ test('the funnel joins a business site from visit to payment, by source and by l
     for (const [requestId, origin, locationId, status] of [['req-beach', ad, 'loc-beach', 'confirmed'], ['req-town', direct, 'loc-town', 'cancelled']] as const) {
       const now = '2026-09-10T05:00:00.000Z'
       const thread = requestInsertQueries({ id: requestId, kind: 'reservation', organization_id: 'org-funnel', location_id: locationId, user_id: null, review_id: null,
-        conversation_state: 'needs_attention', resolved_at: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@funnel.example', phone: '+66812345678' }), created_at: now, updated_at: now })
+        payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@funnel.example', phone: '+66812345678' }), created_at: now, updated_at: now })
       await db.batch(thread.map(write => db.prepare(write.query).bind(...write.params)))
       await db.prepare(`INSERT INTO reservations (id, organization_id, location_id, request_id, timezone, starts_at, ends_at, party_size, status, cancelled_at)
         VALUES (?, 'org-funnel', ?, ?, 'Asia/Bangkok', '2026-09-20T12:00:00.000Z', '2026-09-20T14:00:00.000Z', 2, ?, ?)`)
@@ -233,7 +233,7 @@ test('the funnel joins a business site from visit to payment, by source and by l
     // A request made through checkout records no submit event: its payment is how it was made.
     const now = '2026-09-10T06:00:00.000Z'
     const checkout = requestInsertQueries({ id: 'req-checkout', kind: 'reservation', organization_id: 'org-funnel', location_id: 'loc-beach', user_id: null, review_id: null,
-      conversation_state: 'needs_attention', resolved_at: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'paid@funnel.example', phone: '+66812345678' }), created_at: now, updated_at: now })
+      payload: threadPayloadForGuest({ name: 'Guest', email: 'paid@funnel.example', phone: '+66812345678' }), created_at: now, updated_at: now })
     await db.batch(checkout.map(write => db.prepare(write.query).bind(...write.params)))
     await db.prepare(`INSERT INTO reservations (id, organization_id, location_id, request_id, timezone, starts_at, ends_at, party_size, status)
       VALUES ('reservation-req-checkout', 'org-funnel', 'loc-beach', 'req-checkout', 'Asia/Bangkok', '2026-09-21T12:00:00.000Z', '2026-09-21T14:00:00.000Z', 2, 'confirmed')`).run()

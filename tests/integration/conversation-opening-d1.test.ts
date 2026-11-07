@@ -38,7 +38,7 @@ test('a reservation opens with its own message and the guest note, written once,
     const reservation = async (id: string, notes: string | null, opening?: { body: string }) => {
       const payload = threadPayloadForGuest({ name: 'Filip Heurckmans', email: 'filip@example.test', phone: '+32475699444', locale: 'en', notes, ipHash: null, partySizeIsMinimum: false, answers: [] })
       await db.batch([
-        ...requestInsertQueries({ id, kind: 'reservation', organization_id: ORG, location_id: 'loc', user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null, payload, created_at: CREATED, updated_at: CREATED }, undefined, opening),
+        ...requestInsertQueries({ id, kind: 'reservation', organization_id: ORG, location_id: 'loc', user_id: null, review_id: null, payload, created_at: CREATED, updated_at: CREATED }, undefined, opening),
         { query: `INSERT INTO reservations (id, request_id, organization_id, location_id, timezone, starts_at, ends_at, party_size, status, created_at, updated_at)
             VALUES (?, ?, ?, 'loc', 'Asia/Bangkok', '2026-11-04T07:00:00.000Z', '2026-11-04T09:00:00.000Z', 4, 'confirmed', ?, ?)`, params: [`res-${id}`, id, ORG, CREATED, CREATED] },
       ].map(query => db.prepare(query.query).bind(...(query.params ?? []))))
@@ -91,7 +91,7 @@ test('a reservation opens with its own message and the guest note, written once,
     // A checkout never captured has no reservation; its hold says what was asked.
     const held = threadPayloadForGuest({ name: 'Ana Ruiz', email: 'ana@example.test', phone: null, locale: 'en', notes: null, ipHash: null, partySizeIsMinimum: false, answers: [] })
     await db.batch([
-      ...requestInsertQueries({ id: 'held', kind: 'reservation', organization_id: ORG, location_id: 'loc', user_id: null, review_id: null, conversation_state: 'waiting_on_guest', resolved_at: null, payload: held, created_at: CREATED, updated_at: CREATED }),
+      ...requestInsertQueries({ id: 'held', kind: 'reservation', organization_id: ORG, location_id: 'loc', user_id: null, review_id: null, payload: held, created_at: CREATED, updated_at: CREATED }),
       { query: `INSERT INTO payments (id, organization_id, buyer_user_id, stripe_account_id, livemode, subject_type, subject_id, location_id, currency, amount, captured_amount, state, stripe_payment_intent_id, price_snapshot_json, created_at, updated_at)
           VALUES ('held-pay', ?, NULL, 'acct', 0, 'reservation', NULL, 'loc', 'THB', 50000, 0, 'pending', 'pi_held', '{}', ?, ?)`, params: [ORG, CREATED, CREATED] },
       { query: `INSERT INTO payment_checkout_holds (id, organization_id, location_id, timezone, request_id, payment_id, quantity, amount, currency, starts_at, ends_at, status, expires_at, created_at)
