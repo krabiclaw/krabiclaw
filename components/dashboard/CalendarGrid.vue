@@ -221,7 +221,7 @@ const isText = (value: unknown) => value === null || typeof value === 'string'
 const isCount = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= 0
 const isAmount = (value: unknown) => value === null || typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 function isHome(value: unknown): value is Home {
-  if (!isRecord(value) || typeof value.product_id !== 'string' || typeof value.name !== 'string' || typeof value.internal_name !== 'string' || !isValidTimezone(value.timezone)
+  if (!isRecord(value) || typeof value.product_id !== 'string' || typeof value.name !== 'string' || typeof value.internal_name !== 'string' || typeof value.timezone !== 'string' || !isValidTimezone(value.timezone)
     || !isCurrencyCode(value.currency) || !isAmount(value.base_price_minor) || typeof value.min_nights !== 'number' || !Number.isInteger(value.min_nights) || value.min_nights < 1 || value.min_nights > MAX_STAY_NIGHTS
     || !(value.address === null || isRecord(value.address))) return false
   parseStayCalendarRules(value.calendar_rules)
