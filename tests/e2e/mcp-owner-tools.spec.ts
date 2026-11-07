@@ -528,20 +528,19 @@ test.describe('stateless MCP server', () => {
           method: 'tools/call', toolName: 'get_reservation_policy', args: { organization_id: organizationId, location_id: locationId },
         })
         expect(response.status(), await response.text()).toBe(200)
-        return mcpData<{ policy: Record<string, unknown>; cancellation_policy: string | null }>(await response.json())
+        return mcpData<{ policy: Record<string, unknown> }>(await response.json())
       }
       const currentPolicy = (await policy()).policy
       const firm = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'update_reservation_policy',
-        args: { organization_id: organizationId, location_id: locationId, duration_minutes: 60, expected_updated_at: currentPolicy.updated_at, cancellation_policy: 'firm', advance_notice_minutes: (firstOffset + 2) * 1440, deposit_required: false, deposit_trigger_party_size: null, additional_notes_html: '<p>Please call for dietary requests.</p>' },
+        args: { organization_id: organizationId, location_id: locationId, duration_minutes: 60, expected_updated_at: currentPolicy.updated_at, advance_notice_minutes: (firstOffset + 2) * 1440, deposit_required: false, deposit_trigger_party_size: null },
       })
       expect(firm.status(), await firm.text()).toBe(200)
       const dashboardConfig = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/locations/${locationId}/reservation-config`)
       expect(dashboardConfig.status(), await dashboardConfig.text()).toBe(200)
-      expect((await dashboardConfig.json()).config).toMatchObject({ free_cancellation_until_minutes: 2880, reschedule_allowed: true, reschedule_cutoff_minutes: 2880, deposit_required: false, deposit_trigger_party_size: null, additional_notes_html: '<p>Please call for dietary requests.</p>' })
-      expect((await policy()).cancellation_policy).toBe('firm')
+      expect((await dashboardConfig.json()).config).toMatchObject({ deposit_required: false, deposit_trigger_party_size: null })
       expect(await guestSlots(from)).toBe(0)
-      // Guests see the actual cancellation and rescheduling terms and the owner's note.
+      // Guests see the one cancellation and rescheduling rule.
       await dismissPreviewToolbar(page)
       await page.setExtraHTTPHeaders(asTenant)
       expect((await page.goto(`${baseURL}/reservations`))?.status()).toBe(200)
@@ -551,9 +550,8 @@ test.describe('stateless MCP server', () => {
       await brooklynCard.locator('label[for="reservation-booking-toggle"][role="button"]').click()
       await page.getByRole('dialog').locator('label[role="button"]').click()
       const terms = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Reservation policies', exact: true }) })
-      await expect(terms).toContainText('Cancel free up to 2 days before your booking.')
-      await expect(terms).toContainText('Please call for dietary requests.')
-      await expect(terms).toContainText('You can reschedule up to 2 days before the start time.')
+      await expect(terms).toContainText('Cancel free up to 24 hours before the start time.')
+      await expect(terms).toContainText('You can reschedule up to 24 hours before the start time.')
       await expect(terms).not.toContainText(/deposit/i)
     } finally {
       try {
@@ -576,11 +574,7 @@ test.describe('stateless MCP server', () => {
             duration_minutes: priorPolicy.duration_minutes,
             deposit_required: priorPolicy.deposit_required ?? false,
             deposit_trigger_party_size: priorPolicy.deposit_trigger_party_size ?? null,
-            additional_notes_html: priorPolicy.additional_notes_html ?? null,
             advance_notice_minutes: priorPolicy.advance_notice_minutes ?? null,
-            free_cancellation_until_minutes: priorPolicy.free_cancellation_until_minutes ?? null,
-            reschedule_allowed: priorPolicy.reschedule_allowed ?? true,
-            reschedule_cutoff_minutes: priorPolicy.reschedule_cutoff_minutes ?? null,
           },
         })
         expect(restored.status(), await restored.text()).toBe(200)

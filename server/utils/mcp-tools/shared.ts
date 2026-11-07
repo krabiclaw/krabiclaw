@@ -585,9 +585,8 @@ export const renderedBookingPolicySummaryObject = {
         required: ['id', 'text'],
       },
     },
-    additional_notes_html: { type: ['string', 'null'] },
   },
-  required: ['heading', 'items', 'additional_notes_html'],
+  required: ['heading', 'items'],
 }
 
 /**
@@ -604,9 +603,6 @@ export const locationReservationConfigObject = {
     duration_minutes: { type: 'integer', minimum: 1 },
     slot_capacity: { type: ['number', 'null'], description: 'Guests seatable at one start time. Null means unlimited.' },
     advance_notice_minutes: { type: ['number', 'null'] },
-    free_cancellation_until_minutes: { type: ['number', 'null'] },
-    reschedule_allowed: { type: 'boolean' },
-    reschedule_cutoff_minutes: { type: ['number', 'null'] },
     deposit_required: { type: 'boolean' },
     deposit_amount: { type: ['integer', 'null'], minimum: 1, description: 'Total deposit per reservation, in deposit_currency minor units.' },
     deposit_currency: { ...currencyCodeSchema, type: ['string', 'null'] },
@@ -614,22 +610,18 @@ export const locationReservationConfigObject = {
     deposit_trigger_party_size: { type: ['number', 'null'] },
     minimum_guest_age: { type: ['number', 'null'] },
     accessibility_contact_required: { type: 'boolean' },
-    additional_notes_html: { type: ['string', 'null'] },
     questions: { ...formQuestionsJsonSchema('read'), description: 'The tenant\'s own questions asked beside the required reservation fields; create_table_reservation answers them by ID.' },
     questions_revision: { type: 'string', description: 'Send as expected_questions_revision when replacing questions, and as questions_revision when submitting answers.' },
     created_at: { type: 'string' },
     updated_at: { type: 'string' },
   },
-  required: ['location_id', 'duration_minutes', 'reschedule_allowed', 'deposit_required', 'accessibility_contact_required', 'questions', 'questions_revision', 'created_at', 'updated_at'],
+  required: ['location_id', 'duration_minutes', 'deposit_required', 'accessibility_contact_required', 'questions', 'questions_revision', 'created_at', 'updated_at'],
 } as const
 
 export const locationReservationConfigWriteSchema = {
   duration_minutes: { type: ['integer', 'null'], minimum: 1 },
   slot_capacity: { type: ['number', 'null'], minimum: 0 },
   advance_notice_minutes: { type: ['number', 'null'], minimum: 0 },
-  free_cancellation_until_minutes: { type: ['number', 'null'], minimum: 0 },
-  reschedule_allowed: { type: 'boolean' },
-  reschedule_cutoff_minutes: { type: ['number', 'null'], minimum: 0 },
   deposit_required: { type: 'boolean' },
   deposit_amount: { type: ['integer', 'null'], minimum: 1, description: 'Total deposit per reservation, in deposit_currency minor units.' },
     deposit_currency: { ...currencyCodeSchema, type: ['string', 'null'] },
@@ -637,7 +629,6 @@ export const locationReservationConfigWriteSchema = {
   deposit_trigger_party_size: { type: ['number', 'null'], minimum: 1 },
   minimum_guest_age: { type: ['number', 'null'], minimum: 0 },
   accessibility_contact_required: { type: 'boolean' },
-  additional_notes_html: { type: ['string', 'null'], description: 'Guest-facing notes. Sanitized on the way in; only basic formatting and links survive.' },
   questions: { ...formQuestionsJsonSchema('write'), description: 'Replace the questions asked with each reservation. Read get_reservation_policy first and keep existing question IDs.' },
   expected_questions_revision: { type: 'string', description: 'policy.questions_revision from get_reservation_policy; required with questions.' },
 } as const

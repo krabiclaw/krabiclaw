@@ -398,7 +398,7 @@ test('MCP consultation attorney replacement waits for buyer conversation approva
     for (const actor of actors) await body(await request.post('/api/auth/organization/add-team-member', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId, userId: actor.userId } }))
     product = (await body<{ product: Product }>(await request.post(`${editor}/products`, { data: {
       kind: 'service', active: true, name: `MCP consultation approval ${crypto.randomUUID()}`, description: 'A legal consultation to discuss questions with an attorney.',
-      details: { preparation: 'Bring your consultation questions.', cancellation_policy: 'Contact the legal team before the consultation to cancel.' },
+      details: { preparation: 'Bring your consultation questions.' },
       variants: [{ name: 'Online consultation', prices: [{ unit_amount: 0, currency: 'USD' }] }],
     } }), 201)).product
     await body(await request.put(`${editor}/products/${product.id}/booking`, { data: {

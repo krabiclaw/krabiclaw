@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { sanitizeUrl } from '~/utils/sanitize'
+import { FREE_CANCELLATION_MINUTES } from '~/shared/availability-settings'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '../db/index.ts'
 import { generateReservationTimes, parseOpeningHours, parseSpecialHours, locationAllowsBooking } from '~/shared/reservation-hours'
 import { RESERVATION_CAPACITY_CONSUMING_SQL } from '~/shared/bookings'
@@ -42,11 +42,7 @@ export interface LocationReservationConfig {
   deposit_currency: CurrencyCode | null
   deposit_tax_behavior: 'inclusive' | 'exclusive' | null
   deposit_trigger_party_size: number | null
-  free_cancellation_until_minutes: number | null
-  reschedule_allowed: boolean
-  reschedule_cutoff_minutes: number | null
   accessibility_contact_required: boolean
-  additional_notes_html: string | null
   /** The tenant's own questions asked with each reservation, and the revision a form built from them carries. */
   questions: FormQuestion[]
   questions_revision: string
@@ -64,10 +60,9 @@ export const DEFAULT_RESERVATION_DURATION_MINUTES = 120
 
 const NUMERIC_FIELDS = [
   'duration_minutes', 'slot_capacity', 'advance_notice_minutes', 'minimum_guest_age',
-  'deposit_trigger_party_size', 'free_cancellation_until_minutes', 'reschedule_cutoff_minutes',
-  'deposit_amount',
+  'deposit_trigger_party_size', 'deposit_amount',
 ] as const
-const BOOLEAN_FIELDS = ['deposit_required', 'reschedule_allowed', 'accessibility_contact_required'] as const
+const BOOLEAN_FIELDS = ['deposit_required', 'accessibility_contact_required'] as const
 
 function mapRow(row: Record<string, unknown>): LocationReservationConfig {
   return {
@@ -82,11 +77,7 @@ function mapRow(row: Record<string, unknown>): LocationReservationConfig {
     deposit_currency: row.deposit_currency as CurrencyCode | null,
     deposit_tax_behavior: row.deposit_tax_behavior as LocationReservationConfig['deposit_tax_behavior'],
     deposit_trigger_party_size: row.deposit_trigger_party_size === null ? null : Number(row.deposit_trigger_party_size),
-    free_cancellation_until_minutes: row.free_cancellation_until_minutes === null ? null : Number(row.free_cancellation_until_minutes),
-    reschedule_allowed: Number(row.reschedule_allowed) === 1,
-    reschedule_cutoff_minutes: row.reschedule_cutoff_minutes === null ? null : Number(row.reschedule_cutoff_minutes),
     accessibility_contact_required: Number(row.accessibility_contact_required) === 1,
-    additional_notes_html: row.additional_notes_html === null ? null : String(row.additional_notes_html),
     ...(() => { const questions = parseStoredFormQuestions(String(row.questions)); return { questions, questions_revision: formQuestionsRevision(questions) } })(),
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
@@ -119,60 +110,9 @@ export async function requireLocationReservationConfig(
 }
 
 
-const ALLOWED_NOTES_TAGS = new Set(['p', 'br', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'a'])
-const ALLOWED_NOTES_ATTRS: Record<string, Set<string>> = { a: new Set(['href', 'target', 'rel']) }
-// Their content is raw text to the parser, so unwrapping them would turn text
-// such as `<img onerror=…>` into markup. They go with everything inside them.
-const RAW_TEXT_NOTES_TAGS = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript', 'plaintext', 'template'])
-
-// Uses the Workers runtime's native HTMLRewriter rather than a DOM-based sanitizer
-// (e.g. DOMPurify/jsdom) — those depend on Node's `vm`/native bindings and crash the
-// whole Worker at module load if imported anywhere in the server bundle, since jsdom
-// has no Workers-compatible build. See utils/sanitize.ts's server-side fallback for
-// the same constraint on the client/shared sanitize path.
-export async function sanitizeAdditionalNotesHtml(value: string | null): Promise<string | null> {
-  if (!value) return null
-  const rewriter = new HTMLRewriter().on('*', {
-    element(el) {
-      const tag = el.tagName.toLowerCase()
-      if (RAW_TEXT_NOTES_TAGS.has(tag)) {
-        el.remove()
-        return
-      }
-      if (!ALLOWED_NOTES_TAGS.has(tag)) {
-        el.removeAndKeepContent()
-        return
-      }
-      const allowedAttrs = ALLOWED_NOTES_ATTRS[tag] ?? new Set<string>()
-      // Workers' HTMLRewriter Element.attributes is IterableIterator<string[]> (name/value
-      // pairs), but @cloudflare/workers-types' global `Element` collides with lib.dom's
-      // `Element` in this project's tsconfig (both declare a same-named global interface),
-      // so TS resolves .attributes to the DOM NamedNodeMap shape here. Cast back to the
-      // actual runtime shape rather than touching the shared tsconfig lib/types config.
-      const attrPairs = el.attributes as unknown as IterableIterator<[string, string]>
-      for (const [name] of [...attrPairs]) {
-        if (!allowedAttrs.has(name)) el.removeAttribute(name)
-      }
-      if (tag === 'a') {
-        el.setAttribute('href', sanitizeUrl(el.getAttribute('href')))
-        el.setAttribute('rel', 'noopener noreferrer')
-      }
-    },
-    comments(comment) {
-      comment.remove()
-    },
-  })
-  const response = rewriter.transform(new Response(`<div>${value}</div>`, { headers: { 'content-type': 'text/html' } }))
-  const rewritten = await response.text()
-  const sanitized = rewritten.replace(/^<div>/, '').replace(/<\/div>$/, '').trim()
-  return sanitized || null
-}
-
-
-
 export async function validateLocationReservationConfigPatch(input: Record<string, unknown>): Promise<LocationReservationConfigPatch> {
   const patch: LocationReservationConfigPatch = {}
-  const unknown = Object.keys(input).filter(key => !([...NUMERIC_FIELDS, ...BOOLEAN_FIELDS, 'deposit_currency', 'deposit_tax_behavior', 'additional_notes_html', 'questions', 'expected_questions_revision'] as readonly string[]).includes(key))
+  const unknown = Object.keys(input).filter(key => !([...NUMERIC_FIELDS, ...BOOLEAN_FIELDS, 'deposit_currency', 'deposit_tax_behavior', 'questions', 'expected_questions_revision'] as readonly string[]).includes(key))
   if (unknown.length) throw new HTTPError({ statusCode: 400, statusMessage: `Unsupported field${unknown.length > 1 ? 's' : ''}: ${unknown.sort().join(', ')}` })
 
   for (const field of NUMERIC_FIELDS) {
@@ -188,13 +128,6 @@ export async function validateLocationReservationConfigPatch(input: Record<strin
     if (!Object.hasOwn(input, field)) continue
     if (typeof input[field] !== 'boolean') throw new HTTPError({ statusCode: 400, statusMessage: `${field} must be a boolean` })
     patch[field] = input[field]
-  }
-  if (Object.hasOwn(input, 'additional_notes_html')) {
-    const value = input.additional_notes_html
-    if (value !== null && typeof value !== 'string') throw new HTTPError({ statusCode: 400, statusMessage: 'additional_notes_html must be a string or null' })
-    // Notes are rendered into a guest-facing page, so they are sanitized here
-    // — once, on the way in — rather than at each render site.
-    patch.additional_notes_html = await sanitizeAdditionalNotesHtml(value)
   }
   if (patch.deposit_trigger_party_size !== undefined && patch.deposit_trigger_party_size !== null && patch.deposit_trigger_party_size < 1) {
     throw new HTTPError({ statusCode: 400, statusMessage: 'deposit_trigger_party_size must be at least 1' })
@@ -256,19 +189,14 @@ export async function upsertLocationReservationConfig(db: DbClient, input: {
     query: `
       INSERT INTO location_reservation_configs (
         location_id, organization_id, duration_minutes, slot_capacity, advance_notice_minutes, minimum_guest_age,
-        deposit_required, deposit_amount, deposit_currency, deposit_tax_behavior, deposit_trigger_party_size, free_cancellation_until_minutes,
-        reschedule_allowed, reschedule_cutoff_minutes, accessibility_contact_required,
-        additional_notes_html, questions, created_at, updated_at, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        deposit_required, deposit_amount, deposit_currency, deposit_tax_behavior, deposit_trigger_party_size, accessibility_contact_required, questions, created_at, updated_at, created_by, updated_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (location_id) DO UPDATE SET
         duration_minutes = excluded.duration_minutes, slot_capacity = excluded.slot_capacity, advance_notice_minutes = excluded.advance_notice_minutes,
         minimum_guest_age = excluded.minimum_guest_age, deposit_required = excluded.deposit_required,
         deposit_amount = excluded.deposit_amount, deposit_currency = excluded.deposit_currency, deposit_tax_behavior = excluded.deposit_tax_behavior,
         deposit_trigger_party_size = excluded.deposit_trigger_party_size,
-        free_cancellation_until_minutes = excluded.free_cancellation_until_minutes,
-        reschedule_allowed = excluded.reschedule_allowed, reschedule_cutoff_minutes = excluded.reschedule_cutoff_minutes,
-        accessibility_contact_required = excluded.accessibility_contact_required,
-        additional_notes_html = excluded.additional_notes_html, questions = excluded.questions,
+        accessibility_contact_required = excluded.accessibility_contact_required, questions = excluded.questions,
         updated_at = excluded.updated_at, updated_by = excluded.updated_by
       WHERE location_reservation_configs.organization_id = excluded.organization_id AND location_reservation_configs.updated_at = ?
     `,
@@ -276,9 +204,7 @@ export async function upsertLocationReservationConfig(db: DbClient, input: {
       input.locationId, input.organizationId, merged.duration_minutes,
       merged.slot_capacity ?? null, merged.advance_notice_minutes ?? null, merged.minimum_guest_age ?? null,
       (merged.deposit_required ?? false) ? 1 : 0, merged.deposit_amount ?? null, merged.deposit_currency ?? null, merged.deposit_tax_behavior ?? null, merged.deposit_trigger_party_size ?? null,
-      merged.free_cancellation_until_minutes ?? null, (merged.reschedule_allowed ?? true) ? 1 : 0,
-      merged.reschedule_cutoff_minutes ?? null, (merged.accessibility_contact_required ?? false) ? 1 : 0,
-      merged.additional_notes_html ?? null, JSON.stringify(questions), now, now, input.actorId, input.actorId, existing?.updated_at ?? null,
+      (merged.accessibility_contact_required ?? false) ? 1 : 0, JSON.stringify(questions), now, now, input.actorId, input.actorId, existing?.updated_at ?? null,
     ],
   }, publicResourceCacheInvalidationQuery(input.organizationId, 'reservation-policy-updated')], { operation: 'Upsert location reservation config' })
   if (results[0]?.meta.changes !== 1) throw new HTTPError({ statusCode: 409, message: 'The reservation policy changed before saving. Read it again.' })
@@ -299,9 +225,10 @@ export function reservationPolicySummarySource(config: LocationReservationConfig
   return {
     policy_type: 'reservation' as const,
     advance_notice_minutes: config.advance_notice_minutes,
-    free_cancellation_until_minutes: config.free_cancellation_until_minutes,
-    reschedule_allowed: config.reschedule_allowed,
-    reschedule_cutoff_minutes: config.reschedule_cutoff_minutes,
+    // reservations_policy_check requires these three in policy_json until its migration.
+    free_cancellation_until_minutes: FREE_CANCELLATION_MINUTES,
+    reschedule_allowed: true,
+    reschedule_cutoff_minutes: FREE_CANCELLATION_MINUTES,
     deposit_required: config.deposit_required,
     deposit_amount: config.deposit_amount,
     deposit_currency: config.deposit_currency,
@@ -309,29 +236,18 @@ export function reservationPolicySummarySource(config: LocationReservationConfig
     deposit_trigger_party_size: config.deposit_trigger_party_size,
     minimum_guest_age: config.minimum_guest_age,
     accessibility_contact_required: config.accessibility_contact_required,
-    additional_notes_html: config.additional_notes_html,
   }
 }
 
-/**
- * A product's booking policy, from its details.
- *
- * The policy text is a typed product attribute, so there is nothing to merge
- * and nothing to cascade: a product either has the attribute or it does not.
- */
-export function productPolicySummarySource(details: Record<string, unknown>) {
-  const notes = details.cancellation_policy
+/** A visit with no saved terms of its own: the one cancellation rule, nothing else. */
+export function visitPolicySummarySource(policyType: 'reservation' | 'experience') {
   return {
-    policy_type: 'experience' as const,
+    policy_type: policyType,
     advance_notice_minutes: null,
-    free_cancellation_until_minutes: null,
-    reschedule_allowed: null,
-    reschedule_cutoff_minutes: null,
     deposit_required: null,
     deposit_trigger_party_size: null,
     minimum_guest_age: null,
     accessibility_contact_required: null,
-    additional_notes_html: typeof notes === 'string' ? notes : null,
   }
 }
 
@@ -435,19 +351,10 @@ export class ReservationUnavailableError extends Error {
   }
 }
 
-/** Paid guests keep the terms they accepted; later policy edits apply to new reservations. */
-export function reservationReschedulePolicyPredicate(input: {
-  organizationId: string; locationId: string; reservationId: string; startsAt: string; overridePolicy?: boolean
-}): BatchQuery {
+/** Changes close when free cancellation does, unless the business approves an exception. */
+export function visitReschedulePolicyPredicate(input: { startsAt: string; overridePolicy?: boolean }): BatchQuery {
   if (input.overridePolicy) return { query: '1', params: [] }
-  const allowed = `json_extract(r.policy_json, '$.reschedule_allowed')`
-  const cutoff = `json_extract(r.policy_json, '$.reschedule_cutoff_minutes')`
-  return {
-    query: `EXISTS (SELECT 1 FROM reservations r
-      WHERE r.id = ? AND r.organization_id = ? AND r.location_id = ? AND (${allowed}) = 1
-        AND ((${cutoff}) IS NULL OR julianday('now') <= julianday(?) - (${cutoff}) / 1440.0))`,
-    params: [input.reservationId, input.organizationId, input.locationId, input.startsAt],
-  }
+  return { query: `julianday('now') <= julianday(?) - ${FREE_CANCELLATION_MINUTES} / 1440.0`, params: [input.startsAt] }
 }
 
 /** The same location, hours and capacity boundary for a seat claim and a Checkout hold. */
@@ -505,10 +412,10 @@ export async function reservationClaimQuery(db: DbClient, input: ReservationClai
     ? `SELECT json_extract(price_snapshot_json, '$.reservation') FROM payments WHERE id = ? AND organization_id = ?`
     : `SELECT json_object('policy_type','reservation','advance_notice_minutes',advance_notice_minutes,'minimum_guest_age',minimum_guest_age,
         'deposit_required',json(CASE deposit_required WHEN 1 THEN 'true' ELSE 'false' END),'deposit_amount',deposit_amount,'deposit_currency',deposit_currency,'deposit_tax_behavior',deposit_tax_behavior,'deposit_trigger_party_size',deposit_trigger_party_size,
-        'accessibility_contact_required',json(CASE accessibility_contact_required WHEN 1 THEN 'true' ELSE 'false' END),'additional_notes_html',additional_notes_html,
-        'free_cancellation_until_minutes', free_cancellation_until_minutes,
-        'reschedule_allowed', json(CASE reschedule_allowed WHEN 1 THEN 'true' ELSE 'false' END),
-        'reschedule_cutoff_minutes', reschedule_cutoff_minutes) FROM location_reservation_configs WHERE location_id = ? AND organization_id = ?`
+        'accessibility_contact_required',json(CASE accessibility_contact_required WHEN 1 THEN 'true' ELSE 'false' END),
+        'free_cancellation_until_minutes', ${FREE_CANCELLATION_MINUTES},
+        'reschedule_allowed', json('true'),
+        'reschedule_cutoff_minutes', ${FREE_CANCELLATION_MINUTES}) FROM location_reservation_configs WHERE location_id = ? AND organization_id = ?`
   return {
     query: `INSERT INTO reservations (id, organization_id, location_id, user_id, request_id, timezone, starts_at, ends_at, party_size, policy_json, status, created_at, updated_at)
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, (${terms}), 'confirmed', ?, ? WHERE ${allocation.query}

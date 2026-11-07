@@ -1,13 +1,21 @@
 // The calendar's Settings sheet, in Airbnb's shape: every setting is a card
 // that shows its value and opens a picker of a few choices, and each choice
-// is one value of a field the policy already has. The guest's sentences
-// (server/utils/booking-policy-summary.ts) read those same fields, and MCP's
-// reservation policy tools name the same cancellation tiers.
+// is one value of a field the policy already has.
 import { WEEKDAYS, type OpeningHours } from '~/shared/reservation-hours'
-import type { LocationReservationConfigPatch } from '~/server/utils/reservations'
 
 const HOUR = 60
 const DAY = 24 * HOUR
+
+/**
+ * The one cancellation rule for every reservation, class and consultation,
+ * Airbnb's 1-day policy (airbnb.com/help/article/1565): a full refund until 24
+ * hours before the start. Changes close at the same moment. Not a setting.
+ */
+export const FREE_CANCELLATION_MINUTES = DAY
+
+export function freeCancellationUntil(startsAt: string): string {
+  return new Date(Date.parse(startsAt) - FREE_CANCELLATION_MINUTES * 60_000).toISOString()
+}
 
 /** How far ahead a guest must book: Airbnb's choices, with hours where a table needs them. */
 export const NOTICE_OPTIONS = [
@@ -28,38 +36,6 @@ export function noticeSummary(minutes: number | null | undefined): string {
 
 export function seatsSummary(capacity: number | null | undefined): string {
   return capacity === null || capacity === undefined ? 'No limit' : `${capacity} per time slot`
-}
-
-/**
- * Named reservation terms shared by the calendar and MCP. Free cancellation
- * controls the deposit refund; changes use the same deadline unless the business approves an exception.
- */
-export const CANCELLATION_TIERS = [
-  { id: 'flexible', label: 'Flexible', minutes: 2 * HOUR, points: ['Free cancellation until 2 hours before'] },
-  { id: 'moderate', label: 'Moderate', minutes: DAY, points: ['Free cancellation until 1 day before'] },
-  { id: 'firm', label: 'Firm', minutes: 2 * DAY, points: ['Free cancellation until 2 days before'] },
-] as const
-
-export type CancellationTierId = typeof CANCELLATION_TIERS[number]['id']
-export const CANCELLATION_TIER_IDS = CANCELLATION_TIERS.map(tier => tier.id) as CancellationTierId[]
-
-export function cancellationTierOf(policy: Pick<LocationReservationConfigPatch, 'free_cancellation_until_minutes' | 'reschedule_allowed' | 'reschedule_cutoff_minutes'>): CancellationTierId | null {
-  const minutes = policy.free_cancellation_until_minutes ?? null
-  if (minutes === null) return null
-  const cutoff = policy.reschedule_allowed === false ? null : policy.reschedule_cutoff_minutes ?? minutes
-  return CANCELLATION_TIERS.find(tier => tier.minutes === minutes && cutoff === minutes)?.id ?? null
-}
-
-export function cancellationPatch(tier: CancellationTierId): LocationReservationConfigPatch {
-  const chosen = CANCELLATION_TIERS.find(entry => entry.id === tier)!
-  return { free_cancellation_until_minutes: chosen.minutes, reschedule_allowed: true, reschedule_cutoff_minutes: chosen.minutes }
-}
-
-export function cancellationSummary(policy: Pick<LocationReservationConfigPatch, 'free_cancellation_until_minutes' | 'reschedule_allowed' | 'reschedule_cutoff_minutes'>): string {
-  const tier = cancellationTierOf(policy)
-  if (tier) return CANCELLATION_TIERS.find(entry => entry.id === tier)!.label
-  const minutes = policy.free_cancellation_until_minutes ?? null
-  return minutes === null ? 'No deadline' : `Custom · free until ${formatMinutes(minutes)} before`
 }
 
 /** "Mon–Sat · Closed Sun", the way Airbnb's card states a value in one line. */

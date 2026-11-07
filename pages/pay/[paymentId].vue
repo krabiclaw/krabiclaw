@@ -33,8 +33,7 @@
           </div>
           <section v-if="policySummary" id="booking-policy" class="scroll-mt-8 text-sm text-default">
             <p>
-              <span :class="handoff.stay ? undefined : 'line-clamp-3'">{{ policySummary }}</span>
-              <NuxtLink v-if="termsPath && !handoff.stay" :to="termsPath" class="font-semibold underline">{{ t('payment.full_policy') }}</NuxtLink>
+              {{ policySummary }}
             </p>
             <details v-if="stayPolicy" class="mt-2">
               <summary class="cursor-pointer font-semibold underline">{{ t('payment.full_policy') }}</summary>
@@ -231,8 +230,15 @@ const stayPolicy = computed(() => {
   const policy = handoff.value?.stay?.cancellation_policy
   return policy ? bookedPolicyTerms(policy) : null
 })
-const policySummary = computed(() => stayPolicy.value?.summary ?? handoff.value?.cancellation_policy ?? '')
-// The offering's own page: where its full terms are stated and what was picked can be changed.
+const policySummary = computed(() => {
+  const value = handoff.value
+  if (stayPolicy.value) return stayPolicy.value.summary
+  if (!value?.starts_at || !value.timezone) return ''
+  return value.free_cancellation_until
+    ? t('payment.free_cancellation_until', { time: formatTimestamp(value.free_cancellation_until, locale.value, value.timezone, { dateStyle: 'medium', timeStyle: 'short' }) })
+    : t('payment.non_refundable')
+})
+// The offering's own page: where what was picked can be changed.
 const offeringPath = computed(() => {
   const value = handoff.value
   if (!value?.product_slug || !value.kind || value.kind === 'reservation') return ''
@@ -240,8 +246,7 @@ const offeringPath = computed(() => {
   if (value.kind !== 'experience' && value.kind !== 'stay' && !value.location_slug) return ''
   return localePath(presentationForProduct({ kind: value.kind as ProductKind }).productPath(value.location_slug ?? '', value.product_slug))
 })
-// A stay's accepted policy is shown here; other offerings state their terms on their page.
-const termsPath = computed(() => handoff.value?.stay ? '#booking-policy' : offeringPath.value)
+const termsPath = computed(() => policySummary.value ? '#booking-policy' : '')
 
 // Airbnb's "Choose when to pay": now with any method, or later with the method that pays in installments.
 const LATER_TYPES = ['klarna', 'affirm', 'afterpay_clearpay']

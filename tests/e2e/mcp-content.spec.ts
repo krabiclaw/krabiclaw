@@ -15,32 +15,6 @@ const tenantExtraHeaders = () => seededSiteHeaders('restaurant')
 // tools, and the stateless discovery/list/error protocol flow.
 
 test.describe('stateless MCP server', () => {
-  test('a named reservation cancellation policy excludes raw cutoff fields without changing the saved policy', async ({ request, baseURL }, testInfo) => {
-    const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, mcpOrganizationId())
-    try {
-      await loginAs(request, baseURL!)
-      const locationId = seededTenant('restaurant').locations.brooklyn!.id
-      const policyUrl = `${baseURL}/api/editor/organizations/${mcpOrganizationId()}/locations/${locationId}/reservation-config`
-      const beforeResponse = await request.get(policyUrl)
-      expect(beforeResponse.status()).toBe(200)
-      const before = await beforeResponse.json()
-      expect(before.config, 'The seeded Brooklyn location takes table reservations').not.toBeNull()
-      for (const rawFields of [{ free_cancellation_until_minutes: 60 }, { reschedule_allowed: false }, { reschedule_cutoff_minutes: 60 }]) {
-        const conflicted = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_reservation_policy', args: {
-          organization_id: mcpOrganizationId(), location_id: locationId, expected_updated_at: before.config.updated_at,
-          cancellation_policy: 'flexible', ...rawFields,
-        } })
-        expect(conflicted.status()).toBe(200)
-        expect((await conflicted.json()).result.isError).toBe(true)
-        const afterResponse = await request.get(policyUrl)
-        expect(afterResponse.status()).toBe(200)
-        expect(await afterResponse.json()).toEqual(before)
-      }
-    } finally {
-      await releaseTenantMutationLock()
-    }
-  })
-
   test('separate language operations publish only authored translations and preserve source content', async ({ request, page, baseURL }, testInfo) => {
     test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'Language writes use local D1 only.')
     test.setTimeout(120_000)

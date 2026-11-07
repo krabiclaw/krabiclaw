@@ -64,7 +64,6 @@ const DETAIL_FIELDS = {
   included_items: { icon: 'i-lucide-package-check', name: 'What is included', description: 'Items or work included in the stated price, shown in their own public section.', value_type: 'list.single_line_text', kinds: ['experience', 'service'] },
   what_to_bring: { icon: 'i-lucide-backpack', name: 'What to bring', description: 'Items customers should bring, shown in the preparation section.', value_type: 'list.single_line_text', kinds: ['experience', 'service'] },
   preparation: { icon: 'i-lucide-clipboard-check', name: 'Before you arrive', description: 'Preparation instructions shown to customers before a session or appointment.', value_type: 'multi_line_text', kinds: ['experience', 'service'] },
-  cancellation_policy: { icon: 'i-lucide-calendar-x', name: 'Cancellation policy', description: 'The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.', value_type: 'multi_line_text', kinds: ['experience', 'service'] },
   your_property: { name: 'Your property', description: 'The spaces and features guests should know about this home.', value_type: 'multi_line_text', kinds: ['stay'] },
   guest_access: { name: 'Guest access', description: 'The spaces and facilities guests can use during their stay.', value_type: 'multi_line_text', kinds: ['stay'] },
   interaction_with_guests: { name: 'Interaction with guests', description: 'How guests can contact the host and what support is available.', value_type: 'multi_line_text', kinds: ['stay'] },

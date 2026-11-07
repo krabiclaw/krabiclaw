@@ -173,17 +173,11 @@
   </DashboardListItemDialog>
   <DashboardListItemDialog v-model:open="policyOpen" :title="booking?.policy?.heading || 'Cancellation policy'" :show-actions="false">
     <div v-if="booking" class="space-y-4">
-      <div v-if="booking.policy?.items.length" class="space-y-3">
+      <div class="space-y-3">
         <div v-for="item in booking.policy!.items" :key="item.id" class="flex gap-3">
           <UIcon name="i-lucide-check" class="mt-0.5 size-4 shrink-0 text-success" />
           <p class="text-sm leading-relaxed text-muted">{{ item.text }}</p>
         </div>
-      </div>
-      <p v-else-if="!booking.policy?.additional_notes_html" class="text-sm text-muted">No cancellation terms have been configured for this booking.</p>
-      <div v-if="booking.policy?.additional_notes_html" class="border-t border-default pt-4 text-sm text-muted">
-        <!-- Canonical booking-policy writes sanitize this CMS-authored HTML before persistence. -->
-        <!-- eslint-disable-next-line vue/no-v-html -->
-        <div v-html="booking.policy!.additional_notes_html" />
       </div>
     </div>
   </DashboardListItemDialog>
@@ -214,8 +208,8 @@
       </UFormField>
       <p v-if="personalScope" class="text-sm text-muted">
         {{ booking.organizationName }} is told the {{ noun }} was cancelled.
-        <template v-if="booking.type === 'reservation' && refundable">Your deposit is automatically refunded unless the cancellation deadline has passed.</template>
-        <template v-else-if="refundable">Cancelling doesn’t automatically refund your payment. Contact {{ booking.organizationName }} about a refund.</template>
+        <template v-if="refundable && booking.guestCancelRefunds">Your payment is refunded in full.</template>
+        <template v-else-if="refundable">It’s less than 24 hours before the start, so your payment won’t be refunded.</template>
         This cannot be undone.
       </p>
       <p v-else class="text-sm text-muted">
@@ -285,7 +279,6 @@ import { formatCalendarDate, formatTime, formatTimestamp } from '~/utils/timezon
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import { getErrorMessage } from '~/utils/errors'
-import { htmlToPlainText } from '~/utils/markdown'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 
 const props = defineProps<{
@@ -341,8 +334,7 @@ const guestHeading = computed(() => {
 })
 const guestCountLabel = computed(() => `${booking.value?.partySize ?? 0} ${booking.value?.partySize === 1 ? recordCopy.value?.guestLabel : recordCopy.value?.guestsLabelPlural}`)
 const otherGuestLabel = computed(() => `${(booking.value?.partySize ?? 0) - 1} other ${booking.value?.partySize === 2 ? recordCopy.value?.guestLabel : recordCopy.value?.guestsLabelPlural}`)
-const cancellationSummary = computed(() => booking.value?.policy?.items.find(item => item.id === 'cancellation')?.text
-  ?? (booking.value?.policy?.additional_notes_html ? htmlToPlainText(booking.value.policy.additional_notes_html) : 'No cancellation terms have been configured.'))
+const cancellationSummary = computed(() => booking.value?.policy?.items.find(item => item.id === 'cancellation')?.text)
 const messageTo = computed(() => {
   if (!booking.value?.threadId) return null
   return `/dashboard/${orgSlug.value}/messages/${encodeURIComponent(booking.value.threadId)}`
@@ -622,7 +614,7 @@ async function sendChangeRequest() {
           partySize: changeDraft.value.partySize,
           locationId: changeDraft.value.locationId,
         }
-      : { kind: 'booking' as const, sessionId: changeDraft.value.sessionId || (booking.value?.sessionId ?? ''), partySize: changeDraft.value.partySize }
+      : { kind: 'booking' as const, overridePolicy: changeDraft.value.overridePolicy, sessionId: changeDraft.value.sessionId || (booking.value?.sessionId ?? ''), partySize: changeDraft.value.partySize }
     const response = await dashboardApi<{ booking: DashboardBookingDetails }>(
       `/api/dashboard/bookings/${props.bookingType}/${encodeURIComponent(props.bookingId)}/changes`,
       {

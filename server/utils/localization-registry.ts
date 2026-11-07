@@ -47,8 +47,6 @@ interface ResourceLocalizationDefinition {
   publishedLegalPracticeFields?: readonly string[]
 }
 
-const POLICY_FIELDS = { additional_notes_html: 'text' } as const
-
 // The parts of an address that are words. `regionCode` is an ISO code and a
 // postcode is digits; neither is translated, and a reader that needs them takes
 // them from the location's own address.
@@ -61,7 +59,7 @@ export const RESOURCE_LOCALIZATION_REGISTRY: Readonly<Record<LocalizedResourceTy
     publishedLegalPracticeFields: ['name', 'consultation.cta_label'] },
   business_location: { table: 'business_locations', tenantScope: 'organization_column', fields: { title: 'text', address: ADDRESS_FIELDS,
     description: 'text', short_description: 'text', seo_title: 'text', seo_description: 'text',
-    reservation: { policy: POLICY_FIELDS }, reservation_questions: 'form_questions' }, route: 'stored' },
+    reservation_questions: 'form_questions' }, route: 'stored' },
   // Product SEO is owned by the canonical content document, so it is not
   // localized here: a second SEO source would be a second thing to keep true.
   product: { table: 'products', tenantScope: 'organization_column', fields: { name: 'text', description: 'text',

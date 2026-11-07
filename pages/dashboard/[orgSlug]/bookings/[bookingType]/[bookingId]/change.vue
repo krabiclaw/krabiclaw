@@ -29,7 +29,7 @@
         />
       </div>
 
-      <USwitch v-if="locationRow" v-model="b.changeDraft.value.overridePolicy" class="mt-6" label="Approve an exception to the change policy" />
+      <USwitch v-model="b.changeDraft.value.overridePolicy" class="mt-6" label="Approve an exception to the change policy" />
       <div class="mt-2 border-t border-default">
         <NuxtLink
           v-for="field in b.changeFields.value"

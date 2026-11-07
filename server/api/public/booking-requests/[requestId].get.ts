@@ -1,5 +1,5 @@
 import { getGuestRequest, getThreadOperationalRecord } from '~/server/domain/requests'
-import { canRetryGuestReservationRefund } from '~/server/domain/payments/visit-refund'
+import { canRetryGuestVisitRefund } from '~/server/domain/payments/visit-refund'
 import { paidOnline } from '~/server/domain/payments'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { queryFirst } from '~/server/db'
@@ -9,9 +9,10 @@ import { getSourceLocale } from '~/server/utils/organization-locales'
 import { assertExactCanonicalLocale, assertPublicOrganizationLanguage } from '~/server/utils/localization'
 import { loadExactPublicLocalizations, projectExactLocalizedResource } from '~/server/utils/public-localization'
 import { getProduct } from '~/server/utils/product-management'
-import { productPolicySummarySource, renderBookingPolicySummary } from '~/server/utils/reservations'
+import { renderBookingPolicySummary, visitPolicySummarySource } from '~/server/utils/reservations'
 import type { BookingPolicySummarySource } from '~/server/utils/booking-policy-summary'
 import type { ProductKind } from '~/shared/product-details'
+import { freeCancellationUntil } from '~/shared/availability-settings'
 import { defineHandler } from 'nitro'
 import { getQuery, getRouterParam } from 'nitro/h3'
 import { buildBuyerRequestActivityUrl } from '~/server/utils/dashboard-notification-links'
@@ -51,7 +52,7 @@ export default defineHandler(async (event) => {
 
   const request = await getGuestRequest(db, requestId, organizationId)
   const record = request ? await getThreadOperationalRecord(db, request.id) : null
-  if (!request || request.kind === 'contact' || request.kind === 'stay' || !record || record.organization_id !== organizationId) {
+  if (!request || request.kind === 'contact' || request.kind === 'stay' || !record || record.kind === 'stay' || record.organization_id !== organizationId) {
     return jsonResponse({ error: 'Booking not found' }, { status: 404 })
   }
 
@@ -69,27 +70,24 @@ export default defineHandler(async (event) => {
     : canonicalLocation
   let productName = record.product_name
   let productKind: ProductKind | null = null
-  let policy: BookingPolicySummarySource | null = null
+  let policy: BookingPolicySummarySource = visitPolicySummarySource('experience')
   if (record.kind === 'booking' && record.product_id) {
     const canonical = await getProduct(db, organizationId, record.product_id)
     const translation = localizations.find(item => item.resourceType === 'product' && item.resourceId === record.product_id)
     const product = translation ? projectExactLocalizedResource('product', canonical, translation) : canonical
     productName = product.name
     productKind = product.kind
-    policy = productPolicySummarySource(locale === sourceLocale || translation ? product.details : {})
   } else if (record.kind === 'reservation') {
     const saved = await queryFirst<{ policy_json: string | null }>(db, 'SELECT policy_json FROM reservations WHERE id = ? AND organization_id = ?', [record.id, organizationId])
     if (!saved) return jsonResponse({ error: 'Booking not found' }, { status: 404 })
-    policy = saved.policy_json ? JSON.parse(saved.policy_json) as BookingPolicySummarySource : null
-    if (policy && locale !== sourceLocale) {
-      const translated = locationTranslation?.values.reservation as { policy?: { additional_notes_html?: string } } | undefined
-      policy = { ...policy, additional_notes_html: translated?.policy?.additional_notes_html ?? null }
-    }
+    policy = saved.policy_json ? JSON.parse(saved.policy_json) as BookingPolicySummarySource : visitPolicySummarySource('reservation')
   }
 
   // The receipt leads with what was booked, pictured as its page pictures it: the offering's own photo, or the place's.
   const [ownerType, ownerId] = record.product_id ? ['product', record.product_id] as const : ['business_location', record.location_id] as const
   const picture = ownerId ? (await loadOwnerPictures(db, organizationId, ownerType, [ownerId])).get(ownerId) ?? null : null
+
+  const paid = await paidOnline(db, organizationId, record.kind, record.id)
 
   return jsonResponse({
     success: true,
@@ -101,7 +99,8 @@ export default defineHandler(async (event) => {
       timezone: record.timezone,
       guests: `${record.party_size}${request.payload.party_size_is_minimum ? '+' : ''}`,
       status: record.status,
-      can_retry_cancellation: record.kind === 'reservation' && await canRetryGuestReservationRefund(db, { organizationId, reservationId: record.id, requestId: request.id }),
+      can_retry_cancellation: await canRetryGuestVisitRefund(db, { organizationId, subjectType: record.kind, subjectId: record.id, requestId: request.id }),
+      refund_on_cancel: paid !== null && new Date().toISOString() <= freeCancellationUntil(record.starts_at),
       locale,
       product_id: record.product_id,
       product_kind: productKind,
@@ -109,8 +108,8 @@ export default defineHandler(async (event) => {
       location_id: record.location_id,
       location_name: location?.title ?? null,
       location_slug: location?.slug ?? null,
-      policy_summary: policy ? renderBookingPolicySummary(policy, locale, productKind) : null,
-      paid: await paidOnline(db, organizationId, record.kind, record.id),
+      policy_summary: renderBookingPolicySummary(policy, locale, productKind),
+      paid,
       image_url: picture?.imageUrl ?? null,
       manage_url: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: request.id }),
     },

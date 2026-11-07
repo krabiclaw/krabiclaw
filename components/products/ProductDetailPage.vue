@@ -90,7 +90,7 @@
               <TenantIcon :name="highlight.icon" class="mt-0.5 size-6 shrink-0 text-default" />
               <div class="min-w-0">
                 <p class="text-sm font-semibold text-default">{{ highlight.title }}</p>
-                <p class="line-clamp-2 text-sm text-muted">{{ highlight.text }}</p>
+                <p class="text-sm text-muted" :class="{ 'line-clamp-2': highlight.key === 'review' }">{{ highlight.text }}</p>
               </div>
             </li>
           </ul>
@@ -896,10 +896,9 @@ const averageRating = computed(() => {
 })
 const experienceHighlights = computed(() => {
   if (isStay.value) return []
-  const cancellation = props.product.details.cancellation_policy
   const recent = [...props.reviews].sort((left, right) => (right.original_review_date ?? right.created_at).localeCompare(left.original_review_date ?? left.created_at))[0]
   return [
-    ...(typeof cancellation === 'string' && cancellation.trim() ? [{ key: 'cancellation', icon: 'calendar-days' as const, title: t('site.experience_detail.cancellation'), text: cancellation.trim() }] : []),
+    ...(props.booking ? [{ key: 'cancellation', icon: 'calendar-days' as const, title: t('site.experience_detail.cancellation'), text: t('booking_policy.cancellation') }] : []),
     ...(recent ? [{ key: 'review', icon: 'star' as const, title: t('site.experience_detail.recent_review'), text: `“${recent.content}” — ${recent.author_name}` }] : []),
   ]
 })

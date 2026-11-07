@@ -4,7 +4,6 @@ import { pageEditorPath } from '~/server/utils/dashboard-links'
 import type { McpToolDefinition } from './shared'
 import { contentBlockDataInputSchema, contentBlockMediaInputRef, contentBlockObject, contentBlockTypeBranches, contentBlockUpdatedAtInput, locationReservationConfigObject, locationReservationConfigWriteSchema, pageInfoObject, paginationInputSchema, renderedBookingPolicySummaryObject, organizationTool, workspaceContextObject } from './shared'
 import { HTTPError } from 'nitro';
-import { CANCELLATION_TIER_IDS, cancellationPatch, cancellationTierOf, type CancellationTierId } from "~/shared/availability-settings";
 import type { McpExecutorContext } from './execution'
 import {
   DEFAULT_RESERVATION_DURATION_MINUTES,
@@ -288,15 +287,14 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
         type: 'object',
         properties: {
           policy: locationReservationConfigObject,
-          cancellation_policy: { type: ['string', 'null'], enum: [...CANCELLATION_TIER_IDS, null], description: 'The named cancellation policy the dashboard shows, or null when the stored cutoffs match none of them.' },
           summary: renderedBookingPolicySummaryObject,
         },
-        required: ['policy', 'cancellation_policy', 'summary'],
+        required: ['policy', 'summary'],
       },
     }),
   organizationTool({
       name: 'update_reservation_policy',
-      description: 'Enable or update table reservations using the location’s saved hours, including the questions asked with each reservation. New setup defaults to two hours, unlimited capacity, no advance notice and no deposit. Use the current updated_at when amending it; omitted fields keep their value. Deposits need an amount, currency, tax treatment and ready Payments.',
+      description: 'Enable or update table reservations using the location’s saved hours, including the questions asked with each reservation. New setup defaults to two hours, unlimited capacity, no advance notice and no deposit. Use the current updated_at when amending it; omitted fields keep their value. Deposits need an amount, currency, tax treatment and ready Payments. Cancellation is not a setting: every reservation, class and consultation is free to cancel until 24 hours before the start.',
       domain: 'content',
       minimumRole: 'admin',
       inputSchema: {
@@ -308,8 +306,6 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
         slot_capacity: { ...locationReservationConfigWriteSchema.slot_capacity, description: 'Guests per start time. Defaults to unlimited on setup; null removes the limit.' },
         advance_notice_minutes: { ...locationReservationConfigWriteSchema.advance_notice_minutes, description: 'Required notice before the start. Defaults to zero on setup; null removes the rule.' },
         deposit_required: { ...locationReservationConfigWriteSchema.deposit_required, description: 'Defaults to false on setup. Omit to keep the current requirement.' },
-        cancellation_policy: { type: 'string', enum: CANCELLATION_TIER_IDS, description: 'Flexible: 2 hours. Moderate: 1 day. Firm: 2 days. Sets the deposit-refund and reschedule cutoffs together; do not also pass those fields.' },
-        allOf: [{ not: { required: ['cancellation_policy'], anyOf: ['free_cancellation_until_minutes', 'reschedule_allowed', 'reschedule_cutoff_minutes'].map(field => ({ required: [field] })) } }],
       },
       required: ['location_id', 'expected_updated_at'],
       outputSchema: {
@@ -533,25 +529,13 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
       });
       return {
         policy: config,
-        cancellation_policy: cancellationTierOf(config),
         summary: renderBookingPolicySummary(reservationPolicySummarySource(config), locale),
       };
     }
     case "update_reservation_policy": {
       const locationId = requiredString(args, "location_id");
       const locale = optionalString(args, "locale") ?? await getSourceLocale(organization.db, organization.organizationId);
-      // A named policy is its two cutoffs, written as the dashboard writes them.
-      const tier = args.cancellation_policy;
-      if (tier !== undefined && !CANCELLATION_TIER_IDS.includes(tier as CancellationTierId)) {
-        throw new Error(`cancellation_policy must be one of ${CANCELLATION_TIER_IDS.join(", ")}`);
-      }
-      if (tier !== undefined && ["free_cancellation_until_minutes", "reschedule_allowed", "reschedule_cutoff_minutes"].some((field) => field in args)) {
-        throw new Error("Pass cancellation_policy or the cancellation cutoffs, not both");
-      }
-      const patch = await validateLocationReservationConfigPatch({
-        ...omit(args as Record<string, unknown>, ["location_id", "locale", "cancellation_policy", "expected_updated_at"]),
-        ...(tier === undefined ? {} : cancellationPatch(tier as CancellationTierId)),
-      });
+      const patch = await validateLocationReservationConfigPatch(omit(args as Record<string, unknown>, ["location_id", "locale", "expected_updated_at"]));
       const config = await upsertLocationReservationConfig(organization.db, {
         organizationId: organization.organizationId,
         locationId,
