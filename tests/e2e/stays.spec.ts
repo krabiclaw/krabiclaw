@@ -286,7 +286,8 @@ test('a home keeps its operator name independent from its public title across CM
   await waitForNuxtHydration(page)
   await expect(page.getByRole('link', { name: 'Calendar', exact: true })).toBeVisible()
   await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('web-upcoming-reservation-task.png') })
-  await replyCard.getByRole('link', { name: /^Reply/ }).click()
+  // The whole reply card opens its conversation.
+  await replyCard.locator('a.tc-target').click()
   await expect(page).toHaveURL(url => url.pathname === `/dashboard/${slug}/messages/${stay.request_id}`)
   await expect(page.getByText(internalName, { exact: true }).first()).toBeVisible()
   await waitForNuxtHydration(page)
