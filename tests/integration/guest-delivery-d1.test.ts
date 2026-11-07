@@ -1029,7 +1029,7 @@ test('native Resend test transport persists one delivered financial email throug
   } finally { await runtime.dispose() }
 })
 
-test('Stripe account events alert owners once for a refused document or a new ask, never during first onboarding', { timeout: 120_000 }, async () => {
+test('each Stripe requirements event that leaves the business action due alerts owners and admins once', { timeout: 120_000 }, async () => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'stripe-account-attention-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
@@ -1058,24 +1058,22 @@ test('Stripe account events alert owners once for a refused document or a new as
       identity: { country: 'TH' }, configuration: { merchant: { capabilities: { card_payments: capability } } },
       requirements: { entries: requirements },
     }) } } } } as unknown as Stripe
-    let events = 0
-    const deliver = () => processStripeConnectEvent(db, stripe, env, {
-      id: `evt_${++events}`, type: 'v2.core.account[requirements].updated', related_object: { id: 'acct_proof' },
+    const deliver = (id: string, type = 'v2.core.account[requirements].updated') => processStripeConnectEvent(db, stripe, env, {
+      id, type, related_object: { id: 'acct_proof' },
     } as unknown as Stripe.V2.Core.EventNotification, '{}')
     const due = (errors: string[]) => [{ awaiting_action_from: 'user', description: 'person.documents.primary_verification', errors: errors.map(description => ({ description })), minimum_deadline: { status: 'past_due' } }]
     const alerts = async () => (await db.prepare("SELECT body,json_extract(payload_json,'$.severity') severity,json_extract(payload_json,'$.deep_link') deep_link FROM activity_entries WHERE event_name='stripe_account_attention' ORDER BY created_at, id").all()).results
     const status = () => db.prepare("SELECT status FROM stripe_connected_accounts WHERE id='connect'").first('status')
 
-    // First onboarding: the owner is in Stripe's form, and each step changes what is due.
-    requirements = due([])
-    assert.equal(await deliver(), true)
+    // Another kind of account event says nothing about what is due.
+    requirements = due([refused])
+    assert.equal(await deliver('evt_identity', 'v2.core.account[identity].updated'), true)
     assert.deepEqual(await alerts(), [])
     assert.equal(await status(), 'action_required')
 
-    // Stripe refuses the submitted document: said once, however many events carry it.
-    requirements = due([refused])
-    assert.equal(await deliver(), true)
-    assert.equal(await deliver(), true)
+    // Stripe refuses a document. Stripe redelivering that event says nothing new.
+    assert.equal(await deliver('evt_refused'), true)
+    assert.equal(await deliver('evt_refused'), true)
     const told = await alerts()
     assert.equal(told.length, 1)
     assert.match(String(told[0]!.body), /doesn't match information on the document/u)
@@ -1089,16 +1087,24 @@ test('Stripe account events alert owners once for a refused document or a new as
     assert.match(mail[0]!.html, /match information on the document/u)
     assert.match(mail[0]!.html, /href="https:\/\/proof\.example\/dashboard\/merchant\/payments\/payout-method"/u)
 
-    // Setup finishes, then Stripe later asks for something new: entering the state is the alert.
+    // Setup finishes: nothing is due, so the same event type stays quiet.
     requirements = []
     capability = { status: 'active', status_details: [] }
-    assert.equal(await deliver(), true)
+    assert.equal(await deliver('evt_cleared'), true)
     assert.equal(await status(), 'ready')
     assert.equal((await alerts()).length, 1)
-    requirements = due([])
-    assert.equal(await deliver(), true)
-    assert.equal(await status(), 'action_required')
+
+    // Stripe later asks for exactly the same thing again: its new event is a new alert.
+    requirements = due([refused])
+    assert.equal(await deliver('evt_asked_again'), true)
     assert.equal((await alerts()).length, 2)
+
+    // Stripe restricts the capability.
+    requirements = []
+    capability = { status: 'restricted', status_details: [] }
+    assert.equal(await deliver('evt_restricted', 'v2.core.account[configuration.merchant].capability_status_updated'), true)
+    assert.equal(await status(), 'restricted')
+    assert.equal((await alerts()).length, 3)
 
     // The approved WhatsApp template can carry this message, button included.
     const message = stripeAccountAttentionMessage({ organizationName: 'Merchant', status: 'action_required', reasons: [refused], action: { url: 'https://proof.example/dashboard/merchant/payments/payout-method', label: 'Review payout setup' } })
