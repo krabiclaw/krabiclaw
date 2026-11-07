@@ -33,7 +33,7 @@ import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 import { stayThreadQueries } from '~/server/domain/requests'
 import { openingMessageQueries, openingSentence } from '~/server/domain/guest-threads/opening'
 import { ownedBuyerRequest } from '~/server/domain/payments/buyer'
-import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { publishBusinessInvalidation, publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
 import { listingCalendar } from '~/server/integrations/channex/airbnb-listing'
 import { toE164 } from '~/utils/phone'
@@ -868,7 +868,8 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
  */
 async function arrangeHomePhotos(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, home: StayHome, to: string[], roomAssignment?: { assetId: string; roomId: string }): Promise<StayHome> {
   await arrangeProductPhotos(db, { organizationId: access.organizationId, env, principal, productId: home.product_id, from: home.photos.map(photo => photo.id), to, roomAssignment })
-  await purgePublicResourceCacheNow(env, access.organizationId)
+  // The placement batch already advances the revision read by public pages.
+  await publishBusinessInvalidation(env, access.organizationId)
   const updated = await readStayHome(db, access, home.product_id)
   await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId: home.product_id, locationId: home.location_id, stayId: null }, { updated_at: new Date().toISOString() })
   return updated

@@ -491,15 +491,35 @@ test('a drain syncs search once and leaves its continuation to the next run', as
         } }) } as unknown as NonNullable<OrganizationChangeDrainEnv['AI_SEARCH']>,
       }
       await insertInvalidation(db, { id: 'write', status: 'pending', attemptCount: 0, createdAt: '2026-10-02T00:00:00.000Z' })
+      await insertInvalidation(db, { id: 'another-write', status: 'pending', attemptCount: 0, createdAt: '2026-10-02T00:00:01.000Z' })
+      const cacheKey = 'public~org~v21~previous'
+      await kv.put(cacheKey, 'old page')
+      const staleList = await kv.list({ prefix: 'public~org~' })
+      let deleted = false
+      const eventuallyConsistentKv = new Proxy(kv, {
+        get(target, property) {
+          if (property === 'list') return async (options: { prefix?: string }) =>
+            options.prefix === 'public~org~' ? staleList : await target.list(options)
+          if (property === 'delete') return async (key: string) => {
+            if (key === cacheKey && deleted) throw new Error('KV DELETE failed: 429 Too Many Requests')
+            await target.delete(key)
+            if (key === cacheKey) deleted = true
+          }
+          const value = Reflect.get(target, property, target)
+          return typeof value === 'function' ? value.bind(target) : value
+        },
+      })
       const continuation = async () => (await db.prepare("SELECT status, attempt_count, last_error FROM public_resource_cache_invalidations WHERE reason = 'search-sync-continue'").first<{
         status: string; attempt_count: number; last_error: string | null
       }>())!
 
-      // One drain run: one bounded sync, the write's row processed, the rest queued.
-      assert.equal(await drainPublicResourceCacheInvalidations(db, kv, env, {}), 1)
+      // Both writes drain even when KV still lists a key after its deletion.
+      assert.equal(await drainPublicResourceCacheInvalidations(db, eventuallyConsistentKv, env, {}), 2)
+      assert.equal(await kv.get(cacheKey), null)
       assert.equal(lists, 1)
       assert.deepEqual(uploads, [missing!.key])
       assert.equal((await db.prepare("SELECT status FROM public_resource_cache_invalidations WHERE id = 'write'").first<{ status: string }>())!.status, 'processed')
+      assert.equal(await db.prepare("SELECT status FROM public_resource_cache_invalidations WHERE id = 'another-write'").first('status'), 'processed')
       assert.deepEqual(await continuation(), { status: 'pending', attempt_count: 0, last_error: null })
 
       // The next run finishes it, or reports what the provider refused.
