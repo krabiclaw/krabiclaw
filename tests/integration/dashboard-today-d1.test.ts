@@ -23,9 +23,9 @@ import type { TodayCard, TodayFeedPayload } from '../../shared/dashboard-today.t
 import { localDateAt } from '../../utils/timezone.ts'
 import { cancelScheduledGuestMessage, saveMessageTemplate } from '../../server/domain/guest-messaging.ts'
 import { cancelSendLaterMessage, createSendLaterMessage, sendDueSendLaterMessages } from '../../server/domain/send-later.ts'
+import { buyStay } from './support/stay-checkout.ts'
 import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 import { sendReviewRequestForBooking } from '../../server/utils/review-request-delivery.ts'
-import { claimGuestThreadInvite, createGuestThreadInvite } from '../../server/domain/guest-threads/invites.ts'
 import { createTableReservation } from '../../server/domain/table-reservations.ts'
 import { upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
 import { applyResendEmailEvent, deliverReceiptEmail } from '../../server/domain/guest-threads/deliveries.ts'
@@ -406,15 +406,13 @@ test('Today reads actual scheduled work and review outcomes: cancellation and su
     assert.equal(await db.prepare('SELECT status FROM reservations WHERE request_id=?').bind(reservationId).first('status'), 'confirmed')
     assert.equal((await read()).cards.some(card => card.id.endsWith(`:${reservationId}`)), false, 'a confirmed future reservation is not work due today')
     assert.equal((await read('upcoming')).cards.some(card => card.id === `reservation:${reservationId}`), false)
-    const ended = await createStay(db, env, access, { product_id: homeId, idempotency_key: 'ended-stay', check_in_date: localDateAt(new Date(now - 5 * DAY), ZONE),
-      check_out_date: localDateAt(new Date(now - 2 * DAY), ZONE), adults: 1, guest_name: 'Rhea', guest_email: 'rhea@provider-proof.com', total_minor: 45_000 })
+    // Stays their guest bought on the site, made by the real checkout conversion.
     const guest = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
-    const invite = await createGuestThreadInvite(db, env, { organizationId: ORG, threadId: ended.request_id!, actorUserId: OWNER })
-    await claimGuestThreadInvite(db, { token: new URL(invite.url).pathname.split('/').at(-1)!, userId: guest.response!.user.id })
-    const justEnded = await createStay(db, env, access, { product_id: homeId, idempotency_key: 'just-ended-stay', check_in_date: localDateAt(new Date(now - DAY), ZONE),
-      check_out_date: localDateAt(new Date(now), ZONE), adults: 1, guest_name: 'Rhea', guest_email: 'rhea@provider-proof.com', total_minor: 15_000 })
-    const freshInvite = await createGuestThreadInvite(db, env, { organizationId: ORG, threadId: justEnded.request_id!, actorUserId: OWNER })
-    await claimGuestThreadInvite(db, { token: new URL(freshInvite.url).pathname.split('/').at(-1)!, userId: guest.response!.user.id })
+    const bought = (id: string, checkIn: number, checkOut: number) => buyStay(db, { id, organizationId: ORG, productId: homeId, locationId: 'location', timezone: ZONE,
+      checkIn: localDateAt(new Date(checkIn), ZONE), checkOut: localDateAt(new Date(checkOut), ZONE), adults: 1, nightlyMinor: 15_000, currency: 'USD', buyerUserId: guest.response!.user.id,
+      guest: { name: 'Rhea', email: 'rhea@provider-proof.com', phone: null, notes: null } })
+    const ended = await bought('ended-stay', now - 5 * DAY, now - 2 * DAY)
+    const justEnded = await bought('just-ended-stay', now - DAY, now)
     const futureReview = (await read('upcoming')).cards.find(card => card.id === `review-invitation:${justEnded.request_id}`)
     assert.equal(futureReview, undefined, 'Healthy review dispatch stays in the scheduler')
     const dueReviewId = `review-invitation:${ended.request_id}`

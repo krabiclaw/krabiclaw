@@ -47,6 +47,18 @@ export const E2E_AUTH_FIXTURES: readonly E2eAuthFixture[] = [
     email: 'buyer@playwright.example',
   },
   {
+    // A person with no organization and nothing booked: post-login offers onboarding. Nothing writes to it.
+    id: 'user-e2e-newcomer',
+    name: 'E2E Newcomer',
+    email: 'newcomer@playwright.example',
+  },
+  {
+    // A guest whose only activity is the table the stays spec books signed in: post-login is Personal.
+    id: 'user-e2e-table-guest',
+    name: 'E2E Table Guest',
+    email: 'table-guest@playwright.example',
+  },
+  {
     id: 'user-e2e-demo-owner',
     name: 'E2E Demo Owner',
     email: 'demo-owner@playwright.example',

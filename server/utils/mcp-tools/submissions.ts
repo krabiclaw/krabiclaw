@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { getGuestThreadDetail } from '~/server/domain/guest-threads/detail'
 import { listOrganizationGuestThreads } from '~/server/domain/guest-threads/repository'
-import { executeGuestThreadOperation } from '~/server/domain/guest-threads/operations'
+import { executeGuestThreadOperation, guestReplyDestination } from '~/server/domain/guest-threads/operations'
 import { getGuestRequest } from '~/server/domain/requests'
 import { assertMemberScope, assertAssignedBookingAccess, roleAllows, assertRoleAllows, memberAccessPrincipal } from '~/server/utils/member-access'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
@@ -21,7 +21,7 @@ const changeSide = { type: 'object', properties: { whenLabel: { type: 'string' }
 const bookingChange = { type: ['object', 'null'], description: 'Canonical proposal details and current response state. A pending proposal does not change the operational record.', properties: { status: { type: 'string', enum: ['pending', 'accepted', 'declined', 'withdrawn', 'stale', 'expired'] }, before: changeSide, after: changeSide, locationTitle: { type: 'string' }, originalLocationTitle: { type: 'string' }, message: { type: 'string' } }, required: ['status', 'before', 'after', 'locationTitle', 'originalLocationTitle'] }
 const conversationResult = { type: 'object', properties: { conversation: { type: 'object', properties: {
   request_id: { type: 'string' }, type: { type: 'string', enum: ['contact', 'reservation', 'booking', 'stay'] }, state: nullableString, archived: { type: 'boolean' }, updated_at: { type: 'string' },
-  participant_label: { type: 'string' }, reply_channel: { type: 'string', enum: ['email', 'airbnb'] },
+  participant_label: { type: 'string' }, reply_channel: { type: ['string', 'null'], enum: ['airbnb', 'email', 'account', null], description: 'Where reply_to_guest sends: Airbnb’s conversation, the guest’s email, or their KrabiClaw account inbox. Null when the guest cannot be replied to; reply_not_possible says why.' }, reply_not_possible: nullableString,
   guest: { type: 'object', properties: { name: nullableString, email: nullableString, phone: nullableString }, required: ['name', 'email', 'phone'] },
   answers: formAnswerSnapshotsJsonSchema(),
   operational_record: { type: ['object', 'null'], description: 'For a stay, check_in_date and check_out_date are its nights and id is the stay for get_stay; its starts_at and ends_at only order and archive the conversation.', properties: { id: { type: 'string' }, kind: { type: 'string', enum: ['booking', 'reservation', 'stay'] }, status: { type: 'string' }, starts_at: { type: 'string' }, ends_at: { type: 'string' }, timezone: { type: 'string' }, party_size: { type: 'integer' }, check_in_date: nullableString, check_out_date: nullableString }, required: ['id', 'kind', 'status', 'starts_at', 'ends_at', 'timezone', 'party_size', 'check_in_date', 'check_out_date'] },
@@ -29,7 +29,7 @@ const conversationResult = { type: 'object', properties: { conversation: { type:
     deliveries: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, channel: { type: 'string' }, purpose: { type: 'string' }, status: { type: 'string' } }, required: ['id', 'channel', 'purpose', 'status'] } },
     attachments: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, url: { type: 'string' }, alt: nullableString, width: { type: ['integer', 'null'] }, height: { type: ['integer', 'null'] } }, required: ['id', 'url', 'alt', 'width', 'height'] } },
   }, required: ['id', 'kind', 'actor', 'channel', 'body', 'event', 'occurred_at', 'provider_timestamp', 'booking_change', 'deliveries', 'attachments'] } },
-}, required: ['request_id', 'type', 'state', 'archived', 'updated_at', 'participant_label', 'reply_channel', 'guest', 'answers', 'operational_record', 'entries'] } }, required: ['conversation'] }
+}, required: ['request_id', 'type', 'state', 'archived', 'updated_at', 'participant_label', 'reply_channel', 'reply_not_possible', 'guest', 'answers', 'operational_record', 'entries'] } }, required: ['conversation'] }
 const conversationMutationResult = { type: 'object', properties: {
   outcome: { type: 'object', properties: { ok: { const: true } }, required: ['ok'] },
   conversation: { type: 'object', properties: { request_id: { type: 'string' }, state: nullableString, archived: { type: 'boolean' }, updated_at: { type: 'string' } }, required: ['request_id', 'state', 'archived', 'updated_at'], additionalProperties: false },
@@ -39,8 +39,12 @@ async function readConversation(ctx: McpExecutorContext, requestId: string) {
   const { db, organizationId } = ctx.organization
   const detail = await getGuestThreadDetail(db, requestId, organizationId)
   if (!detail) throw new HTTPError({ statusCode: 404, message: 'Guest conversation not found' })
+  const request = await getGuestRequest(db, requestId, organizationId)
+  if (!request) throw new HTTPError({ statusCode: 404, message: 'Guest conversation not found' })
+  // Where reply_to_guest would send, by the reply operation's own rule.
+  const destination = await guestReplyDestination(db, request)
   return { request_id: detail.id, type: detail.submissionType, state: detail.conversationState, archived: detail.manuallyArchived, updated_at: detail.updatedAt,
-    participant_label: detail.participantLabel, reply_channel: detail.replyChannel,
+    participant_label: detail.participantLabel, reply_channel: destination.channel, reply_not_possible: destination.channel === null ? destination.reason : null,
     guest: { name: detail.guestName, email: detail.guestEmail, phone: detail.guestPhone }, answers: detail.source.fields.answers, operational_record: detail.operationalRecord,
     entries: detail.entries.map(entry => ({ id: entry.id, kind: entry.kind, actor: entry.actorLabel, channel: entry.channel, body: entry.body, event: entry.eventName, payload: entry.payload, booking_change: entry.bookingChange, occurred_at: entry.occurredAt, provider_timestamp: entry.providerTimestamp, deliveries: entry.deliveries, attachments: entry.attachments })),
   }
@@ -49,7 +53,7 @@ async function readConversation(ctx: McpExecutorContext, requestId: string) {
 export const SUBMISSIONS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'list_guest_conversations', domain: 'submissions', minimumRole: 'member', description: 'Read the business inbox for contacts, table reservations, bookings and stay conversations. Filter by type, current/past and whether a reply is needed. Follow page_info; use request_id to read the whole conversation.',
     inputSchema: { type: { type: 'string', enum: ['contact', 'reservation', 'booking', 'stay'] }, state: { type: 'string', enum: ['needs_attention', 'waiting_on_guest', 'resolved'] }, mailbox: { type: 'string', enum: ['current', 'past'] }, location_id: { type: 'string' }, ...paginationInputSchema },
-    outputSchema: { type: 'object', properties: { conversations: { type: 'array', items: { type: 'object', properties: { request_id: { type: 'string' }, guest_name: nullableString, participant_label: { type: 'string' }, reply_channel: { type: 'string', enum: ['email', 'airbnb'] }, type: { type: 'string' }, state: { type: 'string' }, operational_status: { type: ['string', 'null'] }, preview: { type: ['string', 'null'] }, updated_at: { type: 'string' } }, required: ['request_id', 'guest_name', 'participant_label', 'reply_channel', 'type', 'state', 'operational_status', 'preview', 'updated_at'] } }, page_info: pageInfoObject }, required: ['conversations', 'page_info'] },
+    outputSchema: { type: 'object', properties: { conversations: { type: 'array', items: { type: 'object', properties: { request_id: { type: 'string' }, guest_name: nullableString, participant_label: { type: 'string' }, reply_channel: { type: ['string', 'null'], enum: ['airbnb', 'email', 'account', null], description: 'Where reply_to_guest sends; null when the guest cannot be replied to, and reply_not_possible says why.' }, reply_not_possible: nullableString, type: { type: 'string' }, state: { type: 'string' }, operational_status: { type: ['string', 'null'] }, preview: { type: ['string', 'null'] }, updated_at: { type: 'string' } }, required: ['request_id', 'guest_name', 'participant_label', 'reply_channel', 'reply_not_possible', 'type', 'state', 'operational_status', 'preview', 'updated_at'] } }, page_info: pageInfoObject }, required: ['conversations', 'page_info'] },
   }),
   organizationTool({ name: 'create_inquiry', domain: 'submissions', minimumRole: 'admin', description: 'Record an inquiry, quote request or lead in the inbox for a named person, as the website\'s inquiry form does: their contact details, an optional message, and answers to the organization\'s inquiry questions (get_organization_settings → inquiry_questions). No appointment, capacity or payment is involved; to book a time use create_product_booking. Legal practices also require the person\'s consent acknowledgement. Reuse the same idempotency key for an identical retry; read the saved answers with get_guest_conversation.',
     inputSchema: {
@@ -68,7 +72,7 @@ export const SUBMISSIONS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'get_guest_conversation', domain: 'submissions', minimumRole: 'member', description: 'Read the entire guest conversation, including the guest\'s answers to the tenant\'s questions, messages, booking/reservation, proposals, attachments and delivery receipts. Requires request_id from the inbox or booking read.',
     inputSchema: { request_id: { type: 'string' } }, required: ['request_id'], outputSchema: conversationResult,
   }),
-  organizationTool({ name: 'reply_to_guest', domain: 'submissions', minimumRole: 'member', description: 'Reply through this conversation’s reply_channel and save the reply. Airbnb replies accept text or one photo, sent separately; email replies accept text, a photo or both. A stay guest without an email is reached in their KrabiClaw inbox once they accept the host’s invite link; until then the reply is refused with GUEST_INVITE_REQUIRED and the host shares an invite from the KrabiClaw app. Reuse the same key for an identical retry. A failed Airbnb attempt may retry only when retry_with_same_idempotency_key is true. Sending, uncertain or review-required attempts need review and are never blindly resent. Returns saved conversation state; use get_guest_conversation for history and delivery receipts.',
+  organizationTool({ name: 'reply_to_guest', domain: 'submissions', minimumRole: 'member', description: 'Reply through this conversation’s reply_channel and save the reply. Airbnb replies accept text or one photo, sent separately; email replies accept text, a photo or both. A stay guest without an email is reached in their KrabiClaw inbox when they have an account; with neither, the reply is refused with GUEST_UNREACHABLE. Reuse the same key for an identical retry. A failed Airbnb attempt may retry only when retry_with_same_idempotency_key is true. Sending, uncertain or review-required attempts need review and are never blindly resent. Returns saved conversation state; use get_guest_conversation for history and delivery receipts.',
     inputSchema: { anyOf: [{ required: ['message'] }, { required: ['file'] }], request_id: { type: 'string', description: 'Conversation request_id from list_guest_conversations or a booking read.' }, message: { type: 'string', minLength: 1, pattern: '^[\\s\\S]*\\S[\\s\\S]*$', description: 'Reply text; required when no photo is attached.' }, file: { ...chatgptFileInput, description: 'Photo attachment; required when no reply text is supplied.' }, idempotency_key: { type: 'string', minLength: 1, maxLength: 200 } }, required: ['request_id', 'idempotency_key'], fileParams: ['file'], outputSchema: conversationMutationResult,
   }),
   organizationTool({ name: 'set_guest_conversation_archived', domain: 'submissions', minimumRole: 'admin', description: 'Archive or restore the inbox conversation identified by request_id from list_guest_conversations or a booking read. Returns its saved archive state without conversation history. Does not cancel a booking or reservation and does not send the guest a message.',
@@ -120,7 +124,14 @@ export async function handleSubmissionsTools(ctx: McpExecutorContext): Promise<u
       const window = mcpPageWindow(args, resource)
       const rows = await listOrganizationGuestThreads(organization.db, { organizationId: organization.organizationId, principal, userId: organization.userId,
         type: args.type as 'contact' | 'reservation' | 'booking' | 'stay' | undefined, conversationState: args.state as 'needs_attention' | 'waiting_on_guest' | 'resolved' | undefined, mailbox: args.mailbox as 'current' | 'past' | undefined, locationId: optionalString(args, 'location_id'), limit: window.limit + 1, offset: window.offset })
-      const conversations = rows.slice(0, window.limit).map(row => ({ request_id: row.id, guest_name: row.guestName, participant_label: row.participantLabel, reply_channel: row.replyChannel, type: row.submissionType, state: row.conversationState, operational_status: row.operationalStatus, preview: row.preview?.text ?? null, updated_at: row.lastActivityAt }))
+      // Where reply_to_guest would send each one, by the reply operation's own rule, as get_guest_conversation reads it.
+      const conversations = await Promise.all(rows.slice(0, window.limit).map(async row => {
+        const request = await getGuestRequest(organization.db, row.id, organization.organizationId)
+        if (!request) throw new HTTPError({ statusCode: 404, message: 'Guest conversation not found' })
+        const destination = await guestReplyDestination(organization.db, request)
+        return { request_id: row.id, guest_name: row.guestName, participant_label: row.participantLabel, reply_channel: destination.channel, reply_not_possible: destination.channel === null ? destination.reason : null,
+          type: row.submissionType, state: row.conversationState, operational_status: row.operationalStatus, preview: row.preview?.text ?? null, updated_at: row.lastActivityAt }
+      }))
       return { conversations, page_info: mcpPageInfo(window, conversations.length, rows.length > window.limit, resource) }
     }
     case 'get_guest_conversation':

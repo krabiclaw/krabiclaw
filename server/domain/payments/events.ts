@@ -16,7 +16,7 @@ import { recordPaymentPaid } from '~/server/domain/booking-analytics'
 import { notifyStayBooked, raiseSettledFailures } from '~/server/utils/notifications'
 import { paymentsBillingBasis } from './fx'
 import { deliverPaymentsUsage } from './usage'
-import { isStayPurchase } from './checkout'
+import { isStayPurchase, type StayPurchase } from './checkout'
 import { completeStayFromCheckout, isStayNightConflict, releaseLapsedStayHolds, stayFromCheckoutQueries } from '~/server/domain/stays'
 
 interface Hold {
@@ -130,6 +130,31 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,int
 }
 
 /**
+ * The conversion itself: a captured stay payment's hold becomes the buyer's
+ * confirmed direct stay, its hold converted to it and the payment pointed at
+ * it, in one batch. The stay belongs to the buyer who paid. Returns the new
+ * stay's id, or null when another conversion of the same hold landed first.
+ */
+export async function convertStayHold(db: DbClient, input: {
+  payment: Pick<Payment, 'id' | 'organization_id' | 'buyer_user_id'>
+  hold: { id: string; product_id: string; location_id: string; buyer_user_id: string | null }
+  purchase: StayPurchase
+}): Promise<string | null> {
+  const { payment, hold, purchase } = input
+  const candidate = crypto.randomUUID()
+  const now = new Date().toISOString()
+  const home = await queryFirst<{ name: string }>(db, 'SELECT name FROM products WHERE id = ? AND organization_id = ?', [hold.product_id, payment.organization_id])
+  if (!home) throw new Error('Captured stay payment names a home that does not exist')
+  const results = await executeBatch(db, [
+    ...stayFromCheckoutQueries({ organizationId: payment.organization_id, locationId: hold.location_id, stayId: candidate, holdId: hold.id, paymentId: payment.id, buyerUserId: payment.buyer_user_id ?? hold.buyer_user_id, now, stay: { quote: purchase, guest: purchase.guest }, homeTitle: home.name }),
+    { query: "UPDATE payment_checkout_holds SET status='converted', converted_stay_id=? WHERE id=? AND status IN ('active','released') AND EXISTS(SELECT 1 FROM stays WHERE id=?)", params: [candidate, hold.id, candidate] },
+    { query: 'UPDATE payments SET subject_id=?, updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM stays WHERE id=?)', params: [candidate, now, payment.id, candidate] },
+  ], { operation: 'Convert captured stay payment' })
+  // The stay's own insert, after the hold's held nights are released.
+  return results[1]?.meta.changes === 1 ? candidate : null
+}
+
+/**
  * A captured stay payment becomes its confirmed direct stay: the hold's nights
  * pass to the stay in one batch. A night someone else holds by then refunds the
  * guest in full. A replay finds the hold converted and repeats only the
@@ -145,19 +170,12 @@ async function settleStayPayment(db: DbClient, stripe: Stripe, env: CloudflareEn
   if (!isStayPurchase(purchase) || purchase.product_id !== hold.product_id || purchase.total_minor !== payment.amount) throw new Error('Captured stay payment has no valid stay purchase')
   let stayId = hold.converted_stay_id
   if (hold.status !== 'converted') {
-    const candidate = crypto.randomUUID()
     const now = new Date().toISOString()
-    const home = await queryFirst<{ name: string }>(db, 'SELECT name FROM products WHERE id = ? AND organization_id = ?', [hold.product_id, payment.organization_id])
-    if (!home) throw new Error('Captured stay payment names a home that does not exist')
     let created = false
     try {
-      const results = await executeBatch(db, [
-        ...stayFromCheckoutQueries({ organizationId: payment.organization_id, locationId: hold.location_id, stayId: candidate, holdId: hold.id, paymentId: payment.id, buyerUserId: payment.buyer_user_id ?? hold.buyer_user_id, now, stay: { quote: purchase, guest: purchase.guest }, homeTitle: home.name }),
-        { query: "UPDATE payment_checkout_holds SET status='converted', converted_stay_id=? WHERE id=? AND status IN ('active','released') AND EXISTS(SELECT 1 FROM stays WHERE id=?)", params: [candidate, hold.id, candidate] },
-        { query: 'UPDATE payments SET subject_id=?, updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM stays WHERE id=?)', params: [candidate, now, payment.id, candidate] },
-      ], { operation: 'Convert captured stay payment' })
-      created = results[1]?.meta.changes === 1
-      if (created) stayId = candidate
+      const converted = await convertStayHold(db, { payment, hold: { ...hold, product_id: hold.product_id, location_id: hold.location_id }, purchase })
+      created = converted !== null
+      if (converted) stayId = converted
     } catch (error) {
       if (!isStayNightConflict(error) && !/UNIQUE constraint failed: stays\.organization_id, stays\.idempotency_key/.test(error instanceof Error ? error.message : String(error))) throw error
     }

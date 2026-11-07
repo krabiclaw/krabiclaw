@@ -316,7 +316,7 @@ export type ChannelReplyOutcome = { ok: true } | {
   provider_error?: ChannexError['data']
 }
 
-function assertReplyIntent(entry: GuestThreadEntryRow, body: string, requestHash: string, eventName: string): void {
+export function assertReplyIntent(entry: GuestThreadEntryRow, body: string, requestHash: string, eventName: string): void {
   if (entry.event_name !== eventName) fail(409, 'IDEMPOTENCY_CONFLICT', 'The reply key was already used for a different message', 'idempotencyKey')
   const payload = parseEntryPayload(entry)
   if (typeof payload?.request_hash !== 'string') fail(500, 'CHANNEL_REPLY_INTENT_INVALID', 'The channel reply intent has no recorded request hash', 'payload.request_hash')
@@ -349,12 +349,12 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
     }
     if (receipt.status !== 'pending' && !(receipt.status === 'failed' && receipt.non_delivery_confirmed === 1)) return reviewRequired()
   }
-  // A failed preflight records no reply that was never attempted. Proven
-  // accepted replays above remain safe even after the home is disconnected.
+  // Whether the home may still be written to is the caller's (guestReplyDestination);
+  // proven accepted replays above remain safe even after it is disconnected.
   const home = await queryFirst<HomeMapping>(db, `SELECT m.*, c.location_id FROM product_channel_mappings m
     JOIN product_stay_configs c ON c.product_id = m.product_id AND c.organization_id = m.organization_id
     WHERE m.provider = 'channex' AND m.organization_id = ? AND m.product_id = ?`, [input.mapping.organization_id, input.mapping.product_id])
-  if (!home || home.enabled !== 1) fail(409, 'CHANNEL_PROPERTY_NOT_READY', 'This home is disconnected from guest messaging', 'product_id')
+  if (!home) throw new Error(`Channel thread ${input.mapping.request_id} names a home with no Channex mapping`)
   const current = await getChannexThread(env, input.mapping.external_thread_id)
   if (current.propertyId !== home.property_id || (current.channelId !== null && current.channelId !== home.channel_id)) fail(502, 'INVALID_PROVIDER_RESPONSE', 'The provider conversation is outside its local property mapping', 'relationships.property')
   if (!entry) {

@@ -11,7 +11,6 @@ export type ConversationState = 'needs_attention' | 'waiting_on_guest' | 'resolv
 export type GuestThreadSubmissionType = 'contact' | 'reservation' | 'booking' | 'stay'
 export type GuestThreadDeliveryChannel = 'email' | 'whatsapp' | 'airbnb' | 'push'
 export type GuestThreadDeliveryProvider = 'resend' | 'meta' | 'channex' | 'apns' | 'web_push' | 'log_only'
-export type GuestThreadReplyChannel = 'email' | 'airbnb'
 export type GuestThreadDeliveryPurpose = 'owner_alert' | 'guest_acknowledgement' | 'member_reply' | 'scheduled_message' | 'status_update'
 export type GuestThreadDeliveryStatus = 'pending' | 'sending' | 'uncertain' | 'accepted' | 'sent' | 'delivered' | 'read' | 'failed' | 'skipped'
 
@@ -105,7 +104,6 @@ export interface GuestThreadListItemViewModel {
   organizationVertical?: string | null
   guestName: string | null
   participantLabel: string
-  replyChannel: GuestThreadReplyChannel
   submissionType: GuestThreadSubmissionType
   locationLabel: string | null
   locationId: string | null
@@ -208,9 +206,8 @@ export interface GuestThreadDetailViewModel {
   activityPath: string | null
   guestName: string | null
   participantLabel: string
-  replyChannel: GuestThreadReplyChannel
-  /** The conversation belongs to a guest account, so a reply reaches its account inbox even without a guest email. */
-  guestAccountLinked: boolean
+  /** Where the conversation lives: Airbnb's own thread, or KrabiClaw directly. Where a reply can go is `guestReplyDestination`'s. */
+  conversationChannel: 'airbnb' | 'direct'
   guestEmail: string | null
   guestPhone: string | null
   submissionType: GuestThreadSubmissionType
@@ -347,7 +344,8 @@ export interface InboxThread {
   stream: InboxStreamItem[]
   pending: InboxPendingMessage[]
   /** Where a reply goes, and whether one can be sent. */
-  composer: { channel: 'airbnb' | 'email'; available: boolean }
+  /** `reason` says why there is no composer: the reply operation's own refusal. */
+  composer: { channel: 'airbnb' | 'email'; available: boolean; reason: string | null }
 }
 
 /** "In this conversation": who is in it, its photos and what can be done to it. */

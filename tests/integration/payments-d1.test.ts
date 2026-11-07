@@ -666,7 +666,7 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
   assert(thread)
   assert.deepEqual(thread.stream.filter(item=>item.type!=='day').map(item=>item.type==='message'?[item.side,item.author,item.body]:item.type==='event'?['event',item.text]:[item.type]),
    [['guest','You','My question'],['business','Payments','Public host reply'],['event','Payment received']])
-  assert.deepEqual([thread.pending,thread.composer],[[],{channel:'email',available:true}])
+  assert.deepEqual([thread.pending,thread.composer],[[],{channel:'email',available:true,reason:null}])
   for(const secret of secrets)assert.equal(JSON.stringify(thread).includes(secret),false,secret)
   const inbox=await listGuestThreads(db,null,{userId:'verified',buyerAudience:true})
   // The newest message is the internal note; the buyer's row previews the newest message they can read, unread.

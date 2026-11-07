@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:695eba4dfe89f7718e01ea4b18a80c1c9efc160b3338538b25fc6fcba084e971",
-  "documentationFingerprint": "sha256:dfc4d92a1f922d10c4d43e69dd597e2bceeca7539efa0e0aec8a3fa18d7c146d",
+  "fingerprint": "sha256:86c7fdae920511b1fab3487ccdde4dc82b74805e9cdc59b631844231eda04ca9",
+  "documentationFingerprint": "sha256:f36f49c05a06f96995b393abe93670ac2f0d902a423b2ae624f6d3d92494404c",
   "tools": [
     {
       "name": "add_organization_language",
@@ -47317,11 +47317,23 @@
                 "type": "string"
               },
               "reply_channel": {
+                "description": "Where reply_to_guest sends: Airbnb’s conversation, the guest’s email, or their KrabiClaw account inbox. Null when the guest cannot be replied to; reply_not_possible says why.",
                 "enum": [
+                  "airbnb",
                   "email",
-                  "airbnb"
+                  "account",
+                  null
                 ],
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reply_not_possible": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "request_id": {
                 "type": "string"
@@ -47353,6 +47365,7 @@
               "updated_at",
               "participant_label",
               "reply_channel",
+              "reply_not_possible",
               "guest",
               "answers",
               "operational_record",
@@ -66929,11 +66942,23 @@
                   ]
                 },
                 "reply_channel": {
+                  "description": "Where reply_to_guest sends; null when the guest cannot be replied to, and reply_not_possible says why.",
                   "enum": [
+                    "airbnb",
                     "email",
-                    "airbnb"
+                    "account",
+                    null
                   ],
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reply_not_possible": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "request_id": {
                   "type": "string"
@@ -66953,6 +66978,7 @@
                 "guest_name",
                 "participant_label",
                 "reply_channel",
+                "reply_not_possible",
                 "type",
                 "state",
                 "operational_status",
@@ -97548,7 +97574,7 @@
     {
       "name": "reply_to_guest",
       "title": "Reply to guest",
-      "description": "Reply through this conversation’s reply_channel and save the reply. Airbnb replies accept text or one photo, sent separately; email replies accept text, a photo or both. A stay guest without an email is reached in their KrabiClaw inbox once they accept the host’s invite link; until then the reply is refused with GUEST_INVITE_REQUIRED and the host shares an invite from the KrabiClaw app. Reuse the same key for an identical retry. A failed Airbnb attempt may retry only when retry_with_same_idempotency_key is true. Sending, uncertain or review-required attempts need review and are never blindly resent. Returns saved conversation state; use get_guest_conversation for history and delivery receipts.",
+      "description": "Reply through this conversation’s reply_channel and save the reply. Airbnb replies accept text or one photo, sent separately; email replies accept text, a photo or both. A stay guest without an email is reached in their KrabiClaw inbox when they have an account; with neither, the reply is refused with GUEST_UNREACHABLE. Reuse the same key for an identical retry. A failed Airbnb attempt may retry only when retry_with_same_idempotency_key is true. Sending, uncertain or review-required attempts need review and are never blindly resent. Returns saved conversation state; use get_guest_conversation for history and delivery receipts.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -127206,18 +127232,18 @@
         "cancel_product_booking": "sha256:a90b3075935852ee847849f1774addc7077bac2636dd83439a792db5a98c9ca3",
         "cancel_table_reservation": "sha256:7c17a97a9f730249ce112981850351006406adab44d5230f8306953e4450b165",
         "confirm_product_booking": "sha256:d1269994270301b34621918853c929c1e77f702b21fa336ac4dd23dcbf81e18e",
-        "get_guest_conversation": "sha256:d8fb6d75bd38fb53f6bc46dab6207535ffe1c55e57bc1b22b95be6df051aeed8",
+        "get_guest_conversation": "sha256:98d14cd131136e817e14ceecc25c0619990e2e7ec4fe237bd62c61c9e071122b",
         "get_product_booking": "sha256:1f0d7f20d207a6fb1aecb169e86483ae515c5b6209fbf9fe948a2be26860968d",
         "get_team_conversation": "sha256:68a4390f99121151a6c3dcca2e3cff8675166b27d958e7a1a71dcd3a4c9a81d0",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
+        "list_guest_conversations": "sha256:f1a1d47b6c74191b19cf9da049909dc5ed3636f69eb5f59a16ed36f11c4ca9f5",
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
         "list_team_conversations": "sha256:7d0d80ed5a7b2c7b2d46ce8cac3aadddf63040756dafc586723b6bf623914283",
         "mark_team_conversation_read": "sha256:3ad65b07c9bd78090f9f81aeffa74ac00f1c201ee8b6325cf16cd879f1e2644d",
         "reject_product_booking": "sha256:d391fc30d744361aecae959a6e0530b4193bb3366cf9da36cc2a7e2011088357",
-        "reply_to_guest": "sha256:28402ef75ec3f1464c60ffbaa91a3781f96f9764994e56b2c7362dbd26eefb80",
+        "reply_to_guest": "sha256:602feae35241528647db0e55d087abc9068a854b0d4fda463e57365a63ca0eb8",
         "request_product_booking_change": "sha256:d09a9c88466237aff04465bbcffa219f28e197cfad0cb4fdd99f41484343d400",
         "request_table_reservation_change": "sha256:71868f28cc9f329b1f44276ae0a223c487c789f4682c3bb8f3a09b96fde9e2dd",
         "send_team_message": "sha256:b9f715f29f98d627cd0e5fa89f873b5623e13d5ba0867cc7dba69216ba886f97",
@@ -127341,15 +127367,15 @@
       },
       "toolContracts": {
         "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
-        "get_guest_conversation": "sha256:d8fb6d75bd38fb53f6bc46dab6207535ffe1c55e57bc1b22b95be6df051aeed8",
+        "get_guest_conversation": "sha256:98d14cd131136e817e14ceecc25c0619990e2e7ec4fe237bd62c61c9e071122b",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
         "get_product": "sha256:b442c5cc831685228debfcd727733019fa751d23ea9aa411c624a1e0c1f478b4",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
+        "list_guest_conversations": "sha256:f1a1d47b6c74191b19cf9da049909dc5ed3636f69eb5f59a16ed36f11c4ca9f5",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
-        "reply_to_guest": "sha256:28402ef75ec3f1464c60ffbaa91a3781f96f9764994e56b2c7362dbd26eefb80",
+        "reply_to_guest": "sha256:602feae35241528647db0e55d087abc9068a854b0d4fda463e57365a63ca0eb8",
         "update_product": "sha256:a6f1e84c2f216c0cf5f12ff3c680f5227a03b34c951caf3cf75f9d5580ca7372"
       }
     }
