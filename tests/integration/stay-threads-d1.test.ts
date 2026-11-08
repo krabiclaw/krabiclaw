@@ -14,7 +14,7 @@ import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
 // A stay's guest conversation lives in the one inbox: a host stay with a guest
 // email or phone opens it, the member who looks after
-// the home sees it, it moves to Past after check-out, it is answered like any
+// the home sees it, it moves to Past once quiet for 30 days after check-out, it is answered like any
 // thread, and a stay is changed from its own screen rather than its thread.
 
 const ORG = 'org'
@@ -147,10 +147,12 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.deepEqual(cancel, { ok: false, status: 409, reason: 'invalid_transition', message: '"cancel" is not a valid action for the current state' })
     assert.equal(await db.prepare('SELECT status FROM stays WHERE id = ?').bind(ana.id).first('status'), 'confirmed')
 
-    // A stay's thread leaves Current two days after its check-out date, after check-out everywhere.
-    await db.prepare('UPDATE stays SET check_in_date = ?, check_out_date = ? WHERE id = ?').bind(day(-5), day(-1), ana.id).run()
-    assert.equal((await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay', mailbox: 'current' })).some(row => row.id === ana.request_id), true)
+    // An ended stay stays in Current, as Airbnb keeps an ended trip; it leaves once quiet for 30 days.
     await db.prepare('UPDATE stays SET check_in_date = ?, check_out_date = ? WHERE id = ?').bind(day(-6), day(-2), ana.id).run()
+    assert.equal((await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay', mailbox: 'current' })).some(row => row.id === ana.request_id), true)
+    await db.prepare('UPDATE stays SET check_in_date = ?, check_out_date = ? WHERE id = ?').bind(day(-45), day(-40), ana.id).run()
+    await db.prepare('UPDATE activity_entries SET occurred_at = ? WHERE request_id = ?').bind(`${day(-40)}T00:00:00.000Z`, ana.request_id).run()
+    await db.prepare('UPDATE requests SET created_at = ? WHERE id = ?').bind(`${day(-50)}T00:00:00.000Z`, ana.request_id).run()
     assert.equal((await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay', mailbox: 'past' })).some(row => row.id === ana.request_id), true)
     assert.equal((await getGuestThreadDetail(db, ana.request_id, ORG))?.mailbox, 'past')
 

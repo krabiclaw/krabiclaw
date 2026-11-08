@@ -675,8 +675,7 @@ export async function guestReplyDestination(db: DbClient, thread: Pick<GuestRequ
   return { channel: 'account', email: account?.email ?? null }
 }
 
-const ENDED_OCCURRENCE_MESSAGE = 'This conversation is past because its booking has ended'
-const QUIET_CONVERSATION_MESSAGE = 'This conversation is past because nobody has written for 30 days'
+const QUIET_CONVERSATION_MESSAGE = 'This conversation is past because it has been quiet for 30 days'
 
 /**
  * File a conversation under Past, or bring a manually archived one back.
@@ -701,8 +700,8 @@ async function executeMailboxTransition(
   }
 
   const now = new Date().toISOString()
-  const state = resolveGuestThreadMailbox(context.thread, context.record, now, await readMailboxActivity(db, context.thread.id, input.actorUserId))
-  const pastBy = state.pastByRule ? context.record ? ENDED_OCCURRENCE_MESSAGE : QUIET_CONVERSATION_MESSAGE : null
+  const state = resolveGuestThreadMailbox(context.thread, context.record, now, await readMailboxActivity(db, context.thread.id))
+  const pastBy = state.pastByRule ? QUIET_CONVERSATION_MESSAGE : null
   if (transition === 'archive' && !state.canArchive) {
     return conflict(pastBy ?? 'This conversation is already archived')
   }
@@ -733,8 +732,8 @@ async function executeMailboxTransition(
   }
   const reread = await loadThreadContext(db, input.threadId, input.organizationId)
   if ('ok' in reread) return reread
-  const after = resolveGuestThreadMailbox(reread.thread, reread.record, new Date().toISOString(), await readMailboxActivity(db, reread.thread.id, input.actorUserId))
-  return conflict(after.pastByRule ? reread.record ? ENDED_OCCURRENCE_MESSAGE : QUIET_CONVERSATION_MESSAGE : 'This conversation changed; reload it and try again')
+  const after = resolveGuestThreadMailbox(reread.thread, reread.record, new Date().toISOString(), await readMailboxActivity(db, reread.thread.id))
+  return conflict(after.pastByRule ? QUIET_CONVERSATION_MESSAGE : 'This conversation changed; reload it and try again')
 }
 
 /**

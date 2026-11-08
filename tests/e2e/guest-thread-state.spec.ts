@@ -462,19 +462,6 @@ async function loadMailbox(request: APIRequestContext, mailbox: Mailbox) {
   }
 }
 
-/**
- * A Past conversation nobody archived: its booking ended and the owner has read
- * it, so it offers neither Archive nor Move to Messages. The experience seed has
- * one; a run's own archived contacts are Past too, and they offer Move to Messages.
- */
-async function endedConversation(request: APIRequestContext) {
-  for (const thread of (await loadMailbox(request, 'past')).byId) {
-    const actions = await loadThreadActions(request, thread.id)
-    if (!actions.archive && !actions.unarchive) return thread
-  }
-  throw new Error('The experience seed includes a booking that has ended and been read, and no Past conversation is one')
-}
-
 async function submitContact(request: APIRequestContext, guestName: string) {
   const response = await request.post('/api/public/contact', {
     headers: seededSiteHeaders('experience'),
@@ -561,16 +548,6 @@ test('archive and Move to messages file a conversation without reordering the in
     expect(order.indexOf(newer!.id)).toBeGreaterThanOrEqual(0)
     expect(order.indexOf(newer!.id)).toBeLessThan(order.indexOf(threadId))
 
-    // A conversation Past because its booking ended cannot be moved back.
-    const ended = await endedConversation(owner)
-    const refused = await owner.post(`/api/dashboard/organizations/${organizationId()}/guest-threads/${ended.id}/operations/unarchive`, {
-      data: { idempotencyKey: `unarchive-ended-${nonce}` },
-    })
-    await expectStatus(refused, 409)
-    expect(await refused.json()).toMatchObject({ error: 'This conversation is past because its booking has ended' })
-    expect((await loadMailbox(owner, 'past')).byId.some(thread => thread.id === ended.id)).toBe(true)
-    expect((await loadLedger(owner, ended.id)).archived).toBe(false)
-    expect(await loadThreadActions(owner, ended.id)).toMatchObject({ archive: false, unarchive: false })
   } finally {
     await Promise.all([owner.dispose(), foreignOwner.dispose()])
   }
@@ -681,24 +658,12 @@ for (const viewport of [
     await openMessages('?archived=')
     await expect(rowFor(guestName)).toBeVisible()
 
-    // A conversation Past because its booking ended offers no way back; its
-    // guest can still be reported or blocked.
-    const ended = await endedConversation(page.request)
-    await expect(page.locator(`[data-thread-row="${ended.id}"]`)).toBeVisible()
-    await openConversation(ended.id, '?archived=')
+    // Moving it back keeps the conversation open where it is read, and it
+    // leaves Past for Current. In Past its guest can still be reported or blocked.
+    await openConversation(threadId!, '?archived=')
     await sheetButton.click()
     await expect(sheet.getByRole('button', { name: 'Report', exact: true })).toBeVisible()
     await expect(sheet.getByRole('button', { name: 'Block', exact: true })).toBeVisible()
-    await expect(sheet.getByRole('button', { name: 'Archive', exact: true })).toHaveCount(0)
-    await expect(sheet.getByRole('button', { name: 'Move to Messages', exact: true })).toHaveCount(0)
-    await page.keyboard.press('Escape')
-    await expect(sheet).toHaveCount(0)
-
-    // Moving it back keeps the conversation open where it is read, and it
-    // leaves Past for Current.
-    if (viewport.name === 'mobile') await openMessages('?archived=')
-    await openConversation(threadId!, '?archived=')
-    await sheetButton.click()
     await expect(sheet.getByRole('button', { name: 'Archive', exact: true })).toHaveCount(0)
     const moved = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/guest-threads/${threadId}/operations/unarchive`))
     await sheet.getByRole('button', { name: 'Move to Messages', exact: true }).click()
@@ -764,7 +729,8 @@ test('Calendar retains confirmed reservations and their detail sends one change 
   const bookingIds: string[] = []
   for (const [name, email, plan] of [
     [guestName, guestEmail, todaySlot!],
-    ['Priya Patel', `priya-${now}@example.test`, now + 86_400_000],
+    // Two days out, so the change request below is inside the 24-hour change window whatever the hour.
+    ['Priya Patel', `priya-${now}@example.test`, now + 2 * 86_400_000],
   ] as const) {
     let date: string
     let time: string
