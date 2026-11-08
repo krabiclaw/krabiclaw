@@ -131,7 +131,7 @@ async function mirrorMessage(db: DbClient, env: ChannelEnv, mapping: ChannelThre
     threadId: mapping.request_id, kind: 'message', actorKind,
     channel: 'airbnb', body: message.text, eventName: 'channel.message_mirrored', dedupeKey: `channex-message:${message.id}`,
     // This occurrence is the local mirroring operation. Provider timestamps are
-    // retained exactly: a naive provider date is not an established UTC instant.
+    // retained exactly as Channex sent them: zoneless UTC.
     payloadJson: { provider_message_id: message.id, provider_inserted_at: message.insertedAt, provider_updated_at: message.updatedAt,
       attachments: message.attachments, ...(message.meta === undefined ? {} : { meta: message.meta }) },
   }).catch((error: unknown) => {
