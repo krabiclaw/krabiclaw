@@ -151,11 +151,11 @@ export function messageDeliveryTaskQueries(messageId: string, now: string): Batc
   }]
 }
 
-/** The operation an accepted opportunity asked for is recorded: its task is done. */
+/** Close matching tasks only when the preceding write or its guarded audit row committed. */
 export function opportunityDoneQuery(organizationId: string, operations: readonly string[], subjectId: string, now: string): BatchQuery {
   return {
     query: `UPDATE tasks SET status = 'done', closed_at = ?, closed_by_user_id = NULL, version = version + 1, updated_at = ?
-      WHERE organization_id = ? AND kind = 'opportunity' AND status = 'open' AND opportunity_id IN (
+      WHERE changes() = 1 AND organization_id = ? AND kind = 'opportunity' AND status = 'open' AND opportunity_id IN (
         SELECT id FROM opportunities WHERE organization_id = ? AND subject_id = ? AND operation IN (SELECT value FROM json_each(?)))`,
     params: [now, now, organizationId, organizationId, subjectId, d1JsonStringSet(operations)],
   }

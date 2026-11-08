@@ -3,14 +3,16 @@ import { createHmac } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import test from 'node:test'
+import Ajv from 'ajv'
 import { Miniflare } from 'miniflare'
 import sharp from 'sharp'
 import { H3 } from 'nitro/h3'
 import { HTTPError } from 'nitro'
-import { handlePostsTools } from '../../server/utils/mcp-tools/posts.ts'
+import { handlePostsTools, POSTS_TOOLS } from '../../server/utils/mcp-tools/posts.ts'
 import { handleTaskTools } from '../../server/utils/mcp-tools/tasks.ts'
 import type { McpExecutorContext } from '../../server/utils/mcp-tools/execution.ts'
 import { asMcpError, MCP_ERROR } from '../../server/utils/mcp-protocol.ts'
+import { isMcpRenderResponse } from '../../server/utils/mcp-render.ts'
 import { linkedAccountAccessToken, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { createPost, deletePost, getPost, listPublicSocialPosts, postPayloadFingerprint, updatePost } from '../../server/utils/post-management.ts'
 import { publishPost, reconcilePostPublication, type PublishTarget } from '../../server/utils/social-publication.ts'
@@ -25,16 +27,16 @@ import deauthorizeCallback from '../../server/api/integrations/meta/deauthorize.
 import { loadInstagramInsights } from '../../server/utils/instagram-insights.ts'
 import deleteCallback from '../../server/api/integrations/meta/data-deletion.post.ts'
 import deletionStatus from '../../server/api/integrations/meta/data-deletion.get.ts'
-import { createBlogPost, getBlogPost } from '../../server/utils/content/publishing.ts'
+import { createBlogPost, deleteBlogPost, getBlogPost } from '../../server/utils/content/publishing.ts'
 import { fetchTransformedImageAsDataUri } from '../../server/utils/og-image/fetch-image.ts'
 import { renderOgImagePng } from '../../server/utils/og-image/render.ts'
 import { CLAIM_STALE_MS, PostValidationError, POST_TITLE_MAX } from '../../shared/posts.ts'
 import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
 import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 import { readBusinessRecommendations } from '../../server/domain/business-progress.ts'
-import type { OpportunityView } from '../../server/domain/opportunities.ts'
+import { listOpportunities, type OpportunityView } from '../../server/domain/opportunities.ts'
 import type { TaskView } from '../../server/domain/tasks.ts'
-import { postEditorPath } from '../../server/utils/dashboard-links.ts'
+import { blogEditorPath, postEditorPath } from '../../server/utils/dashboard-links.ts'
 
 /**
  * Publication, channel management and erasure against real local D1, with Meta and
@@ -395,6 +397,14 @@ test('publication: one result, one external post per target, and no blind resend
     await run("INSERT INTO member (id, organizationId, userId, role) VALUES ('progress-owner', 'org-a', 'owner', 'owner')")
     const membership = await resolveMembership(env, { organizationId: 'org-a', userId: 'owner' })
     assert.ok(membership)
+    const organization: McpExecutorContext['organization'] = { env: cardless, db, membership, organizationId: 'org-a', userId: 'owner', role: 'owner', isPlatformAdmin: false, scopes: [] }
+    const ajv = new Ajv({ strict: false })
+    const mcp = async (toolName: string, args: Record<string, unknown>) => {
+      const result = await handlePostsTools({ toolName, args, organization })
+      const output = isMcpRenderResponse(result) ? result.structuredContent : result
+      assert(ajv.validate(POSTS_TOOLS.find(tool => tool.name === toolName)!.outputSchema, output), `${toolName} output: ${ajv.errorsText()}`)
+      return output as { post?: { id: string; publications: unknown[] }; posts?: Array<{ id: string; publications: unknown[] }>; replayed?: boolean }
+    }
     const progress = () => listBusinessOutcomes(db, memberAccessPrincipal(membership, { env }), { limit: 100 })
     const recommendations = async () => {
       const plan = await readBusinessRecommendations(db, memberAccessPrincipal(membership, { env }))
@@ -566,6 +576,14 @@ test('publication: one result, one external post per target, and no blind resend
     assert.equal(unknownFact?.state, 'unknown')
     assert.equal(unknownFact?.verification.status, 'unconfirmed')
     const pinned = (await getPost(db, env, 'org-a', fourth.post.id))!
+    const { can_reconcile: canReconcile, ...receipt } = pinned.publications[0]!
+    assert.equal(canReconcile, true)
+    assert.deepEqual((await mcp('get_post', { post_id: pinned.id })).post?.publications, [receipt])
+    assert.deepEqual((await mcp('list_posts', {})).posts?.find(post => post.id === pinned.id)?.publications, [receipt])
+    const replayedDraft = await mcp('create_post', { idempotency_key: 'key-4', body: 'Lost feed', media: [{ asset_id: 'a2', slot: 'cover' }] })
+    assert.equal(replayedDraft.replayed, true)
+    assert.equal(replayedDraft.post?.id, pinned.id)
+    assert.deepEqual(replayedDraft.post?.publications, [receipt])
     await assert.rejects(updatePost(db, cardless, 'org-a', fourth.post.id, { changes: { body: 'Edited' }, expectedUpdatedAt: pinned.updated_at }, 'owner'), /unresolved/)
     await assert.rejects(deletePost(db, 'org-a', fourth.post.id, 'owner'), /unresolved/)
     const feedsBefore = meta.sent(request => request.path.endsWith(`${PAGE}/feed`)).length
@@ -742,8 +760,15 @@ test('publication: one result, one external post per target, and no blind resend
     assert.equal(meta.sent(request => request.path.endsWith('media_publish')).length, publishesBefore + 1)
 
     // After publication, local edits are allowed and nothing is re-sent; the management view says the website copy changed.
-    const edited = await updatePost(db, cardless, 'org-a', racing.post.id, { changes: { body: 'Edited later' }, expectedUpdatedAt: (await getPost(db, env, 'org-a', racing.post.id))!.updated_at }, 'owner')
-    assert.equal(edited!.publications[0]!.local_content_changed, true)
+    const edited = await mcp('update_post', {
+      post_id: racing.post.id, body: 'Edited later', expected_updated_at: (await getPost(db, env, 'org-a', racing.post.id))!.updated_at,
+    })
+    const editedPost = (await getPost(db, env, 'org-a', racing.post.id))!
+    assert.equal(editedPost.body, 'Edited later')
+    const { can_reconcile: editedCanReconcile, ...editedReceipt } = editedPost.publications[0]!
+    assert.equal(editedCanReconcile, false)
+    assert.equal(editedReceipt.local_content_changed, true)
+    assert.deepEqual(edited.post?.publications, [editedReceipt])
     // Deleting the website post detaches, and keeps, the provider identity.
     assert.equal(await deletePost(db, 'org-a', racing.post.id, 'owner'), true)
     assert.equal(await db.prepare("SELECT count(*) FROM post_publications WHERE post_id IS NULL AND provider_post_id IS NOT NULL").first('count(*)'), 1)
@@ -938,10 +963,10 @@ test('opportunity MCP tools preserve saved decisions during incomplete social re
     const scoped = () => list({ location_id: 'other-location' })
     const scopedOnly = (await scoped()).opportunities.find(item => item.path === postEditorPath('org-a', 'new', 'other-location'))
     assert.ok(scopedOnly)
+    const savedScopes = await saved()
     assert.deepEqual(await list(), before)
-    assert.deepEqual(await status(scopedOnly.id), { status: 'superseded', available_at: null })
-    assert(!(await scoped()).opportunities.some(item => item.id === scopedOnly.id))
-    assert.deepEqual(await status(scopedOnly.id), { status: 'superseded', available_at: null })
+    assert((await scoped()).opportunities.some(item => item.id === scopedOnly.id))
+    assert.deepEqual(await saved(), savedScopes)
 
     const [open, dismissed, accepted] = ids as [string, string, string]
     await tool('dismiss_opportunity', { opportunity_id: dismissed })
@@ -963,6 +988,18 @@ test('opportunity MCP tools preserve saved decisions during incomplete social re
     assert((await list()).opportunities.some(item => item.id === open), 'the first successful read shows the original opportunity')
     assert.deepEqual(await saved(), beforeOutage)
 
+    const article = await createBlogPost(db, 'owner', { idempotency_key: 'article-opportunity', title: 'A new menu',
+      content_blocks: [{ type: 'markdown', data: { markdown: 'Read about the new menu.', editor_mode: 'rich' } }] }, { organization_id: 'org-a' }, cardless)
+    const articleWork = (await list()).opportunities.find(item => item.path === blogEditorPath('org-a', article.id))
+    assert.ok(articleWork)
+    await deleteBlogPost(db, article.id, 'org-a')
+    meta.fault('dropped', request => request.path.endsWith('/assigned_pages'))
+    meta.fault('dropped', request => request.host === 'graph.instagram.com' && request.path.endsWith('/me'))
+    await assert.rejects(tool('accept_opportunity', { opportunity_id: articleWork.id }), (error: unknown) => {
+      assert.deepEqual(asMcpError(error).data, { status: 409, code: 'OPPORTUNITY_CHANGED' })
+      return true
+    })
+
     const until = new Date(Date.now() + 60_000).toISOString()
     await tool('defer_opportunity', { opportunity_id: open, until })
     // The providers now explicitly report missing access to the selected targets.
@@ -970,20 +1007,59 @@ test('opportunity MCP tools preserve saved decisions during incomplete social re
     const account = meta.igResponses.get('me')
     meta.assignedPageResponses.set('', { data: [] })
     meta.igResponses.set('me', { user_id: OTHER_IG, username: 'different-account' })
-    assert.deepEqual((await list()).issues, [])
-    assert.deepEqual(await status(open), { status: 'superseded', available_at: until })
+    const disconnected = await list()
+    assert.deepEqual(disconnected.issues, [])
+    assert(!disconnected.opportunities.some(item => item.id === open))
+    assert.deepEqual(await status(open), { status: 'open', available_at: until })
+    // A row retired by an earlier version still carries the original deferral.
+    assert.equal((await db.prepare("UPDATE opportunities SET status = 'superseded' WHERE organization_id = 'org-a' AND id = ? AND status = 'open'").bind(open).run()).meta.changes, 1)
     meta.assignedPageResponses.set('', pages)
     meta.igResponses.set('me', account)
     const recovered = await list()
     assert.deepEqual(recovered.issues, [])
     assert(!recovered.opportunities.some(item => ids.includes(item.id)))
     assert.deepEqual(await status(open), { status: 'open', available_at: until })
+    const due = await listOpportunities(db, memberAccessPrincipal(membership, { env }), { now: new Date(until) })
+    assert.deepEqual(due.issues, [])
+    assert(due.opportunities.some(item => item.id === open))
     assert.deepEqual(await status(dismissed), { status: 'dismissed', available_at: null })
     assert.deepEqual(await status(accepted), { status: 'accepted', available_at: null })
     assert.deepEqual((await db.prepare("SELECT id, opportunity_id FROM tasks WHERE organization_id = 'org-a'").all()).results, [{ id: task.id, opportunity_id: accepted }])
     const afterRecovery = await saved()
     assert.deepEqual(await list(), recovered)
     assert.deepEqual(await saved(), afterRecovery)
+
+    // A newer website edit can win after publish has already read the draft.
+    const { post: draft } = await createPost(db, cardless, 'org-a', { post: { body: 'Draft for a website update' }, idempotencyKey: 'website-race' }, 'owner')
+    const websiteWork = (await list()).opportunities.find(item => item.path === postEditorPath('org-a', draft.id))
+    assert.ok(websiteWork)
+    const { task: websiteTask } = await tool('accept_opportunity', { opportunity_id: websiteWork.id }) as { task: TaskView }
+    const readWebsiteTask = () => db.prepare('SELECT status, version, closed_at FROM tasks WHERE id = ?').bind(websiteTask.id).first()
+    const openTask = await readWebsiteTask()
+    assert.deepEqual(openTask, { status: 'open', version: 1, closed_at: null })
+    let interleaved = false
+    const editingDb = new Proxy(db, { get(target, key) {
+      if (key === 'batch') return async (statements: D1PreparedStatement[]) => {
+        assert.equal(interleaved, false)
+        interleaved = true
+        const edited = await updatePost(db, cardless, 'org-a', draft.id, { changes: { body: 'A concurrent website edit' }, expectedUpdatedAt: draft.updated_at }, 'owner')
+        assert.notEqual(edited?.updated_at, draft.updated_at)
+        return target.batch(statements)
+      }
+      const value = Reflect.get(target, key, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    } })
+    const stale = await publishPost({ ...cardless, DB: editingDb }, 'org-a', draft.id, { expectedUpdatedAt: draft.updated_at, targets: [targets.website] }, 'owner')
+    assert.equal(interleaved, true)
+    assert.deepEqual(stale.outcomes.map(outcome => [outcome.status, outcome.code]), [['failed', 'stale_revision']])
+    const updatedDraft = await getPost(db, env, 'org-a', draft.id)
+    assert.equal(updatedDraft?.status, 'draft')
+    assert.equal(updatedDraft.body, 'A concurrent website edit')
+    assert.deepEqual(await readWebsiteTask(), openTask)
+    const published = await publishPost(cardless, 'org-a', draft.id, { expectedUpdatedAt: updatedDraft.updated_at, targets: [targets.website] }, 'owner')
+    assert.deepEqual(published.outcomes.map(outcome => outcome.status), ['published'])
+    assert.equal((await getPost(db, env, 'org-a', draft.id))?.status, 'published')
+    assert.deepEqual(await readWebsiteTask(), { status: 'done', version: 2, closed_at: published.updated_at })
     assert.equal(meta.sent(request => request.method === 'POST').length, 0)
   } finally {
     restore()

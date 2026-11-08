@@ -41,7 +41,7 @@ test.describe('stateless MCP server', () => {
       const locationId = tenant.locations.brooklyn!.id
       const assignedMemberId = tenant.memberIds[E2E_ADMIN_ID]!
       const input = { organization_id: tenant.organizationId, idempotency_key: key, title, notes, product_id: productId, assigned_member_id: assignedMemberId }
-      const create = (args: Record<string, unknown>) => mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'create_task', args })
+      const create = (args: Record<string, unknown>) => mcpRequest(request, baseURL!, { id: randomUUID(), method: 'tools/call', toolName: 'create_task', args })
       const expectRefusal = async (args: Record<string, unknown>, status: number, code: string) => {
         const response = await create(args)
         expect(response.status()).toBe(200)
@@ -52,11 +52,13 @@ test.describe('stateless MCP server', () => {
 
       await expectRefusal(input, 422, 'TASK_LOCATION_REQUIRED')
       const original = { ...input, location_id: locationId }
-      const response = await create(original)
+      const [response, overlappingResponse] = await Promise.all([create(original), create(original)])
       expect(response.status()).toBe(200)
       const { task } = mcpData<{ task: TaskView }>(await response.json())
       taskId = task.id
       expect(task).toMatchObject({ title, notes, productId, locationId, version: 1, assignee: { id: assignedMemberId, you: true } })
+      expect(overlappingResponse.status()).toBe(200)
+      expect(mcpData<{ task: TaskView }>(await overlappingResponse.json()).task).toMatchObject({ id: taskId, version: 1 })
       const taskPath = `${tasksPath}/${taskId}`
       const saved = await request.get(taskPath)
       expect(saved.status()).toBe(200)
@@ -79,9 +81,13 @@ test.describe('stateless MCP server', () => {
     } finally {
       try {
         if (taskId) {
-          const closed = await request.post(`${tasksPath}/${taskId}/skip`, { data: {} })
+          const taskPath = `${tasksPath}/${taskId}`
+          const closed = await request.post(`${taskPath}/skip`, { data: {} })
           expect(closed.status()).toBe(200)
           expect((await closed.json()).task).toMatchObject({ id: taskId, status: 'skipped' })
+          const saved = await request.get(taskPath)
+          expect(saved.status()).toBe(200)
+          expect((await saved.json()).task).toMatchObject({ id: taskId, status: 'skipped' })
         }
       } finally { await release() }
     }

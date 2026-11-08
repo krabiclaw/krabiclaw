@@ -3,7 +3,7 @@ import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } fr
 import { assertRoleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
-import { readBusinessRecommendations, type BusinessRecommendation } from '~/server/domain/business-progress'
+import { readBusinessRecommendations, readRecommendationReference, type BusinessRecommendation } from '~/server/domain/business-progress'
 import { getTask, opportunityTaskInsert, readTaskAssignee, taskViewer, type TaskRow, type TaskView } from '~/server/domain/tasks'
 import type { BusinessProgressOperation } from '~/shared/business-outcomes'
 import { isValidInstant, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
@@ -57,33 +57,22 @@ async function authorize(principal: MemberAccessPrincipal) {
   await assertRoleAllows({ ...principal, permissions: { task: ['assign'] } })
 }
 
-/**
- * Record observed recommendations and supersede missing open opportunities
- * only when all workspace evidence was available. Idempotent by the reference key.
- */
+/** Record only the observed evidence. A refresh cannot retire rows it did not observe. */
 async function refreshOpportunities(db: DbClient, principal: MemberAccessPrincipal, input: { now: Date; locationId?: string }) {
   const plan = await readBusinessRecommendations(db, principal, { now: input.now, locationId: input.locationId })
+  if (plan.recommendations.length === 0) return { plan, rows: [], changed: false }
   const now = input.now.toISOString(), organizationId = principal.organizationId
-  const workspaceComplete = !input.locationId && plan.evidenceComplete
-  // A scoped plan can offer an organization-level action the workspace plan
-  // suppresses. Only the workspace plan may restore it after supersession.
-  const queries: BatchQuery[] = plan.recommendations.map(item => ({
+  const results = await executeBatch(db, plan.recommendations.map(item => ({
     query: `INSERT INTO opportunities (id, organization_id, operation, subject_id, evidence_revision, goal_id, goal_revision, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?) ON CONFLICT DO UPDATE SET status='open', updated_at=excluded.updated_at
-      WHERE opportunities.status='superseded' AND (opportunities.operation='product.readiness' OR ?)`,
-    params: [crypto.randomUUID(), organizationId, item.operation, item.subjectId, item.reference.evidenceRevision, item.goal?.id ?? null, item.goal?.revision ?? null, now, now, Number(workspaceComplete)],
-  }))
-  if (workspaceComplete) {
-    queries.push({
-      query: `UPDATE opportunities SET status = 'superseded', updated_at = ? WHERE organization_id = ? AND status = 'open'
-        AND NOT EXISTS (SELECT 1 FROM json_each(?) current WHERE json_extract(current.value, '$[0]') = opportunities.operation
-          AND json_extract(current.value, '$[1]') = opportunities.subject_id AND json_extract(current.value, '$[2]') = opportunities.evidence_revision
-          AND json_extract(current.value, '$[3]') IS opportunities.goal_id)`,
-      params: [now, organizationId, JSON.stringify(plan.recommendations.map(item => [item.operation, item.subjectId, item.reference.evidenceRevision, item.goal?.id ?? null]))],
-    })
-  }
-  const results = queries.length ? await executeBatch(db, queries, { operation: 'Record opportunities' }) : []
-  const rows = await queryAll<OpportunityRow>(db, 'SELECT * FROM opportunities WHERE organization_id = ? AND status = \'open\'', [organizationId])
+      WHERE opportunities.status='superseded'`,
+    params: [crypto.randomUUID(), organizationId, item.operation, item.subjectId, item.reference.evidenceRevision, item.goal?.id ?? null, item.goal?.revision ?? null, now, now],
+  })), { operation: 'Record opportunities' })
+  const rows = await queryAll<OpportunityRow>(db, `SELECT opportunities.* FROM json_each(?) current
+    JOIN opportunities ON organization_id = ? AND status = 'open'
+      AND operation = json_extract(current.value, '$[0]') AND subject_id = json_extract(current.value, '$[1]')
+      AND evidence_revision = json_extract(current.value, '$[2]') AND goal_id IS json_extract(current.value, '$[3]')`,
+  [JSON.stringify(plan.recommendations.map(item => [item.operation, item.subjectId, item.reference.evidenceRevision, item.goal?.id ?? null])), organizationId])
   return { plan, rows, changed: results.some(result => (result.meta.changes ?? 0) > 0) }
 }
 
@@ -136,9 +125,17 @@ export async function acceptOpportunity(db: DbClient, principal: MemberAccessPri
   const row = await openOpportunity(db, principal, id)
   const plan = await readBusinessRecommendations(db, principal)
   const item = plan.recommendations.find(candidate => recommendationKey(candidate) === rowKey(row))
-  if (!item && !plan.evidenceComplete) throw new HTTPError({ statusCode: 503, message: 'Could not verify what this opportunity was based on. Reload Today and try again.',
-    data: { code: 'OPPORTUNITY_EVIDENCE_UNAVAILABLE', field: 'id', operation_completed: false, issues: plan.issues } })
-  if (!item) fail(409, 'OPPORTUNITY_CHANGED', 'What this opportunity was based on has changed. Reload Today to see what is current.', 'id')
+  if (!item) {
+    const social = plan.socialEvidenceUnavailable && (row.operation === 'post.create' || row.operation === 'post.publish' || row.operation === 'social.connect' || row.operation === 'article.distribute')
+    const marketing = plan.marketingEvidenceUnavailable && row.operation === 'article.distribute'
+    if (social || marketing) {
+      // Re-read the target when its revision can still be proved independently of the failed provider.
+      const current = row.operation === 'social.connect' || (await readRecommendationReference(db, principal, { operation: row.operation, subjectId: row.subject_id }))?.evidenceRevision === row.evidence_revision
+      if (current) throw new HTTPError({ statusCode: 503, message: 'Could not verify what this opportunity was based on. Reload Today and try again.',
+        data: { code: 'OPPORTUNITY_EVIDENCE_UNAVAILABLE', field: 'id', operation_completed: false, issues: plan.issues } })
+    }
+    fail(409, 'OPPORTUNITY_CHANGED', 'What this opportunity was based on has changed. Reload Today to see what is current.', 'id')
+  }
   const viewer = await taskViewer(db, principal)
   const assigned = body.assignedMemberId === undefined && body.assignedTeamId === undefined
     ? { member: viewer.memberId, team: null }
