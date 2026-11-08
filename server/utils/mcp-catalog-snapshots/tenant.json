@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:a837e5db851a54fed017aa38800ed8dcce5179d195e46704bde593ab19992668",
-  "documentationFingerprint": "sha256:74b06b82d47b5360f88be33a9dbb02904d97b762ed140e3cb54dce18ce0edbf7",
+  "fingerprint": "sha256:7fbb4a28bdeb75d3da3135faaf744f0adbe2d80c858b694dad50e25b46470ef0",
+  "documentationFingerprint": "sha256:c19fe31eb08df5d47680e4a7ce4509da576c61ebb568254856a91a4061d65142",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -37717,7 +37717,7 @@
     {
       "name": "create_task",
       "title": "Create task",
-      "description": "Add a task someone has to do, optionally at a home or location, with a window and an assignee. The assignee is told by their own notification settings. Reuse the same idempotency_key for an identical retry.",
+      "description": "Create a task with optional dates and one assignee. Specify location_id when the product is offered at multiple locations. A new assignee may be notified according to their settings. Reuse idempotency_key only for the same request.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -69396,7 +69396,7 @@
     {
       "name": "list_opportunities",
       "title": "List opportunities",
-      "description": "Read what the business could do now, found from its own records: drafts to finish, posts to share, calendar gaps, payment setup. Each is recorded against its evidence; accept, dismiss or defer it by id.",
+      "description": "List and save opportunities such as drafts to finish, posts to share and calendar gaps. Retires outdated opportunities only after a complete business-wide refresh. Use the returned ID to accept, dismiss or defer an opportunity.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

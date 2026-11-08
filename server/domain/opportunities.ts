@@ -58,20 +58,19 @@ async function authorize(principal: MemberAccessPrincipal) {
 }
 
 /**
- * Run the selector, record what it found, and supersede the open opportunities
- * whose evidence is no longer current. Idempotent by the reference key.
+ * Record observed recommendations and supersede missing open opportunities
+ * only when all workspace evidence was available. Idempotent by the reference key.
  */
-async function select(db: DbClient, principal: MemberAccessPrincipal, input: { now: Date; locationId?: string }) {
+async function refreshOpportunities(db: DbClient, principal: MemberAccessPrincipal, input: { now: Date; locationId?: string }) {
   const plan = await readBusinessRecommendations(db, principal, { now: input.now, locationId: input.locationId })
   const now = input.now.toISOString(), organizationId = principal.organizationId
   const queries: BatchQuery[] = plan.recommendations.map(item => ({
     query: `INSERT INTO opportunities (id, organization_id, operation, subject_id, evidence_revision, goal_id, goal_revision, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?) ON CONFLICT DO UPDATE SET status='open', updated_at=excluded.updated_at
-      WHERE opportunities.operation='product.readiness' AND opportunities.status='superseded'`,
+      WHERE opportunities.status='superseded'`,
     params: [crypto.randomUUID(), organizationId, item.operation, item.subjectId, item.reference.evidenceRevision, item.goal?.id ?? null, item.goal?.revision ?? null, now, now],
   }))
-  // A location-filtered read sees only part of the business, so it never supersedes.
-  if (!input.locationId) {
+  if (!input.locationId && plan.evidenceComplete) {
     queries.push({
       query: `UPDATE opportunities SET status = 'superseded', updated_at = ? WHERE organization_id = ? AND status = 'open'
         AND NOT EXISTS (SELECT 1 FROM json_each(?) current WHERE json_extract(current.value, '$[0]') = opportunities.operation
@@ -93,7 +92,7 @@ function view(row: OpportunityRow, item: BusinessRecommendation, homes: Map<stri
 export async function listOpportunities(db: DbClient, principal: MemberAccessPrincipal, input: { now?: Date; locationId?: string } = {}): Promise<{ opportunities: OpportunityView[]; issues: string[] }> {
   await authorize(principal)
   const now = input.now ?? new Date()
-  const { plan, rows, changed } = await select(db, principal, { now, locationId: input.locationId })
+  const { plan, rows, changed } = await refreshOpportunities(db, principal, { now, locationId: input.locationId })
   if (changed) await publishBusinessInvalidation(principal.env as CloudflareEnv, principal.organizationId)
   const byKey = new Map(rows.filter(row => row.available_at === null || row.available_at <= now.toISOString()).map(row => [rowKey(row), row]))
   const productIds = [...new Set(plan.recommendations.flatMap(item => item.productId && item.operation === 'stay.gap' ? [item.productId] : []))]
@@ -132,8 +131,10 @@ const SUBJECT: Partial<Record<BusinessProgressOperation, TaskRow['subject_type']
 export async function acceptOpportunity(db: DbClient, principal: MemberAccessPrincipal, id: string, body: Record<string, unknown>): Promise<TaskView> {
   await authorize(principal)
   const row = await openOpportunity(db, principal, id)
-  const { plan } = await select(db, principal, { now: new Date() })
+  const plan = await readBusinessRecommendations(db, principal)
   const item = plan.recommendations.find(candidate => recommendationKey(candidate) === rowKey(row))
+  if (!item && !plan.evidenceComplete) throw new HTTPError({ statusCode: 503, message: 'Could not verify what this opportunity was based on. Reload Today and try again.',
+    data: { code: 'OPPORTUNITY_EVIDENCE_UNAVAILABLE', field: 'id', operation_completed: false, issues: plan.issues } })
   if (!item) fail(409, 'OPPORTUNITY_CHANGED', 'What this opportunity was based on has changed. Reload Today to see what is current.', 'id')
   const viewer = await taskViewer(db, principal)
   const assigned = body.assignedMemberId === undefined && body.assignedTeamId === undefined

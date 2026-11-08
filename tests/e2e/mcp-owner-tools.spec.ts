@@ -1,4 +1,5 @@
 import { expect, request as playwrightRequest, test, type APIRequestContext, type Page } from '@playwright/test'
+import { randomUUID } from 'node:crypto'
 import { dismissPreviewToolbar, openTenantPage, waitForNuxtHydration } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpOrganizationId, mcpRequest, mcpData } from './helpers/mcp'
@@ -13,7 +14,8 @@ import { formQuestionsRevision } from '../../shared/form-questions'
 import type { SessionAvailability } from '../../server/utils/availability'
 import type { readMemberScheduling } from '../../server/domain/member-scheduling'
 import type { OrganizationMembersData } from '../../utils/organization-members'
-import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
+import { E2E_ADMIN_ID, findE2eAuthFixture } from '../../config/development-auth-fixtures'
+import type { TaskView } from '../../server/domain/tasks'
 
 // Split out of mcp.spec.ts (owner tool-coverage tests) — see helpers/mcp.ts
 // for why. This group covers the bulk of an owner's MCP tool surface: site
@@ -24,6 +26,67 @@ import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 const brooklynLocationId = () => seededTenant('restaurant').locations.brooklyn!.id
 
 test.describe('stateless MCP server', () => {
+  test('creating a task requires a location for a shared product and replays only the original request', async ({ request, baseURL }, testInfo) => {
+    test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'Uses the seeded restaurant product at both locations')
+    const tenant = seededTenant('restaurant')
+    const release = await acquireTenantMutationLock(testInfo, tenant.organizationId)
+    const tasksPath = `${baseURL}/api/organizations/${tenant.organizationId}/tasks`
+    let taskId: string | undefined
+    try {
+      await loginAs(request, baseURL!)
+      const key = randomUUID()
+      const title = `Check the menu photos ${key}`
+      const notes = 'Start with the printed menu.'
+      const productId = tenant.products.margherita!.id
+      const locationId = tenant.locations.brooklyn!.id
+      const assignedMemberId = tenant.memberIds[E2E_ADMIN_ID]!
+      const input = { organization_id: tenant.organizationId, idempotency_key: key, title, notes, product_id: productId, assigned_member_id: assignedMemberId }
+      const create = (args: Record<string, unknown>) => mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'create_task', args })
+      const expectRefusal = async (args: Record<string, unknown>, status: number, code: string) => {
+        const response = await create(args)
+        expect(response.status()).toBe(200)
+        const result = (await response.json()).result
+        expect(result.isError).toBe(true)
+        expect(JSON.parse(result.content[0].text)).toMatchObject({ status, code })
+      }
+
+      await expectRefusal(input, 422, 'TASK_LOCATION_REQUIRED')
+      const original = { ...input, location_id: locationId }
+      const response = await create(original)
+      expect(response.status()).toBe(200)
+      const { task } = mcpData<{ task: TaskView }>(await response.json())
+      taskId = task.id
+      expect(task).toMatchObject({ title, notes, productId, locationId, version: 1, assignee: { id: assignedMemberId, you: true } })
+      const taskPath = `${tasksPath}/${taskId}`
+      const saved = await request.get(taskPath)
+      expect(saved.status()).toBe(200)
+      expect((await saved.json()).task).toMatchObject({ id: taskId, title, notes, productId, locationId, assignee: { id: assignedMemberId } })
+
+      await expectRefusal({ ...original, location_id: tenant.locations.williamsburg!.id }, 409, 'IDEMPOTENCY_CONFLICT')
+      await expectRefusal({ ...original, assigned_member_id: tenant.memberIds['user-e2e-demo-owner']! }, 409, 'IDEMPOTENCY_CONFLICT')
+
+      const edited = await request.patch(taskPath, { data: { expectedVersion: task.version, title: 'Check revised menu photos', notes: 'Use the updated menu.', assignedMemberId: null } })
+      expect(edited.status()).toBe(200)
+      const replay = await create(original)
+      expect(replay.status()).toBe(200)
+      expect(mcpData<{ task: TaskView }>(await replay.json()).task).toMatchObject({
+        id: taskId, title: 'Check revised menu photos', notes: 'Use the updated menu.', assignee: null, locationId, version: 2,
+      })
+      await expectRefusal({ ...original, title: 'Check revised menu photos', notes: 'Use the updated menu.', assigned_member_id: null }, 409, 'IDEMPOTENCY_CONFLICT')
+      const current = await request.get(taskPath)
+      expect(current.status()).toBe(200)
+      expect((await current.json()).task).toMatchObject({ id: taskId, version: 2, assignee: null, locationId })
+    } finally {
+      try {
+        if (taskId) {
+          const closed = await request.post(`${tasksPath}/${taskId}/skip`, { data: {} })
+          expect(closed.status()).toBe(200)
+          expect((await closed.json()).task).toMatchObject({ id: taskId, status: 'skipped' })
+        }
+      } finally { await release() }
+    }
+  })
+
   test('saved workspace location survives readback and supplies a location-scoped call while explicit targets win', async ({ request, baseURL }) => {
     await loginAs(request, baseURL!)
     const call = async <T>(toolName: string, args: Record<string, unknown>) => {

@@ -387,9 +387,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Persists a new task in the selected workspace and notifies its assignee.",
-        "destructive_justification": "Adds work and sends the assignee email, WhatsApp or push notifications that cannot be recalled.",
-        "open_world_justification": "Notification recipients remain members of the selected private workspace."
+        "read_only_justification": "Persists a new task and can notify its assignee.",
+        "destructive_justification": "Assignment can send email, WhatsApp or push notifications that cannot be recalled.",
+        "open_world_justification": "Sends configured email, WhatsApp or push notifications to workspace assignees through external delivery services."
       }
     },
     "create_team": {
@@ -1155,9 +1155,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Records what the business could do against its current evidence; a repeat records nothing new.",
-        "destructive_justification": "Supersedes opportunities whose evidence changed; it does not change content, bookings or settings.",
-        "open_world_justification": "Reads the workspace's own records and its connected analytics, Search Console, Ads and social accounts."
+        "read_only_justification": "Records and refreshes opportunities against the workspace's current evidence.",
+        "destructive_justification": "Can supersede open opportunities absent from a complete business-wide refresh.",
+        "open_world_justification": "Reads only workspace data and the business's configured provider accounts."
       }
     },
     "list_organization_locales": {
