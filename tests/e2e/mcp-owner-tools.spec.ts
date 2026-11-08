@@ -409,6 +409,17 @@ test.describe('stateless MCP server', () => {
         },
       })
       expect(publicReservation.status(), await publicReservation.text()).toBe(201)
+      const reservationThreadId = (await publicReservation.json() as { request_id: string }).request_id
+
+      const reservationInbox = await mcpRequest(request, baseURL!, {
+        method: 'tools/call', toolName: 'list_guest_conversations',
+        args: { organization_id: organizationId, type: 'reservation', limit: 100 },
+      })
+      expect(reservationInbox.status()).toBe(200)
+      const inboxReservation = mcpData<{ conversations: Array<{ request_id: string }> }>(await reservationInbox.json())
+        .conversations.find(row => row.request_id === reservationThreadId)
+      expect(inboxReservation).toMatchObject({ guest_name: 'MCP Reservation', type: 'reservation' })
+      expect(Object.keys(inboxReservation!).sort()).toEqual(['guest_name', 'needs_reply', 'operational_status', 'participant_label', 'reply_channel', 'reply_not_possible', 'request_id', 'type', 'updated_at'])
 
       const listContacts = await mcpRequest(request, baseURL!, {
         method: 'tools/call',
@@ -418,12 +429,14 @@ test.describe('stateless MCP server', () => {
       expect(listContacts.status()).toBe(200)
       const contactsBody = await listContacts.json()
       // The shared demo inbox holds other runs' submissions; read back this test's own.
-      const contactSubmission = mcpData<{ conversations: Array<{ request_id: string; guest_name: string; preview: string }> }>(contactsBody)
+      const contactSubmission = mcpData<{ conversations: Array<{ request_id: string; guest_name: string }> }>(contactsBody)
         .conversations.find(row => row.guest_name === `MCP Contact ${contactEmail}`)
-      expect(contactSubmission).toMatchObject({ request_id: expect.any(String), preview: 'hello from MCP e2e' })
+      expect(contactSubmission).toMatchObject({ request_id: expect.any(String) })
+      expect(contactSubmission).not.toHaveProperty('preview')
       const contactRead = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'get_guest_conversation',args:{organization_id:organizationId,request_id:contactSubmission!.request_id}})
-      const contact = mcpData<{conversation:{guest:{email:string};entries:Array<{id:string;event:string|null}>;archived:boolean}}>(await contactRead.json()).conversation
+      const contact = mcpData<{conversation:{guest:{email:string};entries:Array<{id:string;event:string|null;body:string|null}>;archived:boolean}}>(await contactRead.json()).conversation
       expect(contact.guest.email).toBe(contactEmail)
+      expect(contact.entries.some(entry => entry.body === 'hello from MCP e2e')).toBe(true)
       const emptyReply = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'reply_to_guest',args:{organization_id:organizationId,request_id:contactSubmission!.request_id,idempotency_key:crypto.randomUUID()}})
       expect(emptyReply.status()).toBe(200)
       const emptyReplyResult = (await emptyReply.json()).result

@@ -616,7 +616,7 @@
       },
       "justifications": {
         "read_only_justification": "Deletes the selected Better Auth team.",
-        "destructive_justification": "Removes the team and its membership associations.",
+        "destructive_justification": "Removes the team and its membership associations and clears open tasks assigned to that team.",
         "open_world_justification": "Only deletes a team within the selected private business."
       }
     },
@@ -1071,7 +1071,7 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads the authorized business inbox and its conversation summaries.",
+        "read_only_justification": "Reads the authorized inbox’s conversation labels and reply status without returning message text or intake answers in bulk.",
         "destructive_justification": "Does not archive conversations, mark messages read, reply or change bookings.",
         "open_world_justification": "Reads the business private inbox subject to the caller conversation access."
       }
@@ -1131,7 +1131,7 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads active non-generated media library assets with optional kind and pagination; excludes sent-conversation media by ownership.",
+        "read_only_justification": "Reads active non-generated media library assets with optional kind and pagination; excludes conversation and task attachments by ownership.",
         "destructive_justification": "Does not upload files, alter metadata or add or remove media placements.",
         "open_world_justification": "Reads the selected business media library without fetching caller-supplied download URLs."
       }
@@ -1420,7 +1420,7 @@
       },
       "justifications": {
         "read_only_justification": "Publishes a version-checked draft article once; an already-published article retains its publication date and announcement.",
-        "destructive_justification": "Changes existing article publication state from private draft to public and records that transition.",
+        "destructive_justification": "Makes a private draft public and can system-close its accepted article task after the publication is saved.",
         "open_world_justification": "Exposes the article to website visitors."
       }
     },
@@ -1444,7 +1444,7 @@
       },
       "justifications": {
         "read_only_justification": "Publishes to explicitly selected website/Facebook/Instagram/Discord targets; unknown provider outcomes require reconciliation before retries.",
-        "destructive_justification": "Can irreversibly send audience-visible content and overwrite publication state.",
+        "destructive_justification": "Can irreversibly send audience-visible content; a saved website publication can also system-close an accepted task for that post.",
         "open_world_justification": "Posts on the public website or connected social audiences."
       }
     },
@@ -1600,7 +1600,7 @@
       },
       "justifications": {
         "read_only_justification": "Removes the selected teammate’s organization membership.",
-        "destructive_justification": "Revokes the teammate’s workspace access through Better Auth.",
+        "destructive_justification": "Revokes workspace access through Better Auth and can clear the teammate’s open task assignments.",
         "open_world_justification": "Only removes a membership of the selected private business."
       }
     },
@@ -1876,7 +1876,7 @@
       },
       "justifications": {
         "read_only_justification": "Upserts booking defaults; question-only writes preserve sessions, other writes can materialize or adjust future sessions and assigned responsibility.",
-        "destructive_justification": "Can overwrite booking rules, questions and session configuration.",
+        "destructive_justification": "Can overwrite booking rules, questions and session configuration; enabling required online payment can system-close its accepted setup task.",
         "open_world_justification": "Changes the rules and available sessions guests can book on the website."
       }
     },

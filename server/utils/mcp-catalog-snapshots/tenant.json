@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:98faf8dbbc433c85a4f48e3bd8a4883f17713fde1d15ba8e92d4cd21655ec0a8",
-  "documentationFingerprint": "sha256:a8f834a2a72844cf676d8f948bfd8789163714dcbff18735e05f64269afd6cda",
+  "fingerprint": "sha256:86b4063a388d5cfb5ca50f073e2dedf16367cfc47cf1fdafb2107cdc5ad6c646",
+  "documentationFingerprint": "sha256:f700df319ad4dc2f65b69cca7409e3f1b32978ee775ecbe516b9b139e6f81dcc",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -68029,7 +68029,7 @@
     {
       "name": "list_guest_conversations",
       "title": "List guest conversations",
-      "description": "Read the business inbox for contacts, table reservations, bookings and stay conversations. Filter by type, current/past and whether a reply is needed. Follow page_info; use request_id to read the whole conversation.",
+      "description": "Read the business inbox for contacts, table reservations, bookings and stay conversations. Filter by type, current/past and whether a reply is needed. Follow page_info. Use request_id with get_guest_conversation to read messages and guest contact details.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -68082,6 +68082,7 @@
         "properties": {
           "conversations": {
             "items": {
+              "additionalProperties": false,
               "properties": {
                 "guest_name": {
                   "type": [
@@ -68100,12 +68101,6 @@
                 },
                 "participant_label": {
                   "type": "string"
-                },
-                "preview": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
                 },
                 "reply_channel": {
                   "description": "Where reply_to_guest sends; null when the guest cannot be replied to, and reply_not_possible says why.",
@@ -68145,7 +68140,6 @@
                 "type",
                 "needs_reply",
                 "operational_status",
-                "preview",
                 "updated_at"
               ],
               "type": "object"
@@ -85553,7 +85547,7 @@
     {
       "name": "reassign_product_booking",
       "title": "Reassign product booking",
-      "description": "Propose a same-time attorney replacement for one consultation. The current appointment and other clients remain unchanged until this client accepts in their conversation. Uses a published available session for that attorney. Read get_product_booking and supply operational_updated_at.",
+      "description": "Propose a same-time attorney replacement for one consultation. The current appointment and other clients remain unchanged until this client accepts in their conversation. Requires a published available session for that attorney and at least 24 hours before the consultation starts. Read get_product_booking and supply operational_updated_at.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -99293,7 +99287,7 @@
     {
       "name": "request_product_booking_change",
       "title": "Request product booking change",
-      "description": "Email the guest a proposal to change a booking’s session or party size. The current booking and places remain unchanged until guest acceptance, which requires availability and preserves its review status. Consultation time and attorney changes always require client acceptance. For other booking kinds, apply moves the booking now and emails the guest; a paid quantity or location change is refused.",
+      "description": "Email the guest a proposal to change a booking’s session or party size. The current booking and places remain unchanged until guest acceptance, which requires availability and preserves its review status. Consultation time and attorney changes always require client acceptance. Within 24 hours of the original start, an approved override_policy is required. For other booking kinds, apply moves the booking now and emails the guest; a paid quantity or location change is refused.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -99477,7 +99471,7 @@
     {
       "name": "request_table_reservation_change",
       "title": "Request table reservation change",
-      "description": "Email the guest a proposal to change a table reservation’s location, local date, time or party size. The current reservation remains unchanged until the guest accepts. With apply, the reservation moves now and the guest is emailed the new time; a change outside the change policy or that needs the guest’s consent is refused.",
+      "description": "Email the guest a proposal to change a table reservation’s location, local date, time or party size. The current reservation remains unchanged until the guest accepts. With apply, move the reservation now and email the guest only when their consent is not required. Within 24 hours of the original start, an approved override_policy is required.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -129417,7 +129411,7 @@
         "get_product_booking": "sha256:1f0d7f20d207a6fb1aecb169e86483ae515c5b6209fbf9fe948a2be26860968d",
         "get_team_conversation": "sha256:68a4390f99121151a6c3dcca2e3cff8675166b27d958e7a1a71dcd3a4c9a81d0",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:6d0b00651d62c18f2c881046eb4d7f619ec7aecf85662d0c173af68134fd98cc",
+        "list_guest_conversations": "sha256:9bae34357644916476bec0c0d9a07dc7dbf2beb726716b882a886a05097d1ee0",
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
@@ -129425,8 +129419,8 @@
         "mark_team_conversation_read": "sha256:3ad65b07c9bd78090f9f81aeffa74ac00f1c201ee8b6325cf16cd879f1e2644d",
         "reject_product_booking": "sha256:91a5bee34d02b729a3dacb01885157ce63b443594116d8710ca90313fb76e357",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
-        "request_product_booking_change": "sha256:8912bbf319cbe44e5e7ba3cc8f6f505a44f3e4cfa724b38e88dbdefbe250382d",
-        "request_table_reservation_change": "sha256:71868f28cc9f329b1f44276ae0a223c487c789f4682c3bb8f3a09b96fde9e2dd",
+        "request_product_booking_change": "sha256:502724204b628e20343ed268bb7cd9e0734adf3f85df52e6360657338430edcc",
+        "request_table_reservation_change": "sha256:00c70a0252033e9df90a66171d64b1728bf1bae7c681a3e7e702ef864223bb88",
         "send_team_message": "sha256:b9f715f29f98d627cd0e5fa89f873b5623e13d5ba0867cc7dba69216ba886f97",
         "start_team_conversation": "sha256:b297eb76fda6a481f0246ee8c6c39d5481ebe9379dd979ecee747b54c67f0492",
         "update_team_group": "sha256:e58436da6c0b45816e909c58d6ff9265c364e410a5c5edf696a7c6085bb3f6cb"
@@ -129552,7 +129546,7 @@
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
         "get_product": "sha256:a42cc2a6355622aa4b35199655e6076923b056237f5c4a0e29133116ef6c2664",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:6d0b00651d62c18f2c881046eb4d7f619ec7aecf85662d0c173af68134fd98cc",
+        "list_guest_conversations": "sha256:9bae34357644916476bec0c0d9a07dc7dbf2beb726716b882a886a05097d1ee0",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
