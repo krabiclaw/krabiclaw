@@ -303,7 +303,7 @@ async function pendingMessages(db: DbClient, threadId: string, organizationId: s
 }
 
 async function rawThread(db: DbClient, threadId: string, organizationId: string, viewer: Viewer): Promise<GuestThreadDetailViewModel | null> {
-  return viewer.audience === 'buyer' ? getGuestThreadDetail(db, threadId, organizationId, { buyerUserId: viewer.userId }) : getGuestThreadDetail(db, threadId, organizationId, undefined, viewer.userId)
+  return viewer.audience === 'buyer' ? getGuestThreadDetail(db, threadId, organizationId, { buyerUserId: viewer.userId }) : getGuestThreadDetail(db, threadId, organizationId)
 }
 
 /** The conversation's view model, or null when the viewer has no such conversation. */

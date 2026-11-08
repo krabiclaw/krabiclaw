@@ -137,7 +137,7 @@ const emptyTitle = computed(() => search.value || kind.value || unreadOnly.value
 const emptyDescription = computed(() => {
   if (search.value) return `Nothing matched “${search.value}”.`
   if (blockedOnly.value) return 'Guests you block appear here until you unblock them.'
-  if (pastOnly.value) return 'Conversations move here when you archive them, when their stay or booking has ended and you have read them, or after 30 days without a message.'
+  if (pastOnly.value) return 'Conversations move here when you archive them, or once they have been quiet for 30 days after the last message and any stay or booking has ended.'
   return props.personalScope ? 'Your conversations with businesses will appear here.' : 'When a guest writes, the conversation appears here.'
 })
 

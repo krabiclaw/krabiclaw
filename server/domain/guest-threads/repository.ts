@@ -137,16 +137,17 @@ function threadLocationTitleSql(buyerAudience = false): string {
  * The mailbox filter, `resolveGuestThreadMailbox` said to the database
  * (mailbox.ts `pastSql`) for the viewer. A blocked guest's thread is in
  * Blocked only, and a list with no mailbox leaves it out. A guest's own inbox
- * has no archive and reads only whether the occurrence ended.
+ * has no archive and reads the same quiet rule.
  */
-function mailboxWhere(mailbox: GuestThreadMailbox | null, now: string, viewerUserId: string, buyerAudience = false): { sql: string; params: string[] } {
+function mailboxWhere(mailbox: GuestThreadMailbox | null, now: string, buyerAudience = false): { sql: string; params: string[] } {
   if (buyerAudience) {
     if (mailbox === null) return { sql: '', params: [] }
-    return mailbox === 'current' ? { sql: ' AND (op.ends_at IS NULL OR op.ends_at >= ?)', params: [now] } : { sql: ' AND op.ends_at < ?', params: [now] }
+    const rule = pastByRuleSql(now)
+    return { sql: ` AND ${mailbox === 'current' ? 'NOT ' : ''}${rule.sql}`, params: rule.params }
   }
   if (mailbox === 'blocked') return { sql: ' AND gt.blocked_at IS NOT NULL', params: [] }
   if (mailbox === null) return { sql: ' AND gt.blocked_at IS NULL', params: [] }
-  const past = pastSql(now, viewerUserId)
+  const past = pastSql(now)
   return { sql: ` AND gt.blocked_at IS NULL AND ${mailbox === 'current' ? 'NOT ' : ''}${past.sql}`, params: past.params }
 }
 
@@ -303,7 +304,7 @@ async function inboxWhere(organizationId: string | null, opts: ListGuestThreadsO
     params.push(like, like, like, like, like, like)
   }
   where += ` AND ${HAS_CONVERSATION_SQL}`
-  const mailbox = mailboxWhere(opts.mailbox ?? null, now, opts.userId, opts.buyerAudience)
+  const mailbox = mailboxWhere(opts.mailbox ?? null, now, opts.buyerAudience)
   where += mailbox.sql
   params.push(...mailbox.params)
   return { where, params }
@@ -476,7 +477,7 @@ export async function listOrganizationGuestThreads(
   if (opts.needsReply) where += ` AND ${OPEN_REPLY_TASK_SQL}`
   // One instant for the filter and for each row's mailbox, so a row cannot be
   // listed as Current and labelled Past.
-  const mailbox = mailboxWhere(opts.mailbox ?? null, now, opts.userId)
+  const mailbox = mailboxWhere(opts.mailbox ?? null, now)
   where += mailbox.sql
   params.push(...mailbox.params)
 
@@ -495,7 +496,7 @@ export async function listOrganizationGuestThreads(
     `
     : ''
 
-  const rule = pastByRuleSql(now, opts.userId)
+  const rule = pastByRuleSql(now)
   const rows = await queryAll<GuestThreadListRow>(db, `
     SELECT
       gt.*, ${rule.sql} AS past_by_rule, ${OPEN_REPLY_TASK_SQL} AS needs_reply,
@@ -772,9 +773,8 @@ export function mailboxTransitionQueries(input: {
         AND ${alias}.archived_at IS ${archive ? 'NULL' : 'NOT NULL'}`
   const guardParams = [input.threadId, input.organizationId]
   // Moving back is also refused in the write where the rule files the thread
-  // in Past for this member by then (their last alert read in another tab):
-  // clearing the flag would report a move that did not happen.
-  const rule = pastByRuleSql(input.now, input.actorUserId)
+  // in Past by then: clearing the flag would report a move that did not happen.
+  const rule = pastByRuleSql(input.now)
   const stillPast = archive ? { sql: '', params: [] } : {
     sql: ` AND NOT EXISTS (SELECT 1 FROM requests gt${OPERATIONAL_RECORD_SQL} WHERE gt.id = ? AND ${rule.sql})`,
     params: [input.threadId, ...rule.params],
