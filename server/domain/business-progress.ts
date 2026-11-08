@@ -108,7 +108,7 @@ export async function updateBusinessGoal(db: DbClient, principal: MemberAccessPr
   return readGoal(db, principal.organizationId, id)
 }
 
-async function referenceOrNull(db: DbClient, principal: MemberAccessPrincipal, subject: { operation: BusinessProgressOperation; subjectId: string }) {
+export async function readRecommendationReference(db: DbClient, principal: MemberAccessPrincipal, subject: { operation: BusinessProgressOperation; subjectId: string }) {
   try {
     return await readBusinessProgressReference(db, principal, subject)
   } catch (error) {
@@ -238,6 +238,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
   ])
   const marketing = await marketingPages(db, principal, organization, now, enabled('google_ads') || Boolean(await readIntegration(db, organizationId, 'google_ads')))
   const issues = marketing.issues
+  const marketingEvidenceUnavailable = issues.length > 0
   const base = `/dashboard/${encodeURIComponent(organization.slug)}`
   const context = marketing.nativeSessions === null ? marketing.nativeUnavailable ? 'Website traffic measurement is currently unavailable.' : 'Website traffic measurement has not started.'
     : `${marketing.nativeSessions} recorded website sessions in the current 28-day window; this does not include off-platform customers.`
@@ -279,12 +280,21 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
     'Connect Google Ads to your marketing goal', 'Connect the existing Google Ads integration to measure which articles your ads bring customers to.',
     `${base}/integrations`, 100, { goal: adsGoal, icon: 'i-logos-google-ads' })
   let canPreparePost = false
+  let socialEvidenceUnavailable = false
   if (canWrite && enabled('social')) {
     let connections: Awaited<ReturnType<typeof getSocialConnections>> | null = null
     try {
       connections = await getSocialConnections(principal.env, organizationId, { dashboardBase: base })
     } catch (error) {
+      socialEvidenceUnavailable = true
       issues.push(`Social connection status could not be read: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    for (const connection of connections?.channels ?? []) {
+      for (const problem of connection.problems) {
+        if (problem.code !== 'provider_unreachable' && problem.code !== 'provider_rejected' && problem.code !== 'rate_limited') continue
+        socialEvidenceUnavailable = true
+        issues.push(`Social connection status for ${connection.channel} could not be read: ${problem.message}`)
+      }
     }
     const connectedChannel = (['instagram', 'facebook', 'discord'] as const).find(channel => connections?.channels.some(connection => connection.channel === channel && connection.connected && connection.problems.length === 0)) ?? null
     const entitled = await hasOrganizationEntitlement(principal.env, organizationId, 'managed_service')
@@ -293,9 +303,9 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
     const draftPosts = posts.filter(post => (post.status === 'draft' || connectedChannel && entitled)
       && !receipts.some(receipt => receipt.post_id === post.id && !isPublicationPreparationResumable(receipt, now.getTime())))
     for (const post of draftPosts) offer('post.publish', post.id, post.title ? `Finish sharing “${post.title}”` : 'Finish your photo or social post',
-      `${post.status === 'published' ? 'The website post is published; no completed social publication is recorded.' : 'Continue the post already in progress.'}${!connectedChannel ? ' Connect a social account to publish it there.' : ''}`,
+      `${post.status === 'published' ? 'The website post is published; no completed social publication is recorded.' : 'Continue the post already in progress.'}${!connectedChannel && !socialEvidenceUnavailable ? ' Connect a social account to publish it there.' : ''}`,
       postEditorPath(organization.slug, post.id), 80, { goal: goalFor('social'), locationId: post.location_id, recency: post.updated_at, icon: 'i-lucide-image-plus' })
-    if (connections && (!connectedChannel || !entitled)) offer('social.connect', organizationId, !entitled ? 'Enable social publishing' : connections.channels.some(channel => channel.connected) ? 'Reconnect your social account' : 'Connect your social account',
+    if (connections && (!entitled || !connectedChannel && !socialEvidenceUnavailable)) offer('social.connect', organizationId, !entitled ? 'Enable social publishing' : connections.channels.some(channel => channel.connected) ? 'Reconnect your social account' : 'Connect your social account',
       !entitled ? 'Your social marketing strategy can use connected publishing when its plan requirement is met. You can prepare content now.' : 'Connect the account where customers follow you, so posts can be published and their outcomes tracked here.',
       !entitled ? `${base}/billing` : `${base}/integrations`, 55, { goal: goalFor('social'), icon: 'i-lucide-link' })
     if (connectedChannel && entitled && canPublish) {
@@ -319,14 +329,16 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       AND NOT EXISTS(SELECT 1 FROM media_placements branding WHERE branding.asset_id=a.id AND branding.organization_id=a.organization_id AND branding.slot IN ('logo','favicon','social_card'))
       AND NOT EXISTS(SELECT 1 FROM media_placements m JOIN content_documents d ON d.id=m.owner_id AND d.organization_id=m.organization_id
         WHERE m.asset_id=a.id AND m.organization_id=a.organization_id AND d.kind='social_post') ORDER BY a.created_at DESC,a.id LIMIT 1`, [organizationId])
-    canPreparePost = !draftPosts.length && Boolean(unusedPhoto || !posts.length)
-    if (canPreparePost) offer('post.create', organizationId,
-      unusedPhoto ? 'Turn a business photo into a social post' : `Prepare a photo post about ${topic}`,
-      `${unusedPhoto ? 'A saved image has not been used in a recorded social post. Choose a suitable photo and caption.' : 'Capture a current photo and give customers a useful reason to visit or book.'} ${context}`,
-      postEditorPath(organization.slug, 'new', input.locationId), 60, { goal: goalFor('social'), productId: leading?.id ?? null, icon: 'i-lucide-camera' })
-    else if (!draftPosts.length) offer('post.create', organizationId, 'Capture a new business photo for your next post',
-      'The previous post is recorded. Capture a fresh photo of your business before preparing another post.',
-      postEditorPath(organization.slug, 'new', input.locationId), 30, { goal: goalFor('social'), icon: 'i-lucide-camera' })
+    if (!draftPosts.length && (!socialEvidenceUnavailable || connectedChannel || !entitled || posts.length === 0)) {
+      canPreparePost = Boolean(unusedPhoto || !posts.length)
+      if (canPreparePost) offer('post.create', organizationId,
+        unusedPhoto ? 'Turn a business photo into a social post' : `Prepare a photo post about ${topic}`,
+        `${unusedPhoto ? 'A saved image has not been used in a recorded social post. Choose a suitable photo and caption.' : 'Capture a current photo and give customers a useful reason to visit or book.'} ${context}`,
+        postEditorPath(organization.slug, 'new', input.locationId), 60, { goal: goalFor('social'), productId: leading?.id ?? null, icon: 'i-lucide-camera' })
+      else offer('post.create', organizationId, 'Capture a new business photo for your next post',
+        'The previous post is recorded. Capture a fresh photo of your business before preparing another post.',
+        postEditorPath(organization.slug, 'new', input.locationId), 30, { goal: goalFor('social'), icon: 'i-lucide-camera' })
+    }
   }
   const paymentGoal = goalFor('payments')
   if (canOperate && (paymentGoal || organization.vertical === 'experience' && await hasOrganizationEntitlement(principal.env, organizationId, 'payments'))) {
@@ -411,7 +423,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
   }
   const ranked = [...unique.values()].sort((a, b) => Number(Boolean(b.goal)) - Number(Boolean(a.goal)) || b.rank - a.rank || b.recency.localeCompare(a.recency) || a.subjectId.localeCompare(b.subjectId))
   // The evidence revision of each candidate is what an opportunity is recorded against.
-  const references = await Promise.all(ranked.map(candidate => referenceOrNull(db, principal, candidate)))
+  const references = await Promise.all(ranked.map(candidate => readRecommendationReference(db, principal, candidate)))
   const recommendations: BusinessRecommendation[] = ranked.flatMap((candidate, index) => {
     const reference = references[index]
     if (!reference) return []
@@ -419,5 +431,5 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       reason: [candidate.reason, candidate.goal ? `Your strategy: ${candidate.goal.intent}` : null].filter(Boolean).join(' '), locationId: candidate.locationId, productId: candidate.productId,
       goal: candidate.goal, reference }]
   })
-  return { recommendations, goals, issues }
+  return { recommendations, goals, issues, marketingEvidenceUnavailable, socialEvidenceUnavailable }
 }

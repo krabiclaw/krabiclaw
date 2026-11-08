@@ -16,8 +16,8 @@
       },
       "justifications": {
         "read_only_justification": "Records the decision and creates the opportunity's task.",
-        "destructive_justification": "Adds work and may notify its assignee by email, WhatsApp or push.",
-        "open_world_justification": "Re-reads the workspace's connected providers to confirm the opportunity still applies; recipients stay within the workspace."
+        "destructive_justification": "Changes an open opportunity to accepted, creates its task, and can send assignment notifications that cannot be recalled.",
+        "open_world_justification": "Assignment can send configured email, WhatsApp or push notifications to workspace assignees through external delivery services."
       }
     },
     "add_organization_language": {
@@ -204,11 +204,11 @@
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
-        "destructiveHint": false
+        "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Creates an idempotent private article draft with ordered blocks and optional category/visibility.",
-        "destructive_justification": "Adds a new article without editing existing documents; a retry returns its created article.",
+        "read_only_justification": "Creates a private article draft with ordered blocks and can complete an accepted article-creation task.",
+        "destructive_justification": "Can close the matching accepted article-creation task. A system-closed task cannot be reopened through the task interface.",
         "open_world_justification": "The article stays a private draft and publication requires another explicit tool."
       }
     },
@@ -288,11 +288,11 @@
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
-        "destructiveHint": false
+        "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Creates an idempotent private short-post draft with optional content/media/title/location/call-to-action.",
-        "destructive_justification": "Only adds a private draft; retry returns its created post.",
+        "read_only_justification": "Creates a private short-post draft and can complete an accepted post-creation task.",
+        "destructive_justification": "Can close the matching accepted post-creation task. A system-closed task cannot be reopened through the task interface.",
         "open_world_justification": "A new draft is not publicly readable and social publication is a separate explicit action."
       }
     },
@@ -387,9 +387,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Persists a new task in the selected workspace and notifies its assignee.",
-        "destructive_justification": "Adds work and sends the assignee email, WhatsApp or push notifications that cannot be recalled.",
-        "open_world_justification": "Notification recipients remain members of the selected private workspace."
+        "read_only_justification": "Persists a new task and can notify its assignee.",
+        "destructive_justification": "Assignment can send email, WhatsApp or push notifications that cannot be recalled.",
+        "open_world_justification": "Sends configured email, WhatsApp or push notifications to workspace assignees through external delivery services."
       }
     },
     "create_team": {
@@ -616,7 +616,7 @@
       },
       "justifications": {
         "read_only_justification": "Deletes the selected Better Auth team.",
-        "destructive_justification": "Removes the team and its membership associations.",
+        "destructive_justification": "Removes the team and its membership associations and clears open tasks assigned to that team.",
         "open_world_justification": "Only deletes a team within the selected private business."
       }
     },
@@ -1071,7 +1071,7 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads the authorized business inbox and its conversation summaries.",
+        "read_only_justification": "Reads the authorized inbox’s conversation labels and reply status without returning message text or intake answers in bulk.",
         "destructive_justification": "Does not archive conversations, mark messages read, reply or change bookings.",
         "open_world_justification": "Reads the business private inbox subject to the caller conversation access."
       }
@@ -1131,7 +1131,7 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads active non-generated media library assets with optional kind and pagination; excludes sent-conversation media by ownership.",
+        "read_only_justification": "Reads active non-generated media library assets with optional kind and pagination; excludes conversation and task attachments by ownership.",
         "destructive_justification": "Does not upload files, alter metadata or add or remove media placements.",
         "open_world_justification": "Reads the selected business media library without fetching caller-supplied download URLs."
       }
@@ -1152,12 +1152,12 @@
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
-        "destructiveHint": true
+        "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Records what the business could do against its current evidence; a repeat records nothing new.",
-        "destructive_justification": "Supersedes opportunities whose evidence changed; it does not change content, bookings or settings.",
-        "open_world_justification": "Reads the workspace's own records and its connected analytics, Search Console, Ads and social accounts."
+        "read_only_justification": "Records opportunities backed by current business evidence.",
+        "destructive_justification": "Adds evidence records without deleting opportunities or changing accepted, dismissed or deferred decisions.",
+        "open_world_justification": "Reads only workspace data and the business's configured provider accounts."
       }
     },
     "list_organization_locales": {
@@ -1420,7 +1420,7 @@
       },
       "justifications": {
         "read_only_justification": "Publishes a version-checked draft article once; an already-published article retains its publication date and announcement.",
-        "destructive_justification": "Changes existing article publication state from private draft to public and records that transition.",
+        "destructive_justification": "Makes a private draft public and can system-close its accepted article task after the publication is saved.",
         "open_world_justification": "Exposes the article to website visitors."
       }
     },
@@ -1444,7 +1444,7 @@
       },
       "justifications": {
         "read_only_justification": "Publishes to explicitly selected website/Facebook/Instagram/Discord targets; unknown provider outcomes require reconciliation before retries.",
-        "destructive_justification": "Can irreversibly send audience-visible content and overwrite publication state.",
+        "destructive_justification": "Can irreversibly send audience-visible content; a saved website publication can also system-close an accepted task for that post.",
         "open_world_justification": "Posts on the public website or connected social audiences."
       }
     },
@@ -1551,7 +1551,7 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Synchronizes complete entries, replaces options/variants/prices, optionally deactivates missing entries, and pushes supported connected-home changes after local commit.",
+        "read_only_justification": "Synchronizes complete entries, replaces supplied variant and price lists, optionally deactivates missing entries, and pushes supported connected-home changes after local commit.",
         "destructive_justification": "Can replace catalog lists, delete omitted owned records and deactivate existing products.",
         "open_world_justification": "Changes published catalog content and can push prices/settings to Airbnb."
       }
@@ -1600,7 +1600,7 @@
       },
       "justifications": {
         "read_only_justification": "Removes the selected teammate’s organization membership.",
-        "destructive_justification": "Revokes the teammate’s workspace access through Better Auth.",
+        "destructive_justification": "Revokes workspace access through Better Auth and can clear the teammate’s open task assignments.",
         "open_world_justification": "Only removes a membership of the selected private business."
       }
     },
@@ -1876,7 +1876,7 @@
       },
       "justifications": {
         "read_only_justification": "Upserts booking defaults; question-only writes preserve sessions, other writes can materialize or adjust future sessions and assigned responsibility.",
-        "destructive_justification": "Can overwrite booking rules, questions and session configuration.",
+        "destructive_justification": "Can overwrite booking rules, questions and session configuration; enabling required online payment can system-close its accepted setup task.",
         "open_world_justification": "Changes the rules and available sessions guests can book on the website."
       }
     },
@@ -2139,8 +2139,8 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Edits a selected product; variants/prices can merge or explicitly replace, options/details can replace, booking setup can publish, and connected-home settings can be pushed to Airbnb.",
-        "destructive_justification": "Can overwrite facts/prices/options, remove supplied replacement-list omissions and change connected listing settings.",
+        "read_only_justification": "Edits a selected product, merges or replaces variants and prices, merges or replaces named details, can publish with booking setup, and can push connected-home settings to Airbnb.",
+        "destructive_justification": "Can overwrite named facts and prices, remove variants or prices omitted from explicit replacement lists, and change connected listing settings.",
         "open_world_justification": "Can change public product content and push supported listing settings to a connected Airbnb listing."
       }
     },
@@ -2175,8 +2175,8 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Upserts provided reservation rules/questions with policy-tier validation and optional revision guard.",
-        "destructive_justification": "Overwrites cancellation, deposit, capacity, guest-question or other reservation rules.",
+        "read_only_justification": "Upserts supplied reservation duration, capacity, notice, deposits and guest questions with revision checks.",
+        "destructive_justification": "Overwrites editable capacity, notice, deposit, guest-question and other reservation rules. The cancellation cutoff is fixed.",
         "open_world_justification": "Changes rules and questions on the public reservation flow."
       }
     },
@@ -2225,7 +2225,7 @@
       "justifications": {
         "read_only_justification": "Changes a stored task's assignee, window, title or notes.",
         "destructive_justification": "Overwrites the task's saved assignment or schedule and notifies a new assignee.",
-        "open_world_justification": "Notification recipients remain members of the selected private workspace."
+        "open_world_justification": "Reassignment can send configured email, WhatsApp or push notifications to the new assignee through external delivery services."
       }
     },
     "update_team": {
@@ -2282,10 +2282,10 @@
     },
     {
       "description": "Create a regular Brooklyn table reservation, then propose a one-hour change for guest acceptance.",
-      "user_prompt": "Book a regular table for two at Ember & Slice in Brooklyn next Friday at 7 PM for Taylor Review, using the reviewer contact details in the review instructions. Then ask the guest to move it to 8 PM. Email the proposal and keep 7 PM until they accept.",
+      "user_prompt": "Find a Friday more than 24 hours away with 7 PM and 8 PM both available at Ember & Slice in Brooklyn. Book a regular table for two at 7 PM for Taylor Review, using the reviewer contact details in the review instructions. Then email the guest a proposal to move it to 8 PM. Keep 7 PM until they accept.",
       "file_attachment_urls": null,
       "tools_triggered": "list_organizations, list_locations, get_reservation_policy, get_calendar, create_table_reservation, list_table_reservations, request_table_reservation_change",
-      "expected_output": "Creates one regular table reservation using the actual location policy and controlled reviewer contact details. Emails one proposal for 8 PM while the reservation remains at 7 PM. Guest acceptance updates the same reservation once; reopening the accepted link preserves the accepted state. Experience bookings remain separate. Cancel the review reservation after verification.",
+      "expected_output": "Uses the Brooklyn calendar and reservation availability to choose a Friday more than 24 hours away. Creates one regular table reservation using the location policy and controlled reviewer contact details. Emails one proposal for 8 PM while the reservation remains at 7 PM. Guest acceptance updates the same reservation once; reopening the accepted link preserves the accepted state. Experience bookings remain separate. Cancel the review reservation after verification.",
       "expected_output_url": null
     },
     {
