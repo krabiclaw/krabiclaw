@@ -49,7 +49,8 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
     }
     const ids: string[] = []
     try {
-      const from = new Date(Date.now() + 86400000).toISOString()
+      // Two days out: the booking below is changed, and changes close 24 hours before the start.
+      const from = new Date(Date.now() + 2 * 86400000).toISOString()
       const to = new Date(Date.now() + 28 * 86400000).toISOString()
       await configure('instant')
       const generated = await request.post(`${editor}/sessions/generate`, { data: { through: to.slice(0, 10) } })

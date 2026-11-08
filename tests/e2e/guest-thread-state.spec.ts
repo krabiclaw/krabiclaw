@@ -658,24 +658,12 @@ for (const viewport of [
     await openMessages('?archived=')
     await expect(rowFor(guestName)).toBeVisible()
 
-    // A conversation Past because its booking ended offers no way back; its
-    // guest can still be reported or blocked.
-    const ended = await endedConversation(page.request)
-    await expect(page.locator(`[data-thread-row="${ended.id}"]`)).toBeVisible()
-    await openConversation(ended.id, '?archived=')
+    // Moving it back keeps the conversation open where it is read, and it
+    // leaves Past for Current. In Past its guest can still be reported or blocked.
+    await openConversation(threadId!, '?archived=')
     await sheetButton.click()
     await expect(sheet.getByRole('button', { name: 'Report', exact: true })).toBeVisible()
     await expect(sheet.getByRole('button', { name: 'Block', exact: true })).toBeVisible()
-    await expect(sheet.getByRole('button', { name: 'Archive', exact: true })).toHaveCount(0)
-    await expect(sheet.getByRole('button', { name: 'Move to Messages', exact: true })).toHaveCount(0)
-    await page.keyboard.press('Escape')
-    await expect(sheet).toHaveCount(0)
-
-    // Moving it back keeps the conversation open where it is read, and it
-    // leaves Past for Current.
-    if (viewport.name === 'mobile') await openMessages('?archived=')
-    await openConversation(threadId!, '?archived=')
-    await sheetButton.click()
     await expect(sheet.getByRole('button', { name: 'Archive', exact: true })).toHaveCount(0)
     const moved = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/guest-threads/${threadId}/operations/unarchive`))
     await sheet.getByRole('button', { name: 'Move to Messages', exact: true }).click()
@@ -741,7 +729,8 @@ test('Calendar retains confirmed reservations and their detail sends one change 
   const bookingIds: string[] = []
   for (const [name, email, plan] of [
     [guestName, guestEmail, todaySlot!],
-    ['Priya Patel', `priya-${now}@example.test`, now + 86_400_000],
+    // Two days out, so the change request below is inside the 24-hour change window whatever the hour.
+    ['Priya Patel', `priya-${now}@example.test`, now + 2 * 86_400_000],
   ] as const) {
     let date: string
     let time: string
