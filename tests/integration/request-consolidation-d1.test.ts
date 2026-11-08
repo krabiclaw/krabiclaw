@@ -266,7 +266,8 @@ test('archive and unarchive file a conversation without touching its booking, st
       thread('future', 'reservation', '2026-09-02T00:00:00.000Z'),
       thread('ongoing', 'reservation', '2026-09-03T00:00:00.000Z'),
       thread('ended', 'reservation', '2026-09-04T00:00:00.000Z'),
-      thread('ended-archived', 'reservation', '2026-09-05T00:00:00.000Z'),
+      // Quiet for over 30 days: its last activity and its end are both behind NOW by more than that.
+      thread('ended-archived', 'reservation', '2026-08-05T00:00:00.000Z'),
       thread('booking-future', 'booking', '2026-09-06T00:00:00.000Z'),
       thread('booking-ended', 'booking', '2026-09-07T00:00:00.000Z'),
       // The newest real activity in the inbox, which filing others must not overtake.
@@ -295,13 +296,14 @@ test('archive and unarchive file a conversation without touching its booking, st
     const operate = (threadId: string, action: 'archive' | 'unarchive', idempotencyKey: string, organizationId = ORG) =>
       executeGuestThreadOperation(db, { threadId, organizationId, action, actorUserId: ACTOR, idempotencyKey, env })
 
-    // Ordered by conversation activity, and split by the end of each occurrence.
-    assert.deepEqual(await ids('current'), ['newest', 'booking-future', 'ongoing', 'future', 'contact'])
-    assert.deepEqual(await ids('past'), ['booking-ended', 'ended-archived', 'ended'])
+    // Ordered by conversation activity. An ended visit with recent activity stays Current, as Airbnb keeps an ended, read trip;
+    // only a conversation quiet for 30 days is Past by the rule.
+    assert.deepEqual(await ids('current'), ['newest', 'booking-ended', 'booking-future', 'ended', 'ongoing', 'future', 'contact'])
+    assert.deepEqual(await ids('past'), ['ended-archived'])
     assert.deepEqual(
-      [await filing('ended'), await filing('ended-archived'), (await row('ended'))?.archived_at, typeof (await row('ended-archived'))?.archived_at],
-      [{ archive: false, unarchive: false }, { archive: false, unarchive: false }, null, 'string'],
-      'an ended occurrence is Past whether or not it was archived, and cannot be moved back',
+      [await filing('ended-archived'), typeof (await row('ended-archived'))?.archived_at],
+      [{ archive: false, unarchive: false }, 'string'],
+      'a conversation quiet for 30 days is Past whether or not it was archived, and cannot be moved back',
     )
     for (const id of await ids('current')) assert.deepEqual(await filing(id), { archive: true, unarchive: false }, id)
     // A guest who writes about a dinner that has ended brings it back to Current, unread and counted; the counts are Current's only.
@@ -311,7 +313,7 @@ test('archive and unarchive file a conversation without touching its booking, st
       const alert = buildCanonicalNotificationInsert({ scope: 'organization', organizationId: ORG, title: 'Message', template: 'submission_reply_email', sourceEntryId: message.id }, `alert-${id}`)
       await db.prepare(alert.query).bind(...alert.params).run()
     }
-    const CURRENT = ['newest', 'booking-future', 'ended', 'ongoing', 'future', 'contact']
+    const CURRENT = ['newest', 'booking-ended', 'booking-future', 'ended', 'ongoing', 'future', 'contact']
     assert.deepEqual(await ids('current'), CURRENT)
     assert.deepEqual([await ids('current', true), await ids('past', true)], [['ended', 'future'], []])
     assert.deepEqual(await countUnreadInboxThreads(db, ORG, { userId: ACTOR }), { all: 2, guests: 2, support: 0 })
@@ -370,10 +372,10 @@ test('archive and unarchive file a conversation without touching its booking, st
     assert.equal((await operate('contact', 'unarchive', 'unarchive-contact')).ok, true)
     assert.equal((await ids('current')).includes('contact'), true)
 
-    // An ended occurrence the rule files in Past cannot be moved back, and nothing is written.
+    // A conversation the rule files in Past cannot be moved back, and nothing is written.
     const endedBefore = await row('ended-archived')
     const refused = await operate('ended-archived', 'unarchive', 'unarchive-ended')
-    assert.deepEqual(refused, { ok: false, status: 409, reason: 'invalid_transition', message: 'This conversation is past because its booking has ended' })
+    assert.deepEqual(refused, { ok: false, status: 409, reason: 'invalid_transition', message: 'This conversation is past because it has been quiet for 30 days' })
     assert.deepEqual(await row('ended-archived'), endedBefore)
     assert.equal(await entries('ended-archived', 'thread.unarchived'), 0)
     // The write itself refuses too, for a move whose check passed before the rule filed the thread in Past.

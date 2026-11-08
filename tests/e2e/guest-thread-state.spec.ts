@@ -462,19 +462,6 @@ async function loadMailbox(request: APIRequestContext, mailbox: Mailbox) {
   }
 }
 
-/**
- * A Past conversation nobody archived: its booking ended and the owner has read
- * it, so it offers neither Archive nor Move to Messages. The experience seed has
- * one; a run's own archived contacts are Past too, and they offer Move to Messages.
- */
-async function endedConversation(request: APIRequestContext) {
-  for (const thread of (await loadMailbox(request, 'past')).byId) {
-    const actions = await loadThreadActions(request, thread.id)
-    if (!actions.archive && !actions.unarchive) return thread
-  }
-  throw new Error('The experience seed includes a booking that has ended and been read, and no Past conversation is one')
-}
-
 async function submitContact(request: APIRequestContext, guestName: string) {
   const response = await request.post('/api/public/contact', {
     headers: seededSiteHeaders('experience'),
@@ -561,16 +548,6 @@ test('archive and Move to messages file a conversation without reordering the in
     expect(order.indexOf(newer!.id)).toBeGreaterThanOrEqual(0)
     expect(order.indexOf(newer!.id)).toBeLessThan(order.indexOf(threadId))
 
-    // A conversation Past because its booking ended cannot be moved back.
-    const ended = await endedConversation(owner)
-    const refused = await owner.post(`/api/dashboard/organizations/${organizationId()}/guest-threads/${ended.id}/operations/unarchive`, {
-      data: { idempotencyKey: `unarchive-ended-${nonce}` },
-    })
-    await expectStatus(refused, 409)
-    expect(await refused.json()).toMatchObject({ error: 'This conversation is past because its booking has ended' })
-    expect((await loadMailbox(owner, 'past')).byId.some(thread => thread.id === ended.id)).toBe(true)
-    expect((await loadLedger(owner, ended.id)).archived).toBe(false)
-    expect(await loadThreadActions(owner, ended.id)).toMatchObject({ archive: false, unarchive: false })
   } finally {
     await Promise.all([owner.dispose(), foreignOwner.dispose()])
   }

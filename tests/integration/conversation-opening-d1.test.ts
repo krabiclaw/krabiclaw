@@ -77,9 +77,9 @@ test('a reservation opens with its own message and the guest note, written once,
     // A second run writes and moves nothing.
     assert.deepEqual(await backfillOpeningMessages(db, ORG), { written: 0, skipped: 0 })
     assert.deepEqual(await ledger(), placed)
-    // In the list (past: both ended, nothing unread, nobody wrote after) the reply is still the preview and its
+    // In the list (Current: ended, but not quiet for 30 days) the reply is still the preview and its
     // time still orders the conversation ahead of the one whose newest message is its opening.
-    const rows = await listGuestThreads(db, ORG, { userId: OWNER, mailbox: 'past' }, new Date('2026-11-05T00:00:00.000Z'))
+    const rows = await listGuestThreads(db, ORG, { userId: OWNER, mailbox: 'current' }, new Date('2026-11-05T00:00:00.000Z'))
     assert.deepEqual(rows.map(row => [row.id, row.previewFrom, row.preview]), [['old', 'Filip', 'Running ten minutes late'], ['new', 'Filip', 'Window seat if possible']])
 
     // The backfill says what the guest asked for when they asked. A table moved since opens with the
