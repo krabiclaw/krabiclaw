@@ -24,6 +24,7 @@ const conversationResult = { type: 'object', properties: { conversation: { type:
   participant_label: { type: 'string' }, reply_channel: { type: ['string', 'null'], enum: ['airbnb', 'email', 'account', null], description: 'Where reply_to_guest sends: Airbnb’s conversation, the guest’s email, or their KrabiClaw account inbox. Null when the guest cannot be replied to; reply_not_possible says why.' }, reply_not_possible: nullableString,
   guest: { type: 'object', properties: { name: nullableString, email: nullableString, phone: nullableString }, required: ['name', 'email', 'phone'] },
   answers: formAnswerSnapshotsJsonSchema(),
+  inquiry_message: { type: 'string', description: 'The original contact-form message. Present for contact inquiries; later messages are in entries.' },
   operational_record: { type: ['object', 'null'], description: 'For a stay, check_in_date and check_out_date are its nights and id is the stay for get_stay; its starts_at and ends_at only order and archive the conversation.', properties: { id: { type: 'string' }, kind: { type: 'string', enum: ['booking', 'reservation', 'stay'] }, status: { type: 'string' }, starts_at: { type: 'string' }, ends_at: { type: 'string' }, timezone: { type: 'string' }, party_size: { type: 'integer' }, check_in_date: nullableString, check_out_date: nullableString }, required: ['id', 'kind', 'status', 'starts_at', 'ends_at', 'timezone', 'party_size', 'check_in_date', 'check_out_date'] },
   entries: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, kind: { type: 'string' }, actor: nullableString, channel: nullableString, body: nullableString, event: nullableString, occurred_at: { type: 'string' }, provider_timestamp: nullableString, payload: { type: ['object', 'null'] }, booking_change: bookingChange,
     deliveries: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, channel: { type: 'string' }, provider: { type: 'string', description: 'log_only records the message locally without sending it through a provider.' }, purpose: { type: 'string' }, status: { type: 'string' } }, required: ['id', 'channel', 'provider', 'purpose', 'status'] } },
@@ -45,7 +46,8 @@ async function readConversation(ctx: McpExecutorContext, requestId: string) {
   const destination = await guestReplyDestination(db, request)
   return { request_id: detail.id, type: detail.submissionType, needs_reply: detail.needsReply, archived: detail.manuallyArchived, updated_at: detail.updatedAt,
     participant_label: detail.participantLabel, reply_channel: destination.channel, reply_not_possible: destination.channel === null ? destination.reason : null,
-    guest: { name: detail.guestName, email: detail.guestEmail, phone: detail.guestPhone }, answers: detail.source.fields.answers, operational_record: detail.operationalRecord,
+    guest: { name: detail.guestName, email: detail.guestEmail, phone: detail.guestPhone }, answers: detail.source.fields.answers,
+    ...(request.kind === 'contact' ? { inquiry_message: request.payload.message } : {}), operational_record: detail.operationalRecord,
     entries: detail.entries.map(entry => ({ id: entry.id, kind: entry.kind, actor: entry.actorLabel, channel: entry.channel, body: entry.body, event: entry.eventName, payload: entry.payload, booking_change: entry.bookingChange, occurred_at: entry.occurredAt, provider_timestamp: entry.providerTimestamp, deliveries: entry.deliveries, attachments: entry.attachments })),
   }
 }

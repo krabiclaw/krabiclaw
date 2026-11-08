@@ -434,9 +434,9 @@ test.describe('stateless MCP server', () => {
       expect(contactSubmission).toMatchObject({ request_id: expect.any(String) })
       expect(contactSubmission).not.toHaveProperty('preview')
       const contactRead = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'get_guest_conversation',args:{organization_id:organizationId,request_id:contactSubmission!.request_id}})
-      const contact = mcpData<{conversation:{guest:{email:string};entries:Array<{id:string;event:string|null;body:string|null}>;archived:boolean}}>(await contactRead.json()).conversation
+      const contact = mcpData<{conversation:{guest:{email:string};inquiry_message:string;entries:Array<{id:string;event:string|null}>;archived:boolean}}>(await contactRead.json()).conversation
       expect(contact.guest.email).toBe(contactEmail)
-      expect(contact.entries.some(entry => entry.body === 'hello from MCP e2e')).toBe(true)
+      expect(contact.inquiry_message).toBe('hello from MCP e2e')
       const emptyReply = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'reply_to_guest',args:{organization_id:organizationId,request_id:contactSubmission!.request_id,idempotency_key:crypto.randomUUID()}})
       expect(emptyReply.status()).toBe(200)
       const emptyReplyResult = (await emptyReply.json()).result
