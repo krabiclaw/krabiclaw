@@ -917,7 +917,7 @@ test('opportunity MCP tools preserve saved decisions during incomplete social re
     assert.ok(membership)
     const organization: McpExecutorContext['organization'] = { env, db, membership, organizationId: 'org-a', userId: 'owner', role: 'owner', isPlatformAdmin: false, scopes: [] }
     const tool = (toolName: string, args: Record<string, unknown> = {}) => handleTaskTools({ toolName, organization, args })
-    const list = async () => await tool('list_opportunities') as { opportunities: OpportunityView[]; issues: string[] }
+    const list = async (args: Record<string, unknown> = {}) => await tool('list_opportunities', args) as { opportunities: OpportunityView[]; issues: string[] }
     const status = (id: string) => db.prepare('SELECT status, available_at FROM opportunities WHERE organization_id = ? AND id = ?').bind('org-a', id).first()
     const saved = async () => (await db.prepare("SELECT * FROM opportunities WHERE organization_id = 'org-a' ORDER BY id").all()).results
     const posts = []
@@ -932,6 +932,17 @@ test('opportunity MCP tools preserve saved decisions during incomplete social re
     assert.deepEqual(before.issues, [])
     const ids = posts.map(post => before.opportunities.find(item => item.path === postEditorPath('org-a', post.id))?.id)
     assert.equal(ids.filter(Boolean).length, 3)
+
+    // This location has no posts of its own, but the workspace already has posts to finish.
+    await run("INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at) VALUES ('other-location', 'org-a', 'other-location', 'Other location', 'active', 'UTC', '2026-09-28T00:00:00.000Z', '2026-09-28T00:00:00.000Z')")
+    const scoped = () => list({ location_id: 'other-location' })
+    const scopedOnly = (await scoped()).opportunities.find(item => item.path === postEditorPath('org-a', 'new', 'other-location'))
+    assert.ok(scopedOnly)
+    assert.deepEqual(await list(), before)
+    assert.deepEqual(await status(scopedOnly.id), { status: 'superseded', available_at: null })
+    assert(!(await scoped()).opportunities.some(item => item.id === scopedOnly.id))
+    assert.deepEqual(await status(scopedOnly.id), { status: 'superseded', available_at: null })
+
     const [open, dismissed, accepted] = ids as [string, string, string]
     await tool('dismiss_opportunity', { opportunity_id: dismissed })
     const { task } = await tool('accept_opportunity', { opportunity_id: accepted }) as { task: TaskView }

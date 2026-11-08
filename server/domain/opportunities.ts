@@ -64,13 +64,16 @@ async function authorize(principal: MemberAccessPrincipal) {
 async function refreshOpportunities(db: DbClient, principal: MemberAccessPrincipal, input: { now: Date; locationId?: string }) {
   const plan = await readBusinessRecommendations(db, principal, { now: input.now, locationId: input.locationId })
   const now = input.now.toISOString(), organizationId = principal.organizationId
+  const workspaceComplete = !input.locationId && plan.evidenceComplete
+  // A scoped plan can offer an organization-level action the workspace plan
+  // suppresses. Only the workspace plan may restore it after supersession.
   const queries: BatchQuery[] = plan.recommendations.map(item => ({
     query: `INSERT INTO opportunities (id, organization_id, operation, subject_id, evidence_revision, goal_id, goal_revision, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?) ON CONFLICT DO UPDATE SET status='open', updated_at=excluded.updated_at
-      WHERE opportunities.status='superseded'`,
-    params: [crypto.randomUUID(), organizationId, item.operation, item.subjectId, item.reference.evidenceRevision, item.goal?.id ?? null, item.goal?.revision ?? null, now, now],
+      WHERE opportunities.status='superseded' AND (opportunities.operation='product.readiness' OR ?)`,
+    params: [crypto.randomUUID(), organizationId, item.operation, item.subjectId, item.reference.evidenceRevision, item.goal?.id ?? null, item.goal?.revision ?? null, now, now, Number(workspaceComplete)],
   }))
-  if (!input.locationId && plan.evidenceComplete) {
+  if (workspaceComplete) {
     queries.push({
       query: `UPDATE opportunities SET status = 'superseded', updated_at = ? WHERE organization_id = ? AND status = 'open'
         AND NOT EXISTS (SELECT 1 FROM json_each(?) current WHERE json_extract(current.value, '$[0]') = opportunities.operation
