@@ -49,24 +49,22 @@ export function successfulBusinessReplySql(reply: string): string {
 }
 
 function providerTimeSql(entry: string): string { return `json_extract(${entry}.payload_json, '$.provider_inserted_at')` }
-function offsetSql(time: string): string { return `(substr(${time}, -1) = 'Z' OR substr(${time}, -6, 1) IN ('+', '-'))` }
+/** An explicit offset is honored; a zoneless Channex time is UTC (read 2026-11-08: every live mirror lands 2-6 s after its provider time). */
+function providerZoneSql(time: string): string {
+  return `CASE WHEN substr(${time}, -1) = 'Z' THEN 'Z' WHEN substr(${time}, -6, 1) IN ('+', '-') THEN substr(${time}, -6) ELSE 'Z' END`
+}
 
-/** Preserve microsecond ordering. Naive times are compared only with the same provider's naive clock, never with UTC. */
-function providerClockSql(time: string, absolute: boolean): string {
+/** One UTC clock for provider and local times, keeping the provider's microseconds for ordering. */
+function providerClockSql(time: string): string {
   const zoneLength = `(CASE WHEN substr(${time}, -1) = 'Z' THEN 1 WHEN substr(${time}, -6, 1) IN ('+', '-') THEN 6 ELSE 0 END)`
   const fraction = `substr((CASE WHEN substr(${time}, 20, 1) = '.' THEN substr(${time}, 21, length(${time}) - 20 - ${zoneLength}) ELSE '' END) || '000000000', 1, 9)`
-  const seconds = absolute ? `strftime('%Y-%m-%dT%H:%M:%S', substr(${time}, 1, 19) || CASE WHEN substr(${time}, -1) = 'Z' THEN 'Z' ELSE substr(${time}, -6) END)` : `substr(${time}, 1, 19)`
-  return `(${seconds} || '.' || ${fraction})`
+  return `(strftime('%Y-%m-%dT%H:%M:%S', substr(${time}, 1, 19) || ${providerZoneSql(time)}) || '.' || ${fraction})`
 }
 
 /** The resource's original time decides whether a late-imported reply follows the guest, not its local append sequence. */
 function mirroredAfterSql(reply: string, guestEntry: string): string {
-  const replyTime = providerTimeSql(reply), guestTime = providerTimeSql(guestEntry)
-  return `(${guestEntry}.event_name = 'channel.message_mirrored' AND ${guestEntry}.channel = 'airbnb' AND (
-    (NOT ${offsetSql(replyTime)} AND NOT ${offsetSql(guestTime)} AND ${providerClockSql(replyTime, false)} > ${providerClockSql(guestTime, false)})
-    OR (${offsetSql(replyTime)} AND ${offsetSql(guestTime)} AND ${providerClockSql(replyTime, true)} > ${providerClockSql(guestTime, true)})
-  ) OR (${guestEntry}.event_name IS NOT 'channel.message_mirrored' AND ${offsetSql(replyTime)}
-    AND ${providerClockSql(replyTime, true)} > ${providerClockSql(`${guestEntry}.occurred_at`, true)}))`
+  const guestTime = `(CASE WHEN ${guestEntry}.event_name = 'channel.message_mirrored' AND ${guestEntry}.channel = 'airbnb' THEN ${providerTimeSql(guestEntry)} ELSE ${guestEntry}.occurred_at END)`
+  return `${providerClockSql(providerTimeSql(reply))} > ${providerClockSql(guestTime)}`
 }
 
 /** A specific business response follows this entry by causal local order or original provider chronology. */
@@ -75,13 +73,14 @@ export function businessReplyFollowsSql(reply: string, guestEntry: string): stri
     OR (${reply}.event_name = 'channel.message_mirrored' AND ${mirroredAfterSql(reply, guestEntry)}))`
 }
 
-/** Whether a later successful business response to this guest entry has been recorded. */
-/** When the guest asked: the provider's own instant for a mirrored message that carries an offset, otherwise when it was recorded. */
+/** When the guest asked: the provider's own instant for a mirrored message, otherwise when it was recorded. */
 export function guestEntryAskedAtSql(entry: string): string {
-  return `CASE WHEN ${entry}.event_name = 'channel.message_mirrored' AND ${offsetSql(providerTimeSql(entry))}
-    THEN strftime('%Y-%m-%dT%H:%M:%fZ', ${providerTimeSql(entry)}) ELSE ${entry}.occurred_at END`
+  const time = providerTimeSql(entry)
+  return `CASE WHEN ${entry}.event_name = 'channel.message_mirrored' AND ${time} IS NOT NULL
+    THEN strftime('%Y-%m-%dT%H:%M:%fZ', substr(${time}, 1, 19) || ${providerZoneSql(time)}) ELSE ${entry}.occurred_at END`
 }
 
+/** Whether a later successful business response to this guest entry has been recorded. */
 export function businessReplyAfterSql(guestEntry: string): string {
   return `EXISTS (
         SELECT 1 FROM activity_entries reply

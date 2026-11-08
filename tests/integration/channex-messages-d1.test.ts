@@ -409,6 +409,23 @@ test('a dismissed question needs no note and stays closed until the guest writes
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
+test('a zoneless Channex time is UTC: an imported question is as old as Airbnb says, and expires from then', async () => {
+  const { runtime, db, env } = await boot()
+  const provider = new Provider(), realFetch = globalThis.fetch
+  globalThis.fetch = provider.fetch as typeof fetch
+  try {
+    // Channex sends inserted_at without a zone; this question was asked 60 days before it was imported.
+    const askedAt = new Date(Date.now() - 60 * 86_400_000).toISOString().replace('Z', '000')
+    provider.messages = [provider.message('old', 'guest', 'Is the hot tub working?', [], askedAt)]
+    await backfillChannexMessages(db, env, 'property', ORG)
+    const requestId = await db.prepare("SELECT request_id FROM channel_threads WHERE external_thread_id = 'thread'").first<string>('request_id')
+    assert.ok(requestId)
+    assert.deepEqual(await waitingOn(db, requestId), [])
+    assert.equal(await db.prepare("SELECT count(*) n FROM tasks WHERE kind = 'guest_reply' AND subject_id = ?").bind(requestId).first<number>('n'), 0,
+      'a question asked more than 30 days ago opens no task, however recently it was imported')
+  } finally { globalThis.fetch = realFetch; await runtime.dispose() }
+})
+
 test('a message mirrored before photos were stored gets its photo on the next backfill or re-mirror, and keeps one set', async () => {
   const { runtime, db, env } = await boot()
   const provider = new Provider(), realFetch = globalThis.fetch
