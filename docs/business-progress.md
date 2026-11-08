@@ -27,8 +27,9 @@ actor attribution is reported only when it was recorded.
 `opportunities` records each thing the selector found at its evidence revision
 and the business's decision about it: accepted (with its one task), dismissed
 (with the owner's note) or deferred (`available_at`). New evidence is a new
-opportunity; the old open one becomes superseded. `tasks` is work someone has to
-do, with an assignee, a window and who closed it; completing, skipping and
+opportunity. Listing shows opportunities backed by current evidence and keeps
+earlier decisions. `tasks` is work someone has to do, with an assignee, a window
+and who closed it; completing, skipping and
 accepting are audit entries here, so they count as business activity.
 
 Article activity is recorded by ordinary CMS/MCP writes; reply evidence comes
@@ -110,7 +111,8 @@ An opportunity is recorded against the `evidenceRevision` of its reference
 categories and attributed activity. Conversation evidence includes the latest
 actual guest activity and member reply, canonical commitment state and reply
 receipts. A decision applies to that revision only: when the evidence changes,
-the selector records a new opportunity and the old open one is superseded.
+the selector records a new opportunity and stops listing the old one. A partial
+read reports the unavailable evidence alongside any current opportunities.
 Accepting re-reads the selector and is refused with 409 when the evidence has
 moved on. Whether the business owes a guest a reply is an open `guest_reply`
 task, opened and closed by the conversation's own writes.

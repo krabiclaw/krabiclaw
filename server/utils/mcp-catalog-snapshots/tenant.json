@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:a837e5db851a54fed017aa38800ed8dcce5179d195e46704bde593ab19992668",
-  "documentationFingerprint": "sha256:74b06b82d47b5360f88be33a9dbb02904d97b762ed140e3cb54dce18ce0edbf7",
+  "fingerprint": "sha256:8a0ab254703f1e603a5284cea585418fe9ff8d70a77702b8ae6bae9f3efc3acc",
+  "documentationFingerprint": "sha256:31d2728c32f0c0d33ac30a2e8ad3b33985d101d592d074fd6acb93c79f6e484c",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -14349,7 +14349,9 @@
       "domain": "tasks",
       "minimumRole": "member",
       "requiredEntitlement": null,
-      "fileParams": [],
+      "fileParams": [
+        "file"
+      ],
       "uiResourceUri": null
     },
     {
@@ -14672,7 +14674,7 @@
     {
       "name": "create_blog_post",
       "title": "Create blog post",
-      "description": "Create a draft blog or documentation article with ordered content_blocks. It stays private until published. A category in the selected collection is required for publication. Use a new idempotency_key for each article; retrying the same key returns the same article. The preview_url allows draft review. When linking to dashboard settings in markdown copy, use /dashboard/app/<path> (e.g. /dashboard/app/products) so the link dynamically resolves to the reader's active organization.",
+      "description": "Create a draft blog or documentation article with ordered content_blocks. It stays private until published. Creating a draft completes any accepted task to create an article. A category in the selected collection is required for publication. Use a new idempotency_key for each article; retrying the same key returns the same article. The preview_url allows draft review. When linking to dashboard settings in markdown copy, use /dashboard/app/<path> (e.g. /dashboard/app/products) so the link dynamically resolves to the reader's active organization.",
       "inputSchema": {
         "$defs": {
           "content_ai_assistance": {
@@ -19924,7 +19926,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "openWorldHint": false,
         "readOnlyHint": false,
         "title": "Create blog post"
@@ -21071,7 +21073,7 @@
     {
       "name": "create_post",
       "title": "Create post",
-      "description": "Create a draft short post when the user wants an announcement, event notice or offer. Supports a plain-text caption, ordered media, optional title, location and call to action. It stays private until publish_post. Use a new idempotency_key for each post and reuse it only for retries of that request. Long-form articles use create_blog_post.",
+      "description": "Create a draft short post when the user wants an announcement, event notice or offer. Supports a plain-text caption, ordered media, optional title, location and call to action. It stays private until publish_post. Creating a draft completes any accepted task to create a post. Use a new idempotency_key for each post and reuse it only for retries of that request. Long-form articles use create_blog_post.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -21572,7 +21574,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "openWorldHint": false,
         "readOnlyHint": false,
         "title": "Create post"
@@ -37717,7 +37719,7 @@
     {
       "name": "create_task",
       "title": "Create task",
-      "description": "Add a task someone has to do, optionally at a home or location, with a window and an assignee. The assignee is told by their own notification settings. Reuse the same idempotency_key for an identical retry.",
+      "description": "Create a task with optional dates and one assignee. Specify location_id when the product is offered at multiple locations. A new assignee may be notified according to their settings. Reuse idempotency_key only for the same request.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -48531,6 +48533,10 @@
                   "phone"
                 ],
                 "type": "object"
+              },
+              "inquiry_message": {
+                "description": "The original contact-form message. Present for contact inquiries; later messages are in entries.",
+                "type": "string"
               },
               "needs_reply": {
                 "type": "boolean"
@@ -68027,7 +68033,7 @@
     {
       "name": "list_guest_conversations",
       "title": "List guest conversations",
-      "description": "Read the business inbox for contacts, table reservations, bookings and stay conversations. Filter by type, current/past and whether a reply is needed. Follow page_info; use request_id to read the whole conversation.",
+      "description": "Read the business inbox for contacts, table reservations, bookings and stay conversations. Filter by type, current/past and whether a reply is needed. Follow page_info. Use request_id with get_guest_conversation to read messages and guest contact details.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -68080,6 +68086,7 @@
         "properties": {
           "conversations": {
             "items": {
+              "additionalProperties": false,
               "properties": {
                 "guest_name": {
                   "type": [
@@ -68098,12 +68105,6 @@
                 },
                 "participant_label": {
                   "type": "string"
-                },
-                "preview": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
                 },
                 "reply_channel": {
                   "description": "Where reply_to_guest sends; null when the guest cannot be replied to, and reply_not_possible says why.",
@@ -68143,7 +68144,6 @@
                 "type",
                 "needs_reply",
                 "operational_status",
-                "preview",
                 "updated_at"
               ],
               "type": "object"
@@ -69396,7 +69396,7 @@
     {
       "name": "list_opportunities",
       "title": "List opportunities",
-      "description": "Read what the business could do now, found from its own records: drafts to finish, posts to share, calendar gaps, payment setup. Each is recorded against its evidence; accept, dismiss or defer it by id.",
+      "description": "List and save current opportunities such as drafts to finish, posts to share and calendar gaps. Reports evidence it could not read. Use a returned ID to accept, dismiss or defer an opportunity.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -69480,7 +69480,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": false,
@@ -85551,7 +85551,7 @@
     {
       "name": "reassign_product_booking",
       "title": "Reassign product booking",
-      "description": "Propose a same-time attorney replacement for one consultation. The current appointment and other clients remain unchanged until this client accepts in their conversation. Uses a published available session for that attorney. Read get_product_booking and supply operational_updated_at.",
+      "description": "Propose a same-time attorney replacement for one consultation. The current appointment and other clients remain unchanged until this client accepts in their conversation. Requires a published available session for that attorney and at least 24 hours before the consultation starts. Read get_product_booking and supply operational_updated_at.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -99291,7 +99291,7 @@
     {
       "name": "request_product_booking_change",
       "title": "Request product booking change",
-      "description": "Email the guest a proposal to change a booking’s session or party size. The current booking and places remain unchanged until guest acceptance, which requires availability and preserves its review status. Consultation time and attorney changes always require client acceptance. For other booking kinds, apply moves the booking now and emails the guest; a paid quantity or location change is refused.",
+      "description": "Email the guest a proposal to change a booking’s session or party size. The current booking and places remain unchanged until guest acceptance, which requires availability and preserves its review status. Consultation time and attorney changes always require client acceptance. Within 24 hours of the original start, an approved override_policy is required. For other booking kinds, apply moves the booking now and emails the guest; a paid quantity or location change is refused.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -99475,7 +99475,7 @@
     {
       "name": "request_table_reservation_change",
       "title": "Request table reservation change",
-      "description": "Email the guest a proposal to change a table reservation’s location, local date, time or party size. The current reservation remains unchanged until the guest accepts. With apply, the reservation moves now and the guest is emailed the new time; a change outside the change policy or that needs the guest’s consent is refused.",
+      "description": "Email the guest a proposal to change a table reservation’s location, local date, time or party size. The current reservation remains unchanged until the guest accepts. With apply, move the reservation now and email the guest only when their consent is not required. Within 24 hours of the original start, an approved override_policy is required.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -129368,7 +129368,7 @@
         "text": "Call create_post with a new idempotency_key and this body: <body> If the user supplied or approved media, pass it as create_post media in the order they want it shown: the cover first, then the gallery. Publish only to: <destinations>. For Facebook, Instagram or Discord, call get_social_connections and use the exact target_id and connection_revision it returns; if the destination is not connected or has a problem, say so instead of publishing elsewhere. Show the user the draft's preview_url, then call publish_post with the post's updated_at as expected_updated_at and one target per named destination. Report each outcome exactly as returned. processing means call publish_post again later to finish the same post; unknown means use reconcile_post_publication, never publish again."
       },
       "toolContracts": {
-        "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
+        "create_post": "sha256:9a4b0be3540b52a6e36d1ee95660bd0826ad7d57cc710c4cf4fabf41ea1a1888",
         "get_social_connections": "sha256:ce06b442ff3f389bf517c54c51ff4fb762a7bde099820d26f260139f1e3d1686",
         "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
         "reconcile_post_publication": "sha256:00cccb196535fe18cb6304fbe3ee58fa254a10a02ff44e5039300d3be42f9d38"
@@ -129411,11 +129411,11 @@
         "cancel_product_booking": "sha256:28d9c2c6be574b460d8711e4040fed5162c439aae2b37e95ca79ea08cd24e62d",
         "cancel_table_reservation": "sha256:9f69a68d495da67c14718dff9208b98d7c28e5a4b8eba2849ded151ad293312a",
         "confirm_product_booking": "sha256:373f9f84360e37716dc1476d28b8f6b47c14001642ebaff8d713d74a7d3a8eaa",
-        "get_guest_conversation": "sha256:fabd2b7aa4ccb5f19c1d0a7bdf3bc559a083c9f2547d0c93aeda64ce51f5563c",
+        "get_guest_conversation": "sha256:bbc45bf9bdc9097c8aad98e871de2e959a34fbfaf24635f8d2490185732bab59",
         "get_product_booking": "sha256:1f0d7f20d207a6fb1aecb169e86483ae515c5b6209fbf9fe948a2be26860968d",
         "get_team_conversation": "sha256:68a4390f99121151a6c3dcca2e3cff8675166b27d958e7a1a71dcd3a4c9a81d0",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:6d0b00651d62c18f2c881046eb4d7f619ec7aecf85662d0c173af68134fd98cc",
+        "list_guest_conversations": "sha256:9bae34357644916476bec0c0d9a07dc7dbf2beb726716b882a886a05097d1ee0",
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
@@ -129423,8 +129423,8 @@
         "mark_team_conversation_read": "sha256:3ad65b07c9bd78090f9f81aeffa74ac00f1c201ee8b6325cf16cd879f1e2644d",
         "reject_product_booking": "sha256:91a5bee34d02b729a3dacb01885157ce63b443594116d8710ca90313fb76e357",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
-        "request_product_booking_change": "sha256:8912bbf319cbe44e5e7ba3cc8f6f505a44f3e4cfa724b38e88dbdefbe250382d",
-        "request_table_reservation_change": "sha256:71868f28cc9f329b1f44276ae0a223c487c789f4682c3bb8f3a09b96fde9e2dd",
+        "request_product_booking_change": "sha256:502724204b628e20343ed268bb7cd9e0734adf3f85df52e6360657338430edcc",
+        "request_table_reservation_change": "sha256:00c70a0252033e9df90a66171d64b1728bf1bae7c681a3e7e702ef864223bb88",
         "send_team_message": "sha256:b9f715f29f98d627cd0e5fa89f873b5623e13d5ba0867cc7dba69216ba886f97",
         "start_team_conversation": "sha256:b297eb76fda6a481f0246ee8c6c39d5481ebe9379dd979ecee747b54c67f0492",
         "update_team_group": "sha256:e58436da6c0b45816e909c58d6ff9265c364e410a5c5edf696a7c6085bb3f6cb"
@@ -129545,12 +129545,12 @@
         "text": "Use get_workspace_context and get_organization_analytics to read recent traffic. Use list_products, get_product and list_product_booking_sessions for bookable offerings and availability, and list_guest_conversations plus get_guest_conversation for current guest demand. Recommend the most useful action supported by those records. Use reply_to_guest, update_product or create_post and publish_post for the action the user requests, then read back its actual outcome and report any incomplete delivery or dashboard handoff."
       },
       "toolContracts": {
-        "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
-        "get_guest_conversation": "sha256:fabd2b7aa4ccb5f19c1d0a7bdf3bc559a083c9f2547d0c93aeda64ce51f5563c",
+        "create_post": "sha256:9a4b0be3540b52a6e36d1ee95660bd0826ad7d57cc710c4cf4fabf41ea1a1888",
+        "get_guest_conversation": "sha256:bbc45bf9bdc9097c8aad98e871de2e959a34fbfaf24635f8d2490185732bab59",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
         "get_product": "sha256:a42cc2a6355622aa4b35199655e6076923b056237f5c4a0e29133116ef6c2664",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:6d0b00651d62c18f2c881046eb4d7f619ec7aecf85662d0c173af68134fd98cc",
+        "list_guest_conversations": "sha256:9bae34357644916476bec0c0d9a07dc7dbf2beb726716b882a886a05097d1ee0",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",

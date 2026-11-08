@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedGuestThreadScope, assignedResponsibilitySql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
-import { organizationEventQuery } from '~/server/utils/organization-events'
+import { creationDedupeKey, creationRequestHash, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { discardMessagePhotos, listMessagePhotos, messagePhotoPlacements, uploadMessagePhotos, MessagePhotoRejection, type MessagePhoto } from '~/server/domain/guest-threads/attachments'
 import { firstName } from '~/server/domain/guest-threads/presentation'
@@ -151,11 +151,11 @@ export function messageDeliveryTaskQueries(messageId: string, now: string): Batc
   }]
 }
 
-/** The operation an accepted opportunity asked for is recorded: its task is done. */
+/** Close matching tasks only when the preceding write or its guarded audit row committed. */
 export function opportunityDoneQuery(organizationId: string, operations: readonly string[], subjectId: string, now: string): BatchQuery {
   return {
     query: `UPDATE tasks SET status = 'done', closed_at = ?, closed_by_user_id = NULL, version = version + 1, updated_at = ?
-      WHERE organization_id = ? AND kind = 'opportunity' AND status = 'open' AND opportunity_id IN (
+      WHERE changes() = 1 AND organization_id = ? AND kind = 'opportunity' AND status = 'open' AND opportunity_id IN (
         SELECT id FROM opportunities WHERE organization_id = ? AND subject_id = ? AND operation IN (SELECT value FROM json_each(?)))`,
     params: [now, now, organizationId, organizationId, subjectId, d1JsonStringSet(operations)],
   }
@@ -767,7 +767,7 @@ export async function readTaskAssignee(db: DbClient, organizationId: string, inp
   return { member: member as string | null, team: team as string | null }
 }
 
-function taskEventQuery(viewer: TaskViewer, row: Pick<TaskRow, 'id' | 'kind' | 'location_id'>, eventType: 'task.created' | 'task.assigned' | 'task.updated' | 'task.completed' | 'task.skipped' | 'task.reopened', state: { before?: unknown; after?: unknown }, guarded = true): BatchQuery {
+function taskEventQuery(viewer: TaskViewer, row: Pick<TaskRow, 'id' | 'kind' | 'location_id'>, eventType: 'task.assigned' | 'task.updated' | 'task.completed' | 'task.skipped' | 'task.reopened', state: { before?: unknown; after?: unknown }, guarded = true): BatchQuery {
   return organizationEventQuery({ organizationId: viewer.principal.organizationId, locationId: row.location_id, actorId: viewer.principal.userId, eventType,
     entityType: 'task', entityId: row.id, metadata: { kind: row.kind }, beforeState: state.before, afterState: state.after, onlyIfPreviousChangedOneRow: guarded })
 }
@@ -800,33 +800,49 @@ export async function createTask(db: DbClient, viewer: TaskViewer, body: Record<
   const notes = text(body.notes, 'notes', 5000)
   const startsAt = instant(body.startsAt, 'startsAt'), dueAt = instant(body.dueAt, 'dueAt')
   if (startsAt && dueAt && startsAt > dueAt) fail(422, 'INVALID_TASK_FIELD', 'startsAt must not be after dueAt', 'startsAt')
-  const assigned = await readTaskAssignee(db, organizationId, body)
+  const actorId = viewer.principal.userId
   const productId = body.productId ?? null, locationId = body.locationId ?? null
-  const place = productId !== null
-    ? await queryFirst<{ location_id: string; timezone: string }>(db, `SELECT pl.location_id, l.timezone FROM products p JOIN product_locations pl ON pl.organization_id = p.organization_id AND pl.product_id = p.id
-        JOIN business_locations l ON l.organization_id = pl.organization_id AND l.id = pl.location_id WHERE p.organization_id = ? AND p.id = ? ${locationId !== null ? 'AND pl.location_id = ?' : ''} ORDER BY pl.location_id LIMIT 1`,
+  const assignedMemberId = body.assignedMemberId ?? null, assignedTeamId = body.assignedTeamId ?? null
+  const dedupeKey = `custom:${organizationId}:${key}`
+  const eventKey = creationDedupeKey('task', organizationId, key)
+  const requestHash = await creationRequestHash({ actorId, title, notes, startsAt, dueAt, productId, locationId, assignedMemberId, assignedTeamId })
+  const readReplay = async (): Promise<string | null> => {
+    const record = await readCreationRecord(db, eventKey)
+    if (!record) return null
+    if (record.requestHash !== requestHash) fail(409, 'IDEMPOTENCY_CONFLICT', 'This key belongs to a different task request', 'idempotencyKey')
+    return record.entityId
+  }
+  const replayId = await readReplay()
+  if (replayId) return { task: await afterWrite(db, viewer, replayId), created: false }
+
+  const assigned = await readTaskAssignee(db, organizationId, body)
+  type Place = { location_id: string; timezone: string }
+  const places = productId !== null
+    ? await queryAll<Place>(db, `SELECT pl.location_id, l.timezone FROM product_locations pl
+        JOIN business_locations l ON l.organization_id = pl.organization_id AND l.id = pl.location_id
+        WHERE pl.organization_id = ? AND pl.product_id = ? ${locationId !== null ? 'AND pl.location_id = ?' : ''} LIMIT 2`,
       [organizationId, productId, ...(locationId !== null ? [locationId] : [])])
-    : locationId !== null ? await queryFirst<{ location_id: string; timezone: string }>(db, 'SELECT id AS location_id, timezone FROM business_locations WHERE organization_id = ? AND id = ?', [organizationId, locationId]) : null
+    : locationId !== null ? await queryAll<Place>(db, 'SELECT id AS location_id, timezone FROM business_locations WHERE organization_id = ? AND id = ?', [organizationId, locationId]) : []
+  if (places.length > 1) fail(422, 'TASK_LOCATION_REQUIRED', 'Choose a location for a product linked to multiple locations', 'locationId')
+  const place = places[0]
   if ((productId !== null || locationId !== null) && !place) fail(422, 'INVALID_TASK_FIELD', productId !== null ? 'The offering is not at that location in this organization' : 'The location is not in this organization', productId !== null ? 'productId' : 'locationId')
   const organization = await queryFirst<{ timezone: string }>(db, 'SELECT timezone FROM organization WHERE id = ?', [organizationId])
   if (!organization) throw new Error(`Organization ${organizationId} is missing`)
-  const dedupeKey = `custom:${organizationId}:${key}`
-  const existing = await queryFirst<TaskRow>(db, 'SELECT * FROM tasks WHERE dedupe_key = ?', [dedupeKey])
-  if (existing) {
-    if (existing.title !== title || existing.notes !== notes || existing.starts_at !== startsAt || existing.due_at !== dueAt || existing.product_id !== productId || existing.created_by_user_id !== viewer.principal.userId) {
-      fail(409, 'IDEMPOTENCY_CONFLICT', 'This key belongs to a different task', 'idempotencyKey')
-    }
-    return { task: await getTask(db, viewer, existing.id), created: false }
-  }
   const id = crypto.randomUUID(), now = new Date().toISOString()
-  const row = { id, kind: 'custom' as const, location_id: place?.location_id ?? null }
-  await executeBatch(db, [{
+  const resolvedLocationId = place?.location_id ?? null
+  const results = await executeBatch(db, [{
     query: `INSERT INTO tasks (id, organization_id, kind, product_id, location_id, title, notes, assigned_member_id, assigned_team_id, starts_at, due_at, timezone, status, dedupe_key, version, created_by_user_id, created_at, updated_at)
       VALUES (?, ?, 'custom', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, 1, ?, ?, ?) ON CONFLICT (dedupe_key) DO NOTHING`,
-    params: [id, organizationId, productId, row.location_id, title, notes, assigned.member, assigned.team, startsAt, dueAt, place?.timezone ?? organization.timezone, dedupeKey, viewer.principal.userId, now, now],
-  }, taskEventQuery(viewer, row, 'task.created', { after: { title, assigned_member_id: assigned.member, assigned_team_id: assigned.team, starts_at: startsAt, due_at: dueAt } })], { operation: 'Create task' })
-  const saved = await queryFirst<{ id: string }>(db, 'SELECT id FROM tasks WHERE dedupe_key = ?', [dedupeKey])
-  if (saved?.id !== id) return createTask(db, viewer, body)
+    params: [id, organizationId, productId, resolvedLocationId, title, notes, assigned.member, assigned.team, startsAt, dueAt, place?.timezone ?? organization.timezone, dedupeKey, actorId, now, now],
+  }, organizationEventQuery({ organizationId, locationId: resolvedLocationId, actorId, eventType: 'task.created', entityType: 'task', entityId: id,
+    dedupeKey: eventKey, metadata: { kind: 'custom', request_hash: requestHash }, onlyIfPreviousChangedOneRow: true,
+    afterState: { title, assigned_member_id: assigned.member, assigned_team_id: assigned.team, starts_at: startsAt, due_at: dueAt },
+  })], { operation: 'Create task' })
+  if (results[0]?.meta.changes !== 1) {
+    const winnerId = await readReplay()
+    if (!winnerId) fail(409, 'IDEMPOTENCY_CONFLICT', 'This key already belongs to a task whose original request could not be verified. Read your tasks before creating another.', 'idempotencyKey')
+    return { task: await afterWrite(db, viewer, winnerId), created: false }
+  }
   return { task: await afterWrite(db, viewer, id, assigned.member || assigned.team ? assigned : undefined), created: true }
 }
 

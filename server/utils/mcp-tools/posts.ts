@@ -140,7 +140,7 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'create_post',
-    description: "Create a draft short post when the user wants an announcement, event notice or offer. Supports a plain-text caption, ordered media, optional title, location and call to action. It stays private until publish_post. Use a new idempotency_key for each post and reuse it only for retries of that request. Long-form articles use create_blog_post.",
+    description: "Create a draft short post when the user wants an announcement, event notice or offer. Supports a plain-text caption, ordered media, optional title, location and call to action. It stays private until publish_post. Creating a draft completes any accepted task to create a post. Use a new idempotency_key for each post and reuse it only for retries of that request. Long-form articles use create_blog_post.",
     domain: 'posts',
     minimumRole: 'admin',
     inputSchema: {
@@ -235,6 +235,7 @@ function forMcp(post: Post, organization: McpExecutorContext['organization']) {
     ...attachViewUrlToRecord(post, organization, { publicPath: post.status === 'published' ? post.public_path : null }),
     public_path: post.public_path,
     preview_url: absolutizeOrganizationUrl(organization, post.preview_url),
+    publications: post.publications.map(({ can_reconcile, ...receipt }) => receipt),
   } as Record<string, unknown>
   return Object.fromEntries(Object.keys(postObject.properties).filter(field => Object.hasOwn(record, field)).map(field => [field, record[field]]))
 }

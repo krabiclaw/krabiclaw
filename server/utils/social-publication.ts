@@ -918,8 +918,8 @@ export async function publishPost(
       params: [now, now, now, postId, organizationId, input.expectedUpdatedAt],
     }, organizationEventQuery({ organizationId, locationId: post.location_id, actorId, eventType: 'post.published', entityType: 'post', entityId: postId,
       metadata: { channel: 'organization' }, onlyIfPreviousChangedOneRow: true }),
-    publicResourceCacheInvalidationQuery(organizationId, 'post-publish'),
-    opportunityDoneQuery(organizationId, ['post.publish'], postId, now)])
+    opportunityDoneQuery(organizationId, ['post.publish'], postId, now),
+    publicResourceCacheInvalidationQuery(organizationId, 'post-publish')])
     if (Number(result?.meta.changes ?? 0) === 1) {
       const published = await getPost(db, env, organizationId, postId)
       if (!published) throw new HTTPError({ statusCode: 404, statusMessage: 'Post not found' })
