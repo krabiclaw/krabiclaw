@@ -247,12 +247,14 @@ test('a guest opens a stay\'s booking dialog, picks nights the calendar allows a
   await studio.click()
   await expect(page).toHaveURL(`${baseURL}${stayPath}`)
   await waitForNuxtHydration(page)
-  const card = page.locator('article')
+  // The stay's own card: the page also renders each review as an article.
+  const availability = page.getByRole('button', { name: 'Check availability', exact: true })
+  const card = page.locator('article').filter({ has: availability })
   // A stay is a reservation: none of an appointment's words.
   await expect(card).not.toContainText(/appointment/i)
   const datePicker = page.getByRole('dialog').filter({ has: page.locator('[data-stay-calendar]') })
   const contact = page.locator('#product-booking')
-  await card.getByRole('button', { name: 'Check availability', exact: true }).click()
+  await availability.click()
   await expect(datePicker).toBeVisible()
   await expect(datePicker.getByRole('heading', { name: 'Select dates', exact: true })).toBeVisible()
 
