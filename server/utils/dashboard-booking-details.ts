@@ -255,7 +255,7 @@ export async function loadDashboardBookingDetails(
   const context = await bookingContext(event, input.organizationSlug)
   if (input.type === 'order' || input.type === 'payment') {
     if (!await roleAllows({ organizationId: context.organization.id, role: context.organization.role, permissions: { payments: ['read'] } })) throw new HTTPError({ statusCode: 403, message: 'Payments access is required' })
-    return composePurchaseDetails(context.db, { organizationId: context.organization.id }, input.bookingId)
+    return composePurchaseDetails(context.db, context.env, { organizationId: context.organization.id }, input.bookingId)
   }
   const row = await loadBookingRow(context.db, { organizationId: context.organization.id }, input.type, input.bookingId)
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
@@ -283,21 +283,22 @@ async function loadResourceImage(db: DbClient, row: BookingRow, type: DashboardB
 
 export async function loadBuyerBookingDetails(
   db: DbClient,
+  env: CloudflareEnv,
   userId: string,
   type: DashboardRecordType,
   bookingId: string,
 ): Promise<DashboardBookingDetails> {
-  if (type === 'order' || type === 'payment') return composePurchaseDetails(db, { buyerUserId: userId }, bookingId)
+  if (type === 'order' || type === 'payment') return composePurchaseDetails(db, env, { buyerUserId: userId }, bookingId)
   const row = await loadBookingRow(db, { buyerUserId: userId }, type, bookingId)
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
-  return composeBookingDetails(db, row, type, { buyerUserId: userId })
+  return composeBookingDetails(db, row, type, { env, buyerUserId: userId })
 }
 
 async function composeBookingDetails(
   db: DbClient,
   row: BookingRow,
   type: DashboardBookingType,
-  reader: { env: CloudflareEnv; canReadPayments: boolean; canReassignProvider: boolean; buyerUserId?: undefined } | { buyerUserId: string; env?: undefined; canReadPayments?: undefined; canReassignProvider?: undefined },
+  reader: { env: CloudflareEnv; canReadPayments: boolean; canReassignProvider: boolean; buyerUserId?: undefined } | { buyerUserId: string; env: CloudflareEnv; canReadPayments?: undefined; canReassignProvider?: undefined },
 ): Promise<DashboardBookingDetails> {
   if (row.location_id !== null && !row.location_title) throw new HTTPError({ statusCode: 500, message: 'The booking location is missing its title' })
 
@@ -323,7 +324,7 @@ async function composeBookingDetails(
   const provider=!reader.buyerUserId&&row.assigned_member_id?await queryFirst<{name:string|null}>(db,`SELECT ${MEMBER_NAME_SQL} name FROM member m LEFT JOIN user u ON u.id=m.userId LEFT JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE m.id=? AND m.organizationId=?`,[row.assigned_member_id,row.organization_id]):null
   // The provider's Google calendar is asked about this booking's time when the team reads it; a calendar that cannot be read says why.
   let providerConflict=false, providerCalendarStatus: string|null=null
-  if (reader.env && row.assigned_member_id) {
+  if (!reader.buyerUserId && row.assigned_member_id) {
     try { providerConflict=(await memberBusyIntervals(db,reader.env,row.organization_id,row.assigned_member_id,{from:row.starts_at,until:row.ends_at})).some(busy=>busy.start<row.ends_at&&busy.end>row.starts_at) }
     catch (error) { providerCalendarStatus=error instanceof Error?error.message:String(error) }
   }
@@ -331,7 +332,7 @@ async function composeBookingDetails(
     ?await queryAll<{id:string}>(db,'SELECT id FROM payments WHERE organization_id=? AND subject_type=? AND subject_id=? AND buyer_user_id=? ORDER BY created_at,id',[row.organization_id,type,row.operational_id,reader.buyerUserId])
     :reader.canReadPayments?await queryAll<{id:string}>(db,'SELECT id FROM payments WHERE organization_id=? AND subject_type=? AND subject_id=? ORDER BY created_at,id',[row.organization_id,type,row.operational_id]):[]
   const payments=await Promise.all(paymentIds.map(async ({id})=>{
-    const detail=await readPaymentDetails(db,row.organization_id,id)
+    const detail=await readPaymentDetails(db,reader.env,row.organization_id,id)
     return {payment:paymentDisplay(detail.payment),refunds:paymentRefundsDisplay(detail.refunds),order:paymentOrderDisplay(detail.order)}
   }))
   const now = new Date().toISOString()
@@ -483,7 +484,7 @@ export function isDashboardRecordType(value: string | undefined): value is Dashb
  * It has no party, time, policy or conversation, and nothing left to decide —
  * what remains is what was bought, when, from whom, and the money.
  */
-async function composePurchaseDetails(db: DbClient, scope: BookingScope, paymentId: string): Promise<DashboardBookingDetails> {
+async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: BookingScope, paymentId: string): Promise<DashboardBookingDetails> {
   const payment = await queryFirst<{ organization_id: string; buyer_user_id: string | null; location_id: string | null; created_at: string; updated_at: string; organization_name: string; vertical: string; contact_phone: string | null; buyer_name: string | null; buyer_email: string | null; buyer_image: string | null; location_slug: string | null; location_title: string | null }>(db, `
     SELECT p.organization_id, p.buyer_user_id, p.location_id, p.created_at, p.updated_at, s.name AS organization_name, s.vertical, s.contact_phone,
            u.name AS buyer_name, u.email AS buyer_email, u.image AS buyer_image, l.slug AS location_slug, l.title AS location_title
@@ -493,7 +494,7 @@ async function composePurchaseDetails(db: DbClient, scope: BookingScope, payment
     LEFT JOIN business_locations l ON l.id = p.location_id AND l.organization_id = p.organization_id
     WHERE p.id = ? AND ${scope.buyerUserId ? 'p.buyer_user_id = ?' : 'p.organization_id = ?'}`, [paymentId, scope.buyerUserId ?? scope.organizationId])
   if (!payment) throw new HTTPError({ statusCode: 404, message: 'Purchase not found' })
-  const detail = await readPaymentDetails(db, payment.organization_id, paymentId)
+  const detail = await readPaymentDetails(db, env, payment.organization_id, paymentId)
   const snapshot: unknown = JSON.parse(detail.payment.price_snapshot_json)
   const line = detail.order ? await queryFirst<{ product_id: string | null }>(db, 'SELECT product_id FROM payment_order_lines WHERE order_id = ? ORDER BY rowid LIMIT 1', [detail.order.id]) : null
   // A purchase keeps the item's own photo or the place it was sold.

@@ -56,16 +56,32 @@ export async function requirePayment(db: DbClient, organizationId: string, payme
   if (!payment) throw new HTTPError({ statusCode: 404, statusMessage: 'Payment not found' })
   return payment
 }
-/** Full merchant detail; callers must authorize before reading or projecting it. */
-export async function readPaymentDetails(db:DbClient,organizationId:string,paymentId:string){
- const payment=await requirePayment(db,organizationId,paymentId)
- const [refunds,disputes,booking,order]=await Promise.all([
-  queryAll<{id:string;amount:number;status:string}>(db,'SELECT * FROM payment_refunds WHERE payment_id=?',[payment.id]),
-  queryAll(db,'SELECT * FROM payment_disputes WHERE payment_id=?',[payment.id]),
-  payment.subject_type==='booking'||payment.subject_type==='reservation'?queryFirst<{request_id:string|null}>(db,`SELECT request_id FROM ${payment.subject_type==='booking'?'bookings':'reservations'} WHERE id=? AND organization_id=?`,[payment.subject_id,organizationId]):Promise.resolve(null),
-  readPaymentOrder(db,organizationId,payment.id),
+/** What Stripe says was captured, refunded and disputed. A PaymentIntent keeps saying succeeded after a refund: the Charge and Refunds hold that. */
+async function stripePaymentFacts(env:CloudflareEnv,payment:Payment){
+ if(!payment.stripe_payment_intent_id||!payment.stripe_charge_id)return null
+ const stripe=paymentsStripe(env,Boolean(payment.livemode))
+ const account={stripeAccount:payment.stripe_account_id}
+ const [charge,refunds,disputes]=await Promise.all([
+  stripe.charges.retrieve(payment.stripe_charge_id,{},account),
+  stripe.refunds.list({payment_intent:payment.stripe_payment_intent_id,limit:100},account),
+  stripe.disputes.list({payment_intent:payment.stripe_payment_intent_id,limit:100},account),
  ])
- return {payment,refunds,disputes,visit:booking?.request_id?{kind:payment.subject_type,request_id:booking.request_id}:null,order}
+ return {captured:charge.amount_captured,refunded:charge.amount_refunded,refunds:refunds.data,disputes:disputes.data}
+}
+/** Full merchant detail; callers must authorize before reading or projecting it. */
+export async function readPaymentDetails(db:DbClient,env:CloudflareEnv,organizationId:string,paymentId:string){
+ const recorded=await requirePayment(db,organizationId,paymentId)
+ const [refundRows,disputeRows,booking,order,stripeFacts]=await Promise.all([
+  queryAll<{id:string;amount:number;status:string;stripe_refund_id:string|null}>(db,'SELECT * FROM payment_refunds WHERE payment_id=?',[recorded.id]),
+  queryAll<{id:string;stripe_dispute_id:string;amount:number;currency:string;reason:string;status:string;evidence_due_at:string|null;updated_at:string}>(db,'SELECT * FROM payment_disputes WHERE payment_id=?',[recorded.id]),
+  recorded.subject_type==='booking'||recorded.subject_type==='reservation'?queryFirst<{request_id:string|null}>(db,`SELECT request_id FROM ${recorded.subject_type==='booking'?'bookings':'reservations'} WHERE id=? AND organization_id=?`,[recorded.subject_id,organizationId]):Promise.resolve(null),
+   readPaymentOrder(db,organizationId,recorded.id),
+  stripePaymentFacts(env,recorded),
+ ])
+ const payment=stripeFacts?{...recorded,captured_amount:stripeFacts.captured,refunded_amount:stripeFacts.refunded}:recorded
+ // Stripe's refunds, with the note and author only we hold; a refund not yet sent to Stripe exists only here.
+ const refunds=stripeFacts?[...stripeFacts.refunds.map(refund=>({...refundRows.find(row=>row.stripe_refund_id===refund.id),id:refundRows.find(row=>row.stripe_refund_id===refund.id)?.id??refund.id,stripe_refund_id:refund.id,amount:refund.amount,status:refund.status??'pending'})),...refundRows.filter(row=>!row.stripe_refund_id)]:refundRows
+ return {payment,refunds,disputes:stripeFacts?stripeFacts.disputes.map(dispute=>{const row=disputeRows.find(item=>item.stripe_dispute_id===dispute.id);return {id:row?.id??dispute.id,stripe_dispute_id:dispute.id,amount:dispute.amount,currency:dispute.currency.toUpperCase(),reason:dispute.reason,status:dispute.status,evidence_due_at:dispute.evidence_details?.due_by?new Date(dispute.evidence_details.due_by*1000).toISOString():null,updated_at:row?.updated_at??new Date(dispute.created*1000).toISOString()}}):disputeRows,visit:booking?.request_id?{kind:payment.subject_type,request_id:booking.request_id}:null,order}
 }
 export type PaymentsEarningsType = 'paid' | 'refunded'
 export async function listPayments(db: DbClient, principal: FinancialPrincipal, input: { from: string; to: string; after?: string; limit?: number; location_id?: string; earnings_type?: PaymentsEarningsType }) {

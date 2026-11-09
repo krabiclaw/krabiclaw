@@ -9,6 +9,6 @@ export default defineHandler(async event=>{
  if(!session)throw new HTTPError({statusCode:401,statusMessage:'Sign in to view your booking'})
  const bookingType=getRouterParam(event,'bookingType'),bookingId=getRouterParam(event,'bookingId')
  if(!isDashboardRecordType(bookingType)||!bookingId)throw new HTTPError({statusCode:400,statusMessage:'Valid record type and ID are required'})
- const booking=await loadBuyerBookingDetails(env.DB,session.user.id,bookingType,bookingId)
+ const booking=await loadBuyerBookingDetails(env.DB,env,session.user.id,bookingType,bookingId)
  return jsonResponse({booking},{headers:{'cache-control':'private, no-store'}})
 })

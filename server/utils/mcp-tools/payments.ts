@@ -58,7 +58,7 @@ export async function handlePaymentsTools(ctx: McpExecutorContext): Promise<unkn
     }
     case 'get_payment': {
       await authorizePayments(principal, 'read')
-      const detail = await readPaymentDetails(db, organizationId, String(args.payment_id))
+      const detail = await readPaymentDetails(db, env, organizationId, String(args.payment_id))
       if (!organizationSlug) throw new HTTPError({ statusCode: 503, statusMessage: 'Payments dashboard link requires the organization slug' })
       const transactions = await paymentTransactions(db, principal, organizationSlug, { payments: [detail.payment], next_cursor: null })
       const transaction = transactions.payments[0]!
