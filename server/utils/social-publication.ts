@@ -19,8 +19,7 @@ import {
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import {
-  createMessage, discordMessageLink, DiscordError, getMessage, listMessages, readMessageChannel,
-  DISCORD_ATTACHMENT_LIMIT, DISCORD_CONTENT_LIMIT, DISCORD_DESCRIPTION_LIMIT, DISCORD_FILE_LIMIT_BYTES, DISCORD_MEDIA_TYPES, DISCORD_REQUEST_LIMIT_BYTES,
+  createMessage, discordMessageLink, DiscordError, getMessage, readMessageChannel,
   type DiscordFile, type DiscordMessage,
 } from '~/server/utils/discord-bot'
 
@@ -131,11 +130,7 @@ const NOT_CONNECTED: Record<SocialChannel, string> = {
 
 export interface DiscordConnection { channelId: string; guildId: string }
 
-/**
- * The connected channel as the bot sees it now. A channel the bot can no
- * longer see, or that stopped being a text or announcement channel, needs a
- * new connection; nothing is sent until then.
- */
+/** The connected channel as the bot sees it now. */
 async function discordTargetFor(env: CloudflareEnv, connection: ConnectionRead): Promise<DiscordConnection> {
   if (connection.channel !== 'discord' || !connection.connected || !connection.targetId) throw new Error('The Discord connection is incomplete. Connect Discord again.')
   const channel = await readMessageChannel(env, connection.targetId)
@@ -254,20 +249,7 @@ export function formatViolation(channel: SocialChannel, caption: string, assets:
   const videos = assets.filter(asset => asset.kind === 'video')
   const unreachable = assets.find(asset => !/^https:\/\//.test(asset.public_url))
   if (unreachable) return { code: 'media_not_public', message: `${channel} media is fetched from its public https URL; asset ${unreachable.asset_id} is at ${unreachable.public_url}` }
-  if (channel === 'discord') {
-    // UTF-16 code units: never fewer than the characters Discord counts, so nothing over its limit is sent.
-    if (caption.length > DISCORD_CONTENT_LIMIT) return { code: 'caption_too_long', message: `A Discord message is limited to ${DISCORD_CONTENT_LIMIT} characters; this post's text and call to action are ${caption.length}. Shorten it; it is not truncated or split.` }
-    if (assets.length > DISCORD_ATTACHMENT_LIMIT) return { code: 'too_many_media', message: `A Discord message carries at most ${DISCORD_ATTACHMENT_LIMIT} attachments; this post has ${assets.length}` }
-    const unsupported = assets.find(asset => DISCORD_MEDIA_TYPES[asset.mime_type ?? ''] !== asset.kind)
-    if (unsupported) return { code: 'unsupported_media_type', message: `Discord attachments here are JPEG, PNG, GIF or WebP images and MP4, MOV or WebM video; asset ${unsupported.asset_id} is ${unsupported.mime_type ?? 'of unknown type'}` }
-    const large = assets.find(asset => (asset.file_size ?? 0) > DISCORD_FILE_LIMIT_BYTES)
-    if (large) return { code: 'media_too_large', message: `Discord accepts files up to 20 MiB; asset ${large.asset_id} is ${((large.file_size ?? 0) / 1024 / 1024).toFixed(1)} MiB` }
-    const total = assets.reduce((sum, asset) => sum + (asset.file_size ?? 0), 0)
-    if (total > DISCORD_REQUEST_LIMIT_BYTES) return { code: 'media_too_large', message: `One Discord message carries at most 25 MiB of attachments; this post's media is ${(total / 1024 / 1024).toFixed(1)} MiB` }
-    const described = assets.find(asset => (asset.alt_text?.length ?? 0) > DISCORD_DESCRIPTION_LIMIT)
-    if (described) return { code: 'alt_text_too_long', message: `Discord attachment descriptions are limited to ${DISCORD_DESCRIPTION_LIMIT} characters; asset ${described.asset_id}'s alt text is ${described.alt_text!.length}` }
-    return null
-  }
+  if (channel === 'discord') return null
   if (channel === 'facebook') {
     if (caption.length > 63_206) return { code: 'caption_too_long', message: `Facebook text is limited to 63206 characters; this is ${caption.length}` }
     if (videos.length && (videos.length > 1 || images.length)) return { code: 'unsupported_combination', message: 'A Facebook post carries photos or one video, not both and not several videos' }
@@ -576,47 +558,15 @@ async function publishToInstagram(context: ChannelContext, target: InstagramTarg
   })
 }
 
-/**
- * The post's media as the files of one Discord message, in order, each checked
- * against what Discord accepts by the bytes actually fetched rather than by
- * what was recorded about the asset.
- */
-async function discordFiles(post: Post): Promise<DiscordFile[] | { code: string; message: string }> {
-  const files: DiscordFile[] = []
-  let total = 0
-  for (const [index, item] of post.media.entries()) {
-    const response = await fetch(item.public_url, { redirect: 'follow' })
+/** The post's media as the files of one Discord message, in order. */
+async function discordFiles(post: Post): Promise<DiscordFile[]> {
+  return Promise.all(post.media.map(async (item, index) => {
+    const response = await fetch(item.public_url)
     if (!response.ok) throw new Error(`Asset ${item.asset_id} could not be read from ${item.public_url}: HTTP ${response.status}`)
     const type = (response.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase()
-    if (DISCORD_MEDIA_TYPES[type] !== item.kind) return { code: 'unsupported_media_type', message: `Asset ${item.asset_id} is served as ${type || 'an unknown type'}, which is not a Discord ${item.kind} format here` }
-    // Never more than the file limit, nor the message's remaining allowance, is held in memory.
-    const cap = Math.min(DISCORD_FILE_LIMIT_BYTES, DISCORD_REQUEST_LIMIT_BYTES - total)
-    const tooLarge = { code: 'media_too_large', message: `Asset ${item.asset_id} is larger than Discord's 20 MiB file limit or the 25 MiB this message carries in all` }
-    if (Number(response.headers.get('content-length') ?? 0) > cap) { await response.body?.cancel(); return tooLarge }
-    if (!response.body) throw new Error(`Asset ${item.asset_id} answered without a body`)
-    const chunks: Uint8Array[] = []
-    let size = 0
-    const reader = response.body.getReader()
-    for (let read = await reader.read(); !read.done; read = await reader.read()) {
-      size += read.value.byteLength
-      if (size > cap) { await reader.cancel(); return tooLarge }
-      chunks.push(read.value)
-    }
-    const bytes = new Uint8Array(size)
-    let offset = 0
-    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
-    total += size
     const extension = type.split('/')[1]!.replace('jpeg', 'jpg').replace('quicktime', 'mov')
-    files.push({ name: `${index + 1}-${item.asset_id}.${extension}`, type, bytes: bytes.buffer, description: item.alt_text })
-  }
-  return files
-}
-
-/** A message is this publication's only when the KrabiClaw bot sent it to the connected channel. */
-function discordMessageMismatch(env: CloudflareEnv, message: DiscordMessage, channelId: string): string | null {
-  if (message.channel_id !== channelId) return `Discord message ${message.id} is in channel ${message.channel_id}, not the connected channel ${channelId}.`
-  if (message.author.id !== env.DISCORD_CLIENT_ID) return `Discord message ${message.id} was not sent by the KrabiClaw bot.`
-  return null
+    return { name: `${index + 1}-${item.asset_id}.${extension}`, type, bytes: await response.arrayBuffer(), description: item.alt_text }
+  }))
 }
 
 /** Discord's nonce is at most 25 characters; the publication id is its identity. */
@@ -626,10 +576,6 @@ async function publishToDiscord(context: ChannelContext, target: DiscordConnecti
   const { env } = context
   const fence = claimed(context.db, context.publication.id, context.attemptId)
   const files = await discordFiles(context.post)
-  if (!Array.isArray(files)) {
-    await fence.failed(files.code, files.message, {})
-    return outcome(context, 'failed', files)
-  }
   await fence.beginFinal()
   let message: DiscordMessage
   try {
@@ -641,11 +587,6 @@ async function publishToDiscord(context: ChannelContext, target: DiscordConnecti
       return outcome(context, 'processing', failureOf(error))
     }
     throw error
-  }
-  const mismatch = discordMessageMismatch(env, message, target.channelId)
-  if (mismatch) {
-    await fence.failed('destination_mismatch', mismatch, {})
-    return outcome(context, 'failed', { code: 'destination_mismatch', message: mismatch })
   }
   const link = discordMessageLink(target.guildId, message.channel_id, message.id)
   await fence.published({ providerPostId: message.id, permalink: link, publishedAt: instantOf(message.timestamp), handles: {} })
@@ -1027,47 +968,15 @@ export async function reconcilePostPublication(env: CloudflareEnv, organizationI
   return { publication: receipt(updated), state: updated.state }
 }
 
-/**
- * Reads the connected channel for what one Discord publication sent. A
- * supplied `provider_post_id` is read and must be the bot's message in that
- * channel. Without one, the bot's messages sent since the publication began
- * are searched for exactly this post's text and media in order; one match is
- * the publication, and none or several leaves it unknown.
- */
+/** Records the bot's message that one Discord publication became. */
 async function reconcileDiscordPublication(env: CloudflareEnv, organizationId: string, publication: PublicationRecord, target: DiscordConnection, providerPostId: string | null) {
   const db = env.DB as DbClient
   if (publication.state !== 'unknown' && publication.state !== 'published') {
     throw new HTTPError({ statusCode: 409, statusMessage: `This Discord publication is ${publication.state}; only an unknown or published one is reconciled` })
   }
   const messageId = providerPostId ?? publication.provider_post_id
-  let message: DiscordMessage | null
-  if (messageId) {
-    message = await readDiscordMessage(env, target, messageId)
-  } else {
-    const post = publication.post_id ? await getPost(db, env, organizationId, publication.post_id) : null
-    if (!post || await postPayloadFingerprint(post, { channel: 'discord', target_id: publication.provider_target_id }) !== publication.payload_hash) {
-      throw new HTTPError({ statusCode: 409, statusMessage: 'The post changed or is gone since this attempt, so the channel cannot be searched for what it sent. Supply the Discord message id.' })
-    }
-    const caption = providerCaption(post.body, post.call_to_action)
-    const since = Date.parse(publication.created_at)
-    const matches = (candidate: DiscordMessage) => !discordMessageMismatch(env, candidate, target.channelId) && Date.parse(candidate.timestamp) >= since
-      && candidate.content === caption && candidate.attachments.length === post.media.length
-      && candidate.attachments.every((attachment, index) => attachment.filename.startsWith(`${index + 1}-${post.media[index]!.asset_id}.`))
-    // Newest first, page by page, back to when the publication began.
-    const sent: DiscordMessage[] = []
-    let before: string | null = null
-    for (;;) {
-      const page = await listMessages(env, target.channelId, { before, limit: 100 })
-      sent.push(...page.filter(matches))
-      if (page.length < 100 || Date.parse(page.at(-1)!.timestamp) < since) break
-      before = page.at(-1)!.id
-    }
-    message = sent.length === 1 ? sent[0]! : null
-    if (!message) {
-      return { publication: receipt(publication), state: publication.state, message: sent.length
-        ? `${sent.length} messages match this post; supply the Discord message id.` : 'No message of this post is in the channel; it stays unknown.' }
-    }
-  }
+  if (!messageId) return { publication: receipt(publication), state: publication.state, message: 'Supply the Discord message id from list_channel_posts.' }
+  const message = await readDiscordMessage(env, target, messageId)
   const result = await execute(db, `UPDATE post_publications SET state = 'published', attempt_id = NULL, provider_post_id = ?, provider_permalink = ?,
       published_at = COALESCE(published_at, ?), error_code = NULL, error_message = NULL, updated_at = ?
     WHERE id = ? AND updated_at = ? AND state IN ('published', 'unknown')`,
@@ -1088,7 +997,6 @@ export async function readDiscordMessage(env: CloudflareEnv, target: DiscordConn
     if (error instanceof DiscordError && error.objectMissing) throw new HTTPError({ statusCode: 404, statusMessage: `The connected Discord channel has no message ${messageId}` })
     throw error
   }
-  const mismatch = discordMessageMismatch(env, message, target.channelId)
-  if (mismatch) throw new HTTPError({ statusCode: 409, statusMessage: mismatch })
+  if (message.author.id !== env.DISCORD_CLIENT_ID) throw new HTTPError({ statusCode: 409, statusMessage: `Discord message ${message.id} was not sent by the KrabiClaw bot.` })
   return message
 }
