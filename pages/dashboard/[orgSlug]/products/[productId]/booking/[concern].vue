@@ -72,7 +72,7 @@ watch(() => [p.form.assigned_member_id, p.form.assigned_team_id], ([memberId, te
 })
 const hostHours = computed({
   get: () => p.form.scheduling_mode === 'provider',
-  set: (value: boolean) => { p.form.scheduling_mode = value ? 'provider' : 'legacy' },
+  set: (value: boolean) => { p.form.scheduling_mode = value ? 'provider' : 'business' },
 })
 // A chosen member guests can't see yet: their profile is one step away.
 const unpublishedHost = computed(() => members.value?.members.find(member => member.id === p.form.assigned_member_id && member.scheduling?.public_approved !== 1) ?? null)

@@ -61,7 +61,7 @@ export interface ProductBookingConfigRecord {
   online_payment_required: boolean
   /** Sessions come from each provider's working hours, in that provider's timezone. */
   held_online: boolean
-  scheduling_mode: 'legacy' | 'provider'
+  scheduling_mode: 'business' | 'provider'
   assigned_member_id: string | null
   assigned_team_id: string | null
   /** The tenant's own questions asked with each booking, and the revision a form built from them carries. */
@@ -163,11 +163,11 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   const currentQuestions = current ? parseStoredFormQuestions(current.questions) : []
   const questions = patch.questions === undefined ? currentQuestions : prepareFormQuestionsWrite(currentQuestions, { questions: patch.questions, expectedRevision: patch.expected_questions_revision })
   const heldOnline = patch.held_online === undefined ? current?.held_online === 1 : patch.held_online === true
-  if (patch.scheduling_mode !== undefined && !['legacy', 'provider'].includes(String(patch.scheduling_mode))) badRequest('Invalid scheduling mode')
+  if (patch.scheduling_mode !== undefined && !['business', 'provider'].includes(String(patch.scheduling_mode))) badRequest('Invalid scheduling mode')
   const target = await assertResponsibilityTarget(db, input.organizationId, patch, current)
   const assignedMember = target.assigned_member_id
   const assignedTeam = target.assigned_team_id
-  const mode = (patch.scheduling_mode ?? current?.scheduling_mode ?? 'legacy') as ProductBookingConfigRecord['scheduling_mode']
+  const mode = (patch.scheduling_mode ?? current?.scheduling_mode ?? 'business') as ProductBookingConfigRecord['scheduling_mode']
   requireConsultationAttorney(product?.kind ?? input.productKind!, { scheduling_mode: mode, assigned_member_id: assignedMember, assigned_team_id: assignedTeam })
   // The host is who runs it, a member or a team; in provider mode their own hours are also the schedule.
   if (mode === 'provider' && !assignedMember && !assignedTeam) badRequest('Choose the member or team whose working hours guests book')
@@ -691,7 +691,7 @@ export interface ProductBookingSetupInput {
   confirmation_mode?: 'instant' | 'review'
   online_payment_required?: boolean
   held_online?: boolean
-  scheduling_mode?: 'legacy' | 'provider'
+  scheduling_mode?: 'business' | 'provider'
   assigned_member_id?: string | null
   assigned_team_id?: string | null
   weekly_slots?: WeeklySlotInput[]

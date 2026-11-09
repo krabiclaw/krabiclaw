@@ -315,7 +315,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       default_capacity: row.default_capacity === null ? null : Number(row.default_capacity),
       confirmation_mode: row.confirmation_mode as 'instant' | 'review', online_payment_required: Number(row.online_payment_required) === 1,
       held_online: Number(row.held_online) === 1,
-      scheduling_mode: row.scheduling_mode as 'legacy' | 'provider', assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
+      scheduling_mode: row.scheduling_mode as 'business' | 'provider', assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
       ...storedQuestions(row.questions),
     }

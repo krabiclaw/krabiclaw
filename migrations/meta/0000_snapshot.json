@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "df84b7dc-a7f8-4648-881d-d08e68b8d913",
+  "id": "0dbface4-9bbb-4b76-a4b0-5db7cfab409a",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -3534,10 +3534,6 @@
         "content_documents_copy_required_check": {
           "name": "content_documents_copy_required_check",
           "value": "row_role <> 'root' OR ((kind NOT IN ('page','article','qa') OR title IS NOT NULL) AND (kind NOT IN ('article','social_post') OR slug IS NOT NULL))"
-        },
-        "content_documents_social_source_check": {
-          "name": "content_documents_social_source_check",
-          "value": "kind <> 'social_post' OR row_role <> 'root' OR (source IN ('manual','template')) IS 1"
         }
       }
     },
@@ -4542,235 +4538,6 @@
         }
       }
     },
-    "inventory_items": {
-      "name": "inventory_items",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "product_variant_id": {
-          "name": "product_variant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
-        }
-      },
-      "indexes": {
-        "inventory_items_org_id_unique": {
-          "name": "inventory_items_org_id_unique",
-          "columns": [
-            "organization_id",
-            "id"
-          ],
-          "isUnique": true
-        },
-        "inventory_items_variant_unique": {
-          "name": "inventory_items_variant_unique",
-          "columns": [
-            "product_variant_id"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {
-        "inventory_items_organization_id_organization_id_fk": {
-          "name": "inventory_items_organization_id_organization_id_fk",
-          "tableFrom": "inventory_items",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "inventory_items_variant_scope_fk": {
-          "name": "inventory_items_variant_scope_fk",
-          "tableFrom": "inventory_items",
-          "tableTo": "product_variants",
-          "columnsFrom": [
-            "organization_id",
-            "product_variant_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "inventory_items_instants_check": {
-          "name": "inventory_items_instants_check",
-          "value": "(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)"
-        }
-      }
-    },
-    "inventory_levels": {
-      "name": "inventory_levels",
-      "columns": {
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "inventory_item_id": {
-          "name": "inventory_item_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "location_id": {
-          "name": "location_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "on_hand": {
-          "name": "on_hand",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "reserved": {
-          "name": "reserved",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
-        }
-      },
-      "indexes": {
-        "inventory_levels_location_idx": {
-          "name": "inventory_levels_location_idx",
-          "columns": [
-            "location_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "inventory_levels_organization_id_organization_id_fk": {
-          "name": "inventory_levels_organization_id_organization_id_fk",
-          "tableFrom": "inventory_levels",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "inventory_levels_item_scope_fk": {
-          "name": "inventory_levels_item_scope_fk",
-          "tableFrom": "inventory_levels",
-          "tableTo": "inventory_items",
-          "columnsFrom": [
-            "organization_id",
-            "inventory_item_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "inventory_levels_location_scope_fk": {
-          "name": "inventory_levels_location_scope_fk",
-          "tableFrom": "inventory_levels",
-          "tableTo": "business_locations",
-          "columnsFrom": [
-            "organization_id",
-            "location_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "inventory_levels_pk": {
-          "columns": [
-            "inventory_item_id",
-            "location_id"
-          ],
-          "name": "inventory_levels_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "inventory_levels_instants_check": {
-          "name": "inventory_levels_instants_check",
-          "value": "(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)"
-        },
-        "inventory_levels_quantities_check": {
-          "name": "inventory_levels_quantities_check",
-          "value": "on_hand >= 0 AND reserved >= 0 AND reserved <= on_hand"
-        }
-      }
-    },
     "invitation": {
       "name": "invitation",
       "columns": {
@@ -5038,28 +4805,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "free_cancellation_until_minutes": {
-          "name": "free_cancellation_until_minutes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "reschedule_allowed": {
-          "name": "reschedule_allowed",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": true
-        },
-        "reschedule_cutoff_minutes": {
-          "name": "reschedule_cutoff_minutes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "accessibility_contact_required": {
           "name": "accessibility_contact_required",
           "type": "integer",
@@ -5067,13 +4812,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": false
-        },
-        "additional_notes_html": {
-          "name": "additional_notes_html",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         },
         "questions": {
           "name": "questions",
@@ -5163,7 +4901,7 @@
         },
         "location_reservation_configs_booleans_check": {
           "name": "location_reservation_configs_booleans_check",
-          "value": "deposit_required IN (0, 1) AND reschedule_allowed IN (0, 1) AND accessibility_contact_required IN (0, 1)"
+          "value": "deposit_required IN (0, 1) AND accessibility_contact_required IN (0, 1)"
         },
         "location_reservation_configs_duration_check": {
           "name": "location_reservation_configs_duration_check",
@@ -5175,7 +4913,7 @@
         },
         "location_reservation_configs_minutes_check": {
           "name": "location_reservation_configs_minutes_check",
-          "value": "(advance_notice_minutes IS NULL OR advance_notice_minutes >= 0) AND (free_cancellation_until_minutes IS NULL OR free_cancellation_until_minutes >= 0) AND (reschedule_cutoff_minutes IS NULL OR reschedule_cutoff_minutes >= 0)"
+          "value": "advance_notice_minutes IS NULL OR advance_notice_minutes >= 0"
         },
         "location_reservation_configs_party_check": {
           "name": "location_reservation_configs_party_check",
@@ -9128,20 +8866,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "stripe_checkout_id": {
-          "name": "stripe_checkout_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "checkout_url": {
-          "name": "checkout_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "stripe_payment_intent_id": {
           "name": "stripe_payment_intent_id",
           "type": "text",
@@ -11482,8 +11206,7 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "'legacy'"
+          "autoincrement": false
         },
         "assigned_member_id": {
           "name": "assigned_member_id",
@@ -12204,278 +11927,6 @@
         }
       }
     },
-    "product_option_values": {
-      "name": "product_option_values",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "product_id": {
-          "name": "product_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "product_option_id": {
-          "name": "product_option_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "value": {
-          "name": "value",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "sort_order": {
-          "name": "sort_order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
-        }
-      },
-      "indexes": {
-        "product_option_values_option_sort_idx": {
-          "name": "product_option_values_option_sort_idx",
-          "columns": [
-            "product_option_id",
-            "sort_order"
-          ],
-          "isUnique": false
-        },
-        "product_option_values_option_id_unique": {
-          "name": "product_option_values_option_id_unique",
-          "columns": [
-            "organization_id",
-            "product_id",
-            "product_option_id",
-            "id"
-          ],
-          "isUnique": true
-        },
-        "product_option_values_option_value_unique": {
-          "name": "product_option_values_option_value_unique",
-          "columns": [
-            "organization_id",
-            "product_option_id",
-            "value"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {
-        "product_option_values_organization_id_organization_id_fk": {
-          "name": "product_option_values_organization_id_organization_id_fk",
-          "tableFrom": "product_option_values",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "product_option_values_option_scope_fk": {
-          "name": "product_option_values_option_scope_fk",
-          "tableFrom": "product_option_values",
-          "tableTo": "product_options",
-          "columnsFrom": [
-            "organization_id",
-            "product_id",
-            "product_option_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "product_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "product_option_values_instants_check": {
-          "name": "product_option_values_instants_check",
-          "value": "(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)"
-        },
-        "product_option_values_value_not_blank_check": {
-          "name": "product_option_values_value_not_blank_check",
-          "value": "trim(value) <> ''"
-        },
-        "product_option_values_sort_order_check": {
-          "name": "product_option_values_sort_order_check",
-          "value": "sort_order >= 0"
-        }
-      }
-    },
-    "product_options": {
-      "name": "product_options",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "product_id": {
-          "name": "product_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "sort_order": {
-          "name": "sort_order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
-        }
-      },
-      "indexes": {
-        "product_options_product_sort_idx": {
-          "name": "product_options_product_sort_idx",
-          "columns": [
-            "product_id",
-            "sort_order"
-          ],
-          "isUnique": false
-        },
-        "product_options_product_id_unique": {
-          "name": "product_options_product_id_unique",
-          "columns": [
-            "organization_id",
-            "product_id",
-            "id"
-          ],
-          "isUnique": true
-        },
-        "product_options_product_name_unique": {
-          "name": "product_options_product_name_unique",
-          "columns": [
-            "organization_id",
-            "product_id",
-            "name"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {
-        "product_options_organization_id_organization_id_fk": {
-          "name": "product_options_organization_id_organization_id_fk",
-          "tableFrom": "product_options",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "product_options_product_scope_fk": {
-          "name": "product_options_product_scope_fk",
-          "tableFrom": "product_options",
-          "tableTo": "products",
-          "columnsFrom": [
-            "organization_id",
-            "product_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "product_options_instants_check": {
-          "name": "product_options_instants_check",
-          "value": "(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)"
-        },
-        "product_options_name_not_blank_check": {
-          "name": "product_options_name_not_blank_check",
-          "value": "trim(name) <> ''"
-        },
-        "product_options_sort_order_check": {
-          "name": "product_options_sort_order_check",
-          "value": "sort_order >= 0"
-        }
-      }
-    },
     "product_publications": {
       "name": "product_publications",
       "columns": {
@@ -13042,6 +12493,13 @@
     "product_stay_configs": {
       "name": "product_stay_configs",
       "columns": {
+        "internal_name": {
+          "name": "internal_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "product_id": {
           "name": "product_id",
           "type": "text",
@@ -13993,134 +13451,6 @@
             "asset_id"
           ],
           "name": "product_stay_room_accessibility_photos_organization_id_product_id_room_id_feature_code_asset_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "product_variant_option_values": {
-      "name": "product_variant_option_values",
-      "columns": {
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "product_id": {
-          "name": "product_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "product_variant_id": {
-          "name": "product_variant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "product_option_id": {
-          "name": "product_option_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "product_option_value_id": {
-          "name": "product_option_value_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "product_variant_option_values_variant_idx": {
-          "name": "product_variant_option_values_variant_idx",
-          "columns": [
-            "product_variant_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "product_variant_option_values_organization_id_organization_id_fk": {
-          "name": "product_variant_option_values_organization_id_organization_id_fk",
-          "tableFrom": "product_variant_option_values",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "product_variant_option_values_variant_scope_fk": {
-          "name": "product_variant_option_values_variant_scope_fk",
-          "tableFrom": "product_variant_option_values",
-          "tableTo": "product_variants",
-          "columnsFrom": [
-            "organization_id",
-            "product_id",
-            "product_variant_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "product_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "product_variant_option_values_option_scope_fk": {
-          "name": "product_variant_option_values_option_scope_fk",
-          "tableFrom": "product_variant_option_values",
-          "tableTo": "product_options",
-          "columnsFrom": [
-            "organization_id",
-            "product_id",
-            "product_option_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "product_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "product_variant_option_values_value_scope_fk": {
-          "name": "product_variant_option_values_value_scope_fk",
-          "tableFrom": "product_variant_option_values",
-          "tableTo": "product_option_values",
-          "columnsFrom": [
-            "organization_id",
-            "product_id",
-            "product_option_id",
-            "product_option_value_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "product_id",
-            "product_option_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "product_variant_option_values_pk": {
-          "columns": [
-            "product_variant_id",
-            "product_option_id"
-          ],
-          "name": "product_variant_option_values_pk"
         }
       },
       "uniqueConstraints": {},
@@ -15156,7 +14486,7 @@
         },
         "reservations_policy_check": {
           "name": "reservations_policy_check",
-          "value": "policy_json IS NULL OR (json_valid(policy_json) AND json_type(policy_json) = 'object' AND json_type(policy_json, '$.reschedule_allowed') IN ('true', 'false') AND json_type(policy_json, '$.free_cancellation_until_minutes') IN ('null', 'integer') AND json_type(policy_json, '$.reschedule_cutoff_minutes') IN ('null', 'integer')) IS 1"
+          "value": "policy_json IS NULL OR (json_valid(policy_json) AND json_type(policy_json) = 'object') IS 1"
         },
         "reservations_instants_check": {
           "name": "reservations_instants_check",
@@ -18687,7 +18017,7 @@
         },
         "tasks_status_check": {
           "name": "tasks_status_check",
-          "value": "status IN ('open', 'done', 'skipped', 'cancelled') AND (status = 'open') = (closed_at IS NULL) AND (status <> 'open' OR closed_by_user_id IS NULL) AND (status <> 'skipped' OR outcome_note IS NOT NULL) AND version >= 1"
+          "value": "status IN ('open', 'done', 'skipped', 'cancelled') AND (status = 'open') = (closed_at IS NULL) AND (status <> 'open' OR closed_by_user_id IS NULL) AND version >= 1"
         },
         "tasks_instants_check": {
           "name": "tasks_instants_check",

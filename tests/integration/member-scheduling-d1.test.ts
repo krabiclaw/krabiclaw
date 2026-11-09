@@ -62,7 +62,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   await assert.rejects(()=>writeMemberScheduling(own,'member-one',{expected_updated_at:profile.updated_at,weekly:[]}),/together the first time/)
   await assert.rejects(()=>writeMemberScheduling(own,'member-one',{expected_updated_at:profile.updated_at,timezone:null} as unknown as Parameters<typeof writeMemberScheduling>[2]),/IANA timezone/)
   await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by)VALUES('experience','profile-host','org','Authored host','profile-host','owner','owner')").run()
-  await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,assigned_member_id,created_by,updated_by)VALUES('profile-host','org','member-one','owner','owner')").run()
+  await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,scheduling_mode,assigned_member_id,created_by,updated_by)VALUES('profile-host','org','business','member-one','owner','owner')").run()
   assert.deepEqual(await publicProductHosts(db,'org','profile-host'),[],'draft content is withheld from the public host read')
   for(const public_name of [null,'','   ']) {
    await assert.rejects(()=>writeMemberScheduling(owner,'member-one',{expected_updated_at:profile.updated_at,public_name,public_approved:true}),{statusCode:400,message:'Set a nonblank public name before publishing the member profile'})

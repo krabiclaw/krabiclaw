@@ -612,7 +612,7 @@ test.describe('lodging identity boundary', () => {
       const madeProduct = await api.post(`${editor}/products`, { headers: ownerBearer, data: { kind: 'experience', name: 'Team-led local experience', active: true, variants: [{ name: 'One guest', prices: [{ unit_amount: 0, currency: 'THB' }] }] } })
       expect(madeProduct.status, await madeProduct.text()).toBe(201)
       const { product } = await madeProduct.json() as { product: Product }
-      const configured = await api.put(`${editor}/products/${product.id}/booking`, { headers: ownerBearer, data: { duration_minutes: 60, default_capacity: 4, scheduling_mode: 'legacy', confirmation_mode: 'review', online_payment_required: false } })
+      const configured = await api.put(`${editor}/products/${product.id}/booking`, { headers: ownerBearer, data: { duration_minutes: 60, default_capacity: 4, scheduling_mode: 'business', confirmation_mode: 'review', online_payment_required: false } })
       expect(configured.status, await configured.text()).toBe(200)
       await loginAs(page.request, baseURL!, fixture.id)
       await page.goto(`/dashboard/${slug}/products/${product.id}/booking/assignment`)
@@ -623,10 +623,10 @@ test.describe('lodging identity boundary', () => {
       await assignment.getByRole('button', { name: 'Save', exact: true }).click()
       const assignedResponse = await assigned
       expect(assignedResponse.status(), await assignedResponse.text()).toBe(200)
-      expect(assignedResponse.request().postDataJSON()).toEqual({ scheduling_mode: 'legacy', assigned_member_id: null, assigned_team_id: teamId })
+      expect(assignedResponse.request().postDataJSON()).toEqual({ scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: teamId })
       const productRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: organization.id, product_id: product.id } })
       expect(productRead.status(), await productRead.text()).toBe(200)
-      expect(mcpData<{ product: Product }>(await productRead.json()).product.booking).toMatchObject({ scheduling_mode: 'legacy', assigned_member_id: null, assigned_team_id: teamId })
+      expect(mcpData<{ product: Product }>(await productRead.json()).product.booking).toMatchObject({ scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: teamId })
       const placed = await api.put(`${editor}/products/${product.id}/locations/${locationId}`, { headers: ownerBearer, data: { active: true, published: false } })
       expect(placed.status, await placed.text()).toBe(200)
       const day = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10)

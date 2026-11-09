@@ -877,3 +877,38 @@ Production's active source for this release is v23. The canonical transfer
 applies the archived v24 transform on the private copy; after production's
 final delta and reconciliation, run the existing `yarn db:tasks --production`
 backfill and verify Today as an owner and an assigned member.
+
+The v25-to-v26 replacement renames the scheduling mode a business uses when it
+publishes its own sessions from `legacy` to `business` and drops the column's
+default: every writer names `product_booking_configs.scheduling_mode`, so the
+baseline has no default to fall back on. Product sessions and availability
+rules reference the booking configuration, so the default cannot change on
+live D1. The v25 chain, including its four forward migrations, is archived in
+`migrations-history/v25/`. The transfer renames `legacy` rows in transit
+(`scheduling_mode_legacy_to_business`) and refuses any other value. On
+2026-11-09 staging v25 held 13 `legacy` and 1 `provider` rows; production v25
+held 16 and 7.
+
+Both v26 databases were created with `--location wnam` on 2026-11-09, and
+Cloudflare reported WNAM before binding or loading:
+
+- `krabiclaw-staging-v26`: `f24889f7-60a7-4606-8a5d-72258f734050`
+- `krabiclaw-production-v26`: `f9f2f077-46c9-47bb-875f-3f77668e2832`
+
+Staging moves with this release. Its baseline was applied through the native
+ledger and its initial copy loaded from `krabiclaw-staging-v25` (116 tables,
+115,330 rows); the artifacts are under
+`~/.codex/krabiclaw-db-replacements/scheduling-mode-v26/`. After the staging
+deploy and old writers finish, run the verified final delta:
+
+```
+node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v25 --out staging-final.sqlite --delta-from ~/.codex/krabiclaw-db-replacements/scheduling-mode-v26/staging-initial.sqlite --export staging-v25-final-source.sqlite
+```
+
+Production, development and E2E move together immediately before promotion,
+in their own change. In it, apply the baseline to production v26 through the
+native ledger, then run the initial load from `krabiclaw-production-v25`
+after checking the deployed Worker's actual source binding, and the final
+delta after the repoint. Read back schema drift, the native baseline ledger,
+`PRAGMA foreign_key_check` and a representative booking journey on each
+before retiring either v25 database.

@@ -255,7 +255,7 @@ export interface ProductForm {
   booking_duration: string
   booking_capacity: string
   confirmation_mode: 'instant' | 'review'
-  scheduling_mode: 'legacy' | 'provider'
+  scheduling_mode: 'business' | 'provider'
   /** null: the business schedule rather than a member or team. */
   assigned_member_id: string | null
   assigned_team_id: string | null
@@ -836,7 +836,7 @@ const draft = useState<ProductForm>(draftKey, () => ({
   collection_ids: [] as string[],
   bookable: false,
   booking_duration: '',
-  booking_capacity: '', scheduling_mode: 'legacy', assigned_member_id: null, assigned_team_id: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false,
+  booking_capacity: '', scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false,
   image_asset_id: null as string | null,
   // A new place to stay starts from these settings; an existing one is loaded from its own.
   stay_location_id: '', check_in_time: '15:00', check_in_end_time: '', check_out_time: '11:00', max_guests: '', min_nights: '', stay_team_id: null, stay_member_id: null,
@@ -966,7 +966,7 @@ function loadForm(row: Product) {
   form.bookable = row.booking !== null
   form.booking_duration = row.booking?.duration_minutes === null || row.booking === null ? '' : String(row.booking.duration_minutes)
   form.confirmation_mode = row.booking?.confirmation_mode ?? 'instant'
-  form.scheduling_mode = row.booking?.scheduling_mode ?? 'legacy'
+  form.scheduling_mode = row.booking?.scheduling_mode ?? 'business'
   form.assigned_member_id = row.booking ? row.booking.assigned_member_id : null
   form.assigned_team_id = row.booking ? row.booking.assigned_team_id : null
   form.online_payment_required = row.booking?.online_payment_required ?? false

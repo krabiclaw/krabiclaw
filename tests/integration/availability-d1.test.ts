@@ -69,8 +69,8 @@ async function boot(legacy = false) {
   // location is still offering the product.
   await db.prepare(`INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_by, updated_by)
     VALUES (?, ?, ?, 1, 1, ?, ?)`).bind(ORG, PRODUCT, LOCATION, ACTOR, ACTOR).run()
-  await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, created_by, updated_by)
-    VALUES (?, ?, 120, 10, ?, ?)`).bind(PRODUCT, ORG, ACTOR, ACTOR).run()
+  await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by)
+    VALUES (?, ?, 120, 10, 'business', ?, ?)`).bind(PRODUCT, ORG, ACTOR, ACTOR).run()
   const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
     STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test' } as CloudflareEnv
   return { runtime, db, env }
@@ -717,7 +717,7 @@ test('new legal consultations require an eligible named attorney while experienc
     await db.prepare("INSERT INTO products (kind,id,organization_id,name,slug,created_by,updated_by) VALUES ('service',?,?,'Family Law Consultation','family-law-consultation',?,?)").bind(consultation, ORG, ACTOR, ACTOR).run()
     await db.prepare("INSERT INTO product_variants (id,organization_id,product_id,name,created_by,updated_by) VALUES ('consultation-variant',?,?,'Consultation',?,?)").bind(ORG, consultation, ACTOR, ACTOR).run()
     await db.prepare('INSERT INTO product_locations (organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES (?,?,?,1,1,?,?)').bind(ORG, consultation, LOCATION, ACTOR, ACTOR).run()
-    await db.prepare("INSERT INTO product_booking_configs (product_id,organization_id,scheduling_mode,assigned_team_id,duration_minutes,default_capacity,created_by,updated_by) VALUES (?,?,'legacy','legal-team',60,1,?,?)").bind(consultation, ORG, ACTOR, ACTOR).run()
+    await db.prepare("INSERT INTO product_booking_configs (product_id,organization_id,scheduling_mode,assigned_team_id,duration_minutes,default_capacity,created_by,updated_by) VALUES (?,?,'business','legal-team',60,1,?,?)").bind(consultation, ORG, ACTOR, ACTOR).run()
     for (const [id, product, attorney, start, end] of [
       ['class-business-clock', PRODUCT, null, startsAt, endsAt],
       ['consultation-unassigned', consultation, null, startsAt, endsAt],
@@ -793,11 +793,11 @@ test('an online offering is booked in its provider\'s hours, in the provider\'s 
     const hostActor = { env, organizationId: ORG, userId: 'host-user' }
     const profile = await writeMemberScheduling(hostActor, 'host', { expected_updated_at: null, public_name: 'Authored host' })
     assert.equal(profile.timezone, null)
-    await setProductBookingConfig(db, { ...scope, env, patch: { assigned_team_id: 'host-team', scheduling_mode: 'legacy' } })
+    await setProductBookingConfig(db, { ...scope, env, patch: { assigned_team_id: 'host-team', scheduling_mode: 'business' } })
     assert.equal(await db.prepare('SELECT assigned_team_id FROM product_booking_configs WHERE product_id=?').bind(PRODUCT).first('assigned_team_id'), 'host-team', 'a host team does not need provider hours for physical sessions')
     await assert.rejects(setProductBookingConfig(db, { ...scope, env, patch: { scheduling_mode: 'provider' } }), /at least one member who has set working hours/)
     await assert.rejects(setProductBookingConfig(db, { ...scope, env, patch: { scheduling_mode: 'provider', assigned_team_id: null, assigned_member_id: 'host' } }), /Set working hours for this member/)
-    assert.equal(await db.prepare('SELECT scheduling_mode FROM product_booking_configs WHERE product_id=?').bind(PRODUCT).first('scheduling_mode'), 'legacy', 'a profile-only member cannot become a provider candidate')
+    assert.equal(await db.prepare('SELECT scheduling_mode FROM product_booking_configs WHERE product_id=?').bind(PRODUCT).first('scheduling_mode'), 'business', 'a profile-only member cannot become a provider candidate')
     const tuesday = (() => { let date = addLocalDays(localNow(zone).date, 2); while (new Date(`${date}T12:00:00Z`).getUTCDay() !== 2) date = addLocalDays(date, 1); return date })()
     const away = { start: localDateTimeToInstant(tuesday, '09:00', zone).toISOString(), end: localDateTimeToInstant(tuesday, '10:00', zone).toISOString() }
     const write = async (end: string, timeOff: Array<{ start: string; end: string }>) => writeMemberScheduling(hostActor, 'host', {
