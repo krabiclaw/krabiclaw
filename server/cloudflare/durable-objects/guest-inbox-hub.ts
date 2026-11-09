@@ -171,8 +171,8 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     if (!organizationId || !isDashboardInvalidation(event) || event.organizationId !== organizationId) {
       return failure(400, 'INVALID_DASHBOARD_INVALIDATION', 'Invalid dashboard invalidation', 'body')
     }
-    // A stay or task write is announced this way; the organization's jobs follow it.
-    if (event.type === 'stay.changed' || event.type === 'business.changed') await this.wakeJobs(organizationId)
+    // A stay, booking or task write is announced this way; the organization's jobs follow it.
+    if (event.type === 'stay.changed' || event.type === 'business.changed' || event.type === 'thread.created' || event.type === 'thread.changed') await this.wakeJobs(organizationId)
 
     // Every eligible dashboard must receive the event. A socket whose send
     // throws is closed so its client reconnects and reconciles, and the

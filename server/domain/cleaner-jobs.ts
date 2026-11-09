@@ -1,7 +1,7 @@
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { isOrganizationWideRole } from '~/server/utils/member-access'
 import { postAutomaticTeamMessage, stayThreadParticipantsKey } from '~/server/domain/team-messages'
-import { JOB_TASK_SQL, jobStayId, taskViewForUser, type TaskRow, type TaskView } from '~/server/domain/tasks'
+import { JOB_TASK_SQL, isJobTask, jobStayId, taskViewForUser, type TaskRow, type TaskView } from '~/server/domain/tasks'
 import { notifyTaskStarting } from '~/server/utils/notifications'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -18,7 +18,8 @@ import type { CloudflareEnv } from '~/server/utils/auth'
   The organization's hub Durable Object wakes this on every stay or business
   change and at the next reminder it reports, and re-arms itself to that time.
   A job an owner or admin gives themselves has no conversation; its morning-of
-  reminder is the task alert.
+  reminder is the task alert, as it is for every other assigned task with a
+  start time, an attorney's consultation jobs among them.
 */
 
 const EVENING_BEFORE = '18:00'
@@ -88,13 +89,13 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
   const [members, teamRows, tasks] = await Promise.all([
     queryAll<Member>(db, 'SELECT id, userId, role FROM member WHERE organizationId = ?', [organizationId]),
     queryAll<{ team_id: string; user_id: string }>(db, 'SELECT t.id AS team_id, tm.userId AS user_id FROM team t JOIN teamMember tm ON tm.teamId = t.id WHERE t.organizationId = ?', [organizationId]),
-    queryAll<TaskRow>(db, `SELECT t.* FROM tasks t WHERE t.organization_id = ? AND ${JOB_TASK_SQL('t')} AND (t.status = 'open' OR t.updated_at >= ?)
+    queryAll<TaskRow>(db, `SELECT t.* FROM tasks t WHERE t.organization_id = ? AND (${JOB_TASK_SQL('t')} OR t.starts_at IS NOT NULL) AND (t.status = 'open' OR t.updated_at >= ?)
       AND (t.assigned_member_id IS NOT NULL OR t.assigned_team_id IS NOT NULL) ORDER BY COALESCE(t.starts_at, t.due_at, t.created_at), t.id`,
     [organizationId, new Date(now.getTime() - RECENT_MS).toISOString()]),
   ])
   const teams = new Map<string, string[]>()
   for (const row of teamRows) teams.set(row.team_id, [...teams.get(row.team_id) ?? [], row.user_id])
-  const stayIds = [...new Set(tasks.map(jobStayId))]
+  const stayIds = [...new Set(tasks.filter(isJobTask).map(jobStayId))]
   const posted = stayIds.length ? await queryAll<{ thread_id: string; stay_id: string; participants_key: string; idempotency_key: string }>(db, `
     SELECT m.thread_id, t.stay_id, t.participants_key, m.idempotency_key FROM team_messages m
       JOIN team_threads t ON t.organization_id = m.organization_id AND t.id = m.thread_id
@@ -119,8 +120,24 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
   }
   const pending: Date[] = []
   const failures: unknown[] = []
+  /** The task alert, once, on the morning of. */
+  const alertOnTheDay = async (task: TaskRow, recipients: readonly string[]) => {
+    const morning = reminders(task).find(reminder => reminder.kind === 'morning')
+    if (!morning) return
+    if (morning.at > now) { pending.push(morning.at); return }
+    if (now >= morning.until) return
+    const day = localDateAt(new Date(task.starts_at ?? task.due_at!), task.timezone)
+    const sent = recipients.length ? await queryAll<{ dedupe_key: string }>(db, "SELECT dedupe_key FROM activity_entries WHERE organization_id = ? AND kind = 'notification' AND dedupe_key IN (SELECT value FROM json_each(?))",
+      [organizationId, d1JsonStringSet(recipients.map(userId => `notification:task-starting:${task.id}:${day}:${userId}`))]) : []
+    const unsent = recipients.filter(userId => !sent.some(row => row.dedupe_key === `notification:task-starting:${task.id}:${day}:${userId}`))
+    if (unsent.length) await notifyTaskStarting(env, db, { organizationId, taskId: task.id, day, recipientUserIds: unsent })
+  }
   for (const task of tasks) {
     try {
+      if (!isJobTask(task)) {
+        if (task.status === 'open') await alertOnTheDay(task, task.assigned_team_id ? teams.get(task.assigned_team_id) ?? [] : members.filter(member => member.id === task.assigned_member_id).map(member => member.userId))
+        continue
+      }
       const stayId = jobStayId(task)
       const roster = rosterFor(task, members, teams)
       const view = roster || task.status === 'open' ? await taskViewForUser(db, organizationId, task.id, roster?.cleaners[0] ?? hostUsers[0] ?? null, now) : null
@@ -139,17 +156,8 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
       }
       if (task.status !== 'open' || !view) continue
       if (!roster) {
-        // An owner's or admin's own job: the task alert, once, on the morning of.
-        const morning = reminders(task).find(reminder => reminder.kind === 'morning')
-        if (!morning) continue
-        if (morning.at > now) { pending.push(morning.at); continue }
-        if (now >= morning.until) continue
-        const day = localDateAt(new Date(task.starts_at ?? task.due_at!), task.timezone)
-        const recipients = task.assigned_member_id ? members.filter(member => member.id === task.assigned_member_id).map(member => member.userId) : []
-        const sent = recipients.length ? await queryAll<{ dedupe_key: string }>(db, "SELECT dedupe_key FROM activity_entries WHERE organization_id = ? AND kind = 'notification' AND dedupe_key IN (SELECT value FROM json_each(?))",
-          [organizationId, d1JsonStringSet(recipients.map(userId => `notification:task-starting:${task.id}:${day}:${userId}`))]) : []
-        const unsent = recipients.filter(userId => !sent.some(row => row.dedupe_key === `notification:task-starting:${task.id}:${day}:${userId}`))
-        if (unsent.length) await notifyTaskStarting(env, db, { organizationId, taskId: task.id, day, recipientUserIds: unsent })
+        // An owner's or admin's own job.
+        await alertOnTheDay(task, members.filter(member => member.id === task.assigned_member_id).map(member => member.userId))
         continue
       }
       const key = jobKey(task)

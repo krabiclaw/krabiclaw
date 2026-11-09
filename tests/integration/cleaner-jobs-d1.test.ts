@@ -7,8 +7,12 @@ import { createProduct } from '../../server/utils/product-management.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import { cancelStay, createStay, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import { createTeamThread, listTeamMessages, listTeamThreads, sendTeamMessage, teamAccessFor } from '../../server/domain/team-messages.ts'
-import { closeTask, taskViewer, updateTask, type TaskRow } from '../../server/domain/tasks.ts'
+import { closeTask, taskViewForUser, taskViewer, updateTask, type TaskRow } from '../../server/domain/tasks.ts'
 import { jobKey, runOrganizationJobs } from '../../server/domain/cleaner-jobs.ts'
+import { claimSessionCapacity } from '../../server/utils/availability.ts'
+import { conversationTaskQueries } from '../../server/domain/guest-threads/repository.ts'
+import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
+import { executeBatch } from '../../server/db/index.ts'
 import { localDateTimeToInstant } from '../../utils/timezone.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
@@ -167,4 +171,60 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
   } finally {
     await runtime.dispose()
   }
+})
+
+test('a consultation gives its attorney jobs that follow the booking and an alert on the day', { timeout: 120_000 }, async () => {
+  const runtime = new Miniflare({ workers: [{ config: {
+    name: 'consultation-jobs-proof', compatibilityDate: '2024-11-01',
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
+    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, MEDIA_BUCKET: { type: 'r2' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'consultation-jobs-proof', exportName: 'Hub' } },
+  } }] })
+  try {
+    const db = await runtime.getD1Database('DB')
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
+      VALUES (?, 'Cedar Legal', 'cedar', 'cedar', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'service', '2026-10-15T00:00:00.000Z', 'America/New_York')`).bind(ORG).run()
+    const NOW = '2026-10-01T00:00:00.000Z'
+    await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
+    await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('service','product',?,'Consultation','consultation','host','host')").bind(ORG).run()
+    await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('variant',?,'product','Hour','host','host')").bind(ORG).run()
+    await db.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('host','Host','host@example.com',1)").run()
+    await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES('host-member',?,'host','member',1)").bind(ORG).run()
+    await db.prepare(`INSERT INTO member_scheduling(member_id, organization_id, public_name, public_approved, timezone, weekly_json, time_off_json, updated_at, updated_by) VALUES('host-member',?,'Attorney Host',1,'America/New_York','[{"weekday":0,"start":"00:00","end":"23:59"},{"weekday":1,"start":"00:00","end":"23:59"},{"weekday":2,"start":"00:00","end":"23:59"},{"weekday":3,"start":"00:00","end":"23:59"},{"weekday":4,"start":"00:00","end":"23:59"},{"weekday":5,"start":"00:00","end":"23:59"},{"weekday":6,"start":"00:00","end":"23:59"}]','[]',?,'host')`).bind(ORG,NOW).run()
+    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,default_capacity,confirmation_mode,held_online,scheduling_mode,assigned_member_id,online_payment_required,created_by,updated_by) VALUES('product',?,60,1,'review',1,'provider','host-member',1,'host','host')").bind(ORG).run()
+    await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by) VALUES('session',?,'product','host-member','America/New_York','2099-10-01T13:00:00.000Z','2099-10-01T14:00:00.000Z',1,'scheduled','host','host')").bind(ORG).run()
+    const opening = { id: 'consult-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: null, review_id: null, payload: threadPayloadForGuest({ name: 'Client', email: 'client@example.test' }), created_at: NOW, updated_at: NOW }
+    await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
+    const booking = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, requestId: opening.id })
+    const jobs = async () => (await db.prepare("SELECT kind, subject_type, subject_id, assigned_member_id, starts_at, status FROM tasks WHERE kind IN ('consultation_prep', 'consultation_follow_up') ORDER BY kind").all<{ kind: string; status: string }>()).results
+    const recompute = () => executeBatch(db, conversationTaskQueries(opening.id, new Date().toISOString()), { operation: 'Recompute consultation jobs' })
+    await db.prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ?").bind(booking.bookingId).run()
+    await recompute()
+    assert.deepEqual(await jobs(), [
+      { kind: 'consultation_follow_up', subject_type: 'booking', subject_id: booking.bookingId, assigned_member_id: 'host-member', starts_at: '2099-10-02T14:00:00.000Z', status: 'open' },
+      { kind: 'consultation_prep', subject_type: 'booking', subject_id: booking.bookingId, assigned_member_id: 'host-member', starts_at: '2099-10-01T13:00:00.000Z', status: 'open' },
+    ])
+    await recompute()
+    assert.equal((await jobs()).length, 2)
+
+    // The morning of, the attorney is alerted once for the consultation; the follow-up is the next morning.
+    const prep = await db.prepare('SELECT id FROM tasks WHERE dedupe_key = ?').bind(`consultation_prep:${booking.bookingId}`).first<{ id: string }>()
+    const view = await taskViewForUser(db, ORG, prep!.id, 'host')
+    assert.deepEqual([view.title, view.sheet.heading], ['Client', 'Prepare for consultation'])
+    const morning = localDateTimeToInstant('2099-10-01', '08:05', 'America/New_York', 'compatible')
+    const next = await runOrganizationJobs(env, db, ORG, morning)
+    assert.equal(next?.toISOString(), localDateTimeToInstant('2099-10-02', '08:00', 'America/New_York', 'compatible').toISOString())
+    await runOrganizationJobs(env, db, ORG, morning)
+    assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE kind = 'notification' AND dedupe_key = ?").bind(`notification:task-starting:${prep!.id}:2099-10-01:host`).first('n'), 1)
+
+    // Cancelling the consultation closes both jobs; confirming it again reopens them.
+    await db.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?").bind(booking.bookingId).run()
+    await recompute()
+    assert.deepEqual((await jobs()).map(job => job.status), ['cancelled', 'cancelled'])
+    await db.prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ?").bind(booking.bookingId).run()
+    await recompute()
+    assert.deepEqual((await jobs()).map(job => job.status), ['open', 'open'])
+  } finally { await runtime.dispose() }
 })

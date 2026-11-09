@@ -142,6 +142,8 @@ const kindLabels: Record<TaskKind, string> = {
   booking_change: 'Booking changes',
   opportunity: 'Accepted opportunities',
   custom: 'Custom tasks',
+  consultation_prep: 'Consultation preparation',
+  consultation_follow_up: 'Consultation follow-ups',
 }
 const taskKind = computed(() => !props.personalScope && typeof route.query.kind === 'string' ? route.query.kind : undefined)
 const kindItems = computed(() => [[

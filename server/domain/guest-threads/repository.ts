@@ -638,6 +638,31 @@ const REPLY_TASK_EXPIRY_DAYS = 30
 const replyTaskCutoff = (now: string) => new Date(Date.parse(now) - REPLY_TASK_EXPIRY_DAYS * 86_400_000).toISOString()
 
 /** The reply tasks (server/domain/tasks.ts) for one conversation, for the batch that changes it. */
+/** What an attorney does around a consultation. Both follow the booking: they move with it and close if it is cancelled. */
+const CONSULTATION_JOBS = [
+  { kind: 'consultation_prep', at: 'ps.starts_at' },
+  { kind: 'consultation_follow_up', at: "strftime('%Y-%m-%dT%H:%M:%fZ', ps.ends_at, '+1 day')" },
+] as const
+
+function consultationJobQueries(requestId: string, now: string): BatchQuery[] {
+  return [{
+    query: `UPDATE tasks SET status = 'cancelled', closed_at = ?, closed_by_user_id = NULL, version = tasks.version + 1, updated_at = ?
+      FROM bookings b WHERE b.request_id = ? AND b.status NOT IN ('confirmed', 'completed') AND tasks.status = 'open'
+        AND tasks.subject_type = 'booking' AND tasks.subject_id = b.id AND tasks.kind IN ('consultation_prep', 'consultation_follow_up')`,
+    params: [now, now, requestId],
+  }, ...CONSULTATION_JOBS.map(job => ({
+    query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, starts_at, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
+      SELECT ?, b.organization_id, '${job.kind}', 'booking', b.id, b.product_id, ps.location_id, b.assigned_member_id, ${job.at}, ${job.at}, ps.timezone, 'open', '${job.kind}:' || b.id, 1, ?, ?
+        FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id AND ps.organization_id = b.organization_id
+        JOIN organization o ON o.id = b.organization_id AND o.vertical = 'service'
+       WHERE b.request_id = ? AND b.status = 'confirmed'
+      ON CONFLICT (dedupe_key) DO UPDATE SET status = CASE WHEN tasks.status = 'cancelled' THEN 'open' ELSE tasks.status END, closed_at = CASE WHEN tasks.status = 'cancelled' THEN NULL ELSE tasks.closed_at END,
+        starts_at = excluded.starts_at, due_at = excluded.due_at, assigned_member_id = excluded.assigned_member_id, version = tasks.version + 1, updated_at = excluded.updated_at
+        WHERE tasks.status = 'cancelled' OR tasks.starts_at IS NOT excluded.starts_at OR tasks.assigned_member_id IS NOT excluded.assigned_member_id`,
+    params: [crypto.randomUUID(), now, now, requestId],
+  }))]
+}
+
 export function conversationTaskQueries(requestId: string, now: string): BatchQuery[] {
   const entryOf = `substr(tasks.dedupe_key, length('guest_reply:' || tasks.subject_id || ':') + 1)`
   const unanswered = `guest_entry.id = ${entryOf} AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}`
@@ -690,7 +715,7 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
        WHERE b.request_id = ? AND b.status = 'pending'
       ON CONFLICT (dedupe_key) DO NOTHING`,
     params: [crypto.randomUUID(), now, now, requestId],
-  }, {
+  }, ...consultationJobQueries(requestId, now), {
     // A change is answered, or replaced by a newer proposal or a move: its task is done, by whoever answered or replaced it.
     query: `UPDATE tasks SET status = 'done', closed_at = ?, version = tasks.version + 1, updated_at = ?,
         closed_by_user_id = (SELECT answer.actor_user_id FROM activity_entries answer WHERE answer.request_id = p.request_id

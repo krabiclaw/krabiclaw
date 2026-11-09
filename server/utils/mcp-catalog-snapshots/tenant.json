@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:b0bbe56d731ec894468e2eb230391940216860b58754b56b5119b44ed572c4db",
-  "documentationFingerprint": "sha256:fc14b0dc90e91d5232e74fdd5f6c2dea366ebced8651b4f8ddb3f17c546a6ad1",
+  "fingerprint": "sha256:f276b457ecc48c2081bcdba863892cbf7fed5378e1057f92d923d65ef398ae92",
+  "documentationFingerprint": "sha256:843201e36f934fbf85514cc74208672607be4fce71af12a531a85dfd4d62f75f",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -172,7 +172,9 @@
                   "booking_review",
                   "booking_change",
                   "opportunity",
-                  "custom"
+                  "custom",
+                  "consultation_prep",
+                  "consultation_follow_up"
                 ],
                 "type": "string"
               },
@@ -14097,7 +14099,9 @@
                   "booking_review",
                   "booking_change",
                   "opportunity",
-                  "custom"
+                  "custom",
+                  "consultation_prep",
+                  "consultation_follow_up"
                 ],
                 "type": "string"
               },
@@ -37899,7 +37903,9 @@
                   "booking_review",
                   "booking_change",
                   "opportunity",
-                  "custom"
+                  "custom",
+                  "consultation_prep",
+                  "consultation_follow_up"
                 ],
                 "type": "string"
               },
@@ -72560,7 +72566,9 @@
               "booking_review",
               "booking_change",
               "opportunity",
-              "custom"
+              "custom",
+              "consultation_prep",
+              "consultation_follow_up"
             ],
             "type": "string"
           },
@@ -72769,7 +72777,9 @@
                           "booking_review",
                           "booking_change",
                           "opportunity",
-                          "custom"
+                          "custom",
+                          "consultation_prep",
+                          "consultation_follow_up"
                         ],
                         "type": "string"
                       },
@@ -73320,7 +73330,9 @@
                         "booking_review",
                         "booking_change",
                         "opportunity",
-                        "custom"
+                        "custom",
+                        "consultation_prep",
+                        "consultation_follow_up"
                       ],
                       "type": "string"
                     },
@@ -104698,7 +104710,9 @@
                   "booking_review",
                   "booking_change",
                   "opportunity",
-                  "custom"
+                  "custom",
+                  "consultation_prep",
+                  "consultation_follow_up"
                 ],
                 "type": "string"
               },
@@ -129319,7 +129333,9 @@
                   "booking_review",
                   "booking_change",
                   "opportunity",
-                  "custom"
+                  "custom",
+                  "consultation_prep",
+                  "consultation_follow_up"
                 ],
                 "type": "string"
               },
@@ -129896,7 +129912,7 @@
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
-        "list_team_conversations": "sha256:78e6d721a6136e552abf9e712882991c82a3a38e660a4034003e1ad16d0856ce",
+        "list_team_conversations": "sha256:53858eaa18b0df4408ece3c47bc73429f643d44ddd7ce066a78c2a8719d98b11",
         "mark_team_conversation_read": "sha256:3ad65b07c9bd78090f9f81aeffa74ac00f1c201ee8b6325cf16cd879f1e2644d",
         "reject_product_booking": "sha256:91a5bee34d02b729a3dacb01885157ce63b443594116d8710ca90313fb76e357",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",

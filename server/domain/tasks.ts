@@ -19,7 +19,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
   reopen them here, from the dashboard, MCP and the app alike.
 */
 
-export const TASK_KINDS = ['turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom'] as const
+export const TASK_KINDS = ['turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'consultation_prep', 'consultation_follow_up'] as const
 export type TaskKind = typeof TASK_KINDS[number]
 export type TaskStatus = 'open' | 'done' | 'skipped' | 'cancelled'
 
@@ -574,6 +574,22 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       sheet = { heading: 'Booking request', title, date: day(record.starts_at), checkout: null, checkin: null }
       break
     }
+    case 'consultation_prep':
+    case 'consultation_follow_up': {
+      const record = context.records.get(row.subject_id!)
+      const request = record?.request_id ? context.requests.get(record.request_id) : undefined
+      if (!record?.request_id || !request) throw new Error(`Consultation job ${row.id} has no booking conversation`)
+      const heading = row.kind === 'consultation_prep' ? 'Prepare for consultation' : 'Follow up with client'
+      requestId = record.request_id
+      face = 'compact'
+      title = request.guest_name ?? request.participant ?? 'Client'
+      avatar = { initial: initialOf(title), tone: 'warm' }
+      statusLine = [heading, place].filter(Boolean).join(' · ')
+      detail = `${day(record.starts_at)}, ${time(record.starts_at)}`
+      path = bookingEditorPath(context.slug, 'booking', record.request_id)
+      sheet = { heading, title, date: day(record.starts_at), checkout: null, checkin: null }
+      break
+    }
     case 'booking_change': {
       const entry = context.entries.get(row.dedupe_key.slice('booking_change:'.length))
       const stay = row.subject_type === 'stay' ? context.stays.get(row.subject_id!) : undefined
@@ -674,8 +690,8 @@ export function parseTaskListQuery(query: Record<string, unknown>, defaults: Par
 
 /** Today's open work in the owner's order: failed deliveries, turnovers, replies, then everything else. */
 /** Work a person does and closes themselves: they Skip it, and say what they found when they finish. Everything else is Dismissed. */
-const PERSON_WORK: ReadonlySet<TaskKind> = new Set(['turnover', 'custom', 'opportunity'])
-const TODAY_ORDER: Record<TaskKind, number> = { message_delivery: 0, turnover: 1, guest_reply: 2, booking_review: 2, booking_change: 2, custom: 3, opportunity: 3 }
+const PERSON_WORK: ReadonlySet<TaskKind> = new Set(['turnover', 'custom', 'opportunity', 'consultation_prep', 'consultation_follow_up'])
+const TODAY_ORDER: Record<TaskKind, number> = { message_delivery: 0, turnover: 1, guest_reply: 2, booking_review: 2, booking_change: 2, consultation_prep: 2, custom: 3, consultation_follow_up: 3, opportunity: 3 }
 
 /** Today: open work due or starting today or earlier, or with no date; then what was closed today. Upcoming: open work later than today, by day. */
 export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskListQuery, now = new Date()): Promise<{ sections: TaskSection[]; resolvedAt: string }> {
