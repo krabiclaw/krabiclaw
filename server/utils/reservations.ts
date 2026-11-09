@@ -356,15 +356,15 @@ export function visitReschedulePolicyPredicate(input: { startsAt: string; overri
 /** The same location, hours and capacity boundary for a seat claim and a Checkout hold. */
 export async function reservationAllocationPredicate(db: DbClient, input: {
   organizationId: string; locationId: string; timezone: string; startsAt: string; endsAt: string; partySize: number
-  replacingReservationId?: string; capturedPaymentId?: string; capturedAt?: string; policyUpdatedAt?: string
+  replacingReservationId?: string; chargedPaymentId?: string; chargedAt?: string; policyUpdatedAt?: string
 }): Promise<BatchQuery> {
   const location = await queryFirst<LocationHoursRow>(db, 'SELECT id, organization_id, timezone, status, opening_hours, special_hours FROM business_locations WHERE id = ? AND organization_id = ?', [input.locationId, input.organizationId])
   if (!location || location.timezone !== input.timezone || !locationAllowsBooking({ starts_at: input.startsAt, ends_at: input.endsAt }, location)) return { query: '0', params: [] }
-  const payment = input.capturedPaymentId ? `EXISTS (
+  const payment = input.chargedPaymentId ? `EXISTS (
     SELECT 1 FROM payment_checkout_holds h JOIN payments p ON p.id = h.payment_id
     WHERE h.payment_id = ? AND h.organization_id = c.organization_id AND h.location_id = c.location_id
       AND p.organization_id = c.organization_id AND p.subject_type = 'reservation'
-      AND p.captured_amount > 0 AND p.refunded_amount = 0 AND h.product_id IS NULL
+      AND p.refunded_amount = 0 AND h.product_id IS NULL
       AND h.starts_at = ? AND h.ends_at = ? AND h.timezone = ? AND h.quantity = ?
       AND h.status IN ('active', 'released') AND ? <= h.expires_at
   )` : input.replacingReservationId ? `EXISTS (SELECT 1 FROM reservations original
@@ -388,15 +388,15 @@ export async function reservationAllocationPredicate(db: DbClient, input: {
             AND h.payment_id IS NOT ? AND h.status = 'active' AND h.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), 0))
     )`,
     params: [input.locationId, input.organizationId, location.timezone, location.opening_hours, location.special_hours, input.startsAt,
-      ...(input.capturedPaymentId ? [input.capturedPaymentId, input.startsAt, input.endsAt, input.timezone, input.partySize, input.capturedAt ?? ''] : input.replacingReservationId ? [input.replacingReservationId, input.endsAt, input.startsAt] : [input.startsAt, input.endsAt, input.startsAt]),
-      ...(input.policyUpdatedAt ? [input.policyUpdatedAt] : []), input.partySize, input.startsAt, input.replacingReservationId ?? null, input.startsAt, input.capturedPaymentId ?? null],
+      ...(input.chargedPaymentId ? [input.chargedPaymentId, input.startsAt, input.endsAt, input.timezone, input.partySize, input.chargedAt ?? ''] : input.replacingReservationId ? [input.replacingReservationId, input.endsAt, input.startsAt] : [input.startsAt, input.endsAt, input.startsAt]),
+      ...(input.policyUpdatedAt ? [input.policyUpdatedAt] : []), input.partySize, input.startsAt, input.replacingReservationId ?? null, input.startsAt, input.chargedPaymentId ?? null],
   }
 }
 
 export interface ReservationClaimInput {
   organizationId: string; locationId: string; reservationId: string; requestId: string | null; userId: string | null
   timezone: string; startsAt: string; endsAt: string; date: string; timeSlot: string; partySize: number
-  capturedPaymentId?: string; capturedAt?: string
+  chargedPaymentId?: string; chargedAt?: string
   thread?: BatchQuery[]
 }
 
@@ -404,7 +404,7 @@ export async function reservationClaimQuery(db: DbClient, input: ReservationClai
   if (!Number.isSafeInteger(input.partySize) || input.partySize < 1) throw new HTTPError({ statusCode: 400, statusMessage: 'party_size must be a positive integer' })
   const allocation = await reservationAllocationPredicate(db, input)
   const now = new Date().toISOString()
-  const terms = input.capturedPaymentId
+  const terms = input.chargedPaymentId
     ? `SELECT json_extract(price_snapshot_json, '$.reservation') FROM payments WHERE id = ? AND organization_id = ?`
     : `SELECT json_object('policy_type','reservation','advance_notice_minutes',advance_notice_minutes,'minimum_guest_age',minimum_guest_age,
         'deposit_required',json(CASE deposit_required WHEN 1 THEN 'true' ELSE 'false' END),'deposit_amount',deposit_amount,'deposit_currency',deposit_currency,'deposit_tax_behavior',deposit_tax_behavior,'deposit_trigger_party_size',deposit_trigger_party_size,
@@ -412,10 +412,10 @@ export async function reservationClaimQuery(db: DbClient, input: ReservationClai
   return {
     query: `INSERT INTO reservations (id, organization_id, location_id, user_id, request_id, timezone, starts_at, ends_at, party_size, policy_json, status, created_at, updated_at)
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, (${terms}), 'confirmed', ?, ? WHERE ${allocation.query}
-        ${input.capturedPaymentId ? '' : `AND EXISTS (SELECT 1 FROM location_reservation_configs c WHERE c.organization_id = ? AND c.location_id = ? AND (c.deposit_required = 0 OR (c.deposit_trigger_party_size IS NOT NULL AND ? < c.deposit_trigger_party_size)))`}
+        ${input.chargedPaymentId ? '' : `AND EXISTS (SELECT 1 FROM location_reservation_configs c WHERE c.organization_id = ? AND c.location_id = ? AND (c.deposit_required = 0 OR (c.deposit_trigger_party_size IS NOT NULL AND ? < c.deposit_trigger_party_size)))`}
       ON CONFLICT (id) DO NOTHING`,
-    params: [input.reservationId, input.organizationId, input.locationId, input.userId, input.requestId, input.timezone, input.startsAt, input.endsAt, input.partySize, input.capturedPaymentId ?? input.locationId, input.organizationId, now, now,
-      ...allocation.params!, ...(input.capturedPaymentId ? [] : [input.organizationId, input.locationId, input.partySize])],
+    params: [input.reservationId, input.organizationId, input.locationId, input.userId, input.requestId, input.timezone, input.startsAt, input.endsAt, input.partySize, input.chargedPaymentId ?? input.locationId, input.organizationId, now, now,
+      ...allocation.params!, ...(input.chargedPaymentId ? [] : [input.organizationId, input.locationId, input.partySize])],
   }
 }
 

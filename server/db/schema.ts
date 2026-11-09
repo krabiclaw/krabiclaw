@@ -1527,7 +1527,7 @@ export const stay_calendar_links = sqliteTable("stay_calendar_links", {
 //   it is cancelled or converted. An overbooked or cancelled stay holds none.
 // A hold's claim counts only while its hold is active and unexpired. Every
 //   batch that claims nights first deletes, in its range, the claims of holds
-//   that no longer count; the checkout-holds task deletes the rest and
+//   that no longer count; the stay-checkout-holds task deletes the rest and
 //   reopens those nights on the home's channel.
 // Deletion: cascades from the stay or the hold.
 export const stay_nights = sqliteTable("stay_nights", {

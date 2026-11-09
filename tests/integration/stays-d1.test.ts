@@ -1729,15 +1729,21 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     const claim = crypto.randomUUID() + crypto.randomUUID()
     await db.prepare("UPDATE payments SET idempotency_key = 'checkout:stay', stripe_payment_intent_id = 'pi_stay-pay', return_token = ?, checkout_expires_at = '2099-01-01T00:00:00.000Z', return_token_hash = ?, return_expires_at = '2099-01-01T00:00:00.000Z' WHERE id = 'stay-pay'").bind(claim, await tokenHash(claim)).run()
     const charge = { id: 'ch_stay', object: 'charge', livemode: false, amount: 45_000, currency: 'usd', created: 1_790_000_000, payment_intent: 'pi_stay-pay', payment_method: 'pm_card', receipt_url: 'https://pay.stripe.com/receipts/stay', billing_details: { email: 'ana@example.com' } }
+    let stayIntentStatus = 'requires_capture'
     const originalFetch = globalThis.fetch
     t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(request instanceof Request ? request.url : String(request))
       if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
-      assert.equal(init?.method, 'GET')
       assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
+      if (url.pathname === '/v1/payment_intents/pi_stay-pay/capture') {
+        // The card is charged only once its stay exists.
+        assert.equal(init?.method, 'POST')
+        assert.equal(await db.prepare("SELECT status FROM payment_checkout_holds WHERE id = 'stay-hold'").first('status'), 'converted')
+        stayIntentStatus = 'succeeded'
+      } else assert.equal(init?.method, 'GET')
       if (url.pathname === '/v1/charges/ch_stay') return Response.json(charge)
-      assert.equal(url.pathname, '/v1/payment_intents/pi_stay-pay')
-      return Response.json({ id: 'pi_stay-pay', object: 'payment_intent', livemode: false, currency: 'usd', amount: 45_000, amount_received: 45_000, status: 'succeeded', customer: null, application_fee_amount: null, latest_charge: charge, metadata: { krabiclaw_payment_id: 'stay-pay' } })
+      assert.match(url.pathname, /^\/v1\/payment_intents\/pi_stay-pay(\/capture)?$/u)
+      return Response.json({ id: 'pi_stay-pay', object: 'payment_intent', livemode: false, currency: 'usd', amount: 45_000, amount_received: stayIntentStatus === 'succeeded' ? 45_000 : 0, status: stayIntentStatus, customer: null, application_fee_amount: null, latest_charge: charge, metadata: { krabiclaw_payment_id: 'stay-pay' } })
     })
     const app = new H3()
     app.use((event) => { event.context.organizationId = ORG })

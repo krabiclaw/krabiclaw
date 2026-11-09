@@ -165,8 +165,8 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     const purchase = { product_id: home.id, location_id: 'location', timezone: 'America/Denver', check_in_date: '2026-11-20', check_out_date: '2026-11-23', adults: 2, children: 0, infants: 0,
       total_minor: 45_000, currency: 'USD', cancellation_policy: 'moderate', nightly: ['2026-11-20', '2026-11-21', '2026-11-22'].map(date => ({ date, price_minor: 15_000 })),
       guest: { name: 'Ana Ruiz', email: 'ana@example.test', phone: '+13035550123', notes: 'We arrive late, around 9 PM.', answers: [] } }
-    await db.prepare(`INSERT INTO payments (id, organization_id, buyer_user_id, stripe_account_id, livemode, subject_type, subject_id, location_id, currency, amount, captured_amount, state, stripe_payment_intent_id, price_snapshot_json, created_at, updated_at)
-      VALUES ('site-pay', ?, NULL, 'acct_contract', 0, 'stay', NULL, 'location', 'USD', 45000, 45000, 'captured', 'pi_site', ?, ?, ?)`).bind(ORG, JSON.stringify({ stay: purchase }), NOW, NOW).run()
+    await db.prepare(`INSERT INTO payments (id, organization_id, buyer_user_id, stripe_account_id, livemode, subject_type, subject_id, location_id, currency, amount, captured_amount, stripe_payment_intent_id, price_snapshot_json, created_at, updated_at)
+      VALUES ('site-pay', ?, NULL, 'acct_contract', 0, 'stay', NULL, 'location', 'USD', 45000, 45000, 'pi_site', ?, ?, ?)`).bind(ORG, JSON.stringify({ stay: purchase }), NOW, NOW).run()
     await executeBatch(db, stayFromCheckoutQueries({ organizationId: ORG, locationId: 'location', stayId: 'site-stay', holdId: 'site-hold', paymentId: 'site-pay', buyerUserId: null, now: NOW,
       stay: { quote: purchase, guest: purchase.guest }, homeTitle: home.name }))
     const siteThreadId = (await db.prepare("SELECT request_id FROM stays WHERE id = 'site-stay'").first<{ request_id: string }>())!.request_id

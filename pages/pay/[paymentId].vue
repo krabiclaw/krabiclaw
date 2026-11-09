@@ -98,6 +98,7 @@
           <p v-if="completing" class="text-sm text-muted">{{ t('payment.verifying') }}</p>
           <UAlert v-if="outcome === 'processing'" color="info" :title="t('payment.processing')" :description="t('payment.processing_help')" />
           <UAlert v-else-if="outcome === 'refunded'" color="warning" :title="t('payment.refunded')" :description="t('payment.refunded_help')" />
+          <UAlert v-else-if="outcome === 'expired'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
           <UAlert v-else-if="paid || handoff.state === 'paid'" color="success" :title="t('payment.already_paid')" />
           <UAlert v-else-if="handoff.state !== 'open'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
           <template v-else>
@@ -198,7 +199,7 @@ const actionError = ref('')
 const review = ref<Review | null>(null)
 const completing = ref(false)
 const paid = ref(false)
-const outcome = ref<'processing' | 'refunded' | null>(null)
+const outcome = ref<'processing' | 'refunded' | 'expired' | null>(null)
 let stripe: Stripe | null = null
 let mounting = false
 let elements: StripeElements | null = null
@@ -364,7 +365,7 @@ async function pay() {
       if (!confirmed.client_secret) throw new Error(t('payment.unavailable'))
       const next = await stripe.handleNextAction({ clientSecret: confirmed.client_secret })
       if (next.error) throw new Error(next.error.message ?? t('payment.declined'))
-      if (next.paymentIntent?.status !== 'succeeded' && next.paymentIntent?.status !== 'processing') throw new Error(t('payment.declined'))
+      if (next.paymentIntent?.status !== 'succeeded' && next.paymentIntent?.status !== 'processing' && next.paymentIntent?.status !== 'requires_capture') throw new Error(t('payment.declined'))
     } else if (confirmed.status !== 'succeeded' && confirmed.status !== 'processing') {
       throw new Error(t('payment.declined'))
     }

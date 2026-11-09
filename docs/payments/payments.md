@@ -365,9 +365,9 @@ required collection and the product payment configuration stay unchanged.
 The public booking hold uses the canonical allocator predicate,
 including tenant/calendar-group half-open overlap exclusion. Holds expire after
 60 minutes. Review-pending Bookings have no Checkout TTL and consume capacity.
-Only authenticated native capture converts the hold to the canonical pending or
-confirmed Booking and commits its lifecycle activity/operational ID atomically.
-Late or unfulfillable capture creates an automatic full-principal refund intent.
+A card or Link authorization, or a bank debit once it clears, converts the hold
+to the canonical pending or confirmed Booking and commits its lifecycle
+activity/operational ID atomically. A card is captured only after that commit.
 
 Stripe account + livemode + native object identity scope every financial mutation.
 The connected snapshot webhook is separate from the subscription handler; durable
@@ -425,32 +425,32 @@ terminal: it releases the active hold.
 
 **Expiry.** The buyer's time to pay is `payments.checkout_expires_at`. Every
 availability query ignores a hold past `expires_at`, and the confirm endpoint
-refuses a payment past its window. Stripe says what happened to a payment; the
-hold says who has the capacity, and confirming keeps it in step:
+refuses a payment past its window. Before the confirm request goes to Stripe, one
+conditional write extends the active, unexpired hold by an hour; a hold that has
+already lapsed stops the confirmation there.
 
-- Before the confirm request goes to Stripe, one conditional write extends the
-  active, unexpired hold to at least an hour on and past the buyer's window. A
-  hold that has already lapsed stops the confirmation there, so Stripe is never
-  asked to take money for capacity that has gone.
-- These intents use automatic confirmation, because Stripe refuses
-  `confirmation_method: manual` alongside `automatic_payment_methods`. So anyone
-  holding the client secret could confirm from a browser. The browser only gets
-  the secret when Stripe says `requires_action`.
-- `checkout-holds`, every five minutes, reads Stripe for each reviewed payment
-  whose buyer window is over and whose hold has under 20 minutes left. An intent
-  still in `requires_action`, or back in `requires_payment_method` after a
-  failure, is cancelled at Stripe before its hold lapses; a success is settled.
-  An intent that never began confirming is left alone: no browser holds its
-  secret and the pay page refuses it.
-- A cancellation asks Stripe first and releases the hold only after Stripe has
-  cancelled the intent.
+**Cards and Link: authorize, book, capture.** Both use manual capture
+(`payment_method_options[card|link].capture_method`; surcharge and tax are in the
+authorized total). When Stripe reports `requires_capture`, from the confirm
+response, the webhook or the pay page's return, the hold becomes the booking and
+only then is the payment captured. If the capacity has gone the authorization is
+cancelled: nothing is charged and nothing is refunded. These intents use automatic
+confirmation, because Stripe refuses `confirmation_method: manual` alongside
+`automatic_payment_methods`, so a browser holding the client secret could confirm
+one late; the browser only gets the secret for `requires_action`, and a late
+authorization is cancelled the same way.
 
-**A capture with no booking.** Conversion that fails for a reason that can pass
-returns non-2xx and Stripe redelivers; conversion is idempotent on the hold. A
-capture whose capacity is genuinely gone is refunded in full through the ordinary
-refund under the key `unfulfillable:<intent>`, and a redelivery that finds that
-refund repeats it rather than booking. Delayed webhook delivery has not been seen
-to cost a booking; it is covered as a condition, not an incident.
+A lost capture response is not a failure. Stripe's status is read again before
+anything is retried, and the hold finds the same booking. If Stripe cancels an
+authorization a booking was committed on, nothing was paid and the business gets a
+payment-failed alert on the booking.
+
+**ACH.** Confirmation starts the debit, so there is nothing to authorize. The hold
+keeps the capacity for 14 days while the debit clears (instant bank verification
+only; the pay page cannot wait on microdeposits), and the booking is made when it
+succeeds. A debit that clears after its capacity went, because the business closed
+what it paid for, goes back through the ordinary refund under
+`unfulfillable:<intent>`, and a redelivery repeats that refund rather than booking.
 
 **Tax.** A business in a Stripe Tax business location
 (https://docs.stripe.com/tax/supported-countries) with active Stripe Tax

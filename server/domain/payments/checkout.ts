@@ -248,6 +248,8 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       // The connected configuration the acceptance check verified: cards, Link, wallets, and ACH Direct Debit.
       payment_method_configuration: methodConfigurationId,
       automatic_payment_methods: { enabled: true, allow_redirects: 'always' },
+      // A card or Link is authorized, booked, then captured. ACH has no authorization, and the pay page cannot wait on microdeposits.
+      payment_method_options: { card: { capture_method: 'manual' }, link: { capture_method: 'manual' }, us_bank_account: { verification_method: 'instant' } },
       application_fee_amount: 0,
       description: projectionTitle,
       metadata: { krabiclaw_payment_id: id },

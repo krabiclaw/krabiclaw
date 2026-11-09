@@ -42,8 +42,8 @@ const stayProperties = {
 }
 const channelPush = { ...CHANNEL_PUSH_SCHEMA, description: "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error." }
 const onlinePayment = { type: ['object', 'null'], description: 'The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.',
-  properties: { payment_id: text, state: { type: 'string', enum: ['pending', 'captured', 'failed', 'recovery', 'refunded'] }, currency: text, amount_minor: { type: 'integer' }, captured_minor: { type: 'integer' }, refunded_minor: { type: 'integer' }, receipt_url: nullableText, created_at: text },
-  required: ['payment_id', 'state', 'currency', 'amount_minor', 'captured_minor', 'refunded_minor', 'receipt_url', 'created_at'] }
+  properties: { payment_id: text, currency: text, amount_minor: { type: 'integer' }, captured_minor: { type: 'integer' }, refunded_minor: { type: 'integer' }, receipt_url: nullableText, created_at: text },
+  required: ['payment_id', 'currency', 'amount_minor', 'captured_minor', 'refunded_minor', 'receipt_url', 'created_at'] }
 const stayTurnoverProperties = Object.fromEntries(STAY_TURNOVER_FIELDS.map(field => [field, stayProperties[field]]))
 /** What a member responsible for the home reads of a stay: dates, arrival, the guest's first name and party. */
 const stayTurnover = { type: 'object', description: 'A member’s view of a stay at a home they look after: dates, arrival time, the guest’s first name and party. Owners and admins read the whole stay.', properties: stayTurnoverProperties, required: [...STAY_TURNOVER_FIELDS], additionalProperties: false }

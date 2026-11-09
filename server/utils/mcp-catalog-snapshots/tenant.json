@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:63d3eb18274759e7c1c227b4d7e6b7252e3c25460097b07e7cf758abc97b218d",
-  "documentationFingerprint": "sha256:f67d16b5d376d63c7c4bf8f0123e6977045a72b15f1b77060b340fe1246fb58b",
+  "fingerprint": "sha256:0e68f128032ffae4e4800c707fc53f35baf0bfbf294fc0a5cae50275a502d918",
+  "documentationFingerprint": "sha256:3d9ddf6e24de25d9452c06e8066462c1f9ed6f5d1c9089517dc3b202879a3a1f",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -65529,21 +65529,10 @@
                       },
                       "refunded_minor": {
                         "type": "integer"
-                      },
-                      "state": {
-                        "enum": [
-                          "pending",
-                          "captured",
-                          "failed",
-                          "recovery",
-                          "refunded"
-                        ],
-                        "type": "string"
                       }
                     },
                     "required": [
                       "payment_id",
-                      "state",
                       "currency",
                       "amount_minor",
                       "captured_minor",

@@ -31,7 +31,7 @@ export async function requireClaimedPayment(db: DbClient, stripe: Stripe, organi
   if (!payment?.stripe_payment_intent_id || !payment.checkout_expires_at || !payment.return_expires_at) throw new HTTPError({ statusCode: 404, statusMessage: 'Payment not found' })
   const intent = await stripe.paymentIntents.retrieve(payment.stripe_payment_intent_id, { expand: ['latest_charge'] }, { stripeAccount: payment.stripe_account_id })
   const now = new Date().toISOString()
-  const state: PaymentHandoffState = payment.captured_amount > 0 ? 'paid' : intent.status === 'canceled' ? 'failed' : payment.checkout_expires_at <= now || payment.return_expires_at <= now ? 'expired' : 'open'
+  const state: PaymentHandoffState = payment.captured_amount > 0 || intent.status === 'requires_capture' || intent.status === 'succeeded' ? 'paid' : intent.status === 'canceled' ? 'failed' : payment.checkout_expires_at <= now || payment.return_expires_at <= now ? 'expired' : 'open'
   return { payment, intent, state }
 }
 
@@ -190,8 +190,9 @@ async function calculateTax(stripe: Stripe, payment: Payment, snapshot: ReturnTy
 
 /**
  * Confirms exactly what was reviewed: the same method on the intent, the same
- * total. Stripe's own 3DS, bank clearing and capture follow; a succeeded intent
- * settles here and again, idempotently, from the webhook.
+ * total. A card or Link is authorized, booked, then captured here or, after 3DS,
+ * from the webhook or the return; a bank debit clears later and books then.
+ * Every path settles idempotently from Stripe's own status.
  */
 export async function confirmPayment(db: DbClient, stripe: Stripe, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, input: { payment_method_id: string; total: number }, siteOrigin: string) {
   const { payment, intent: current, state } = await requireClaimedPayment(db, stripe, organizationId, paymentId, claim)
@@ -210,9 +211,9 @@ export async function confirmPayment(db: DbClient, stripe: Stripe, env: Cloudfla
     // The surcharged total is what Stripe charges; the surcharge inside it is named so receipts and refunds carry it.
     ...(review.surcharge > 0 ? { amount_to_confirm: review.total, amount_details: { surcharge: { amount: review.surcharge, enforce_validation: 'enabled' } } } : {}),
   } as Stripe.PaymentIntentConfirmParams, { stripeAccount: payment.stripe_account_id, idempotencyKey: `krabiclaw-confirm:${payment.id}:${review.reviewed_at}` })
-  if (confirmed.status === 'succeeded' || confirmed.status === 'processing') await reconcilePaymentIntent(db, stripe, payment, confirmed, env)
+  const settled = confirmed.status === 'requires_capture' || confirmed.status === 'succeeded' || confirmed.status === 'processing' ? await reconcilePaymentIntent(db, stripe, payment, confirmed, env) : confirmed
   // Automatic confirmation lets whoever holds this secret confirm the intent, so only a payment that needs the browser gets it.
-  return { status: confirmed.status, client_secret: confirmed.status === 'requires_action' ? confirmed.client_secret : null, requires_action: confirmed.status === 'requires_action' }
+  return { status: settled.status, client_secret: settled.status === 'requires_action' ? settled.client_secret : null, requires_action: settled.status === 'requires_action' }
 }
 
 /**
@@ -225,8 +226,10 @@ export type PaymentReturn =
   | { state: 'paid'; kind: 'stay'; activity_id: string; receipt_token: string }
   /** Stripe is still clearing the payment; nothing is booked until it captures. */
   | { state: 'processing' }
-  /** Captured, but what it paid for was taken first; the payment is refunded in full. */
+  /** A bank debit cleared after what it paid for was taken; the payment is refunded in full. */
   | { state: 'refunded' }
+  /** What it was for has gone, so the authorization was cancelled and nothing was charged. */
+  | { state: 'expired' }
 
 async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment): Promise<PaymentReturn> {
   const hold = await queryFirst<{ status: string; request_id: string | null; converted_stay_id: string | null }>(db, 'SELECT status,request_id,converted_stay_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id])
@@ -256,13 +259,14 @@ async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment
  */
 export async function completePaymentReturn(db: DbClient, stripe: Stripe, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, buyer: () => Promise<string>): Promise<PaymentReturn> {
   const { payment, intent } = await requireClaimedPayment(db, stripe, organizationId, paymentId, claim)
-  if (intent.livemode !== Boolean(payment.livemode) || intent.metadata.krabiclaw_payment_id !== payment.id || (intent.status !== 'succeeded' && intent.status !== 'processing')) throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
-  await reconcilePaymentIntent(db, stripe, payment, intent, env)
-  if (intent.status === 'processing') return { state: 'processing' }
+  if (intent.livemode !== Boolean(payment.livemode) || intent.metadata.krabiclaw_payment_id !== payment.id || (intent.status !== 'succeeded' && intent.status !== 'processing' && intent.status !== 'requires_capture')) throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
+  const settled = await reconcilePaymentIntent(db, stripe, payment, intent, env)
+  if (settled.status === 'processing') return { state: 'processing' }
+  if (settled.status !== 'succeeded') return { state: 'expired' }
   await claimCheckoutReturn(db, await buyer(), claim)
   const owned = await requirePayment(db, organizationId, payment.id)
   const charge = typeof intent.latest_charge === 'string' ? null : intent.latest_charge
   // The capture alert names the buyer who has now proved the purchase; the event key makes it the same alert.
-  await notifyPaymentFinancialEvent(db, stripe, env, owned, { kind: 'payment_captured', nativeId: intent.id, status: intent.status, amount: intent.amount_received, email: charge?.billing_details.email ?? null })
+  await notifyPaymentFinancialEvent(db, stripe, env, owned, { kind: 'payment_captured', nativeId: settled.id, status: settled.status, amount: settled.amount_received, email: charge?.billing_details.email ?? null })
   return paymentReceipt(db, env, owned)
 }
