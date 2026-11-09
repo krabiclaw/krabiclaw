@@ -9,6 +9,7 @@
 <script setup lang="ts">
 import { GUEST_NOT_MESSAGED_WARNING, isMovedStayResponse } from '~/shared/stay-move'
 import { getErrorMessage } from '~/utils/errors'
+import { ApiClientError } from '~/utils/api-clients'
 
 definePageMeta({ layout: 'dashboard' })
 
@@ -61,6 +62,10 @@ async function save() {
     await navigateTo(level.to.value ?? `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/bookings/stay/${encodeURIComponent(stayId)}`)
   } catch (cause) {
     error.value = getErrorMessage(cause, 'The guest could not be moved.')
+    // The move is saved when its channel push or publication fails: the stay and its options are reloaded so the next attempt is not a version conflict.
+    if (cause instanceof ApiClientError && (cause.data.committed === true || (isRecord(cause.data.data) && cause.data.data.committed === true))) {
+      await Promise.all([refreshNuxtData(`stay-move:${stayId}`), refreshNuxtData(`${String(route.params.orgSlug)}-stay:${stayId}`)])
+    }
   } finally {
     saving.value = false
   }

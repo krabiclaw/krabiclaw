@@ -2454,9 +2454,9 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
     `SELECT id, product_id, booked_product_id, provider_updated_at, revision_id, external_booking_id FROM stays WHERE organization_id = ? AND channel = ? AND channel_booking_id = ?
       AND ((provider = ? AND external_booking_id <> ?) OR owner = 'app')`,
     [organizationId, booking.channel, booking.channel_booking_id, booking.provider, booking.external_booking_id]))
-  if (existing?.external_booking_id === null && existing.product_id !== productId) fail(409, 'CHANNEL_MIGRATION_HOME_CONFLICT', 'This reservation was imported into a different occupied home. Resolve its property assignment before accepting the channel revision.', 'product_id')
   // A revision names the listing it was booked on. A guest the host moved stays where they sleep; a revision for another listing is a real re-map.
   const landing = existing?.booked_product_id === productId ? existing.product_id : productId
+  if (existing?.external_booking_id === null && existing.product_id !== landing) fail(409, 'CHANNEL_MIGRATION_HOME_CONFLICT', 'This reservation was imported into a different occupied home. Resolve its property assignment before accepting the channel revision.', 'product_id')
   const reimported = existing && existing.external_booking_id !== booking.external_booking_id ? existing.external_booking_id : null
   const conversation = await queryFirst<{ organization_id: string; product_id: string; request_id: string }>(db,
     'SELECT organization_id, product_id, request_id FROM channel_threads WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])

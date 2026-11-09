@@ -81,10 +81,10 @@ async function stripePaymentFacts(env:CloudflareEnv,payment:Payment){
  const account={stripeAccount:payment.stripe_account_id}
  const [charge,refunds,disputes]=await Promise.all([
   stripe.charges.retrieve(payment.stripe_charge_id,{},account),
-  stripe.refunds.list({payment_intent:payment.stripe_payment_intent_id,limit:100},account),
-  stripe.disputes.list({payment_intent:payment.stripe_payment_intent_id,limit:100},account),
+  stripe.refunds.list({payment_intent:payment.stripe_payment_intent_id,limit:100},account).autoPagingToArray({limit:10_000}),
+  stripe.disputes.list({payment_intent:payment.stripe_payment_intent_id,limit:100},account).autoPagingToArray({limit:10_000}),
  ])
- return {captured:charge.amount_captured,refunded:charge.amount_refunded,refunds:refunds.data,disputes:disputes.data}
+ return {captured:charge.amount_captured,refunded:charge.amount_refunded,refunds,disputes}
 }
 /** Full merchant detail; callers must authorize before reading or projecting it. */
 export async function readPaymentDetails(db:DbClient,env:CloudflareEnv,organizationId:string,paymentId:string){
