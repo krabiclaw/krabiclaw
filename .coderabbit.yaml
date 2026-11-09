@@ -12,6 +12,9 @@ reviews:
   # An epoch archives its migrations here unchanged; they were reviewed when written.
   path_filters:
     - "!migrations-history/**"
+    # Drizzle writes these snapshots; the schema they describe is reviewed in
+    # server/db/schema.ts and the baseline SQL.
+    - "!migrations/meta/**"
   # Deliberately absent. It blocks the PR until findings are resolved, and an
   # agent cannot dismiss a review after fixing one, so the gate would deadlock
   # on the author it is meant to hold to account.
