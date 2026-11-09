@@ -1604,6 +1604,20 @@ function bookedListingGuardQuery(organizationId: string, productId: string, stay
   }
 }
 
+/**
+ * The guards for the nights a write newly takes on a home: none when the stay
+ * already held every night there, otherwise the stretch before and the stretch
+ * after what it held. A stay that already overlapped a reservation later moved
+ * off its listing keeps its own nights and is edited freely within them.
+ */
+function bookedListingGuardQueries(organizationId: string, productId: string, stayId: string, held: { product_id: string; check_in_date: string; check_out_date: string } | null, next: { check_in_date: string; check_out_date: string }): BatchQuery[] {
+  if (!held || held.product_id !== productId) return [bookedListingGuardQuery(organizationId, productId, stayId, next.check_in_date, next.check_out_date)]
+  const guards: BatchQuery[] = []
+  if (next.check_in_date < held.check_in_date) guards.push(bookedListingGuardQuery(organizationId, productId, stayId, next.check_in_date, held.check_in_date < next.check_out_date ? held.check_in_date : next.check_out_date))
+  if (next.check_out_date > held.check_out_date) guards.push(bookedListingGuardQuery(organizationId, productId, stayId, held.check_out_date > next.check_in_date ? held.check_out_date : next.check_in_date, next.check_out_date))
+  return guards
+}
+
 /** The booked-listing guard above is the only `json()` of plain text in a stay batch. */
 function isBookedListingHeld(error: unknown): boolean {
   return /malformed JSON/.test(error instanceof Error ? error.message : String(error))
@@ -1741,7 +1755,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
         params: [id, access.organizationId, home.product_id, channel, fields.check_in_date, fields.check_out_date, fields.arrival_time, fields.adults, fields.children, fields.infants,
           fields.guest_name, fields.guest_surname, fields.guest_email, fields.guest_phone, fields.total_minor, home.currency, fields.notes, key, channelBookingId, imported ? null : now, now, now, access.actorId, access.actorId, JSON.stringify(answers)],
       },
-      bookedListingGuardQuery(access.organizationId, home.product_id, id, fields.check_in_date, fields.check_out_date),
+      ...bookedListingGuardQueries(access.organizationId, home.product_id, id, null, fields),
       ...reconcileNightsQueries(access.organizationId, id),
       ...stayThreadQueries({ organizationId: access.organizationId, stayId: id, now, openedBy: { userId: access.actorId } }),
       organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.created', entityType: 'stay', entityId: id,
@@ -1799,7 +1813,7 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
           fields.guest_email, fields.guest_phone, fields.total_minor, fields.notes, next, now, access.actorId, access.organizationId, stayId, current.version],
       },
       organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.updated', entityType: 'stay', entityId: stayId, onlyIfPreviousChangedOneRow: true }),
-      bookedListingGuardQuery(access.organizationId, current.product_id, stayId, fields.check_in_date, fields.check_out_date),
+      ...bookedListingGuardQueries(access.organizationId, current.product_id, stayId, current, fields),
       ...reconcileNightsQueries(access.organizationId, stayId),
       ...stayThreadQueries({ organizationId: access.organizationId, stayId, now, openedBy: { userId: access.actorId } }),
       ...turnovers,
@@ -1932,7 +1946,7 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
         params: [to.product_id, booked, next, now, access.actorId, access.organizationId, stayId, from.product_id, current.version] },
       organizationEventQuery({ organizationId: access.organizationId, locationId: to.location_id, actorId: access.actorId, eventType: 'stay.moved', entityType: 'stay', entityId: stayId, onlyIfPreviousChangedOneRow: true,
         metadata: { from_product_id: from.product_id, to_product_id: to.product_id, booked_product_id: booked } }),
-      bookedListingGuardQuery(access.organizationId, to.product_id, stayId, current.check_in_date, current.check_out_date),
+      ...bookedListingGuardQueries(access.organizationId, to.product_id, stayId, current, current),
       ...reconcileNightsQueries(access.organizationId, stayId),
       { query: `UPDATE scheduled_guest_messages SET product_id = ?, updated_at = ? WHERE organization_id = ? AND stay_id = ? AND status <> 'sent' AND ${moved}`,
         params: [to.product_id, now, access.organizationId, stayId, ...movedParams] },
@@ -2575,7 +2589,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
       booking.provider_updated_at, booking.cancelled ? now : null, booking.imported || booking.cancelled ? null : now, now, now, 'channex', 'channex', landing === productId ? null : productId, existing?.id ?? null, previous?.product_id ?? null, previous?.version ?? null],
   },
   // A listing whose guest was moved elsewhere still holds its nights: a second reservation landing on them is an overbooking, like one landing on claimed nights.
-  ...(overbooked === 0 && !booking.cancelled ? [bookedListingGuardQuery(organizationId, landing, id, booking.check_in_date, booking.check_out_date)] : []),
+  ...(overbooked === 0 && !booking.cancelled ? bookedListingGuardQueries(organizationId, landing, id, previous, booking) : []),
   organizationEventQuery({ organizationId, locationId: home.location_id, actorId: null, eventType: existing ? 'stay.updated' : 'stay.created', entityType: 'stay', entityId: id,
     dedupeKey: revisionKey, onlyIfPreviousChangedOneRow: true, metadata: { channel: booking.channel, overbooked: overbooked === 1,
       provider: booking.provider, external_booking_id: booking.external_booking_id, revision_id: booking.revision_id, provider_updated_at: booking.provider_updated_at,

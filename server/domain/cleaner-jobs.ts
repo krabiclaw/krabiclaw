@@ -27,6 +27,8 @@ const MORNING_OF = '08:00'
 const WARNING_BEFORE_ARRIVAL_MS = 2 * 3_600_000
 /** How long a closed or cancelled job is still told about in its conversation. */
 const RECENT_MS = 7 * 86_400_000
+/** How far ahead a job's reminders are armed from one wake; a later wake, or the daily one, reaches the rest. */
+const AHEAD_MS = 14 * 86_400_000
 
 interface Member { id: string; userId: string; role: string }
 
@@ -90,9 +92,11 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
   const [members, teamRows, tasks] = await Promise.all([
     queryAll<Member>(db, 'SELECT id, userId, role FROM member WHERE organizationId = ?', [organizationId]),
     queryAll<{ team_id: string; user_id: string }>(db, 'SELECT t.id AS team_id, tm.userId AS user_id FROM team t JOIN teamMember tm ON tm.teamId = t.id WHERE t.organizationId = ?', [organizationId]),
-    queryAll<TaskRow>(db, `SELECT t.* FROM tasks t WHERE t.organization_id = ? AND (${JOB_TASK_SQL('t')} OR t.starts_at IS NOT NULL) AND (t.status = 'open' OR t.updated_at >= ?)
+    // A job has something to say when its time is near (its reminders, from the evening before to its warning) or it changed lately (its post, release or cancellation); an open job long past says nothing more.
+    queryAll<TaskRow>(db, `SELECT t.* FROM tasks t WHERE t.organization_id = ? AND (${JOB_TASK_SQL('t')} OR t.starts_at IS NOT NULL)
+      AND ((t.status = 'open' AND COALESCE(t.due_at, t.starts_at, t.created_at) BETWEEN ? AND ?) OR t.updated_at >= ?)
       AND (t.assigned_member_id IS NOT NULL OR t.assigned_team_id IS NOT NULL OR ${JOB_TASK_SQL('t')}) ORDER BY COALESCE(t.starts_at, t.due_at, t.created_at), t.id`,
-    [organizationId, new Date(now.getTime() - RECENT_MS).toISOString()]),
+    [organizationId, new Date(now.getTime() - RECENT_MS).toISOString(), new Date(now.getTime() + AHEAD_MS).toISOString(), new Date(now.getTime() - RECENT_MS).toISOString()]),
   ])
   const teams = new Map<string, string[]>()
   for (const row of teamRows) teams.set(row.team_id, [...teams.get(row.team_id) ?? [], row.user_id])
