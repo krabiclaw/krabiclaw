@@ -249,7 +249,9 @@ test('a guest opens a stay\'s booking dialog, picks nights the calendar allows a
   await waitForNuxtHydration(page)
   // The stay's own card: the page also renders each review as an article.
   const availability = page.getByRole('button', { name: 'Check availability', exact: true })
-  const card = page.locator('article').filter({ has: availability })
+  await expect(availability).toBeVisible()
+  // Only the page's own article has Share; its buttons change as dates are chosen, and rooms and reviews are articles too.
+  const card = page.locator('article').filter({ has: page.getByRole('button', { name: 'Share', exact: true }) })
   // A stay is a reservation: none of an appointment's words.
   await expect(card).not.toContainText(/appointment/i)
   const datePicker = page.getByRole('dialog').filter({ has: page.locator('[data-stay-calendar]') })
