@@ -24,7 +24,7 @@ import { PHOTO_WIDTH, minorUnits, listingCalendar, listingContent, listingDetail
 import { DETAIL_FIELDS, IMPORT_STAGES, type DetailField, type ImportStage } from '~/shared/airbnb-import'
 export type { ImportStage } from '~/shared/airbnb-import'
 import { installChannexMessages, uninstallChannexMessages } from './messages'
-import { calendarMinimumDefaults, completeChannelPush, configureStayCalendar, forgetConfirmedNights, type ChannelPushCompletion, withDeliveryLease, withLeaseHeartbeat, type ChannexMapping, type DeliveryLease } from './ari'
+import { calendarMinimumDefaults, completeChannelPush, configureStayCalendar, forgetConfirmedNights, type ChannelPushCompletion, type ChannexMapping } from './ari'
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import { backfillChannexMessages } from '~/server/domain/guest-threads/channel-messages'
 import { publishBusinessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
@@ -137,6 +137,50 @@ export const AIRBNB_CALLBACK = 'krabiclaw://airbnb/callback'
 const SIGN_IN_LIFETIME_MS = 2 * 60 * 60 * 1000
 /** Crash-recovery window; live actions conditionally renew their operation timestamp. */
 const ABANDONED_LOCK_MS = 15 * 60 * 1000
+
+/**
+ * Renew the connection's operation lock while an action runs and drain the
+ * renewal before cleanup. A returned error proves the lock was lost; a thrown
+ * renewal failure stays visible while renewal continues.
+ */
+async function withLeaseHeartbeat<T>(interval: number, renew: () => Promise<Error | null>, action: (check: () => Promise<void>) => Promise<T>, cleanup: () => void | Promise<void>): Promise<T> {
+  const failures: unknown[] = []
+  let active = true
+  let owned = true
+  let renewal = Promise.resolve()
+  const check = async () => {
+    await renewal
+    if (failures.length) throw failures[0]
+  }
+  const heartbeat = setInterval(() => {
+    renewal = renewal.then(async () => {
+      if (!active || !owned) return
+      try {
+        const lost = await renew()
+        if (lost) {
+          owned = false
+          failures.push(lost)
+        }
+      } catch (error) { failures.push(error) }
+    })
+  }, interval)
+  let value!: T
+  try {
+    value = await action(check)
+  } catch (error) {
+    if (!failures.includes(error)) failures.push(error)
+  } finally {
+    active = false
+    clearInterval(heartbeat)
+    await renewal
+    try {
+      await cleanup()
+    } catch (error) { failures.push(error) }
+  }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length) throw new AggregateError(failures, failures.map(error => error instanceof Error ? error.message : String(error)).join('; '))
+  return value
+}
 /**
  * Photos one content-stage call fetches from Airbnb. A listing's photos are
  * fetched over as many calls as it takes, so no call outlasts the app's
@@ -228,8 +272,8 @@ export class AirbnbConnection {
     this.checkSlice()
     await execute(this.db, "INSERT INTO channex_connections (organization_id, status) VALUES (?, 'not_connected') ON CONFLICT (organization_id) DO NOTHING", [this.organizationId])
     const operationId = crypto.randomUUID()
-    // The timestamp is a crash-recovery window; live actions renew it conditionally.
-    // A stale pending write may have applied and is held for review; a stale lock without one can be reclaimed.
+    // One operation at a time per connection. A lock not renewed for ABANDONED_LOCK_MS is free again;
+    // one left with a pending provider write is held for review instead.
     const abandonedBefore = new Date(Date.now() - ABANDONED_LOCK_MS).toISOString()
     await execute(this.db, `UPDATE channex_connections SET status = 'needs_review', updated_at = ?
       WHERE organization_id = ? AND operation_id IS NOT NULL AND pending_step IS NOT NULL AND updated_at < ? AND status <> 'needs_review'`,
@@ -1081,37 +1125,28 @@ export class AirbnbConnection {
 
   /** Resend a connected home's calendar without changing its Airbnb mapping or Messages installation. */
   async syncFullCalendar(productId: string): Promise<{ product_id: string; channel_push: SuccessfulChannelPush }> {
-    return this.locked(async (row, check) => {
+    return this.locked(async (row) => {
       if (row.status !== 'connected' || !row.channel_id) fail(409, 'NOT_CONNECTED', 'Connect Airbnb before syncing the calendar.')
       await this.requireChannelSync()
       const mapping = await queryFirst<MappingRow>(this.db, "SELECT * FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex'", [this.organizationId, productId])
       if (!mapping || mapping.channel_id !== row.channel_id) fail(404, 'IMPORT_NOT_FOUND', 'Listing import not found')
       if (mapping.import_stage !== 'complete' || mapping.enabled !== 1) fail(409, 'CHANNEL_PROPERTY_NOT_READY', 'Finish connecting this home before syncing its full calendar.')
       for (const field of ['property_id', 'room_type_id', 'rate_plan_id'] as const) string(mapping[field], field)
-      // The connection lock protects setup; the delivery lease also excludes normal calendar writes' deliveries.
-      const pushed = await withDeliveryLease(this.db, productId, async (lease) => {
-        const delivery = { token: lease.token, check: async () => {
-          await check()
-          await lease.check()
-        } }
-        await forgetConfirmedNights(this.db, productId, delivery)
-        return this.deliverCalendar(row, mapping, delivery)
-      })
-      if (!pushed) fail(409, 'CHANNEL_DELIVERY_BUSY', 'A calendar update for this home is under way. Try the full sync again after it finishes.')
+      await forgetConfirmedNights(this.db, productId)
+      const pushed = await this.deliverCalendar(row, mapping)
       return { product_id: productId, channel_push: pushed }
     })
   }
 
   /** Send the configured home's calendar through the outbox: one restrictions call and one availability call. */
-  private async deliverCalendar(row: ConnectionRow, mapping: MappingRow, lease?: DeliveryLease): Promise<SuccessfulChannelPush> {
+  private async deliverCalendar(row: ConnectionRow, mapping: MappingRow): Promise<SuccessfulChannelPush> {
     const target = { property_id: string(mapping.property_id, 'property_id'), room_type_id: string(mapping.room_type_id, 'room_type_id'), rate_plan_id: string(mapping.rate_plan_id, 'rate_plan_id') }
-    // Existing-resource settings PUTs are repeatable; the sync queue re-reads their result under these same lease checks.
     await configureStayCalendar(this.db, this.env, this.organizationId, await readStayHome(this.db, this.manager(), mapping.product_id), target, async (action) => {
-      await this.save(row, {}, lease?.check)
+      await this.save(row, {})
       await action()
-      await this.save(row, {}, lease?.check)
+      await this.save(row, {})
     })
-    const pushed = await syncStayCalendar(this.db, this.env, this.manager(), mapping.product_id, target, lease)
+    const pushed = await syncStayCalendar(this.db, this.env, this.manager(), mapping.product_id, target)
     if (pushed.state === 'needs_review') fail(502, 'PROVIDER_VERIFICATION_FAILED', `Channex rejected part of the calendar: ${pushed.detail}`)
     return pushed
   }

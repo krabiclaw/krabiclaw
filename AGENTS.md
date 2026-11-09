@@ -111,6 +111,11 @@ provider — and why that mechanism cannot do the job. "Reconstructibility",
 "auditability" or "rigor" without a defect someone hits is not a reason to add
 one. An endpoint, store or path nothing calls is deleted, not repaired.
 
+Documentation describes what the product does for a user and links the
+provider's documented behavior. It never describes our handling of a failure
+that has no recorded occurrence, and a sentence written alongside code is not a
+requirement for the next change.
+
 ## Database and releases
 
 Every Cloudflare D1 database must use Western North America (`wnam`).
@@ -159,9 +164,9 @@ Do not default, placeholder or fabricate state that could not be read. Missing
 or invalid required state fails visibly — a manufactured value is worse than an
 error because it is indistinguishable from a real one.
 
-A write that succeeded while the work that makes it visible failed has not
-succeeded. Cache purges, index refreshes, reconciliations, notifications and
-audit rows are part of the operation that asked for them.
+An operation includes every write it needs, in one batch where possible, and
+fails as a whole: a row saved while a later write of the same operation failed
+is reported as that failure, not as success.
 
 ## Evidence
 

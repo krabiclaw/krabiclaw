@@ -164,10 +164,10 @@ maintenance response in the application.
 
 Paged initial reads are not a consistent live snapshot. After repointing,
 account for old HTTP and cron invocations through version-specific Worker
-logs, paired MCP request events and the existing operation/delivery leases.
-Asset convergence verifies the build, not completion of old writers. Cron
-invocations can run for 15 minutes; HTTP has no fixed duration while connected,
-so elapsed time or an empty lease query alone cannot establish that work ended.
+logs and paired MCP request events. Asset convergence verifies the build, not
+completion of old writers. Cron invocations can run for 15 minutes; HTTP has no
+fixed duration while connected, so elapsed time alone cannot establish that
+work ended.
 Capture the final delta only after old writers finish, and verify that the
 retired source remains unchanged during and after capture. If it changes,
 discard the unapplied capture and repeat the read-only preflight against the

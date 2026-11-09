@@ -110,7 +110,7 @@ export async function deleteChannelPost(env: CloudflareEnv, organizationId: stri
   }
   const now = new Date().toISOString()
   await executeBatch(env.DB, [
-    { query: `UPDATE post_publications SET state = 'removed', attempt_id = NULL, error_code = NULL, error_message = NULL, updated_at = ?
+    { query: `UPDATE post_publications SET state = 'removed', error_code = NULL, error_message = NULL, updated_at = ?
         WHERE organization_id = ? AND channel = ? AND provider_target_id = ? AND provider_post_id = ? AND state IN ('published','removed')`,
       params: [now, ...receiptParams] },
     organizationEventQuery({ organizationId, actorId, eventType: 'post.channel_deleted', entityType: 'post', entityId: providerPostId, metadata: { channel: input.channel, target_id: input.target_id } }),

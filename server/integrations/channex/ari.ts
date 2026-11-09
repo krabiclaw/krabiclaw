@@ -56,30 +56,25 @@ export async function completeChannelPush<T extends object>(outcome: ChannelPush
  * ahead, with nothing confirmed yet: an import's inventory, and a home that
  * syncs again after it stopped.
  *
- * One delivery runs per property at a time, under a lease on its mapping.
  * Channex takes 10 restrictions and 10 availability calls per property per
- * minute (docs.channex.io rate-limits). Delivery counts this property's calls
- * in the last minute from channel_sync_log and leaves the nights pending with
- * their retry time instead of exceeding the limit. A 429, or a call Channex
- * did not confirm (5xx, the network, an unreadable answer), pauses the
- * property: a minute, doubling with each further attempt up to an hour, and
- * the nights stay pending with the reason until Channex confirms them. ARI
- * values are absolute, so sending one twice changes nothing. Only a refusal
- * or a partial rejection (200 with meta.warnings, by the dates it names)
- * marks nights needs_review with Channex's reason. The channex-ari-delivery
- * task delivers every pending night that comes due.
+ * minute (docs.channex.io/docs/rate-limits). Delivery counts this property's
+ * calls in the last minute from channel_sync_log and leaves the nights pending
+ * instead of exceeding the limit; the next delivery sends them because they
+ * are pending. A call Channex did not confirm (a 429, a 5xx, the network, an
+ * unreadable answer) is logged as failed with Channex's answer and its nights
+ * stay pending with that reason. ARI values are absolute, so a night sent
+ * twice changes nothing. Only a refusal or a partial rejection (200 with
+ * meta.warnings, by the dates it names) marks nights needs_review with
+ * Channex's reason. The channex-ari-delivery task delivers every pending
+ * night.
  */
 
 const RATE_WINDOW_MS = 60_000
 const CALLS_PER_WINDOW = 10
-const MAX_RETRY_MS = 3_600_000
-/** Crash-recovery window; a live delivery renews its property lease before it expires. */
-const LEASE_MS = 120_000
-/** A delivery sends again for nights changed while it ran, this many rounds at most. */
-const ROUNDS = 3
+/** A night changed while a delivery had it in flight: that delivery sent the old value, so the night stays pending for the next. */
+const CHANGED_DURING_DELIVERY = 'This change was saved while a delivery was under way; the next delivery sends it'
 
 export interface ChannexMapping { property_id: string; room_type_id: string; rate_plan_id: string }
-export interface DeliveryLease { token: string; check(): Promise<void> }
 type Mapping = ChannexMapping
 
 /** A night's values as Channex takes them: availability on the room, price and rules on the rate plan. */
@@ -95,8 +90,8 @@ interface AriValues {
 type SentValues = Partial<AriValues>
 const RESTRICTION_FIELDS = ['rate', 'min_stay_arrival', 'max_stay', 'closed_to_arrival', 'closed_to_departure', 'stop_sell'] as const
 
-interface OutboxRow { date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null; sent_json: string | null; attempts: number; retry_at: string | null; updated_at: string }
-type Outcome = { state: 'pending'; detail: string; attempts: number; retry_at: string } | { state: 'needs_review'; detail: string }
+interface OutboxRow { date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null; sent_json: string | null; updated_at: string }
+type Outcome = { state: 'pending' | 'needs_review'; detail: string }
 
 /** Reads a home's nights over [from, to) as they are now. */
 export type StayNightReader = (from: string, to: string) => Promise<StayNight[]>
@@ -311,11 +306,11 @@ export async function configureStayCalendar(db: DbClient, env: ChannexEnv, organ
 }
 
 /**
- * Queue these nights of one home and deliver the home's due pending nights.
+ * Queue these nights of one home and deliver the home's pending nights.
  * A home with no enabled Channex mapping has nothing to push and returns
  * null. Nights before today where the home is are skipped: Channex does not
  * take past dates. The outcome is these nights' state after delivery: pending
- * while a rate limit, a retry or another delivery of the home holds them.
+ * while Channex's rate limit or an unconfirmed call holds them.
  */
 export async function pushStayNights(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, dates: readonly string[], read: StayNightReader): Promise<ChannelPush | null> {
   const mapping = await connectedMapping(db, env, organizationId, home.product_id)
@@ -328,154 +323,59 @@ export async function pushStayNights(db: DbClient, env: ChannexEnv, organization
  * whether or not the mapping is enabled yet: an import's full sync, before the
  * listing syncs, and the full sync of a home that syncs again. What Channex
  * last confirmed is what the outbox holds; a caller resending the whole
- * calendar clears those confirmations first, under the same delivery lease.
+ * calendar clears those confirmations first.
  */
-export async function pushStayCalendar(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: ChannexMapping, read: StayNightReader, lease?: DeliveryLease): Promise<ChannelPush> {
+export async function pushStayCalendar(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: ChannexMapping, read: StayNightReader): Promise<ChannelPush> {
   const from = today(home.timezone)
-  const outcome = await queueAndDeliver(db, env, organizationId, home, mapping, Array.from({ length: STAY_CALENDAR_DAYS }, (_, offset) => addDays(from, offset)), read, lease)
+  const outcome = await queueAndDeliver(db, env, organizationId, home, mapping, Array.from({ length: STAY_CALENDAR_DAYS }, (_, offset) => addDays(from, offset)), read)
   if (!outcome) throw new Error(`The calendar of ${home.product_id} has no night from ${from} to send`)
   return outcome
 }
 
 /** Forget what Channex confirmed for a home: its next delivery sends every night whole. */
-export async function forgetConfirmedNights(db: DbClient, productId: string, lease?: DeliveryLease): Promise<void> {
-  await lease?.check()
-  await execute(db, `UPDATE channel_night_pushes SET sent_json = NULL WHERE product_id = ? AND provider = 'channex'
-    AND (? IS NULL OR EXISTS (SELECT 1 FROM product_channel_mappings m WHERE m.product_id = channel_night_pushes.product_id AND m.provider = 'channex' AND m.delivery_lease = ?))`, [productId, lease?.token ?? null, lease?.token ?? null])
-  if (lease && !await queryFirst(db, "SELECT 1 FROM product_channel_mappings WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?", [productId, lease.token])) {
-    throw new HTTPError({ statusCode: 409, message: 'The calendar delivery changed. Try the full sync again.', data: { code: 'CHANNEL_DELIVERY_CHANGED', product_id: productId } })
-  }
+export async function forgetConfirmedNights(db: DbClient, productId: string): Promise<void> {
+  await execute(db, "UPDATE channel_night_pushes SET sent_json = NULL WHERE product_id = ? AND provider = 'channex'", [productId])
 }
 
 function addDays(date: string, count: number): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + count * 86_400_000).toISOString().slice(0, 10)
 }
 
-async function queueAndDeliver(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: Mapping, dates: readonly string[], read: StayNightReader, lease?: DeliveryLease): Promise<ChannelPush | null> {
-  await lease?.check()
+async function queueAndDeliver(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: Mapping, dates: readonly string[], read: StayNightReader): Promise<ChannelPush | null> {
   const from = today(home.timezone)
   const queued = [...new Set(dates.filter(date => date >= from))].sort()
   if (!queued.length) return null
-  // A night already pending keeps its attempt count and retry time: the property's pause holds, and the change goes
-  // with the retry. Its updated_at still moves, so a delivery that read the night before this change leaves it pending.
-  const inserted = await execute(db, `INSERT INTO channel_night_pushes (organization_id, product_id, provider, date, state, detail, attempts, retry_at, updated_at)
-    SELECT ?, ?, 'channex', value, 'pending', NULL, 0, NULL, ? FROM json_each(?)
-    WHERE ? IS NULL OR EXISTS (SELECT 1 FROM product_channel_mappings WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?)
+  // A night already pending keeps the reason it waits. Its updated_at still moves, so a delivery that read the night before this change leaves it pending.
+  await execute(db, `INSERT INTO channel_night_pushes (organization_id, product_id, provider, date, state, detail, updated_at)
+    SELECT ?, ?, 'channex', value, 'pending', NULL, ? FROM json_each(?) WHERE true
     ON CONFLICT (product_id, provider, date) DO UPDATE SET state = 'pending', updated_at = excluded.updated_at,
-      detail = CASE WHEN channel_night_pushes.state = 'pending' THEN channel_night_pushes.detail ELSE NULL END,
-      attempts = CASE WHEN channel_night_pushes.state = 'pending' THEN channel_night_pushes.attempts ELSE 0 END,
-      retry_at = CASE WHEN channel_night_pushes.state = 'pending' THEN channel_night_pushes.retry_at ELSE NULL END`,
-  [organizationId, home.product_id, new Date().toISOString(), JSON.stringify(queued), lease?.token ?? null, home.product_id, lease?.token ?? null])
-  if (lease && inserted.meta.changes !== queued.length) throw new HTTPError({ statusCode: 409, message: 'The calendar delivery changed. Try the full sync again.', data: { code: 'CHANNEL_DELIVERY_CHANGED', product_id: home.product_id } })
-  // Every new date waits out the property's existing pause, including a newly opened rolling date.
-  const pause = await queryFirst<{ retry_at: string; detail: string | null }>(db, `SELECT n.retry_at, n.detail FROM channel_night_pushes n
-    WHERE n.product_id = ? AND n.provider = 'channex' AND n.state = 'pending' AND n.retry_at > ?
-      AND (? IS NOT NULL OR EXISTS (SELECT 1 FROM channel_sync_log l WHERE l.product_id = n.product_id AND l.provider = n.provider
-        AND l.direction = 'outbound' AND l.status = 'failed' AND substr(n.detail, 1, length(l.detail)) = l.detail))
-    ORDER BY n.retry_at DESC LIMIT 1`, [home.product_id, new Date().toISOString(), lease?.token ?? null])
-  if (pause) await execute(db, `UPDATE channel_night_pushes SET retry_at = ?, detail = ?
-    WHERE product_id = ? AND provider = 'channex' AND date IN (SELECT value FROM json_each(?))
-      AND (? IS NULL OR EXISTS (SELECT 1 FROM product_channel_mappings WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?))`,
-  [pause.retry_at, pause.detail, home.product_id, JSON.stringify(queued), lease?.token ?? null, home.product_id, lease?.token ?? null])
-  await deliver(db, env, organizationId, home, mapping, read, lease)
+      detail = CASE WHEN channel_night_pushes.state = 'pending' THEN channel_night_pushes.detail ELSE NULL END`,
+  [organizationId, home.product_id, new Date().toISOString(), JSON.stringify(queued)])
+  await deliver(db, env, organizationId, home, mapping, read)
   const rows = await queryAll<{ state: OutboxRow['state']; detail: string | null }>(db, `SELECT state, detail FROM channel_night_pushes
     WHERE product_id = ? AND provider = 'channex' AND date IN (SELECT value FROM json_each(?)) ORDER BY state = 'needs_review' DESC, state = 'pending' DESC, date`,
   [home.product_id, JSON.stringify(queued)])
   const worst = rows[0]
   if (!worst || worst.state === 'pushed') return { state: 'pushed', detail: null }
-  return { state: worst.state, detail: worst.detail ?? 'Another delivery to Channex for this home is under way; this change goes with it or right after' }
+  return { state: worst.state, detail: worst.detail ?? CHANGED_DURING_DELIVERY }
 }
 
-/** Deliver one home's due pending nights now. A home with no enabled mapping has nothing to deliver. */
+/** Deliver one home's pending nights now. A home with no enabled mapping has nothing to deliver. */
 export async function deliverStayNights(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, read: StayNightReader): Promise<void> {
   const mapping = await connectedMapping(db, env, organizationId, home.product_id)
   if (mapping) await deliver(db, env, organizationId, home, mapping, read)
 }
 
 /**
- * Renew a live lock and drain renewal before cleanup. A returned error proves
- * ownership loss; a thrown renewal failure stays visible while renewal continues.
+ * One delivery of the home's pending nights: what differs from what Channex
+ * last confirmed, as at most one restrictions call and one availability call.
+ * A night changed again since this delivery read it stays pending for the
+ * next; two deliveries of the same home send the same absolute values.
  */
-export async function withLeaseHeartbeat<T>(interval: number, renew: () => Promise<Error | null>, action: (check: () => Promise<void>) => Promise<T>, cleanup: () => void | Promise<void>): Promise<T> {
-  const failures: unknown[] = []
-  let active = true
-  let owned = true
-  let renewal = Promise.resolve()
-  const check = async () => {
-    await renewal
-    if (failures.length) throw failures[0]
-  }
-  // Keep protecting an in-flight action after a renewal error; its check retains the failure.
-  const heartbeat = setInterval(() => {
-    renewal = renewal.then(async () => {
-      if (!active || !owned) return
-      try {
-        const lost = await renew()
-        if (lost) {
-          owned = false
-          failures.push(lost)
-        }
-      } catch (error) { failures.push(error) }
-    })
-  }, interval)
-  let value!: T
-  try {
-    value = await action(check)
-  } catch (error) {
-    if (!failures.includes(error)) failures.push(error)
-  } finally {
-    active = false
-    clearInterval(heartbeat)
-    await renewal
-    try {
-      await cleanup()
-    } catch (error) { failures.push(error) }
-  }
-  if (failures.length === 1) throw failures[0]
-  if (failures.length) throw new AggregateError(failures, failures.map(error => error instanceof Error ? error.message : String(error)).join('; '))
-  return value
-}
-
-/** One renewable property lease for ordinary delivery and an explicit full sync's reset plus delivery. */
-export async function withDeliveryLease<T>(db: DbClient, productId: string, action: (lease: DeliveryLease) => Promise<T>): Promise<T | null> {
-  const token = crypto.randomUUID()
-  const claimed = await execute(db, `UPDATE product_channel_mappings SET delivery_lease = ?, delivery_lease_until = ?
-    WHERE product_id = ? AND provider = 'channex' AND (delivery_lease_until IS NULL OR delivery_lease_until <= ?)`,
-  [token, new Date(Date.now() + LEASE_MS).toISOString(), productId, new Date().toISOString()])
-  if (claimed.meta.changes !== 1) return null
-  return withLeaseHeartbeat(LEASE_MS / 3, async () => {
-    try {
-      const renewed = await execute(db, "UPDATE product_channel_mappings SET delivery_lease_until = ? WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?", [new Date(Date.now() + LEASE_MS).toISOString(), productId, token])
-      return renewed.meta.changes === 1 ? null : new HTTPError({ statusCode: 409, message: 'This home’s sync changed during the update. Its remaining changes stay queued.', data: { code: 'CHANNEL_DELIVERY_CHANGED', product_id: productId } })
-    } catch (cause) {
-      throw new HTTPError({ statusCode: 503, message: 'The calendar update could not continue. Its remaining changes stay queued.', data: { code: 'CHANNEL_DELIVERY_RENEWAL_FAILED', product_id: productId }, cause })
-    }
-  }, check => action({ token, check }), async () => {
-    await execute(db, "UPDATE product_channel_mappings SET delivery_lease = NULL, delivery_lease_until = NULL WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?", [productId, token])
-  })
-}
-
-async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: Mapping, read: StayNightReader, lease?: DeliveryLease): Promise<void> {
-  const send = async (held: DeliveryLease) => {
-    for (let round = 0; round < ROUNDS; round++) if (!await sendDue(db, env, organizationId, home, mapping, read, held)) break
-  }
-  if (lease) await send(lease)
-  else await withDeliveryLease(db, home.product_id, send)
-}
-
-/**
- * One delivery of the due pending nights; false when none was due or the lease was lost. Its
- * results are written only while it still holds the lease: a delivery that
- * outlived it leaves them to the one that took over, which sends again what
- * Channex has not confirmed to it.
- */
-async function sendDue(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: Mapping, read: StayNightReader, lease: DeliveryLease): Promise<boolean> {
-  await lease.check()
-  if (!await queryFirst(db, "SELECT 1 FROM product_channel_mappings WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?", [home.product_id, lease.token])) return false
-  const now = new Date().toISOString()
-  const due = await queryAll<OutboxRow>(db, `SELECT date, state, detail, sent_json, attempts, retry_at, updated_at FROM channel_night_pushes
-    WHERE product_id = ? AND provider = 'channex' AND state = 'pending' AND (retry_at IS NULL OR retry_at <= ?) ORDER BY date`, [home.product_id, now])
-  if (!due.length) return false
+async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: Mapping, read: StayNightReader): Promise<void> {
+  const due = await queryAll<OutboxRow>(db, `SELECT date, state, detail, sent_json, updated_at FROM channel_night_pushes
+    WHERE product_id = ? AND provider = 'channex' AND state = 'pending' ORDER BY date`, [home.product_id])
+  if (!due.length) return
   const outcomes = new Map<string, Outcome>()
   const from = today(home.timezone)
   for (const row of due) if (row.date < from) outcomes.set(row.date, { state: 'needs_review', detail: `${row.date} passed before Channex confirmed it; Channex does not take past dates` })
@@ -490,7 +390,6 @@ async function sendDue(db: DbClient, env: ChannexEnv, organizationId: string, ho
     if (values.rate === null) outcomes.set(row.date, { state: 'needs_review', detail: `${row.date} has no nightly price; Channex needs one for every night` })
     const changed = (field: typeof RESTRICTION_FIELDS[number]) => before[field] !== values[field] && values[field] !== null
     return { row, values, restrictions: RESTRICTION_FIELDS.filter(changed), availability: before.availability !== values.availability }
-
   })
 
   const log = async (kind: 'availability' | 'restrictions', status: 'pushed' | 'needs_review' | 'failed', detail: string, taskId: string | null = null) =>
@@ -500,11 +399,10 @@ async function sendDue(db: DbClient, env: ChannexEnv, organizationId: string, ho
   [mapping.property_id, new Date(Date.now() - RATE_WINDOW_MS).toISOString()])
   const confirmed = new Map(current.map(row => [row.date, { ...sent.get(row.date)! }]))
   // A night still to be sent stays pending, even with a part Channex refused: its next delivery sends what differs again.
-  const wait = (rows: ReadonlyArray<{ row: OutboxRow }>, outcome: (attempts: number) => Outcome) => {
-    for (const { row } of rows) outcomes.set(row.date, outcome(row.attempts))
+  const wait = (rows: ReadonlyArray<{ row: OutboxRow }>, detail: string) => {
+    for (const { row } of rows) outcomes.set(row.date, { state: 'pending', detail })
   }
   const review = (date: string, detail: string) => { if (outcomes.get(date)?.state !== 'pending') outcomes.set(date, { state: 'needs_review', detail }) }
-  let paused: ((attempts: number) => Outcome) | null = null
 
   const requests = [
     ['restrictions', changes.filter(change => change.restrictions.length), (batch: typeof changes) => channexRequest(env, '/restrictions', 'POST', { values: dateRanges(batch.map(change => ({
@@ -518,17 +416,13 @@ async function sendDue(db: DbClient, env: ChannexEnv, organizationId: string, ho
   ] as const
   for (const [kind, batch, send, take] of requests) {
     if (!batch.length) continue
-    if (paused) { wait(batch, paused); continue }
     const window = recent.find(entry => entry.kind === kind && entry.calls >= CALLS_PER_WINDOW)
     if (window) {
-      const retryAt = new Date(Date.parse(window.first) + RATE_WINDOW_MS).toISOString()
-      wait(batch, attempts => ({ state: 'pending', detail: `Channex takes ${CALLS_PER_WINDOW} ${kind} updates a minute for this home; this one goes at ${clock(retryAt)}`, attempts, retry_at: retryAt }))
+      wait(batch, `Channex takes ${CALLS_PER_WINDOW} ${kind} updates a minute for this home; this one goes after ${clock(new Date(Date.parse(window.first) + RATE_WINDOW_MS).toISOString())}`)
       continue
     }
     const span = `${batch[0]!.row.date}..${batch.at(-1)!.row.date}`
     try {
-      if (!await queryFirst(db, "SELECT 1 FROM product_channel_mappings WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?", [home.product_id, lease.token])) return false
-      await lease.check()
       const result = await send(batch)
       const refused = refusals(result, kind, batch.map(change => change.row.date))
       const task = ariTask(result, refused.size > 0)
@@ -540,39 +434,32 @@ async function sendDue(db: DbClient, env: ChannexEnv, organizationId: string, ho
       await log(kind, refused.size ? 'needs_review' : 'pushed', refused.size ? [...new Set(refused.values())].join(' ') : span, task)
     } catch (error) {
       if (!(error instanceof ChannexDataError || error instanceof ChannexError)) throw error
-      const limited = error instanceof ChannexError && error.providerStatus === 429
-      const unconfirmed = error instanceof ChannexDataError || error.uncertain || error.providerStatus >= 500
-      if (!limited && !unconfirmed) {
+      const unconfirmed = error instanceof ChannexDataError || error.uncertain || error.providerStatus === 429 || error.providerStatus >= 500
+      if (!unconfirmed) {
         await log(kind, 'needs_review', error.message)
         for (const change of batch) review(change.row.date, `Channex refused the ${kind} update: ${error.message}`)
         continue
       }
-      // Channex says to pause the property after any failed call: a minute, then doubling.
-      const reason = limited ? `Channex asked KrabiClaw to slow down for this home (${span})` : `Channex did not confirm the ${kind} update for ${span}. ${error.message}`
+      const reason = `Channex did not confirm the ${kind} update for ${span}: ${error.message}`
       await log(kind, 'failed', reason)
-      const retryAt = new Date(Date.now() + Math.min(MAX_RETRY_MS, RATE_WINDOW_MS * 2 ** Math.max(...batch.map(change => change.row.attempts)))).toISOString()
-      paused = (attempts) => {
-        return { state: 'pending', detail: `${reason} Attempt ${attempts + 1}; sending again at ${clock(retryAt)}.`, attempts: attempts + 1, retry_at: retryAt }
-      }
-      wait(batch, paused)
+      wait(batch, reason)
     }
   }
 
-  const held = `EXISTS (SELECT 1 FROM product_channel_mappings m WHERE m.product_id = channel_night_pushes.product_id AND m.provider = 'channex' AND m.delivery_lease = ?)`
-  if (!await queryFirst(db, "SELECT 1 FROM product_channel_mappings WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?", [home.product_id, lease.token])) return false
   await execute(db, `UPDATE channel_night_pushes SET sent_json = json_extract(value, '$[1]')
-    FROM json_each(?) WHERE product_id = ? AND provider = 'channex' AND date = json_extract(value, '$[0]') AND ${held}`,
-  [JSON.stringify([...confirmed].map(([date, values]) => [date, JSON.stringify(values)])), home.product_id, lease.token])
-  // What Channex confirmed is kept whatever the night's state; a night changed again since this delivery read it stays pending for the next.
-  await execute(db, `UPDATE channel_night_pushes SET state = json_extract(value, '$.state'), detail = json_extract(value, '$.detail'), attempts = json_extract(value, '$.attempts'),
-      retry_at = json_extract(value, '$.retry_at'), updated_at = ?
-    FROM json_each(?) WHERE product_id = ? AND provider = 'channex' AND date = json_extract(value, '$.date') AND channel_night_pushes.updated_at = json_extract(value, '$.updated_at') AND ${held}`,
-  [new Date().toISOString(), JSON.stringify(due.map((row) => {
+    FROM json_each(?) WHERE product_id = ? AND provider = 'channex' AND date = json_extract(value, '$[0]')`,
+  [JSON.stringify([...confirmed].map(([date, values]) => [date, JSON.stringify(values)])), home.product_id])
+  // What Channex last received is kept whatever the night's state. A night changed since this delivery read it was sent
+  // its old value, so it stays pending with that reason and the next delivery sends what differs.
+  await execute(db, `UPDATE channel_night_pushes SET
+      state = CASE WHEN channel_night_pushes.updated_at = json_extract(value, '$.updated_at') THEN json_extract(value, '$.state') ELSE 'pending' END,
+      detail = CASE WHEN channel_night_pushes.updated_at = json_extract(value, '$.updated_at') THEN json_extract(value, '$.detail') ELSE ? END,
+      updated_at = ?
+    FROM json_each(?) WHERE product_id = ? AND provider = 'channex' AND date = json_extract(value, '$.date')`,
+  [CHANGED_DURING_DELIVERY, new Date().toISOString(), JSON.stringify(due.map((row) => {
     const outcome = outcomes.get(row.date)
-    return { date: row.date, updated_at: row.updated_at, state: outcome?.state ?? 'pushed', detail: outcome?.detail ?? null,
-      attempts: outcome?.state === 'pending' ? outcome.attempts : 0, retry_at: outcome?.state === 'pending' ? outcome.retry_at : null }
-  })), home.product_id, lease.token])
-  return true
+    return { date: row.date, updated_at: row.updated_at, state: outcome?.state ?? 'pushed', detail: outcome?.detail ?? null }
+  })), home.product_id])
 }
 
 /**

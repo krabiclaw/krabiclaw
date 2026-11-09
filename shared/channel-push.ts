@@ -1,7 +1,8 @@
 /**
- * The channel's outcome for saved nights: confirmed; pending, queued with the
- * reason it has not gone yet (a rate limit or an unconfirmed attempt it will
- * retry); or an explicit reason the nights need review.
+ * The channel's outcome for saved nights: confirmed; pending, with the reason
+ * it has not gone yet (Channex's rate limit or a call Channex did not
+ * confirm), which the next delivery sends; or an explicit reason the nights
+ * need review.
  */
 export type ChannelPush = { state: 'pushed'; detail: null } | { state: 'pending'; detail: string } | { state: 'needs_review'; detail: string }
 export type SuccessfulChannelPush = Exclude<ChannelPush, { state: 'needs_review' }>

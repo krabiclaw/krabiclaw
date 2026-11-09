@@ -36,9 +36,8 @@
                 <p class="text-base text-highlighted">{{ row.name }}<span v-if="row.target" class="text-muted"> · {{ row.target }}</span></p>
                 <p class="mt-1 text-sm" :class="row.tone">{{ row.state }}</p>
                 <p v-if="row.detail" class="mt-1 text-sm text-muted">{{ row.detail }}</p>
-                <div v-if="row.url || row.reconcileId || row.connectUrl" class="mt-2 flex flex-wrap gap-2">
+                <div v-if="row.url || row.connectUrl" class="mt-2 flex flex-wrap gap-2">
                   <UButton v-if="row.url" :to="row.url" target="_blank" color="neutral" variant="link" size="sm">View</UButton>
-                  <UButton v-if="row.reconcileId" color="neutral" variant="link" size="sm" :loading="reconciling === row.reconcileId" @click="reconcile(row.reconcileId)">Check with {{ row.name }}</UButton>
                   <UButton v-if="row.connectUrl" :to="row.connectUrl" target="_blank" :aria-label="`Connect ${row.name} (opens in a new tab)`" color="neutral" variant="link" size="sm" trailing-icon="i-lucide-external-link">Connect</UButton>
                 </div>
               </div>
@@ -149,9 +148,8 @@ const { data: connections, error: connectionFailure, status: connectionStatus, r
 useEventListener(import.meta.client ? window : undefined, 'focus', () => refreshConnections())
 const connectionsError = computed(() => connectionFailure.value ? getErrorMessage(connectionFailure.value, 'Failed to read connections') : null)
 const lastOutcomes = ref<PublishOutcome[]>([])
-const reconciling = ref<string | null>(null)
 const CHANNELS: Record<SocialChannel, { name: string; icon: string }> = { facebook: { name: 'Facebook', icon: 'i-logos-facebook' }, instagram: { name: 'Instagram', icon: 'i-skill-icons-instagram' }, discord: { name: 'Discord', icon: 'i-logos-discord-icon' } }
-const STATE_WORDS: Record<string, string> = { published: 'Published', preparing: 'Being prepared', publishing: 'Publishing', failed: 'Not published', unknown: 'Outcome unknown — check it', removed: 'Removed from the channel' }
+const STATE_WORDS: Record<string, string> = { published: 'Published', failed: 'Not published', removed: 'Removed from the channel' }
 const rows = computed(() => {
   const record = post.value
   const publications = Array.isArray(record?.publications) ? record.publications as ApiRecord[] : []
@@ -159,18 +157,18 @@ const rows = computed(() => {
   return [{ channel: 'organization' as const, name: 'Website', icon: 'i-lucide-globe', target: null as string | null,
     selectable: record?.status !== 'published', state: record?.status === 'published' ? 'Live' : 'Not published', tone: record?.status === 'published' ? 'text-success' : 'text-muted',
     detail: outcome('organization')?.message ?? null, url: record?.status === 'published' && typeof record.canonical_url === 'string' ? record.canonical_url : null,
-    reconcileId: null as string | null, connectUrl: null as string | null,
+    connectUrl: null as string | null,
   }, ...(connectionStatus.value === 'success' ? connections.value?.channels ?? [] : []).map(channel => {
     const publication = publications.find(item => item.channel === channel.channel)
     const state = publication ? String(publication.state) : null
     const blocked = !channel.connected || channel.problems.length > 0
     return { channel: channel.channel, ...CHANNELS[channel.channel], target: channel.target_name,
-      selectable: !blocked && (!publication || state === 'failed' || state === 'preparing'),
+      selectable: !blocked && (!publication || state === 'failed'),
       state: state ? STATE_WORDS[state] ?? state : blocked ? channel.problems.map(problem => problem.message).join(' ') || 'Not connected' : 'Not published',
-      tone: state === 'published' ? 'text-success' : state === 'failed' || state === 'unknown' ? 'text-warning' : 'text-muted',
+      tone: state === 'published' ? 'text-success' : state === 'failed' ? 'text-warning' : 'text-muted',
       detail: outcome(channel.channel)?.message ?? (publication?.message ? String(publication.message) : null) ?? (publication?.local_content_changed ? 'The post changed here after it was sent; the external post was not edited.' : null),
       url: typeof publication?.public_url === 'string' ? publication.public_url : null,
-      reconcileId: publication?.can_reconcile ? String(publication.id) : null, connectUrl: channel.connected ? null : channel.connect_url,
+      connectUrl: channel.connected ? null : channel.connect_url,
     }
   })]
 })
@@ -247,10 +245,6 @@ async function commit(publish: boolean) {
       clearNuxtState(draftKey)
     }
   } catch (cause) { actionError.value = getErrorMessage(cause, 'The post could not be completed') } finally { committing.value = false }
-}
-async function reconcile(publicationId: string) {
-  reconciling.value = publicationId
-  try { await editor.reconcile(String(post.value!.id), publicationId) } finally { reconciling.value = null }
 }
 async function cancel() {
   if (busy.value) return

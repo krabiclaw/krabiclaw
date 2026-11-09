@@ -35,7 +35,7 @@ export const isPostResponse = (value: unknown): value is { post: ApiRecord } =>
 export interface PublishOutcome {
   channel: 'organization' | SocialChannel
   target_id: string
-  status: 'published' | 'already_published' | 'processing' | 'failed' | 'unknown' | 'skipped'
+  status: 'published' | 'already_published' | 'failed' | 'skipped'
   publication_id?: string
   public_url?: string | null
   code?: string
@@ -245,20 +245,6 @@ export function usePostEditor(organizationId: string, locationId: Ref<string | n
     }
   }
 
-  async function reconcile(postId: string, publicationId: string): Promise<boolean> {
-    error.value = null
-    try {
-      await dashboardApi(`/api/editor/organizations/${organizationId}/post-publications/${publicationId}/reconcile`, {
-        method: 'POST', body: {}, validate: (value): value is ApiRecord => isRecord(value),
-      })
-      await reload(postId, true)
-      return true
-    } catch (err) {
-      error.value = getErrorMessage(err, 'Failed to check the publication')
-      return false
-    }
-  }
-
   async function remove(postId: string): Promise<boolean> {
     error.value = null
     try {
@@ -272,5 +258,5 @@ export function usePostEditor(organizationId: string, locationId: Ref<string | n
     }
   }
 
-  return { form, record, updatedAt, saving, publishing, creationRejected, isDirty, error, loadFrom, reload, save, publish, reconcile, remove }
+  return { form, record, updatedAt, saving, publishing, creationRejected, isDirty, error, loadFrom, reload, save, publish, remove }
 }

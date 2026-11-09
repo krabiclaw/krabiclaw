@@ -170,7 +170,7 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'publish_post',
-    description: 'Publish the post to the selected website or social destinations, returning one result per target. Retry processing with the same post; reconcile an unknown result before publishing again.',
+    description: 'Publish the post to the selected website or social destinations, returning one result per target: the provider post on success, the provider error on failure. Publish again after a failure once its cause is fixed.',
     domain: 'posts',
     minimumRole: 'admin',
     inputSchema: {
@@ -183,7 +183,7 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'reconcile_post_publication',
-    description: 'Read an existing social publication and refresh its receipt without publishing. Supply provider_post_id only for the exact post on the connected destination; unproven outcomes remain unknown.',
+    description: 'Read an existing social publication on its destination and refresh its receipt without publishing. Supply provider_post_id only for the exact post on the connected destination.',
     domain: 'posts',
     minimumRole: 'admin',
     inputSchema: {
@@ -235,7 +235,7 @@ function forMcp(post: Post, organization: McpExecutorContext['organization']) {
     ...attachViewUrlToRecord(post, organization, { publicPath: post.status === 'published' ? post.public_path : null }),
     public_path: post.public_path,
     preview_url: absolutizeOrganizationUrl(organization, post.preview_url),
-    publications: post.publications.map(({ can_reconcile, ...receipt }) => receipt),
+    publications: post.publications,
   } as Record<string, unknown>
   return Object.fromEntries(Object.keys(postObject.properties).filter(field => Object.hasOwn(record, field)).map(field => [field, record[field]]))
 }

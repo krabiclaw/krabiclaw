@@ -30,7 +30,7 @@ import deletionStatus from '../../server/api/integrations/meta/data-deletion.get
 import { createBlogPost, deleteBlogPost, getBlogPost } from '../../server/utils/content/publishing.ts'
 import { fetchTransformedImageAsDataUri } from '../../server/utils/og-image/fetch-image.ts'
 import { renderOgImagePng } from '../../server/utils/og-image/render.ts'
-import { CLAIM_STALE_MS, PostValidationError, POST_TITLE_MAX } from '../../shared/posts.ts'
+import { PostValidationError, POST_TITLE_MAX } from '../../shared/posts.ts'
 import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
 import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 import { readBusinessRecommendations } from '../../server/domain/business-progress.ts'
@@ -390,7 +390,7 @@ test('AVIF article and Post pictures render through native Images and retries co
   }
 })
 
-test('publication: one result, one external post per target, and no blind resend under any fault', async t => {
+test('publication: one result and one external post per target; a failure is the provider\u2019s answer and the next call publishes again', async () => {
   const { runtime, db, env, cardless, meta, run, asset, restore } = await setUp()
   try {
     await run("INSERT INTO user (id, name, email) VALUES ('publisher', 'Publisher', 'publisher@proof.example')")
@@ -467,21 +467,19 @@ test('publication: one result, one external post per target, and no blind resend
       ['IMAGE', 'true', ''], ['IMAGE', 'true', ''], ['CAROUSEL', '', 'Pizza night Friday\n\nBook: https://example.test/book'],
     ])
     assert.equal(meta.sent(request => request.path.endsWith('media_publish')).length, 1)
-    const stored = await db.prepare("SELECT channel, state, provider_post_id, provider_permalink, attempt_id FROM post_publications WHERE post_id = ? ORDER BY channel").bind(first.post.id).all()
-    assert.deepEqual(stored.results.map(row => [row.channel, row.state, row.attempt_id]), [['facebook', 'published', null], ['instagram', 'published', null]])
-    const initiators = await db.prepare(`SELECT p.id, p.channel, p.state, p.attempt_id, p.initiating_activity_id, a.actor_user_id, a.payload_json
+    const stored = await db.prepare("SELECT channel, state, provider_post_id, provider_permalink FROM post_publications WHERE post_id = ? ORDER BY channel").bind(first.post.id).all()
+    assert.deepEqual(stored.results.map(row => [row.channel, row.state]), [['facebook', 'published'], ['instagram', 'published']])
+    const initiators = await db.prepare(`SELECT p.id, p.channel, p.state, p.initiating_activity_id, a.actor_user_id, a.payload_json
       FROM post_publications p JOIN activity_entries a ON a.id = p.initiating_activity_id AND a.organization_id = p.organization_id
-      WHERE p.post_id = ? ORDER BY p.channel`).bind(first.post.id).all<{ id: string; channel: string; state: string; attempt_id: string | null; initiating_activity_id: string; actor_user_id: string; payload_json: string }>()
+      WHERE p.post_id = ? ORDER BY p.channel`).bind(first.post.id).all<{ id: string; channel: string; state: string; initiating_activity_id: string; actor_user_id: string; payload_json: string }>()
     assert.equal(initiators.results.length, 2)
     for (const row of initiators.results) {
       assert.equal(row.actor_user_id, 'publisher', 'the initiating publisher is not the post creator or linked provider-account owner')
       assert.equal(row.state, 'published')
-      assert.equal(row.attempt_id, null, 'terminal publication clears only its in-flight fence, not its causal activity')
-      const event = JSON.parse(row.payload_json) as { entityId: string; metadata: { post_id: string; attempt_id: string; channel: string } }
+      const event = JSON.parse(row.payload_json) as { entityId: string; metadata: { post_id: string; channel: string } }
       assert.equal(event.entityId, row.id)
       assert.equal(event.metadata.post_id, first.post.id)
       assert.equal(event.metadata.channel, row.channel)
-      assert.ok(event.metadata.attempt_id)
     }
     const receiptIds = new Set(initiators.results.map(row => row.id))
     const firstProgress = await progress()
@@ -496,7 +494,7 @@ test('publication: one result, one external post per target, and no blind resend
       assert.equal(fact.state, 'published')
       assert.equal(fact.verification.status, 'verified')
     }
-    assert.equal(firstProgress.outcomes.some(fact => String(fact.event) === 'post.publication_started'), false, 'the claim is provenance for the provider receipt, not another completed publication')
+    assert.equal(firstProgress.outcomes.some(fact => String(fact.event) === 'post.publication_started'), false, 'the start is provenance for the provider receipt, not another completed publication')
 
     // A repeat reads the receipts: nothing is sent again and the publication date stays.
     const requestCount = meta.requests.length
@@ -565,32 +563,29 @@ test('publication: one result, one external post per target, and no blind resend
       AND json_extract(payload_json, '$.metadata.post_id') = ?`).bind(third.post.id).all<{ actor_user_id: string; payload_json: string }>()
     assert.equal(attempts.results.length, 2)
     assert.deepEqual(attempts.results.map(row => row.actor_user_id).sort(), ['owner', 'publisher'])
-    assert.equal(new Set(attempts.results.map(row => JSON.parse(row.payload_json).metadata.attempt_id)).size, 2)
 
-    // The final call's connection dropped before Facebook answered: unknown, never sent again; its photos stay saved.
+    // The publishing call's connection dropped before Facebook answered: failed with that answer, and the post can be edited; publishing again publishes.
     const fourth = await create('key-4', { body: 'Lost feed', media: [{ asset_id: 'a2', slot: 'cover' }] })
     meta.fault('dropped', request => request.path.endsWith(`${PAGE}/feed`))
     const lost = await publishPost(env, 'org-a', fourth.post.id, { expectedUpdatedAt: fourth.post.updated_at, targets: [targets.facebook()] }, 'owner')
-    assert.deepEqual([lost.ok, lost.outcomes[0]!.status, lost.outcomes[0]!.code], [false, 'unknown', 'final_unconfirmed'])
-    const unknownFact = (await progress()).outcomes.find(fact => fact.source.table === 'post_publications' && fact.source.id === lost.outcomes[0]!.publication_id)
-    assert.equal(unknownFact?.state, 'unknown')
-    assert.equal(unknownFact?.verification.status, 'unconfirmed')
+    assert.deepEqual([lost.ok, lost.outcomes[0]!.status, lost.outcomes[0]!.code], [false, 'failed', 'provider_unreachable'])
+    const lostFact = (await progress()).outcomes.find(fact => fact.source.table === 'post_publications' && fact.source.id === lost.outcomes[0]!.publication_id)
+    assert.equal(lostFact?.state, 'failed')
+    assert.equal(lostFact?.verification.status, 'failed')
     const pinned = (await getPost(db, env, 'org-a', fourth.post.id))!
-    const { can_reconcile: canReconcile, ...receipt } = pinned.publications[0]!
-    assert.equal(canReconcile, true)
+    const receipt = pinned.publications[0]!
     assert.deepEqual((await mcp('get_post', { post_id: pinned.id })).post?.publications, [receipt])
     assert.deepEqual((await mcp('list_posts', {})).posts?.find(post => post.id === pinned.id)?.publications, [receipt])
     const replayedDraft = await mcp('create_post', { idempotency_key: 'key-4', body: 'Lost feed', media: [{ asset_id: 'a2', slot: 'cover' }] })
     assert.equal(replayedDraft.replayed, true)
     assert.equal(replayedDraft.post?.id, pinned.id)
     assert.deepEqual(replayedDraft.post?.publications, [receipt])
-    await assert.rejects(updatePost(db, cardless, 'org-a', fourth.post.id, { changes: { body: 'Edited' }, expectedUpdatedAt: pinned.updated_at }, 'owner'), /unresolved/)
-    await assert.rejects(deletePost(db, 'org-a', fourth.post.id, 'owner'), /unresolved/)
-    const feedsBefore = meta.sent(request => request.path.endsWith(`${PAGE}/feed`)).length
-    assert.equal((await publishPost(env, 'org-a', fourth.post.id, { expectedUpdatedAt: pinned.updated_at, targets: [targets.facebook()] }, 'owner')).outcomes[0]!.status, 'unknown')
-    assert.equal(meta.sent(request => request.path.endsWith(`${PAGE}/feed`)).length, feedsBefore)
+    const editedLost = await updatePost(db, cardless, 'org-a', fourth.post.id, { changes: { body: 'Edited' }, expectedUpdatedAt: pinned.updated_at }, 'owner')
+    assert.equal(editedLost!.body, 'Edited')
+    assert.equal((await publishPost(env, 'org-a', fourth.post.id, { expectedUpdatedAt: editedLost!.updated_at, targets: [targets.facebook()] }, 'owner')).outcomes[0]!.status, 'published')
+    await publishedOnMeta(fourth.post.id, 'facebook')
 
-    // The final call took effect but its answer was lost: unknown until reconciliation is told the post it became, which it reads on the Page.
+    // The publishing call took effect but its answer was lost: failed until reconciliation is told the post it became, which it reads on the Page.
     const fifth = await create('key-5', { body: 'Answer lost' })
     let createdId: string | null = null
     meta.fault('dropped', request => {
@@ -600,45 +595,31 @@ test('publication: one result, one external post per target, and no blind resend
       return true
     })
     const answerLost = await publishPost(env, 'org-a', fifth.post.id, { expectedUpdatedAt: fifth.post.updated_at, targets: [targets.facebook()] }, 'owner')
-    assert.equal(answerLost.outcomes[0]!.status, 'unknown')
+    assert.deepEqual([answerLost.outcomes[0]!.status, answerLost.outcomes[0]!.code], ['failed', 'provider_unreachable'])
     const fifthPublication = (await getPost(db, env, 'org-a', fifth.post.id))!.publications[0]!
     assert.equal((await reconcilePostPublication(env, 'org-a', fifthPublication.id, createdId)).state, 'published')
     await publishedOnMeta(fifth.post.id, 'facebook')
 
-    // A publication an earlier version prepared as an unpublished feed post: that draft is deleted with the photos it carried, and the post is published once with new ones.
+    // A failed publication whose Facebook post reads as unpublished stays failed with its reason; publishing again publishes once with new photos.
     const sixth = await create('key-6', { body: 'Prepared the old way', media: [{ asset_id: 'a1', slot: 'cover' }] })
     const draftId = `${PAGE}_legacy-draft`
     meta.fbPhotos.set('photo-legacy', 'https://legacy.example.test/a.jpg')
     meta.fbPosts.set(draftId, { published: false, attached: ['photo-legacy'] })
-    await run(`INSERT INTO post_publications (id, organization_id, post_id, channel, provider_app_id, provider_subject_id, provider_target_id, state, provider_post_id, provider_handles_json, payload_hash, error_code, error_message)
-      VALUES ('legacy', 'org-a', '${sixth.post.id}', 'facebook', 'fb-app', 'fb-subject', '${PAGE}', 'failed', '${draftId}', '${JSON.stringify({ photo_ids: ['photo-legacy'], post_id: draftId })}',
+    await run(`INSERT INTO post_publications (id, organization_id, post_id, channel, provider_app_id, provider_subject_id, provider_target_id, state, provider_post_id, payload_hash, error_code, error_message)
+      VALUES ('legacy', 'org-a', '${sixth.post.id}', 'facebook', 'fb-app', 'fb-subject', '${PAGE}', 'failed', '${draftId}',
         '${await postPayloadFingerprint((await getPost(db, env, 'org-a', sixth.post.id))!, { channel: 'facebook', target_id: PAGE })}', 'connection_error', '(#10) Failed to publish post')`)
     const stillUnpublished = await reconcilePostPublication(env, 'org-a', 'legacy', draftId)
     assert.deepEqual([stillUnpublished.state, stillUnpublished.publication?.status, stillUnpublished.publication?.code, stillUnpublished.publication?.message],
       ['failed', 'failed', 'connection_error', '(#10) Failed to publish post'])
-    assert.deepEqual(await db.prepare('SELECT state, attempt_id, error_code, error_message FROM post_publications WHERE id = ?').bind('legacy').first(),
-      { state: 'failed', attempt_id: null, error_code: 'connection_error', error_message: '(#10) Failed to publish post' })
+    assert.deepEqual(await db.prepare('SELECT state, error_code, error_message FROM post_publications WHERE id = ?').bind('legacy').first(),
+      { state: 'failed', error_code: 'connection_error', error_message: '(#10) Failed to publish post' })
     const republished = await publishPost(env, 'org-a', sixth.post.id, { expectedUpdatedAt: sixth.post.updated_at, targets: [targets.facebook()] }, 'owner')
     assert.equal(republished.outcomes[0]!.status, 'published', JSON.stringify(republished.outcomes))
-    assert.equal(meta.fbPosts.has(draftId), false)
+    assert.equal(republished.outcomes[0]!.publication_id, 'legacy', 'the post keeps one publication per channel')
     const attachedPhoto = JSON.parse(meta.sent(request => request.method === 'POST' && request.path.endsWith(`${PAGE}/feed`)).at(-1)!.body['attached_media[0]']!).media_fbid
     assert.notEqual(attachedPhoto, 'photo-legacy')
     assert.equal(meta.fbPhotos.has(attachedPhoto), true)
     await publishedOnMeta(sixth.post.id, 'facebook')
-
-    // An earlier reconciliation left an unclaimed unpublished draft in preparing.
-    const seventh = await create('key-7', { body: 'Unclaimed legacy draft' })
-    const unclaimedId = `${PAGE}_unclaimed-draft`
-    meta.fbPosts.set(unclaimedId, { published: false, attached: [] })
-    await run(`INSERT INTO post_publications (id, organization_id, post_id, channel, provider_app_id, provider_subject_id, provider_target_id, state, provider_post_id, provider_handles_json, payload_hash)
-      VALUES ('unclaimed', 'org-a', '${seventh.post.id}', 'facebook', 'fb-app', 'fb-subject', '${PAGE}', 'preparing', '${unclaimedId}', '${JSON.stringify({ post_id: unclaimedId })}',
-        '${await postPayloadFingerprint((await getPost(db, env, 'org-a', seventh.post.id))!, { channel: 'facebook', target_id: PAGE })}')`)
-    const ready = await reconcilePostPublication(env, 'org-a', 'unclaimed', unclaimedId)
-    assert.deepEqual([ready.state, ready.publication?.status, ready.publication?.code], ['preparing', 'processing', 'preparation_ready'])
-    assert.match(ready.publication!.message!, /Call publish_post again/)
-    assert.equal((await publishPost(env, 'org-a', seventh.post.id, { expectedUpdatedAt: seventh.post.updated_at, targets: [targets.facebook()] }, 'owner')).outcomes[0]!.status, 'published')
-    assert.equal(meta.fbPosts.has(unclaimedId), false)
-    await publishedOnMeta(seventh.post.id, 'facebook')
 
     // A Reel Instagram is still processing is waited for and published by the same call.
     meta.reelProcessingReads = 2
@@ -659,89 +640,15 @@ test('publication: one result, one external post per target, and no blind resend
     assert.equal(meta.publishNotReady, 0)
     await publishedOnMeta(notReadyYet.post.id, 'instagram')
 
-    // A live preparation is already running. A released, confirmed-unpublished
-    // container is work the owner can resume; the real publication then clears it.
-    const resumable = await create('key-resumable-preparation', { media: [{ asset_id: 'a1', slot: 'cover' }] })
-    let preparationObserved!: () => void, releasePreparation!: () => void
-    const observedPreparation = new Promise<void>(resolve => { preparationObserved = resolve })
-    const preparationResponse = new Promise<void>(resolve => { releasePreparation = resolve })
-    meta.instagramResponseGate = async request => {
-      if (request.method !== 'GET' || !request.query.get('fields')?.includes('status_code')) return
-      meta.instagramResponseGate = null
-      preparationObserved()
-      await preparationResponse
-    }
+    // Instagram refusing media_publish is a failed publication with Meta's reason; the next call prepares new containers and publishes.
+    const refusedContainer = await create('key-refused-publish', { media: [{ asset_id: 'a1', slot: 'cover' }] })
     meta.fault('reject', request => request.path.endsWith('media_publish'))
-    const preparing = publishPost(env, 'org-a', resumable.post.id, { expectedUpdatedAt: resumable.post.updated_at, targets: [targets.instagram()] }, 'owner')
-    try {
-      await observedPreparation
-      const active = await db.prepare('SELECT state, attempt_id FROM post_publications WHERE post_id=?').bind(resumable.post.id).first<{ state: string; attempt_id: string | null }>()
-      assert.equal(active?.state, 'preparing')
-      assert.ok(active?.attempt_id)
-      assert.equal((await recommendations()).recommendations.some(item => item.operation === 'post.publish' && item.subjectId === resumable.post.id), false,
-        'a live publisher is not duplicated as owner work')
-    } finally {
-      meta.instagramResponseGate = null
-      releasePreparation()
-      await preparing
-    }
-    const refusedPreparation = await preparing
-    assert.equal(refusedPreparation.outcomes[0]!.code, 'provider_rejected')
-    const resumableId = refusedPreparation.outcomes[0]!.publication_id!
-    assert.equal((await reconcilePostPublication(env, 'org-a', resumableId, null)).state, 'preparing')
-    assert.deepEqual(await db.prepare('SELECT state, attempt_id FROM post_publications WHERE id=?').bind(resumableId).first(), { state: 'preparing', attempt_id: null })
-    assert.equal((await recommendations()).recommendations.some(item => item.operation === 'post.publish' && item.subjectId === resumable.post.id), true,
-      'canonical reconciliation makes released preparation available to finish')
-    assert.equal((await publishPost(env, 'org-a', resumable.post.id, { expectedUpdatedAt: resumable.post.updated_at, targets: [targets.instagram()] }, 'owner')).outcomes[0]!.status, 'published')
-    await publishedOnMeta(resumable.post.id, 'instagram')
-    assert.equal((await recommendations()).recommendations.some(item => item.operation === 'post.publish' && item.subjectId === resumable.post.id), false)
-
-    // Instagram accepts the final call while its answer is delayed. The actual
-    // clock expires that claim; reconciliation reads the real accepted media.
-    const stalled = await create('key-stalled-final', { media: [{ asset_id: 'a2', slot: 'cover' }] })
-    let finalObserved!: () => void, releaseFinal!: () => void
-    const observedFinal = new Promise<void>(resolve => { finalObserved = resolve })
-    const finalResponse = new Promise<void>(resolve => { releaseFinal = resolve })
-    meta.instagramResponseGate = async request => {
-      if (request.method !== 'POST' || !request.path.endsWith('media_publish')) return
-      meta.instagramResponseGate = null
-      finalObserved()
-      await finalResponse
-    }
-    t.mock.timers.enable({ apis: ['Date'], now: Date.now() })
-    const stalledPublish = publishPost(env, 'org-a', stalled.post.id, { expectedUpdatedAt: stalled.post.updated_at, targets: [targets.instagram()] }, 'owner')
-    try {
-      await observedFinal
-      const current = (await getPost(db, env, 'org-a', stalled.post.id))!.publications[0]!
-      assert.equal(current.state, 'publishing')
-      assert.equal(current.can_reconcile, false)
-      await assert.rejects(reconcilePostPublication(env, 'org-a', String(current.id), null), (error: unknown) => HTTPError.isError(error) && error.status === 409)
-      t.mock.timers.tick(CLAIM_STALE_MS + 1)
-      assert.equal((await getPost(db, env, 'org-a', stalled.post.id))!.publications[0]!.can_reconcile, true)
-      // A renewal wins the first expiry CAS, but is stale again by this read.
-      const stamp = await db.prepare('SELECT updated_at FROM post_publications WHERE id=?').bind(current.id).first<string>('updated_at')
-      const renewed = new Date(new Date(stamp!).getTime() + 1).toISOString()
-      await db.prepare(`CREATE TRIGGER renew_stalled_claim BEFORE UPDATE OF state ON post_publications
-        WHEN OLD.id = '${current.id}' AND OLD.state = 'publishing' AND NEW.state = 'unknown' AND OLD.updated_at = '${stamp}'
-        BEGIN UPDATE post_publications SET updated_at = '${renewed}' WHERE id = OLD.id; SELECT RAISE(IGNORE); END`).run()
-      t.mock.timers.tick(CLAIM_STALE_MS + 1)
-      assert.equal((await reconcilePostPublication(env, 'org-a', String(current.id), null)).state, 'published')
-      const confirmed = (await getPost(db, env, 'org-a', stalled.post.id))!.publications[0]!
-      assert.equal(confirmed.can_reconcile, false)
-      assert.equal(confirmed.provider_post_id, null, 'Instagram container PUBLISHED is confirmed even before its media ID is recovered')
-      assert.equal((await recommendations()).recommendations.some(item => item.operation === 'post.publish' && item.subjectId === stalled.post.id), false)
-    } finally {
-      await db.prepare('DROP TRIGGER IF EXISTS renew_stalled_claim').run()
-      meta.instagramResponseGate = null
-      releaseFinal()
-      await stalledPublish
-      t.mock.timers.reset()
-    }
-    assert.equal((await stalledPublish).outcomes[0]!.code, 'claim_lost')
-    const stalledReceipt = await db.prepare('SELECT provider_handles_json FROM post_publications WHERE post_id=?').bind(stalled.post.id).first<{ provider_handles_json: string }>()
-    const stalledContainer = JSON.parse(stalledReceipt!.provider_handles_json) as { container_id: string }
-    assert.equal(meta.igContainers.get(stalledContainer.container_id)?.status, 'PUBLISHED')
-    assert.equal([...meta.igMedia.values()].some(media => media.container === stalledContainer.container_id), true)
+    const refusedPublish = await publishPost(env, 'org-a', refusedContainer.post.id, { expectedUpdatedAt: refusedContainer.post.updated_at, targets: [targets.instagram()] }, 'owner')
+    assert.equal(refusedPublish.outcomes[0]!.code, 'provider_rejected')
+    assert.equal((await recommendations()).recommendations.some(item => item.operation === 'post.publish' && item.subjectId === refusedContainer.post.id), false,
+      'a recorded provider answer is not reopened as owner work')
+    assert.equal((await publishPost(env, 'org-a', refusedContainer.post.id, { expectedUpdatedAt: refusedContainer.post.updated_at, targets: [targets.instagram()] }, 'owner')).outcomes[0]!.status, 'published')
+    await publishedOnMeta(refusedContainer.post.id, 'instagram')
 
     // An expired container is a definite non-publication; the next call prepares new ones.
     const expiring = await create('key-expire', { media: [{ asset_id: 'a2', slot: 'cover' }] })
@@ -752,12 +659,10 @@ test('publication: one result, one external post per target, and no blind resend
     assert.equal((await publishPost(env, 'org-a', expiring.post.id, { expectedUpdatedAt: expiring.post.updated_at, targets: [targets.instagram()] }, 'owner')).outcomes[0]!.status, 'published')
     await publishedOnMeta(expiring.post.id, 'instagram')
 
-    // Concurrent calls for one new target: one claim, one media_publish.
+    // A published post keeps one receipt per channel.
     const racing = await create('key-race', { media: [{ asset_id: 'a1', slot: 'cover' }] })
-    const publishesBefore = meta.sent(request => request.path.endsWith('media_publish')).length
-    const raced = await Promise.all([1, 2].map(() => publishPost(env, 'org-a', racing.post.id, { expectedUpdatedAt: racing.post.updated_at, targets: [targets.instagram()] }, 'owner')))
-    assert.deepEqual(raced.map(result => result.outcomes[0]!.status).sort(), ['processing', 'published'])
-    assert.equal(meta.sent(request => request.path.endsWith('media_publish')).length, publishesBefore + 1)
+    assert.equal((await publishPost(env, 'org-a', racing.post.id, { expectedUpdatedAt: racing.post.updated_at, targets: [targets.instagram()] }, 'owner')).outcomes[0]!.status, 'published')
+    assert.equal(await db.prepare('SELECT count(*) FROM post_publications WHERE post_id = ?').bind(racing.post.id).first('count(*)'), 1)
 
     // After publication, local edits are allowed and nothing is re-sent; the management view says the website copy changed.
     const edited = await mcp('update_post', {
@@ -765,8 +670,7 @@ test('publication: one result, one external post per target, and no blind resend
     })
     const editedPost = (await getPost(db, env, 'org-a', racing.post.id))!
     assert.equal(editedPost.body, 'Edited later')
-    const { can_reconcile: editedCanReconcile, ...editedReceipt } = editedPost.publications[0]!
-    assert.equal(editedCanReconcile, false)
+    const editedReceipt = editedPost.publications[0]!
     assert.equal(editedReceipt.local_content_changed, true)
     assert.deepEqual(edited.post?.publications, [editedReceipt])
     // Deleting the website post detaches, and keeps, the provider identity.
@@ -1235,8 +1139,8 @@ test('Facebook video: a Reel is published by finishing its upload session, any o
     await asset('reel', 'video/mp4', 'video', { width: 720, height: 1280, duration: 12 })
     await asset('wide', 'video/mp4', 'video', { width: 1920, height: 1080, duration: 20 })
     const create = (key: string, post: Record<string, unknown>) => createPost(db, cardless, 'org-a', { post, idempotencyKey: key }, 'owner')
-    const publication = (postId: string) => db.prepare('SELECT state, provider_post_id, provider_permalink, provider_handles_json, error_code FROM post_publications WHERE post_id = ? AND channel = ?').bind(postId, 'facebook')
-      .first<{ state: string; provider_post_id: string | null; provider_permalink: string | null; provider_handles_json: string; error_code: string | null }>()
+    const publication = (postId: string) => db.prepare('SELECT state, provider_post_id, provider_permalink, error_code FROM post_publications WHERE post_id = ? AND channel = ?').bind(postId, 'facebook')
+      .first<{ state: string; provider_post_id: string | null; provider_permalink: string | null; error_code: string | null }>()
     const starts = () => meta.sent(request => request.path.endsWith(`${PAGE}/video_reels`) && request.body.upload_phase === 'start').length
 
     // A 9:16 video is a Reel: start, Facebook fetches the file, finish as PUBLISHED with the caption; the finish's post is the publication.
@@ -1248,7 +1152,7 @@ test('Facebook video: a Reel is published by finishing its upload session, any o
       [['/video-upload/v25.0/reel-1', 'https://imagedelivery.example.test/hash/reel/public', 'OAuth page-token']])
     assert.deepEqual(meta.sent(request => request.path.endsWith(`${PAGE}/video_reels`) && request.body.upload_phase === 'finish').map(request => [request.body.video_id, request.body.video_state, request.body.description]),
       [['reel-1', 'PUBLISHED', 'Robatayaki tonight']])
-    assert.deepEqual(await publication(reel.post.id), { state: 'published', provider_post_id: `${PAGE}_reel-1`, provider_permalink: null, provider_handles_json: JSON.stringify({ video_id: 'reel-1' }), error_code: null })
+    assert.deepEqual(await publication(reel.post.id), { state: 'published', provider_post_id: `${PAGE}_reel-1`, provider_permalink: null, error_code: null })
     assert.equal(meta.fbPosts.get(`${PAGE}_reel-1`)?.published, true)
     // A repeat is a receipt, not another Reel.
     assert.equal((await publishPost(env, 'org-a', reel.post.id, { expectedUpdatedAt: reel.post.updated_at, targets: [targets.facebook()] }, 'owner')).outcomes[0]!.status, 'already_published')
@@ -1262,7 +1166,7 @@ test('Facebook video: a Reel is published by finishing its upload session, any o
       [['https://imagedelivery.example.test/hash/wide/public', undefined, 'Kitchen tour']])
     assert.deepEqual(await publication(wide.post.id).then(row => [row!.state, row!.provider_post_id]), ['published', 'video-2'])
 
-    // A Reel upload Facebook does not answer is a failure that says so; the retry runs its own session, and the abandoned one was never public.
+    // A Reel upload Facebook does not answer is a failure that says so; the next call runs its own session, and the abandoned one was never public.
     const retried = await create('key-fb-reel-retry', { body: 'Second reel', media: [{ asset_id: 'reel', slot: 'cover' }] })
     meta.fault('dropped', request => request.host === 'rupload.facebook.com')
     const unanswered = await publishPost(env, 'org-a', retried.post.id, { expectedUpdatedAt: retried.post.updated_at, targets: [targets.facebook()] }, 'owner')

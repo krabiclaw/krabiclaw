@@ -209,13 +209,13 @@ Stages of a listing's import, in order: `property`, `room`, `rate`, `inventory`,
 
 ```json
 { "listings": [
-  { "listing_id": "39313043", "product_id": "8d0c…", "action": "sync", "status": "running", "stage": "content", "error": null, "attempts": 0, "next_attempt_at": null, "updated_at": "2026-10-23T07:20:00.000Z" },
-  { "listing_id": "40112808", "product_id": null, "action": "sync", "status": "failed", "stage": null, "error": { "code": "MISSING_DETAIL", "message": "zipCode is required" }, "attempts": 1, "next_attempt_at": null, "updated_at": "…" }
+  { "listing_id": "39313043", "product_id": "8d0c…", "action": "sync", "status": "running", "stage": "content", "error": null, "updated_at": "2026-10-23T07:20:00.000Z" },
+  { "listing_id": "40112808", "product_id": null, "action": "sync", "status": "failed", "stage": null, "error": { "code": "MISSING_DETAIL", "message": "zipCode is required" }, "updated_at": "…" }
 ] }
 ```
 
 - `status`: `queued` (waiting its turn), `running` (being worked on, or its import is between stages; `stage` says where), `done`, `failed` (needs a new request). `product_id` is the home once it exists; `stage` is its import stage, `null` before the home exists.
-- `error` is the last failure's code and message. A transient failure (the network, a provider answering 5xx or 429, or `AIRBNB_UNAVAILABLE`: Airbnb failing behind Channex) is retried on its own, after 30 s doubling up to an hour, 8 attempts in all: meanwhile the listing stays `queued` or `running` with that `error`, its `attempts` and `next_attempt_at` (the next retry; `null` when none is due). Any other failure is `failed` until a new request names the listing: `MISSING_DETAIL` (a field Airbnb leaves out that the request's `details` and the organization's contact do not fill; send it in `details`), `ONLY_MISSING_DETAILS`, `INVALID_DETAIL`, `CURRENCY_MISMATCH`, `MISSING_AIRBNB_FIELD`, `LISTING_NOT_FOUND`, `LISTING_LINKED_ELSEWHERE`, `HOME_LIMIT`, `PROVIDER_VERIFICATION_FAILED`, `CONNECTION_NEEDS_REVIEW`, `REQUESTER_REMOVED`.
+- `error` is the failure's code and message, Channex's or Airbnb's where one of them answered (`AIRBNB_UNAVAILABLE` is Airbnb failing behind Channex). A failed listing stays `failed` until a new request names it, which carries on from the stage its home reached: `MISSING_DETAIL` (a field Airbnb leaves out that the request's `details` and the organization's contact do not fill; send it in `details`), `ONLY_MISSING_DETAILS`, `INVALID_DETAIL`, `CURRENCY_MISMATCH`, `MISSING_AIRBNB_FIELD`, `LISTING_NOT_FOUND`, `LISTING_LINKED_ELSEWHERE`, `HOME_LIMIT`, `PROVIDER_VERIFICATION_FAILED`, `CONNECTION_NEEDS_REVIEW`, `REQUESTER_REMOVED`.
 - A listing's home found partway (an import or activation that stopped at any stage) is carried on from that stage.
 - The work runs on KrabiClaw: the request queues it, and a task every two minutes picks it up and carries it on, a few photos per step, until each listing is `done` or `failed`. The app needs to stay open for none of it, and can show progress by reading `GET`. `GET …/integrations/airbnb/listings` and listing details stay readable while the sync runs.
 

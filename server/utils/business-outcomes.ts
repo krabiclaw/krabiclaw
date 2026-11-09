@@ -165,7 +165,7 @@ export async function listBusinessOutcomes(
       ? accepted ? 'verified' : deliveries.length > 0 && deliveries.every(receipt => receipt.status === 'failed'
         && (receipt.provider !== 'channex' || receipt.non_delivery_confirmed === 1)) ? 'failed' : 'unconfirmed'
       : row.source_table === 'post_publications'
-        ? payload.state === 'published' || payload.state === 'removed' ? 'verified' : payload.state === 'failed' ? 'failed' : 'unconfirmed'
+        ? payload.state === 'failed' ? 'failed' : 'verified'
         : 'verified'
     const outcome: BusinessOutcome = {
       id: row.source_table === 'activity_entries' ? row.source_id : `${row.source_table}:${row.source_id}`,

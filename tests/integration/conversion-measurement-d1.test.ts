@@ -4,7 +4,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { handleStripeGa4Event, withdrawStripeGaIdentifiers } from '../../server/utils/stripe-ga4.ts'
-import { claimZarazPageview, finishZarazPageview, deliverViaMeasurementProtocol, readGa4Delivery } from '../../server/utils/ga4-delivery.ts'
+import { deliverViaMeasurementProtocol, readGa4Delivery, recordZarazPageviewReceipt, zarazPageviewDelivery } from '../../server/utils/ga4-delivery.ts'
 import { PLATFORM_SITE } from '../../utils/site-routing.ts'
 import { originatingOwnerId, recordAndDeliverConversion, recordOrganizationConversionEvent as recordAt, type OrganizationConversionInput } from '../../server/utils/organization-conversions.ts'
 import { findStripeGa4CheckoutAttribution } from '../../server/utils/stripe-ga4-intents.ts'
@@ -329,14 +329,20 @@ test('consent is enforced for GA delivery and withdrawal erases stored identifie
     await recordTenantPageview(db, { eventId: 'browser-pageview', organizationId: 'org-platform', sessionId: SESSION, visitorId: VISITOR,
       pagePath: '/', locale: 'en', referrerHost: null, attribution: {}, internalHosts: ['platform.example'], userAgent: 'Desktop', ipHash: 'h',
       country: null, region: null, city: null, locationId: null, pageId: null, pageType: null, recipe: null, now: '2026-09-10T03:00:00.000Z' })
-    const claimInput = { eventId: 'browser-pageview', organizationId: 'org-platform', sessionId: SESSION, cookieHeader: `kc_analytics_consent=${encodeURIComponent('{"kc_analytics":true}')}` }
-    const claims = await Promise.all([claimZarazPageview(db, claimInput), claimZarazPageview(db, claimInput)])
-    assert.equal(claims.filter(claim => claim.claimId).length, 1)
-    const claimId = claims.find(claim => claim.claimId)!.claimId!
-    assert.equal(await finishZarazPageview(db, { ...claimInput, sessionId: 'other-session', claimId, status: 'dispatched' }), false)
-    assert.equal(await finishZarazPageview(db, { ...claimInput, sessionId: SESSION, claimId, status: 'dispatched' }), true)
-    assert.equal((await readGa4Delivery(db, claimInput.eventId))?.status, 'dispatched')
-    assert.equal((await claimZarazPageview(db, claimInput)).claimId, undefined)
+    // A consenting visitor's pageview is handed to Zaraz by the browser; the browser's receipt is the record, once.
+    const handoff = { eventId: 'browser-pageview', organizationId: 'org-platform', sessionId: SESSION, cookieHeader: `kc_analytics_consent=${encodeURIComponent('{"kc_analytics":true}')}` }
+    assert.deepEqual(await zarazPageviewDelivery(db, handoff), { dispatch: true })
+    assert.equal(await readGa4Delivery(db, handoff.eventId), null)
+    assert.equal(await recordZarazPageviewReceipt(db, { ...handoff, sessionId: 'other-session', status: 'dispatched' }), false)
+    assert.equal(await recordZarazPageviewReceipt(db, { ...handoff, status: 'dispatched' }), true)
+    assert.equal((await readGa4Delivery(db, handoff.eventId))?.status, 'dispatched')
+    assert.equal(await recordZarazPageviewReceipt(db, { ...handoff, status: 'failed' }), false)
+    // A visitor who declined is not handed over, and the pageview says why.
+    await recordTenantPageview(db, { eventId: 'declined-pageview', organizationId: 'org-platform', sessionId: SESSION, visitorId: VISITOR,
+      pagePath: '/', locale: 'en', referrerHost: null, attribution: {}, internalHosts: ['platform.example'], userAgent: 'Desktop', ipHash: 'h',
+      country: null, region: null, city: null, locationId: null, pageId: null, pageType: null, recipe: null, now: '2026-09-10T03:01:00.000Z' })
+    assert.deepEqual(await zarazPageviewDelivery(db, { ...handoff, eventId: 'declined-pageview', cookieHeader: `kc_analytics_consent=${encodeURIComponent('{"kc_analytics":false}')}` }), { dispatch: false, status: 'consent_rejected' })
+    assert.equal((await readGa4Delivery(db, 'declined-pageview'))?.status, 'consent_rejected')
     // The native events exist regardless of the consent decision.
     assert.equal(await db.prepare("SELECT count(*) FROM analytics_events WHERE json_extract(payload_json, '$.event_name') = 'sign_up'").first('count(*)'), 2)
     const accepted = await recordAndDeliverConversion({ GA4_API_SECRET: 'secret' }, db, request('{"kc_analytics":true}'), { ...signup('user-c') })
@@ -344,33 +350,17 @@ test('consent is enforced for GA delivery and withdrawal erases stored identifie
     assert.equal(sent.length, 1)
     assert.match(sent[0]!, /measurement_id=G-TEST/)
 
-    // Concurrent delivery callers share an atomic lease; a crashed sender's lease expires.
-    const pending = await recordAt(db, null, signup('user-concurrent'))
+    // A Measurement Protocol delivery records Google's answer on the event: sent, or the failure.
+    const pending = await recordAt(db, null, signup('user-direct'))
     const input = { eventId: pending.id, organizationId: 'org-platform', event: { name: 'sign_up', params: {} },
       clientId: '111.222', userId: null, sessionId: null, sessionCapturedAt: null }
-    const entered = Promise.withResolvers<undefined>()
-    const release = Promise.withResolvers<undefined>()
-    let attempts = 0
-    globalThis.fetch = (async () => { attempts++; entered.resolve(undefined); await release.promise; return new Response(null, { status: 204 }) }) as typeof fetch
-    const sending = deliverViaMeasurementProtocol({ GA4_API_SECRET: 'secret' }, db, input)
-    await entered.promise
-    try {
-      const concurrent = await deliverViaMeasurementProtocol({ GA4_API_SECRET: 'secret' }, db, input)
-      assert.equal(concurrent.status, 'sending')
-      assert.ok(Date.parse(concurrent.leaseExpiresAt!) > Date.now())
-      assert.equal(attempts, 1)
-    } finally { release.resolve(undefined) }
-    assert.equal((await sending).status, 'sent')
+    globalThis.fetch = (async () => new Response(null, { status: 204 })) as typeof fetch
     assert.equal((await deliverViaMeasurementProtocol({ GA4_API_SECRET: 'secret' }, db, input)).status, 'sent')
-    assert.equal(attempts, 1)
     assert.equal((await readGa4Delivery(db, pending.id))?.status, 'sent')
-
-    const abandoned = await recordAt(db, null, signup('user-abandoned'))
-    await db.prepare("UPDATE analytics_events SET payload_json = json_set(payload_json, '$.ga4_delivery', json(?)) WHERE id = ?")
-      .bind(JSON.stringify({ transport: 'measurement_protocol', status: 'sending', claimId: 'crashed', leaseExpiresAt: '2000-01-01T00:00:00.000Z' }), abandoned.id).run()
-    assert.equal((await deliverViaMeasurementProtocol({ GA4_API_SECRET: 'secret' }, db, { ...input, eventId: abandoned.id })).status, 'sent')
-    assert.equal(attempts, 2)
-    assert.equal((await readGa4Delivery(db, abandoned.id))?.status, 'sent')
+    globalThis.fetch = (async () => new Response(null, { status: 503 })) as typeof fetch
+    const refused = await recordAt(db, null, signup('user-refused'))
+    assert.deepEqual(await deliverViaMeasurementProtocol({ GA4_API_SECRET: 'secret' }, db, { ...input, eventId: refused.id }), { transport: 'measurement_protocol', status: 'failed', detail: 'measurement_protocol_503' })
+    assert.equal((await readGa4Delivery(db, refused.id))?.status, 'failed')
 
     // Withdrawal erases what checkout stored for this user, only where they captured it.
     await db.prepare(`INSERT INTO stripe_ga4_subscription_intents (id, organization_id, user_id, action, client_id, session_id, session_captured_at, expires_at)

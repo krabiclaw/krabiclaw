@@ -13,17 +13,15 @@ import type { Ga4Projection } from '~/utils/ga4-projection'
  * measuring organization's own connected property, resolved from its canonical
  * host; there is no environment-level property and no synthetic client.
  *
- * The outcome of every attempt is written onto the native event
- * (`payload.ga4_delivery`), so reporting can tell an unconfigured or
- * consent-rejected outcome from a provider failure without inventing zeros.
+ * The outcome is written onto the native event (`payload.ga4_delivery`), so
+ * reporting can tell an unconfigured or consent-rejected outcome from a
+ * provider failure without inventing zeros.
  */
-export type Ga4DeliveryStatus = 'sending' | 'sent' | 'dispatched' | 'not_configured' | 'no_consent_context' | 'consent_rejected' | 'failed'
+export type Ga4DeliveryStatus = 'sent' | 'dispatched' | 'not_configured' | 'no_consent_context' | 'consent_rejected' | 'failed'
 export interface Ga4Delivery {
   transport: 'measurement_protocol' | 'zaraz'
   status: Ga4DeliveryStatus
   detail?: string
-  claimId?: string
-  leaseExpiresAt?: string
 }
 
 interface Ga4Destination { measurementId: string; host: string }
@@ -46,42 +44,35 @@ export async function readGa4Delivery(db: DbClient, eventId: string): Promise<Ga
   return row?.delivery ? JSON.parse(row.delivery) as Ga4Delivery : null
 }
 
-async function recordGa4Delivery(db: DbClient, eventId: string, delivery: Ga4Delivery, claimId?: string): Promise<Ga4Delivery> {
-  const updated = await execute(db, `UPDATE analytics_events SET payload_json = json_set(payload_json, '$.ga4_delivery', json(?)) WHERE id = ?
-    AND (? IS NULL OR json_extract(payload_json, '$.ga4_delivery.claimId') = ?)`, [JSON.stringify(delivery), eventId, claimId ?? null, claimId ?? null])
-  if (updated.meta.changes === 0) {
-    const existing = await readGa4Delivery(db, eventId)
-    if (!existing) throw new Error(`GA4 delivery event ${eventId} not found`)
-    return existing
-  }
+async function recordGa4Delivery(db: DbClient, eventId: string, delivery: Ga4Delivery): Promise<Ga4Delivery> {
+  const updated = await execute(db, `UPDATE analytics_events SET payload_json = json_set(payload_json, '$.ga4_delivery', json(?)) WHERE id = ?`, [JSON.stringify(delivery), eventId])
+  if (updated.meta.changes === 0) throw new Error(`GA4 delivery event ${eventId} not found`)
   if (delivery.status === 'failed') console.error('ga4_delivery_failed', { eventId, ...delivery })
   return delivery
 }
 
-/** Claim a single browser handoff after native persistence. Dispatched means Zaraz accepted it, not Google acknowledgement. */
-export async function claimZarazPageview(db: DbClient, input: { eventId: string; organizationId: string; sessionId: string; cookieHeader: string }): Promise<{ claimId?: string; status: Ga4DeliveryStatus }> {
+/**
+ * Whether the browser hands this recorded pageview to Zaraz: only when the
+ * visitor consented and the organization has a GA4 property. A pageview that
+ * is not handed over records why; one that is records nothing until the
+ * browser's receipt says Zaraz took it or did not.
+ */
+export async function zarazPageviewDelivery(db: DbClient, input: { eventId: string; organizationId: string; sessionId: string; cookieHeader: string }): Promise<{ dispatch: boolean; status?: Ga4DeliveryStatus }> {
   const destination = await resolveGa4Destination(db, input.organizationId)
   const consent = readAnalyticsConsent(input.cookieHeader)
-  const status: Ga4DeliveryStatus = 'status' in destination ? destination.status
-    : consent === 'accepted' ? 'sending' : consent === 'rejected' ? 'consent_rejected' : 'no_consent_context'
-  const claimId = crypto.randomUUID()
-  const delivery: Ga4Delivery = { transport: 'zaraz', status, ...(status === 'sending' ? { claimId } : {}) }
-  const claimed = await execute(db, `UPDATE analytics_events SET payload_json = json_set(payload_json, '$.ga4_delivery', json(?))
-    WHERE id = ? AND organization_id = ? AND session_id = ? AND kind = 'pageview' AND json_extract(payload_json, '$.ga4_delivery') IS NULL`, [JSON.stringify(delivery), input.eventId, input.organizationId, input.sessionId])
-  if (!claimed.meta.changes) {
-    const existing = await queryFirst<{ status: Ga4DeliveryStatus }>(db, `SELECT json_extract(payload_json, '$.ga4_delivery.status') status
-      FROM analytics_events WHERE id = ? AND organization_id = ? AND session_id = ? AND kind = 'pageview'`, [input.eventId, input.organizationId, input.sessionId])
-    if (!existing?.status) throw new Error('Native pageview does not match the GA4 delivery context')
-    return existing
-  }
-  return { status, ...(status === 'sending' ? { claimId } : {}) }
+  if (!('status' in destination) && consent === 'accepted') return { dispatch: true }
+  const status: Ga4DeliveryStatus = 'status' in destination ? destination.status : consent === 'rejected' ? 'consent_rejected' : 'no_consent_context'
+  const recorded = await execute(db, `UPDATE analytics_events SET payload_json = json_set(payload_json, '$.ga4_delivery', json(?))
+    WHERE id = ? AND organization_id = ? AND session_id = ? AND kind = 'pageview'`, [JSON.stringify({ transport: 'zaraz', status } satisfies Ga4Delivery), input.eventId, input.organizationId, input.sessionId])
+  if (!recorded.meta.changes) throw new Error('Native pageview does not match the GA4 delivery context')
+  return { dispatch: false, status }
 }
 
-export async function finishZarazPageview(db: DbClient, input: { eventId: string; organizationId: string; sessionId: string; claimId: string; status: 'dispatched' | 'failed' }): Promise<boolean> {
+/** The browser's receipt for a handed-over pageview: dispatched means Zaraz accepted it, not Google acknowledgement. One receipt per pageview. */
+export async function recordZarazPageviewReceipt(db: DbClient, input: { eventId: string; organizationId: string; sessionId: string; status: 'dispatched' | 'failed' }): Promise<boolean> {
   const result = await execute(db, `UPDATE analytics_events SET payload_json = json_set(payload_json, '$.ga4_delivery', json(?))
-    WHERE id = ? AND organization_id = ? AND session_id = ? AND kind = 'pageview'
-      AND json_extract(payload_json, '$.ga4_delivery.claimId') = ? AND json_extract(payload_json, '$.ga4_delivery.status') = 'sending'`,
-  [JSON.stringify({ transport: 'zaraz', status: input.status }), input.eventId, input.organizationId, input.sessionId, input.claimId])
+    WHERE id = ? AND organization_id = ? AND session_id = ? AND kind = 'pageview' AND json_extract(payload_json, '$.ga4_delivery') IS NULL`,
+  [JSON.stringify({ transport: 'zaraz', status: input.status } satisfies Ga4Delivery), input.eventId, input.organizationId, input.sessionId])
   return result.meta.changes === 1
 }
 
@@ -159,30 +150,9 @@ export async function sendMeasurementProtocol(env: MeasurementProtocolEnv, db: D
   }
 }
 
-/**
- * Measurement Protocol delivery of a recorded native event, with the outcome
- * written onto it. Only the holder of the atomic sending lease may send or
- * finish the attempt. A sent event is never claimed again; an abandoned attempt
- * can be retried after one minute. Callers can retry failed or busy deliveries.
- */
+/** Measurement Protocol delivery of a recorded native event, with the outcome written onto it. */
 export async function deliverViaMeasurementProtocol(env: MeasurementProtocolEnv, db: DbClient, input: MeasurementProtocolInput & { eventId: string }): Promise<Ga4Delivery> {
-  const now = new Date()
-  const claimId = crypto.randomUUID()
-  const claim: Ga4Delivery = {
-    transport: 'measurement_protocol', status: 'sending', claimId,
-    leaseExpiresAt: new Date(now.getTime() + 60_000).toISOString(),
-  }
-  const claimed = await execute(db, `UPDATE analytics_events SET payload_json = json_set(payload_json, '$.ga4_delivery', json(?))
-    WHERE id = ? AND COALESCE(json_extract(payload_json, '$.ga4_delivery.status'), '') != 'sent'
-      AND (COALESCE(json_extract(payload_json, '$.ga4_delivery.status'), '') != 'sending'
-        OR COALESCE(json_extract(payload_json, '$.ga4_delivery.leaseExpiresAt'), '') <= ?)`,
-  [JSON.stringify(claim), input.eventId, now.toISOString()])
-  if (claimed.meta.changes === 0) {
-    const existing = await readGa4Delivery(db, input.eventId)
-    if (!existing) throw new Error(`GA4 delivery event ${input.eventId} not found`)
-    return existing
-  }
-  return await recordGa4Delivery(db, input.eventId, { transport: 'measurement_protocol', ...await sendMeasurementProtocol(env, db, input) }, claimId)
+  return await recordGa4Delivery(db, input.eventId, { transport: 'measurement_protocol', ...await sendMeasurementProtocol(env, db, input) })
 }
 
 /**

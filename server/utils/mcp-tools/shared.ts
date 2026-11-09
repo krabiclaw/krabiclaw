@@ -486,7 +486,7 @@ export const publishOutcomeObject = {
   properties: {
     channel: { type: 'string', enum: ['organization', 'facebook', 'instagram', 'discord'] },
     target_id: { type: 'string' },
-    status: { type: 'string', enum: ['published', 'already_published', 'processing', 'failed', 'unknown', 'skipped'] },
+    status: { type: 'string', enum: ['published', 'already_published', 'failed', 'skipped'] },
     publication_id: { type: 'string' },
     public_url: { type: ['string', 'null'] },
     code: { type: 'string' },

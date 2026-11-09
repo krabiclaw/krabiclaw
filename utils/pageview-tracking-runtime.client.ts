@@ -104,7 +104,7 @@ export function registerPageviewTracking() {
       keepalive: true,
     })
     if (!response.ok) throw new Error(`Analytics collection was rejected (${response.status})`)
-    return await response.json() as { ignored?: boolean; ga4_delivery?: { claimId?: string } }
+    return await response.json() as { ignored?: boolean; ga4_delivery?: { dispatch?: boolean } }
   }
   const report = (error: unknown) => {
     void nuxtApp.callHook('vue:error', error, null, 'analytics-collector')
@@ -117,16 +117,15 @@ export function registerPageviewTracking() {
     await after
     const result = await send(page.pageview!).catch(report)
     if (!result || result.ignored) return false
-    const claimId = result.ga4_delivery?.claimId
-    if (claimId) {
+    if (result.ga4_delivery?.dispatch) {
       // Native readiness never waits for an optional destination or its receipt.
       void (async () => {
         let deliveryStatus = 'dispatched'
         try {
-          if (!win.zaraz?.track) throw new Error('Zaraz is unavailable for the claimed pageview')
+          if (!win.zaraz?.track) throw new Error('Zaraz is unavailable for the recorded pageview')
           await win.zaraz.track(NATIVE_PAGEVIEW_ZARAZ_EVENT, { event_id: page.eventId, page_location: new URL(page.fullPath, window.location.origin).href })
         } catch (error) { deliveryStatus = 'failed'; report(error) }
-        await send({ eventId: page.eventId, eventType: 'ga4_delivery', pagePath: page.path, claimId, deliveryStatus }).catch(report)
+        await send({ eventId: page.eventId, eventType: 'ga4_delivery', pagePath: page.path, deliveryStatus }).catch(report)
       })()
     }
     return true
