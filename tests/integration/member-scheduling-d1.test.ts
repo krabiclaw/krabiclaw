@@ -5,7 +5,9 @@ import { Miniflare } from 'miniflare'
 import { generateSQLiteDrizzleJson,generateSQLiteMigration } from 'drizzle-kit/api'
 import * as schema from '../../server/db/schema.ts'
 import { writeMemberScheduling, readMemberScheduling, memberSchedulingList, requireSchedulingAccess, workingWindows, selectBusyCalendars } from '../../server/domain/member-scheduling.ts'
-import { claimSessionCapacity, updateSession } from '../../server/utils/availability.ts'
+import { claimSessionCapacity } from '../../server/utils/availability.ts'
+import { handleBookingsTools } from '../../server/utils/mcp-tools/bookings.ts'
+import type { McpExecutorContext } from '../../server/utils/mcp-tools/execution.ts'
 import { publicProductHosts } from '../../server/utils/public-provider.ts'
 import { requestInsertQueries, threadPayloadForGuest, getGuestRequest } from '../../server/domain/requests.ts'
 import { formatTimestamp } from '../../utils/timezone.ts'
@@ -191,9 +193,12 @@ test('member self-service uses Better Auth permissions, public approval is admin
   assert.equal(await db.prepare("SELECT count(*) n FROM bookings WHERE product_session_id='session-one'").first('n'),0)
   // Cancelling an unbooked session asks no calendar, so an unreadable one does not stand in the way, nor does another scheduled session of the same offering at the same time.
   await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES('session-one-b','org','one','member-one','UTC',?,?,1,'owner','owner')").bind(`${day}T14:30:00.000Z`,`${day}T15:30:00.000Z`).run()
-  assert.equal((await updateSession(db,{env,organizationId:'org',productId:'one',sessionId:'session-one',actorId:'owner',status:'cancelled'})).status,'cancelled')
-  await db.prepare("DELETE FROM product_sessions WHERE id='session-one-b'").run()
+  const sessionOne=await db.prepare("SELECT updated_at FROM product_sessions WHERE id='session-one'").first<string>('updated_at')
+  const mcpOrganization={db,env,organizationId:'org',userId:'owner',role:'owner',isPlatformAdmin:false,scopes:['tenant'],membership:{id:'member-owner',organizationId:'org',userId:'owner',role:'owner'}} as McpExecutorContext['organization']
+  const cancelled=await handleBookingsTools({toolName:'update_product_session',args:{product_id:'one',session_id:'session-one',expected_updated_at:sessionOne,status:'cancelled'},organization:mcpOrganization} as McpExecutorContext) as {session:{status:string}}
+  assert.equal(cancelled.session.status,'cancelled')
   assert.equal(await db.prepare("SELECT status FROM product_sessions WHERE id='session-one'").first('status'),'cancelled')
+  await db.prepare("DELETE FROM product_sessions WHERE id='session-one-b'").run()
   await db.prepare("UPDATE product_sessions SET status='scheduled' WHERE id='session-one'").run()
   const healthy=await claimSessionCapacity(db,{env,organizationId:'org',productId:'two',sessionId:'session-two',productVariantId:'variant-two',partySize:1})
   assert.equal(await db.prepare('SELECT assigned_member_id FROM bookings WHERE id=?').bind(healthy.bookingId).first('assigned_member_id'),'member-two')

@@ -730,8 +730,10 @@ export async function prepareProductBookingSetup(db: DbClient, input: {
   const queries: BatchQuery[] = [...configQueries]
   // The offering is created only if a guest could book something now, at the location as it was read.
   let locationGuard: BatchQuery = { query: 's.location_id IS NULL', params: [] }
-  // The offering is created only if a guest could book something now: a session inside the public window, as the public listing bounds it.
-  let bookableUntil = new Date(Date.parse(input.now) + PUBLIC_BOOKING_WINDOW_DAYS * 86_400_000).toISOString()
+  // The offering is created only if a guest could book something now: a session inside its own public window, as the
+  // public listing bounds it (`bookingWindow` in the session's timezone); a timezone with no window falls back to UTC's.
+  const utcWindowEnd = new Date(Date.parse(input.now) + PUBLIC_BOOKING_WINDOW_DAYS * 86_400_000).toISOString()
+  const windowEnds: Record<string, string> = {}
   if (locationId === null) {
     // Online: the provider's working hours are the times. Weekly slots and
     // dated sessions would be a second schedule beside theirs.
@@ -740,7 +742,7 @@ export async function prepareProductBookingSetup(db: DbClient, input: {
   } else {
     const location = await queryFirst<SessionLocation>(db, 'SELECT id,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id=?', [input.organizationId, locationId])
     if (!location || location.status !== 'active') badRequest('Choose an active location in this business')
-    bookableUntil = bookingWindow(location.timezone).toInstant
+    windowEnds[location.timezone] = bookingWindow(location.timezone).toInstant
     locationGuard = { query: `EXISTS (SELECT 1 FROM business_locations l WHERE l.id=s.location_id AND l.organization_id=s.organization_id AND l.status='active' AND l.timezone IS ? AND l.opening_hours IS ? AND l.special_hours IS ?)`, params: [location.timezone, location.opening_hours, location.special_hours] }
     const existingRules = input.productInSameBatch ? [] : (await listAvailabilityRules(db, input.organizationId, input.productId)).filter(rule => rule.location_id === locationId)
     const schedule = prepareWeeklySchedule({ ...input, locationId, slots: weeklySlots ?? existingRules.map(rule => ({ weekday: rule.weekday, start_time: rule.start_time })) }, config, location.timezone, existingRules)
@@ -770,21 +772,25 @@ export async function prepareProductBookingSetup(db: DbClient, input: {
   // The sessions this batch inserts are not stored yet: their providers come from the configuration.
   const configured = await configuredProviderIds(db, config)
   if (locationId === null && configured.length) {
-    // An online slot is public inside its provider's own window; the guard uses the earliest of them.
-    const zones = await queryAll<{ timezone: string }>(db, 'SELECT timezone FROM member_scheduling WHERE organization_id=? AND timezone IS NOT NULL AND member_id IN (SELECT value FROM json_each(?))', [input.organizationId, JSON.stringify(configured)])
-    bookableUntil = [bookableUntil, ...zones.map(zone => bookingWindow(zone.timezone).toInstant)].sort()[0]!
+    // An online slot is public inside its own provider's window, in that provider's timezone.
+    for (const zone of await queryAll<{ timezone: string }>(db, 'SELECT DISTINCT timezone FROM member_scheduling WHERE organization_id=? AND timezone IS NOT NULL AND member_id IN (SELECT value FROM json_each(?))', [input.organizationId, JSON.stringify(configured)])) {
+      windowEnds[zone.timezone] = bookingWindow(zone.timezone).toInstant
+    }
   }
   const stored = await sessionProviderIds(db, input.organizationId, { productId: input.productId, fromInstant: bookableFrom })
-  // Sessions start inside the window and may run past its end.
-  const availability = await memberAvailabilityJson(db, input.env, input.organizationId, { from: bookableFrom, until: new Date(Date.parse(bookableUntil) + 86_400_000).toISOString() }, [...new Set([...configured, ...stored.members])])
+  // Google is asked through the end of every session the guard may count: a day past the latest window, the stored
+  // sessions' last end, and each dated session this batch queues, whole.
+  const readUntil = [new Date(Date.parse([utcWindowEnd, ...Object.values(windowEnds)].sort().at(-1)!) + 86_400_000).toISOString(),
+    ...(stored.until ? [stored.until] : []), ...(oneOffSessions ?? []).map(session => sessionInstants(session.starts_at, session.ends_at).ends_at)].sort().at(-1)!
+  const availability = await memberAvailabilityJson(db, input.env, input.organizationId, { from: bookableFrom, until: readUntil }, [...new Set([...configured, ...stored.members])])
   queries.push({
     query: `UPDATE product_booking_configs SET updated_at=CASE WHEN EXISTS (
       SELECT 1 FROM product_sessions s WHERE s.organization_id=? AND s.product_id=?
-        AND s.location_id IS ? AND s.starts_at>? AND s.starts_at<? AND s.status='scheduled'
+        AND s.location_id IS ? AND s.starts_at>? AND s.starts_at<COALESCE(json_extract(?, '$."' || s.timezone || '"'), ?) AND s.status='scheduled'
         AND (s.capacity IS NULL OR s.capacity>${sessionHeldCapacitySql('s')}+COALESCE((SELECT SUM(b.party_size) FROM bookings b WHERE b.product_session_id=s.id AND ${CAPACITY_CONSUMING_SQL}),0))
         AND (${locationGuard.query}) AND NOT ${providerUnavailableSql('s')}
     ) THEN updated_at ELSE NULL END WHERE organization_id=? AND product_id=?`,
-    params: [input.organizationId, input.productId, locationId, input.now, bookableUntil, ...locationGuard.params!, ...providerAvailabilityParams(availability), input.organizationId, input.productId],
+    params: [input.organizationId, input.productId, locationId, input.now, JSON.stringify(windowEnds), utcWindowEnd, ...locationGuard.params!, ...providerAvailabilityParams(availability), input.organizationId, input.productId],
   })
   return queries
 }
