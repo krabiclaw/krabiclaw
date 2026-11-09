@@ -18,7 +18,6 @@ import whatsappWebhook from '../../server/api/whatsapp/webhook.post.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { createStay } from '../../server/domain/stays.ts'
 import { whatsAppServiceWindowOpen } from '../../server/utils/mcp-context.ts'
-import { useNitroHooks } from 'nitro/app'
 import { createTeamThread, listTeamMessages, sendTeamMessage, teamAccessFor } from '../../server/domain/team-messages.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 
@@ -224,19 +223,17 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
       if ([...refuse].some(start => text.startsWith(start))) return Response.json({ error: { message: 'Meta refused the message' } }, { status: 400 })
       return Response.json({ messages: [{ id: `meta-out-${sent.length}` }] })
     }
-    const reported: unknown[] = []
-    useNitroHooks().hook('error', error => { reported.push(error) })
     const app = new H3()
     app.post('/api/whatsapp/webhook', whatsappWebhook)
     let inbound = 0
     /** Delivers one owner message as Meta signs it, and returns what the owner was sent back. */
-    const write = async (text: string, quoting?: string, id = `wamid-${++inbound}`) => {
+    const write = async (text: string, quoting?: string, id = `wamid-${++inbound}`, status = 200) => {
       const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ value: { messages: [{ id, from: '66812345678', timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: text }, ...(quoting && { context: { id: quoting } }) }] } }] }] })
       const before = sent.length
       const response = await app.request(Object.assign(new Request('https://proof.example/api/whatsapp/webhook', {
         method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': `sha256=${createHmac('sha256', 'whatsapp-secret').update(body).digest('hex')}` }, body,
       }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
-      assert.equal(response.status, 200, await response.clone().text())
+      assert.equal(response.status, status, await response.clone().text())
       return sent.slice(before)
     }
     const replies = async (stay: { request_id: string | null }) => (await db.prepare("SELECT body FROM activity_entries WHERE request_id = ? AND event_name = 'thread.member_reply'")
@@ -265,12 +262,12 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
     assert.deepEqual(await write('Hello Dee', 'meta-alert-dee'), ['Reply not sent: This guest has no email or KrabiClaw account to reply to.'])
     assert.deepEqual(await replies(dee), [])
 
-    // The reply went and Meta refused to carry its outcome: the guest has the reply once, and the refusal is reported.
+    // The reply went and Meta refused to carry its outcome: the message fails, so Meta delivers it again,
+    // and the redelivery tells the member without sending the guest the reply twice.
     refuse.add('Reply sent.')
-    const reportedBefore = reported.length
-    assert.deepEqual(await write('The gate code is 4512', 'meta-alert-bo'), ['Reply sent.'])
+    assert.deepEqual(await write('The gate code is 4512', 'meta-alert-bo', 'wamid-gate', 500), ['Reply sent.'])
     refuse.delete('Reply sent.')
-    assert.equal(reported.length - reportedBefore, 1, 'the refused notice is reported')
+    assert.deepEqual(await write('The gate code is 4512', 'meta-alert-bo', 'wamid-gate'), ['Reply sent.'])
     assert.deepEqual(await replies(bo), ['The gate code is 4512'])
 
     // Quoting a teammate's alert posts to the team conversation as this member, once.

@@ -112,7 +112,7 @@ async function resolveUser(env: ApiRecord, from: string): Promise<UserRow | null
  * saying how to answer. The reply's key is the WhatsApp message's id, so Meta
  * redelivering it sends nothing twice.
  */
-async function answerMember(db: D1Database, env: ApiRecord, message: WhatsAppMessage, toPhone: string, userId: string, report: (error: unknown) => Promise<void>): Promise<void> {
+async function answerMember(db: D1Database, env: ApiRecord, message: WhatsAppMessage, toPhone: string, userId: string): Promise<void> {
   const quoted = message.context?.id
     ? await queryFirst<{ entry_id: string }>(db, `
         SELECT d.entry_id FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
@@ -128,12 +128,11 @@ async function answerMember(db: D1Database, env: ApiRecord, message: WhatsAppMes
   const outcome = await replyToAlertEntry(env as CloudflareEnv, {
     entryId: quoted.entry_id, userId, body: messageText(message), files: await messageFiles(env, message), idempotencyKey: `whatsapp:${message.id}`,
   })
-  // The outcome is the member's to read whatever else failed; a notice Meta refuses is reported beside it.
-  const told = await sendWhatsAppText(env, toPhone, outcome.notice).then(
-    result => result.success ? null : new Error(result.error || 'Failed to send the WhatsApp reply outcome'), (error: unknown) => error)
-  if (outcome.report !== null && told) await report(new AggregateError([outcome.report, told], 'The reply failed and the member could not be told', { cause: outcome.report }))
-  else if (outcome.report !== null) await report(outcome.report)
-  else if (told) await report(told)
+  // The member reads the outcome first. A failed reply, or an outcome Meta would not carry, then fails
+  // this message, so Meta delivers it again; the replay under the same key sends nothing twice.
+  const told = await sendWhatsAppText(env, toPhone, outcome.notice)
+  if (outcome.report !== null) throw outcome.report instanceof Error ? outcome.report : new Error(String(outcome.report), { cause: outcome.report })
+  if (!told.success) throw new Error(told.error || 'Failed to send the WhatsApp reply outcome')
 }
 
 function metaMessageTime(message: WhatsAppMessage): string {
@@ -142,7 +141,7 @@ function metaMessageTime(message: WhatsAppMessage): string {
   return new Date(seconds * 1000).toISOString()
 }
 
-async function handleMessage(db: D1Database, env: ApiRecord, message: WhatsAppMessage, event: H3Event): Promise<void> {
+async function handleMessage(db: D1Database, env: ApiRecord, message: WhatsAppMessage): Promise<void> {
 
   const toPhone = parseMetaMsisdn(message.from)
   const user = await resolveUser(env, message.from)
@@ -202,9 +201,7 @@ async function handleMessage(db: D1Database, env: ApiRecord, message: WhatsAppMe
   // Meta redelivering a message already answered runs nothing again.
   if (await isLastWhatsAppInbound(db, user.id, message.id)) return
   const sentAt = metaMessageTime(message)
-  await answerMember(db, env, message, toPhone, user.id,
-    // Through the same error hook a thrown error reaches (server/plugins/error-logger.ts).
-    async (error) => { await useNitroHooks().callHook('error', error instanceof Error ? error : new Error(String(error), { cause: error }), { event, tags: ['whatsapp'] }) })
+  await answerMember(db, env, message, toPhone, user.id)
   // Meta's own time for the message opens the member's service window.
   await recordWhatsAppInbound(db, { userId: user.id, messageId: message.id, sentAt })
 }
@@ -289,7 +286,7 @@ export default defineHandler(async (event) => {
   const statuses = inboundStatuses(payload)
 
   for (const message of messages) {
-    await handleMessage(db, env, message, event)
+    await handleMessage(db, env, message)
   }
   for (const status of statuses) {
     await handleStatus(db, env, status)
@@ -298,6 +295,4 @@ export default defineHandler(async (event) => {
   return jsonResponse({ success: true })
 })
 import { defineHandler } from 'nitro';
-import { useNitroHooks } from 'nitro/app'
-import type { H3Event } from 'nitro/h3'
 import {  readRawBody  } from 'nitro/h3';

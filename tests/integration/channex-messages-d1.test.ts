@@ -26,8 +26,6 @@ import { guestThreadListPage, parseGuestThreadListQuery } from '../../server/uti
 import { assertAssignedBookingAccess, memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
 import whatsappWebhook from '../../server/api/whatsapp/webhook.post.ts'
-import { useNitroHooks } from 'nitro/app'
-import { ChannexError } from '../../server/integrations/channex/client.ts'
 import { receiveMemberEmail } from '../../server/domain/guest-threads/inbound-email.ts'
 import { InboundEmailRejection, parseReplyToAddress } from '../../server/utils/reply-address.ts'
 
@@ -995,10 +993,9 @@ test('explicit provider instants order replies across offsets without losing sub
 })
 
 // A WhatsApp reply to an Airbnb conversation that fails, whether the reply operation throws or
-// returns the failure, is never shown raw: the manager reads a fixed notice (or that it may have
-// reached the guest), and the failure is reported through the error hook while the message is
-// answered, so Meta's redelivery runs nothing again.
-test('a failed WhatsApp reply tells the manager a fixed notice and reports the failure', async () => {
+// returns the failure, is never shown raw: the manager reads a fixed notice, and the message fails
+// so Meta delivers it again, whose replay under the same key retries the reply without repeating it.
+test('a failed WhatsApp reply tells the manager a fixed notice and fails the message for redelivery', async () => {
   const { runtime, db, env: base } = await boot()
   const provider = new Provider(), realFetch = globalThis.fetch
   const sent: string[] = []
@@ -1034,30 +1031,26 @@ test('a failed WhatsApp reply tells the manager a fixed notice and reports the f
     const alerted = 'Reply not sent. The team has been alerted.'
     // Each failure: how it is made, the webhook status it reports with, the exact messages the manager
     // receives for that reply, and how many writes reached Airbnb.
-    const reported: unknown[] = []
-    useNitroHooks().hook('error', error => { reported.push(error) })
     const cases = [
       // Channex answers with an HTML error page: a ChannexError the operation throws before writing.
-      { mode: 'channex', notices: [alerted], writes: 0, reports: (error: unknown) => error instanceof ChannexError },
+      { mode: 'channex', notices: [alerted], writes: 0 },
       // Channex names a property that is not the home's: the operation's own 502 invariant.
-      { mode: 'invariant', notices: [alerted], writes: 0, reports: code('INVALID_PROVIDER_RESPONSE') },
+      { mode: 'invariant', notices: [alerted], writes: 0 },
       // Airbnb refuses the message: a returned failure, never told in Channex's words.
-      { mode: 'refused', notices: [alerted], writes: 1, reports: (error: unknown) => /CHANNEL_REPLY_FAILED/u.test(String((error as Error).message)) },
-      // The connection ended after Channex took it: a failed reply, reported with Channex's error.
-      { mode: 'uncertain', notices: [alerted], writes: 1, reports: (error: unknown) => /CHANNEL_REPLY_FAILED/u.test(String((error as Error).message)) },
+      { mode: 'refused', notices: [alerted], writes: 1 },
+      // The connection ended after Channex took it: a failed reply with Channex's error.
+      { mode: 'uncertain', notices: [alerted], writes: 1 },
     ] as const
-    for (const { mode, notices, writes, reports } of cases) {
+    for (const { mode, notices, writes } of cases) {
       failure = null
       Object.assign(provider, { propertyId: 'property', refuseMessage: false, uncertain: false })
       if (mode === 'channex') failure = 'channex'
       if (mode === 'invariant') provider.propertyId = 'another-property'
       if (mode === 'refused') provider.refuseMessage = true
       if (mode === 'uncertain') provider.uncertain = true
-      const [sentBefore, writesBefore, reportedBefore] = [sent.length, provider.sends, reported.length]
-      const confirmed = await write(`Reply for ${mode}`, 'meta-alert')
-      assert.equal(confirmed.status, 200, `${mode}: the message is answered, so Meta does not redeliver it`)
-      assert.equal(reported.length - reportedBefore, 1, `${mode}: the failure is reported once`)
-      assert.ok(reports(reported.at(-1)), `${mode}: the reported error is the reply's own`)
+      const [sentBefore, writesBefore] = [sent.length, provider.sends]
+      const failed = await write(`Reply for ${mode}`, 'meta-alert')
+      assert.ok(failed.status >= 500, `${mode}: the failed reply fails the message, so Meta delivers it again (${failed.status})`)
       assert.deepEqual(sent.slice(sentBefore), notices, `${mode}: exactly these messages reach the manager, and nothing raw`)
       assert.equal(provider.sends - writesBefore, writes, `${mode}: writes that reached Airbnb`)
     }
