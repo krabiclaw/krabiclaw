@@ -60,7 +60,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { createCanonicalNotification, isConversationNotification, isScheduleNotification, notifyBuyerThread, type NotificationSeverity } from '~/server/utils/notification-center'
 import { buildOwnerThreadInboxUrl, buildBuyerRequestActivityUrl, dashboardOrigin, destinationUnavailable, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
 import { bookingEditorPath, insightsPath, reviewEditorPath } from '~/server/utils/dashboard-links'
-import { createDeliveryReceipt, deliverReceiptEmail, isDeliverySent, recordDeliveryOutcome } from '~/server/domain/guest-threads/deliveries'
+import { createDeliveryReceipt, deliverReceiptEmail, getDeliveryById, isDeliverySent, recordDeliveryOutcome } from '~/server/domain/guest-threads/deliveries'
 import { appendEntry, findEntryByDedupeKey, getEntryById, parseEntryPayload } from '~/server/domain/guest-threads/entries'
 import { listMessagePhotos, messagePreview } from '~/server/domain/guest-threads/attachments'
 import { publishGuestInboxThreadEvent, publishNotificationInvalidation } from '~/server/cloudflare/guest-inbox-events'
@@ -449,7 +449,13 @@ async function sendEmailNotification(
   }
   let result: EmailSendResult
   if (delivery) {
-    const outcome = await deliverReceiptEmail(db, { env, delivery, threadId: deliveryContext!.threadId, email })
+    const outcome = await deliverReceiptEmail(db, { env, delivery, threadId: deliveryContext!.threadId, email }).catch(async (error: unknown) => {
+      // The dispatcher writes a failure onto the delivery before raising it, such as a Message-ID
+      // readback that timed out after Resend took the email; that one is recorded, and the thread shows it.
+      const recorded = await getDeliveryById(db, delivery.id)
+      if (recorded?.error) throw new RecordedDeliveryFailure(`Email delivery failed: ${recorded.error}`, { cause: error })
+      throw error
+    })
     if (isDeliverySent(outcome)) {
       if (!outcome.provider_message_id) throw new Error('Sent email delivery has no provider identity')
       result = { status: 'sent', messageId: outcome.provider_message_id }

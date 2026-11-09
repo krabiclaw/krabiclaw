@@ -525,6 +525,17 @@ test('message alerts thread per recipient and replying to one answers the guest 
     assert.deepEqual(alerts[2]!.headers, { 'In-Reply-To': ids[1], References: `${ids[0]} ${ids[1]}` })
     // Each alert reads in its conversation: the new words lead, the earlier ones follow quietly.
     assert.match(alerts[2]!.text as string, /Thanks![\s\S]*Earlier in this conversation[\s\S]*Jamie Rivera: Is parking free\?[\s\S]*Jamie Rivera: Can I park a van\?/u)
+    // Resend takes an alert but its Message-ID cannot be read back: the failure is recorded on the
+    // alert's delivery, where the conversation shows it, and the guest's message still stands.
+    resend.failNext('GET /emails/')
+    const unread = await appendEntry(db, { threadId: asked, kind: 'message', actorKind: 'guest', channel: 'email', body: 'One more thing', dedupeKey: 'guest:one-more' })
+    await notifyGuestThreadReply(env, db, { organizationId: 'inn', threadId: asked, sourceEntryId: unread.id, submissionType: 'contact', submissionId: asked,
+      participantLabel: 'Jamie Rivera', guestEmail: 'guest@provider-proof.com', inboundChannel: 'email' })
+    const unreadAlert = await db.prepare("SELECT provider_message_id, email_message_id, error FROM guest_thread_deliveries WHERE entry_id = ? AND channel = 'email' AND purpose = 'owner_alert'")
+      .bind(unread.id).first<{ provider_message_id: string | null; email_message_id: string | null; error: string | null }>()
+    assert.ok(unreadAlert?.provider_message_id, 'Resend took the alert')
+    assert.equal(unreadAlert.email_message_id, null)
+    assert.match(unreadAlert.error ?? '', /injected failure/u)
     const replyTo = [alerts[0]!.reply_to].flat()[0] as string
     const address = parseReplyToAddress(env, replyTo)
     // Each alert's reply-to names the guest message it was about, and every one answers the same conversation.
