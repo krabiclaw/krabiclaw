@@ -895,14 +895,19 @@ Cloudflare reported WNAM before binding or loading:
 - `krabiclaw-staging-v26`: `041c627b-b0e9-4543-bc06-f88a93f03ac7`
 - `krabiclaw-production-v26`: `f9f2f077-46c9-47bb-875f-3f77668e2832`
 
-Staging moves with this release. Its baseline was applied through the native
-ledger and its initial copy loaded from `krabiclaw-staging-v25` (116 tables,
-115,330 rows); the artifacts are under
-`~/.codex/krabiclaw-db-replacements/scheduling-mode-v26/`. After the staging
-deploy and old writers finish, run the verified final delta:
+Staging moves with this release. `krabiclaw-staging-v26` was recreated empty in
+WNAM on 2026-11-09 (D1 Time Travel's bookmark endpoint answered 500), its
+baseline applied through the native ledger, and its initial copy loaded from
+`krabiclaw-staging-v25` after a passing read-only preflight: 112 tables,
+115,262 rows; `scheduling_mode_legacy_to_business` 13,
+`payment_attempts_and_claims_folded_into_payments` 45,
+`superseded_opportunities_removed` 2, `dead_test_hosted_checkout_fields_discarded` 5;
+`PRAGMA foreign_key_check` empty. The artifacts are under
+`~/krabiclaw-db-replacements/v26/`. After the staging deploy and old writers
+finish, run the verified final delta:
 
 ```
-node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v25 --out staging-final.sqlite --delta-from ~/.codex/krabiclaw-db-replacements/scheduling-mode-v26/staging-initial.sqlite --export staging-v25-final-source.sqlite
+node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v25 --out staging-v26-final.sqlite --delta-from ~/krabiclaw-db-replacements/v26/staging-v26-initial.sqlite
 ```
 
 Production, development and E2E move together immediately before promotion,
