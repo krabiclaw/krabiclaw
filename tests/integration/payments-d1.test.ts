@@ -67,10 +67,11 @@ async function boot(){
  // Held online by its provider, in the provider's own hours.
  await db.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('host','Host','host@example.com',1)").run()
  await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES('host-member',?,'host','member',1)").bind(ORG).run()
- await db.prepare(`INSERT INTO member_scheduling(member_id,organization_id,public_name,public_approved,timezone,weekly_json,time_off_json,windows_json,windows_until,calendar_revision,updated_at,updated_by) VALUES('host-member',?,'Attorney Host',1,'America/New_York','[]','[]','[{"start":"2099-10-01T00:00:00.000Z","end":"2099-10-02T00:00:00.000Z"}]','2100-01-01T00:00:00.000Z','r1',?,'host')`).bind(ORG,NOW).run()
+ await db.prepare(`INSERT INTO member_scheduling(member_id,organization_id,public_name,public_approved,timezone,weekly_json,time_off_json,windows_json,windows_until,calendar_revision,updated_at,updated_by) VALUES('host-member',?,'Attorney Host',1,'America/New_York','[{"weekday":0,"start":"00:00","end":"23:59"},{"weekday":1,"start":"00:00","end":"23:59"},{"weekday":2,"start":"00:00","end":"23:59"},{"weekday":3,"start":"00:00","end":"23:59"},{"weekday":4,"start":"00:00","end":"23:59"},{"weekday":5,"start":"00:00","end":"23:59"},{"weekday":6,"start":"00:00","end":"23:59"}]','[]','[{"start":"2099-10-01T00:00:00.000Z","end":"2099-10-02T00:00:00.000Z"}]','2100-01-01T00:00:00.000Z','r1',?,'host')`).bind(ORG,NOW).run()
  await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,default_capacity,confirmation_mode,held_online,scheduling_mode,assigned_member_id,online_payment_required,created_by,updated_by) VALUES('product',?,60,1,'review',1,'provider','host-member',1,'guest','guest')").bind(ORG).run()
  await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by) VALUES('session',?,'product','host-member','America/New_York','2099-10-01T13:00:00.000Z','2099-10-01T14:00:00.000Z',1,'scheduled','guest','guest')").bind(ORG).run()
- return {db,runtime}
+ const env={...await runtime.getBindings<CloudflareEnv>(),BETTER_AUTH_URL:'https://proof.example',BETTER_AUTH_SECRET:'local-proof-secret-long-enough-for-auth',NUXT_PUBLIC_PLATFORM_DOMAIN:'https://proof.example'} as CloudflareEnv
+ return {db,runtime,env}
  }catch(error){await runtime.dispose();throw error}
 }
 async function payable(db:D1Database,id:string,expires='2099-09-30T00:00:00.000Z'){
@@ -137,7 +138,7 @@ test('guest table cancellation refunds until 24 hours before the start, through 
 })
 
 test('a checkout thread stays out of Messages until payment creates its booking', { timeout: 120_000 }, async () => {
- const { db, runtime } = await boot()
+ const { db, runtime, env } = await boot()
  try {
   const provenance = { source: 'website', external_reference: null, actor_user_id: null, idempotency_key: 'checkout-key', fingerprint: 'checkout-fingerprint', guest_acknowledgement: true, creation_kind: 'checkout' as const, creation_status: 'confirmed' as const, followups_completed: false }
   const opening = { id: 'checkout-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'verified', review_id: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com', notes: 'A note before paying' }), provenance }, created_at: NOW, updated_at: NOW }
@@ -145,7 +146,7 @@ test('a checkout thread stays out of Messages until payment creates its booking'
   const owner = async () => (await listGuestThreads(db, ORG, { userId: 'owner-reader' })).map(row => row.id)
   const buyer = async () => (await listGuestThreads(db, null, { userId: 'verified', buyerAudience: true })).map(row => row.id)
   assert.deepEqual([await owner(), await buyer()], [[], []])
-  await claimSessionCapacity(db, { organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified', requestId: opening.id })
+  await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified', requestId: opening.id })
   assert.deepEqual([await owner(), await buyer()], [[opening.id], [opening.id]])
  } finally { await runtime.dispose() }
 })
@@ -157,7 +158,7 @@ test('guest class cancellation refunds through Stripe until 24 hours before the 
    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
    const opening = { id: 'class-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'verified', review_id: null, payload: threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com' }), created_at: NOW, updated_at: NOW }
    await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
-   const booking = await claimSessionCapacity(db, { organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified', requestId: opening.id })
+   const booking = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified', requestId: opening.id })
    await payable(db, 'class-payment')
    await db.prepare("UPDATE payments SET buyer_user_id='verified',subject_id=?,captured_amount=10000,state='captured',stripe_payment_intent_id='pi_class',stripe_charge_id='ch_class' WHERE id='class-payment'").bind(booking.bookingId).run()
    await db.prepare("UPDATE payment_checkout_holds SET buyer_user_id='verified',request_id=?,status='converted',converted_booking_id=? WHERE payment_id='class-payment'").bind(opening.id, booking.bookingId).run()
@@ -267,13 +268,13 @@ test('authorized guest cancellation replay recovers an interrupted Stripe refund
  }
 })
 test('an active payment hold consumes the canonical session capacity until release', { timeout: 120_000 }, async () => {
- const { db, runtime } = await boot()
+ const { db, runtime, env } = await boot()
  try {
   await payable(db, 'held')
-  await assert.rejects(() => claimSessionCapacity(db, { organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
+  await assert.rejects(() => claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
   assert.equal(await db.prepare('SELECT COUNT(*) n FROM bookings').first('n'), 0)
   await db.prepare("UPDATE payment_checkout_holds SET status='released' WHERE payment_id='held'").run()
-  const booking = await claimSessionCapacity(db, { organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
+  const booking = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
   assert.equal(await db.prepare('SELECT party_size FROM bookings WHERE id=?').bind(booking.bookingId).first('party_size'), 1)
  } finally { await runtime.dispose() }
 })
@@ -281,14 +282,14 @@ test('MCP paid booking cancellation and rejection hand off without preparing mon
  for (const action of ['cancel', 'reject'] as const) {
   const { db, runtime } = await boot()
   try {
+   const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
    await db.prepare("INSERT INTO member(id,organizationId,userId,role) VALUES('owner',?,'verified','owner')").bind(ORG).run()
    const opening = { id: 'paid-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', review_id: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@example.com' }), created_at: NOW, updated_at: NOW }
    await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
-   const booking = await claimSessionCapacity(db, { organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'guest', requestId: opening.id })
+   const booking = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'guest', requestId: opening.id })
    await payable(db, 'paid')
    await db.prepare("UPDATE payments SET subject_id=?,captured_amount=10000,state='captured',stripe_payment_intent_id='pi_paid',stripe_charge_id='ch_paid' WHERE id='paid'").bind(booking.bookingId).run()
    await db.prepare("UPDATE payment_checkout_holds SET request_id=?,status='converted',converted_booking_id=? WHERE payment_id='paid'").bind(opening.id,booking.bookingId).run()
-   const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
    const input = { organizationId: ORG, threadId: opening.id, action, actorUserId: 'verified', idempotencyKey: 'same-request', env }
    const tables = ['bookings', 'requests', 'activity_entries', 'guest_thread_deliveries', 'payments', 'payment_attempts', 'payment_checkout_holds', 'payment_orders', 'payment_order_lines', 'payment_authorizations', 'payment_refunds', 'payment_usage_events']
    const before = await Promise.all(tables.map(async table => (await db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()).results))
@@ -650,10 +651,10 @@ test('a payment back on the business’s site claims for that site’s buyer and
 })
 
 test('buyer Activity groups exact owned visits and immutable orders without manufacturing conversations', {timeout:120000},async()=>{
- const {db,runtime}=await boot();try{
+ const {db,runtime,env}=await boot();try{
   const opening={id:'booking-request',kind:'booking' as const,organization_id:ORG,location_id:null,user_id:'verified',review_id:null,payload:threadPayloadForGuest({name:'Verified',email:'verified@example.com',notes:'My booking note',ipHash:'private-ip-hash'}),created_at:NOW,updated_at:NOW}
   await db.batch(requestInsertQueries(opening).map(write=>db.prepare(write.query).bind(...write.params)))
-  const booking=await claimSessionCapacity(db,{organizationId:ORG,productId:'product',sessionId:'session',productVariantId:'variant',partySize:1,userId:'verified',requestId:opening.id})
+  const booking=await claimSessionCapacity(db,{env,organizationId:ORG,productId:'product',sessionId:'session',productVariantId:'variant',partySize:1,userId:'verified',requestId:opening.id})
   assert.notEqual(booking.bookingId,opening.id)
   assert.equal(await db.prepare('SELECT request_id FROM bookings WHERE id=?').bind(booking.bookingId).first('request_id'),opening.id)
   await payable(db,'visit-payment')
@@ -802,9 +803,9 @@ test('tenant deletion refuses a connected account retained for another tenant wi
 })
 
 test('an expired payment hold no longer consumes session capacity', {timeout:120000},async()=>{
- const {db,runtime}=await boot();try{
+ const {db,runtime,env}=await boot();try{
   await payable(db,'expired','2000-01-01T00:00:00.000Z')
-  const booking=await claimSessionCapacity(db,{organizationId:ORG,productId:'product',sessionId:'session',productVariantId:'variant',partySize:1})
+  const booking=await claimSessionCapacity(db,{env,organizationId:ORG,productId:'product',sessionId:'session',productVariantId:'variant',partySize:1})
   assert.equal(await db.prepare('SELECT party_size FROM bookings WHERE id=?').bind(booking.bookingId).first('party_size'),1)
   assert.equal(await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='expired'").first('status'),'active')
  }finally{await runtime.dispose()}
@@ -1220,7 +1221,7 @@ test('processing webhooks extend only active checkout holds and preserve capacit
       assert.equal((await requirePayment(db, ORG, id)).state, 'pending')
       if (status === 'active') {
         assert.ok(Date.parse(hold!.expires_at) >= Date.now() + 13 * 86400_000)
-        await assert.rejects(claimSessionCapacity(db, { organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
+        await assert.rejects(claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
       } else {
         assert.equal(hold?.expires_at, expires)
       }

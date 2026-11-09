@@ -319,7 +319,7 @@ export async function readBusinessProgressReference(
     if (input.operation === 'post.create' && input.subjectId !== principal.organizationId) {
       const [kind, resourceId, occurrence] = coordinates()
       if (kind === 'session') {
-        const session = await getSessionAvailability(db, principal.organizationId, resourceId, occurrence)
+        const session = await getSessionAvailability(db, principal.env, principal.organizationId, resourceId, occurrence)
         if (session.status !== 'scheduled' || session.starts_at <= new Date().toISOString() || session.remaining === null || session.remaining < 1 || session.is_full) throw missing()
         availability = session
       } else if (kind === 'reservation') {

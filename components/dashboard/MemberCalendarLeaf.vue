@@ -1,5 +1,5 @@
 <template>
- <DashboardLeafPanel id="personal-google-calendar" icon="i-logos-google-calendar" title="Google Calendar sync" lead="Busy on your calendar? Booked out on your website. New bookings show up on your calendar." :footer="Boolean(editor.record.value?.calendar_account_id) && (entitled || Boolean(editor.record.value?.calendar_ids.length))" :disabled="enabled === Boolean(editor.record.value?.calendar_ids.length)" :saving="editor.saving.value" :error="editor.error.value || connection.error.value || editor.record.value?.busy_error || ''" @cancel="revert" @save="save">
+ <DashboardLeafPanel id="personal-google-calendar" icon="i-logos-google-calendar" title="Google Calendar sync" lead="Busy on your calendar? Booked out on your website. New bookings show up on your calendar." :footer="Boolean(editor.record.value?.calendar_account_id) && (entitled || Boolean(editor.record.value?.calendar_ids.length))" :disabled="enabled === Boolean(editor.record.value?.calendar_ids.length)" :saving="editor.saving.value" :error="editor.error.value || connection.error.value || editor.record.value?.calendar_error || ''" @cancel="revert" @save="save">
   <!-- Nothing to edit until the schedule has been read; a failed read is the error above. -->
   <template v-if="editor.loaded.value">
     <!-- The sync is Business. A selection kept from a lapsed plan can still be turned off. -->
@@ -12,7 +12,7 @@
      <p v-if="!editor.record.value?.timezone" class="mb-6 text-muted">Choose your timezone in Hours before connecting Google Calendar.</p>
      <UButton icon="i-simple-icons-google" size="xl" block :disabled="!editor.record.value?.timezone" :loading="editor.saving.value || connection.linking.value" @click="connect">Connect Google Calendar</UButton>
     </template>
-    <UButton v-if="editor.record.value?.busy_error || (connection.accountId.value && editor.error.value)" class="mt-6" color="neutral" variant="outline" :loading="editor.saving.value" @click="save">Retry</UButton>
+    <UButton v-if="editor.record.value?.calendar_error || (connection.accountId.value && editor.error.value)" class="mt-6" color="neutral" variant="outline" :loading="editor.saving.value" @click="save">Retry</UButton>
   </template>
  </DashboardLeafPanel>
 </template>

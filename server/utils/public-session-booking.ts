@@ -1,4 +1,3 @@
-import { refreshProductBusy } from '~/server/domain/member-scheduling'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { HTTPError } from 'nitro'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
@@ -29,12 +28,12 @@ export async function listPublicBookingSessions(db: DbClient, organizationId: st
     throw new HTTPError({ statusCode: 404, statusMessage: 'This product is not on sale at that location' })
   }
 
-  await refreshProductBusy(db,env,organizationId,product.id)
   // Each session is offered in its own zone — its location's, or its
   // provider's online — so the read is broad and each is windowed in its own.
   const fromInstant = new Date().toISOString()
   const toInstant = new Date(Date.now() + (PUBLIC_BOOKING_WINDOW_DAYS + 2) * 86_400_000).toISOString()
   const sessions = await listSessions(db, {
+    env,
     organizationId: product.organization_id, productId: product.id,
     fromInstant, toInstant, statuses: ['scheduled'],
   })
