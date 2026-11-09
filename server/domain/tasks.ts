@@ -19,7 +19,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
   reopen them here, from the dashboard, MCP and the app alike.
 */
 
-export const TASK_KINDS = ['turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'consultation_prep', 'consultation_follow_up'] as const
+export const TASK_KINDS = ['turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up'] as const
 export type TaskKind = typeof TASK_KINDS[number]
 export type TaskStatus = 'open' | 'done' | 'skipped' | 'cancelled'
 
@@ -47,21 +47,16 @@ function fail(statusCode: number, code: string, message: string, field?: string)
 // keeps the task alert instead.
 // ---------------------------------------------------------------------------
 
-export const JOB_TASK_SQL = (alias: string) => `(${alias}.kind = 'turnover' OR substr(${alias}.dedupe_key, 1, 11) = 'stay-ready:')`
+export const JOB_TASK_SQL = (alias: string) => `${alias}.kind IN ('turnover', 'stay_ready')`
 
-export function isJobTask(row: Pick<TaskRow, 'kind' | 'dedupe_key'>): boolean {
-  return row.kind === 'turnover' || row.dedupe_key.startsWith('stay-ready:')
+export function isJobTask(row: Pick<TaskRow, 'kind'>): boolean {
+  return row.kind === 'turnover' || row.kind === 'stay_ready'
 }
 
 /** The stay a job is about. */
 export function jobStayId(row: Pick<TaskRow, 'kind' | 'dedupe_key' | 'subject_id'>): string {
-  if (row.kind === 'turnover') {
-    if (!row.subject_id) throw new Error(`Turnover task ${row.dedupe_key} names no stay`)
-    return row.subject_id
-  }
-  const stayId = row.dedupe_key.split(':')[1]
-  if (!stayId) throw new Error(`Job task ${row.dedupe_key} names no stay`)
-  return stayId
+  if (!row.subject_id) throw new Error(`Job task ${row.dedupe_key} names no stay`)
+  return row.subject_id
 }
 
 /** Whether a job's people hear about it in a team conversation: a member who is not an owner or admin, or a team. */
@@ -626,6 +621,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       sheet = { heading: 'Task', title, date: row.due_at ? day(row.due_at) : null, checkout: null, checkin: null }
       break
     case 'custom':
+    case 'stay_ready':
       face = 'compact'
       statusLine = ['Task', place].filter(Boolean).join(' · ')
       title = row.title!
@@ -645,7 +641,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     detail = null
   }
   const mine = assignee?.you ?? false
-  const reachable = viewer.manage || mine || row.assigned_team_id !== null || row.kind === 'turnover' || row.kind === 'custom' || row.kind === 'opportunity' || row.kind === 'booking_change'
+  const reachable = viewer.manage || mine || row.assigned_team_id !== null || row.kind === 'turnover' || row.kind === 'stay_ready' || row.kind === 'custom' || row.kind === 'opportunity' || row.kind === 'booking_change'
   const personClosed = (row.status === 'done' || row.status === 'skipped') && row.closed_by_user_id !== null
   const can = {
     complete: row.status === 'open' && action?.type === 'complete' && reachable,
@@ -690,8 +686,8 @@ export function parseTaskListQuery(query: Record<string, unknown>, defaults: Par
 
 /** Today's open work in the owner's order: failed deliveries, turnovers, replies, then everything else. */
 /** Work a person does and closes themselves: they Skip it, and say what they found when they finish. Everything else is Dismissed. */
-const PERSON_WORK: ReadonlySet<TaskKind> = new Set(['turnover', 'custom', 'opportunity', 'consultation_prep', 'consultation_follow_up'])
-const TODAY_ORDER: Record<TaskKind, number> = { message_delivery: 0, turnover: 1, guest_reply: 2, booking_review: 2, booking_change: 2, consultation_prep: 2, custom: 3, consultation_follow_up: 3, opportunity: 3 }
+const PERSON_WORK: ReadonlySet<TaskKind> = new Set(['turnover', 'custom', 'stay_ready', 'opportunity', 'consultation_prep', 'consultation_follow_up'])
+const TODAY_ORDER: Record<TaskKind, number> = { message_delivery: 0, turnover: 1, guest_reply: 2, booking_review: 2, booking_change: 2, consultation_prep: 2, custom: 3, stay_ready: 1, consultation_follow_up: 3, opportunity: 3 }
 
 /** Today: open work due or starting today or earlier, or with no date; then what was closed today. Upcoming: open work later than today, by day. */
 export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskListQuery, now = new Date()): Promise<{ sections: TaskSection[]; resolvedAt: string }> {
@@ -800,10 +796,9 @@ export async function stayJobViews(db: DbClient, viewer: TaskViewer, stayIds: re
   if (!stayIds.length) return new Map()
   const scope = scopeSql(viewer)
   const rows = await queryAll<TaskRow>(db, `SELECT t.* FROM tasks t WHERE t.organization_id = ? AND ${JOB_TASK_SQL('t')} AND ${scope.sql}
-      AND ((t.kind = 'turnover' AND t.subject_id IN (SELECT value FROM json_each(?)))
-        OR EXISTS (SELECT 1 FROM stays s WHERE s.organization_id = t.organization_id AND s.id IN (SELECT value FROM json_each(?)) AND t.dedupe_key = 'stay-ready:' || s.id || ':' || s.product_id))
+      AND t.subject_id IN (SELECT value FROM json_each(?))
     ORDER BY CASE t.status WHEN 'open' THEN 0 ELSE 1 END, COALESCE(t.due_at, t.starts_at, t.created_at), t.updated_at DESC`,
-  [viewer.principal.organizationId, ...scope.params, d1JsonStringSet(stayIds), d1JsonStringSet(stayIds)])
+  [viewer.principal.organizationId, ...scope.params, d1JsonStringSet(stayIds)])
   const chosen = new Map<string, TaskRow>()
   for (const row of rows) {
     const stayId = jobStayId(row)
@@ -872,11 +867,11 @@ export function stayReadyTaskQueries(input: {
   if (!home) return queries
   const dueAt = home.check_in_time === null ? null : localDateTimeToInstant(input.checkInDate, home.check_in_time, home.timezone, 'compatible').toISOString()
   queries.push({
-    query: `INSERT INTO tasks (id, organization_id, kind, product_id, location_id, assigned_member_id, assigned_team_id, title, notes, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
-      SELECT ?, ?, 'custom', ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, 1, ?, ? WHERE ${guard.query}
+    query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, assigned_team_id, title, notes, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
+      SELECT ?, ?, 'stay_ready', 'stay', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, 1, ?, ? WHERE ${guard.query}
       ON CONFLICT (dedupe_key) DO UPDATE SET status = 'open', closed_at = NULL, closed_by_user_id = NULL, outcome_note = NULL, due_at = excluded.due_at,
         assigned_member_id = excluded.assigned_member_id, assigned_team_id = excluded.assigned_team_id, version = tasks.version + 1, updated_at = excluded.updated_at`,
-    params: [crypto.randomUUID(), organizationId, home.product_id, home.location_id, home.assigned_member_id, home.assigned_team_id, `Get ${home.internal_name} ready`.slice(0, 200),
+    params: [crypto.randomUUID(), organizationId, stayId, home.product_id, home.location_id, home.assigned_member_id, home.assigned_team_id, `Get ${home.internal_name} ready`.slice(0, 200),
       `${input.guestName ?? 'A guest'} was moved here and arrives ${formatCalendarDate(input.checkInDate, 'en', { weekday: 'short', month: 'short', day: 'numeric' })}.`,
       dueAt, home.timezone, stayReadyKey(stayId, home.product_id), now, now, ...guard.params!],
   })

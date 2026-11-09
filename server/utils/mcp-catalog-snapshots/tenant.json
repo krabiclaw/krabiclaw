@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:f276b457ecc48c2081bcdba863892cbf7fed5378e1057f92d923d65ef398ae92",
-  "documentationFingerprint": "sha256:843201e36f934fbf85514cc74208672607be4fce71af12a531a85dfd4d62f75f",
+  "fingerprint": "sha256:b27a5d34f2248212f62656541a119ced1b868e40fbd27dd57282cccb0b3c28cd",
+  "documentationFingerprint": "sha256:500b4ae4ed1e74a69b38b1a7717c9f643853669e777f626ef37e42bf132048d1",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -173,6 +173,7 @@
                   "booking_change",
                   "opportunity",
                   "custom",
+                  "stay_ready",
                   "consultation_prep",
                   "consultation_follow_up"
                 ],
@@ -14100,6 +14101,7 @@
                   "booking_change",
                   "opportunity",
                   "custom",
+                  "stay_ready",
                   "consultation_prep",
                   "consultation_follow_up"
                 ],
@@ -37904,6 +37906,7 @@
                   "booking_change",
                   "opportunity",
                   "custom",
+                  "stay_ready",
                   "consultation_prep",
                   "consultation_follow_up"
                 ],
@@ -72567,6 +72570,7 @@
               "booking_change",
               "opportunity",
               "custom",
+              "stay_ready",
               "consultation_prep",
               "consultation_follow_up"
             ],
@@ -72778,6 +72782,7 @@
                           "booking_change",
                           "opportunity",
                           "custom",
+                          "stay_ready",
                           "consultation_prep",
                           "consultation_follow_up"
                         ],
@@ -73331,6 +73336,7 @@
                         "booking_change",
                         "opportunity",
                         "custom",
+                        "stay_ready",
                         "consultation_prep",
                         "consultation_follow_up"
                       ],
@@ -104711,6 +104717,7 @@
                   "booking_change",
                   "opportunity",
                   "custom",
+                  "stay_ready",
                   "consultation_prep",
                   "consultation_follow_up"
                 ],
@@ -129334,6 +129341,7 @@
                   "booking_change",
                   "opportunity",
                   "custom",
+                  "stay_ready",
                   "consultation_prep",
                   "consultation_follow_up"
                 ],
@@ -129912,7 +129920,7 @@
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
-        "list_team_conversations": "sha256:53858eaa18b0df4408ece3c47bc73429f643d44ddd7ce066a78c2a8719d98b11",
+        "list_team_conversations": "sha256:9c2e29afbdc782fec5a7a615465d19355188636f22668d6694d5480a601c0987",
         "mark_team_conversation_read": "sha256:3ad65b07c9bd78090f9f81aeffa74ac00f1c201ee8b6325cf16cd879f1e2644d",
         "reject_product_booking": "sha256:91a5bee34d02b729a3dacb01885157ce63b443594116d8710ca90313fb76e357",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",

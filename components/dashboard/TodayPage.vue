@@ -142,6 +142,7 @@ const kindLabels: Record<TaskKind, string> = {
   booking_change: 'Booking changes',
   opportunity: 'Accepted opportunities',
   custom: 'Custom tasks',
+  stay_ready: 'Homes to get ready',
   consultation_prep: 'Consultation preparation',
   consultation_follow_up: 'Consultation follow-ups',
 }
