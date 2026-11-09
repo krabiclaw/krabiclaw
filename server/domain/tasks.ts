@@ -779,6 +779,45 @@ async function assigneeUsers(db: DbClient, organizationId: string, target: { mem
   return []
 }
 
+/** A job a guest's move creates: the home they moved to may have no earlier stay to clean after. */
+const stayReadyKey = (stayId: string, productId: string) => `stay-ready:${stayId}:${productId}`
+
+export function stayReadyTaskQueries(input: {
+  organizationId: string; stayId: string; now: string; previousProductId: string; guard: BatchQuery; guestName: string | null; checkInDate: string
+  /** The home to make ready; null when the guest moved back to the listing they booked. */
+  home: { product_id: string; location_id: string; timezone: string; check_in_time: string | null; internal_name: string; assigned_member_id: string | null; assigned_team_id: string | null } | null
+}): BatchQuery[] {
+  const { organizationId, stayId, now, previousProductId, guard, home } = input
+  const queries: BatchQuery[] = [{
+    query: `UPDATE tasks SET status = 'cancelled', closed_at = ?, closed_by_user_id = NULL, version = version + 1, updated_at = ? WHERE dedupe_key = ? AND status = 'open' AND ${guard.query}`,
+    params: [now, now, stayReadyKey(stayId, previousProductId), ...guard.params!],
+  }]
+  if (!home) return queries
+  const dueAt = home.check_in_time === null ? null : localDateTimeToInstant(input.checkInDate, home.check_in_time, home.timezone, 'compatible').toISOString()
+  queries.push({
+    query: `INSERT INTO tasks (id, organization_id, kind, product_id, location_id, assigned_member_id, assigned_team_id, title, notes, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
+      SELECT ?, ?, 'custom', ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, 1, ?, ? WHERE ${guard.query}
+      ON CONFLICT (dedupe_key) DO UPDATE SET status = 'open', closed_at = NULL, closed_by_user_id = NULL, outcome_note = NULL, due_at = excluded.due_at,
+        assigned_member_id = excluded.assigned_member_id, assigned_team_id = excluded.assigned_team_id, version = tasks.version + 1, updated_at = excluded.updated_at`,
+    params: [crypto.randomUUID(), organizationId, home.product_id, home.location_id, home.assigned_member_id, home.assigned_team_id, `Get ${home.internal_name} ready`.slice(0, 200),
+      `${input.guestName ?? 'A guest'} was moved here and arrives ${formatCalendarDate(input.checkInDate, 'en', { weekday: 'short', month: 'short', day: 'numeric' })}.`,
+      dueAt, home.timezone, stayReadyKey(stayId, home.product_id), now, now, ...guard.params!],
+  })
+  return queries
+}
+
+export async function notifyStayReady(env: CloudflareEnv, db: DbClient, input: { organizationId: string; stayId: string; productId: string; actorUserId: string | null }): Promise<void> {
+  const task = await queryFirst<{ id: string; assigned_member_id: string | null; assigned_team_id: string | null }>(db,
+    'SELECT id, assigned_member_id, assigned_team_id FROM tasks WHERE organization_id = ? AND dedupe_key = ?', [input.organizationId, stayReadyKey(input.stayId, input.productId)])
+  if (!task) throw new Error(`The move of stay ${input.stayId} left no job to make its home ready`)
+  const recipients = (await assigneeUsers(db, input.organizationId, { member: task.assigned_member_id, team: task.assigned_team_id })).filter(userId => userId !== input.actorUserId)
+  if (recipients.length) {
+    const { notifyTaskAssigned } = await import('~/server/utils/notifications')
+    await notifyTaskAssigned(env, db, { organizationId: input.organizationId, taskId: task.id, actorUserId: input.actorUserId ?? recipients[0]!, recipientUserIds: recipients })
+  }
+  await publishBusinessInvalidation(env, input.organizationId)
+}
+
 async function afterWrite(db: DbClient, viewer: TaskViewer, taskId: string, assigned?: { member: string | null; team: string | null }): Promise<TaskView> {
   const env = viewer.principal.env as CloudflareEnv
   if (assigned) {

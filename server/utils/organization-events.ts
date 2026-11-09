@@ -27,7 +27,7 @@ export type OrganizationEventType =
   | 'review.received' | 'review.replied'
   | 'location.created' | 'location.updated'
   | 'experience.created'
-  | 'stay.created' | 'stay.updated' | 'stay.cancelled' | 'stay.payment_recorded' | 'stay.payment_deleted' | 'stay.nights_changed' | 'stay.nights_imported' | 'stay.reservations_import_requested' | 'stay.migration_imported' | 'stay.migration_verified' | 'stay.calendar_linked' | 'stay.calendar_unlinked'
+  | 'stay.created' | 'stay.updated' | 'stay.moved' | 'stay.cancelled' | 'stay.payment_recorded' | 'stay.payment_deleted' | 'stay.nights_changed' | 'stay.nights_imported' | 'stay.reservations_import_requested' | 'stay.migration_imported' | 'stay.migration_verified' | 'stay.calendar_linked' | 'stay.calendar_unlinked'
   | 'team.message_sent' | 'team.group_created' | 'team.group_updated'
   | 'message_template.created' | 'message_template.updated' | 'message_template.deleted' | 'scheduled_message.cancelled' | 'stay.instructions_updated'
   | 'domain.connected' | 'domain.verified' | 'domain.failed'
