@@ -914,6 +914,13 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
         const discarded = stage.prepare(`SELECT count(*) AS n FROM payment_attempts WHERE ${dead}`).get().n
         if (discarded) manifest.transforms.push({ name: 'dead_test_hosted_checkout_fields_discarded', changes: discarded })
       }
+      // A superseded opportunity is evidence that went stale before anyone
+      // decided about it. Nothing reads it: undecided, with no task, it goes.
+      const undecided = `status = 'superseded' AND decided_at IS NULL AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.opportunity_id = opportunities.id)`
+      const decided = stage.prepare(`SELECT id FROM opportunities WHERE status = 'superseded' AND NOT (${undecided})`).all()
+      assert(decided.length === 0, `Superseded opportunities with a decision or task: ${decided.slice(0, 8).map(row => row.id).join(', ')}; no rows were copied`)
+      const superseded = stage.prepare(`DELETE FROM opportunities WHERE ${undecided}`).run().changes
+      if (superseded) manifest.transforms.push({ name: 'superseded_opportunities_removed', changes: superseded })
       const renamed = stage.prepare("UPDATE product_booking_configs SET scheduling_mode = 'business' WHERE scheduling_mode = 'legacy'").run().changes
       const unknown = stage.prepare("SELECT product_id, scheduling_mode FROM product_booking_configs WHERE scheduling_mode NOT IN ('business', 'provider')").all()
       assert(unknown.length === 0, `Booking configurations with an unknown scheduling mode: ${JSON.stringify(unknown.slice(0, 8))}; no rows were copied`)

@@ -193,6 +193,10 @@ test('a v25 replacement names business scheduling with no default to fall back o
       INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('class-default','host','class','Class','owner','owner'),('consult-default','host','consult','Consult','owner','owner');
       INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,created_by,updated_by) VALUES('class','host',60,'owner','owner');
       INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,scheduling_mode,created_by,updated_by) VALUES('consult','host',30,'provider','owner','owner');`)
+    // Stale evidence nobody decided about, beside its live successor.
+    source.exec(`INSERT INTO opportunities(id,organization_id,operation,subject_id,evidence_revision,status,created_at,updated_at)
+        VALUES('stale','host','article.create','host','${'1'.repeat(64)}','superseded','2026-11-01T10:00:00.000Z','2026-11-01T10:00:00.000Z'),
+          ('current','host','article.create','host','${'2'.repeat(64)}','open','2026-11-02T10:00:00.000Z','2026-11-02T10:00:00.000Z');`)
     // A test-mode Hosted Checkout that never reached a PaymentIntent.
     source.exec(`INSERT INTO payments(id,organization_id,stripe_account_id,livemode,subject_type,currency,amount,price_snapshot_json,created_at,updated_at)
         VALUES('test-payment','host','acct_test',0,'booking','USD',5000,'{}','2026-10-06T00:48:32.658Z','2026-10-06T00:48:32.658Z');
@@ -205,6 +209,7 @@ test('a v25 replacement names business scheduling with no default to fall back o
     const manifest = await transferDatabaseExport(sourcePath, targetPath, { payloadPath: join(directory, 'payload.sql') })
     assert.deepEqual(manifest.transforms.filter((transform: { name: string }) => transform.name === 'scheduling_mode_legacy_to_business'), [{ name: 'scheduling_mode_legacy_to_business', changes: 1 }])
     assert.deepEqual(manifest.transforms.filter((transform: { name: string }) => transform.name === 'dead_test_hosted_checkout_fields_discarded'), [{ name: 'dead_test_hosted_checkout_fields_discarded', changes: 1 }])
+    assert.deepEqual(manifest.transforms.filter((transform: { name: string }) => transform.name === 'superseded_opportunities_removed'), [{ name: 'superseded_opportunities_removed', changes: 1 }])
     const target = new Database(targetPath)
     try {
       assert.deepEqual(target.prepare('SELECT product_id, scheduling_mode FROM product_booking_configs ORDER BY product_id').all(), [{ product_id: 'class', scheduling_mode: 'business' }, { product_id: 'consult', scheduling_mode: 'provider' }])
@@ -212,6 +217,7 @@ test('a v25 replacement names business scheduling with no default to fall back o
       assert.deepEqual(target.prepare("SELECT name FROM sqlite_schema WHERE name IN ('inventory_items', 'inventory_levels')").all(), [])
       assert.equal((target.prepare("SELECT count(*) AS n FROM pragma_table_info('payment_attempts') WHERE name IN ('stripe_checkout_id', 'checkout_url')").get() as { n: number }).n, 0)
       assert.deepEqual(target.prepare("SELECT id, payment_id, status, expires_at FROM payment_attempts").all(), [{ id: 'hosted', payment_id: 'test-payment', status: 'open', expires_at: '2026-10-06T01:18:32.658Z' }])
+      assert.deepEqual(target.prepare('SELECT id, status FROM opportunities').all(), [{ id: 'current', status: 'open' }])
       assert.deepEqual(target.pragma('foreign_key_check'), [])
     } finally { target.close() }
     // A live-mode Hosted Checkout is not dead: the transfer refuses to discard it.
