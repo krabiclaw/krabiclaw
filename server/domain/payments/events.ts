@@ -42,7 +42,8 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,rep
   const now = new Date().toISOString()
   const intent = reported.status === 'requires_capture' ? await captureOnceBooked(db,stripe,env,payment,reported) : reported
   if (intent.status !== 'succeeded') {
-    if (intent.status === 'processing') {
+    // A debit waiting on its bank verification or clearing keeps its capacity until Stripe says how it ended.
+    if (intent.status === 'processing' || intent.next_action?.type === 'verify_with_microdeposits') {
       await execute(db,"UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND status='active'",[new Date(Date.now()+14*86400*1000).toISOString(),payment.id])
     }
     // A declined confirmation can accept another method; only cancellation is terminal.

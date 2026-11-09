@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:97768421aad9f4d8a3047e4ba5fdbc04759b0a337321d2cca884f2c59f3d74ba",
-  "documentationFingerprint": "sha256:52eae42535c257f5207db0162f330b4812fd3b4490a97a2bb45d8b4b1dc88228",
+  "fingerprint": "sha256:d0007d915ed275a6d083411b3b0c3838a3fff0230e2ee135d9dc47e098c9e8f8",
+  "documentationFingerprint": "sha256:24f2c645631c651a5504015711848296ad21df8beaa58cd8c13408c490a15636",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -73120,6 +73120,10 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "booking_id": {
+            "minLength": 1,
+            "type": "string"
+          },
           "cursor": {
             "description": "Opaque next_cursor from the previous page.",
             "type": "string"
@@ -73155,6 +73159,12 @@
           "conversations": {
             "items": {
               "properties": {
+                "bookingId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "canLeave": {
                   "type": "boolean"
                 },
@@ -73694,6 +73704,7 @@
                 "createdAt",
                 "lastMessageAt",
                 "stayId",
+                "bookingId",
                 "locationId",
                 "name",
                 "isGroup",
@@ -104939,6 +104950,11 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "booking_id": {
+            "description": "Optional booking ID you may read; never a guest request ID.",
+            "minLength": 1,
+            "type": "string"
+          },
           "idempotency_key": {
             "description": "Required for a manually created group. Keep the same key for an identical retry.",
             "maxLength": 200,
@@ -129877,14 +129893,14 @@
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
-        "list_team_conversations": "sha256:9c2e29afbdc782fec5a7a615465d19355188636f22668d6694d5480a601c0987",
+        "list_team_conversations": "sha256:1d7d0e453b5897c4f47bc11a4be939eed31a39eed442513ff59f78f953ef7d0c",
         "mark_team_conversation_read": "sha256:3ad65b07c9bd78090f9f81aeffa74ac00f1c201ee8b6325cf16cd879f1e2644d",
         "reject_product_booking": "sha256:91a5bee34d02b729a3dacb01885157ce63b443594116d8710ca90313fb76e357",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
         "request_product_booking_change": "sha256:502724204b628e20343ed268bb7cd9e0734adf3f85df52e6360657338430edcc",
         "request_table_reservation_change": "sha256:00c70a0252033e9df90a66171d64b1728bf1bae7c681a3e7e702ef864223bb88",
         "send_team_message": "sha256:a1da8c45097286e7a2f9b5f0abcfafc9319a970eb70e6c3859e972be70beea73",
-        "start_team_conversation": "sha256:b297eb76fda6a481f0246ee8c6c39d5481ebe9379dd979ecee747b54c67f0492",
+        "start_team_conversation": "sha256:936cdcf65c7d841f0da4c5bf208573caff2204fab1481fd7f1d5dbda45d22699",
         "update_team_group": "sha256:e58436da6c0b45816e909c58d6ff9265c364e410a5c5edf696a7c6085bb3f6cb"
       }
     },

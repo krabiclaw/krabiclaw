@@ -96,7 +96,8 @@
 
         <div class="lg:order-1 min-w-0 space-y-6">
           <p v-if="completing" class="text-sm text-muted">{{ t('payment.verifying') }}</p>
-          <UAlert v-if="outcome === 'processing'" color="info" :title="t('payment.processing')" :description="t('payment.processing_help')" />
+          <UAlert v-if="verificationUrl" color="info" :title="t('payment.bank_verification')" :description="t('payment.bank_verification_help')" :actions="[{ label: t('payment.bank_verification_action'), to: verificationUrl, target: '_blank', color: 'neutral', variant: 'outline' }]" data-bank-verification />
+          <UAlert v-else-if="outcome === 'processing' || handoff.state === 'processing'" color="info" :title="t('payment.processing')" :description="t('payment.processing_help')" />
           <UAlert v-else-if="outcome === 'refunded'" color="warning" :title="t('payment.refunded')" :description="t('payment.refunded_help')" />
           <UAlert v-else-if="outcome === 'expired'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
           <UAlert v-else-if="paid || handoff.state === 'paid'" color="success" :title="t('payment.already_paid')" />
@@ -182,7 +183,7 @@ type Confirmation = Awaited<ReturnType<typeof confirmPayment>>
 const isHandoff = (value: unknown): value is Handoff => isRecord(value) && value.payment_id === paymentId && typeof value.title === 'string' && Number.isSafeInteger(value.subtotal) && typeof value.currency === 'string' && typeof value.stripe_account_id === 'string' && typeof value.publishable_key === 'string' && Array.isArray(value.payment_method_types) && value.payment_method_types.every(type => typeof type === 'string') && ['open', 'paid', 'failed', 'expired'].includes(String(value.state))
 const isReview = (value: unknown): value is Review => isRecord(value) && typeof value.payment_method_id === 'string' && [value.subtotal, value.tax, value.tax_included, value.surcharge].every(Number.isSafeInteger) && value.total === (value.subtotal as number) + (value.tax as number) + (value.surcharge as number) && isRecord(value.method)
 const isConfirmation = (value: unknown): value is Confirmation => isRecord(value) && typeof value.status === 'string' && typeof value.requires_action === 'boolean'
-const isReturn = (value: unknown): value is PaymentReturn => isRecord(value) && (value.state === 'processing' || value.state === 'refunded' || (value.state === 'paid' && (
+const isReturn = (value: unknown): value is PaymentReturn => isRecord(value) && (value.state === 'processing' || value.state === 'refunded' || value.state === 'expired' || (value.state === 'paid' && (
   (value.kind === 'stay' && typeof value.activity_id === 'string' && typeof value.receipt_token === 'string')
   || ((value.kind === 'booking' || value.kind === 'reservation') && typeof value.request_id === 'string' && typeof value.cancellation_token === 'string'))))
 
@@ -200,6 +201,8 @@ const review = ref<Review | null>(null)
 const completing = ref(false)
 const paid = ref(false)
 const outcome = ref<'processing' | 'refunded' | 'expired' | null>(null)
+const confirmedVerificationUrl = ref<string | null>(null)
+const verificationUrl = computed(() => confirmedVerificationUrl.value ?? handoff.value?.bank_verification_url ?? null)
 let stripe: Stripe | null = null
 let mounting = false
 let elements: StripeElements | null = null
@@ -267,7 +270,7 @@ const priceLines = computed(() => {
 
 // A paid purchase, or one Stripe sent back here, goes on to its receipt.
 watch(handoff, (value) => {
-  if (value && !import.meta.server && (value.state === 'paid' || (returned && value.state === 'open'))) void complete()
+  if (value && !import.meta.server && (value.state === 'paid' || value.state === 'processing' || (returned && value.state === 'open'))) void complete()
 }, { immediate: true })
 
 // Stripe's Payment Element on the business's own account, in deferred mode: the
@@ -361,6 +364,10 @@ async function pay() {
   actionError.value = ''
   try {
     const confirmed = await publicApiMutation<Confirmation>(`/api/public/payments/${encodeURIComponent(paymentId)}/confirm`, { method: 'POST', body: { claim: claim.value, payment_method_id: review.value.payment_method_id, total: review.value.total }, validate: isConfirmation })
+    if (confirmed.bank_verification_url) {
+      confirmedVerificationUrl.value = confirmed.bank_verification_url
+      return
+    }
     if (confirmed.requires_action) {
       if (!confirmed.client_secret) throw new Error(t('payment.unavailable'))
       const next = await stripe.handleNextAction({ clientSecret: confirmed.client_secret })

@@ -209,15 +209,32 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     await recompute()
     assert.equal((await jobs()).length, 2)
 
-    // The morning of, the attorney is alerted once for the consultation; the follow-up is the next morning.
+    // The attorney's jobs live in a conversation with the owner, tied to the booking and named for the client.
     const prep = await db.prepare('SELECT id FROM tasks WHERE dedupe_key = ?').bind(`consultation_prep:${booking.bookingId}`).first<{ id: string }>()
     const view = await taskViewForUser(db, ORG, prep!.id, 'host')
     assert.deepEqual([view.title, view.sheet.heading], ['Client', 'Prepare for consultation'])
+    await db.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('partner','Pat Partner','partner@example.test',1)").run()
+    await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES('partner-member',?,'partner','owner',1)").bind(ORG).run()
     const morning = localDateTimeToInstant('2099-10-01', '08:05', 'America/New_York', 'compatible')
     const next = await runOrganizationJobs(env, db, ORG, morning)
-    assert.equal(next?.toISOString(), localDateTimeToInstant('2099-10-02', '08:00', 'America/New_York', 'compatible').toISOString())
+    assert.equal(next?.toISOString(), localDateTimeToInstant('2099-10-01', '18:00', 'America/New_York', 'compatible').toISOString())
     await runOrganizationJobs(env, db, ORG, morning)
-    assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE kind = 'notification' AND dedupe_key = ?").bind(`notification:task-starting:${prep!.id}:2099-10-01:host`).first('n'), 1)
+    const attorney = await teamAccessFor(memberAccessPrincipal({ userId: 'host', role: 'member', organizationId: ORG } as never, { env }), 'host-member', 'send')
+    const threads = await listTeamThreads(env, db, attorney, { bookingId: booking.bookingId })
+    assert.deepEqual(threads.map(thread => [thread.name, thread.bookingId, thread.job?.id]), [['Client', booking.bookingId, prep!.id]])
+    const posts = (await db.prepare('SELECT body FROM team_messages WHERE thread_id = ? AND automatic = 1').bind(threads[0]!.id).all<{ body: string }>()).results.map(row => row.body)
+    assert.equal(posts.filter(body => body === `Today: prepare for consultation with Client${view.when ? `, ${view.when}` : ''}.`).length, 1)
+    assert.equal(posts.filter(body => body.includes('arrive')).length, 0)
+
+    // Chatting about it reaches the same conversation; an unknown booking does not.
+    const partner = await teamAccessFor(memberAccessPrincipal({ userId: 'partner', role: 'owner', organizationId: ORG } as never, { env }), 'partner-member', 'send')
+    assert.deepEqual(await createTeamThread(env, db, partner, { memberIds: ['host'], bookingId: booking.bookingId }), { id: threads[0]!.id, created: false })
+    await assert.rejects(createTeamThread(env, db, partner, { memberIds: ['host'], bookingId: 'not-a-booking' }), /booking/iu)
+
+    // Any other assigned task with a start time gets its alert on the morning of.
+    await db.prepare("INSERT INTO tasks (id, organization_id, kind, assigned_member_id, title, starts_at, timezone, status, dedupe_key, version, created_at, updated_at) VALUES ('plain', ?, 'custom', 'host-member', 'File the motion', '2099-10-01T15:00:00.000Z', 'America/New_York', 'open', 'plain', 1, ?, ?)").bind(ORG, NOW, NOW).run()
+    await runOrganizationJobs(env, db, ORG, morning)
+    assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE kind = 'notification' AND dedupe_key = 'notification:task-starting:plain:2099-10-01:host'").first('n'), 1)
 
     // Cancelling the consultation closes both jobs; confirming it again reopens them.
     await db.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?").bind(booking.bookingId).run()

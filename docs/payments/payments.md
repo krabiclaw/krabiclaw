@@ -444,9 +444,11 @@ authorization a booking was committed on, nothing was paid and the business gets
 payment-failed alert on the booking.
 
 **ACH.** Confirmation starts the debit, so there is nothing to authorize. The hold
-keeps the capacity for 14 days while the debit clears (instant bank verification
-only; the pay page cannot wait on microdeposits), and the booking is made when it
-succeeds. A debit that clears after its capacity went, because the business closed
+keeps the capacity for 14 days while the debit clears, and the booking is made
+when it succeeds. Stripe tries instant bank verification and falls back to
+microdeposits: the pay page then shows Stripe's verification link, and the hold
+lasts through verification. A verification that fails or expires returns the
+intent to `requires_payment_method` with its error, which gives the capacity back. A debit that clears after its capacity went, because the business closed
 what it paid for, goes back through the ordinary refund under
 `unfulfillable:<intent>`, and a redelivery repeats that refund rather than booking.
 

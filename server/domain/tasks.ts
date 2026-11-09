@@ -47,16 +47,18 @@ function fail(statusCode: number, code: string, message: string, field?: string)
 // keeps the task alert instead.
 // ---------------------------------------------------------------------------
 
-export const JOB_TASK_SQL = (alias: string) => `${alias}.kind IN ('turnover', 'stay_ready')`
+export const JOB_TASK_SQL = (alias: string) => `${alias}.kind IN ('turnover', 'stay_ready', 'consultation_prep', 'consultation_follow_up')`
 
 export function isJobTask(row: Pick<TaskRow, 'kind'>): boolean {
-  return row.kind === 'turnover' || row.kind === 'stay_ready'
+  return row.kind === 'turnover' || row.kind === 'stay_ready' || row.kind === 'consultation_prep' || row.kind === 'consultation_follow_up'
 }
 
-/** The stay a job is about. */
-export function jobStayId(row: Pick<TaskRow, 'kind' | 'dedupe_key' | 'subject_id'>): string {
-  if (!row.subject_id) throw new Error(`Job task ${row.dedupe_key} names no stay`)
-  return row.subject_id
+export type JobSubject = { kind: 'stay' | 'booking'; id: string }
+
+/** The stay or booking a job is about, which its conversation is tied to. */
+export function jobSubject(row: Pick<TaskRow, 'kind' | 'dedupe_key' | 'subject_id'>): JobSubject {
+  if (!row.subject_id) throw new Error(`Job task ${row.dedupe_key} names no subject`)
+  return { kind: row.kind === 'consultation_prep' || row.kind === 'consultation_follow_up' ? 'booking' : 'stay', id: row.subject_id }
 }
 
 /** Whether a job's people hear about it in a team conversation: a member who is not an owner or admin, or a team. */
@@ -574,7 +576,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       const record = context.records.get(row.subject_id!)
       const request = record?.request_id ? context.requests.get(record.request_id) : undefined
       if (!record?.request_id || !request) throw new Error(`Consultation job ${row.id} has no booking conversation`)
-      const heading = row.kind === 'consultation_prep' ? 'Prepare for consultation' : 'Follow up with client'
+      const heading = row.kind === 'consultation_prep' ? 'Prepare for consultation' : 'Follow up'
       requestId = record.request_id
       face = 'compact'
       title = request.guest_name ?? request.participant ?? 'Client'
@@ -582,7 +584,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       statusLine = [heading, place].filter(Boolean).join(' · ')
       detail = `${day(record.starts_at)}, ${time(record.starts_at)}`
       path = bookingEditorPath(context.slug, 'booking', record.request_id)
-      sheet = { heading, title, date: day(record.starts_at), checkout: null, checkin: null }
+      sheet = { heading, title, date: null, checkout: null, checkin: null }
       break
     }
     case 'booking_change': {
@@ -792,20 +794,19 @@ export async function getTask(db: DbClient, viewer: TaskViewer, taskId: string, 
  * team conversation: the open one first (the home must be ready before the
  * guest arrives, then turned over after), otherwise the one closed last.
  */
-export async function stayJobViews(db: DbClient, viewer: TaskViewer, stayIds: readonly string[], now = new Date()): Promise<Map<string, TaskView>> {
-  if (!stayIds.length) return new Map()
+export async function subjectJobViews(db: DbClient, viewer: TaskViewer, subjectIds: readonly string[], now = new Date()): Promise<Map<string, TaskView>> {
+  if (!subjectIds.length) return new Map()
   const scope = scopeSql(viewer)
   const rows = await queryAll<TaskRow>(db, `SELECT t.* FROM tasks t WHERE t.organization_id = ? AND ${JOB_TASK_SQL('t')} AND ${scope.sql}
       AND t.subject_id IN (SELECT value FROM json_each(?))
     ORDER BY CASE t.status WHEN 'open' THEN 0 ELSE 1 END, COALESCE(t.due_at, t.starts_at, t.created_at), t.updated_at DESC`,
-  [viewer.principal.organizationId, ...scope.params, d1JsonStringSet(stayIds)])
+  [viewer.principal.organizationId, ...scope.params, d1JsonStringSet(subjectIds)])
   const chosen = new Map<string, TaskRow>()
   for (const row of rows) {
-    const stayId = jobStayId(row)
-    if (!chosen.has(stayId)) chosen.set(stayId, row)
+    if (!chosen.has(row.subject_id!)) chosen.set(row.subject_id!, row)
   }
   const context = await loadContext(db, viewer, [...chosen.values()])
-  return new Map([...chosen].map(([stayId, row]) => [stayId, present(row, viewer, context, now)]))
+  return new Map([...chosen].map(([subjectId, row]) => [subjectId, present(row, viewer, context, now)]))
 }
 
 // ---------------------------------------------------------------------------
@@ -1003,7 +1004,7 @@ export async function closeTask(db: DbClient, viewer: TaskViewer, taskId: string
   // A job closes in its conversation too: the note and photos are the person's own message there, and nobody is alerted.
   const thread = isJobTask(current) ? await queryFirst<{ id: string }>(db, `SELECT t.id FROM team_threads t
       JOIN team_thread_members s ON s.organization_id = t.organization_id AND s.thread_id = t.id
-     WHERE t.organization_id = ? AND t.stay_id = ? AND s.member_id = ? ORDER BY t.last_message_at DESC, t.id LIMIT 1`, [organizationId, jobStayId(current), viewer.memberId]) : null
+     WHERE t.organization_id = ? AND ${jobSubject(current).kind === 'booking' ? 't.booking_id' : 't.stay_id'} = ? AND s.member_id = ? ORDER BY t.last_message_at DESC, t.id LIMIT 1`, [organizationId, jobSubject(current).id, viewer.memberId]) : null
   const assetIds = input.photos.length ? await uploadMessagePhotos(db, input.env, organizationId, input.photos, { source: 'uploaded', userId: viewer.principal.userId })
     .catch((error: unknown) => error instanceof MessagePhotoRejection ? fail(422, 'INVALID_PHOTO', error.message, 'photos') : Promise.reject(error)) : []
   const closed = `EXISTS (SELECT 1 FROM tasks WHERE organization_id = ? AND id = ? AND version = ? AND status = ?)`

@@ -8,9 +8,10 @@ import { createTeamThread, teamAccessFor } from '~/server/domain/team-messages'
 export default defineHandler(async (event) => {
   const { env, db, organization } = await getDashboardMemberContext(event, {})
   const access = await teamAccessFor(memberAccessPrincipal(organization, { env, event }), organization.memberId, 'send')
-  const body = await readStrictBody<{ memberIds?: unknown; stayId?: unknown; locationId?: unknown; name?: unknown; idempotencyKey?: unknown }>(event, {
+  const body = await readStrictBody<{ memberIds?: unknown; stayId?: unknown; bookingId?: unknown; locationId?: unknown; name?: unknown; idempotencyKey?: unknown }>(event, {
     memberIds: 'unknown',
     stayId: 'string',
+    bookingId: 'string',
     locationId: 'string',
     name: 'nullable-string',
     idempotencyKey: 'string',
@@ -18,6 +19,7 @@ export default defineHandler(async (event) => {
   const thread = await createTeamThread(env, db, access, {
     memberIds: body.memberIds,
     stayId: body.stayId,
+    bookingId: body.bookingId,
     locationId: body.locationId,
     ...(body.name === undefined ? {} : { name: body.name }),
     idempotencyKey: body.idempotencyKey,

@@ -2409,6 +2409,8 @@ export const team_threads = sqliteTable("team_threads", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	stay_id: text(),
+	// The consultation this conversation is about.
+	booking_id: text().references(() => bookings.id, { onDelete: "set null" }),
 	location_id: text(),
 	created_by_user_id: text().references(() => user.id, { onDelete: "set null" }),
 	name: text(),
@@ -2427,6 +2429,7 @@ export const team_threads = sqliteTable("team_threads", {
 	uniqueIndex("team_threads_participants_unique").on(table.organization_id, table.participants_key),
 	index("team_threads_org_activity_idx").on(table.organization_id, table.last_message_at),
 	index("team_threads_org_stay_idx").on(table.organization_id, table.stay_id),
+	index("team_threads_org_booking_idx").on(table.organization_id, table.booking_id),
 	index("team_threads_org_location_idx").on(table.organization_id, table.location_id),
 	check("team_threads_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', last_message_at, '+0 days') IS last_message_at AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
 ]);

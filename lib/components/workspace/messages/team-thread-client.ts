@@ -14,7 +14,7 @@ export function isTeamThreadsResponse(value: unknown): value is { threads: TeamT
     && typeof thread.id === 'string' && typeof thread.createdAt === 'string' && typeof thread.lastMessageAt === 'string'
     && nullableString(thread.name) && nullableString(thread.createdByUserId)
     && typeof thread.isGroup === 'boolean' && typeof thread.canManage === 'boolean' && typeof thread.canLeave === 'boolean'
-    && nullableString(thread.stayId) && nullableString(thread.locationId)
+    && nullableString(thread.stayId) && nullableString(thread.bookingId) && nullableString(thread.locationId)
     && (thread.stay === null || isRecord(thread.stay) && typeof thread.stay.id === 'string' && typeof thread.stay.homeName === 'string' && typeof thread.stay.checkInDate === 'string' && typeof thread.stay.checkOutDate === 'string')
     && (thread.job === null || isRecord(thread.job) && typeof thread.job.id === 'string' && typeof thread.job.version === 'number' && isRecord(thread.job.sheet) && isRecord(thread.job.can))
     && (thread.location === null || isRecord(thread.location) && typeof thread.location.id === 'string' && typeof thread.location.title === 'string')

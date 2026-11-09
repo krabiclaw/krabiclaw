@@ -20,7 +20,6 @@ import { loadOrganizationSite } from '~/server/utils/content/publishing'
 import { publishAccessInvalidation, publishBusinessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
 import type { AirbnbSettingSections, pushStayHomeChannel } from '~/server/domain/stays'
-import { JOB_TASK_SQL } from '~/server/domain/tasks'
 import { executeWithinCapacity, liveHomeSql, reportBillingUsage } from '~/server/utils/billing'
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -1116,7 +1115,7 @@ function productWrites(
       // The home's open cleaning jobs are its assignee's: a new assignee takes them over.
       writes.push({
         query: `UPDATE tasks SET assigned_member_id = ?, assigned_team_id = ?, version = version + 1, updated_at = ?
-          WHERE organization_id = ? AND product_id = ? AND status = 'open' AND ${JOB_TASK_SQL('tasks')} AND (assigned_member_id IS NOT ? OR assigned_team_id IS NOT ?)`,
+          WHERE organization_id = ? AND product_id = ? AND status = 'open' AND kind IN ('turnover', 'stay_ready') AND (assigned_member_id IS NOT ? OR assigned_team_id IS NOT ?)`,
         params: [planned.stay.assigned_member_id, planned.stay.assigned_team_id, now, organizationId, planned.id, planned.stay.assigned_member_id, planned.stay.assigned_team_id],
       })
     }

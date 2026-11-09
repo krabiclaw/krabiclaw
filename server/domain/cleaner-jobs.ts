@@ -1,13 +1,13 @@
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { isOrganizationWideRole } from '~/server/utils/member-access'
-import { postAutomaticTeamMessage, stayThreadParticipantsKey } from '~/server/domain/team-messages'
-import { JOB_TASK_SQL, isJobTask, jobStayId, taskViewForUser, type TaskRow, type TaskView } from '~/server/domain/tasks'
+import { jobThreadParticipantsKey, postAutomaticTeamMessage } from '~/server/domain/team-messages'
+import { JOB_TASK_SQL, isJobTask, jobSubject, taskViewForUser, type JobSubject, type TaskRow, type TaskView } from '~/server/domain/tasks'
 import { notifyTaskStarting } from '~/server/utils/notifications'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import type { CloudflareEnv } from '~/server/utils/auth'
 
 /*
-  A cleaner's jobs live in team conversations. Each job given to a member or a
+  A person's jobs live in team conversations. Each job given to a member or a
   team is posted into the stay's conversation with that person (or team) and
   every owner and admin, the same conversation the app's "Message host" opens.
   Reminders follow in it: the evening before, the morning of, and a warning to
@@ -75,7 +75,8 @@ function reminders(task: TaskRow): Array<{ key: string; at: Date; until: Date; k
     { kind: 'evening', key: `reminder:${task.id}:evening:${day}`, at: at(addLocalDays(day, -1), EVENING_BEFORE), until: new Date(anchor) },
     { kind: 'morning', key: `reminder:${task.id}:morning:${day}`, at: at(day, MORNING_OF), until: windowEnd },
   ]
-  if (task.due_at !== null) out.push({ kind: 'warning', key: `warning:${task.id}:${task.due_at}`, at: new Date(Date.parse(task.due_at) - WARNING_BEFORE_ARRIVAL_MS), until: new Date(task.due_at) })
+  // Only a stay has guests arriving at a home that must be ready.
+  if (task.due_at !== null && jobSubject(task).kind === 'stay') out.push({ kind: 'warning', key: `warning:${task.id}:${task.due_at}`, at: new Date(Date.parse(task.due_at) - WARNING_BEFORE_ARRIVAL_MS), until: new Date(task.due_at) })
   return out
 }
 
@@ -95,16 +96,16 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
   ])
   const teams = new Map<string, string[]>()
   for (const row of teamRows) teams.set(row.team_id, [...teams.get(row.team_id) ?? [], row.user_id])
-  const stayIds = [...new Set(tasks.filter(isJobTask).map(jobStayId))]
-  const posted = stayIds.length ? await queryAll<{ thread_id: string; stay_id: string; participants_key: string; idempotency_key: string }>(db, `
-    SELECT m.thread_id, t.stay_id, t.participants_key, m.idempotency_key FROM team_messages m
+  const subjectIds = [...new Set(tasks.filter(isJobTask).map(task => jobSubject(task).id))]
+  const posted = subjectIds.length ? await queryAll<{ thread_id: string; subject_id: string; participants_key: string; idempotency_key: string }>(db, `
+    SELECT m.thread_id, COALESCE(t.stay_id, t.booking_id) AS subject_id, t.participants_key, m.idempotency_key FROM team_messages m
       JOIN team_threads t ON t.organization_id = m.organization_id AND t.id = m.thread_id
-     WHERE t.organization_id = ? AND t.stay_id IN (SELECT value FROM json_each(?)) AND m.automatic = 1`, [organizationId, d1JsonStringSet(stayIds)]) : []
+     WHERE t.organization_id = ? AND COALESCE(t.stay_id, t.booking_id) IN (SELECT value FROM json_each(?)) AND m.automatic = 1`, [organizationId, d1JsonStringSet(subjectIds)]) : []
   const keysByThread = new Map<string, Set<string>>()
-  const threads = new Map<string, { stay_id: string; participants_key: string }>()
+  const threads = new Map<string, { subject_id: string; participants_key: string }>()
   for (const row of posted) {
     keysByThread.set(row.thread_id, (keysByThread.get(row.thread_id) ?? new Set()).add(row.idempotency_key))
-    threads.set(row.thread_id, { stay_id: row.stay_id, participants_key: row.participants_key })
+    threads.set(row.thread_id, { subject_id: row.subject_id, participants_key: row.participants_key })
   }
   const seatUsers = new Map<string, string[]>()
   if (threads.size) {
@@ -113,8 +114,8 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
     [organizationId, d1JsonStringSet([...threads.keys()])])) seatUsers.set(seat.thread_id, [...seatUsers.get(seat.thread_id) ?? [], seat.user_id])
   }
   const hostUsers = members.filter(member => isOrganizationWideRole(member.role)).map(member => member.userId)
-  const post = async (stayId: string, seats: readonly string[], key: string, body: string, alertUserIds: readonly string[]) => {
-    const result = await postAutomaticTeamMessage(env, db, { organizationId, stayId, seatMemberIds: seats, body, idempotencyKey: key, alertUserIds, senderName: organization.name })
+  const post = async (subject: JobSubject, seats: readonly string[], key: string, body: string, alertUserIds: readonly string[]) => {
+    const result = await postAutomaticTeamMessage(env, db, { organizationId, subject, seatMemberIds: seats, body, idempotencyKey: key, alertUserIds, senderName: organization.name })
     keysByThread.set(result.threadId, (keysByThread.get(result.threadId) ?? new Set()).add(key))
     return result
   }
@@ -138,21 +139,22 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
         if (task.status === 'open') await alertOnTheDay(task, task.assigned_team_id ? teams.get(task.assigned_team_id) ?? [] : members.filter(member => member.id === task.assigned_member_id).map(member => member.userId))
         continue
       }
-      const stayId = jobStayId(task)
+      const subject = jobSubject(task)
+      const about = subject.kind === 'booking' ? 'with' : 'at'
       const roster = rosterFor(task, members, teams)
       const view = roster || task.status === 'open' ? await taskViewForUser(db, organizationId, task.id, roster?.cleaners[0] ?? hostUsers[0] ?? null, now) : null
       // Conversations of this stay that once carried this job for other people: they are told it is no longer theirs.
-      const elsewhere = [...threads].filter(([threadId, thread]) => thread.stay_id === stayId && [...keysByThread.get(threadId) ?? []].some(key => key.startsWith(`job:${task.id}:`)))
-      const targetKey = roster ? await stayThreadParticipantsKey(stayId, roster.seats) : null
+      const elsewhere = [...threads].filter(([threadId, thread]) => thread.subject_id === subject.id && [...keysByThread.get(threadId) ?? []].some(key => key.startsWith(`job:${task.id}:`)))
+      const targetKey = roster ? await jobThreadParticipantsKey(subject, roster.seats) : null
       for (const [threadId, thread] of elsewhere) {
         if (thread.participants_key === targetKey && task.status === 'open') continue
         const keys = keysByThread.get(threadId)!
         const closedKey = task.status === 'open' ? `released:${task.id}` : `${task.status === 'cancelled' ? 'cancelled' : 'closed'}:${task.id}`
         if (keys.has(closedKey) || (task.status !== 'open' && task.status !== 'cancelled' && task.closed_by_user_id !== null)) continue
         const seated = seatUsers.get(threadId) ?? []
-        const body = task.status === 'open' ? `No longer yours: ${view!.sheet.heading.toLowerCase()} at ${view!.sheet.title}${view!.sheet.date ? `, ${view!.sheet.date}` : ''}.`
-          : `Cancelled: ${view ? `${view.sheet.heading.toLowerCase()} at ${view.sheet.title}${view.sheet.date ? `, ${view.sheet.date}` : ''}` : 'this job'}.`
-        await post(stayId, seated.map(userId => members.find(member => member.userId === userId)?.id).filter((id): id is string => Boolean(id)), closedKey, body, seated.filter(userId => !hostUsers.includes(userId)))
+        const body = task.status === 'open' ? `No longer yours: ${view!.sheet.heading.toLowerCase()} ${about} ${view!.sheet.title}${view!.sheet.date ? `, ${view!.sheet.date}` : ''}.`
+          : `Cancelled: ${view ? `${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${view.sheet.date ? `, ${view.sheet.date}` : ''}` : 'this job'}.`
+        await post(subject, seated.map(userId => members.find(member => member.userId === userId)?.id).filter((id): id is string => Boolean(id)), closedKey, body, seated.filter(userId => !hostUsers.includes(userId)))
       }
       if (task.status !== 'open' || !view) continue
       if (!roster) {
@@ -164,18 +166,18 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
       const thread = [...threads].find(([, thread]) => thread.participants_key === targetKey)
       const keys = thread ? keysByThread.get(thread[0]) ?? new Set<string>() : new Set<string>()
       if (!keys.has(key)) {
-        const result = await post(stayId, roster.seats, key, lines(view), roster.cleaners)
-        threads.set(result.threadId, { stay_id: stayId, participants_key: targetKey! })
+        const result = await post(subject, roster.seats, key, lines(view), roster.cleaners)
+        threads.set(result.threadId, { subject_id: subject.id, participants_key: targetKey! })
       }
       for (const reminder of reminders(task)) {
         if (keys.has(reminder.key) || keysByThread.get(thread?.[0] ?? '')?.has(reminder.key)) continue
         if (reminder.at > now) { pending.push(reminder.at); continue }
         if (now >= reminder.until) continue
         const when = view.when ? `, ${view.when}` : ''
-        const body = reminder.kind === 'evening' ? `Tomorrow: ${view.sheet.heading.toLowerCase()} at ${view.sheet.title}${when}.`
-          : reminder.kind === 'morning' ? `Today: ${view.sheet.heading.toLowerCase()} at ${view.sheet.title}${when}.`
+        const body = reminder.kind === 'evening' ? `Tomorrow: ${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${when}.`
+          : reminder.kind === 'morning' ? `Today: ${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${when}.`
             : `${view.sheet.title} is not marked done and the next guests arrive${view.sheet.checkin ? ` at ${view.sheet.checkin.time}` : ' in two hours'}.`
-        await post(stayId, roster.seats, reminder.key, body, reminder.kind === 'warning' ? roster.hosts : roster.cleaners)
+        await post(subject, roster.seats, reminder.key, body, reminder.kind === 'warning' ? roster.hosts : roster.cleaners)
       }
     } catch (error) {
       failures.push(error)

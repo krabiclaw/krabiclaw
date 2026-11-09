@@ -146,7 +146,10 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     const organizationId = await this.ctx.storage.get<string>(JOBS_ORGANIZATION)
     if (!organizationId) throw new Error('The jobs alarm fired for a hub that holds no organization')
     const next = await runOrganizationJobs(this.env, this.env.DB, organizationId)
-    if (next) await this.ctx.storage.setAlarm(next.getTime())
+    if (!next) return
+    // A change that arrived while this ran has already set an earlier wake.
+    const scheduled = await this.ctx.storage.getAlarm()
+    if (scheduled === null || next.getTime() < scheduled) await this.ctx.storage.setAlarm(next.getTime())
   }
 
   override webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): void {

@@ -949,6 +949,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       if (renamed) manifest.transforms.push({ name: 'scheduling_mode_legacy_to_business', changes: renamed })
       // Every guest sleeps where they booked until a host moves them.
       if (!columns(stage, 'stays').includes('booked_product_id')) stage.exec('ALTER TABLE stays ADD COLUMN booked_product_id TEXT')
+      if (!columns(stage, 'team_threads').includes('booking_id')) stage.exec('ALTER TABLE team_threads ADD COLUMN booking_id TEXT')
       // Every message so far was written by a person.
       if (!columns(stage, 'team_messages').includes('automatic')) stage.exec('ALTER TABLE team_messages ADD COLUMN automatic INTEGER NOT NULL DEFAULT 0')
       for (const name of files.slice(1)) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))

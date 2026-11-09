@@ -1887,7 +1887,8 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
   if (nightsTaken(await homeNights(db, access.organizationId, to, current.check_in_date, current.check_out_date), stayId).length) fail(409, 'STAY_MOVE_NIGHTS_TAKEN', `${to.internal_name} is not free for every night of this stay`, 'product_id')
   await Promise.all([requireChannelPush(db, env, access.organizationId, from.product_id), requireChannelPush(db, env, access.organizationId, to.product_id)])
   const listing = isChannelManagedStay(current) ? current.booked_product_id ?? current.product_id : null
-  const booked = to.product_id === listing ? null : listing
+  const backOnListing = to.product_id === listing
+  const booked = backOnListing ? null : listing
   const next = current.version + 1
   const now = new Date().toISOString()
   const body = stayMovedMessage(current, from, to, config.check_in_instructions)
@@ -1913,7 +1914,7 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
       ...stayThreadQueries({ organizationId: access.organizationId, stayId, now, openedBy: { userId: access.actorId } }),
       ...turnovers,
       ...stayReadyTaskQueries({ organizationId: access.organizationId, stayId, now, previousProductId: from.product_id, guard: { query: moved, params: movedParams },
-        home: booked === null ? null : { product_id: to.product_id, location_id: to.location_id, timezone: to.timezone, check_in_time: to.check_in_time, internal_name: to.internal_name, assigned_member_id: config.assigned_member_id, assigned_team_id: config.assigned_team_id },
+        home: backOnListing ? null : { product_id: to.product_id, location_id: to.location_id, timezone: to.timezone, check_in_time: to.check_in_time, internal_name: to.internal_name, assigned_member_id: config.assigned_member_id, assigned_team_id: config.assigned_team_id },
         guestName: stayGuestFirstName(current.guest_name), checkInDate: current.check_in_date }),
       ...(current.request_id === null ? [] : [{
         query: `INSERT INTO scheduled_guest_messages (id, organization_id, product_id, stay_id, request_id, template_id, template_title, template_version, stay_version, body, due_at, timezone, status, created_at, updated_at)
@@ -1937,7 +1938,7 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
     const released = { organizationId: access.organizationId, locationId: from.location_id, productId: from.product_id, stayId }
     await publishStayInvalidation(env, { ...released, type: 'stay.changed' }, { version: next })
     await publishStayInvalidation(env, { ...released, type: 'nights.changed' }, { version: next })
-    if (booked !== null) await notifyStayReady(env as CloudflareEnv, db, { organizationId: access.organizationId, stayId, productId: to.product_id, actorUserId: access.actorId })
+    if (!backOnListing) await notifyStayReady(env as CloudflareEnv, db, { organizationId: access.organizationId, stayId, productId: to.product_id, actorUserId: access.actorId })
     return { ...stay, guest_notified: current.request_id !== null }
   })
 }

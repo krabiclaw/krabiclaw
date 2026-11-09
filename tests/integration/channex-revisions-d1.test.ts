@@ -296,6 +296,11 @@ test('a moved guest takes the nights, turnover and messages to the new home whil
     assert.deepEqual([undone.product_id, undone.booked_product_id], [productId, null])
     assert.deepEqual((await claims()).map(row => (row as { product_id: string }).product_id), Array(4).fill(productId))
     assert.equal((await db.prepare('SELECT status FROM tasks WHERE dedupe_key = ?').bind(`stay-ready:${stayId}:${annex}`).first<{ status: string }>())!.status, 'cancelled')
+
+    // A stay booked directly has no listing to go back to: its new home still gets the job.
+    const direct = await createStay(db, env, access, { product_id: productId, idempotency_key: 'direct-move', check_in_date: '2027-06-01', check_out_date: '2027-06-03', adults: 1, guest_name: 'Direct Guest', total_minor: 10_000 })
+    await moveStay(db, env, access, direct.id, { expected_version: direct.version, product_id: annex })
+    assert.equal((await db.prepare('SELECT status FROM tasks WHERE dedupe_key = ?').bind(`stay-ready:${direct.id}:${annex}`).first<{ status: string }>())?.status, 'open')
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()
