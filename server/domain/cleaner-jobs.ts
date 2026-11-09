@@ -94,9 +94,9 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
     queryAll<{ team_id: string; user_id: string }>(db, 'SELECT t.id AS team_id, tm.userId AS user_id FROM team t JOIN teamMember tm ON tm.teamId = t.id WHERE t.organizationId = ?', [organizationId]),
     // A job has something to say when its time is near (its reminders, from the evening before to its warning) or it changed lately (its post, release or cancellation); an open job long past says nothing more.
     queryAll<TaskRow>(db, `SELECT t.* FROM tasks t WHERE t.organization_id = ? AND (${JOB_TASK_SQL('t')} OR t.starts_at IS NOT NULL)
-      AND ((t.status = 'open' AND COALESCE(t.due_at, t.starts_at, t.created_at) BETWEEN ? AND ?) OR t.updated_at >= ?)
+      AND ((t.status = 'open' AND (COALESCE(t.starts_at, t.due_at, t.created_at) BETWEEN ? AND ? OR t.due_at BETWEEN ? AND ?)) OR t.updated_at >= ?)
       AND (t.assigned_member_id IS NOT NULL OR t.assigned_team_id IS NOT NULL OR ${JOB_TASK_SQL('t')}) ORDER BY COALESCE(t.starts_at, t.due_at, t.created_at), t.id`,
-    [organizationId, new Date(now.getTime() - RECENT_MS).toISOString(), new Date(now.getTime() + AHEAD_MS).toISOString(), new Date(now.getTime() - RECENT_MS).toISOString()]),
+    [organizationId, new Date(now.getTime() - RECENT_MS).toISOString(), new Date(now.getTime() + AHEAD_MS).toISOString(), new Date(now.getTime() - RECENT_MS).toISOString(), new Date(now.getTime() + AHEAD_MS).toISOString(), new Date(now.getTime() - RECENT_MS).toISOString()]),
   ])
   const teams = new Map<string, string[]>()
   for (const row of teamRows) teams.set(row.team_id, [...teams.get(row.team_id) ?? [], row.user_id])

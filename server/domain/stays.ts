@@ -2589,7 +2589,8 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
       booking.provider_updated_at, booking.cancelled ? now : null, booking.imported || booking.cancelled ? null : now, now, now, 'channex', 'channex', landing === productId ? null : productId, existing?.id ?? null, previous?.product_id ?? null, previous?.version ?? null],
   },
   // A listing whose guest was moved elsewhere still holds its nights: a second reservation landing on them is an overbooking, like one landing on claimed nights.
-  ...(overbooked === 0 && !booking.cancelled ? bookedListingGuardQueries(organizationId, landing, id, previous, booking) : []),
+  // A stay that was cancelled or overbooked held no nights, so a revision that brings it back takes every night anew.
+  ...(overbooked === 0 && !booking.cancelled ? bookedListingGuardQueries(organizationId, landing, id, previous && previous.status !== 'cancelled' && !previous.overbooked ? previous : null, booking) : []),
   organizationEventQuery({ organizationId, locationId: home.location_id, actorId: null, eventType: existing ? 'stay.updated' : 'stay.created', entityType: 'stay', entityId: id,
     dedupeKey: revisionKey, onlyIfPreviousChangedOneRow: true, metadata: { channel: booking.channel, overbooked: overbooked === 1,
       provider: booking.provider, external_booking_id: booking.external_booking_id, revision_id: booking.revision_id, provider_updated_at: booking.provider_updated_at,
