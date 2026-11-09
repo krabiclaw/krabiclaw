@@ -436,16 +436,7 @@ async function undoMove() {
   const value = detail.value
   if (!value?.booked_product_id) return
   if (!await confirmDialog.open({ title: 'Undo this move', description: `The guest goes back to ${value.booked_home_name} and is messaged its address and entry details.`, confirmLabel: 'Undo move', cancelLabel: 'Keep the move' })) return
-  busy.value = 'undo_move'
-  actionError.value = null
-  try {
-    await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/move`, { method: 'POST', validate: (response: unknown): response is { stay: Record<string, unknown> } => isRecord(response) && isRecord(response.stay), body: { expected_version: value.version, product_id: value.booked_product_id } })
-    await refresh()
-  } catch (cause) {
-    actionError.value = getErrorMessage(cause, 'The move could not be undone.')
-  } finally {
-    busy.value = null
-  }
+  await run('undo_move', () => dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/move`, { method: 'POST', validate: (response: unknown): response is { stay: Record<string, unknown> } => isRecord(response) && isRecord(response.stay), body: { expected_version: value.version, product_id: value.booked_product_id } }), 'The move could not be undone.')
 }
 
 async function markNoShow() {

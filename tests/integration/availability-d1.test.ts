@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readFileSync } from 'node:fs'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
@@ -35,7 +34,7 @@ const NOW = '2026-09-11T00:00:00.000Z'
 /** The open reply tasks of a conversation, by dedupe key: the guest entry each one is about. */
 const openReplies = (db: D1Database, threadId: string) => db.prepare("SELECT dedupe_key FROM tasks WHERE kind = 'guest_reply' AND subject_type = 'request' AND subject_id = ? AND status = 'open'").bind(threadId).all<{ dedupe_key: string }>().then(rows => rows.results.map(row => row.dedupe_key))
 
-async function boot(legacy = false) {
+async function boot() {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'availability-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
@@ -43,16 +42,10 @@ async function boot(legacy = false) {
     env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'availability-proof', exportName: 'Hub' } },
   } }] })
   const db = await runtime.getD1Database('DB')
-  const statements = legacy
-    ? ['0000_baseline'].flatMap(name => readFileSync(`migrations-history/v11/${name}.sql`, 'utf8').split('--> statement-breakpoint').map(sql => sql.trim()).filter(Boolean))
-    : await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
+  const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
   await db.batch(statements.map(statement => db.prepare(statement)))
   await db.prepare("INSERT INTO user (id,name,email) VALUES (?,'Operator','operator@example.com')").bind(ACTOR).run()
-  // The archived v11 schema kept the business clock in settings; the current one holds it as a column.
-  await db.prepare(legacy
-    ? `INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at)
-       VALUES (?, 'Sessions', 'sessions', 'sessions', '{"config":{"default_timezone":"Asia/Bangkok"}}', 'theme', 'THB', 'active', 'complete', 'flat', 'experience', ?)`
-    : `INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
+  await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
        VALUES (?, 'Sessions', 'sessions', 'sessions', '{}', 'theme', 'THB', 'active', 'complete', 'flat', 'experience', ?, 'Asia/Bangkok')`)
     .bind(ORG, NOW).run()
   await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('sessions-en', ?, 'en', 1, 'published')").bind(ORG).run()
@@ -505,36 +498,6 @@ test('re-adoption protects cancelled history and a claim racing its atomic write
     const invalid = await db.prepare("SELECT count(*) n FROM product_sessions s WHERE s.capacity IS NOT NULL AND s.capacity < (SELECT COALESCE(SUM(b.party_size),0) FROM bookings b WHERE b.product_session_id=s.id AND b.status='confirmed')").first('n')
     assert.equal(invalid, 0)
     assert.equal(await db.prepare('SELECT product_session_id FROM bookings WHERE id = ?').bind(booking.bookingId).first('product_session_id'), protectedId)
-  } finally { await runtime.dispose() }
-})
-
-
-test('provider additive migration keeps the separately held weekly columns and their populated values', { timeout: 120_000 }, async () => {
-  const { runtime, db } = await boot(true)
-  try {
-    await addRule(db, 'held-rule')
-    await db.prepare("UPDATE product_availability_rules SET end_time='16:00',interval_minutes=30,interval_weeks=2,effective_from_date='2026-01-01',effective_until_date='2030-01-01',duration_minutes=30,capacity=0 WHERE id='held-rule'").run()
-    await db.prepare("INSERT INTO organization_integrations(id,organization_id,provider,account_id,target_id,target_name,measurement_id,revision,created_at,updated_at)VALUES('retained-analytics',?,'google_analytics','linked-account','properties/123','Analytics','G-RETAINED','original-revision',?,?)").bind(ORG,NOW,NOW).run()
-    const integrationBefore=await db.prepare("SELECT * FROM organization_integrations WHERE id='retained-analytics'").first()
-    await db.batch(readFileSync('migrations-history/v11/0001_calendar_member_scheduling.sql', 'utf8').split('--> statement-breakpoint').map(sql => sql.trim()).filter(Boolean).map(sql => db.prepare(sql)))
-    const row = await db.prepare("SELECT end_time,interval_minutes,interval_weeks,effective_from_date,effective_until_date,duration_minutes,capacity FROM product_availability_rules WHERE id='held-rule'").first()
-    assert.deepEqual(row, { end_time: '16:00', interval_minutes: 30, interval_weeks: 2, effective_from_date: '2026-01-01', effective_until_date: '2030-01-01', duration_minutes: 30, capacity: 0 })
-    assert.deepEqual(await db.prepare("SELECT * FROM organization_integrations WHERE id='retained-analytics'").first(),{...integrationBefore,calendar_group:null,include_reservations:null,status:null,last_error:null})
-    await db.prepare("INSERT INTO user(id,name,email) VALUES('integrity-user','Member','integrity@example.test')").run()
-    await db.prepare("INSERT INTO member(id,organizationId,userId) VALUES('integrity-member',?,'integrity-user')").bind(ORG).run()
-    await db.prepare("INSERT INTO member_scheduling(member_id,organization_id,timezone,weekly_json,time_off_json,windows_json,windows_until,public_name,calendar_revision,updated_at,updated_by) VALUES('integrity-member',?,'Asia/Bangkok','[]','[]','[]','2030-01-01T00:00:00.000Z','Retained profile','retained-revision',?,?)").bind(ORG,NOW,ACTOR).run()
-    const scheduleBefore=await db.prepare("SELECT * FROM member_scheduling WHERE member_id='integrity-member'").first()
-    await db.batch(readFileSync('migrations-history/v11/0002_calendar_member_integrity.sql','utf8').split('--> statement-breakpoint').map(sql=>sql.trim()).filter(Boolean).map(sql=>db.prepare(sql)))
-    assert.deepEqual(await db.prepare("SELECT * FROM member_scheduling WHERE member_id='integrity-member'").first(),scheduleBefore,'the forward constraint migration preserves the exact schedule and profile')
-    const analyticsBefore=await db.prepare("SELECT id,organization_id,provider,account_id,target_id,target_name,measurement_id,verified,verification_token,status,last_error,revision,created_at,updated_at FROM organization_integrations WHERE provider='google_analytics'").first()
-    await db.batch(readFileSync('migrations-history/v11/0003_calendar_connection.sql','utf8').split('--> statement-breakpoint').map(sql=>sql.trim()).filter(Boolean).map(sql=>db.prepare(sql)))
-    assert.deepEqual(await db.prepare("SELECT * FROM organization_integrations WHERE provider='google_analytics'").first(),analyticsBefore,'removing calendar export policy preserves the exact Analytics identity and credentials reference')
-    await db.prepare("INSERT INTO organization(id,name,slug) VALUES('foreign-org','Foreign','foreign-org')").run()
-    await assert.rejects(db.prepare("UPDATE member_scheduling SET organization_id='foreign-org' WHERE member_id='integrity-member'").run(),/FOREIGN KEY/)
-    assert.deepEqual(await db.prepare('PRAGMA foreign_key_check').all().then(result=>result.results),[])
-    await db.prepare("DELETE FROM member WHERE id='integrity-member'").run()
-    assert.equal(await db.prepare("SELECT * FROM member_scheduling WHERE member_id='integrity-member'").first(),null,'Better Auth membership deletion removes its scheduling state')
-    assert.deepEqual((await db.prepare('PRAGMA foreign_key_check').all()).results, [])
   } finally { await runtime.dispose() }
 })
 

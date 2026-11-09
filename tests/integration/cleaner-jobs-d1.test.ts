@@ -80,7 +80,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
 
     // Posting the job opens the conversation with the cleaner and every owner and admin, titled by the home, with the job strip.
     const now = new Date(checkout.getTime() - 2 * 86_400_000)
-    assert.equal((await runOrganizationJobs(env, db, ORG, now))?.toISOString(), at(day(2), '18:00').toISOString(), 'the next wake is the evening-before reminder')
+    assert.deepEqual(await runOrganizationJobs(env, db, ORG, now).then(run => [run.next?.toISOString(), run.failures]), [at(day(2), '18:00').toISOString(), []], 'the next wake is the evening-before reminder')
     // Lee's own turnover is the cleaner's too, so they have one conversation per job.
     const threads = await listTeamThreads(env, db, cleaner)
     assert.deepEqual(threads.map(item => item.stayId).sort(), [dee.id, lee.id].sort())
@@ -117,7 +117,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     }
     const warningId = await db.prepare('SELECT id FROM team_messages WHERE thread_id = ? AND idempotency_key = ?').bind(thread.id, `warning:${turnover.id}:${turnover.due_at}`).first<string>('id')
     assert.equal(await alerted(`team-message:${warningId}`), 2, 'both hosts are warned')
-    assert.equal((await runOrganizationJobs(env, db, ORG, at(day(3), '13:05')))?.toISOString(), at(day(4), '18:00').toISOString(), 'only Lee’s turnover is still pending')
+    assert.deepEqual(await runOrganizationJobs(env, db, ORG, at(day(3), '13:05')).then(run => [run.next?.toISOString(), run.failures]), [at(day(4), '18:00').toISOString(), []], 'only Lee’s turnover is still pending')
 
     // The home is handed to the cook: the open job follows, the cleaner is told it is no longer theirs, the cook gets it.
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cook', assigned_team_id: null })
@@ -216,8 +216,8 @@ test('a consultation gives its attorney jobs that follow the booking and an aler
     await db.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('partner','Pat Partner','partner@example.test',1)").run()
     await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES('partner-member',?,'partner','owner',1)").bind(ORG).run()
     const morning = localDateTimeToInstant('2099-10-01', '08:05', 'America/New_York', 'compatible')
-    const next = await runOrganizationJobs(env, db, ORG, morning)
-    assert.equal(next?.toISOString(), localDateTimeToInstant('2099-10-01', '18:00', 'America/New_York', 'compatible').toISOString())
+    const run = await runOrganizationJobs(env, db, ORG, morning)
+    assert.deepEqual([run.next?.toISOString(), run.failures], [localDateTimeToInstant('2099-10-01', '18:00', 'America/New_York', 'compatible').toISOString(), []])
     await runOrganizationJobs(env, db, ORG, morning)
     const attorney = await teamAccessFor(memberAccessPrincipal({ userId: 'host', role: 'member', organizationId: ORG } as never, { env }), 'host-member', 'send')
     const threads = await listTeamThreads(env, db, attorney, { bookingId: booking.bookingId })

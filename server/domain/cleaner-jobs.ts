@@ -84,7 +84,7 @@ function reminders(task: TaskRow): Array<{ key: string; at: Date; until: Date; k
  * Posts what the organization's cleaners need to hear now and returns when the
  * next reminder is due, or null when nothing is pending.
  */
-export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, organizationId: string, now = new Date()): Promise<Date | null> {
+export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, organizationId: string, now = new Date()): Promise<{ next: Date | null; failures: unknown[] }> {
   const organization = await queryFirst<{ name: string }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId])
   if (!organization) throw new Error(`Organization ${organizationId} is missing`)
   const [members, teamRows, tasks] = await Promise.all([
@@ -183,6 +183,6 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
       failures.push(error)
     }
   }
-  if (failures.length) throw new AggregateError(failures, `${failures.length} of ${tasks.length} cleaning jobs could not be told about: ${failures.map(error => error instanceof Error ? error.message : String(error)).join('; ')}`)
-  return pending.length ? new Date(Math.min(...pending.map(date => date.getTime()))) : null
+  // The jobs that could not be told about are the caller's to report; the next wake still comes from the ones that could.
+  return { next: pending.length ? new Date(Math.min(...pending.map(date => date.getTime()))) : null, failures }
 }

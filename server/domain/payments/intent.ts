@@ -237,7 +237,7 @@ export type PaymentReturn =
   | { state: 'paid'; kind: 'stay'; activity_id: string; receipt_token: string }
   /** Stripe is still clearing the payment; nothing is booked until it captures. */
   | { state: 'processing' }
-  /** A bank debit cleared after what it paid for was taken; the payment is refunded in full. */
+  /** A bank debit cleared after what it paid for was taken; the payment is refunded in full, or Stripe is still settling that refund. */
   | { state: 'refunded' }
   /** What it was for has gone, so the authorization was cancelled and nothing was charged. */
   | { state: 'expired' }
@@ -247,6 +247,10 @@ async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment
   if (!hold) throw new Error('Captured payment has no checkout hold')
   if (hold.status !== 'converted') {
     if (payment.refunded_amount > 0) return { state: 'refunded' }
+    // A bank debit that cleared after its capacity went is refunded in full; Stripe may still be settling that refund.
+    const refund = await queryFirst<{ status: string; error: string | null }>(db, 'SELECT status, error FROM payment_refunds WHERE payment_id=? ORDER BY created_at DESC LIMIT 1', [payment.id])
+    if (refund && ['creating', 'pending', 'requires_action', 'succeeded'].includes(refund.status)) return { state: 'refunded' }
+    if (refund) throw new Error(`Captured payment has no booking and its refund ${refund.status}${refund.error ? `: ${refund.error}` : ''}`)
     throw new Error('Captured payment has no booking it paid for')
   }
   if (payment.subject_type === 'stay') {

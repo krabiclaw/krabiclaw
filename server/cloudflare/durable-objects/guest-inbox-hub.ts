@@ -145,11 +145,14 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
   override async alarm(): Promise<void> {
     const organizationId = await this.ctx.storage.get<string>(JOBS_ORGANIZATION)
     if (!organizationId) throw new Error('The jobs alarm fired for a hub that holds no organization')
-    const next = await runOrganizationJobs(this.env, this.env.DB, organizationId)
-    if (!next) return
-    // A change that arrived while this ran has already set an earlier wake.
-    const scheduled = await this.ctx.storage.getAlarm()
-    if (scheduled === null || next.getTime() < scheduled) await this.ctx.storage.setAlarm(next.getTime())
+    const { next, failures } = await runOrganizationJobs(this.env, this.env.DB, organizationId)
+    if (next) {
+      // A change that arrived while this ran has already set an earlier wake.
+      const scheduled = await this.ctx.storage.getAlarm()
+      if (scheduled === null || next.getTime() < scheduled) await this.ctx.storage.setAlarm(next.getTime())
+    }
+    // The other jobs' reminders are armed before a failing one is reported.
+    if (failures.length) throw new AggregateError(failures, `${failures.length} cleaning jobs of ${organizationId} could not be told about: ${failures.map(error => error instanceof Error ? error.message : String(error)).join('; ')}`)
   }
 
   override webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): void {
