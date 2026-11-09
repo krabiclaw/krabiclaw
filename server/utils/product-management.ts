@@ -2050,6 +2050,8 @@ export async function deleteProduct(db: DbClient, input: {
     ...pages.flatMap(page => page.queries),
     ...resourceLocalizationDeletionQueries('product', { query: 'SELECT ?', params: [input.productId] }),
     ...invalidations,
+    // Its pictures go with it; the assets stay in the library.
+    buildDeleteOwnerPlacementsQuery({ ownerType: 'product', ownerId: input.productId, organizationId: input.organizationId }),
     { query: 'DELETE FROM products WHERE organization_id = ? AND id = ?', params: [input.organizationId, input.productId] },
   ], { operation: 'Delete product', action: 'delete it', stay: product.kind === 'stay' }).catch((error: unknown) => {
     if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) conflict('This product received a booking, stay, guest conversation, schedule or checkout while you were deleting it. Turn it off instead of deleting it.')

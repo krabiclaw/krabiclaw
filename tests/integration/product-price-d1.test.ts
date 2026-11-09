@@ -390,8 +390,12 @@ test('reconcile converges instead of duplicating, and deletion respects the cano
       VALUES ('sl-en', ?, 'en', 1, 'published', ?, ?)`).bind(ORG, NOW, NOW).run()
     await db.prepare(`INSERT INTO content_documents (id, organization_id, kind, row_role, locale, product_id, title, path, sort_order, metadata_json, created_at, updated_at)
       VALUES ('doc-1', ?, 'page', 'root', 'en', 'src-1', 'One', '/one', 0, '{"page_type":"custom"}', ?, ?)`).bind(ORG, NOW, NOW).run()
+    await db.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source) VALUES ('src-1-photo', ?, 'image', 'cloudflare_r2', 'uploaded')").bind(ORG).run()
+    await db.prepare("INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id) VALUES ('src-1-card', ?, 'product', 'src-1', 'social_card', 'src-1-photo')").bind(ORG).run()
     await deleteProduct(db, { organizationId: ORG, productId: 'src-1' })
     assert.equal(await db.prepare("SELECT count(*) n FROM content_documents WHERE id='doc-1'").first<number>('n'),0)
+    assert.equal(await db.prepare("SELECT count(*) n FROM media_placements WHERE owner_type='product' AND owner_id='src-1'").first<number>('n'), 0, 'its pictures went with it')
+    assert.equal(await db.prepare("SELECT count(*) n FROM media_assets WHERE id='src-1-photo'").first<number>('n'), 1, 'the asset stays in the library')
     assert.equal(await db.prepare('SELECT count(*) n FROM products').first<number>('n'), 1)
     assert.equal(await db.prepare('SELECT count(*) n FROM product_variants').first<number>('n'), 1, 'the deleted product took its variants with it')
   } finally { await runtime.dispose() }
