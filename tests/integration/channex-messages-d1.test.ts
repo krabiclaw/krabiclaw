@@ -602,7 +602,7 @@ test('an existing stay timeline is adopted intact; two existing timelines fail e
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
-test('replies use actual provider receipts once; an uncertain write remains visible and cannot be blindly resent', async () => {
+test('a reply is sent with the message id Channex returns, and any Channex error is a failed reply sent again under its key', async () => {
   const { runtime, db, env } = await boot()
   const provider = new Provider(), realFetch = globalThis.fetch
   let releaseRetry: (() => void) | undefined
@@ -618,54 +618,42 @@ test('replies use actual provider receipts once; an uncertain write remains visi
     assert.equal((await executeGuestThreadOperation(db, input)).ok, true)
     assert.equal((await executeGuestThreadOperation(db, input)).ok, true)
     assert.equal(provider.sends, 1)
-    assert.deepEqual(await db.prepare("SELECT channel, provider, status, provider_message_id, non_delivery_confirmed FROM guest_thread_deliveries").first(), { channel: 'airbnb', provider: 'channex', status: 'accepted', provider_message_id: 'accepted-1', non_delivery_confirmed: 0 })
+    assert.deepEqual(await db.prepare("SELECT channel, provider, status, provider_message_id FROM guest_thread_deliveries").first(), { channel: 'airbnb', provider: 'channex', status: 'accepted', provider_message_id: 'accepted-1' })
     await mirrorChannexThread(db, env, 'thread', 'property')
     assert.equal(await db.prepare('SELECT count(*) FROM activity_entries WHERE request_id IS NOT NULL').first('count(*)'), 4)
     assert.equal((await getGuestThreadDetail(db, result.request_id, ORG))!.entries.length, 3)
-    provider.uncertain = true
-    const uncertain = { ...input, body: 'Second reply', idempotencyKey: 'uncertain' }
-    const failed = await executeGuestThreadOperation(db, uncertain)
-    assert.equal(failed.ok, false)
-    if (failed.ok || failed.reason !== 'delivery_failed') throw new Error('Expected an explicit recorded delivery failure')
-    assert.deepEqual([failed.status, failed.code, failed.field, failed.mutation_applied, failed.retry_with_same_idempotency_key], [502, 'CHANNEL_REPLY_UNCERTAIN', 'delivery.status', true, false])
-    const retry = await executeGuestThreadOperation(db, uncertain)
-    assert.equal(retry.ok, false)
-    if (retry.ok || retry.reason !== 'delivery_failed') throw new Error('Expected explicit review-required result')
-    assert.equal(retry.code, 'CHANNEL_REPLY_REVIEW_REQUIRED')
-    assert.equal(provider.sends, 2)
-    const detail = (await getGuestThreadDetail(db, result.request_id, ORG))!
-    assert.equal(detail.deliveryFailures.length, 1)
-    assert.equal(detail.deliveryFailures[0]!.status, 'uncertain')
-    assert.deepEqual(await db.prepare(`SELECT d.status, d.non_delivery_confirmed FROM guest_thread_deliveries d
-      JOIN activity_entries a ON a.id = d.entry_id WHERE a.dedupe_key = ?`).bind(`guest-thread-operation:${result.request_id}:uncertain`).first(),
-      { status: 'uncertain', non_delivery_confirmed: 0 })
     await assert.rejects(executeGuestThreadOperation(db, { ...input, body: 'Changed text' }), code('IDEMPOTENCY_CONFLICT'))
     await assert.rejects(executeGuestThreadOperation(db, { ...input, photos: [{ filename: 'file', bytes: new Uint8Array([1]) }] }), code('CHANNEL_PHOTO_MESSAGE_INVALID'))
 
-    provider.uncertain = false
-    provider.refuseMessage = true
-    const refusedInput = { ...input, body: 'Recovered host reply', idempotencyKey: 'certain-refusal' }
-    const refused = await executeGuestThreadOperation(db, refusedInput)
-    if (refused.ok || refused.reason !== 'delivery_failed') throw new Error('Expected a definite recorded refusal')
-    assert.deepEqual([refused.code, refused.retry_with_same_idempotency_key], ['CHANNEL_REPLY_FAILED', true])
-    const refusedEntry = await db.prepare('SELECT id, payload_json FROM activity_entries WHERE dedupe_key = ?').bind(`guest-thread-operation:${result.request_id}:certain-refusal`).first<{ id: string; payload_json: string }>()
+    // Each way Channex can answer with an error is a failed reply with Channex's error, shown on the conversation.
+    for (const [failure, key] of [['refuseMessage', 'refused'], ['airbnbUnavailable', 'upstream'], ['uncertain', 'connection']] as const) {
+      Object.assign(provider, { [failure]: true })
+      const failedInput = { ...input, body: `Reply that fails: ${key}`, idempotencyKey: key }
+      const failed = await executeGuestThreadOperation(db, failedInput)
+      if (failed.ok || failed.reason !== 'delivery_failed') throw new Error(`Expected a failed reply for ${key}`)
+      assert.deepEqual([failed.status, failed.code, failed.retry_with_same_idempotency_key], [502, 'CHANNEL_REPLY_FAILED', true], key)
+      const receipt = await db.prepare(`SELECT d.status, d.provider_message_id, d.error FROM guest_thread_deliveries d JOIN activity_entries a ON a.id = d.entry_id
+        WHERE a.dedupe_key = ?`).bind(`guest-thread-operation:${result.request_id}:${key}`).first<{ status: string; provider_message_id: string | null; error: string | null }>()
+      assert.deepEqual([receipt?.status, receipt?.provider_message_id], ['failed', null], key)
+      assert.ok(receipt?.error, `${key}: Channex's error is recorded`)
+      Object.assign(provider, { [failure]: false })
+    }
+    const refusedEntry = await db.prepare('SELECT id FROM activity_entries WHERE dedupe_key = ?').bind(`guest-thread-operation:${result.request_id}:refused`).first<{ id: string }>()
     assert.ok(refusedEntry)
-    assert.deepEqual(await db.prepare('SELECT status, provider_message_id, non_delivery_confirmed FROM guest_thread_deliveries WHERE entry_id = ?').bind(refusedEntry.id).first(),
-      { status: 'failed', provider_message_id: null, non_delivery_confirmed: 1 })
     const refusedProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
     assert.deepEqual(refusedProgress?.verification, { status: 'failed', basis: 'provider_acceptance', receipts: [{
-      id: `guest-thread-channex:${result.request_id}:certain-refusal`, channel: 'airbnb', provider: 'channex', status: 'failed', providerMessageId: null, nonDeliveryConfirmed: true,
+      id: `guest-thread-channex:${result.request_id}:refused`, channel: 'airbnb', provider: 'channex', status: 'failed', providerMessageId: null,
     }] })
-    provider.refuseMessage = false
+    assert.equal((await getGuestThreadDetail(db, result.request_id, ORG))!.deliveryFailures.length, 3)
+
+    // Sending the failed reply again under its key sends it once, even when two retries race.
+    const refusedInput = { ...input, body: 'Reply that fails: refused', idempotencyKey: 'refused' }
     const started = new Promise<void>(resolve => { provider.onSend = resolve })
     provider.holdReply = new Promise<void>(resolve => { releaseRetry = resolve })
+    const sendsBefore = provider.sends
     const recovering = Promise.all([executeGuestThreadOperation(db, refusedInput), executeGuestThreadOperation(db, refusedInput)])
     await started
-    assert.deepEqual(await db.prepare('SELECT status, error, non_delivery_confirmed FROM guest_thread_deliveries WHERE entry_id = ?').bind(refusedEntry.id).first(),
-      { status: 'sending', error: null, non_delivery_confirmed: null }, 'claiming the retry atomically clears the previous attempt’s non-delivery proof')
-    const sendingProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
-    assert.deepEqual([sendingProgress?.verification.status, sendingProgress?.verification.receipts.map(receipt => [receipt.status, receipt.nonDeliveryConfirmed])],
-      ['unconfirmed', [['sending', null]]])
+    assert.equal((await db.prepare('SELECT status FROM guest_thread_deliveries WHERE entry_id = ?').bind(refusedEntry.id).first('status')), 'sending')
     releaseRetry!()
     const recovered = await recovering
     provider.holdReply = undefined
@@ -674,55 +662,14 @@ test('replies use actual provider receipts once; an uncertain write remains visi
     for (const outcome of recovered) {
       if (outcome.ok) continue
       if (outcome.reason !== 'delivery_failed') throw new Error(`Unexpected concurrent retry result: ${outcome.reason}`)
-      assert.deepEqual([outcome.status, outcome.code], [409, 'CHANNEL_REPLY_REVIEW_REQUIRED'])
+      assert.deepEqual([outcome.status, outcome.code, outcome.message], [409, 'CHANNEL_REPLY_FAILED', 'This reply is already being sent.'])
     }
-    assert.equal(provider.sends, 4, 'the refused text retry sends once, including concurrent retries')
-    await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.deepEqual((await getGuestThreadDetail(db, result.request_id, ORG))!.entries.filter(entry => entry.id === refusedEntry.id).map(entry => entry.body), [refusedInput.body])
-    assert.deepEqual(await db.prepare(`SELECT d.status, d.provider_message_id, d.error, d.non_delivery_confirmed FROM guest_thread_deliveries d
-      JOIN activity_entries a ON a.id = d.entry_id WHERE a.dedupe_key = ?`).bind(`guest-thread-operation:${result.request_id}:certain-refusal`).first(),
-      { status: 'accepted', provider_message_id: 'accepted-4', error: null, non_delivery_confirmed: 0 })
+    assert.equal(provider.sends - sendsBefore, 1, 'concurrent retries send once')
+    assert.deepEqual(await db.prepare('SELECT status, provider_message_id, error FROM guest_thread_deliveries WHERE entry_id = ?').bind(refusedEntry.id).first(),
+      { status: 'accepted', provider_message_id: `accepted-${provider.sends}`, error: null })
     const recoveredProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === refusedEntry.id)
-    assert.deepEqual([recoveredProgress?.verification.status, recoveredProgress?.verification.receipts.map(receipt => [receipt.status, receipt.providerMessageId, receipt.nonDeliveryConfirmed])],
-      ['verified', [['accepted', 'accepted-4', false]]])
-
-    // A Channex 422 carrying an upstream Airbnb 500 does not prove refusal.
-    provider.airbnbUnavailable = true
-    const upstreamInput = { ...input, body: 'Reply with an upstream unknown outcome', idempotencyKey: 'upstream-unknown' }
-    const upstream = await executeGuestThreadOperation(db, upstreamInput)
-    if (upstream.ok || upstream.reason !== 'delivery_failed') throw new Error('Expected an uncertain upstream write')
-    assert.deepEqual([upstream.code, upstream.retry_with_same_idempotency_key, upstream.provider_error?.code, upstream.provider_error?.uncertain], ['CHANNEL_REPLY_UNCERTAIN', false, 'AIRBNB_UNAVAILABLE', true])
-    const upstreamRetry = await executeGuestThreadOperation(db, upstreamInput)
-    if (upstreamRetry.ok || upstreamRetry.reason !== 'delivery_failed') throw new Error('Expected an unknown write to require review')
-    assert.deepEqual([upstreamRetry.status, upstreamRetry.code, upstreamRetry.retry_with_same_idempotency_key], [409, 'CHANNEL_REPLY_REVIEW_REQUIRED', false])
-    assert.equal(provider.sends, 5)
-    assert.deepEqual(await db.prepare(`SELECT d.status, d.provider_message_id, d.non_delivery_confirmed FROM guest_thread_deliveries d
-      JOIN activity_entries a ON a.id = d.entry_id WHERE a.dedupe_key = ?`).bind(`guest-thread-operation:${result.request_id}:upstream-unknown`).first(),
-      { status: 'uncertain', provider_message_id: null, non_delivery_confirmed: 0 })
-
-    // An old writer can still persist a failed status after this additive
-    // migration. Its omitted proof is unknown, even if the error says refused.
-    const oldInput = { ...refusedInput, idempotencyKey: 'old-writer' }
-    const oldEntry = await appendEntry(db, { threadId: result.request_id, kind: 'message', actorKind: 'member', actorUserId: OWNER,
-      body: oldInput.body, channel: 'airbnb', eventName: 'thread.member_reply', payloadJson: JSON.parse(refusedEntry.payload_json),
-      dedupeKey: `guest-thread-operation:${result.request_id}:old-writer` })
-    const oldReceipt = await createDeliveryReceipt(db, { entryId: oldEntry.id, channel: 'airbnb', provider: 'channex', purpose: 'member_reply',
-      idempotencyKey: `guest-thread-channex:${result.request_id}:old-writer` })
-    await db.prepare("UPDATE guest_thread_deliveries SET status = 'failed', error = 'Channex refused the reply' WHERE id = ?").bind(oldReceipt.id).run()
-    assert.deepEqual(await db.prepare('SELECT status, non_delivery_confirmed FROM guest_thread_deliveries WHERE id = ?').bind(oldReceipt.id).first(),
-      { status: 'failed', non_delivery_confirmed: null })
-    for (const proof of [null, 0]) {
-      await db.prepare('UPDATE guest_thread_deliveries SET non_delivery_confirmed = ? WHERE id = ?').bind(proof, oldReceipt.id).run()
-      const blocked = await executeGuestThreadOperation(db, oldInput)
-      if (blocked.ok || blocked.reason !== 'delivery_failed') throw new Error('Expected failed receipts without proven non-delivery to require review')
-      assert.deepEqual([blocked.status, blocked.code, blocked.retry_with_same_idempotency_key], [409, 'CHANNEL_REPLY_REVIEW_REQUIRED', false])
-      assert.deepEqual(await db.prepare('SELECT status, non_delivery_confirmed FROM guest_thread_deliveries WHERE id = ?').bind(oldReceipt.id).first(),
-        { status: 'failed', non_delivery_confirmed: proof })
-      const oldProgress = (await listBusinessOutcomes(db, principal, { limit: 100 })).outcomes.find(outcome => outcome.id === oldEntry.id)
-      assert.deepEqual([oldProgress?.verification.status, oldProgress?.verification.receipts.map(receipt => [receipt.status, receipt.nonDeliveryConfirmed])],
-        ['unconfirmed', [['failed', proof === null ? null : false]]])
-    }
-    assert.equal(provider.sends, 5, 'neither an old-writer null nor explicit negative proof permits another provider call')
+    assert.deepEqual([recoveredProgress?.verification.status, recoveredProgress?.verification.receipts.map(receipt => [receipt.status, receipt.providerMessageId])],
+      ['verified', [['accepted', `accepted-${provider.sends}`]]])
   } finally { releaseRetry?.(); globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
@@ -754,7 +701,7 @@ test('photo replies retain their canonical media, replay without expired source 
     const saved = await (await runtime.getR2Bucket('MEDIA_BUCKET')).get(asset.r2_key)
     assert.ok(saved)
     assert.deepEqual(new Uint8Array(await saved.arrayBuffer()), bytes, 'the canonical media store retained the actual uploaded image')
-    assert.deepEqual(await db.prepare('SELECT status, provider_message_id, non_delivery_confirmed FROM guest_thread_deliveries').first(), { status: 'accepted', provider_message_id: 'accepted-1', non_delivery_confirmed: 0 })
+    assert.deepEqual(await db.prepare('SELECT status, provider_message_id FROM guest_thread_deliveries').first(), { status: 'accepted', provider_message_id: 'accepted-1' })
     await mirrorChannexThread(db, env, 'thread', 'property')
     const detail = (await getGuestThreadDetail(db, mirrored.request_id, ORG))!
     assert.equal(detail.entries.length, 3, 'the receipt suppresses only its exact provider echo')
@@ -765,20 +712,18 @@ test('photo replies retain their canonical media, replay without expired source 
     assert.deepEqual([resolutions, provider.sends, provider.uploads.length], [1, 1, 1])
     await assert.rejects(executeGuestThreadOperation(db, { ...replay, photos: { ...replay.photos, sourceIds: ['different-photo-id'] } }), code('IDEMPOTENCY_CONFLICT'))
 
+    // The connection ends after Channex stored the photo: the reply failed, with Channex's error.
     provider.uncertain = true
-    const uncertainInput = { ...input, idempotencyKey: 'uncertain-photo' }
-    const uncertain = await executeGuestThreadOperation(db, uncertainInput)
-    if (uncertain.ok || uncertain.reason !== 'delivery_failed') throw new Error('Expected an explicit recorded delivery failure')
-    assert.equal(uncertain.code, 'CHANNEL_REPLY_UNCERTAIN')
-    const retry = await executeGuestThreadOperation(db, uncertainInput)
-    if (retry.ok || retry.reason !== 'delivery_failed') throw new Error('Expected explicit review-required result')
-    assert.equal(retry.code, 'CHANNEL_REPLY_REVIEW_REQUIRED')
+    const lostInput = { ...input, idempotencyKey: 'lost-photo' }
+    const lost = await executeGuestThreadOperation(db, lostInput)
+    if (lost.ok || lost.reason !== 'delivery_failed') throw new Error('Expected a failed reply')
+    assert.deepEqual([lost.code, lost.retry_with_same_idempotency_key], ['CHANNEL_REPLY_FAILED', true])
     assert.deepEqual([resolutions, provider.sends, provider.uploads.length], [2, 2, 2])
     await mirrorChannexThread(db, env, 'thread', 'property')
-    const afterUncertain = (await getGuestThreadDetail(db, mirrored.request_id, ORG))!
-    assert.equal(afterUncertain.entries.length, 5, 'an unknown provider identity preserves both the attempted photo and actual resource')
-    assert.equal(afterUncertain.deliveryFailures[0]!.status, 'uncertain')
-    // Mirroring keeps the photos Channex holds that KrabiClaw does not: the guest's, and the echo of the uncertain reply whose
+    const afterLost = (await getGuestThreadDetail(db, mirrored.request_id, ORG))!
+    assert.equal(afterLost.entries.length, 5, 'without Channex\'s message id the failed reply and the message Channex stored are both shown')
+    assert.equal(afterLost.deliveryFailures[0]!.status, 'failed')
+    // Mirroring keeps the photos Channex holds that KrabiClaw does not: the guest's, and the echo of the failed reply whose
     // identity was never learned. The echo of the accepted reply is that reply's own photo, already stored, and is not read again.
     assert.deepEqual(provider.fileReads, ['/attachment/file', '/api/v1/attachments/photo-2'])
     const mirroredPhotos = 2
@@ -791,7 +736,7 @@ test('photo replies retain their canonical media, replay without expired source 
     for (const outcome of raced) {
       if (outcome.ok) continue
       if (outcome.reason !== 'delivery_failed') throw new Error(`Unexpected concurrent reply result: ${outcome.reason}`)
-      assert.deepEqual([outcome.status, outcome.code], [409, 'CHANNEL_REPLY_REVIEW_REQUIRED'])
+      assert.deepEqual([outcome.status, outcome.code], [409, 'CHANNEL_REPLY_FAILED'])
     }
     assert.deepEqual([provider.sends, provider.uploads.length], [3, 3], 'the same concurrent photo intent delivers once')
     assert.deepEqual(await db.prepare(`SELECT d.status, d.provider_message_id, COUNT(mp.asset_id) AS photos FROM guest_thread_deliveries d
@@ -810,11 +755,11 @@ test('photo replies retain their canonical media, replay without expired source 
     assert.deepEqual([refused.status, refused.code, refused.retry_with_same_idempotency_key], [502, 'CHANNEL_REPLY_FAILED', true])
     assert.equal(refused.provider_error?.uncertain, false)
     assert.deepEqual([provider.sends, provider.uploads.length], [3, 4], 'a refused upload never calls the guest message endpoint')
-    const refusedReceipt = await db.prepare(`SELECT d.status, d.provider_message_id, d.error, d.non_delivery_confirmed, a.id FROM guest_thread_deliveries d
+    const refusedReceipt = await db.prepare(`SELECT d.status, d.provider_message_id, d.error, a.id FROM guest_thread_deliveries d
       JOIN activity_entries a ON a.id = d.entry_id WHERE a.dedupe_key = ?`).bind(`guest-thread-operation:${mirrored.request_id}:refused-photo-upload`)
-      .first<{ status: string; provider_message_id: string | null; error: string; non_delivery_confirmed: number; id: string }>()
+      .first<{ status: string; provider_message_id: string | null; error: string; id: string }>()
     assert.ok(refusedReceipt)
-    assert.deepEqual([refusedReceipt.status, refusedReceipt.provider_message_id, refusedReceipt.non_delivery_confirmed], ['failed', null, 1])
+    assert.deepEqual([refusedReceipt.status, refusedReceipt.provider_message_id], ['failed', null])
     assert.match(refusedReceipt.error, /no guest message was sent/)
     const refusalDetail = (await getGuestThreadDetail(db, mirrored.request_id, ORG))!
     assert.equal(refusalDetail.entries.find(entry => entry.id === refusedReceipt.id)!.attachments.length, 1, 'the failed send retains the chosen photo for review')
@@ -838,17 +783,17 @@ test('photo replies retain their canonical media, replay without expired source 
     await assert.rejects(executeGuestThreadOperation(db, expiredRefused), code('CHANNEL_REPLY_PHOTO_UNAVAILABLE'))
     await photoBucket.put(retainedPhoto.r2_key, bytes, { httpMetadata: { contentType: 'image/avif' } })
     assert.deepEqual([provider.sends, provider.uploads.length], [3, 4], 'missing or invalid retained media never reaches the provider or caller resolver')
-    assert.deepEqual(await db.prepare('SELECT status, non_delivery_confirmed FROM guest_thread_deliveries WHERE entry_id = ?').bind(refusedReceipt.id).first(),
-      { status: 'failed', non_delivery_confirmed: 1 }, 'media validation happens before the retry claim')
+    assert.deepEqual(await db.prepare('SELECT status FROM guest_thread_deliveries WHERE entry_id = ?').bind(refusedReceipt.id).first(),
+      { status: 'failed' }, 'media validation happens before the retry claim')
     provider.refuseAttachment = false
     const recovered = await Promise.all([executeGuestThreadOperation(db, expiredRefused), executeGuestThreadOperation(db, expiredRefused)])
     assert.ok(recovered.some(outcome => outcome.ok))
     for (const outcome of recovered) {
       if (outcome.ok) continue
       if (outcome.reason !== 'delivery_failed') throw new Error(`Unexpected concurrent photo retry result: ${outcome.reason}`)
-      assert.deepEqual([outcome.status, outcome.code], [409, 'CHANNEL_REPLY_REVIEW_REQUIRED'])
+      assert.deepEqual([outcome.status, outcome.code], [409, 'CHANNEL_REPLY_FAILED'])
     }
-    assert.deepEqual([provider.sends, provider.uploads.length], [4, 5], 'concurrent retries of the proven non-delivery send one photo')
+    assert.deepEqual([provider.sends, provider.uploads.length], [4, 5], 'concurrent retries of the failed reply send one photo')
     assert.equal(resolutions, beforeRecoveryResolutions, 'matching retries never re-resolve the expired host source')
     assert.deepEqual(provider.uploads[4], provider.uploads[3], 'the retry sends the same stored photo bytes and filename')
     const recoveredDetail = (await getGuestThreadDetail(db, mirrored.request_id, ORG))!
@@ -860,8 +805,8 @@ test('photo replies retain their canonical media, replay without expired source 
     const recoveredBytes = await photoBucket.get(retainedPhoto.r2_key)
     assert.ok(recoveredBytes)
     assert.deepEqual(new Uint8Array(await recoveredBytes.arrayBuffer()), bytes)
-    assert.deepEqual(await db.prepare('SELECT status, provider_message_id, error, non_delivery_confirmed FROM guest_thread_deliveries WHERE entry_id = ?').bind(refusedReceipt.id).first(),
-      { status: 'accepted', provider_message_id: 'accepted-4', error: null, non_delivery_confirmed: 0 })
+    assert.deepEqual(await db.prepare('SELECT status, provider_message_id, error FROM guest_thread_deliveries WHERE entry_id = ?').bind(refusedReceipt.id).first(),
+      { status: 'accepted', provider_message_id: 'accepted-4', error: null })
     assert.equal(await db.prepare("SELECT count(*) FROM media_assets WHERE status = 'active'").first('count(*)'), 4 + mirroredPhotos, 'retry reuses the retained photo')
 
     provider.attachmentNetworkFailure = true
@@ -879,15 +824,15 @@ test('photo replies retain their canonical media, replay without expired source 
     const retainedBytes = await (await runtime.getR2Bucket('MEDIA_BUCKET')).get(retained.r2_key)
     assert.ok(retainedBytes)
     assert.deepEqual(new Uint8Array(await retainedBytes.arrayBuffer()), bytes)
-    assert.deepEqual(await db.prepare('SELECT status, provider_message_id, non_delivery_confirmed FROM guest_thread_deliveries WHERE entry_id = ?').bind(retained.id).first(),
-      { status: 'failed', provider_message_id: null, non_delivery_confirmed: 1 }, 'an interrupted upload still proves the guest-message endpoint was never called')
+    assert.deepEqual(await db.prepare('SELECT status, provider_message_id FROM guest_thread_deliveries WHERE entry_id = ?').bind(retained.id).first(),
+      { status: 'failed', provider_message_id: null }, 'an interrupted upload is a failed reply')
     provider.attachmentNetworkFailure = false
     assert.equal((await executeGuestThreadOperation(db, networkInput)).ok, true)
     assert.deepEqual([provider.sends, provider.uploads.length], [5, 7])
     assert.deepEqual((await getGuestThreadDetail(db, mirrored.request_id, ORG))!.entries.filter(entry => entry.id === retained.id).map(entry => entry.attachments.map(photo => [photo.id, photo.url])),
       [[[retained.asset_id, retained.public_url]]])
-    assert.deepEqual(await db.prepare('SELECT status, provider_message_id, error, non_delivery_confirmed FROM guest_thread_deliveries WHERE entry_id = ?').bind(retained.id).first(),
-      { status: 'accepted', provider_message_id: 'accepted-5', error: null, non_delivery_confirmed: 0 })
+    assert.deepEqual(await db.prepare('SELECT status, provider_message_id, error FROM guest_thread_deliveries WHERE entry_id = ?').bind(retained.id).first(),
+      { status: 'accepted', provider_message_id: 'accepted-5', error: null })
     assert.equal(await db.prepare('SELECT count(*) FROM activity_entries WHERE dedupe_key = ?').bind(`guest-thread-operation:${mirrored.request_id}:interrupted-photo-upload`).first('count(*)'), 1)
     assert.equal(await db.prepare("SELECT count(*) FROM media_assets WHERE status = 'active'").first('count(*)'), 5 + mirroredPhotos)
     assert.equal((await executeGuestThreadOperation(db, networkInput)).ok, true)
@@ -924,8 +869,8 @@ test('photo replies retain their canonical media, replay without expired source 
     assert.deepEqual(provider.uploads[8], { file: Buffer.from(imageBytes).toString('base64'), file_name: 'entry.png', file_type: 'image/png' })
     const imageDetail = (await getGuestThreadDetail(db, mirrored.request_id, ORG))!
     assert.deepEqual(imageDetail.entries.find(entry => entry.id === imageAsset.entry_id)!.attachments.map(photo => photo.id), [imageAsset.id])
-    assert.deepEqual(await db.prepare('SELECT status, provider_message_id, non_delivery_confirmed FROM guest_thread_deliveries WHERE entry_id = ?').bind(imageAsset.entry_id).first(),
-      { status: 'accepted', provider_message_id: 'accepted-6', non_delivery_confirmed: 0 })
+    assert.deepEqual(await db.prepare('SELECT status, provider_message_id FROM guest_thread_deliveries WHERE entry_id = ?').bind(imageAsset.entry_id).first(),
+      { status: 'accepted', provider_message_id: 'accepted-6' })
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 
@@ -944,14 +889,14 @@ test('an in-flight or interrupted reply never blocks actual provider messages an
     await started
     provider.messages.push(provider.message('host-on-airbnb', 'property', 'A real host message'), provider.message('new-guest', 'guest', 'Another guest message'))
     await mirrorChannexThread(db, env, 'thread', 'property')
-    assert.deepEqual(await db.prepare('SELECT status, non_delivery_confirmed FROM guest_thread_deliveries').first(), { status: 'sending', non_delivery_confirmed: null })
+    assert.deepEqual(await db.prepare('SELECT status FROM guest_thread_deliveries').first(), { status: 'sending' })
     const pending = (await getGuestThreadDetail(db, mirrored.request_id, ORG))!
     assert.equal(pending.entries.length, 6)
     assert.equal(pending.entries.filter(entry => entry.body === input.body).length, 2, 'unknown identity preserves the attempt and the actual resource')
     const retry = await executeGuestThreadOperation(db, input)
     assert.equal(retry.ok, false)
-    if (retry.ok || retry.reason !== 'delivery_failed') throw new Error('Expected unconfirmed replay to require review')
-    assert.equal(retry.code, 'CHANNEL_REPLY_REVIEW_REQUIRED')
+    if (retry.ok || retry.reason !== 'delivery_failed') throw new Error('Expected the reply being sent to refuse a second send')
+    assert.deepEqual([retry.status, retry.code, retry.message], [409, 'CHANNEL_REPLY_FAILED', 'This reply is already being sent.'])
     assert.equal(provider.sends, 1)
     release()
     assert.equal((await operation).ok, true)
@@ -1087,7 +1032,6 @@ test('a failed WhatsApp reply tells the manager a fixed notice and reports the f
     }
 
     const alerted = 'Reply not sent. The team has been alerted.'
-    const mayHaveReached = 'This reply may have reached the guest. Check the conversation before sending again.'
     // Each failure: how it is made, the webhook status it reports with, the exact messages the manager
     // receives for that reply, and how many writes reached Airbnb.
     const reported: unknown[] = []
@@ -1099,8 +1043,8 @@ test('a failed WhatsApp reply tells the manager a fixed notice and reports the f
       { mode: 'invariant', notices: [alerted], writes: 0, reports: code('INVALID_PROVIDER_RESPONSE') },
       // Airbnb refuses the message: a returned failure, never told in Channex's words.
       { mode: 'refused', notices: [alerted], writes: 1, reports: (error: unknown) => /CHANNEL_REPLY_FAILED/u.test(String((error as Error).message)) },
-      // Airbnb took the message but the connection ended: it may be with the guest.
-      { mode: 'uncertain', notices: [mayHaveReached], writes: 1, reports: (error: unknown) => /CHANNEL_REPLY_UNCERTAIN/u.test(String((error as Error).message)) },
+      // The connection ended after Channex took it: a failed reply, reported with Channex's error.
+      { mode: 'uncertain', notices: [alerted], writes: 1, reports: (error: unknown) => /CHANNEL_REPLY_FAILED/u.test(String((error as Error).message)) },
     ] as const
     for (const { mode, notices, writes, reports } of cases) {
       failure = null
@@ -1167,19 +1111,19 @@ test('an Airbnb photo is in the owner alert, and replying to the alert answers t
     // Airbnb takes a photo or words, not both: the owner is told so, and nothing is sent.
     await assert.rejects(receiveMemberEmail(env, { ...reply, files: [{ bytes: GUEST_PHOTO, filename: 'door.avif' }], messageId: '<both@mail.example.test>' }, unexpectedReport),
       (error: unknown) => error instanceof InboundEmailRejection && error.message === 'Reply not sent: Send one Airbnb photo at a time, separately from text')
-    // Airbnb took the words but the connection ended: the owner is told it may have reached the
-    // guest, so they do not send it again, and the failure is reported beside that answer.
+    // The connection ends after Channex took the words: the reply failed, so the email's delivery fails
+    // with Channex's error and its redelivery sends the reply again under the same key.
     provider.uncertain = true
-    const reported: unknown[] = []
-    await assert.rejects(receiveMemberEmail(env, { ...reply, body: 'The spare key is under the mat.', messageId: '<uncertain@mail.example.test>' }, async (error) => { reported.push(error) }),
-      (error: unknown) => error instanceof InboundEmailRejection && error.message === 'This reply may have reached the guest. Check the conversation before sending again.')
-    assert.equal(reported.length, 1)
+    const lost = { ...reply, body: 'The spare key is under the mat.', messageId: '<lost@mail.example.test>' }
+    await assert.rejects(receiveMemberEmail(env, lost, unexpectedReport), (error: unknown) => !(error instanceof InboundEmailRejection) && /CHANNEL_REPLY_FAILED/u.test(String((error as Error).message)))
     assert.equal(provider.sends, 2)
     provider.uncertain = false
+    await receiveMemberEmail(env, lost, unexpectedReport)
+    assert.equal(provider.sends, 3)
     // A member who has left the business is refused before anything is sent.
     await db.prepare("DELETE FROM member WHERE id = 'owner-member'").run()
     await assert.rejects(receiveMemberEmail(env, { ...reply, messageId: '<after-leaving@mail.example.test>' }, unexpectedReport),
       (error: unknown) => error instanceof InboundEmailRejection && error.message === 'Reply not sent: You are no longer a member of this business.')
-    assert.equal(provider.sends, 2)
+    assert.equal(provider.sends, 3)
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })

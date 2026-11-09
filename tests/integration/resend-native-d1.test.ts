@@ -45,7 +45,6 @@ function fakeResend(t: TestContext) {
   const failures = new Map<string, number>()
   let sequence = 0
   let loseEmailResponse = false
-  let queueEmailRead = false
   const json = (body: unknown, status = 200) => Response.json(body, { status })
   const notFound = () => json({ statusCode: 404, name: 'not_found', message: 'Not found' }, 404)
   const find = (key: string) => contacts.get(key) ?? [...contacts.values()].find(contact => contact.id === key)
@@ -87,10 +86,6 @@ function fakeResend(t: TestContext) {
       const email = emails.get(match[1]!)
       if (!email) return notFound()
       const { headers: _headers, ...retrieved } = email
-      if (queueEmailRead) {
-        queueEmailRead = false
-        return json({ ...retrieved, message_id: null, last_event: 'queued' })
-      }
       return json(retrieved)
     }
     if (route === 'POST /contacts') {
@@ -161,7 +156,6 @@ function fakeResend(t: TestContext) {
     contacts, broadcasts, calls, emails,
     failNext(routePrefix: string, times = 1) { failures.set(routePrefix, times) },
     loseNextEmailResponse() { loseEmailResponse = true },
-    queueNextEmailRead() { queueEmailRead = true },
     addContact(email: string, state: { unsubscribed?: boolean; segments?: string[]; topic?: 'opt_in' | 'opt_out' }) {
       contacts.set(email, { id: `contact-${++sequence}`, email, unsubscribed: state.unsubscribed ?? false, segments: new Set(state.segments ?? []), topics: new Map(state.topic ? [[TOPIC, state.topic]] : []) })
     },
@@ -318,16 +312,23 @@ test('conversation email uses provider-assigned ancestry and freezes each delive
     const rootEmail = { to: guestEmail, subject: message.title, fromName: 'Original brand', ...await renderNotificationEmail(message, { platformDomain: 'proof.example' }) }
     const foreignEntry = await appendEntry(db, { threadId: 'other-conversation', kind: 'submission', actorKind: 'guest', channel: 'web', body: 'Other business question' })
     const foreignReceipt = await createDeliveryReceipt(db, { entryId: foreignEntry.id, channel: 'email', provider: 'resend', purpose: 'guest_acknowledgement', idempotencyKey: 'email:foreign-root' })
-    const foreign = await deliverReceiptEmail(db, { env: PROVIDER_ENV, delivery: foreignReceipt, threadId: 'other-conversation', email: { ...rootEmail, subject: 'Other business confirmation' } })
+    // Resend's send answer carries no RFC Message-ID; its webhook records it, and later email answers what is recorded.
+    const delivered = async (row: Awaited<ReturnType<typeof deliverReceiptEmail>>) => {
+      const messageId = resend.emails.get(row.provider_message_id!)!.message_id
+      await applyResendEmailEvent(db, { GUEST_INBOX_HUBS: hubs }, emailEvent('email.sent', row.provider_message_id!, { message_id: messageId }))
+      const recorded = (await getDeliveryById(db, row.id))!
+      assert.equal(recorded.email_message_id, messageId)
+      return recorded
+    }
+    const foreign = await delivered(await deliverReceiptEmail(db, { env: PROVIDER_ENV, delivery: foreignReceipt, threadId: 'other-conversation', email: { ...rootEmail, subject: 'Other business confirmation' } }))
     const opening = await appendEntry(db, { threadId: 'conversation', kind: 'submission', actorKind: 'guest', channel: 'web', body: 'Is there parking?' })
     const rootReceipt = await createDeliveryReceipt(db, { entryId: opening.id, channel: 'email', provider: 'resend', purpose: 'guest_acknowledgement', idempotencyKey: 'email:conversation-root' })
-    resend.queueNextEmailRead()
-    const root = await deliverReceiptEmail(db, { env: PROVIDER_ENV, delivery: rootReceipt, threadId: 'conversation', email: rootEmail })
-    assert.equal(isDeliverySent(root), true)
+    const sentRoot = await deliverReceiptEmail(db, { env: PROVIDER_ENV, delivery: rootReceipt, threadId: 'conversation', email: rootEmail })
+    assert.equal(isDeliverySent(sentRoot), true, 'Resend\'s answer with the email id is a sent email')
+    assert.equal(sentRoot.email_message_id, null)
+    assert.equal(resend.calls.filter(call => call.method === 'GET').length, 0, 'nothing polls Resend for the Message-ID')
+    const root = await delivered(sentRoot)
     assert.equal(root.email_message_id, resend.emails.get(root.provider_message_id!)!.message_id)
-    assert.equal(resend.calls.filter(call => call.method === 'GET' && call.path === `/emails/${root.provider_message_id}`).length, 2, 'queued readback waits for the provider to assign the real RFC Message-ID')
-    assert.equal(resend.calls.filter(call => call.method === 'POST' && call.path === '/emails' && call.idempotencyKey === rootReceipt.id).length, 1, 'queued readback cannot send a second confirmation')
-    assert.equal((await getDeliveryById(db, rootReceipt.id))!.email_message_id, root.email_message_id, 'the actual assigned RFC identity is persisted after queued readiness')
     assert.equal(resend.emails.get(root.provider_message_id!)!.headers, undefined, 'another tenant cannot supply this confirmation ancestry')
     const ownerReceipt = await createDeliveryReceipt(db, { entryId: opening.id, channel: 'email', provider: 'resend', purpose: 'owner_alert', idempotencyKey: 'email:owner-alert' })
     const owner = await deliverReceiptEmail(db, { env: PROVIDER_ENV, delivery: ownerReceipt, threadId: 'conversation', email: { ...rootEmail, subject: 'Staff-only alert', to: 'owner@provider-proof.com' } })
@@ -344,12 +345,12 @@ test('conversation email uses provider-assigned ancestry and freezes each delive
     const replyEmail = { to: guestEmail, subject: 'A generic reply subject', fromName: 'Original brand', ...await renderNotificationEmail(replyMessage, { platformDomain: 'proof.example' }) }
     const firstEntry = await appendEntry(db, { threadId: 'conversation', kind: 'message', actorKind: 'member', channel: 'email', body: 'Yes, parking is free.' })
     const firstReceipt = await createDeliveryReceipt(db, { entryId: firstEntry.id, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'email:first-staff' })
-    const first = await deliverReceiptEmail(db, { env: PROVIDER_ENV, delivery: firstReceipt, threadId: 'conversation', email: replyEmail })
+    const first = await delivered(await deliverReceiptEmail(db, { env: PROVIDER_ENV, delivery: firstReceipt, threadId: 'conversation', email: replyEmail }))
     assert.deepEqual(resend.emails.get(first.provider_message_id!)!.headers, { 'In-Reply-To': guestMessageId, References: `${root.email_message_id} ${guestMessageId}` })
     assert.equal(resend.emails.get(first.provider_message_id!)!.subject, `Re: ${rootEmail.subject}`)
     const secondEntry = await appendEntry(db, { threadId: 'conversation', kind: 'message', actorKind: 'member', channel: 'email', body: 'The entrance is on the left.' })
     const secondReceipt = await createDeliveryReceipt(db, { entryId: secondEntry.id, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'email:second-staff' })
-    const second = await deliverReceiptEmail(db, { env: PROVIDER_ENV, delivery: secondReceipt, threadId: 'conversation', email: { ...replyEmail, text: secondEntry.body! } })
+    const second = await delivered(await deliverReceiptEmail(db, { env: PROVIDER_ENV, delivery: secondReceipt, threadId: 'conversation', email: { ...replyEmail, text: secondEntry.body! } }))
     const secondPayload = resend.emails.get(second.provider_message_id!)!
     assert.deepEqual(secondPayload.headers, { 'In-Reply-To': first.email_message_id, References: `${root.email_message_id} ${guestMessageId} ${first.email_message_id}` })
     assert.equal(secondPayload.subject, `Re: ${rootEmail.subject}`)
@@ -358,33 +359,17 @@ test('conversation email uses provider-assigned ancestry and freezes each delive
 
     const pendingEntry = await appendEntry(db, { threadId: 'conversation', kind: 'message', actorKind: 'member', channel: 'email', body: 'We close at six.' })
     const pendingReceipt = await createDeliveryReceipt(db, { entryId: pendingEntry.id, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'email:pending-staff' })
-    resend.failNext('GET /emails/')
-    await assert.rejects(deliverReceiptEmail(db, { env: PROVIDER_ENV, delivery: pendingReceipt, threadId: 'conversation', email: { ...replyEmail, text: pendingEntry.body! } }), /conversation email readback failed/)
-    const awaitingReadback = (await getDeliveryById(db, pendingReceipt.id))!
-    assert.equal(awaitingReadback.status, 'sent')
-    assert.ok(awaitingReadback.provider_message_id)
-    assert.equal(awaitingReadback.email_message_id, null)
-    assert.equal(isDeliverySent(awaitingReadback), false, 'provider acceptance without RFC identity remains incomplete')
-    assert.match(awaitingReadback.error!, /conversation email readback failed/)
-    const frozen = awaitingReadback.email_json
+    const pending = await deliverReceiptEmail(db, { env: PROVIDER_ENV, delivery: pendingReceipt, threadId: 'conversation', email: { ...replyEmail, text: pendingEntry.body! } })
+    assert.equal(isDeliverySent(pending), true, 'sent before its delivered webhook arrives')
+    assert.equal(pending.email_message_id, null)
+    const pendingPayload = resend.emails.get(pending.provider_message_id!)!
+    assert.equal(pendingPayload.subject, `Re: ${rootEmail.subject}`)
+    assert.deepEqual(pendingPayload.headers, { 'In-Reply-To': second.email_message_id, References: `${root.email_message_id} ${guestMessageId} ${first.email_message_id} ${second.email_message_id}` })
+    // Sending it again, even with an edited brand and draft, returns the sent email and sends nothing.
     const outboundCount = resend.calls.filter(call => call.path === '/emails' && call.method === 'POST').length
-    await appendEntry(db, { threadId: 'conversation', kind: 'message', actorKind: 'guest', channel: 'email', body: 'Can we arrive at five?',
-      payloadJson: { email: { from: guestEmail, subject: 'A new subject', messageId: '<guest-newer@provider-proof.com>', inReplyTo: second.email_message_id, references: second.email_message_id } } })
     await db.prepare("UPDATE organization SET name='Edited brand' WHERE id='thread-owner'").run()
     const editedReply = { ...replyEmail, subject: 'Edited subject', fromName: 'Edited brand', html: '<p>Changed draft</p>', text: 'Changed draft' }
-    const resumed = await deliverReceiptEmail(db, { env: { ...PROVIDER_ENV, EMAIL_FROM: 'Edited sender <edited@provider-proof.com>' }, delivery: awaitingReadback, threadId: 'conversation', email: editedReply })
-    assert.equal(resumed.email_json, frozen)
-    assert.equal(resumed.provider_message_id, awaitingReadback.provider_message_id)
-    assert.equal(resumed.email_message_id, resend.emails.get(resumed.provider_message_id!)!.message_id)
-    assert.equal(resumed.error, null)
-    assert.equal(isDeliverySent(resumed), true)
-    assert.equal(resend.calls.filter(call => call.path === '/emails' && call.method === 'POST').length, outboundCount, 'readback retry cannot send a second email')
-    const resumedPayload = resend.emails.get(resumed.provider_message_id!)!
-    assert.equal(resumedPayload.from, 'Original brand <hello@krabiclaw.com>')
-    assert.equal(resumedPayload.subject, `Re: ${rootEmail.subject}`)
-    assert.equal(resumedPayload.text, 'We close at six.')
-    assert.deepEqual(resumedPayload.headers, { 'In-Reply-To': second.email_message_id, References: `${root.email_message_id} ${guestMessageId} ${first.email_message_id} ${second.email_message_id}` })
-    assert.deepEqual(await deliverReceiptEmail(db, { env: PROVIDER_ENV, delivery: resumed, threadId: 'conversation', email: editedReply }), resumed)
+    assert.deepEqual(await deliverReceiptEmail(db, { env: { ...PROVIDER_ENV, EMAIL_FROM: 'Edited sender <edited@provider-proof.com>' }, delivery: pending, threadId: 'conversation', email: editedReply }), pending)
     assert.equal(resend.calls.filter(call => call.path === '/emails' && call.method === 'POST').length, outboundCount)
 
     const failedEntry = await appendEntry(db, { threadId: 'conversation', kind: 'message', actorKind: 'member', channel: 'email', body: 'Arriving at five is fine.' })
@@ -395,7 +380,7 @@ test('conversation email uses provider-assigned ancestry and freezes each delive
     assert.equal(failed.provider_message_id, null)
     const failedRequest = resend.calls.at(-1)!
     await appendEntry(db, { threadId: 'conversation', kind: 'message', actorKind: 'guest', channel: 'email', body: 'We will bring a car.',
-      payloadJson: { email: { from: guestEmail, subject: 'Latest guest subject', messageId: '<guest-latest@provider-proof.com>', inReplyTo: resumed.email_message_id, references: resumed.email_message_id } } })
+      payloadJson: { email: { from: guestEmail, subject: 'Latest guest subject', messageId: '<guest-latest@provider-proof.com>', inReplyTo: second.email_message_id, references: second.email_message_id } } })
     await assert.rejects(deliverReceiptEmail(db, { env: PROVIDER_ENV, delivery: failed, threadId: 'conversation', email: { ...editedReply, to: 'different@provider-proof.com' } }), /recipient differs from its recorded delivery/)
     const retried = await deliverReceiptEmail(db, { env: { ...PROVIDER_ENV, EMAIL_FROM: 'Edited sender <edited@provider-proof.com>' }, delivery: failed, threadId: 'conversation', email: editedReply })
     assert.equal(isDeliverySent(retried), true)
@@ -418,7 +403,7 @@ test('conversation email uses provider-assigned ancestry and freezes each delive
       headers: { from: guestEmail, subject: null, messageId: subjectlessMessageId, inReplyTo: foreign.email_message_id, references: foreign.email_message_id } })
     const subjectlessEntry = await appendEntry(db, { threadId: 'other-conversation', kind: 'message', actorKind: 'member', channel: 'email', body: 'Please ask.' })
     const subjectlessReceipt = await createDeliveryReceipt(db, { entryId: subjectlessEntry.id, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'email:subjectless-parent' })
-    const subjectlessReply = await deliverReceiptEmail(db, { env: PROVIDER_ENV, delivery: subjectlessReceipt, threadId: 'other-conversation', email: replyEmail })
+    const subjectlessReply = await delivered(await deliverReceiptEmail(db, { env: PROVIDER_ENV, delivery: subjectlessReceipt, threadId: 'other-conversation', email: replyEmail }))
     assert.equal(isDeliverySent(subjectlessReply), true)
     const subjectlessPayload = resend.emails.get(subjectlessReply.provider_message_id!)!
     assert.equal(subjectlessPayload.subject, 'Re: Other business confirmation')
@@ -477,18 +462,15 @@ test('conversation email uses provider-assigned ancestry and freezes each delive
       assert.equal(resend.emails.size, acceptedBefore + Number(failure === 'ambiguous'), 'a lost response may conceal provider acceptance')
       attempts.push(attempt)
     }
-    const beforeExpiredRetry = resend.calls.filter(call => call.path === '/emails' && call.method === 'POST').length
-    t.mock.timers.enable({ apis: ['Date'], now: new Date(Date.now() + 24 * 60 * 60 * 1000 + 1) })
-    try {
-      for (const attempt of attempts) {
-        await assert.rejects(deliverReceiptEmail(db, { env: PROVIDER_ENV, delivery: attempt, threadId: 'other-conversation', email: replyEmail }), /past Resend's 24-hour idempotency window/)
-        const retained = (await getDeliveryById(db, attempt.id))!
-        assert.equal(retained.provider_message_id, null)
-        assert.equal(retained.email_json, attempt.email_json, 'expiry cannot replace the original recorded request')
-        assert.match(retained.error!, /past Resend's 24-hour idempotency window/)
-      }
-      assert.equal(resend.calls.filter(call => call.path === '/emails' && call.method === 'POST').length, beforeExpiredRetry, 'expired retries never contact the send API')
-    } finally { t.mock.timers.reset() }
+    // A failed send, whether Resend refused it or its answer was lost, is sent again under the receipt's
+    // id, Resend's idempotency key: the refused one is sent once, the lost one is the email Resend already took.
+    const emailsBefore = resend.emails.size
+    for (const attempt of attempts) {
+      const retried = await deliverReceiptEmail(db, { env: PROVIDER_ENV, delivery: attempt, threadId: 'other-conversation', email: replyEmail })
+      assert.equal(isDeliverySent(retried), true)
+      assert.equal(retried.email_json, attempt.email_json, 'the retry sends the recorded request')
+    }
+    assert.equal(resend.emails.size, emailsBefore + 1, 'only the refused email is created by its retry')
   } finally { await runtime.dispose() }
 })
 
@@ -514,6 +496,9 @@ test('message alerts thread per recipient and replying to one answers the guest 
       const entry = await appendEntry(db, { threadId: asked, kind: 'message', actorKind: 'guest', channel: 'email', body, dedupeKey: `guest:${body}` })
       await notifyGuestThreadReply(env, db, { organizationId: 'inn', threadId: asked, sourceEntryId: entry.id, submissionType: 'contact', submissionId: asked,
         participantLabel: 'Jamie Rivera', guestEmail: 'guest@provider-proof.com', inboundChannel: 'email' })
+      // Resend's delivered webhook records the alert's Message-ID, which the next alert answers.
+      const sent = [...resend.emails.values()].filter(email => (email.to as string[])[0] === 'owner@provider-proof.com').at(-1)!
+      assert.equal(await applyResendEmailEvent(db, { GUEST_INBOX_HUBS: hubs }, emailEvent('email.delivered', sent.id as string, { message_id: sent.message_id })), 'advanced')
     }
     const alerts = [...resend.emails.values()].filter(email => (email.to as string[])[0] === 'owner@provider-proof.com')
     assert.equal(alerts.length, 3)
@@ -525,17 +510,16 @@ test('message alerts thread per recipient and replying to one answers the guest 
     assert.deepEqual(alerts[2]!.headers, { 'In-Reply-To': ids[1], References: `${ids[0]} ${ids[1]}` })
     // Each alert reads in its conversation: the new words lead, the earlier ones follow quietly.
     assert.match(alerts[2]!.text as string, /Thanks![\s\S]*Earlier in this conversation[\s\S]*Jamie Rivera: Is parking free\?[\s\S]*Jamie Rivera: Can I park a van\?/u)
-    // Resend takes an alert but its Message-ID cannot be read back: the failure is recorded on the
-    // alert's delivery, where the conversation shows it, and the guest's message still stands.
-    resend.failNext('GET /emails/')
-    const unread = await appendEntry(db, { threadId: asked, kind: 'message', actorKind: 'guest', channel: 'email', body: 'One more thing', dedupeKey: 'guest:one-more' })
-    await notifyGuestThreadReply(env, db, { organizationId: 'inn', threadId: asked, sourceEntryId: unread.id, submissionType: 'contact', submissionId: asked,
+    // An alert whose send threw is failed with its error on the delivery, where the conversation shows
+    // it, and the guest's message still stands.
+    resend.loseNextEmailResponse()
+    const lost = await appendEntry(db, { threadId: asked, kind: 'message', actorKind: 'guest', channel: 'email', body: 'One more thing', dedupeKey: 'guest:one-more' })
+    await notifyGuestThreadReply(env, db, { organizationId: 'inn', threadId: asked, sourceEntryId: lost.id, submissionType: 'contact', submissionId: asked,
       participantLabel: 'Jamie Rivera', guestEmail: 'guest@provider-proof.com', inboundChannel: 'email' })
-    const unreadAlert = await db.prepare("SELECT provider_message_id, email_message_id, error FROM guest_thread_deliveries WHERE entry_id = ? AND channel = 'email' AND purpose = 'owner_alert'")
-      .bind(unread.id).first<{ provider_message_id: string | null; email_message_id: string | null; error: string | null }>()
-    assert.ok(unreadAlert?.provider_message_id, 'Resend took the alert')
-    assert.equal(unreadAlert.email_message_id, null)
-    assert.match(unreadAlert.error ?? '', /injected failure/u)
+    const lostAlert = await db.prepare("SELECT status, provider_message_id, error FROM guest_thread_deliveries WHERE entry_id = ? AND channel = 'email' AND purpose = 'owner_alert'")
+      .bind(lost.id).first<{ status: string; provider_message_id: string | null; error: string | null }>()
+    assert.deepEqual([lostAlert?.status, lostAlert?.provider_message_id], ['failed', null])
+    assert.ok(lostAlert?.error)
     const replyTo = [alerts[0]!.reply_to].flat()[0] as string
     const address = parseReplyToAddress(env, replyTo)
     // Each alert's reply-to names the guest message it was about, and every one answers the same conversation.

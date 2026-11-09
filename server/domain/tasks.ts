@@ -517,9 +517,9 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
         : stay.check_in_date === today ? 'Arriving today' : stay.check_out_date > today ? 'Staying now' : `Checked out ${calendarDay(stay.check_out_date)}`
       statusLine = [arrival, home].filter(Boolean).join(' · ')
       title = who(stay.guest_name)
-      // Only what our own record knows: the message, and whether its sending was refused or is unconfirmed.
+      // Only what our own record knows: the message, and that it did not send.
       error = `${message.title} didn’t send`
-      detail = message.status === 'needs_review' ? 'We could not confirm it was delivered. Check the conversation before sending it again.' : 'You can send it yourself from the conversation.'
+      detail = message.status === 'needs_review' ? 'Its send was already used for a different message. Check the conversation before sending it again.' : 'You can send it yourself from the conversation.'
       path = conversation(message.request_id) ?? stayPath(message.stay_id)
       action = { type: 'open', label: message.request_id ? 'Open conversation' : 'Open stay', path }
       sheet = { heading: 'Message', title, date: null, checkout: null, checkin: null }

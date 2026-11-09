@@ -1,14 +1,12 @@
 import { HTTPError } from 'nitro'
-import { queryAll, queryFirst, type DbClient } from '~/server/db'
+import { queryFirst } from '~/server/db'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { getGuestRequest } from '~/server/domain/requests'
 import { sendTeamMessage, teamAccessFor } from '~/server/domain/team-messages'
 import { assertAssignedBookingAccess, memberAccessPrincipal, resolveOrganizationMembership } from '~/server/utils/member-access'
 import { creationRequestHash } from '~/server/utils/organization-events'
-import { isDeliverySent } from './deliveries'
-import { executeGuestThreadOperation, operationDedupeKey, type ExecuteOperationInput } from './operations'
+import { executeGuestThreadOperation, type ExecuteOperationInput } from './operations'
 import type { MessagePhoto } from './attachments'
-import type { GuestThreadDeliveryRow } from './types'
 
 /*
   A member answering a conversation from outside the dashboard: by replying to
@@ -20,8 +18,6 @@ import type { GuestThreadDeliveryRow } from './types'
 export const REPLY_SENT = 'Reply sent.'
 /** A reply that failed for a reason the member cannot act on; the error is reported, never shown. */
 export const REPLY_FAILED_ALERTED = 'Reply not sent. The team has been alerted.'
-/** A reply whose delivery is unknown: it may already be with the guest. */
-export const REPLY_UNCERTAIN = 'This reply may have reached the guest. Check the conversation before sending again.'
 /** What an owner's WhatsApp message that quotes no alert is answered with. */
 export const REPLY_BY_QUOTING = 'To answer a message, reply to it.'
 
@@ -39,16 +35,12 @@ export interface MemberReplyOutcome {
 type Outcome = Awaited<ReturnType<typeof executeGuestThreadOperation>>
 
 /**
- * A refusal (4xx) is told in the operation's words, never a reason code; a reply
- * that may already be with the guest says so; any failure (5xx) is reported and
- * never shown raw.
+ * A refusal (4xx) is told in the operation's words, never a reason code; any
+ * failure (5xx) is reported and never shown raw.
  */
 function returnedOutcome(outcome: Outcome): MemberReplyOutcome {
   if (outcome.ok) return { sent: true, notice: REPLY_SENT, report: null }
   const failure = new Error(`Member reply ${outcome.reason}${'code' in outcome ? ` ${outcome.code}` : ''}: ${'message' in outcome ? outcome.message : outcome.status}`)
-  if (outcome.reason === 'delivery_failed' && (outcome.code === 'CHANNEL_REPLY_UNCERTAIN' || outcome.code === 'CHANNEL_REPLY_REVIEW_REQUIRED')) {
-    return { sent: false, notice: REPLY_UNCERTAIN, report: outcome.status >= 500 ? failure : null }
-  }
   if (outcome.status >= 500) return { sent: false, notice: REPLY_FAILED_ALERTED, report: failure }
   switch (outcome.reason) {
     case 'thread_not_found': case 'source_not_found': return { sent: false, notice: replyNotSent('This conversation no longer exists.'), report: null }
@@ -59,20 +51,11 @@ function returnedOutcome(outcome: Outcome): MemberReplyOutcome {
 }
 
 /**
- * The same for an error the operation threw. A reply this key already wrote or
- * handed to a provider may be with the guest whatever failed after. Otherwise
- * only a refusal the operation throws by design (a 4xx with its code) is told as
- * it is; everything else is reported, not shown.
+ * The same for an error the operation threw: it did not send. A refusal the
+ * operation throws by design (a 4xx with its code) is told as it is; anything
+ * else is reported with its cause and told as not sent.
  */
-async function thrownOutcome(db: DbClient, error: unknown, threadId: string, idempotencyKey: string): Promise<MemberReplyOutcome> {
-  const written = await queryAll<{ id: string; status: string | null; provider_message_id: string | null; channel: string | null; provider: string | null; purpose: string | null; email_message_id: string | null }>(db,
-    `SELECT e.id, d.status, d.provider_message_id, d.channel, d.provider, d.purpose, d.email_message_id
-       FROM activity_entries e LEFT JOIN guest_thread_deliveries d ON d.entry_id = e.id WHERE e.dedupe_key = ?`,
-    [operationDedupeKey({ threadId, idempotencyKey })]).then(rows => ({ rows }), (lookupError: unknown) => ({ lookupError }))
-  if ('lookupError' in written) return { sent: false, notice: REPLY_UNCERTAIN, report: new AggregateError([error, written.lookupError], 'The reply failed and whether it was written could not be read', { cause: error }) }
-  const handedOver = written.rows.some(row => row.status === null || row.status === 'sending' || row.status === 'uncertain' || row.provider_message_id !== null
-    || isDeliverySent(row as unknown as GuestThreadDeliveryRow))
-  if (handedOver) return { sent: false, notice: REPLY_UNCERTAIN, report: error }
+function thrownOutcome(error: unknown): MemberReplyOutcome {
   if (error instanceof HTTPError && error.status >= 400 && error.status < 500 && typeof (error.data as { code?: unknown } | undefined)?.code === 'string') {
     return { sent: false, notice: replyNotSent(error.message), report: null }
   }
@@ -102,7 +85,7 @@ async function replyAsMember(env: ExecuteOperationInput['env'], input: { threadI
     threadId: thread.id, organizationId: thread.organization_id, action: 'reply', actorUserId: input.userId,
     body: input.body, photos: input.files, env, idempotencyKey: input.idempotencyKey,
   }).then(outcome => ({ outcome }), (error: unknown) => ({ error }))
-  if ('error' in attempt) return await thrownOutcome(db, attempt.error, thread.id, input.idempotencyKey)
+  if ('error' in attempt) return thrownOutcome(attempt.error)
   const told = returnedOutcome(attempt.outcome)
   if (!attempt.outcome.ok) return told
   // A reply is not sent until open inboxes show it. A failed refresh fails the email or WhatsApp

@@ -450,8 +450,7 @@ async function sendEmailNotification(
   let result: EmailSendResult
   if (delivery) {
     const outcome = await deliverReceiptEmail(db, { env, delivery, threadId: deliveryContext!.threadId, email }).catch(async (error: unknown) => {
-      // The dispatcher writes a failure onto the delivery before raising it, such as a Message-ID
-      // readback that timed out after Resend took the email; that one is recorded, and the thread shows it.
+      // The dispatcher writes a failure onto the delivery before raising it, where the thread shows it.
       const recorded = await getDeliveryById(db, delivery.id)
       if (recorded?.error) throw new RecordedDeliveryFailure(`Email delivery failed: ${recorded.error}`, { cause: error })
       throw error

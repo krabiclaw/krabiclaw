@@ -70,11 +70,14 @@ outbound request before dispatch in `guest_thread_deliveries.email_json` and
 stores Resend's actual RFC Message-ID in `email_message_id`. The provider API
 UUID remains in `provider_message_id`; the two identities are not interchangeable.
 
-Resend initially returns queued email with no RFC Message-ID. The dispatcher
-waits for assignment through the official SDK. If readback fails, the saved API
-UUID resumes that readback without another send. Verified Resend webhooks also
-record the actual RFC ID. A send with an unknown provider outcome cannot be
-retried beyond Resend's documented 24-hour idempotency window without review.
+A send is sent when Resend answers with the email's id, and failed with
+Resend's error when it answers with an error or the call throws. A failed send
+is sent again under the receipt's id, which is Resend's idempotency key, so an
+email Resend already took is not sent twice. Resend's send answer carries no RFC
+Message-ID. The verified `email.sent` or `email.delivered` webhook records it,
+and nothing polls Resend for it. A reply threads on the Message-IDs recorded
+when it is prepared; an earlier email whose webhook has not arrived is left out
+of its references.
 
 Native inbound email records its parsed subject, Message-ID and reply references
 on the immutable guest entry. The content hash used to deduplicate email without
@@ -91,8 +94,9 @@ confirmation/guest/staff sequence against real local D1. The native MIME ingress
 journey verifies routing, stored metadata, duplicate protection and staff replies
 through the built Worker. The opt-in native transport test uses only Resend's
 `delivered@resend.dev` simulation address and independently reads the actual
-provider IDs and subjects. It does not inspect a real Gmail or Outlook inbox.
-The configured Resend API key must permit both sending and retrieving sent email.
+provider IDs and subjects to verify them. It does not inspect a real Gmail or
+Outlook inbox. Its Resend API key must permit retrieving sent email for that
+check; the application never retrieves it.
 
 ## Message alerts
 
@@ -128,8 +132,8 @@ the single hint for an unquoted message, refusals and Meta redelivery.
 ## Review invitation retries
 
 An ended visit gets one initial invitation. A retry resumes that invitation;
-metadata readback, inbox publication or final success persistence failing after
-Resend acceptance must not issue a new link or another email. `first_sent_at`
+inbox publication or final success persistence failing after Resend acceptance
+must not issue a new link or another email. `first_sent_at`
 marks completed application work, not proof that no earlier send was accepted.
 `send_count` counts completed initial invitations, not physical provider sends.
 
@@ -143,11 +147,10 @@ An inconsistent recorded invitation fails visibly instead of invalidating its
 emailed link. The token is private application data, like the existing email
 snapshot, and is never returned in review API responses.
 
-Retries preserve the original expiry, token, invitation entry and receipt key.
-Provider acceptance resumes metadata readback even after the 24-hour idempotency
-window. An unknown send outcome past that window still requires provider review;
-automation must not mint a fresh key to bypass the dispatcher guard. Failures
-remain reported and incomplete work remains eligible for automation retry.
+Retries preserve the original expiry, token, invitation entry and receipt key,
+so Resend's idempotency key sends a failed invitation again without a second
+email for one it already took. Failures remain reported and incomplete work
+remains eligible for automation retry.
 
 A retry is neither a reminder nor a reissue. The current automation sends one
 initial invitation and implements no reminder schedule. This change leaves the
@@ -157,7 +160,7 @@ window intact; it does not add a new resend policy or revive revoked links.
 `guest-reviews-d1.test.ts` runs the actual automation, review APIs, dispatcher,
 local D1 and a local Durable Object. Its controlled Resend transport proves one
 accepted email and a usable original link across preparation failure, acceptance
-persistence failure, metadata failure, publication failure, final write failure
+persistence failure, publication failure, final write failure
 and concurrency, plus recovery of rejected sends.
 No customer email is sent by these tests.
 
