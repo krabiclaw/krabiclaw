@@ -104,7 +104,7 @@ async function alertEmailParent(db: DbClient, delivery: GuestThreadDeliveryRow, 
   // The alert's conversation: its guest conversation, or its team message's team conversation (the key the reply path reads).
   const anchor = await queryFirst<{ request_id: string | null; team_thread_id: string | null }>(db, `
     SELECT a.request_id, tm.thread_id AS team_thread_id FROM activity_entries a
-    LEFT JOIN team_messages tm ON tm.organization_id = a.organization_id AND a.dedupe_key = 'team-message:' || tm.id
+    LEFT JOIN team_messages tm ON tm.organization_id = a.organization_id AND tm.id = substr(a.dedupe_key, 14) AND a.dedupe_key = 'team-message:' || tm.id
     WHERE a.id = ?`, [delivery.entry_id])
   if (!anchor) throw new Error(`Alert delivery ${delivery.id} has no ledger entry`)
   if (!anchor.request_id && !anchor.team_thread_id) return {}

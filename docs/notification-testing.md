@@ -117,8 +117,10 @@ a notification service extension, which the app does not have.
 
 Every email alert about a conversation threads per recipient. It keeps the
 subject of the first alert sent to that address. It sends `In-Reply-To` with the
-previous alert's Message-ID and `References` with all of them. Alerts therefore
-read Resend's assigned RFC Message-ID like guest email does. Alerts to other
+previous alert's Message-ID and `References` with all of them. Alerts use the
+Message-IDs already recorded from Resend's webhooks, as guest email does: an
+earlier alert whose webhook has not arrived is left out, and with none recorded
+an alert carries no threading headers. Alerts to other
 recipients and the guest's own emails are never part of that ancestry. A
 log-only alert has no RFC identity, so staging alerts share a subject but carry
 no threading headers. Each alert's reply-to is that member's signed reply

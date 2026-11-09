@@ -115,9 +115,9 @@ async function resolveUser(env: ApiRecord, from: string): Promise<UserRow | null
 async function answerMember(db: D1Database, env: ApiRecord, message: WhatsAppMessage, toPhone: string, userId: string): Promise<void> {
   const quoted = message.context?.id
     ? await queryFirst<{ entry_id: string }>(db, `
-        SELECT d.entry_id FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
+        SELECT d.entry_id FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id LEFT JOIN requests r ON r.id = e.request_id
          WHERE d.provider = 'meta' AND d.channel = 'whatsapp' AND d.purpose = 'owner_alert' AND d.provider_message_id = ?
-           AND (e.request_id IS NOT NULL OR e.dedupe_key LIKE 'team-message:%')
+           AND (e.kind = 'message' OR (e.kind = 'submission' AND r.kind = 'contact') OR e.dedupe_key LIKE 'team-message:%')
          LIMIT 1`, [message.context.id])
     : null
   if (!quoted) {

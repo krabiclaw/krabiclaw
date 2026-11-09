@@ -121,7 +121,7 @@ export async function replyToAlertEntry(env: ExecuteOperationInput['env'], input
   const { entryId, ...reply } = input
   const entry = await queryFirst<{ request_id: string | null; organization_id: string | null; team_thread_id: string | null }>(env.DB, `
     SELECT e.request_id, e.organization_id, t.thread_id AS team_thread_id
-      FROM activity_entries e LEFT JOIN team_messages t ON t.organization_id = e.organization_id AND e.dedupe_key = 'team-message:' || t.id
+      FROM activity_entries e LEFT JOIN team_messages t ON t.organization_id = e.organization_id AND t.id = substr(e.dedupe_key, 14) AND e.dedupe_key = 'team-message:' || t.id
      WHERE e.id = ?`, [entryId])
   if (entry?.organization_id && entry.team_thread_id) return await replyToTeamAsMember(env, { ...reply, organizationId: entry.organization_id, threadId: entry.team_thread_id })
   if (entry?.request_id) return await replyAsMember(env, { ...reply, threadId: entry.request_id })
