@@ -1011,8 +1011,6 @@ test('opportunity MCP tools preserve saved decisions during incomplete social re
     assert.deepEqual(disconnected.issues, [])
     assert(!disconnected.opportunities.some(item => item.id === open))
     assert.deepEqual(await status(open), { status: 'open', available_at: until })
-    // A row retired by an earlier version still carries the original deferral.
-    assert.equal((await db.prepare("UPDATE opportunities SET status = 'superseded' WHERE organization_id = 'org-a' AND id = ? AND status = 'open'").bind(open).run()).meta.changes, 1)
     meta.assignedPageResponses.set('', pages)
     meta.igResponses.set('me', account)
     const recovered = await list()

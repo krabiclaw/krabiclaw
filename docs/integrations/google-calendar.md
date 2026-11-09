@@ -306,11 +306,12 @@ deleted its mapped event. Disconnect deleted all 13 managed identities while
 preserving an independently created event.
 
 Member free/busy reads returned that independent event's exact UTC interval.
-Google rejected the original single 94-day query as too long. The canonical read
-now uses contiguous 30-day requests, retaining the full 94-day horizon and
-committing coverage only after every window succeeds. A rejected final window
-retains the last complete cache and exposes Google's reason; availability fails
-closed. Deleting the test event and rechecking returned no busy intervals. Both
+Google rejected the original single 94-day query as too long, so a read uses
+contiguous 30-day requests across the span it needs. Nothing Google answers is
+stored: availability asks Google for the span of the sessions being read, and a
+window Google refuses fails that read with Google's reason, which the member's
+calendar state reports as `calendar_error`. Deleting the test event and
+rechecking returned no busy intervals. Both
 domain connections were disconnected, test events removed, and the member's
 test hours cleared. The Google linked account and existing grants were retained.
 

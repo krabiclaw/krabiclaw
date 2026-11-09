@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:8a0ab254703f1e603a5284cea585418fe9ff8d70a77702b8ae6bae9f3efc3acc",
-  "documentationFingerprint": "sha256:31d2728c32f0c0d33ac30a2e8ad3b33985d101d592d074fd6acb93c79f6e484c",
+  "fingerprint": "sha256:47b47ef253af7320bb8afa2d8d18747f3af33253cad869712e5ae91665b8db0c",
+  "documentationFingerprint": "sha256:cf03fb5a10f4fb551e3be5c52a0d9b9c6b7454dbc81f01acbd5996118be9ed7d",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -8605,7 +8605,7 @@
     {
       "name": "batch_create_products",
       "title": "Batch create products",
-      "description": "Create several products in the selected site’s catalog when the user supplies a new catalog batch. Validates every entry before writing; any invalid entry rejects the complete request. Publication and location offerings are assigned separately.",
+      "description": "Create several products in the selected site’s catalog when the user supplies a new catalog batch. Validates every entry before writing; any invalid entry rejects the complete request. Creating a place to stay reports the business's current live-home count to its Stripe subscription; an unpublished home adds nothing to it. Publication and location offerings are assigned separately.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -12232,7 +12232,7 @@
       "annotations": {
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "readOnlyHint": false,
         "title": "Batch create products"
       },
@@ -21510,14 +21510,6 @@
                 ]
               },
               "slug": {
-                "type": "string"
-              },
-              "source": {
-                "description": "The organization authored this website post or created it from a template.",
-                "enum": [
-                  "manual",
-                  "template"
-                ],
                 "type": "string"
               },
               "status": {
@@ -49589,30 +49581,6 @@
                 "scheduling": {
                   "additionalProperties": false,
                   "properties": {
-                    "busy_checked_at": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "busy_error": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "busy_from": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "busy_until": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
                     "calendar_account_id": {
                       "type": [
                         "string",
@@ -49649,6 +49617,13 @@
                       },
                       "type": "array"
                     },
+                    "calendar_error": {
+                      "description": "Why the selected Google calendars could not be read just now; null when they were.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "calendar_ids": {
                       "items": {
                         "type": "string"
@@ -49660,7 +49635,6 @@
                         "internal",
                         "disconnected",
                         "error",
-                        "stale",
                         "ready"
                       ],
                       "type": "string"
@@ -49738,10 +49712,7 @@
                     "calendar_account_id",
                     "calendar_ids",
                     "calendar_status",
-                    "busy_from",
-                    "busy_until",
-                    "busy_checked_at",
-                    "busy_error",
+                    "calendar_error",
                     "calendar_conflict_count",
                     "calendar_conflicts"
                   ],
@@ -49768,30 +49739,6 @@
           "scheduling": {
             "additionalProperties": false,
             "properties": {
-              "busy_checked_at": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "busy_error": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "busy_from": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "busy_until": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "calendar_account_id": {
                 "type": [
                   "string",
@@ -49828,6 +49775,13 @@
                 },
                 "type": "array"
               },
+              "calendar_error": {
+                "description": "Why the selected Google calendars could not be read just now; null when they were.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "calendar_ids": {
                 "items": {
                   "type": "string"
@@ -49839,7 +49793,6 @@
                   "internal",
                   "disconnected",
                   "error",
-                  "stale",
                   "ready"
                 ],
                 "type": "string"
@@ -49917,10 +49870,7 @@
               "calendar_account_id",
               "calendar_ids",
               "calendar_status",
-              "busy_from",
-              "busy_until",
-              "busy_checked_at",
-              "busy_error",
+              "calendar_error",
               "calendar_conflict_count",
               "calendar_conflicts"
             ],
@@ -52782,14 +52732,6 @@
                 ]
               },
               "slug": {
-                "type": "string"
-              },
-              "source": {
-                "description": "The organization authored this website post or created it from a template.",
-                "enum": [
-                  "manual",
-                  "template"
-                ],
                 "type": "string"
               },
               "status": {
@@ -70719,14 +70661,6 @@
                   ]
                 },
                 "slug": {
-                  "type": "string"
-                },
-                "source": {
-                  "description": "The organization authored this website post or created it from a template.",
-                  "enum": [
-                    "manual",
-                    "template"
-                  ],
                   "type": "string"
                 },
                 "status": {
@@ -102405,7 +102339,6 @@
                   "internal",
                   "disconnected",
                   "error",
-                  "stale",
                   "ready"
                 ],
                 "type": "string"
@@ -115288,14 +115221,6 @@
                 ]
               },
               "slug": {
-                "type": "string"
-              },
-              "source": {
-                "description": "The organization authored this website post or created it from a template.",
-                "enum": [
-                  "manual",
-                  "template"
-                ],
                 "type": "string"
               },
               "status": {
@@ -129368,7 +129293,7 @@
         "text": "Call create_post with a new idempotency_key and this body: <body> If the user supplied or approved media, pass it as create_post media in the order they want it shown: the cover first, then the gallery. Publish only to: <destinations>. For Facebook, Instagram or Discord, call get_social_connections and use the exact target_id and connection_revision it returns; if the destination is not connected or has a problem, say so instead of publishing elsewhere. Show the user the draft's preview_url, then call publish_post with the post's updated_at as expected_updated_at and one target per named destination. Report each outcome exactly as returned. processing means call publish_post again later to finish the same post; unknown means use reconcile_post_publication, never publish again."
       },
       "toolContracts": {
-        "create_post": "sha256:9a4b0be3540b52a6e36d1ee95660bd0826ad7d57cc710c4cf4fabf41ea1a1888",
+        "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
         "get_social_connections": "sha256:ce06b442ff3f389bf517c54c51ff4fb762a7bde099820d26f260139f1e3d1686",
         "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
         "reconcile_post_publication": "sha256:00cccb196535fe18cb6304fbe3ee58fa254a10a02ff44e5039300d3be42f9d38"
@@ -129461,7 +129386,7 @@
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
-        "get_post": "sha256:1bfb415fc3917a3aad29e1b1ae44db4a092b10dd169974b39c89832c4a69017d",
+        "get_post": "sha256:084fd73ea9efe150fe8e7812e02a80394a52477719bdab8ed3c33beae8225df8",
         "get_product": "sha256:a42cc2a6355622aa4b35199655e6076923b056237f5c4a0e29133116ef6c2664",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
@@ -129545,7 +129470,7 @@
         "text": "Use get_workspace_context and get_organization_analytics to read recent traffic. Use list_products, get_product and list_product_booking_sessions for bookable offerings and availability, and list_guest_conversations plus get_guest_conversation for current guest demand. Recommend the most useful action supported by those records. Use reply_to_guest, update_product or create_post and publish_post for the action the user requests, then read back its actual outcome and report any incomplete delivery or dashboard handoff."
       },
       "toolContracts": {
-        "create_post": "sha256:9a4b0be3540b52a6e36d1ee95660bd0826ad7d57cc710c4cf4fabf41ea1a1888",
+        "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
         "get_guest_conversation": "sha256:bbc45bf9bdc9097c8aad98e871de2e959a34fbfaf24635f8d2490185732bab59",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
         "get_product": "sha256:a42cc2a6355622aa4b35199655e6076923b056237f5c4a0e29133116ef6c2664",

@@ -17,7 +17,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
   makes it a task; dismissing records why; deferring hides it until a time.
 */
 
-type OpportunityStatus = 'open' | 'accepted' | 'dismissed' | 'superseded'
+type OpportunityStatus = 'open' | 'accepted' | 'dismissed'
 interface OpportunityRow {
   id: string; organization_id: string; operation: BusinessProgressOperation; subject_id: string; evidence_revision: string
   goal_id: string | null; goal_revision: string | null; status: OpportunityStatus; available_at: string | null
@@ -64,8 +64,7 @@ async function refreshOpportunities(db: DbClient, principal: MemberAccessPrincip
   const now = input.now.toISOString(), organizationId = principal.organizationId
   const results = await executeBatch(db, plan.recommendations.map(item => ({
     query: `INSERT INTO opportunities (id, organization_id, operation, subject_id, evidence_revision, goal_id, goal_revision, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?) ON CONFLICT DO UPDATE SET status='open', updated_at=excluded.updated_at
-      WHERE opportunities.status='superseded'`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?) ON CONFLICT DO NOTHING`,
     params: [crypto.randomUUID(), organizationId, item.operation, item.subjectId, item.reference.evidenceRevision, item.goal?.id ?? null, item.goal?.revision ?? null, now, now],
   })), { operation: 'Record opportunities' })
   const rows = await queryAll<OpportunityRow>(db, `SELECT opportunities.* FROM json_each(?) current

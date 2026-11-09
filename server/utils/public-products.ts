@@ -23,7 +23,6 @@ import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-re
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { publicTenantVisibilitySql } from '~/server/utils/public-base'
-import { refreshProductBusy } from '~/server/domain/member-scheduling'
 import { selectProductCollectionSiblings, type ProductCollectionSibling } from '~/utils/product-seo'
 import { getPublicTenantPageForPath } from '~/server/utils/public-tenant-pages'
 import { resolvePublishedTenantPageIdentity } from '~/server/utils/content/pages'
@@ -505,9 +504,9 @@ export async function loadPublicProductSessions(
     return (await listPublicBookingSessions(db, detail.organization.id, detail.product.slug, env, 'online')).sessions.filter(session => !session.is_full)
   }
   if (!detail.product.locations.some(location => location.location_id === detail.location!.id && location.active && location.published)) return []
-  await refreshProductBusy(db,env,detail.organization.id,detail.product.id)
   const window = bookingWindow(detail.location.timezone)
   const sessions = await listSessions(db, {
+    env,
     organizationId: detail.organization.id,
     productId: detail.product.id,
     locationId: detail.location.id,

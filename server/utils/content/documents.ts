@@ -592,6 +592,64 @@ export async function listBlocksForDocument(db: DbClient, documentId: string) {
   ) ?? []
 }
 
+/**
+ * A single block's write refuses to run against a document another writer has
+ * changed since it was read, or a block row whose own timestamp moved.
+ * The batch is: those two guards, the block statements, the document's
+ * timestamp (and author), the caller's media placements, and a page's activity.
+ */
+function singleBlockBatch(
+  document: ContentDocumentRow,
+  block: { id: string; updated_at: string } | null,
+  now: string,
+  statements: BatchQuery[],
+  opts: Pick<ContentDocumentWriteOptions, 'additionalQueriesAfter' | 'actorId'>,
+): BatchQuery[] {
+  const queries: BatchQuery[] = [assertDocumentSnapshotQuery(document.id, now, document.updated_at)]
+  if (block) {
+    queries.push({
+      query: `INSERT INTO content_blocks (id, document_id, parent_block_id, type, position, level, data_json, created_at, updated_at)
+        SELECT NULL, ?, NULL, 'markdown', 0, NULL, '{}', ?, ?
+         WHERE NOT EXISTS (SELECT 1 FROM content_blocks WHERE id = ? AND document_id = ? AND updated_at = ?)`,
+      params: [document.id, now, now, block.id, document.id, block.updated_at],
+    })
+  }
+  queries.push(...statements, {
+    query: `UPDATE content_documents SET updated_at = ?${opts.actorId === undefined ? '' : ', updated_by = ?'} WHERE id = ?`,
+    params: [now, ...(opts.actorId === undefined ? [] : [opts.actorId]), document.id],
+  }, ...(opts.additionalQueriesAfter ?? []))
+  if (document.kind === 'page' && opts.actorId !== undefined) {
+    queries.push(organizationEventQuery({ organizationId: document.organization_id, actorId: opts.actorId,
+      eventType: 'content.updated', entityType: 'page', entityId: document.id,
+      beforeState: { updated_at: document.updated_at }, afterState: { updated_at: now },
+      metadata: { changed_fields: ['content_blocks'], evidence_basis: 'persisted_change', locale: document.locale, page_id: document.root_id ?? document.id } }))
+  }
+  return queries
+}
+
+async function runSingleBlockBatch(db: DbClient, document: ContentDocumentRow, queries: BatchQuery[]) {
+  try {
+    await executeBatch(db, queries)
+  } catch (error) {
+    const current = await getContentDocumentById(db, document.id)
+    if (!current || current.updated_at !== document.updated_at) {
+      throw new HTTPError({ statusCode: 409, statusMessage: 'Content document was updated by another writer', cause: error })
+    }
+    throw error
+  }
+}
+
+/** A social_posts block that names a location names one of this organization's active ones. */
+function blockLocationGuard(document: ContentDocumentRow, type: ContentBlockType, data: Record<string, unknown>): BatchQuery[] {
+  if (type !== 'social_posts' || typeof data.location_id !== 'string' || !data.location_id) return []
+  return [{
+    query: `INSERT INTO content_blocks (id, document_id, type, position, data_json) SELECT NULL, ?, 'markdown', 0, '{}'
+      WHERE NOT EXISTS (SELECT 1 FROM business_locations WHERE id = ? AND organization_id = ? AND status = 'active')`,
+    params: [document.id, data.location_id, document.organization_id],
+  }]
+}
+
+/** One new block row at the end of the document or right after `after_block_id`; the blocks after it move down one place. */
 export async function appendContentBlock(
   db: DbClient,
   documentId: string,
@@ -600,51 +658,37 @@ export async function appendContentBlock(
 ) {
   const document = await getContentDocumentById(db, documentId)
   if (!document) notFound('Content document not found')
-
-  const existing = await listBlocksForDocument(db, documentId)
-  const afterIndex = input.after_block_id ? existing.findIndex(block => block.id === input.after_block_id) : existing.length - 1
-  if (input.after_block_id && afterIndex === -1) badRequest('after_block_id was not found in this document')
-
-  const newBlock: ContentBlockWriteInput = {
-    // The caller's id when it has one, so the media placements it batches
-    // alongside this write address the block that is actually inserted.
-    id: input.id,
-    source_block_id: input.source_block_id ?? null,
-    parent_block_id: input.parent_block_id ?? null,
-    type: assertBlockType(input.type),
-    position: afterIndex + 1,
-    level: input.level ?? null,
-    data: asObject(input.data, 'content block data'),
-  }
-  const snapshots = [
-    ...existing.slice(0, afterIndex + 1).map(block => ({
-      id: block.id,
-
-      source_block_id: block.source_block_id,
-      parent_block_id: block.parent_block_id,
-      type: block.type,
-      position: block.position,
-      level: block.level,
-      data: parseBlockData(block),
-      updated_at: block.updated_at,
-    })),
-    newBlock,
-    ...existing.slice(afterIndex + 1).map(block => ({
-      id: block.id,
-
-      source_block_id: block.source_block_id,
-      parent_block_id: block.parent_block_id,
-      type: block.type,
-      position: block.position,
-      level: block.level,
-      data: parseBlockData(block),
-      updated_at: block.updated_at,
-    })),
-  ].map((block, index) => ({ ...block, position: index, updated_at: block.position === index ? block.updated_at : null }))
-
-  return await writeDocumentBlocks(db, document, snapshots, opts)
+  const type = assertBlockType(input.type)
+  const data = mediaFreeBlockData(type, input.data, 'content block data')
+  const now = new Date(Math.max(Date.now(), Date.parse(document.updated_at) + 1)).toISOString()
+  const id = input.id ?? crypto.randomUUID()
+  const after = input.after_block_id
+    ? await queryFirst<{ position: number }>(db, 'SELECT position FROM content_blocks WHERE id = ? AND document_id = ?', [input.after_block_id, document.id])
+    : null
+  if (input.after_block_id && !after) badRequest('after_block_id was not found in this document')
+  const statements: BatchQuery[] = [
+    ...(input.source_block_id ? [{
+      query: `INSERT INTO content_blocks(id, document_id, type, position, data_json)
+        SELECT NULL, ?, 'markdown', 0, '{}' WHERE NOT EXISTS (
+          SELECT 1 FROM content_blocks source JOIN content_documents root ON root.id = source.document_id
+          WHERE source.id = ? AND source.type = ? AND source.source_block_id IS NULL AND root.id = ?
+            AND root.row_role = 'root' AND root.kind = ? AND root.organization_id = ?
+        )`,
+      params: [document.id, input.source_block_id, type, document.root_id, document.kind, document.organization_id],
+    }] : []),
+    ...blockLocationGuard(document, type, data),
+    ...(after ? [{ query: 'UPDATE content_blocks SET position = position + 1 WHERE document_id = ? AND position > ?', params: [document.id, after.position] }] : []),
+    {
+      query: `INSERT INTO content_blocks (id, document_id, source_block_id, parent_block_id, type, position, level, data_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ${after ? '?' : 'COALESCE((SELECT MAX(position) + 1 FROM content_blocks WHERE document_id = ?), 0)'}, ?, ?, ?, ?)`,
+      params: [id, document.id, input.source_block_id ?? null, input.parent_block_id ?? null, type, after ? after.position + 1 : document.id, input.level ?? null, JSON.stringify(data), now, now],
+    },
+  ]
+  await runSingleBlockBatch(db, document, singleBlockBatch(document, null, now, statements, opts))
+  return { id, updated_at: now }
 }
 
+/** The one block's data changes; its type, place and neighbours do not. */
 export async function replaceContentBlock(
   db: DbClient,
   blockId: string,
@@ -654,29 +698,27 @@ export async function replaceContentBlock(
   const current = await getContentBlock(db, blockId)
   const document = await getContentDocumentById(db, current.document_id)
   if (!document) notFound('Content document not found')
-
-  const blocks = await listBlocksForDocument(db, document.id)
-  if (blocks.find(block => block.id === blockId)?.updated_at !== input.expected_updated_at) {
+  if (current.updated_at !== input.expected_updated_at) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Content block was updated by another writer' })
   }
-  if (!(opts.additionalQueriesAfter?.length) && await creationRequestHash(current.data) === await creationRequestHash(mediaFreeBlockData(current.type, input.data, 'content block data'))) {
-    return { body_markdown: renderContentBlocksToMarkdown(blocks), blocks: blocks.map(formatBlockOutline), updated_at: document.updated_at }
+  const data = mediaFreeBlockData(current.type, input.data, 'content block data')
+  if (!(opts.additionalQueriesAfter?.length) && await creationRequestHash(current.data) === await creationRequestHash(data)) {
+    return { id: blockId, updated_at: document.updated_at }
   }
-  const snapshots = blocks.map((block) => ({
-    id: block.id,
-
-    source_block_id: block.source_block_id,
-    parent_block_id: block.parent_block_id,
-    type: block.type,
-    position: block.position,
-    level: block.level,
-    data: block.id === blockId ? asObject(input.data, 'content block data') : parseBlockData(block),
-    updated_at: block.id === blockId ? null : block.updated_at,
-  }))
-
-  return await writeDocumentBlocks(db, document, snapshots, opts)
+  const now = new Date(Math.max(Date.now(), Date.parse(document.updated_at) + 1)).toISOString()
+  const statements: BatchQuery[] = [
+    ...blockLocationGuard(document, current.type, data),
+    { query: 'UPDATE content_blocks SET data_json = ?, updated_at = ? WHERE id = ? AND document_id = ?', params: [JSON.stringify(data), now, blockId, document.id] },
+  ]
+  await runSingleBlockBatch(db, document, singleBlockBatch(document, { id: blockId, updated_at: input.expected_updated_at }, now, statements, opts))
+  return { id: blockId, updated_at: now }
 }
 
+/**
+ * The block goes, with its children and translations (the table's foreign
+ * keys cascade) and every one of their media placements; the remaining blocks
+ * keep their order at dense positions.
+ */
 export async function deleteContentBlock(
   db: DbClient,
   blockId: string,
@@ -685,39 +727,33 @@ export async function deleteContentBlock(
   const current = await getContentBlock(db, blockId)
   const document = await getContentDocumentById(db, current.document_id)
   if (!document) notFound('Content document not found')
-
-  const allBlocks = await listBlocksForDocument(db, document.id)
-  if (allBlocks.find(block => block.id === blockId)?.updated_at !== input.expected_updated_at) {
+  if (current.updated_at !== input.expected_updated_at) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Content block was updated by another writer' })
   }
-
-  const removedIds = new Set<string>([blockId])
-  let addedDescendant = true
-  while (addedDescendant) {
-    addedDescendant = false
-    for (const block of allBlocks) {
-      if (block.parent_block_id && removedIds.has(block.parent_block_id) && !removedIds.has(block.id)) {
-        removedIds.add(block.id)
-        addedDescendant = true
-      }
-    }
+  const now = new Date(Math.max(Date.now(), Date.parse(document.updated_at) + 1)).toISOString()
+  // The blocks that remain, in their current order, take dense positions; the
+  // document guard refuses the batch if that list changed since it was read.
+  const removed = new Set([blockId])
+  const blocks = await listBlocksForDocument(db, document.id)
+  for (let grew = true; grew;) {
+    grew = false
+    for (const block of blocks) if (!removed.has(block.id) && block.parent_block_id && removed.has(block.parent_block_id)) { removed.add(block.id); grew = true }
   }
-
-  const snapshots = allBlocks
-    .filter(block => !removedIds.has(block.id))
-    .map((block, index) => ({
-      id: block.id,
-
-      source_block_id: block.source_block_id,
-      parent_block_id: block.parent_block_id,
-      type: block.type,
-      position: index,
-      level: block.level,
-      data: parseBlockData(block),
-      updated_at: block.updated_at,
-    }))
-
-  return await writeDocumentBlocks(db, document, snapshots, { actorId: input.actorId })
+  const statements: BatchQuery[] = [
+    {
+      query: `DELETE FROM media_placements WHERE owner_type = 'content_block' AND owner_id IN (
+        WITH RECURSIVE removed(id) AS (
+          SELECT ? UNION SELECT child.id FROM content_blocks child JOIN removed ON child.parent_block_id = removed.id OR child.source_block_id = removed.id
+        ) SELECT id FROM removed)`,
+      params: [blockId],
+    },
+    { query: 'DELETE FROM content_blocks WHERE id = ? AND document_id = ?', params: [blockId, document.id] },
+    ...blocks.filter(block => !removed.has(block.id)).flatMap((block, position) => block.position === position ? [] : [{
+      query: 'UPDATE content_blocks SET position = ? WHERE id = ? AND document_id = ?', params: [position, block.id, document.id],
+    }]),
+  ]
+  await runSingleBlockBatch(db, document, singleBlockBatch(document, { id: blockId, updated_at: input.expected_updated_at }, now, statements, { actorId: input.actorId }))
+  return { updated_at: now }
 }
 
 export async function getContentEditorSnapshotForDocument(db: DbClient, document: ContentDocumentRow) {

@@ -11,7 +11,7 @@ export default defineHandler(async (event) => {
   const productId = getRouterParam(event, 'productId')
   if (!organizationId || !productId) return jsonResponse({ error: 'Organization ID and product ID are required' }, { status: 400 })
   try {
-    const { db, organization } = await requireProductAccess(event, organizationId, productId)
+    const { db, env, organization } = await requireProductAccess(event, organizationId, productId)
     // A product id in the path is not authorized by the site in the path.
     await requireOrganizationProduct(db, { organizationId: organization.id, productId })
     const query = getQuery(event)
@@ -22,7 +22,7 @@ export default defineHandler(async (event) => {
     const statuses = typeof query.status === 'string'
       ? String(query.status).split(',').filter((value): value is ProductSessionStatus => (PRODUCT_SESSION_STATUSES as readonly string[]).includes(value))
       : [...PRODUCT_SESSION_STATUSES]
-    const sessions = await listSessions(db, { organizationId: organization.id, productId, fromInstant: from, toInstant: to, statuses })
+    const sessions = await listSessions(db, { env, organizationId: organization.id, productId, fromInstant: from, toInstant: to, statuses })
     return jsonResponse({ success: true, sessions })
   } catch (error) {
     rethrowHttpError(error)

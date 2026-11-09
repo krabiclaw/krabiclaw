@@ -15,8 +15,6 @@ export type ScheduledTaskName =
   | 'analytics-aggregate-daily'
   | 'google-places-sync'
   | 'review-request-automation'
-  | 'social-card-backfill'
-  | 'social-card-cleanup'
   | 'sessions-materialize'
   | 'stripe-ga4-intent-retention'
   | 'stripe-fee-report-request'
@@ -34,12 +32,12 @@ type TaskLoader = () => Promise<{ default: ScheduledTaskDefinition }>
 
 /** The single source of truth for cron-to-task dispatch in Nitro's scheduled hook. */
 export const SCHEDULED_TASKS: Readonly<Record<string, readonly ScheduledTaskName[]>> = {
-  '*/5 * * * *': ['google-calendar-sync', 'social-card-backfill', 'scheduled-guest-messages', 'stay-checkout-holds', 'stay-calendar-links'],
+  '*/5 * * * *': ['google-calendar-sync', 'scheduled-guest-messages', 'stay-checkout-holds', 'stay-calendar-links'],
   '*/2 * * * *': ['public-resource-cache-invalidation', 'airbnb-sync', 'channex-ari-delivery', 'send-later-messages'],
   '*/10 * * * *': ['domain-reconciliation', 'zaraz-analytics-reconciliation', 'channex-revision-feed'],
   '0 3 * * *': ['reply-task-expiry', 'domain-reconciliation-daily', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request', 'marketing-ad-spend-daily'],
   '0 0 * * SUN': ['google-places-sync'],
-  '0 * * * *': ['review-request-automation', 'social-card-cleanup', 'sessions-materialize'],
+  '0 * * * *': ['review-request-automation', 'sessions-materialize'],
   // Staging only ([env.staging.triggers]): the Channex certification run needs imports, ARI
   // retries and the revision-feed backup. Each reads only its own Channex queue table.
   '1-59/2 * * * *': ['airbnb-sync', 'channex-ari-delivery'],
@@ -56,8 +54,6 @@ const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
   'airbnb-sync': async () => import('./tasks/airbnb-sync'),
   'channex-ari-delivery': async () => import('./tasks/channex-ari-delivery'),
   'reply-task-expiry': async () => import('./tasks/reply-task-expiry'),
-  'social-card-backfill': async () => import('./tasks/social-card-backfill'),
-  'social-card-cleanup': async () => import('./tasks/social-card-cleanup'),
   'public-resource-cache-invalidation': async () => import('./tasks/public-resource-cache-invalidation'),
   'domain-reconciliation': async () => import('./tasks/domain-reconciliation'),
   'zaraz-analytics-reconciliation': async () => import('./tasks/zaraz-analytics-reconciliation'),
