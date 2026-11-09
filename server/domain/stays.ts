@@ -1604,9 +1604,13 @@ function bookedListingGuardQuery(organizationId: string, productId: string, stay
   }
 }
 
+/** The booked-listing guard above is the only `json()` of plain text in a stay batch. */
+function isBookedListingHeld(error: unknown): boolean {
+  return /malformed JSON/.test(error instanceof Error ? error.message : String(error))
+}
+
 export function isStayNightConflict(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error)
-  return /UNIQUE constraint failed: stay_nights\./.test(message) || /malformed JSON/.test(message)
+  return /UNIQUE constraint failed: stay_nights\./.test(error instanceof Error ? error.message : String(error))
 }
 
 interface StayFields {
@@ -1746,7 +1750,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
       ...turnovers,
     ], { operation: 'Create stay' })
   } catch (error) {
-    if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
+    if (isStayNightConflict(error) || isBookedListingHeld(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
     if (/UNIQUE constraint failed: stays\.organization_id, stays\.idempotency_key/.test(error instanceof Error ? error.message : String(error))) {
       const concurrent = await replay()
       if (concurrent) return pushed(concurrent)
@@ -1801,7 +1805,7 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
       ...turnovers,
     ], { operation: 'Update stay' })
   } catch (error) {
-    if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
+    if (isStayNightConflict(error) || isBookedListingHeld(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
     throw error
   }
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
@@ -1927,6 +1931,7 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
         params: [to.product_id, booked, next, now, access.actorId, access.organizationId, stayId, from.product_id, current.version] },
       organizationEventQuery({ organizationId: access.organizationId, locationId: to.location_id, actorId: access.actorId, eventType: 'stay.moved', entityType: 'stay', entityId: stayId, onlyIfPreviousChangedOneRow: true,
         metadata: { from_product_id: from.product_id, to_product_id: to.product_id, booked_product_id: booked } }),
+      bookedListingGuardQuery(access.organizationId, to.product_id, stayId, current.check_in_date, current.check_out_date),
       ...reconcileNightsQueries(access.organizationId, stayId),
       { query: `UPDATE scheduled_guest_messages SET product_id = ?, updated_at = ? WHERE organization_id = ? AND stay_id = ? AND status <> 'sent' AND ${moved}`,
         params: [to.product_id, now, access.organizationId, stayId, ...movedParams] },
@@ -1942,7 +1947,7 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
       }]),
     ], { operation: 'Move stay' })
   } catch (error) {
-    if (isStayNightConflict(error)) fail(409, 'STAY_MOVE_NIGHTS_TAKEN', `${to.internal_name} is not free for every night of this stay`, 'product_id')
+    if (isStayNightConflict(error) || isBookedListingHeld(error)) fail(409, 'STAY_MOVE_NIGHTS_TAKEN', `${to.internal_name} is not free for every night of this stay`, 'product_id')
     throw error
   }
   if (results[1]?.meta.changes !== 1) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')

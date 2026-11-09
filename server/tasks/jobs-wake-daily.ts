@@ -20,7 +20,11 @@ export default defineScheduledTask<{ woken: number }>({
     const horizon = new Date(Date.now() + 2 * 86_400_000).toISOString()
     const organizations = await queryAll<{ organization_id: string }>(env.DB, `SELECT DISTINCT t.organization_id FROM tasks t
       WHERE t.status = 'open' AND (${JOB_TASK_SQL('t')} OR (t.starts_at IS NOT NULL AND t.starts_at <= ?))`, [horizon])
-    for (const row of organizations) await publishBusinessInvalidation(env, row.organization_id)
+    const failures: unknown[] = []
+    for (const row of organizations) {
+      try { await publishBusinessInvalidation(env, row.organization_id) } catch (error) { failures.push(error) }
+    }
+    if (failures.length) throw new AggregateError(failures, `${failures.length} of ${organizations.length} businesses could not be woken`)
     return { result: { woken: organizations.length } }
   },
 })

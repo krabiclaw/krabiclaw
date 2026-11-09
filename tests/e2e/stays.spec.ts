@@ -4615,7 +4615,9 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
         const lines = (await read.json() as { messages: Array<{ automatic: boolean; body: string }> }).messages.filter(message => message.automatic).map(message => message.body.split('\n')[0])
         return { job: lines.filter(line => line === 'Turnover: Assigned Cabin').length, other: lines.filter(line => line !== 'Turnover: Assigned Cabin' && !/^No longer yours: turnover at Assigned Cabin, /.test(line)) }
       }, { timeout: 30_000, message: 'the job is posted into the conversation as an automatic message' }).toEqual({ job: 1, other: [] })
-      expect(jobThread!.unread).toBe(false)
+      const threadsAfterPost = await cleaner.request.get(api('team/threads'))
+      await expectStatus(threadsAfterPost, 200)
+      expect((await threadsAfterPost.json() as { threads: Array<{ id: string; unread: boolean }> }).threads.find(item => item.id === jobThread!.id)?.unread).toBe(false)
       const alertsResponse = await cleaner.request.get(api('notifications'))
       await expectStatus(alertsResponse, 200)
       const alerts = await alertsResponse.json() as { notifications: Array<{ template: string }> }

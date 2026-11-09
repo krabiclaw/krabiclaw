@@ -745,7 +745,6 @@ export async function postAutomaticTeamMessage(env: TeamEnv, db: DbClient, input
     const recipients = seated.map(seat => seat.user_id).filter(userId => input.alertUserIds.includes(userId))
     try {
       await notifyTeamMessage(env, db, { organizationId: input.organizationId, threadId: row.thread_id, entryId: entry.id, senderName: input.senderName, messagePreview: body, recipientUserIds: recipients })
-      await publishThreadChanged(env, input.organizationId, row.thread_id, { message_id: row.id })
     } catch (error) {
       // The alert is part of the message: one that could not be told is not kept, so the next post writes and tells it again.
       await executeBatch(db, [
@@ -754,6 +753,8 @@ export async function postAutomaticTeamMessage(env: TeamEnv, db: DbClient, input
       ], { operation: 'Withdraw an automatic team message whose alert failed' })
       throw error
     }
+    // Told and kept: a refresh that fails is reported, and the next change refreshes the open inboxes.
+    await publishThreadChanged(env, input.organizationId, row.thread_id, { message_id: row.id })
   }
   return { threadId: row.thread_id, messageId: row.id, created }
 }
@@ -764,7 +765,10 @@ export async function postAutomaticTeamMessage(env: TeamEnv, db: DbClient, input
  * that roster from now on. Nobody is removed; a departed member's seat is gone
  * with their membership.
  */
-export async function reseatAutomaticThread(db: DbClient, input: { organizationId: string; threadId: string; seatMemberIds: readonly string[]; participantsKey: string }): Promise<void> {
+export async function reseatAutomaticThread(db: DbClient, input: { organizationId: string; threadId: string; seatMemberIds: readonly string[]; participantsKey: string }): Promise<{ threadId: string }> {
+  // Someone may already have opened the conversation this roster is addressed by ("Message host" after a host joined): that one carries the job from here.
+  const addressed = await queryFirst<{ id: string }>(db, 'SELECT id FROM team_threads WHERE organization_id = ? AND participants_key = ?', [input.organizationId, input.participantsKey])
+  if (addressed) return { threadId: addressed.id }
   const now = new Date().toISOString()
   const results = await executeBatch(db, [
     ...input.seatMemberIds.map(memberId => ({
@@ -775,6 +779,7 @@ export async function reseatAutomaticThread(db: DbClient, input: { organizationI
     { query: 'UPDATE team_threads SET participants_key = ? WHERE organization_id = ? AND id = ?', params: [input.participantsKey, input.organizationId, input.threadId] },
   ], { operation: 'Bring a job conversation up to today’s roster' })
   if ((results.at(-1)?.meta.changes ?? 0) !== 1) throw new Error(`Team conversation ${input.threadId} could not be addressed by its new roster`)
+  return { threadId: input.threadId }
 }
 
 /**

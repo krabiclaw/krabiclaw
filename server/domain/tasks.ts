@@ -372,7 +372,7 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
   if (!organization) throw new Error(`Organization ${organizationId} is missing`)
   const stayIds = [...new Set([...ids(row => row.subject_type === 'stay' ? row.subject_id : null), ...messages.map(message => message.stay_id)])]
   const openReplies = ids(row => row.kind === 'guest_reply' && row.status === 'open' ? row.subject_id : null)
-  const replyRequests = openReplies.length && await roleAllows({ ...viewer.principal, permissions: { operations: ['update'] } }) ? openReplies : []
+  const replyRequests = openReplies.length && viewer.principal.role && await roleAllows({ ...viewer.principal, permissions: { operations: ['update'] } }) ? openReplies : []
   const stays = await queryAll<StayContextFacts>(db, `
     SELECT s.id, s.product_id, s.guest_name, s.guest_surname, s.adults, s.children, s.check_in_date, s.check_out_date,
       s.request_id, s.status, s.no_show_at, s.channel, s.overbooked, u.image AS guest_image_url, l.timezone AS home_timezone,
@@ -781,7 +781,10 @@ export async function describeTaskForAlert(db: DbClient, organizationId: string,
 export async function taskViewForUser(db: DbClient, organizationId: string, taskId: string, userId: string | null, now = new Date()): Promise<TaskView> {
   const row = await queryFirst<TaskRow>(db, 'SELECT * FROM tasks WHERE organization_id = ? AND id = ?', [organizationId, taskId])
   if (!row) throw new Error(`Task ${taskId} is not in organization ${organizationId}`)
-  const viewer = { principal: { organizationId, userId: userId ?? '' } as MemberAccessPrincipal, manage: false, memberId: '' }
+  // The recipient's own membership answers what they may read; a view for nobody (a job with no people yet) reads as a member with no role.
+  const member = userId === null ? null : await queryFirst<{ id: string; role: string }>(db, 'SELECT id, role FROM member WHERE organizationId = ? AND userId = ?', [organizationId, userId])
+  if (userId !== null && !member) throw new Error(`User ${userId} is not a member of organization ${organizationId}`)
+  const viewer = { principal: { organizationId, userId: userId ?? '', role: member?.role ?? '' } as MemberAccessPrincipal, manage: false, memberId: member?.id ?? '' }
   return present(row, viewer, await loadContext(db, viewer, [row]), now)
 }
 

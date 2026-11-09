@@ -155,10 +155,10 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
       if (task.status === 'open' && roster && heldIn === null) {
         const kept = elsewhere.find(([threadId]) => sameCleaners(threadId))
         if (kept) {
-          await reseatAutomaticThread(db, { organizationId, threadId: kept[0], seatMemberIds: roster.seats, participantsKey: targetKey! })
-          threads.set(kept[0], { subject_id: subject.id, participants_key: targetKey! })
-          seatUsers.set(kept[0], [...new Set([...roster.cleaners, ...roster.hosts])])
-          heldIn = kept[0]
+          const { threadId } = await reseatAutomaticThread(db, { organizationId, threadId: kept[0], seatMemberIds: roster.seats, participantsKey: targetKey! })
+          threads.set(threadId, { subject_id: subject.id, participants_key: targetKey! })
+          seatUsers.set(threadId, [...new Set([...roster.cleaners, ...roster.hosts])])
+          heldIn = threadId
         }
       }
       for (const [threadId] of elsewhere) {
