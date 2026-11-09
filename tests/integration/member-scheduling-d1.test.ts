@@ -189,8 +189,10 @@ test('member self-service uses Better Auth permissions, public approval is admin
   // A calendar that cannot be read fails the claim visibly instead of guessing the member is free.
   await assert.rejects(()=>claimSessionCapacity(db,{env,organizationId:'org',productId:'one',sessionId:'session-one',productVariantId:'variant-one',partySize:1}),{statusCode:404,message:'That account is not linked to you.'})
   assert.equal(await db.prepare("SELECT count(*) n FROM bookings WHERE product_session_id='session-one'").first('n'),0)
-  // Cancelling an unbooked session asks no calendar, so an unreadable one does not stand in the way.
+  // Cancelling an unbooked session asks no calendar, so an unreadable one does not stand in the way, nor does another scheduled session of the same offering at the same time.
+  await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES('session-one-b','org','one','member-one','UTC',?,?,1,'owner','owner')").bind(`${day}T14:30:00.000Z`,`${day}T15:30:00.000Z`).run()
   assert.equal((await updateSession(db,{env,organizationId:'org',productId:'one',sessionId:'session-one',actorId:'owner',status:'cancelled'})).status,'cancelled')
+  await db.prepare("DELETE FROM product_sessions WHERE id='session-one-b'").run()
   assert.equal(await db.prepare("SELECT status FROM product_sessions WHERE id='session-one'").first('status'),'cancelled')
   await db.prepare("UPDATE product_sessions SET status='scheduled' WHERE id='session-one'").run()
   const healthy=await claimSessionCapacity(db,{env,organizationId:'org',productId:'two',sessionId:'session-two',productVariantId:'variant-two',partySize:1})

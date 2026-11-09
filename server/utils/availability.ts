@@ -768,9 +768,15 @@ export async function prepareProductBookingSetup(db: DbClient, input: {
   }
   const bookableFrom = input.now
   // The sessions this batch inserts are not stored yet: their providers come from the configuration.
+  const configured = await configuredProviderIds(db, config)
+  if (locationId === null && configured.length) {
+    // An online slot is public inside its provider's own window; the guard uses the earliest of them.
+    const zones = await queryAll<{ timezone: string }>(db, 'SELECT timezone FROM member_scheduling WHERE organization_id=? AND timezone IS NOT NULL AND member_id IN (SELECT value FROM json_each(?))', [input.organizationId, JSON.stringify(configured)])
+    bookableUntil = [bookableUntil, ...zones.map(zone => bookingWindow(zone.timezone).toInstant)].sort()[0]!
+  }
   const stored = await sessionProviderIds(db, input.organizationId, { productId: input.productId, fromInstant: bookableFrom })
   // Sessions start inside the window and may run past its end.
-  const availability = await memberAvailabilityJson(db, input.env, input.organizationId, { from: bookableFrom, until: new Date(Date.parse(bookableUntil) + 86_400_000).toISOString() }, [...new Set([...await configuredProviderIds(db, config), ...stored.members])])
+  const availability = await memberAvailabilityJson(db, input.env, input.organizationId, { from: bookableFrom, until: new Date(Date.parse(bookableUntil) + 86_400_000).toISOString() }, [...new Set([...configured, ...stored.members])])
   queries.push({
     query: `UPDATE product_booking_configs SET updated_at=CASE WHEN EXISTS (
       SELECT 1 FROM product_sessions s WHERE s.organization_id=? AND s.product_id=?
@@ -797,12 +803,12 @@ type SessionLocation = { id: string; timezone: string; status: string; opening_h
  * availability it binds asks Google about those members only. A cancelled
  * session and a session with no provider need no entry.
  */
-async function sessionProviderIds(db: DbClient, organizationId: string, filter: { productId?: string | null; productIds?: string[] | null; locationId?: string | null; sessionId?: string | null; fromInstant?: string | null; toInstant?: string | null }): Promise<{ members: string[]; from: string | null; until: string | null }> {
+async function sessionProviderIds(db: DbClient, organizationId: string, filter: { productId?: string | null; productIds?: string[] | null; locationId?: string | null; sessionIds?: string[] | null; fromInstant?: string | null; toInstant?: string | null }): Promise<{ members: string[]; from: string | null; until: string | null }> {
   const rows = await queryAll<{ member: string | null; from: string; until: string }>(db, `SELECT ${sessionMemberSql('s')} AS member, MIN(s.starts_at) AS "from", MAX(s.ends_at) AS until FROM product_sessions s
-    WHERE s.organization_id=? AND s.status='scheduled' AND (? IS NULL OR s.product_id=?) AND (? IS NULL OR s.product_id IN (SELECT value FROM json_each(?))) AND (? IS NULL OR s.location_id=?) AND (? IS NULL OR s.id=?)
+    WHERE s.organization_id=? AND s.status='scheduled' AND (? IS NULL OR s.product_id=?) AND (? IS NULL OR s.product_id IN (SELECT value FROM json_each(?))) AND (? IS NULL OR s.location_id=?) AND (? IS NULL OR s.id IN (SELECT value FROM json_each(?)))
       AND (? IS NULL OR s.starts_at>=?) AND (? IS NULL OR s.starts_at<?)
     GROUP BY 1`,
-  [organizationId, filter.productId ?? null, filter.productId ?? null, filter.productIds ? JSON.stringify(filter.productIds) : null, filter.productIds ? JSON.stringify(filter.productIds) : null, filter.locationId ?? null, filter.locationId ?? null, filter.sessionId ?? null, filter.sessionId ?? null,
+  [organizationId, filter.productId ?? null, filter.productId ?? null, filter.productIds ? JSON.stringify(filter.productIds) : null, filter.productIds ? JSON.stringify(filter.productIds) : null, filter.locationId ?? null, filter.locationId ?? null, filter.sessionIds ? JSON.stringify(filter.sessionIds) : null, filter.sessionIds ? JSON.stringify(filter.sessionIds) : null,
     filter.fromInstant ?? null, filter.fromInstant ?? null, filter.toInstant ?? null, filter.toInstant ?? null])
   const named = rows.filter(row => row.member)
   return { members: named.map(row => row.member!), from: named.map(row => row.from).sort()[0] ?? null, until: named.map(row => row.until).sort().at(-1) ?? null }
@@ -831,6 +837,8 @@ export async function listSessions(db: DbClient, input: {
   productId?: string
   /** A catalog read names the offerings whose readiness it is assessing, so only their providers' calendars are read. */
   productIds?: string[]
+  /** A readback names the sessions it wants, so only their providers' calendars are read. */
+  sessionIds?: string[]
   locationId?: string
   fromInstant: string
   toInstant: string
@@ -842,7 +850,7 @@ export async function listSessions(db: DbClient, input: {
   }
   const statuses = input.statuses ?? ['scheduled']
   // Google is asked about the span the stored provider sessions actually cover, not the whole window.
-  const providers = await sessionProviderIds(db, input.organizationId, { productId: input.productId, productIds: input.productIds, locationId: input.locationId, fromInstant: input.fromInstant, toInstant: input.toInstant })
+  const providers = await sessionProviderIds(db, input.organizationId, { productId: input.productId, productIds: input.productIds, sessionIds: input.sessionIds, locationId: input.locationId, fromInstant: input.fromInstant, toInstant: input.toInstant })
   const availability = providers.members.length ? await memberAvailabilityJson(db, input.env, input.organizationId, { from: providers.from!, until: providers.until! }, providers.members) : '{}'
   const sessions = await queryAll<SessionAvailability>(db, `
     SELECT s.id, s.organization_id, s.product_id, s.location_id, s.availability_rule_id, ${sessionMemberSql('s')} AS assigned_member_id,
@@ -863,6 +871,7 @@ export async function listSessions(db: DbClient, input: {
     WHERE s.organization_id = ?
       AND (? IS NULL OR s.product_id = ?)
       AND (? IS NULL OR s.product_id IN (SELECT value FROM json_each(?)))
+      AND (? IS NULL OR s.id IN (SELECT value FROM json_each(?)))
       AND (? IS NULL OR s.location_id = ?)
       AND s.starts_at >= ? AND s.starts_at < ?
       AND s.status IN (SELECT value FROM json_each(?))
@@ -872,6 +881,7 @@ export async function listSessions(db: DbClient, input: {
     input.organizationId,
     input.productId ?? null, input.productId ?? null,
     input.productIds ? JSON.stringify(input.productIds) : null, input.productIds ? JSON.stringify(input.productIds) : null,
+    input.sessionIds ? JSON.stringify(input.sessionIds) : null, input.sessionIds ? JSON.stringify(input.sessionIds) : null,
     input.locationId ?? null, input.locationId ?? null,
     input.fromInstant, input.toInstant, JSON.stringify(statuses),
   ]).then(rows => rows.map(row => ({ ...row, is_full: Boolean(row.is_full) })))
@@ -930,7 +940,7 @@ export interface SessionAllocationInput {
 export async function sessionAllocationPredicate(db: DbClient, input: SessionAllocationInput): Promise<BatchQuery> {
   const location = await sessionLocationGuard(db, input)
   const span = await queryFirst<{ starts_at: string; ends_at: string }>(db, 'SELECT starts_at, ends_at FROM product_sessions WHERE id=? AND organization_id=?', [input.sessionId, input.organizationId])
-  const availability = span ? await memberAvailabilityJson(db, input.env, input.organizationId, { from: span.starts_at, until: span.ends_at }, (await sessionProviderIds(db, input.organizationId, { sessionId: input.sessionId })).members) : '{}'
+  const availability = span ? await memberAvailabilityJson(db, input.env, input.organizationId, { from: span.starts_at, until: span.ends_at }, (await sessionProviderIds(db, input.organizationId, { sessionIds: [input.sessionId] })).members) : '{}'
   return { query: `${input.capturedPaymentId ? `EXISTS (SELECT 1 FROM payment_checkout_holds h JOIN payments p ON p.id=h.payment_id WHERE p.id=? AND p.organization_id=? AND p.state='captured' AND p.refunded_amount=0 AND h.status IN ('active','released') AND h.expires_at>? AND h.session_id=? AND h.quantity=? AND h.organization_id=p.organization_id AND h.amount=p.amount AND h.currency=p.currency) AND ` : ''}${input.requireUndecided
         ? `EXISTS (SELECT 1 FROM requests WHERE id = ? AND organization_id = ? AND updated_at = ?)
            AND NOT EXISTS (SELECT 1 FROM activity_entries WHERE dedupe_key = ?) AND `
@@ -1134,7 +1144,7 @@ export async function setBookingStatus(db: DbClient, input: {
 export async function getSessionAvailability(db: DbClient, env: CloudflareEnv, organizationId: string, productId: string, sessionId: string): Promise<SessionAvailability> {
   const session = await queryFirst<ProductSession>(db, 'SELECT * FROM product_sessions WHERE organization_id=? AND product_id=? AND id=?', [organizationId, productId, sessionId])
   if (!session) throw new HTTPError({ statusCode: 404, statusMessage: 'Session not found for this offering' })
-  const sessions = await listSessions(db, { env, organizationId, productId, fromInstant: session.starts_at, toInstant: session.ends_at, statuses: ['scheduled', 'cancelled'] })
+  const sessions = await listSessions(db, { env, organizationId, productId, sessionIds: [sessionId], fromInstant: session.starts_at, toInstant: session.ends_at, statuses: ['scheduled', 'cancelled'] })
   const result = sessions.find(row => row.id === sessionId)
   if (!result) throw new Error('The saved session could not be read back')
   return result
@@ -1144,7 +1154,7 @@ export async function getSessionAvailability(db: DbClient, env: CloudflareEnv, o
 async function readSessionsBack(db: DbClient, env: CloudflareEnv, organizationId: string, productId: string, ids: string[]): Promise<SessionAvailability[]> {
   const span = await queryFirst<{ from: string; until: string }>(db, 'SELECT MIN(starts_at) AS "from", MAX(ends_at) AS until FROM product_sessions WHERE organization_id=? AND product_id=? AND id IN (SELECT value FROM json_each(?))', [organizationId, productId, JSON.stringify(ids)])
   if (!span?.from) throw new Error('The saved sessions could not be read back')
-  const sessions = await listSessions(db, { env, organizationId, productId, fromInstant: span.from, toInstant: new Date(Date.parse(span.until) + 1).toISOString(), statuses: ['scheduled', 'cancelled'] })
+  const sessions = await listSessions(db, { env, organizationId, productId, sessionIds: ids, fromInstant: span.from, toInstant: new Date(Date.parse(span.until) + 1).toISOString(), statuses: ['scheduled', 'cancelled'] })
   return ids.map((id) => {
     const session = sessions.find(row => row.id === id)
     if (!session) throw new Error('The saved session could not be read back')
@@ -1238,7 +1248,7 @@ export async function updateSession(db: DbClient, input: {
   const location = session.location_id ? await queryFirst<SessionLocation>(db, 'SELECT id,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id=?', [input.organizationId, session.location_id]) : null
   const moved = startsAt !== session.starts_at || endsAt !== session.ends_at
   // Only a move needs the provider's availability at the new time; a capacity or status change asks no calendar.
-  const availability = moved ? await memberAvailabilityJson(db, input.env, input.organizationId, { from: startsAt, until: endsAt }, (await sessionProviderIds(db, input.organizationId, { sessionId: input.sessionId })).members) : null
+  const availability = moved ? await memberAvailabilityJson(db, input.env, input.organizationId, { from: startsAt, until: endsAt }, (await sessionProviderIds(db, input.organizationId, { sessionIds: [input.sessionId] })).members) : null
   if (moved && session.location_id && (!location || !locationAllowsBooking({ starts_at: startsAt, ends_at: endsAt }, location))) badRequest('This session is outside opening hours or during a closure')
   const locationGuard: BatchQuery = moved && location
     ? { query: `AND EXISTS (SELECT 1 FROM business_locations l WHERE l.id=product_sessions.location_id AND l.organization_id=product_sessions.organization_id AND l.status='active' AND l.timezone IS ? AND l.opening_hours IS ? AND l.special_hours IS ?)`, params: [location.timezone, location.opening_hours, location.special_hours] }
