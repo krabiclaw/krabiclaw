@@ -174,9 +174,7 @@ export async function deliverReceiptEmail(db: DbClient, input: {
   } catch (error) {
     // A send that threw did not send: it is failed with its error, and sending it again reuses
     // the receipt's id as Resend's idempotency key.
-    await execute(db, `UPDATE guest_thread_deliveries SET error = ?,
-      status = CASE WHEN status IN ('accepted', 'sent', 'delivered', 'read') THEN status ELSE 'failed' END, updated_at = ? WHERE id = ?`,
-    [error instanceof Error ? error.message : String(error), new Date().toISOString(), delivery.id])
+    await recordDeliveryOutcome(db, { deliveryId: delivery.id, status: 'failed', error: error instanceof Error ? error.message : String(error) })
     throw error
   }
 }

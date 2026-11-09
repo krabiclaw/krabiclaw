@@ -72,8 +72,9 @@ UUID remains in `provider_message_id`; the two identities are not interchangeabl
 
 A send is sent when Resend answers with the email's id, and failed with
 Resend's error when it answers with an error or the call throws. A failed send
-is sent again under the receipt's id, which is Resend's idempotency key, so an
-email Resend already took is not sent twice. Resend's send answer carries no RFC
+is sent again under the receipt's id, which is Resend's idempotency key, so
+within Resend's 24-hour idempotency window an email it already took is not sent
+twice. Resend's send answer carries no RFC
 Message-ID. The verified `email.sent` or `email.delivered` webhook records it,
 and nothing polls Resend for it. A reply threads on the Message-IDs recorded
 when it is prepared; an earlier email whose webhook has not arrived is left out
