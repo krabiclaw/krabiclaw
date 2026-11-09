@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4d828792-cba4-4a99-8336-074edf20ebc9",
+  "id": "e4840381-b413-4598-9c31-61817f4674a6",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -5753,20 +5753,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "windows_json": {
-          "name": "windows_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "windows_until": {
-          "name": "windows_until",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "public_name": {
           "name": "public_name",
           "type": "text",
@@ -5810,49 +5796,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'[]'"
-        },
-        "calendar_revision": {
-          "name": "calendar_revision",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "busy_json": {
-          "name": "busy_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[]'"
-        },
-        "busy_from": {
-          "name": "busy_from",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "busy_until": {
-          "name": "busy_until",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "busy_checked_at": {
-          "name": "busy_checked_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "busy_error": {
-          "name": "busy_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         },
         "updated_at": {
           "name": "updated_at",
@@ -5900,7 +5843,7 @@
       "checkConstraints": {
         "member_scheduling_hours_check": {
           "name": "member_scheduling_hours_check",
-          "value": "(\"member_scheduling\".\"timezone\" IS NULL AND \"member_scheduling\".\"weekly_json\" IS NULL AND \"member_scheduling\".\"time_off_json\" IS NULL AND \"member_scheduling\".\"windows_json\" IS NULL AND \"member_scheduling\".\"windows_until\" IS NULL) OR (\"member_scheduling\".\"timezone\" IS NOT NULL AND \"member_scheduling\".\"weekly_json\" IS NOT NULL AND \"member_scheduling\".\"time_off_json\" IS NOT NULL AND \"member_scheduling\".\"windows_json\" IS NOT NULL AND \"member_scheduling\".\"windows_until\" IS NOT NULL)"
+          "value": "(\"member_scheduling\".\"timezone\" IS NULL AND \"member_scheduling\".\"weekly_json\" IS NULL AND \"member_scheduling\".\"time_off_json\" IS NULL) OR (\"member_scheduling\".\"timezone\" IS NOT NULL AND \"member_scheduling\".\"weekly_json\" IS NOT NULL AND \"member_scheduling\".\"time_off_json\" IS NOT NULL)"
         }
       }
     },

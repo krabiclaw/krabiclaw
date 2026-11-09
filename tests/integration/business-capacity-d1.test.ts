@@ -89,8 +89,8 @@ test('live homes are reported to their Stripe meter, drafts and locations are fr
       await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES (?, ?, 'en', 1, 'published')").bind(`${id}-en`, id).run()
       await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'owner', 0)").bind(`m-${id}`, id, OWNER).run()
       // The owner's published host profile: a home is listed only with a host guests can see.
-      await db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until, public_name, public_bio, public_approved, calendar_revision, updated_at, updated_by)
-        VALUES (?, ?, 'America/Denver', '[]', '[]', '[]', '2026-10-15T00:00:00.000Z', 'Owner Host', NULL, 1, 'revision', '2026-10-15T00:00:00.000Z', ?)`).bind(`m-${id}`, id, OWNER).run()
+      await db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, public_name, public_bio, public_approved, updated_at, updated_by)
+        VALUES (?, ?, 'America/Denver', '[]', '[]', 'Owner Host', NULL, 1, '2026-10-15T00:00:00.000Z', ?)`).bind(`m-${id}`, id, OWNER).run()
       // As Better Auth's webhook writes it from the Stripe subscription.
       if (plan) await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, seats, billingInterval, stripeSubscriptionId, stripeCustomerId, periodEnd) VALUES (?, ?, ?, ?, 1, 'month', ?, ?, ?)")
         .bind(`sub-${id}`, plan, id, subscriptions[`sub_${id}`]!.status, `sub_${id}`, customer, Math.floor(Date.now() / 1000) + 86_400).run()

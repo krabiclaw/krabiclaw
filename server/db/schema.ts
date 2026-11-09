@@ -257,7 +257,7 @@ export const organization_goals = sqliteTable('organization_goals', {
 
 // Something the business could do, as the opportunity selector found it at one
 // evidence revision (server/domain/opportunities.ts). New evidence is a new
-// row; the old one becomes superseded. Accepting creates its one task
+// row; a row whose evidence is gone stays as it was. Accepting creates its one task
 // (tasks.opportunity_id); dismissing records the owner's decision. Tasks
 // reference this table, so its value sets (operation, status) are enforced by
 // the domain, not by a CHECK a new value would have to rebuild. A decision
@@ -270,7 +270,7 @@ export const opportunities = sqliteTable('opportunities', {
   evidence_revision: text().notNull(),
   goal_id: text(),
   goal_revision: text(),
-  status: text({ enum: ['open', 'accepted', 'dismissed', 'superseded'] }).notNull(),
+  status: text({ enum: ['open', 'accepted', 'dismissed'] }).notNull(),
   available_at: text(),
   decision_note: text(),
   decided_at: text(),
@@ -3431,25 +3431,17 @@ export const member_scheduling = sqliteTable("member_scheduling", {
  timezone: text(),
  weekly_json: text(),
  time_off_json: text(),
- windows_json: text(),
- windows_until: text(),
  public_name: text(),
  public_photo_url: text(),
  public_bio: text(),
  public_approved: integer({ mode: "boolean" }).default(false).notNull(),
  calendar_account_id: text(),
  calendar_ids_json: text().default("[]").notNull(),
- calendar_revision: text().notNull(),
- busy_json: text().default("[]").notNull(),
- busy_from: text(),
- busy_until: text(),
- busy_checked_at: text(),
- busy_error: text(),
  updated_at: text().notNull(),
  updated_by: text().notNull(),
 }, t => [index("member_scheduling_org_idx").on(t.organization_id),
  foreignKey({ columns: [t.member_id, t.organization_id], foreignColumns: [member.id, member.organizationId] }).onDelete("cascade"),
- check("member_scheduling_hours_check", sql`(${t.timezone} IS NULL AND ${t.weekly_json} IS NULL AND ${t.time_off_json} IS NULL AND ${t.windows_json} IS NULL AND ${t.windows_until} IS NULL) OR (${t.timezone} IS NOT NULL AND ${t.weekly_json} IS NOT NULL AND ${t.time_off_json} IS NOT NULL AND ${t.windows_json} IS NOT NULL AND ${t.windows_until} IS NOT NULL)`),
+ check("member_scheduling_hours_check", sql`(${t.timezone} IS NULL AND ${t.weekly_json} IS NULL AND ${t.time_off_json} IS NULL) OR (${t.timezone} IS NOT NULL AND ${t.weekly_json} IS NOT NULL AND ${t.time_off_json} IS NOT NULL)`),
 ]);
 
 // A creation attempt survives an ambiguous provider response. Retry discovers

@@ -12,8 +12,6 @@ import { getR2KeyFromPublicUrl } from '~/server/utils/cloudflare-r2'
 export interface SchedulingActor { env: CloudflareEnv; userId: string; organizationId: string }
 export interface MemberScheduling {
  member_id: string; organization_id: string; timezone: string | null; weekly_json: string | null; time_off_json: string | null
- /** Unread; dropped by the v26 epoch together with calendar_revision and the busy_* columns. */
- windows_json: string | null; windows_until: string | null
  public_name: string | null; public_photo_url: string | null; public_bio: string | null; public_approved: number
  calendar_account_id: string | null; calendar_ids_json: string; updated_at: string; updated_by: string
 }
@@ -122,8 +120,7 @@ export async function writeMemberScheduling(actor: SchedulingActor, memberId: st
  const changedHours=timezone!==(current?.timezone??null) || JSON.stringify(weekly)!==JSON.stringify(currentWeekly)
  const changedTimeOff=JSON.stringify(timeOff)!==JSON.stringify(currentTimeOff)
  // Hours that cannot be placed on a real clock are refused here, where the member can fix them.
- // windows_json, windows_until and calendar_revision are unread: the v26 epoch drops the columns and these values with them.
- const windows=changedHours?workingWindows(timezone!,weekly!,{from:new Date(),until:new Date(Date.now()+370*86400000)}):null
+ if(changedHours) workingWindows(timezone!,weekly!,{from:new Date(),until:new Date(Date.now()+370*86400000)})
  for(const [key,max] of [['public_name',100],['public_bio',2000],['public_photo_url',2048]] as const) if(input[key]!==undefined && input[key]!==null && (typeof input[key]!=='string' || input[key]!.length>max)) throw new HTTPError({statusCode:400,message:`Invalid ${key}`})
  if(input.public_photo_url) { if(!URL.canParse(input.public_photo_url))throw new HTTPError({statusCode:400,message:'Public photo must be a valid HTTPS URL'});const url=new URL(input.public_photo_url); if((url.protocol!=='https:' && getR2KeyFromPublicUrl(actor.env,input.public_photo_url)===null) || url.username || url.password) throw new HTTPError({statusCode:400,message:'Public photo must use HTTPS'}) }
  const changedProfile=['public_name','public_photo_url','public_bio'].some(key=>input[key as keyof typeof input]!==undefined && input[key as keyof typeof input]!==current?.[key as keyof typeof current])
@@ -131,12 +128,12 @@ export async function writeMemberScheduling(actor: SchedulingActor, memberId: st
  const publicName=input.public_name===undefined?current?.public_name??null:input.public_name
  if(approved && !publicName?.trim())throw new HTTPError({statusCode:400,message:'Set a nonblank public name before publishing the member profile'})
  const now=new Date(Math.max(Date.now(),current?Date.parse(current.updated_at)+1:0)).toISOString()
- const updates=['public_name','public_photo_url','public_bio','public_approved','updated_at','updated_by',...(changedHours?['timezone','weekly_json','windows_json','windows_until']:[]),...(changedTimeOff?['time_off_json']:[])]
- await executeBatch(db,[{query:`INSERT INTO member_scheduling(member_id,organization_id,timezone,weekly_json,time_off_json,windows_json,windows_until,public_name,public_photo_url,public_bio,public_approved,calendar_revision,updated_at,updated_by)
- SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM member WHERE id=? AND organizationId=?)
+ const updates=['public_name','public_photo_url','public_bio','public_approved','updated_at','updated_by',...(changedHours?['timezone','weekly_json']:[]),...(changedTimeOff?['time_off_json']:[])]
+ await executeBatch(db,[{query:`INSERT INTO member_scheduling(member_id,organization_id,timezone,weekly_json,time_off_json,public_name,public_photo_url,public_bio,public_approved,updated_at,updated_by)
+ SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM member WHERE id=? AND organizationId=?)
   AND (? IS NULL OR EXISTS(SELECT 1 FROM member_scheduling WHERE member_id=? AND organization_id=? AND updated_at=?))
  ON CONFLICT(member_id) DO UPDATE SET ${updates.map(field=>`${field}=excluded.${field}`).join(',')}
- WHERE member_scheduling.organization_id=excluded.organization_id AND member_scheduling.updated_at IS ?`,params:[memberId,actor.organizationId,timezone,weekly===null?null:JSON.stringify(weekly),timeOff===null?null:JSON.stringify(timeOff),windows?JSON.stringify(windows):current?.windows_json??null,windows?new Date(Date.now()+370*86400000).toISOString():current?.windows_until??null,publicName,input.public_photo_url===undefined?current?.public_photo_url??null:input.public_photo_url,input.public_bio===undefined?current?.public_bio??null:input.public_bio,Number(approved),crypto.randomUUID(),now,actor.userId,memberId,actor.organizationId,input.expected_updated_at,memberId,actor.organizationId,input.expected_updated_at,input.expected_updated_at]},
+ WHERE member_scheduling.organization_id=excluded.organization_id AND member_scheduling.updated_at IS ?`,params:[memberId,actor.organizationId,timezone,weekly===null?null:JSON.stringify(weekly),timeOff===null?null:JSON.stringify(timeOff),publicName,input.public_photo_url===undefined?current?.public_photo_url??null:input.public_photo_url,input.public_bio===undefined?current?.public_bio??null:input.public_bio,Number(approved),now,actor.userId,memberId,actor.organizationId,input.expected_updated_at,memberId,actor.organizationId,input.expected_updated_at,input.expected_updated_at]},
  {query:"SELECT CASE WHEN changes() = 1 THEN NULL ELSE json('Member settings changed; reload before saving') END"},
  publicResourceCacheInvalidationQuery(actor.organizationId,'member-profile')],{operation:'Save member settings'}).catch(error=>{
   if(error instanceof Error && /malformed JSON/.test(error.message))throw new HTTPError({statusCode:409,message:'Member settings changed; reload before saving',cause:error})

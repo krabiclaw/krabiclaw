@@ -127,6 +127,8 @@ const RETIRED_COLUMNS = {
   requests: ['conversation_state', 'resolved_at'],
   // v26: the buyer confirms a PaymentIntent on the site; nothing wrote these.
   payment_attempts: ['stripe_checkout_id', 'checkout_url'],
+  // v26: working windows and Google busy times are read live, never stored.
+  member_scheduling: ['windows_json', 'windows_until', 'calendar_revision', 'busy_json', 'busy_from', 'busy_until', 'busy_checked_at', 'busy_error'],
 }
 
 /**

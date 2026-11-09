@@ -500,8 +500,10 @@ test('interleaved branch migration ledgers preserve location privacy and authore
       }
       const recorded = (source.prepare('SELECT name FROM d1_migrations ORDER BY id').all() as Array<{ name: string }>).map(row => row.name)
       const unchangedTables = history.startsWith('v19-') ? ['products', 'product_variants', 'product_publications', 'product_locations', 'product_stay_configs', 'user', 'member', 'member_scheduling', 'product_booking_configs', 'product_sessions', 'bookings'] : []
+      // The v26 baseline no longer stores member working windows or busy times.
+      const retired: Record<string, string[]> = { member_scheduling: ['windows_json', 'windows_until', 'calendar_revision', 'busy_json', 'busy_from', 'busy_until', 'busy_checked_at', 'busy_error'] }
       const unchanged = unchangedTables.map(table => {
-        const columns = (source.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(row => row.name)
+        const columns = (source.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(row => row.name).filter(name => !retired[table]?.includes(name))
         return { table, columns, rows: source.prepare(`SELECT ${columns.join(',')} FROM ${table}`).all() }
       })
       const preservedTables = ['product_stay_photo_rooms', 'product_stay_photo_room_memberships', 'product_stay_photo_room_amenities', 'product_stay_room_accessibility', 'product_stay_room_accessibility_photos', 'media_placements', 'product_channel_mappings', 'channel_night_pushes', 'channel_threads']
@@ -521,6 +523,7 @@ test('interleaved branch migration ledgers preserve location privacy and authore
       try {
         for (const { table, columns, rows } of authored) assert.deepEqual(target.prepare(`SELECT ${columns.join(',')} FROM ${table}`).all(), rows)
         for (const { table, columns, rows } of unchanged) assert.deepEqual(target.prepare(`SELECT ${columns.join(',')} FROM ${table}`).all(), rows)
+        for (const [table, names] of Object.entries(retired)) if (unchangedTables.includes(table)) assert.deepEqual((target.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).filter(row => names.includes(row.name)), [])
         assert.equal(target.prepare("SELECT check_in_end_time FROM product_stay_configs WHERE product_id = 'home'").get()!.check_in_end_time, history === 'v19-complete' ? '19:00' : null)
         assert.deepEqual(manifest.provider_hours_session_ids, [])
         assert.deepEqual(target.prepare("SELECT organization_id, product_id, beds, amenities FROM product_stay_configs WHERE product_id = 'home'").get(), { organization_id: 'host', product_id: 'home', beds: 2, amenities: '[{"code":"smoke_detector","available":true}]' })
