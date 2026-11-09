@@ -737,16 +737,44 @@ export async function postAutomaticTeamMessage(env: TeamEnv, db: DbClient, input
     WHERE m.organization_id = ? AND m.thread_id = (${thread}) AND m.idempotency_key = ?`, [input.organizationId, ...threadParams, input.idempotencyKey])
   if (!row) throw new Error(`Automatic team message ${input.idempotencyKey} for ${input.subject.kind} ${input.subject.id} was not written: a seat is no longer a member or the stay is gone`)
   const created = row.id === messageId
-  // The alert and the refresh belong to the message, not to the call that first wrote it: each delivery is
-  // recorded under the message's receipt, so a repeated post tells only who was not told.
-  const entry = await queryFirst<{ id: string }>(db, "SELECT id FROM activity_entries WHERE organization_id = ? AND scope_kind = 'organization' AND dedupe_key = ?", [input.organizationId, messageEventKey(row.id)])
-  if (!entry) throw new Error(`Team message ${row.id} has no organization receipt`)
-  const seated = await queryAll<{ user_id: string }>(db, `SELECT m.userId AS user_id FROM team_thread_members s
-    JOIN member m ON m.id = s.member_id AND m.organizationId = s.organization_id WHERE s.organization_id = ? AND s.thread_id = ?`, [input.organizationId, row.thread_id])
-  const recipients = seated.map(seat => seat.user_id).filter(userId => input.alertUserIds.includes(userId))
-  await notifyTeamMessage(env, db, { organizationId: input.organizationId, threadId: row.thread_id, entryId: entry.id, senderName: input.senderName, messagePreview: body, recipientUserIds: recipients })
-  if (created) await publishThreadChanged(env, input.organizationId, row.thread_id, { message_id: row.id })
+  if (created) {
+    const entry = await queryFirst<{ id: string }>(db, "SELECT id FROM activity_entries WHERE organization_id = ? AND scope_kind = 'organization' AND dedupe_key = ?", [input.organizationId, messageEventKey(row.id)])
+    if (!entry) throw new Error(`Team message ${row.id} has no organization receipt`)
+    const seated = await queryAll<{ user_id: string }>(db, `SELECT m.userId AS user_id FROM team_thread_members s
+      JOIN member m ON m.id = s.member_id AND m.organizationId = s.organization_id WHERE s.organization_id = ? AND s.thread_id = ?`, [input.organizationId, row.thread_id])
+    const recipients = seated.map(seat => seat.user_id).filter(userId => input.alertUserIds.includes(userId))
+    try {
+      await notifyTeamMessage(env, db, { organizationId: input.organizationId, threadId: row.thread_id, entryId: entry.id, senderName: input.senderName, messagePreview: body, recipientUserIds: recipients })
+      await publishThreadChanged(env, input.organizationId, row.thread_id, { message_id: row.id })
+    } catch (error) {
+      // The alert is part of the message: one that could not be told is not kept, so the next post writes and tells it again.
+      await executeBatch(db, [
+        { query: 'DELETE FROM activity_entries WHERE organization_id = ? AND id = ?', params: [input.organizationId, entry.id] },
+        { query: 'DELETE FROM team_messages WHERE organization_id = ? AND id = ?', params: [input.organizationId, row.id] },
+      ], { operation: 'Withdraw an automatic team message whose alert failed' })
+      throw error
+    }
+  }
   return { threadId: row.thread_id, messageId: row.id, created }
+}
+
+/**
+ * A job's conversation keeps its history when the owners and admins change: the
+ * seats are brought up to today's roster and the conversation is addressed by
+ * that roster from now on. Nobody is removed; a departed member's seat is gone
+ * with their membership.
+ */
+export async function reseatAutomaticThread(db: DbClient, input: { organizationId: string; threadId: string; seatMemberIds: readonly string[]; participantsKey: string }): Promise<void> {
+  const now = new Date().toISOString()
+  const results = await executeBatch(db, [
+    ...input.seatMemberIds.map(memberId => ({
+      query: `INSERT INTO team_thread_members (thread_id, organization_id, member_id, last_read_at, created_at) SELECT id, organization_id, ?, NULL, ? FROM team_threads WHERE organization_id = ? AND id = ?
+              ON CONFLICT DO NOTHING`,
+      params: [memberId, now, input.organizationId, input.threadId],
+    })),
+    { query: 'UPDATE team_threads SET participants_key = ? WHERE organization_id = ? AND id = ?', params: [input.participantsKey, input.organizationId, input.threadId] },
+  ], { operation: 'Bring a job conversation up to today’s roster' })
+  if ((results.at(-1)?.meta.changes ?? 0) !== 1) throw new Error(`Team conversation ${input.threadId} could not be addressed by its new roster`)
 }
 
 /**

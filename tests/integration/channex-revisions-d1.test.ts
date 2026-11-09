@@ -273,6 +273,12 @@ test('a moved guest takes the nights, turnover and messages to the new home whil
     // The reservation still holds its listing's nights: they are closed there, not resold.
     assert.equal(JSON.parse((await db.prepare("SELECT sent_json FROM channel_night_pushes WHERE product_id = ? AND date = '2027-03-11'").bind(productId).first<{ sent_json: string }>())!.sent_json).availability, 0)
 
+    // Neither home takes another stay over the moved guest's nights, in the write itself: the listing because
+    // the reservation still holds it, the destination because the guest sleeps there.
+    await assert.rejects(createStay(db, env, access, { product_id: productId, idempotency_key: 'listing-held', check_in_date: '2027-03-11', check_out_date: '2027-03-12', adults: 1, guest_name: 'Second', total_minor: 100 }), /already holds one of these nights/)
+    await assert.rejects(createStay(db, env, access, { product_id: annex, idempotency_key: 'annex-held', check_in_date: '2027-03-11', check_out_date: '2027-03-12', adults: 1, guest_name: 'Second', total_minor: 100 }), /already holds one of these nights/)
+    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM stays WHERE idempotency_key IN ('listing-held', 'annex-held')").first('n'), 0)
+
     // A later revision names the listing it was booked on, and the guest stays where they sleep.
     channex.revise('rev-move-2', { ...booking, status: 'modified', departure: '2027-03-14' }, '2026-10-16T01:00:00Z')
     await applyBookingRevision(db, env, 'rev-move-2')

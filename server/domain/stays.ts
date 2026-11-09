@@ -1588,8 +1588,25 @@ function reconcileNightsQueries(organizationId: string, stayId: string): BatchQu
   }]
 }
 
+/**
+ * A listing whose guest was moved elsewhere keeps its nights for that stay: the
+ * channel still sells it as taken, and its nights carry no claim rows because a
+ * claim names the home the guest sleeps in. This statement refuses the batch,
+ * in the same transaction as the write it follows, when the home takes a stay
+ * over nights another stay holds as its booked listing. `json()` of plain text
+ * is the batch's one way to fail on a read.
+ */
+function bookedListingGuardQuery(organizationId: string, productId: string, stayId: string, checkIn: string, checkOut: string): BatchQuery {
+  return {
+    query: `SELECT CASE WHEN EXISTS (SELECT 1 FROM stays b WHERE b.organization_id = ? AND b.booked_product_id = ? AND b.id <> ? AND b.status <> 'cancelled'
+              AND b.check_in_date < ? AND b.check_out_date > ?) THEN json('STAY_BOOKED_LISTING_HELD') ELSE NULL END`,
+    params: [organizationId, productId, stayId, checkOut, checkIn],
+  }
+}
+
 export function isStayNightConflict(error: unknown): boolean {
-  return /UNIQUE constraint failed: stay_nights\./.test(error instanceof Error ? error.message : String(error))
+  const message = error instanceof Error ? error.message : String(error)
+  return /UNIQUE constraint failed: stay_nights\./.test(message) || /malformed JSON/.test(message)
 }
 
 interface StayFields {
@@ -1720,6 +1737,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
         params: [id, access.organizationId, home.product_id, channel, fields.check_in_date, fields.check_out_date, fields.arrival_time, fields.adults, fields.children, fields.infants,
           fields.guest_name, fields.guest_surname, fields.guest_email, fields.guest_phone, fields.total_minor, home.currency, fields.notes, key, channelBookingId, imported ? null : now, now, now, access.actorId, access.actorId, JSON.stringify(answers)],
       },
+      bookedListingGuardQuery(access.organizationId, home.product_id, id, fields.check_in_date, fields.check_out_date),
       ...reconcileNightsQueries(access.organizationId, id),
       ...stayThreadQueries({ organizationId: access.organizationId, stayId: id, now, openedBy: { userId: access.actorId } }),
       organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.created', entityType: 'stay', entityId: id,
@@ -1777,6 +1795,7 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
           fields.guest_email, fields.guest_phone, fields.total_minor, fields.notes, next, now, access.actorId, access.organizationId, stayId, current.version],
       },
       organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.updated', entityType: 'stay', entityId: stayId, onlyIfPreviousChangedOneRow: true }),
+      bookedListingGuardQuery(access.organizationId, current.product_id, stayId, fields.check_in_date, fields.check_out_date),
       ...reconcileNightsQueries(access.organizationId, stayId),
       ...stayThreadQueries({ organizationId: access.organizationId, stayId, now, openedBy: { userId: access.actorId } }),
       ...turnovers,

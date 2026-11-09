@@ -2366,7 +2366,7 @@ async function notifyTaskPeople(env: NotificationEnv, db: DbClient, input: { org
   raiseUnrecordedOwnerAlertFailures('notifyTaskPeople', `task ${input.taskId}`, results.map(result => ({ result, task: 'taskAlert' })))
 }
 
-export async function notifyTaskAssigned(env: NotificationEnv, db: DbClient, input: { organizationId: string; taskId: string; actorUserId: string; recipientUserIds: string[] }): Promise<void> {
+export async function notifyTaskAssigned(env: NotificationEnv, db: DbClient, input: { organizationId: string; taskId: string; actorUserId: string | null; recipientUserIds: string[] }): Promise<void> {
   const version = await queryFirst<{ version: number }>(db, 'SELECT version FROM tasks WHERE organization_id = ? AND id = ?', [input.organizationId, input.taskId])
   if (!version) throw new Error(`Task ${input.taskId} disappeared before its assignment alert`)
   await notifyTaskPeople(env, db, { ...input, kind: 'assigned', eventKey: `task-assigned:${input.taskId}:${version.version}` })

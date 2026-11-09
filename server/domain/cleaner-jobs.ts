@@ -1,6 +1,6 @@
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { isOrganizationWideRole } from '~/server/utils/member-access'
-import { jobThreadParticipantsKey, postAutomaticTeamMessage } from '~/server/domain/team-messages'
+import { jobThreadParticipantsKey, postAutomaticTeamMessage, reseatAutomaticThread } from '~/server/domain/team-messages'
 import { JOB_TASK_SQL, isJobTask, jobSubject, taskViewForUser, type JobSubject, type TaskRow, type TaskView } from '~/server/domain/tasks'
 import { notifyTaskStarting } from '~/server/utils/notifications'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
@@ -76,7 +76,7 @@ function reminders(task: TaskRow): Array<{ key: string; at: Date; until: Date; k
     { kind: 'morning', key: `reminder:${task.id}:morning:${day}`, at: at(day, MORNING_OF), until: windowEnd },
   ]
   // Only a stay has guests arriving at a home that must be ready.
-  if (task.due_at !== null && jobSubject(task).kind === 'stay') out.push({ kind: 'warning', key: `warning:${task.id}:${task.due_at}`, at: new Date(Date.parse(task.due_at) - WARNING_BEFORE_ARRIVAL_MS), until: new Date(task.due_at) })
+  if (task.due_at !== null && isJobTask(task) && jobSubject(task).kind === 'stay') out.push({ kind: 'warning', key: `warning:${task.id}:${task.due_at}`, at: new Date(Date.parse(task.due_at) - WARNING_BEFORE_ARRIVAL_MS), until: new Date(task.due_at) })
   return out
 }
 
@@ -143,12 +143,28 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
       const about = subject.kind === 'booking' ? 'with' : 'at'
       const roster = rosterFor(task, members, teams)
       const view = roster || task.status === 'open' ? await taskViewForUser(db, organizationId, task.id, roster?.cleaners[0] ?? hostUsers[0] ?? null, now) : null
-      // Conversations of this stay that once carried this job for other people: they are told it is no longer theirs.
+      // Conversations of this stay that once carried this job: the one still held by the same people keeps it,
+      // with its seats brought up to today's owners and admins; the others are told it is no longer theirs.
       const elsewhere = [...threads].filter(([threadId, thread]) => thread.subject_id === subject.id && [...keysByThread.get(threadId) ?? []].some(key => key.startsWith(`job:${task.id}:`)))
       const targetKey = roster ? await jobThreadParticipantsKey(subject, roster.seats) : null
-      for (const [threadId, thread] of elsewhere) {
-        if (thread.participants_key === targetKey && task.status === 'open') continue
+      const sameCleaners = (threadId: string) => {
+        const cleaners = (seatUsers.get(threadId) ?? []).filter(userId => !hostUsers.includes(userId)).sort()
+        return roster !== null && cleaners.length === roster.cleaners.length && cleaners.every((userId, index) => userId === [...roster.cleaners].sort()[index])
+      }
+      let heldIn = elsewhere.find(([, thread]) => thread.participants_key === targetKey)?.[0] ?? null
+      if (task.status === 'open' && roster && heldIn === null) {
+        const kept = elsewhere.find(([threadId]) => sameCleaners(threadId))
+        if (kept) {
+          await reseatAutomaticThread(db, { organizationId, threadId: kept[0], seatMemberIds: roster.seats, participantsKey: targetKey! })
+          threads.set(kept[0], { subject_id: subject.id, participants_key: targetKey! })
+          seatUsers.set(kept[0], [...new Set([...roster.cleaners, ...roster.hosts])])
+          heldIn = kept[0]
+        }
+      }
+      for (const [threadId] of elsewhere) {
+        if (threadId === heldIn && task.status === 'open') continue
         const closedKey = task.status === 'open' ? `released:${task.id}` : `${task.status === 'cancelled' ? 'cancelled' : 'closed'}:${task.id}`
+        if (keysByThread.get(threadId)?.has(closedKey)) continue
         if (task.status !== 'open' && task.status !== 'cancelled' && task.closed_by_user_id !== null) continue
         const seated = seatUsers.get(threadId) ?? []
         const body = task.status === 'open' ? `No longer yours: ${view!.sheet.heading.toLowerCase()} ${about} ${view!.sheet.title}${view!.sheet.date ? `, ${view!.sheet.date}` : ''}.`
@@ -164,18 +180,22 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
         continue
       }
       const key = jobKey(task)
-      // Posting is idempotent by key, and the alert and the open inboxes' refresh ride on every post through
-      // their own receipts, so a message whose alert failed last time is told this time.
-      const result = await post(subject, roster.seats, key, lines(view), roster.cleaners)
-      threads.set(result.threadId, { subject_id: subject.id, participants_key: targetKey! })
+      // A post whose alert failed was withdrawn with it, so what is here was told; only what is missing is posted.
+      const keys = heldIn ? keysByThread.get(heldIn) ?? new Set<string>() : new Set<string>()
+      if (!keys.has(key)) {
+        const result = await post(subject, roster.seats, key, lines(view), roster.cleaners, heldIn ?? undefined)
+        threads.set(result.threadId, { subject_id: subject.id, participants_key: targetKey! })
+        heldIn = result.threadId
+      }
       for (const reminder of reminders(task)) {
+        if (keysByThread.get(heldIn!)?.has(reminder.key)) continue
         if (reminder.at > now) { pending.push(reminder.at); continue }
         if (now >= reminder.until) continue
         const when = view.when ? `, ${view.when}` : ''
         const body = reminder.kind === 'evening' ? `Tomorrow: ${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${when}.`
           : reminder.kind === 'morning' ? `Today: ${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${when}.`
             : `${view.sheet.title} is not marked done and the next guests arrive${view.sheet.checkin ? ` at ${view.sheet.checkin.time}` : ' in two hours'}.`
-        await post(subject, roster.seats, reminder.key, body, reminder.kind === 'warning' ? roster.hosts : roster.cleaners)
+        await post(subject, roster.seats, reminder.key, body, reminder.kind === 'warning' ? roster.hosts : roster.cleaners, heldIn!)
       }
     } catch (error) {
       failures.push(error)

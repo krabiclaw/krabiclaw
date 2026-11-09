@@ -889,7 +889,7 @@ export async function notifyStayReady(env: CloudflareEnv, db: DbClient, input: {
   const recipients = await jobHasConversation(db, input.organizationId, assigned) ? [] : (await assigneeUsers(db, input.organizationId, assigned)).filter(userId => userId !== input.actorUserId)
   if (recipients.length) {
     const { notifyTaskAssigned } = await import('~/server/utils/notifications')
-    await notifyTaskAssigned(env, db, { organizationId: input.organizationId, taskId: task.id, actorUserId: input.actorUserId ?? recipients[0]!, recipientUserIds: recipients })
+    await notifyTaskAssigned(env, db, { organizationId: input.organizationId, taskId: task.id, actorUserId: input.actorUserId, recipientUserIds: recipients })
   }
   await publishBusinessInvalidation(env, input.organizationId)
 }
