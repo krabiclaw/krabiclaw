@@ -272,7 +272,7 @@ the merchant's financial activity when a personal account is deleted. Existing
 Better Auth anonymous linking transfers purchases, notification targets and read
 acknowledgements; current purchase ownership authorizes a return-proof replay.
 Booking conversion completes before notification delivery. A delivery or
-realtime publication failure is recorded where the dashboard reads it.
+realtime publication failure fails the webhook, and Stripe redelivers it.
 
 Better Auth Stripe still owns subscriptions, and the fees are invoiced on them;
 Stripe's own invoice emails carry their status. There is no scheduled

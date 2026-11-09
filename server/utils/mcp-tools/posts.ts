@@ -170,7 +170,7 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'publish_post',
-    description: 'Publish the post to the selected website or social destinations, returning one result per target with its status: published, already_published, failed with the provider error, or skipped. Publish again after a failure once its cause is fixed.',
+    description: 'Publish the post to the selected website or social destinations, returning one result per target with its status: published, already_published, failed with the provider error, or skipped. Publish again after a failure once its cause is fixed. A provider_unreachable failure may still have reached the destination: read it with reconcile_post_publication before publishing again.',
     domain: 'posts',
     minimumRole: 'admin',
     inputSchema: {
