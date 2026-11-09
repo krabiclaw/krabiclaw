@@ -73,8 +73,9 @@ export interface PaymentHandoff { payment_id: string; pay_path: string; purchase
 export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, input: CheckoutInput, retry = false) {
   if (!Number.isSafeInteger(input.quantity) || input.quantity < 1 || input.quantity > 99 || !input.idempotencyKey.trim() || input.idempotencyKey.trim().length > 200) throw new HTTPError({ statusCode: 400, statusMessage: 'A quantity of 1–99 and an idempotency key of 1–200 characters are required' })
   const key = `checkout:${input.organizationId}:${input.idempotencyKey.trim()}`
-  const previous = await queryFirst<{id:string;payment_id:string;stripe_payment_intent_id:string|null;expires_at:string;return_token:string;status:string}>(db,'SELECT id,payment_id,stripe_payment_intent_id,expires_at,return_token,status FROM payment_attempts WHERE idempotency_key=?',[key])
-  if(previous?.status==='failed')throw new HTTPError({statusCode:409,statusMessage:'Checkout was rejected; start a new request',data:{code:'checkout_failed'}})
+  const previous = await queryFirst<{id:string;stripe_payment_intent_id:string|null;checkout_expires_at:string;return_token:string;hold_status:string|null}>(db,'SELECT p.id,p.stripe_payment_intent_id,p.checkout_expires_at,p.return_token,(SELECT h.status FROM payment_checkout_holds h WHERE h.payment_id=p.id) AS hold_status FROM payments p WHERE p.idempotency_key=?',[key])
+  // Stripe refused this request outright: it has no intent and gave its capacity back.
+  if(previous&&!previous.stripe_payment_intent_id&&previous.hold_status==='released')throw new HTTPError({statusCode:409,statusMessage:'Checkout was rejected; start a new request',data:{code:'checkout_failed'}})
   const now = new Date().toISOString()
   let price: Pick<Price, 'unit_amount' | 'currency' | 'tax_behavior'> | undefined
   let catalogPriceId: string | null = null
@@ -88,7 +89,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
   let methodConfigurationId: string | undefined
   let session: {id:string;location_id:string|null;starts_at:string;ends_at:string;online_payment_required:number;timezone:string} | null = null
   if (previous) {
-    const frozen = await requirePayment(db,input.organizationId,previous.payment_id)
+    const frozen = await requirePayment(db,input.organizationId,previous.id)
     const snapshot: unknown = JSON.parse(frozen.price_snapshot_json)
     if (frozen.subject_type !== input.subjectType || !isRecord(snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()
       || (snapshot.tax_code !== null && (typeof snapshot.tax_code !== 'string' || !snapshot.tax_code.trim()))
@@ -178,15 +179,15 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
   const stripe = paymentsStripe(env, connected.livemode)
   const amount = price.unit_amount*purchaseQuantity
   assertMinorAmount(amount)
-  const id = previous?.payment_id ?? crypto.randomUUID(), attemptId = previous?.id ?? crypto.randomUUID(), holdId = crypto.randomUUID()
+  const id = previous?.id ?? crypto.randomUUID(), holdId = crypto.randomUUID()
   const returnToken=previous?.return_token ?? crypto.randomUUID()+crypto.randomUUID()
   const returnHash=await tokenHash(returnToken)
-  const expiresAt = previous?.expires_at ?? new Date(Date.now()+60*60*1000).toISOString()
+  const expiresAt = previous?.checkout_expires_at ?? new Date(Date.now()+60*60*1000).toISOString()
   if (expiresAt<=now) throw new HTTPError({statusCode:409,statusMessage:'Checkout hold expired; start a new request',data:{code:'checkout_expired'}})
   const handoff = (paymentId: string): PaymentHandoff => ({ payment_id: paymentId, pay_path: `/pay/${encodeURIComponent(paymentId)}`, purchase_claim: returnToken, expires_at: expiresAt })
   if (previous?.stripe_payment_intent_id) {
-    await recordCheckoutStarted(db, await requirePayment(db,input.organizationId,previous.payment_id), null, input.origin)
-    return handoff(previous.payment_id)
+    await recordCheckoutStarted(db, await requirePayment(db,input.organizationId,previous.id), null, input.origin)
+    return handoff(previous.id)
   }
   if (!previous) {
     const billingFx = await quotePaymentsBillingFx(stripe, price.currency)
@@ -220,21 +221,19 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     const purchase = { title: projectionTitle, tax_code: projectionTaxCode, price, quantity: purchaseQuantity, automatic_tax: automaticTax, method_configuration_id: methodConfigurationId, request_fingerprint: input.requestFingerprint, billing_fx: billingFx,
       ...(input.subjectType === 'booking' ? { product_id: input.productId, variant_id: input.variantId, session_id: input.sessionId } : input.subjectType === 'stay' ? { stay } : { reservation }) }
     try { await executeBatch(db,[
-      { query: `INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,price_snapshot_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, params:[id,input.organizationId,input.buyerUserId,connected.stripeAccountId,Number(connected.livemode),input.subjectType,null,input.subjectType === 'booking' ? session!.location_id : input.subjectType === 'stay' ? stay!.location_id : input.locationId,price.currency,amount,JSON.stringify(purchase),now,now] },
+      { query: `INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,price_snapshot_json,idempotency_key,checkout_expires_at,return_token,return_token_hash,return_expires_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, params:[id,input.organizationId,input.buyerUserId,connected.stripeAccountId,Number(connected.livemode),input.subjectType,null,input.subjectType === 'booking' ? session!.location_id : input.subjectType === 'stay' ? stay!.location_id : input.locationId,price.currency,amount,JSON.stringify(purchase),key,expiresAt,returnToken,returnHash,new Date(Date.now()+86400000).toISOString(),now,now] },
       ...preceding, hold, ...following,
-      {query:`INSERT INTO payment_attempts(id,payment_id,idempotency_key,return_token,status,expires_at,created_at,updated_at) SELECT ?,?,?,?,'creating',?,?,? WHERE EXISTS(SELECT 1 FROM payment_checkout_holds WHERE payment_id=? AND status='active')`,params:[attemptId,id,key,returnToken,expiresAt,now,now,id]},
       ...input.following(id),
-      {query:'INSERT INTO payment_claims(token_hash,payment_id,expires_at) SELECT ?,?,? WHERE EXISTS(SELECT 1 FROM payment_attempts WHERE id=?)',params:[returnHash,id,new Date(Date.now()+86400000).toISOString(),attemptId]},
+      // No capacity, no purchase: without a hold nothing refers to this row.
+      {query:'DELETE FROM payments WHERE id=? AND NOT EXISTS(SELECT 1 FROM payment_checkout_holds WHERE payment_id=?)',params:[id,id]},
     ],{operation:'Reserve payment checkout'})
     } catch(error) {
-      const raced=await queryFirst(db,'SELECT id FROM payment_attempts WHERE idempotency_key=?',[key])
+      const raced=await queryFirst(db,'SELECT id FROM payments WHERE idempotency_key=?',[key])
       if(raced && !retry) return await createPaymentCheckout(db,env,input,true)
       if (input.subjectType === 'stay' && isStayNightConflict(error)) throw new HTTPError({ statusCode: 409, statusMessage: 'Some of these nights are no longer available', data: { code: 'STAY_NIGHTS_UNAVAILABLE', field: 'check_in_date' }, cause: error })
       throw error
     }
-    const attempt = await queryFirst(db,'SELECT id FROM payment_attempts WHERE id=?',[attemptId])
-    if (!attempt) {
-      await execute(db,"UPDATE payments SET state='failed',updated_at=? WHERE id=?",[now,id])
+    if (!await queryFirst(db,'SELECT id FROM payments WHERE id=?',[id])) {
       if (input.subjectType === 'stay') throw new HTTPError({ statusCode: 409, statusMessage: 'This place to stay is no longer open for these nights', data: { code: 'STAY_NIGHTS_UNAVAILABLE', field: 'check_in_date' } })
       throw new HTTPError({statusCode:409,statusMessage:'This time no longer has capacity for your party'})
     }
@@ -249,6 +248,8 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       // The connected configuration the acceptance check verified: cards, Link, wallets, and ACH Direct Debit.
       payment_method_configuration: methodConfigurationId,
       automatic_payment_methods: { enabled: true, allow_redirects: 'always' },
+      // A card or Link is authorized, booked, then captured. ACH has no authorization.
+      payment_method_options: { card: { capture_method: 'manual' }, link: { capture_method: 'manual' } },
       application_fee_amount: 0,
       description: projectionTitle,
       metadata: { krabiclaw_payment_id: id },
@@ -256,22 +257,12 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       ...(surcharge !== null ? { amount_details: { surcharge: { enforce_validation: 'enabled' } } } : {}),
     } as Stripe.PaymentIntentCreateParams, { stripeAccount: connected.stripeAccountId, idempotencyKey: key })
     if (intent.livemode !== connected.livemode || !intent.client_secret) throw new Error('Stripe returned a PaymentIntent outside the connected mode')
-    await executeBatch(db, [
-      { query: `UPDATE payment_attempts SET stripe_payment_intent_id=?,status='open',error=NULL,updated_at=? WHERE id=?`, params: [intent.id, new Date().toISOString(), attemptId] },
-      { query: 'UPDATE payments SET stripe_payment_intent_id=?,updated_at=? WHERE id=?', params: [intent.id, new Date().toISOString(), id] },
-    ], { operation: 'Record the payment intent' })
+    await execute(db,'UPDATE payments SET stripe_payment_intent_id=?,updated_at=? WHERE id=?',[intent.id,new Date().toISOString(),id])
   } catch(error) {
     // A prior attempt may have reached Stripe even when its response was lost.
     // Only a first-call content/auth rejection proves no intent was created.
     const rejected=!previous&&(error instanceof stripe.errors.StripeInvalidRequestError||error instanceof stripe.errors.StripeAuthenticationError||error instanceof stripe.errors.StripePermissionError)&&error.headers?.['stripe-should-retry']!=='true'
-    const failedAt=new Date().toISOString()
-    await executeBatch(db,[
-      {query:"UPDATE payment_attempts SET error=?,updated_at=?,status=CASE WHEN ? THEN 'failed' ELSE status END WHERE id=?",params:[error instanceof Error?error.message.slice(0,500):'Provider payment intent failed',failedAt,Number(rejected),attemptId]},
-      ...(rejected?[
-        {query:"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",params:[id]},
-        {query:"UPDATE payments SET state='failed',updated_at=? WHERE id=? AND captured_amount=0",params:[failedAt,id]},
-      ]:[]),
-    ],{operation:'Record rejected or uncertain payment intent creation'})
+    if(rejected)await execute(db,"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",[id])
     throw error
   }
   await recordCheckoutStarted(db, await requirePayment(db,input.organizationId,id), customer?.savedCards ?? 0, input.origin)

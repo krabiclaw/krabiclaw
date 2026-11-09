@@ -210,12 +210,10 @@ export async function getThreadOperationalRecord(db: DbClient, requestId: string
        AND EXISTS (
          SELECT 1 FROM payment_checkout_holds h
          JOIN payments p ON p.id = h.payment_id AND p.organization_id = h.organization_id AND p.subject_type = r.kind
-         JOIN payment_attempts a ON a.payment_id = p.id
-           AND a.idempotency_key = 'checkout:' || r.organization_id || ':' || json_extract(r.payload_json, '$.provenance.idempotency_key')
          WHERE h.request_id = r.id AND h.organization_id = r.organization_id
            AND h.status IN ('active', 'released') AND h.converted_booking_id IS NULL AND h.converted_reservation_id IS NULL
-           AND p.state IN ('pending', 'failed') AND p.captured_amount = 0 AND p.subject_id IS NULL
-           AND a.status IN ('creating', 'open', 'expired', 'failed')
+           AND p.captured_amount = 0 AND p.subject_id IS NULL
+           AND p.idempotency_key = 'checkout:' || r.organization_id || ':' || json_extract(r.payload_json, '$.provenance.idempotency_key')
        )) AS uncaptured_checkout
     FROM requests r WHERE r.id = ?
   `, [requestId])

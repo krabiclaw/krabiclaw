@@ -25,6 +25,7 @@ export type ScheduledTaskName =
   | 'airbnb-sync'
   | 'channex-ari-delivery'
   | 'reply-task-expiry'
+  | 'jobs-wake-daily'
 
 type TaskLoader = () => Promise<{ default: ScheduledTaskDefinition }>
 
@@ -33,7 +34,7 @@ export const SCHEDULED_TASKS: Readonly<Record<string, readonly ScheduledTaskName
   '*/5 * * * *': ['google-calendar-sync', 'scheduled-guest-messages', 'stay-checkout-holds', 'stay-calendar-links'],
   '*/2 * * * *': ['public-resource-cache-invalidation', 'airbnb-sync', 'channex-ari-delivery', 'send-later-messages'],
   '*/10 * * * *': ['domain-reconciliation', 'channex-revision-feed'],
-  '0 3 * * *': ['reply-task-expiry', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request', 'marketing-ad-spend-daily'],
+  '0 3 * * *': ['reply-task-expiry', 'jobs-wake-daily', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request', 'marketing-ad-spend-daily'],
   '0 0 * * SUN': ['google-places-sync'],
   '0 * * * *': ['review-request-automation', 'sessions-materialize'],
   // Staging only ([env.staging.triggers]): the Channex certification run needs imports, pending
@@ -52,6 +53,7 @@ const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
   'airbnb-sync': async () => import('./tasks/airbnb-sync'),
   'channex-ari-delivery': async () => import('./tasks/channex-ari-delivery'),
   'reply-task-expiry': async () => import('./tasks/reply-task-expiry'),
+  'jobs-wake-daily': async () => import('./tasks/jobs-wake-daily'),
   'public-resource-cache-invalidation': async () => import('./tasks/public-resource-cache-invalidation'),
   'domain-reconciliation': async () => import('./tasks/domain-reconciliation'),
   'analytics-aggregate-daily': async () => import('./tasks/analytics-aggregate-daily'),
@@ -61,6 +63,19 @@ const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
   'review-request-automation': async () => import('./tasks/review-request-automation'),
   'stripe-fee-report-request': async () => import('./tasks/stripe-fee-report-request'),
   'marketing-ad-spend-daily': async () => import('./tasks/marketing-ad-spend-daily'),
+}
+
+/**
+ * The failure with every cause and member it carries. The wrapper message alone
+ * said "Scheduled guest messages or turnover alerts failed" for months while
+ * the D1 error underneath was the one that named the broken query.
+ */
+export function describeFailure(error: unknown, depth = 0): string {
+  if (!(error instanceof Error)) return String(error)
+  const parts = [`${error.name}: ${error.message}`]
+  if (error instanceof AggregateError) parts.push(`[${error.errors.map(member => describeFailure(member, depth + 1)).join('; ')}]`)
+  if (error.cause !== undefined && depth < 6) parts.push(`caused by ${describeFailure(error.cause, depth + 1)}`)
+  return parts.join(' ')
 }
 
 export function getScheduledTaskNames(cron: string): readonly ScheduledTaskName[] {
@@ -109,7 +124,7 @@ export async function runScheduledTasks(
       }
       return []
     }
-    return [new Error(`Scheduled task "${names[index]}" failed: ${outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)}`, { cause: outcome.reason })]
+    return [new Error(`Scheduled task "${names[index]}" failed: ${describeFailure(outcome.reason)}`, { cause: outcome.reason })]
   })
   if (failures.length) throw new AggregateError(failures, `${failures.length} of ${names.length} scheduled tasks failed for "${cron}": ${failures.map(error => error.message).join('; ')}`)
 }

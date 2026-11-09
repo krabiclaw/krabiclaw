@@ -142,14 +142,13 @@ export async function createTableReservation(event: H3Event, input: {
   }
   const completed = await replay()
   if (completed) return completed
-  const checkoutAttempt = await queryFirst<{ price_snapshot_json: string; fingerprint: string | null }>(db, `SELECT p.price_snapshot_json, json_extract(r.payload_json, '$.provenance.fingerprint') AS fingerprint FROM payment_attempts a JOIN payments p ON p.id = a.payment_id JOIN requests r ON r.id = ? AND r.organization_id = p.organization_id WHERE a.idempotency_key = ? AND p.organization_id = ? AND p.subject_type = 'reservation'`, [id, `checkout:${organizationId}:${idempotencyKey}`, organizationId])
+  const checkoutAttempt = await queryFirst<{ price_snapshot_json: string; fingerprint: string | null }>(db, `SELECT p.price_snapshot_json, json_extract(r.payload_json, '$.provenance.fingerprint') AS fingerprint FROM payments p JOIN requests r ON r.id = ? AND r.organization_id = p.organization_id WHERE p.idempotency_key = ? AND p.organization_id = ? AND p.subject_type = 'reservation'`, [id, `checkout:${organizationId}:${idempotencyKey}`, organizationId])
   if (checkoutAttempt) {
     if (checkoutAttempt.fingerprint !== fingerprint) return creationResult({ error: 'This idempotency key belongs to different reservation details', code: 'idempotency_conflict' }, { status: 409 })
     const snapshot: unknown = JSON.parse(checkoutAttempt.price_snapshot_json)
     if (!isRecord(snapshot) || !isRecord(snapshot.reservation) || snapshot.reservation.location_id !== resolvedLocationId || snapshot.reservation.party_size !== partySize
       || typeof snapshot.reservation.starts_at !== 'string' || typeof snapshot.reservation.ends_at !== 'string' || typeof snapshot.reservation.timezone !== 'string') throw new Error('Saved reservation checkout has invalid occurrence details')
     if (input.financialWritesAllowed === false) throw new HTTPError({ statusCode: 409, message: 'Continue this reservation through the business’s payment workflow', data: { code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(organization.slug)}/calendar/settings/availability/deposit?locationId=${encodeURIComponent(resolvedLocationId)}` } })
-    if (!env.STRIPE_SECRET_KEY || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) return creationResult({ error: 'Payments provider configuration is incomplete', code: 'payments_unavailable' }, { status: 503 })
     const checkout = await createPaymentCheckout(db, env, {
       subjectType: 'reservation', organizationId, buyerUserId: operator ? null : await ensureInteractionUser(event, env), locationId: resolvedLocationId,
       startsAt: snapshot.reservation.starts_at, endsAt: snapshot.reservation.ends_at, timezone: snapshot.reservation.timezone,
@@ -231,7 +230,6 @@ export async function createTableReservation(event: H3Event, input: {
     partySize, partySizeIsMinimum: guests.endsWith('+'), startsAt: slot.starts_at, timezone: availability.timezone, placeTitle: place.title }) }
 
   if (requiresDeposit) {
-    if (!env.STRIPE_SECRET_KEY || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) return creationResult({ error: 'Payments provider configuration is incomplete', code: 'payments_unavailable' }, { status: 503 })
     if (!slot) throw new Error('Reservation checkout has no selected time')
     const checkout = await createPaymentCheckout(db, env, {
       subjectType: 'reservation', organizationId, buyerUserId: userId, locationId: resolvedLocationId, startsAt: slot.starts_at,

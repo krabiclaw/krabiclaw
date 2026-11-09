@@ -70,7 +70,7 @@ test('the v25 forward migration initializes the internal name of an existing hom
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
   try {
-    database.exec(readFileSync('migrations/0000_baseline.sql', 'utf8'))
+    database.exec(readFileSync('migrations-history/v25/0000_baseline.sql', 'utf8'))
     database.exec(`
       INSERT INTO organization (id, name, slug, default_currency, timezone)
         VALUES ('host', 'Host', 'host', 'USD', 'America/Denver');
@@ -84,7 +84,7 @@ test('the v25 forward migration initializes the internal name of an existing hom
       INSERT INTO product_stay_configs (organization_id, product_id, location_id, check_in_time, check_out_time, max_guests, min_nights, beds, created_by, updated_by)
         VALUES ('host', 'home', 'site', NULL, NULL, 4, 1, 0, 'owner', 'owner');
     `)
-    database.exec(readFileSync('migrations/0001_home_internal_name.sql', 'utf8'))
+    database.exec(readFileSync('migrations-history/v25/0001_home_internal_name.sql', 'utf8'))
     assert.deepEqual(database.prepare(`
       SELECT p.name, c.internal_name, c.check_in_time, c.check_out_time, c.beds
       FROM product_stay_configs c JOIN products p ON p.id = c.product_id AND p.organization_id = c.organization_id
@@ -173,6 +173,59 @@ test('a v23 replacement maps every recommendation feedback row into the business
       assert.equal((target.prepare("SELECT count(*) AS n FROM pragma_table_info('requests') WHERE name IN ('conversation_state', 'resolved_at')").get() as { n: number }).n, 0)
       assert.deepEqual(target.pragma('foreign_key_check'), [])
     } finally { target.close() }
+  } finally { rmSync(directory, { recursive: true, force: true }) }
+})
+
+test('a v25 replacement names business scheduling with no default to fall back on, and drops the unused stock tables and Hosted Checkout fields', async () => {
+  const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
+  const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-v25-transfer-'))
+  // The last forward migration is still pending on this source; the transfer runs it.
+  const v25 = (JSON.parse(readFileSync('migrations-history/v25/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]).slice(0, -1)
+  const sourcePath = join(directory, 'v25.sqlite')
+  try {
+    const source = new Database(sourcePath)
+    for (const file of v25) source.exec(readFileSync(`migrations-history/v25/${file}`, 'utf8'))
+    source.exec(`CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
+      ${v25.map(file => `INSERT INTO d1_migrations(name) VALUES('${file}');`).join('\n')}`)
+    source.exec(`INSERT INTO organization(id,name,slug,default_currency,timezone) VALUES('host','Host','host','USD','America/Denver');
+      INSERT INTO user(id,name,email,emailVerified) VALUES('owner','Owner','owner@example.test',1);
+      INSERT INTO products(id,organization_id,kind,name,slug,created_by,updated_by) VALUES('class','host','experience','Class','class','owner','owner'),('consult','host','service','Consult','consult','owner','owner');
+      INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('class-default','host','class','Class','owner','owner'),('consult-default','host','consult','Consult','owner','owner');
+      INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,created_by,updated_by) VALUES('class','host',60,'owner','owner');
+      INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,scheduling_mode,created_by,updated_by) VALUES('consult','host',30,'provider','owner','owner');`)
+    // Stale evidence nobody decided about, beside its live successor.
+    source.exec(`INSERT INTO opportunities(id,organization_id,operation,subject_id,evidence_revision,status,created_at,updated_at)
+        VALUES('stale','host','article.create','host','${'1'.repeat(64)}','superseded','2026-11-01T10:00:00.000Z','2026-11-01T10:00:00.000Z'),
+          ('current','host','article.create','host','${'2'.repeat(64)}','open','2026-11-02T10:00:00.000Z','2026-11-02T10:00:00.000Z');`)
+    // A test-mode Hosted Checkout that never reached a PaymentIntent.
+    source.exec(`INSERT INTO payments(id,organization_id,stripe_account_id,livemode,subject_type,currency,amount,price_snapshot_json,created_at,updated_at)
+        VALUES('test-payment','host','acct_test',0,'booking','USD',5000,'{}','2026-10-06T00:48:32.658Z','2026-10-06T00:48:32.658Z');
+      INSERT INTO payment_attempts(id,payment_id,idempotency_key,stripe_checkout_id,checkout_url,status,return_token,expires_at,created_at,updated_at)
+        VALUES('hosted','test-payment','checkout:host:hosted','cs_test_abc','https://checkout.stripe.com/c/pay/cs_test_abc','open','token','2026-10-06T01:18:32.658Z','2026-10-06T00:48:32.658Z','2026-10-06T00:48:32.658Z');`)
+    assert.deepEqual(source.prepare('SELECT product_id, scheduling_mode FROM product_booking_configs ORDER BY product_id').all(), [{ product_id: 'class', scheduling_mode: 'legacy' }, { product_id: 'consult', scheduling_mode: 'provider' }])
+    source.close()
+
+    const targetPath = join(directory, 'v26.sqlite')
+    const manifest = await transferDatabaseExport(sourcePath, targetPath, { payloadPath: join(directory, 'payload.sql') })
+    assert.deepEqual(manifest.transforms.filter((transform: { name: string }) => transform.name === 'scheduling_mode_legacy_to_business'), [{ name: 'scheduling_mode_legacy_to_business', changes: 1 }])
+    assert.deepEqual(manifest.transforms.filter((transform: { name: string }) => transform.name === 'dead_test_hosted_checkout_fields_discarded'), [{ name: 'dead_test_hosted_checkout_fields_discarded', changes: 1 }])
+    assert.deepEqual(manifest.transforms.filter((transform: { name: string }) => transform.name === 'superseded_opportunities_removed'), [{ name: 'superseded_opportunities_removed', changes: 1 }])
+    const target = new Database(targetPath)
+    try {
+      assert.deepEqual(target.prepare('SELECT product_id, scheduling_mode FROM product_booking_configs ORDER BY product_id').all(), [{ product_id: 'class', scheduling_mode: 'business' }, { product_id: 'consult', scheduling_mode: 'provider' }])
+      assert.throws(() => target.prepare("INSERT INTO product_booking_configs(product_id,organization_id,created_by,updated_by) VALUES('unnamed','host','owner','owner')").run(), /NOT NULL constraint failed: product_booking_configs.scheduling_mode/)
+      assert.throws(() => target.prepare("UPDATE product_booking_configs SET scheduling_mode = 'legacy' WHERE product_id = 'class'").run(), /product_booking_configs_scheduling_mode_check/)
+      assert.deepEqual(target.prepare("SELECT name FROM sqlite_schema WHERE name IN ('inventory_items', 'inventory_levels')").all(), [])
+      assert.deepEqual(target.prepare("SELECT name FROM sqlite_schema WHERE name IN ('payment_attempts', 'payment_claims')").all(), [])
+      assert.deepEqual(target.prepare("SELECT id, idempotency_key, checkout_expires_at, return_token FROM payments WHERE id = 'test-payment'").all(), [{ id: 'test-payment', idempotency_key: 'checkout:host:hosted', checkout_expires_at: '2026-10-06T01:18:32.658Z', return_token: 'token' }])
+      assert.deepEqual(target.prepare('SELECT id, status FROM opportunities').all(), [{ id: 'current', status: 'open' }])
+      assert.deepEqual(target.pragma('foreign_key_check'), [])
+    } finally { target.close() }
+    // A live-mode Hosted Checkout is not dead: the transfer refuses to discard it.
+    const live = new Database(sourcePath)
+    live.prepare("UPDATE payments SET livemode = 1 WHERE id = 'test-payment'").run()
+    live.close()
+    await assert.rejects(transferDatabaseExport(sourcePath, join(directory, 'v26-live.sqlite'), { payloadPath: join(directory, 'payload-live.sql') }), /Hosted Checkout fields nothing maps: hosted/)
   } finally { rmSync(directory, { recursive: true, force: true }) }
 })
 
@@ -447,8 +500,10 @@ test('interleaved branch migration ledgers preserve location privacy and authore
       }
       const recorded = (source.prepare('SELECT name FROM d1_migrations ORDER BY id').all() as Array<{ name: string }>).map(row => row.name)
       const unchangedTables = history.startsWith('v19-') ? ['products', 'product_variants', 'product_publications', 'product_locations', 'product_stay_configs', 'user', 'member', 'member_scheduling', 'product_booking_configs', 'product_sessions', 'bookings'] : []
+      // The v26 baseline no longer stores member working windows or busy times.
+      const retired: Record<string, string[]> = { member_scheduling: ['windows_json', 'windows_until', 'calendar_revision', 'busy_json', 'busy_from', 'busy_until', 'busy_checked_at', 'busy_error'] }
       const unchanged = unchangedTables.map(table => {
-        const columns = (source.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(row => row.name)
+        const columns = (source.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(row => row.name).filter(name => !retired[table]?.includes(name))
         return { table, columns, rows: source.prepare(`SELECT ${columns.join(',')} FROM ${table}`).all() }
       })
       const preservedTables = ['product_stay_photo_rooms', 'product_stay_photo_room_memberships', 'product_stay_photo_room_amenities', 'product_stay_room_accessibility', 'product_stay_room_accessibility_photos', 'media_placements', 'product_channel_mappings', 'channel_night_pushes', 'channel_threads']
@@ -468,6 +523,7 @@ test('interleaved branch migration ledgers preserve location privacy and authore
       try {
         for (const { table, columns, rows } of authored) assert.deepEqual(target.prepare(`SELECT ${columns.join(',')} FROM ${table}`).all(), rows)
         for (const { table, columns, rows } of unchanged) assert.deepEqual(target.prepare(`SELECT ${columns.join(',')} FROM ${table}`).all(), rows)
+        for (const [table, names] of Object.entries(retired)) if (unchangedTables.includes(table)) assert.deepEqual((target.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).filter(row => names.includes(row.name)), [])
         assert.equal(target.prepare("SELECT check_in_end_time FROM product_stay_configs WHERE product_id = 'home'").get()!.check_in_end_time, history === 'v19-complete' ? '19:00' : null)
         assert.deepEqual(manifest.provider_hours_session_ids, [])
         assert.deepEqual(target.prepare("SELECT organization_id, product_id, beds, amenities FROM product_stay_configs WHERE product_id = 'home'").get(), { organization_id: 'host', product_id: 'home', beds: 2, amenities: '[{"code":"smoke_detector","available":true}]' })
@@ -1174,7 +1230,7 @@ test('a v21 replacement preserves booked descendants and auth, completes manual 
       live.prepare("UPDATE product_booking_configs SET assigned_member_id = NULL WHERE product_id = 'consultation'").run()
       live.prepare("UPDATE team_threads SET name = 'Authored on replacement' WHERE id = 'manual'").run()
       assert.deepEqual(live.prepare("SELECT held_online, scheduling_mode, assigned_member_id FROM product_booking_configs WHERE product_id = 'consultation'").get(), { held_online: 1, scheduling_mode: 'provider', assigned_member_id: null })
-      assert.throws(() => live.prepare("UPDATE product_booking_configs SET scheduling_mode = 'legacy' WHERE product_id = 'consultation'").run(), /product_booking_configs_held_online_check/)
+      assert.throws(() => live.prepare("UPDATE product_booking_configs SET scheduling_mode = 'business' WHERE product_id = 'consultation'").run(), /product_booking_configs_held_online_check/)
 
       const later = new Database(sourcePath)
       try {

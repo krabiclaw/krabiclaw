@@ -61,7 +61,7 @@ export interface ProductBookingConfigRecord {
   online_payment_required: boolean
   /** Sessions come from each provider's working hours, in that provider's timezone. */
   held_online: boolean
-  scheduling_mode: 'legacy' | 'provider'
+  scheduling_mode: 'business' | 'provider'
   assigned_member_id: string | null
   assigned_team_id: string | null
   /** The tenant's own questions asked with each booking, and the revision a form built from them carries. */
@@ -163,11 +163,11 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   const currentQuestions = current ? parseStoredFormQuestions(current.questions) : []
   const questions = patch.questions === undefined ? currentQuestions : prepareFormQuestionsWrite(currentQuestions, { questions: patch.questions, expectedRevision: patch.expected_questions_revision })
   const heldOnline = patch.held_online === undefined ? current?.held_online === 1 : patch.held_online === true
-  if (patch.scheduling_mode !== undefined && !['legacy', 'provider'].includes(String(patch.scheduling_mode))) badRequest('Invalid scheduling mode')
+  if (patch.scheduling_mode !== undefined && !['business', 'provider'].includes(String(patch.scheduling_mode))) badRequest('Invalid scheduling mode')
   const target = await assertResponsibilityTarget(db, input.organizationId, patch, current)
   const assignedMember = target.assigned_member_id
   const assignedTeam = target.assigned_team_id
-  const mode = (patch.scheduling_mode ?? current?.scheduling_mode ?? 'legacy') as ProductBookingConfigRecord['scheduling_mode']
+  const mode = (patch.scheduling_mode ?? current?.scheduling_mode ?? 'business') as ProductBookingConfigRecord['scheduling_mode']
   requireConsultationAttorney(product?.kind ?? input.productKind!, { scheduling_mode: mode, assigned_member_id: assignedMember, assigned_team_id: assignedTeam })
   // The host is who runs it, a member or a team; in provider mode their own hours are also the schedule.
   if (mode === 'provider' && !assignedMember && !assignedTeam) badRequest('Choose the member or team whose working hours guests book')
@@ -691,7 +691,7 @@ export interface ProductBookingSetupInput {
   confirmation_mode?: 'instant' | 'review'
   online_payment_required?: boolean
   held_online?: boolean
-  scheduling_mode?: 'legacy' | 'provider'
+  scheduling_mode?: 'business' | 'provider'
   assigned_member_id?: string | null
   assigned_team_id?: string | null
   weekly_slots?: WeeklySlotInput[]
@@ -937,9 +937,9 @@ export interface SessionAllocationInput {
   requireActive?: boolean
   replacingBookingId?: string | null
   /** Only authenticated capture reconciliation supplies this; public callers cannot exclude holds. */
-  capturedPaymentId?: string
+  chargedPaymentId?: string
   /** Authenticated automatic capture time; delivery time still checks current capacity. */
-  capturedAt?: string
+  chargedAt?: string
   requireUndecided?: { requestId: string; organizationId: string; updatedAt: string; decisionDedupeKey: string } | null
 }
 
@@ -947,7 +947,7 @@ export async function sessionAllocationPredicate(db: DbClient, input: SessionAll
   const location = await sessionLocationGuard(db, input)
   const span = await queryFirst<{ starts_at: string; ends_at: string }>(db, 'SELECT starts_at, ends_at FROM product_sessions WHERE id=? AND organization_id=?', [input.sessionId, input.organizationId])
   const availability = span ? await memberAvailabilityJson(db, input.env, input.organizationId, { from: span.starts_at, until: span.ends_at }, (await sessionProviderIds(db, input.organizationId, { sessionIds: [input.sessionId] })).members) : '{}'
-  return { query: `${input.capturedPaymentId ? `EXISTS (SELECT 1 FROM payment_checkout_holds h JOIN payments p ON p.id=h.payment_id WHERE p.id=? AND p.organization_id=? AND p.state='captured' AND p.refunded_amount=0 AND h.status IN ('active','released') AND h.expires_at>? AND h.session_id=? AND h.quantity=? AND h.organization_id=p.organization_id AND h.amount=p.amount AND h.currency=p.currency) AND ` : ''}${input.requireUndecided
+  return { query: `${input.chargedPaymentId ? `EXISTS (SELECT 1 FROM payment_checkout_holds h JOIN payments p ON p.id=h.payment_id WHERE p.id=? AND p.organization_id=? AND p.refunded_amount=0 AND h.status IN ('active','released') AND h.expires_at>? AND h.session_id=? AND h.quantity=? AND h.organization_id=p.organization_id AND h.amount=p.amount AND h.currency=p.currency) AND ` : ''}${input.requireUndecided
         ? `EXISTS (SELECT 1 FROM requests WHERE id = ? AND organization_id = ? AND updated_at = ?)
            AND NOT EXISTS (SELECT 1 FROM activity_entries WHERE dedupe_key = ?) AND `
         : ''}EXISTS (
@@ -956,7 +956,7 @@ export async function sessionAllocationPredicate(db: DbClient, input: SessionAll
           AND s.status = 'scheduled'
           AND EXISTS (SELECT 1 FROM product_booking_configs c JOIN products p ON p.id=c.product_id AND p.organization_id=c.organization_id
             WHERE c.product_id=s.product_id AND c.organization_id=s.organization_id AND c.duration_minutes>0
-              ${input.capturedPaymentId || input.requireActive === false ? '' : 'AND p.active=1'} AND (s.location_id IS NOT NULL OR c.held_online=1))
+              ${input.chargedPaymentId || input.requireActive === false ? '' : 'AND p.active=1'} AND (s.location_id IS NOT NULL OR c.held_online=1))
           AND (${location.query})
           -- The location's own sale switch is part of being bookable: a branch
           -- that has stopped selling this does not take seats for it.
@@ -967,17 +967,17 @@ export async function sessionAllocationPredicate(db: DbClient, input: SessionAll
           ))
           AND s.starts_at > ?
           AND NOT ${providerUnavailableSql('s', '?', '?')}
-          ${input.capturedPaymentId ? 'AND EXISTS(SELECT 1 FROM payment_checkout_holds held WHERE held.payment_id=? AND held.assigned_member_id IS ' + sessionMemberSql('s') + ')' : ''}
+          ${input.chargedPaymentId ? 'AND EXISTS(SELECT 1 FROM payment_checkout_holds held WHERE held.payment_id=? AND held.assigned_member_id IS ' + sessionMemberSql('s') + ')' : ''}
           AND (s.capacity IS NULL OR s.capacity >= ? + ${sessionHeldCapacitySql('s','?')} + COALESCE((
             SELECT SUM(b.party_size) FROM bookings b
             WHERE b.product_session_id = s.id AND b.id IS NOT ? AND ${CAPACITY_CONSUMING_SQL}
           ), 0))
       )`, params: [
-      ...(input.capturedPaymentId ? [input.capturedPaymentId,input.organizationId,input.capturedAt ?? input.now,input.sessionId,input.partySize] : []),
+      ...(input.chargedPaymentId ? [input.chargedPaymentId,input.organizationId,input.chargedAt ?? input.now,input.sessionId,input.partySize] : []),
       ...(input.requireUndecided
         ? [input.requireUndecided.requestId, input.requireUndecided.organizationId, input.requireUndecided.updatedAt, input.requireUndecided.decisionDedupeKey]
         : []),
-      input.sessionId, input.organizationId, input.productId, ...location.params!, input.now, ...providerAvailabilityParams(availability), input.replacingBookingId ?? null, input.capturedPaymentId ?? null, ...(input.capturedPaymentId ? [input.capturedPaymentId] : []), input.partySize, input.capturedPaymentId ?? null, input.replacingBookingId ?? null,
+      input.sessionId, input.organizationId, input.productId, ...location.params!, input.now, ...providerAvailabilityParams(availability), input.replacingBookingId ?? null, input.chargedPaymentId ?? null, ...(input.chargedPaymentId ? [input.chargedPaymentId] : []), input.partySize, input.chargedPaymentId ?? null, input.replacingBookingId ?? null,
   ] }
 }
 
@@ -1024,9 +1024,9 @@ export async function sessionClaimQuery(db: DbClient, input: {
    * anything.
    */
   requireUndecided?: { requestId: string; organizationId: string; updatedAt: string; decisionDedupeKey: string } | null
-  capturedPaymentId?: string
+  chargedPaymentId?: string
   /** Authenticated automatic capture time; delivery time still checks current capacity. */
-  capturedAt?: string
+  chargedAt?: string
   now: string
 }): Promise<BatchQuery> {
   const allocation = await sessionAllocationPredicate(db, input)

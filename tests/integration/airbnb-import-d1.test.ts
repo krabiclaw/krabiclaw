@@ -1032,8 +1032,8 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
   try {
     await connected(db, env, channex)
     // The owner hosts with a published profile, so the two homes added by hand can be published.
-    await db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until, public_name, public_bio, public_approved, calendar_revision, updated_at, updated_by)
-      VALUES ('m-owner', ?, ?, '[]', '[]', '[]', '2026-10-15T00:00:00.000Z', 'Owner Host', NULL, 1, 'revision', '2026-10-15T00:00:00.000Z', ?)`).bind(ORG, TZ, OWNER).run()
+    await db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, public_name, public_bio, public_approved, updated_at, updated_by)
+      VALUES ('m-owner', ?, ?, '[]', '[]', 'Owner Host', NULL, 1, '2026-10-15T00:00:00.000Z', ?)`).bind(ORG, TZ, OWNER).run()
     for (const name of ['Dune Hut', 'Reef Hut']) {
       const made = await createStayHome(env, db, manager, stayHomeInput({ name, timezone: TZ, address: `1 ${name} Rd`, city: 'Moab', country: 'US', check_in_time: '15:00', check_out_time: '11:00', max_guests: 2, min_nights: 1, base_price_minor: 100_00 }), name)
       await updateStayHome(env, db, manager, made.product_id, { assigned_member_id: 'm-owner' })

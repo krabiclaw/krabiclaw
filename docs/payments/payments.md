@@ -178,9 +178,9 @@ to the selected business.
 Stripe's settlement timing and payout schedule are separate. KrabiClaw does not
 apply Airbnb check-in payout-release rules. Bank changes use Stripe Express;
 sent payouts cannot be redirected. Merchant refunds require authenticated browser
-approval. A paid visit's rejection or cancellation and a guest's own cancellation
-of a deposit-paid reservation inside its terms are each Stripe's full-remaining
-refund: the
+approval. A paid visit's rejection or cancellation, a guest's own cancellation of
+a deposit-paid reservation inside its terms, and the refund of a bank debit that
+cleared after its capacity went are each Stripe's full-remaining refund: the
 request names no amount, Stripe returns whatever it still holds for the
 payment, and the recorded amount is the one Stripe reports. The approval screen
 shows that remainder read from the charge. Each refund is one request under a
@@ -363,9 +363,9 @@ required collection and the product payment configuration stay unchanged.
 The public booking hold uses the canonical allocator predicate,
 including tenant/calendar-group half-open overlap exclusion. Holds expire after
 60 minutes. Review-pending Bookings have no Checkout TTL and consume capacity.
-Only authenticated native capture converts the hold to the canonical pending or
-confirmed Booking and commits its lifecycle activity/operational ID atomically.
-Late or unfulfillable capture creates an automatic full-principal refund intent.
+A card or Link authorization, or a bank debit once it clears, converts the hold
+to the canonical pending or confirmed Booking and commits its lifecycle
+activity/operational ID atomically. A card is captured only after that commit.
 
 Stripe account + livemode + native object identity scope every financial mutation.
 The connected snapshot webhook is separate from the subscription handler; durable
@@ -377,7 +377,7 @@ returns non-2xx and Stripe redelivers the event until the write lands.
 
 The buyer pays on the business's own site at `/pay/<payment id>`, not on a hosted
 Checkout. `createPaymentCheckout` opens a Stripe PaymentIntent on the connected
-account (`payment_attempts.stripe_payment_intent_id`) and hands the browser the
+account (`payments.stripe_payment_intent_id`) and hands the browser the
 page path and a purchase claim, carried in the URL fragment so no server, log or
 referrer sees it. Stripe's Payment Element, mounted on the connected account in
 deferred mode with the business's payment method configuration, collects the
@@ -417,13 +417,40 @@ intents settle via `reconcilePaymentIntent` when the `payment_intent.succeeded`
 webhook fires. Clearing failures still generate financial notifications. An
 intent in `requires_payment_method` with `last_payment_error` remains payable
 and retains its active hold so the buyer can retry, including after a
-recoverable confirmation decline. A canceled intent is terminal: it marks the
-payment failed and releases the active hold.
+recoverable confirmation decline, until its window ends. A bank debit that
+fails after that gives back the 14 days it was holding. A canceled intent is
+terminal: it releases the active hold.
 
-**Expiry.** The buyer's time to pay is the attempt's `expires_at`. Every
-availability query ignores a hold past it, and the confirm endpoint refuses an
-attempt past it, so an unpaid intent simply stays unused at Stripe. A capture that
-lands late anyway takes the unfulfillable-capture path and is refunded.
+**Expiry.** The buyer's time to pay is `payments.checkout_expires_at`. Every
+availability query ignores a hold past `expires_at`, and the confirm endpoint
+refuses a payment past its window. Before the confirm request goes to Stripe, one
+conditional write extends the active, unexpired hold by an hour; a hold that has
+already lapsed stops the confirmation there.
+
+**Cards and Link: authorize, book, capture.** Both use manual capture
+(`payment_method_options[card|link].capture_method`; surcharge and tax are in the
+authorized total). When Stripe reports `requires_capture`, from the confirm
+response, the webhook or the pay page's return, the hold becomes the booking and
+only then is the payment captured. If the capacity has gone the authorization is
+cancelled: nothing is charged and nothing is refunded. These intents use automatic
+confirmation, because Stripe refuses `confirmation_method: manual` alongside
+`automatic_payment_methods`, so a browser holding the client secret could confirm
+one late; the browser only gets the secret for `requires_action`, and a late
+authorization is cancelled the same way.
+
+A lost capture response is not a failure. Stripe's status is read again before
+anything is retried, and the hold finds the same booking. If Stripe cancels an
+authorization a booking was committed on, nothing was paid and the business gets a
+payment-failed alert on the booking.
+
+**ACH.** Confirmation starts the debit, so there is nothing to authorize. The hold
+keeps the capacity for 14 days while the debit clears, and the booking is made
+when it succeeds. Stripe tries instant bank verification and falls back to
+microdeposits: the pay page then shows Stripe's verification link, and the hold
+lasts through verification. A verification that fails or expires returns the
+intent to `requires_payment_method` with its error, which gives the capacity back. A debit that clears after its capacity went, because the business closed
+what it paid for, goes back through the ordinary refund under
+`unfulfillable:<intent>`, and a redelivery repeats that refund rather than booking.
 
 **Tax.** A business in a Stripe Tax business location
 (https://docs.stripe.com/tax/supported-countries) with active Stripe Tax

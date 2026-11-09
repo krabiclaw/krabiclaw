@@ -35,12 +35,29 @@ export interface Payment {
   captured_amount: number
   refunded_amount: number
   surcharge_amount: number
-  state: string
   stripe_payment_intent_id: string | null
   stripe_charge_id: string | null
   receipt_url: string | null
+  idempotency_key: string | null
+  checkout_expires_at: string | null
+  review_json: string | null
+  return_token: string | null
+  return_token_hash: string | null
+  return_expires_at: string | null
+  claimed_at: string | null
+  claimed_user_id: string | null
   created_at: string
   updated_at: string
+}
+/** The columns that authorize the pay page never leave the payment record. */
+export type VisiblePayment = Omit<Payment, 'idempotency_key' | 'review_json' | 'return_token' | 'return_token_hash'>
+function visiblePayment(payment: Payment): VisiblePayment {
+  const visible: Partial<Payment> = { ...payment }
+  delete visible.idempotency_key
+  delete visible.review_json
+  delete visible.return_token
+  delete visible.return_token_hash
+  return visible as VisiblePayment
 }
 export type FinancialAction = 'read' | 'refund' | 'disputes' | 'payouts' | 'integration'
 export interface FinancialPrincipal { organizationId: string; userId: string; role: string }
@@ -57,16 +74,32 @@ export async function requirePayment(db: DbClient, organizationId: string, payme
   if (!payment) throw new HTTPError({ statusCode: 404, statusMessage: 'Payment not found' })
   return payment
 }
-/** Full merchant detail; callers must authorize before reading or projecting it. */
-export async function readPaymentDetails(db:DbClient,organizationId:string,paymentId:string){
- const payment=await requirePayment(db,organizationId,paymentId)
- const [refunds,disputes,booking,order]=await Promise.all([
-  queryAll<{id:string;amount:number;status:string}>(db,'SELECT * FROM payment_refunds WHERE payment_id=?',[payment.id]),
-  queryAll(db,'SELECT * FROM payment_disputes WHERE payment_id=?',[payment.id]),
-  payment.subject_type==='booking'||payment.subject_type==='reservation'?queryFirst<{request_id:string|null}>(db,`SELECT request_id FROM ${payment.subject_type==='booking'?'bookings':'reservations'} WHERE id=? AND organization_id=?`,[payment.subject_id,organizationId]):Promise.resolve(null),
-  readPaymentOrder(db,organizationId,payment.id),
+/** What Stripe says was captured, refunded and disputed. A PaymentIntent keeps saying succeeded after a refund: the Charge and Refunds hold that. */
+async function stripePaymentFacts(env:CloudflareEnv,payment:Payment){
+ if(!payment.stripe_payment_intent_id||!payment.stripe_charge_id)return null
+ const stripe=paymentsStripe(env,Boolean(payment.livemode))
+ const account={stripeAccount:payment.stripe_account_id}
+ const [charge,refunds,disputes]=await Promise.all([
+  stripe.charges.retrieve(payment.stripe_charge_id,{},account),
+  stripe.refunds.list({payment_intent:payment.stripe_payment_intent_id,limit:100},account).autoPagingToArray({limit:10_000}),
+  stripe.disputes.list({payment_intent:payment.stripe_payment_intent_id,limit:100},account).autoPagingToArray({limit:10_000}),
  ])
- return {payment,refunds,disputes,visit:booking?.request_id?{kind:payment.subject_type,request_id:booking.request_id}:null,order}
+ return {captured:charge.amount_captured,refunded:charge.amount_refunded,refunds,disputes}
+}
+/** Full merchant detail; callers must authorize before reading or projecting it. */
+export async function readPaymentDetails(db:DbClient,env:CloudflareEnv,organizationId:string,paymentId:string){
+ const recorded=await requirePayment(db,organizationId,paymentId)
+ const [refundRows,disputeRows,booking,order,stripeFacts]=await Promise.all([
+  queryAll<{id:string;amount:number;status:string;stripe_refund_id:string|null}>(db,'SELECT * FROM payment_refunds WHERE payment_id=?',[recorded.id]),
+  queryAll<{id:string;stripe_dispute_id:string;amount:number;currency:string;reason:string;status:string;evidence_due_at:string|null;updated_at:string}>(db,'SELECT * FROM payment_disputes WHERE payment_id=?',[recorded.id]),
+  recorded.subject_type==='booking'||recorded.subject_type==='reservation'?queryFirst<{request_id:string|null}>(db,`SELECT request_id FROM ${recorded.subject_type==='booking'?'bookings':'reservations'} WHERE id=? AND organization_id=?`,[recorded.subject_id,organizationId]):Promise.resolve(null),
+   readPaymentOrder(db,organizationId,recorded.id),
+  stripePaymentFacts(env,recorded),
+ ])
+ const payment=visiblePayment(stripeFacts?{...recorded,captured_amount:stripeFacts.captured,refunded_amount:stripeFacts.refunded}:recorded)
+ // Stripe's refunds, with the note and author only we hold; a refund not yet sent to Stripe exists only here.
+ const refunds=stripeFacts?[...stripeFacts.refunds.map(refund=>({...refundRows.find(row=>row.stripe_refund_id===refund.id),id:refundRows.find(row=>row.stripe_refund_id===refund.id)?.id??refund.id,stripe_refund_id:refund.id,amount:refund.amount,status:refund.status??'pending'})),...refundRows.filter(row=>!row.stripe_refund_id)]:refundRows
+ return {payment,refunds,disputes:stripeFacts?stripeFacts.disputes.map(dispute=>{const row=disputeRows.find(item=>item.stripe_dispute_id===dispute.id);return {id:row?.id??dispute.id,stripe_dispute_id:dispute.id,amount:dispute.amount,currency:dispute.currency.toUpperCase(),reason:dispute.reason,status:dispute.status,evidence_due_at:dispute.evidence_details?.due_by?new Date(dispute.evidence_details.due_by*1000).toISOString():null,updated_at:row?.updated_at??new Date(dispute.created*1000).toISOString()}}):disputeRows,visit:booking?.request_id?{kind:payment.subject_type,request_id:booking.request_id}:null,order}
 }
 export type PaymentsEarningsType = 'paid' | 'refunded'
 export async function listPayments(db: DbClient, principal: FinancialPrincipal, input: { from: string; to: string; after?: string; limit?: number; location_id?: string; earnings_type?: PaymentsEarningsType }) {
@@ -78,7 +111,7 @@ export async function listPayments(db: DbClient, principal: FinancialPrincipal, 
   if (input.earnings_type !== undefined && input.earnings_type !== 'paid' && input.earnings_type !== 'refunded') throw new HTTPError({ statusCode: 400, statusMessage: 'earnings_type must be paid or refunded' })
   const rows = await queryAll<Payment>(db, `SELECT * FROM payments WHERE organization_id = ? AND created_at >= ? AND created_at < ? AND id > ? AND (? IS NULL OR location_id = ?) AND (? IS NULL OR (CASE WHEN ? = 'refunded' THEN refunded_amount > 0 ELSE refunded_amount < captured_amount END)) ORDER BY id LIMIT ?`,
     [principal.organizationId, from.toISOString(), to.toISOString(), input.after ?? '', input.location_id ?? null, input.location_id ?? null, input.earnings_type ?? null, input.earnings_type ?? null, limit + 1])
-  return { organization_id: principal.organizationId, timezone: 'UTC', from: from.toISOString(), to: to.toISOString(), payments: rows.slice(0, limit), next_cursor: rows.length > limit ? rows[limit - 1]!.id : null }
+  return { organization_id: principal.organizationId, timezone: 'UTC', from: from.toISOString(), to: to.toISOString(), payments: rows.slice(0, limit).map(visiblePayment), next_cursor: rows.length > limit ? rows[limit - 1]!.id : null }
 }
 export async function paymentPayouts(db: DbClient, env: CloudflareEnv, principal: FinancialPrincipal, after?: string) {
   await authorizePayments(principal, 'payouts')
@@ -180,7 +213,6 @@ export async function reconcileRefundState(db:DbClient,stripe:Stripe,payment:Pay
  await executeBatch(db,[
   {query:`INSERT INTO payment_refunds(id,payment_id,idempotency_key,stripe_refund_id,amount,reason,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET stripe_refund_id=excluded.stripe_refund_id,amount=excluded.amount,status=excluded.status,error=NULL,updated_at=excluded.updated_at`,params:[id,payment.id,`provider:${payment.stripe_account_id}:${payment.livemode}:${refund.id}`,refund.id,refund.amount,refund.reason??'provider',refund.status,now,now]},
   {query:"UPDATE payments SET refunded_amount=(SELECT COALESCE(SUM(amount),0) FROM payment_refunds WHERE payment_id=? AND status='succeeded'),updated_at=? WHERE id=?",params:[payment.id,now,payment.id]},
-  {query:"UPDATE payments SET state=CASE WHEN refunded_amount=captured_amount AND captured_amount>0 THEN 'refunded' ELSE state END WHERE id=?",params:[payment.id]},
   {query:`UPDATE payment_authorizations SET consumed_at=COALESCE(consumed_at,?) WHERE payment_id=? AND approved_at IS NOT NULL AND action='refund' AND EXISTS(SELECT 1 FROM payment_refunds r WHERE r.id=? AND r.payment_id=payment_authorizations.payment_id AND r.idempotency_key='approved:'||payment_authorizations.id AND (payment_authorizations.amount IS NULL OR r.amount=payment_authorizations.amount) AND r.created_by=payment_authorizations.user_id)`,params:[now,payment.id,id]},
  ])
  await notifyPaymentFinancialEvent(db,stripe,env,payment,{kind,nativeId:refund.id,status:refund.status!,amount:refund.amount})

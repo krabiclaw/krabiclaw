@@ -304,8 +304,8 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.equal((await edit(owner, { base_price_minor: 210_00 })).status, 200)
     // Guests see who hosts it: a home is listed only with a host whose profile is published.
     assert.deepEqual(refusal(await edit(owner, { published: true })), { status: 409, code: 'HOST_REQUIRED', field: 'host' })
-    await db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until, public_name, public_bio, public_approved, calendar_revision, updated_at, updated_by)
-      VALUES ('m-helper', ?, 'America/Denver', '[]', '[]', '[]', '2026-10-15T00:00:00.000Z', 'Helper Host', NULL, 1, 'revision', '2026-10-15T00:00:00.000Z', 'owner')`).bind(ORG).run()
+    await db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, public_name, public_bio, public_approved, updated_at, updated_by)
+      VALUES ('m-helper', ?, 'America/Denver', '[]', '[]', 'Helper Host', NULL, 1, '2026-10-15T00:00:00.000Z', 'owner')`).bind(ORG).run()
     assert.equal((await edit(owner, { assigned_member_id: 'm-helper' })).status, 200)
     assert.equal((await edit(owner, { published: true })).status, 200)
     assert.equal(((await call(owner, 'GET')).body.homes as Array<{ product_id: string; published: boolean }>).find(home => home.product_id === made.product_id)!.published, true)

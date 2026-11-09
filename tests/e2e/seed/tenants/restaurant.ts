@@ -94,7 +94,7 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
       kind: 'experience', name: 'Pizza-Making Class', active: true, idempotency_key: 'seed-pizza-class',
       description: 'Stretch, top and fire your own pie in our wood oven with the Brooklyn kitchen team.',
       variants: [{ name: 'One guest', prices: [{ unit_amount: 6500, currency: 'USD' }] }],
-      booking: { location_id: brooklyn.id, duration_minutes: 120, default_capacity: 12, confirmation_mode: 'instant', scheduling_mode: 'legacy', assigned_member_id: chefMemberId, weekly_slots: [{ weekday: 6, start_time: '11:00' }] },
+      booking: { location_id: brooklyn.id, duration_minutes: 120, default_capacity: 12, confirmation_mode: 'instant', scheduling_mode: 'business', assigned_member_id: chefMemberId, weekly_slots: [{ weekday: 6, start_time: '11:00' }] },
     })
     await tool('set_media', { placement: { owner_type: 'product', owner_id: pizzaClass.id, slot: 'image' }, asset_id: diningRoom.id })
     await tool('set_product_location', { product_id: pizzaClass.id, location_id: brooklyn.id, active: true, published: true })

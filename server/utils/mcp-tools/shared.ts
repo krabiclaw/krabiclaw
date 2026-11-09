@@ -876,6 +876,7 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   // Creation also plans guest sends and updates connected availability.
   create_stay: { ...D, openWorldHint: true, idempotentHint: true },
   update_stay: { ...D, openWorldHint: true },
+  move_stay: { ...D, openWorldHint: true },
   cancel_stay: { ...D, openWorldHint: true },
   record_stay_payment: { ...W, idempotentHint: true },
   delete_stay_payment: D,

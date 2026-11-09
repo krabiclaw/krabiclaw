@@ -438,6 +438,7 @@ export async function applyOnboardingDraft(
     ? [
         ...pageDeletions.flatMap(page => page.queries),
         ...resourceLocalizationDeletionQueries('product', { query: 'SELECT value FROM json_each(?)', params: [JSON.stringify(previouslyImported.map(row => row.id))] }),
+        { query: "DELETE FROM media_placements WHERE organization_id = ? AND owner_type = 'product' AND owner_id IN (SELECT value FROM json_each(?))", params: [organizationId, JSON.stringify(previouslyImported.map(row => row.id))] },
         { query: `DELETE FROM products WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))`, params: [organizationId, JSON.stringify(previouslyImported.map(row => row.id))] },
       ]
     : []

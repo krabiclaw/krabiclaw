@@ -95,7 +95,7 @@ test('public experiences require a configured booking flow and retain full or te
     // Imported legacy state can have a published duration without a schedule.
     await db.prepare("INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_by, updated_by) VALUES (?, ?, 'loc-a', 1, 1, ?, ?)")
       .bind(ORG, legacy.id, ACTOR.actorId, ACTOR.actorId).run()
-    await db.prepare('INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, created_by, updated_by) VALUES (?, ?, 60, 8, ?, ?)')
+    await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES (?, ?, 60, 8, 'business', ?, ?)`)
       .bind(legacy.id, ORG, ACTOR.actorId, ACTOR.actorId).run()
     await db.prepare('UPDATE product_publications SET published = 1 WHERE organization_id = ? AND product_id = ?').bind(ORG, legacy.id).run()
     const visible = async () => (await loadPublicProductCollection(db, ORG, 'experiences', false, undefined, env))!.products.map(product => product.id)
@@ -390,8 +390,12 @@ test('reconcile converges instead of duplicating, and deletion respects the cano
       VALUES ('sl-en', ?, 'en', 1, 'published', ?, ?)`).bind(ORG, NOW, NOW).run()
     await db.prepare(`INSERT INTO content_documents (id, organization_id, kind, row_role, locale, product_id, title, path, sort_order, metadata_json, created_at, updated_at)
       VALUES ('doc-1', ?, 'page', 'root', 'en', 'src-1', 'One', '/one', 0, '{"page_type":"custom"}', ?, ?)`).bind(ORG, NOW, NOW).run()
+    await db.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source) VALUES ('src-1-photo', ?, 'image', 'cloudflare_r2', 'uploaded')").bind(ORG).run()
+    await db.prepare("INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id) VALUES ('src-1-card', ?, 'product', 'src-1', 'social_card', 'src-1-photo')").bind(ORG).run()
     await deleteProduct(db, { organizationId: ORG, productId: 'src-1' })
     assert.equal(await db.prepare("SELECT count(*) n FROM content_documents WHERE id='doc-1'").first<number>('n'),0)
+    assert.equal(await db.prepare("SELECT count(*) n FROM media_placements WHERE owner_type='product' AND owner_id='src-1'").first<number>('n'), 0, 'its pictures went with it')
+    assert.equal(await db.prepare("SELECT count(*) n FROM media_assets WHERE id='src-1-photo'").first<number>('n'), 1, 'the asset stays in the library')
     assert.equal(await db.prepare('SELECT count(*) n FROM products').first<number>('n'), 1)
     assert.equal(await db.prepare('SELECT count(*) n FROM product_variants').first<number>('n'), 1, 'the deleted product took its variants with it')
   } finally { await runtime.dispose() }
@@ -403,8 +407,8 @@ test('editing a product keeps variant identity, so bookings survive', { timeout:
     const product = await createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',
       name: 'Class', variants: [{ id: 'var-adult', name: 'Adult', prices: [{ unit_amount: 50000, currency: 'THB' }] }],
     } })
-    await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, created_by, updated_by)
-      VALUES (?, ?, 60, 5, 'a', 'a')`).bind(product.id, ORG).run()
+    await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by)
+      VALUES (?, ?, 60, 5, 'business', 'a', 'a')`).bind(product.id, ORG).run()
     await db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by)
       VALUES ('s1', ?, ?, 'loc-a', 'Asia/Bangkok', '2099-01-01T00:00:00.000Z', '2099-01-01T01:00:00.000Z', 5, 'scheduled', 'a', 'a')`).bind(ORG, product.id).run()
     await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, status)

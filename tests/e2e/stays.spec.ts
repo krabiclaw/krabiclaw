@@ -17,6 +17,7 @@ import type { StayPhotoRoom } from '../../shared/stay-photos'
 import type { StayHomeAccessibility } from '../../shared/stay-accessibility'
 import { formatMinorAmount } from '../../shared/prices'
 import type { TaskPerson, TaskSection, TaskView } from '../../server/domain/tasks'
+import type { TeamMessage, TeamThread } from '../../server/domain/team-messages'
 import type { OpportunityView } from '../../server/domain/opportunities'
 
 // A host's place to stay, end to end through the surfaces that own it: the
@@ -472,6 +473,45 @@ test('a responsible home team reads its stays as turnovers on every surface unti
     const ownerMcp = await call<{ stay: StayDetail }>('get_stay', { stay_id: stay.id })
     expect(ownerMcp.data!.stay).toMatchObject({ guest_surname: surname, guest_email: guestEmail, notes, total_minor: 123_400, request_id: stay.request_id })
     await expectStatus(await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${stay.request_id}`), 200)
+
+    // The team's turnover is a job in the stay's conversation with the host: the
+    // Worker's hub posts it after the stay write, and "Message host" from the
+    // member lands in that same conversation, titled by the home, with the
+    // job strip that opens the task sheet.
+    let jobThreadId = ''
+    await expect.poll(async () => {
+      const threads = await memberContext.request.get(api('team/threads'))
+      await expectStatus(threads, 200)
+      jobThreadId = (await threads.json() as { threads: TeamThread[] }).threads.find(thread => thread.stayId === stay.id && thread.job)?.id ?? ''
+      return jobThreadId
+    }, { timeout: 30_000, message: 'the hub opens the turnover’s conversation after the stay write' }).not.toBe('')
+    const hosted = await memberContext.request.post(api('team/threads'), { data: { memberIds: ['user-e2e-lodging-host'], stayId: stay.id } })
+    await expectStatus(hosted, 200)
+    expect((await hosted.json() as { id: string }).id).toBe(jobThreadId)
+    const jobThread = () => memberContext.request.get(api('team/threads')).then(async response => { await expectStatus(response, 200); return (await response.json() as { threads: TeamThread[] }).threads.find(thread => thread.id === jobThreadId)! })
+    expect(await jobThread()).toMatchObject({ name: 'Cliff Cabin', stayId: stay.id, job: expect.objectContaining({ kind: 'turnover', status: 'open', title: 'Cliff Cabin', stayId: stay.id }) })
+    await expect.poll(async () => {
+      const read = await memberContext.request.get(api(`team/threads/${jobThreadId}/messages`))
+      await expectStatus(read, 200)
+      return (await read.json() as { messages: TeamMessage[] }).messages.filter(message => message.automatic).map(message => message.body.split('\n')[0])
+    }, { timeout: 30_000, message: 'the hub posts the turnover into the conversation after the stay write' }).toEqual(['Turnover: Cliff Cabin'])
+    expect((await jobThread()).unread).toBe(false)
+    await memberPage.goto(`/dashboard/${slug}/messages/team/${jobThreadId}?view=team`)
+    await expect(memberPage.getByText('Sent automatically')).toBeVisible()
+    const strip = memberPage.getByTestId('team-thread-job')
+    await expect(strip).toContainText('Cliff Cabin')
+    await strip.getByRole('button', { name: 'Cliff Cabin', exact: true }).click()
+    const sheet = memberPage.getByRole('dialog', { name: 'Turnover', exact: true })
+    await expect(sheet.getByRole('heading', { name: 'Turnover', exact: true })).toBeVisible()
+    await expect(sheet.getByText('Checkout', { exact: false })).toBeVisible()
+    await expect(sheet.getByText(guestName, { exact: false })).toBeVisible()
+    await memberPage.keyboard.press('Escape')
+    // The host can move the guest; this business has no other home to move them to.
+    await page.goto(`/dashboard/${slug}/bookings/stay/${stay.id}`)
+    await page.getByTestId('stay-move').click()
+    await expect(page).toHaveURL(new RegExp(`/bookings/stay/${stay.id}/move$`))
+    await expect(page.locator('#dashboard-panel-stay-move').getByText('You have no other homes to move this guest to.', { exact: true })).toBeVisible()
+    await expect(page.locator('#dashboard-panel-stay-move').getByRole('button', { name: 'Move guest', exact: true })).toBeDisabled()
 
     const removed = await page.request.post('/api/auth/organization/remove-team-member', { headers, data: { organizationId, teamId, userId: 'user-e2e-lodging-native' } })
     await expectStatus(removed, 200)
@@ -4551,23 +4591,37 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const otherLocation = await cleaner.request.get(api('today'), { params: { range: 'upcoming', locationId: homes[1]!.location_id } })
       await expectStatus(otherLocation, 200)
       expect((await otherLocation.json() as BusinessToday).tasks).toEqual([])
-      // The host takes the turnover back and gives it to the cleaner again: the alert reaches the member's
-      // own feed and unread count, and opening the task reads it.
+      // The host takes the turnover back and gives it to the cleaner again. A cleaner's job is a team
+      // conversation with the owners: the organization's jobs post it there as an automatic message once
+      // they wake, that message is the cleaner's alert (push, email, WhatsApp), it never counts as unread,
+      // and no task alert is sent beside it.
       const unassigned = await call<{ task: { version: number } }>('update_task', { task_id: turnover.id, expected_version: turnover.version, assigned_member_id: null })
       expect(unassigned.error).toBeNull()
       const reassigned = await call<{ task: { version: number } }>('update_task', { task_id: turnover.id, expected_version: unassigned.data!.task.version, assigned_member_id: memberId })
       expect(reassigned.error).toBeNull()
-      const taskAlert = `?task=${encodeURIComponent(turnover.id)}`
+      let jobThread: { id: string; unread: boolean } | undefined
+      await expect.poll(async () => {
+        const threads = await cleaner.request.get(api('team/threads'))
+        await expectStatus(threads, 200)
+        jobThread = (await threads.json() as { threads: Array<{ id: string; stayId: string | null; unread: boolean; job: { id: string } | null }> }).threads
+          .find(item => item.stayId === stays[0]!.id && item.job?.id === turnover.id)
+        return jobThread?.id ?? ''
+      }, { timeout: 30_000, message: 'the organization’s jobs open the cleaner’s conversation for the turnover' }).not.toBe('')
+      // The job is posted once; a wake that saw the moment between unassigning and reassigning also told the
+      // cleaner it was no longer theirs, and nothing else is said in the conversation.
+      await expect.poll(async () => {
+        const read = await cleaner.request.get(api(`team/threads/${jobThread!.id}/messages`))
+        await expectStatus(read, 200)
+        const lines = (await read.json() as { messages: Array<{ automatic: boolean; body: string }> }).messages.filter(message => message.automatic).map(message => message.body.split('\n')[0])
+        return { job: lines.filter(line => line === 'Turnover: Assigned Cabin').length, other: lines.filter(line => line !== 'Turnover: Assigned Cabin' && !/^No longer yours: turnover at Assigned Cabin, /.test(line)) }
+      }, { timeout: 30_000, message: 'the job is posted into the conversation as an automatic message' }).toEqual({ job: 1, other: [] })
+      const threadsAfterPost = await cleaner.request.get(api('team/threads'))
+      await expectStatus(threadsAfterPost, 200)
+      expect((await threadsAfterPost.json() as { threads: Array<{ id: string; unread: boolean }> }).threads.find(item => item.id === jobThread!.id)?.unread).toBe(false)
       const alertsResponse = await cleaner.request.get(api('notifications'))
       await expectStatus(alertsResponse, 200)
-      const alerts = await alertsResponse.json() as { notifications: Array<{ template: string; deep_link: string | null; read_at: string | null }>; unread_count: number }
-      expect(alerts.notifications.filter(alert => alert.template === 'task_assigned' && alert.deep_link?.endsWith(taskAlert))).toEqual([expect.objectContaining({ read_at: null })])
-      const unreadBeforeOpening = alerts.unread_count
-      expect(unreadBeforeOpening).toBeGreaterThanOrEqual(1)
-      await expectStatus(await cleaner.request.post(`/api/organizations/${organizationId}/tasks/${turnover.id}/read`, { data: {} }), 200)
-      const countResponse = await cleaner.request.get(api('notifications/unread-count'))
-      await expectStatus(countResponse, 200)
-      expect((await countResponse.json() as { unread_count: number }).unread_count).toBe(unreadBeforeOpening - 1)
+      const alerts = await alertsResponse.json() as { notifications: Array<{ template: string }> }
+      expect(alerts.notifications.filter(alert => alert.template === 'task_assigned')).toEqual([])
 
       // The cleaner finishes the turnover through the tasks route; Today reads it back as today's done work,
       // and the host reads the same task through MCP.

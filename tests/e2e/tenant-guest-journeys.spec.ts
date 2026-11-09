@@ -157,9 +157,9 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const response = await submission
     expect(response.status()).toBe(201)
     expect(response.request().postDataJSON()).toMatchObject({ guest_phone: '+66812345678' })
-    const booked = await response.json() as { booking_id: string }
-    expect(booked.booking_id).toEqual(expect.any(String))
-    const persisted = await request.get(`${testBaseUrl()}/api/dashboard/bookings/booking/${booked.booking_id}`, {
+    const booked = await response.json() as { request_id: string }
+    expect(booked.request_id).toEqual(expect.any(String))
+    const persisted = await request.get(`${testBaseUrl()}/api/dashboard/bookings/booking/${booked.request_id}`, {
       params: { org: wheel.slug },
     })
     expect(persisted.status(), await persisted.text()).toBe(200)
@@ -313,22 +313,22 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const created = await submission
     expect(created.status()).toBe(201)
     expect(created.request().postDataJSON()).toMatchObject({ guest_phone: null })
-    const body = await created.json() as { booking_id: string; cancellation_token: string }
+    const body = await created.json() as { request_id: string; cancellation_token: string }
     expect(JSON.stringify(body)).not.toContain('cancel-once@playwright.example')
     await loginAs(request, baseURL, 'user-e2e-pottery-owner')
-    const persisted = await request.get(`${baseURL}/api/dashboard/bookings/booking/${body.booking_id}`, {
+    const persisted = await request.get(`${baseURL}/api/dashboard/bookings/booking/${body.request_id}`, {
       params: { org: wheel.slug },
     })
     expect(persisted.status(), await persisted.text()).toBe(200)
     const persistedBooking = (await persisted.json()).booking as { guestName: string; guestPhone: string | null; bookingDate: string }
     expect(persistedBooking).toMatchObject({ guestName: 'Cancel Once', guestPhone: null })
-    const threadURL = `${baseURL}/api/dashboard/organizations/${wheel.organizationId}/guest-threads/${body.booking_id}`
+    const threadURL = `${baseURL}/api/dashboard/organizations/${wheel.organizationId}/guest-threads/${body.request_id}`
     const pendingThread = await request.get(threadURL)
     expect(pendingThread.status(), await pendingThread.text()).toBe(200)
-    expect((await pendingThread.json() as { thread: InboxThread }).thread).toMatchObject({ id: body.booking_id, guestName: 'Cancel Once', recordKind: 'booking' })
+    expect((await pendingThread.json() as { thread: InboxThread }).thread).toMatchObject({ id: body.request_id, guestName: 'Cancel Once', recordKind: 'booking' })
     // Whether a reply is owed is the ledger's, which MCP reads out; the inbox view keeps it on the server.
     const conversationLedger = async () => {
-      const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_guest_conversation', args: { organization_id: wheel.organizationId, request_id: body.booking_id } })
+      const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName: 'get_guest_conversation', args: { organization_id: wheel.organizationId, request_id: body.request_id } })
       expect(response.status()).toBe(200)
       return mcpData<{ conversation: { needs_reply: boolean; operational_record: { status: string } | null; entries: Array<{ id: string; event: string | null }> } }>(await response.json()).conversation
     }
@@ -337,14 +337,14 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const todayBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
     expect(todayBefore.status(), await todayBefore.text()).toBe(200)
     const todayBeforePayload = await todayBefore.json() as { tasks: TaskSection[] }
-    expect(todayBeforePayload.tasks.flatMap(section => section.tasks).filter(task => task.requestId === body.booking_id)).toEqual([])
+    expect(todayBeforePayload.tasks.flatMap(section => section.tasks).filter(task => task.requestId === body.request_id)).toEqual([])
     const day = persistedBooking.bookingDate
     // Calendar owns confirmed commitments; quests do not repeat its agenda.
     const scheduleParams = { org: wheel.slug, from: day, to: day }
     const scheduleBefore = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })
     expect(scheduleBefore.status(), await scheduleBefore.text()).toBe(200)
-    expect((await scheduleBefore.json() as { items: Array<{ id: string }> }).items.map(item => item.id)).toContain(`booking:${body.booking_id}`)
-    const cancelURL = `${baseURL}/api/public/booking-requests/${body.booking_id}/cancel`
+    expect((await scheduleBefore.json() as { items: Array<{ id: string }> }).items.map(item => item.id)).toContain(`booking:${body.request_id}`)
+    const cancelURL = `${baseURL}/api/public/booking-requests/${body.request_id}/cancel`
     const authHeaders = { ...headers, Authorization: `Bearer ${body.cancellation_token}` }
     const receiptURL = cancelURL.replace(/\/cancel$/, '')
     const before = await request.get(receiptURL, { headers: authHeaders })
@@ -369,7 +369,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect(thread.stream.filter(item => item.type === 'event' && item.id === cancelEntries[0]!.id)).toMatchObject([{ text: expect.stringMatching(/ canceled the booking$/) }])
     const scheduleAfter = await request.get(`${baseURL}/api/dashboard/agenda`, { params: scheduleParams })
     expect(scheduleAfter.status(), await scheduleAfter.text()).toBe(200)
-    expect((await scheduleAfter.json() as { items: Array<{ id: string }> }).items.some(item => item.id === `booking:${body.booking_id}`)).toBe(false)
+    expect((await scheduleAfter.json() as { items: Array<{ id: string }> }).items.some(item => item.id === `booking:${body.request_id}`)).toBe(false)
     expect((await request.post(cancelURL, {
       headers: { ...headers, Authorization: 'Bearer invalid-cancellation-token' },
     })).status()).toBe(404)

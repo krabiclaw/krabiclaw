@@ -13,7 +13,7 @@ export default defineHandler(async event=>{
  if(query.after!==undefined&&(typeof query.after!=='string'||!query.after))throw new HTTPError({statusCode:400,statusMessage:'Valid page cursor is required'})
  const after=typeof query.after==='string'?query.after:undefined
  if(typeof query.payment_id==='string'){
-  return jsonResponse(await readPaymentDetails(db,organization.id,query.payment_id))
+  return jsonResponse(await readPaymentDetails(db,env,organization.id,query.payment_id))
  }
  if(query.view==='payouts'){
   const result=await paymentPayouts(db,env,principal,after)

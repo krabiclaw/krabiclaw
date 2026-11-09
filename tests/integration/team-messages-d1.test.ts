@@ -509,7 +509,9 @@ test('members talk in team conversations, see unread state and receive recorded 
     const promotedMember = await auth.api.updateMemberRole({ headers, body: { organizationId: ORG, memberId: 'm-cook', role: 'admin' } })
     assert.equal(promotedMember.role, 'admin')
     assert.equal(await assignee(), 'm-cook')
-    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM activity_entries WHERE event_name = 'member.access_scope_revoked' AND actor_kind = 'system' AND organization_id = ?").bind(ORG).first('n'), 3)
+    // Each departure releases the home, the open turnover that followed the home's assignee, and the site the cook looked after.
+    assert.deepEqual((await db.prepare("SELECT json_extract(payload_json, '$.entityType') AS entity, COUNT(*) AS n FROM activity_entries WHERE event_name = 'member.access_scope_revoked' AND actor_kind = 'system' AND organization_id = ? GROUP BY entity ORDER BY entity").bind(ORG).all()).results,
+      [{ entity: 'business_locations', n: 1 }, { entity: 'product_stay_configs', n: 2 }, { entity: 'tasks', n: 2 }])
   } finally {
     await runtime.dispose()
   }

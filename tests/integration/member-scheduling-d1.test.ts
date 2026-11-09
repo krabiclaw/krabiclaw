@@ -54,7 +54,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   assert.equal((await memberSchedulingList(owner)).members.find(member=>member.id==='member-one')?.name,'Approved name','the owner sees the same authored name in assignment choices')
   assert.deepEqual({timezone:profile.timezone,weekly:profile.weekly,time_off:profile.time_off,calendar_ids:profile.calendar_ids},{timezone:null,weekly:null,time_off:null,calendar_ids:[]})
   const profileRow=await db.prepare("SELECT * FROM member_scheduling WHERE member_id='member-one'").first()
-  for(const field of ['timezone','weekly_json','time_off_json','windows_json','windows_until'])assert.equal(profileRow?.[field],null,'a profile does not fabricate working facts')
+  for(const field of ['timezone','weekly_json','time_off_json'])assert.equal(profileRow?.[field],null,'a profile does not fabricate working facts')
   await assert.rejects(db.prepare("UPDATE member_scheduling SET timezone='UTC' WHERE member_id='member-one'").run(),/member_scheduling_hours_check/)
   await assert.rejects(db.prepare("UPDATE member_scheduling SET weekly_json='[]' WHERE member_id='member-one'").run(),/member_scheduling_hours_check/)
   await assert.rejects(()=>selectBusyCalendars(own,'member-one',{account_id:null,calendar_ids:[]}),{statusCode:409,message:'Save member hours first before selecting busy-input calendars'})
@@ -62,7 +62,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   await assert.rejects(()=>writeMemberScheduling(own,'member-one',{expected_updated_at:profile.updated_at,weekly:[]}),/together the first time/)
   await assert.rejects(()=>writeMemberScheduling(own,'member-one',{expected_updated_at:profile.updated_at,timezone:null} as unknown as Parameters<typeof writeMemberScheduling>[2]),/IANA timezone/)
   await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by)VALUES('experience','profile-host','org','Authored host','profile-host','owner','owner')").run()
-  await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,assigned_member_id,created_by,updated_by)VALUES('profile-host','org','member-one','owner','owner')").run()
+  await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,scheduling_mode,assigned_member_id,created_by,updated_by)VALUES('profile-host','org','business','member-one','owner','owner')").run()
   assert.deepEqual(await publicProductHosts(db,'org','profile-host'),[],'draft content is withheld from the public host read')
   for(const public_name of [null,'','   ']) {
    await assert.rejects(()=>writeMemberScheduling(owner,'member-one',{expected_updated_at:profile.updated_at,public_name,public_approved:true}),{statusCode:400,message:'Set a nonblank public name before publishing the member profile'})
@@ -136,11 +136,12 @@ test('member self-service uses Better Auth permissions, public approval is admin
   // Selecting the calendars reads them back through Google at once.
   await selectBusyCalendars(own,'member-one',{account_id:'busy-linked',calendar_ids:['busy-calendar']})
   ranges.length=0
+  const storedBeforeRead=await db.prepare("SELECT * FROM member_scheduling WHERE member_id='member-one'").first()
   const ready=await readMemberScheduling(db,env,'org','member-one')
   assert.equal(ready?.calendar_status,'ready','a member read asks Google for the horizon ahead')
   assert.equal(Date.parse(ranges.at(-1)!.timeMax)-Date.parse(ranges[0]!.timeMin),94*86400000)
   for(let i=1;i<ranges.length;i++)assert.equal(ranges[i]!.timeMin,ranges[i-1]!.timeMax,'busy coverage has no gaps')
-  assert.deepEqual(await db.prepare("SELECT busy_json,busy_checked_at FROM member_scheduling WHERE member_id='member-one'").first(),{busy_json:'[]',busy_checked_at:null},'nothing Google said is stored')
+  assert.deepEqual(await db.prepare("SELECT * FROM member_scheduling WHERE member_id='member-one'").first(),storedBeforeRead,'nothing Google said is stored')
   rejectLast='provider'
   await assert.rejects(()=>readMemberScheduling(db,env,'org','member-one'),{statusCode:502,message:'Google busy-calendar check failed (400)'},'a window Google refuses fails the read')
   rejectLast='invalid'

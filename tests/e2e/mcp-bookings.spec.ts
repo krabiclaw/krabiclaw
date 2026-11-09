@@ -230,7 +230,8 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       expect(publicResponse.status(), await publicResponse.text()).toBe(201)
       const publicCreated = await publicResponse.json() as Created
       ids.push(publicCreated.operational_booking_id)
-      expect(publicCreated).toMatchObject({ success: true, status: instant.status, booking_id: publicCreated.request_id })
+      expect(publicCreated).toMatchObject({ success: true, status: instant.status, request_id: expect.any(String) })
+      expect(publicCreated).not.toHaveProperty('booking_id')
       expect(await read(publicCreated.operational_booking_id)).not.toHaveProperty('guest_user_id')
       const experienceBeforeRequest = await read(publicCreated.operational_booking_id)
       await page.goto(`${baseURL}/dashboard/account/activity/booking/${publicCreated.request_id}`)

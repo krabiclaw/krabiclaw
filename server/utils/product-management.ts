@@ -315,7 +315,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       default_capacity: row.default_capacity === null ? null : Number(row.default_capacity),
       confirmation_mode: row.confirmation_mode as 'instant' | 'review', online_payment_required: Number(row.online_payment_required) === 1,
       held_online: Number(row.held_online) === 1,
-      scheduling_mode: row.scheduling_mode as 'legacy' | 'provider', assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
+      scheduling_mode: row.scheduling_mode as 'business' | 'provider', assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
       ...storedQuestions(row.questions),
     }
@@ -1111,6 +1111,17 @@ function productWrites(
         JSON.stringify(planned.stay.amenity_answers), planned.stay.cancellation_policy, planned.stay.long_term_cancellation_policy,
         planned.stay.assigned_member_id, planned.stay.assigned_team_id, JSON.stringify(planned.stay.questions), now, now, actor.actorId, actor.actorId],
     })
+    if (upsert && (options.stayFields === undefined || options.stayFields.includes('assigned_member_id') || options.stayFields.includes('assigned_team_id'))) {
+      // The home's open cleaning jobs are its assignee's: a new assignee takes them over. A save that
+      // restates the same assignee leaves a job's own assignment alone, so this runs before the home is written.
+      writes.splice(writes.length - 1, 0, {
+        query: `UPDATE tasks SET assigned_member_id = ?, assigned_team_id = ?, version = version + 1, updated_at = ?
+          WHERE organization_id = ? AND product_id = ? AND status = 'open' AND kind IN ('turnover', 'stay_ready') AND (assigned_member_id IS NOT ? OR assigned_team_id IS NOT ?)
+            AND EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = ? AND c.product_id = ? AND (c.assigned_member_id IS NOT ? OR c.assigned_team_id IS NOT ?))`,
+        params: [planned.stay.assigned_member_id, planned.stay.assigned_team_id, now, organizationId, planned.id, planned.stay.assigned_member_id, planned.stay.assigned_team_id,
+          organizationId, planned.id, planned.stay.assigned_member_id, planned.stay.assigned_team_id],
+      })
+    }
     if (upsert && (options.stayFields === undefined || options.stayFields.includes('amenities') || options.stayFields.includes('amenity_answers'))) {
       // A removed listing fact cannot retain room references. Invalidate every
       // affected room draft before deleting the references in this same batch.
@@ -2050,6 +2061,8 @@ export async function deleteProduct(db: DbClient, input: {
     ...pages.flatMap(page => page.queries),
     ...resourceLocalizationDeletionQueries('product', { query: 'SELECT ?', params: [input.productId] }),
     ...invalidations,
+    // Its pictures go with it; the assets stay in the library.
+    buildDeleteOwnerPlacementsQuery({ ownerType: 'product', ownerId: input.productId, organizationId: input.organizationId }),
     { query: 'DELETE FROM products WHERE organization_id = ? AND id = ?', params: [input.organizationId, input.productId] },
   ], { operation: 'Delete product', action: 'delete it', stay: product.kind === 'stay' }).catch((error: unknown) => {
     if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) conflict('This product received a booking, stay, guest conversation, schedule or checkout while you were deleting it. Turn it off instead of deleting it.')

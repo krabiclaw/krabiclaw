@@ -144,12 +144,12 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
       const cancellation = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', threadId)
       const request = await getGuestRequest(db, threadId, organizationId, 'booking')
       if (!request || request.kind !== 'booking' || await hashReservationCancelToken(cancellation.token) !== request.payload.cancellation.token_hash) throw new Error('Booking receipt is missing its cancellation capability')
-      return creationResult({ success: true, booking_id: threadId, request_id: threadId, operational_booking_id: record.id, status: record.status, replayed: true,
+      return creationResult({ success: true, request_id: threadId, operational_booking_id: record.id, status: record.status, replayed: true,
         starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, cancellation_token: cancellation.token,
         message: record.status === 'pending' ? 'Your booking request is awaiting review.' : 'Your booking is confirmed.',
       }, { status: 200 })
     }
-    return creationResult({ success: true, booking_id: threadId, request_id: threadId, operational_booking_id: record.id, status: record.status, replayed: true,
+    return creationResult({ success: true, request_id: threadId, operational_booking_id: record.id, status: record.status, replayed: true,
       starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone,
     }, { status: 200 })
   }
@@ -157,8 +157,8 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   if (existing) return existing
 
   const checkoutAttempt = await queryFirst<{ price_snapshot_json: string; fingerprint: string | null }>(db, `SELECT p.price_snapshot_json, json_extract(r.payload_json,'$.provenance.fingerprint') AS fingerprint
-    FROM payment_attempts a JOIN payments p ON p.id=a.payment_id JOIN requests r ON r.id=? AND r.organization_id=p.organization_id
-    WHERE a.idempotency_key=? AND p.organization_id=?`, [threadId, `checkout:${organizationId}:${idempotencyKey}`, organizationId])
+    FROM payments p JOIN requests r ON r.id=? AND r.organization_id=p.organization_id
+    WHERE p.idempotency_key=? AND p.organization_id=?`, [threadId, `checkout:${organizationId}:${idempotencyKey}`, organizationId])
   if (checkoutAttempt) {
     if (checkoutAttempt.fingerprint !== fingerprint) return creationResult({ error: 'This key already identifies a different checkout request. Read its purchase before continuing.', code: 'idempotency_conflict' }, { status: 409 })
     const snapshot: unknown = JSON.parse(checkoutAttempt.price_snapshot_json)
@@ -167,7 +167,6 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
       return creationResult({ error: 'Checkout retry does not match its saved purchase', code: 'idempotency_conflict' }, { status: 409 })
     }
     if (context.financialWritesAllowed === false) throw new HTTPError({ statusCode: 409, statusMessage: 'Continue this purchase through the business’s payment workflow', data: { code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(organization.slug)}/products/${encodeURIComponent(snapshot.product_id)}/booking` } })
-    if (!env.STRIPE_SECRET_KEY || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) return creationResult({ error: 'Payments provider configuration is incomplete', code: 'payments_unavailable' }, { status: 503 })
     const checkout = await createPaymentCheckout(db, env, {
       subjectType: 'booking', organizationId, buyerUserId: operator ? null : await ensureInteractionUser(event, env), productId: snapshot.product_id, variantId: snapshot.variant_id,
       sessionId, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize,
@@ -256,7 +255,6 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   const cancellation = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', threadId)
   const cancellationTokenHash = await hashReservationCancelToken(cancellation.token)
   if (requiresPayment && !await hasOrganizationEntitlement(env,organizationId,'payments')) return creationResult({error:'Payments entitlement is required to collect online payment',code:'payment_required'}, {status:409})
-  if (requiresPayment && (!env.STRIPE_SECRET_KEY || !env.NUXT_PUBLIC_PLATFORM_DOMAIN)) return creationResult({error:'Payments provider configuration is incomplete',code:'payments_unavailable'},{status:503})
   // The person is the Better Auth user; what they typed stays on the thread as
   // this booking's guest snapshot and is never copied onto that user.
   const userId = operator ? null : await ensureInteractionUser(event, env)
@@ -276,7 +274,6 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   payload.cancellation = { token_hash: cancellationTokenHash, expires_at: cancellation.expiresAt, used_at: null }
 
   if (requiresPayment) {
-    if (!env.STRIPE_SECRET_KEY || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) return creationResult({ error: 'Payments provider configuration is incomplete', code: 'payments_unavailable' }, { status: 503 })
     const checkoutKey = idempotencyKey
     // Contact stays on the guest thread. A checkout thread waits on the guest;
     // authenticated capture alone creates its operational Booking and activity.
@@ -389,7 +386,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   const quotedValueOf = (result: PromiseSettledResult<unknown>) => result.status === 'fulfilled' ? (result.value as { quotedValue: unknown }).quotedValue : null
 
   return creationResult({
-    success: true, booking_id: threadId, request_id: threadId, operational_booking_id: operationalBookingId, status: record.status, replayed: false, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, presentation, ...(operator ? {} : { cancellation_token: cancellation.token, quoted_value: quotedValueOf(followUps[1]!), measurement }),
+    success: true, request_id: threadId, operational_booking_id: operationalBookingId, status: record.status, replayed: false, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, presentation, ...(operator ? {} : { cancellation_token: cancellation.token, quoted_value: quotedValueOf(followUps[1]!), measurement }),
     message: record.status === 'cancelled' ? 'This booking was cancelled.' : record.status === 'pending' ? `Your request for ${record.product_name} on ${whenLabel} is awaiting review.` : `Your ${presentation.noun} for ${record.product_name} on ${whenLabel} is confirmed.`,
     policy_summary: renderBookingPolicySummary(visitPolicySummarySource('experience'), locale, full.kind),
   }, { status: 201 })
@@ -431,8 +428,7 @@ export async function createStayBooking(event: H3Event, context: { organizationI
   const request = { product_id: home.product_id, check_in_date: body.check_in_date, check_out_date: body.check_out_date, adults: body.adults, children: body.children ?? 0, infants: body.infants ?? 0 }
   const fingerprint = await hashIdentifier(JSON.stringify({ slug, ...request, guest: { name: guestName, email: guestEmail, phone, notes }, answers: formAnswersFingerprint(body.answers) }))
 
-  if (!env.STRIPE_SECRET_KEY || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) stayBookingError(503, 'payments_unavailable', 'Payments provider configuration is incomplete', 'payments')
-  const retrying = await queryFirst(db, 'SELECT 1 FROM payment_attempts a JOIN payments p ON p.id = a.payment_id WHERE a.idempotency_key = ? AND p.organization_id = ?', [`checkout:${organizationId}:${idempotencyKey}`, organizationId])
+  const retrying = await queryFirst(db, 'SELECT 1 FROM payments WHERE idempotency_key = ? AND organization_id = ?', [`checkout:${organizationId}:${idempotencyKey}`, organizationId])
   // A new checkout checks and freezes the answers with the purchase; a retry is
   // held to the purchase it froze, answers included, and does not read the
   // questions again (createPaymentCheckout reads `guest` only for a new checkout).

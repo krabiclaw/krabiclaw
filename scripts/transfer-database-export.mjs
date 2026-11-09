@@ -122,9 +122,13 @@ const RETIRED_COLUMNS = {
   products: ['tags'],
   product_booking_configs: ['online_timezone', 'calendar_group'],
   payment_checkout_holds: ['calendar_group'],
+  payments: ['state'],
   product_nights: ['min_stay_through'],
   // v24: whether a reply is owed is an open guest_reply task.
   requests: ['conversation_state', 'resolved_at'],
+  // v26: the buyer confirms a PaymentIntent on the site; nothing wrote these.
+  // v26: working windows and Google busy times are read live, never stored.
+  member_scheduling: ['windows_json', 'windows_until', 'calendar_revision', 'busy_json', 'busy_from', 'busy_until', 'busy_checked_at', 'busy_error'],
 }
 
 /**
@@ -365,7 +369,9 @@ export async function auditTargetInvariants(target) {
       const response = await fetch(String(row.public_url), { method: 'HEAD', signal: AbortSignal.timeout(20_000) })
       if (response.status !== 200) unserved.push(`${row.id} ${row.public_url}: HTTP ${response.status}`)
     } catch (error) {
-      unserved.push(`${row.id} ${row.public_url}: ${error instanceof Error ? error.message : String(error)}`)
+      // undici's "fetch failed" says nothing; the reason is its cause.
+      const cause = error instanceof Error && error.cause instanceof Error ? error.cause : null
+      unserved.push(`${row.id} ${row.public_url}: ${error instanceof Error ? error.message : String(error)}${cause ? ` (${[Reflect.get(cause, 'code'), Reflect.get(cause, 'syscall'), Reflect.get(cause, 'hostname'), cause.message].filter(Boolean).join(' ')})` : ''}`)
     }
   }
   results.push({ name: 'media_objects_are_served', violations: unserved.length, unserved })
@@ -557,7 +563,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     assert(applied.size === ledger.length, 'Source migration ledger contains duplicate filenames')
     assert(ledger[0] === '0000_baseline.sql', 'Source migration ledger must start with 0000_baseline.sql')
     let recognized = false
-    for (const directory of [MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
+    for (const directory of [MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
       const candidates = readdirSync(resolve(directory)).filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort()
       if (!ledger.every(name => candidates.includes(name))) continue
       const expected = new Database(':memory:')
@@ -663,13 +669,13 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       stage.exec(normalizedTable)
     }
     // An older archived chain reaches v11 through v11's forward migrations, which the v12 baseline absorbed.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v11').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v11', name), 'utf8'))
       }
     }
     // An older archived chain reaches v12 through v12's forward migrations, which the v13 baseline absorbed.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v12').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v12', name), 'utf8'))
       }
@@ -688,7 +694,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // start empty; existing booking commitments and source languages keep every
     // recorded fact. The new nullable fields stay unknown until an owner sets
     // them or a native financial event supplies its actual billing basis.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v13').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v13', name), 'utf8'))
       }
@@ -717,7 +723,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     }
     // v15 relaxes the calendar group CHECK only. Older chains still pass
     // through v14's canonical content data migration before the exact copy.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v14').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v14', name), 'utf8'))
       }
@@ -761,7 +767,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // retired public OAuth flag, team member times, the Google Ads provider,
     // invite links, full-remaining refunds and payment intents). Older chains pass through it before the exact copy; a v16
     // source already ran its pending ones above.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v16').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v16', name), 'utf8'))
       }
@@ -795,13 +801,13 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // v18 absorbs v17's deployed forward chain (Channex connections, channel
     // mappings, the sync log, night pushes and stay threads). Older chains pass
     // through it before the exact copy; a v17 source already ran its pending ones above.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19', 'migrations-history/v18', 'migrations-history/v17'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v17/0000_baseline.sql', 'utf8'))
       for (const name of readdirSync('migrations-history/v17').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v17', name), 'utf8'))
       }
     }
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) withBaselineTables(readFileSync('migrations-history/v19/0000_baseline.sql', 'utf8'))
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) withBaselineTables(readFileSync('migrations-history/v19/0000_baseline.sql', 'utf8'))
     // v19 adds facts no older row has: no copied stay was received as a new
     // reservation and no home has private instructions yet. A saved category
     // preference predates push, so its push switch is that category's
@@ -824,7 +830,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     }
     // Older epochs reach v19 through its full archived forward chain before
     // receiving tables and forward migrations from the current baseline.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v19').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v19', name), 'utf8'))
       }
@@ -832,7 +838,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // Older epochs reach v20 the same way: its baseline's tables, then its
     // forward chain. Rehoming an archived forward migration does not make it a
     // second operation: the complete v19 chain already ran on this stage.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v20/0000_baseline.sql', 'utf8'))
       const absorbed = new Set(readdirSync('migrations-history/v19').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)
         .map(name => hash(readFileSync(resolve('migrations-history/v19', name), 'utf8'))))
@@ -844,7 +850,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // v21 widens stays_channel_check to admit Booking.com; every v20 row fits it
     // unchanged. Complete its archived forward chain, including the manual-group
     // backfill, before copying into the replacement's relaxed responsibility CHECK.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v21/0000_baseline.sql', 'utf8'))
       for (const name of readdirSync('migrations-history/v21').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v21', name), 'utf8'))
@@ -852,13 +858,13 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     }
     // v22's pending leaf migrations must run before its tables are copied into
     // the baseline that retires the duplicated nightly rule. No referenced table is dropped remotely.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v22/0000_baseline.sql', 'utf8'))
       for (const name of readdirSync('migrations-history/v22').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v22', name), 'utf8'))
       }
     }
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23'].includes(sourceDirectory)) {
       // Legacy homes have no recorded weekday/weekend rules. Keep that absence
       // as NULL while advancing the private stage to the v23 schema.
       stage.exec('ALTER TABLE product_stay_configs ADD COLUMN calendar_rules TEXT NULL')
@@ -873,7 +879,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // conversation_state and resolved_at are not copied (RETIRED_COLUMNS):
     // an open guest_reply task, derived from the ledger by `yarn db:tasks`,
     // says whether the business owes a reply.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24'].includes(sourceDirectory)) {
       withBaselineTables(readFileSync('migrations-history/v24/0000_baseline.sql', 'utf8'))
       const references = stage.prepare("SELECT count(*) AS n FROM (SELECT DISTINCT organization_id, operation, subject_id, evidence_revision, coalesce(goal_id, '') FROM recommendation_feedback)").get().n
       const accepted = stage.prepare("SELECT count(*) AS n FROM (SELECT DISTINCT organization_id, operation, subject_id, evidence_revision, coalesce(goal_id, '') FROM recommendation_feedback f WHERE decision = 'accept' AND updated_at = (SELECT max(updated_at) FROM recommendation_feedback g WHERE g.organization_id = f.organization_id AND g.operation = f.operation AND g.subject_id = f.subject_id AND g.evidence_revision = f.evidence_revision AND g.goal_id IS f.goal_id))").get().n
@@ -885,8 +891,72 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       stage.exec('DROP TABLE recommendation_feedback')
       for (const name of readdirSync('migrations-history/v24').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) stage.exec(readFileSync(resolve('migrations-history/v24', name), 'utf8'))
     }
+    // Older epochs reach v25 through its baseline's tables and forward chain.
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25'].includes(sourceDirectory)) {
+      withBaselineTables(readFileSync('migrations-history/v25/0000_baseline.sql', 'utf8'))
+      for (const name of readdirSync('migrations-history/v25').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) stage.exec(readFileSync(resolve('migrations-history/v25', name), 'utf8'))
+    }
+    // v25 to v26: a business that publishes its own sessions schedules as
+    // 'business'. The value was 'legacy', the column's old default. Stock
+    // tables and Hosted Checkout fields that nothing reads or writes are
+    // dropped; a row or value in them fails rather than being discarded.
     if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
       withBaselineTables(baseSql)
+      for (const table of ['inventory_levels', 'inventory_items']) {
+        if (!tableNames(stage).includes(table)) continue
+        assert(stage.prepare(`SELECT count(*) AS n FROM ${qi(table)}`).get().n === 0, `${table} holds rows nothing maps; no rows were copied`)
+        stage.exec(`DROP TABLE ${qi(table)}`)
+      }
+      if (columns(stage, 'payment_attempts').includes('checkout_url')) {
+        // A test-mode Hosted Checkout that never reached a PaymentIntent and was
+        // left open or expired is dead: its session id and URL go; the attempt,
+        // its payment and its status stay. Any other value fails.
+        const dead = `stripe_payment_intent_id IS NULL AND status IN ('open', 'expired') AND stripe_checkout_id LIKE 'cs_test_%'
+          AND payment_id IN (SELECT id FROM payments WHERE livemode = 0)`
+        const hosted = stage.prepare(`SELECT id FROM payment_attempts WHERE (stripe_checkout_id IS NOT NULL OR checkout_url IS NOT NULL) AND NOT (${dead})`).all()
+        assert(hosted.length === 0, `Payment attempts hold Hosted Checkout fields nothing maps: ${hosted.slice(0, 8).map(row => row.id).join(', ')}; no rows were copied`)
+        const discarded = stage.prepare(`SELECT count(*) AS n FROM payment_attempts WHERE ${dead}`).get().n
+        if (discarded) manifest.transforms.push({ name: 'dead_test_hosted_checkout_fields_discarded', changes: discarded })
+      }
+      if (tableNames(stage).includes('payment_attempts')) {
+        // A purchase has one attempt and one claim; both become columns of the payment.
+        const repeated = stage.prepare(`SELECT payment_id FROM payment_attempts GROUP BY payment_id HAVING count(*) > 1 UNION SELECT payment_id FROM payment_claims GROUP BY payment_id HAVING count(*) > 1`).all()
+        assert(repeated.length === 0, `Payments with more than one attempt or claim: ${repeated.slice(0, 8).map(row => row.payment_id).join(', ')}; no rows were copied`)
+        const divergent = stage.prepare(`SELECT a.id FROM payment_attempts a JOIN payments p ON p.id = a.payment_id WHERE a.stripe_payment_intent_id IS NOT NULL AND a.stripe_payment_intent_id IS NOT p.stripe_payment_intent_id`).all()
+        assert(divergent.length === 0, `Payment attempts name an intent their payment does not: ${divergent.slice(0, 8).map(row => row.id).join(', ')}; no rows were copied`)
+        // An attempt's status is Stripe's intent status or its own expiry, both of which the payment keeps; a status that is neither cannot be folded.
+        const unmapped = stage.prepare(`SELECT id, status FROM payment_attempts WHERE status NOT IN ('creating', 'open', 'expired', 'action_required', 'confirmed', 'canceled')`).all()
+        assert(unmapped.length === 0, `Payment attempts with a status the payment cannot keep: ${unmapped.slice(0, 8).map(row => `${row.id} (${row.status})`).join(', ')}; no rows were copied`)
+        for (const column of ['idempotency_key', 'checkout_expires_at', 'review_json', 'return_token', 'return_token_hash', 'return_expires_at', 'claimed_at', 'claimed_user_id']) stage.exec(`ALTER TABLE payments ADD COLUMN ${column} TEXT`)
+        const folded = stage.prepare(`UPDATE payments SET
+          idempotency_key = (SELECT idempotency_key FROM payment_attempts a WHERE a.payment_id = payments.id),
+          checkout_expires_at = (SELECT expires_at FROM payment_attempts a WHERE a.payment_id = payments.id),
+          review_json = (SELECT review_json FROM payment_attempts a WHERE a.payment_id = payments.id),
+          return_token = (SELECT return_token FROM payment_attempts a WHERE a.payment_id = payments.id),
+          return_token_hash = (SELECT token_hash FROM payment_claims c WHERE c.payment_id = payments.id),
+          return_expires_at = (SELECT expires_at FROM payment_claims c WHERE c.payment_id = payments.id),
+          claimed_at = (SELECT claimed_at FROM payment_claims c WHERE c.payment_id = payments.id),
+          claimed_user_id = (SELECT claimed_user_id FROM payment_claims c WHERE c.payment_id = payments.id)
+          WHERE id IN (SELECT payment_id FROM payment_attempts UNION SELECT payment_id FROM payment_claims)`).run().changes
+        stage.exec('DROP TABLE payment_claims; DROP TABLE payment_attempts')
+        if (folded) manifest.transforms.push({ name: 'payment_attempts_and_claims_folded_into_payments', changes: folded })
+      }
+      // A superseded opportunity is evidence that went stale before anyone
+      // decided about it. Nothing reads it: undecided, with no task, it goes.
+      const undecided = `status = 'superseded' AND decided_at IS NULL AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.opportunity_id = opportunities.id)`
+      const decided = stage.prepare(`SELECT id FROM opportunities WHERE status = 'superseded' AND NOT (${undecided})`).all()
+      assert(decided.length === 0, `Superseded opportunities with a decision or task: ${decided.slice(0, 8).map(row => row.id).join(', ')}; no rows were copied`)
+      const superseded = stage.prepare(`DELETE FROM opportunities WHERE ${undecided}`).run().changes
+      if (superseded) manifest.transforms.push({ name: 'superseded_opportunities_removed', changes: superseded })
+      const renamed = stage.prepare("UPDATE product_booking_configs SET scheduling_mode = 'business' WHERE scheduling_mode = 'legacy'").run().changes
+      const unknown = stage.prepare("SELECT product_id, scheduling_mode FROM product_booking_configs WHERE scheduling_mode NOT IN ('business', 'provider')").all()
+      assert(unknown.length === 0, `Booking configurations with an unknown scheduling mode: ${JSON.stringify(unknown.slice(0, 8))}; no rows were copied`)
+      if (renamed) manifest.transforms.push({ name: 'scheduling_mode_legacy_to_business', changes: renamed })
+      // Every guest sleeps where they booked until a host moves them.
+      if (!columns(stage, 'stays').includes('booked_product_id')) stage.exec('ALTER TABLE stays ADD COLUMN booked_product_id TEXT')
+      if (!columns(stage, 'team_threads').includes('booking_id')) stage.exec('ALTER TABLE team_threads ADD COLUMN booking_id TEXT')
+      // Every message so far was written by a person.
+      if (!columns(stage, 'team_messages').includes('automatic')) stage.exec('ALTER TABLE team_messages ADD COLUMN automatic INTEGER NOT NULL DEFAULT 0')
       for (const name of files.slice(1)) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))
     }
     // Airbnb's single minimum was duplicated by the old importer. The owner also
@@ -926,7 +996,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       }
     })
     copy()
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23'].includes(sourceDirectory)) {
       // Seed the existing content-import edit guard only for a default still
       // equal to the original first imported night. The protected source read
       // can then correct that derivation; this transfer never guesses its value.
@@ -1000,7 +1070,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       assert(count(target, 'organization_integrations') === integrations.length, 'organization_integrations differs from the connections it maps')
       manifest.transforms.push({ name: 'integrations_json_to_organization_integrations', changes: integrations.length })
     }
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v25', 'migrations-history/v24', 'migrations-history/v23', 'migrations-history/v22', 'migrations-history/v21', 'migrations-history/v20', 'migrations-history/v19'].includes(sourceDirectory)) {
       const configs = target.prepare('SELECT * FROM product_booking_configs WHERE held_online = 1 ORDER BY product_id').all()
       const previousSourceRows = new Map()
       if (deltaFrom) {

@@ -354,8 +354,6 @@ export async function createPost(
           id, rowRole: 'root', kind: 'social_post', locale: await getSourceLocale(db, organizationId), organizationId,
           locationId: data.location_id ?? null, slug, title: data.title ?? null, summary: data.body ?? null,
           status: 'draft', visibility: data.visibility ?? 'listed', createdBy, updatedBy: createdBy,
-          // Unread for social posts; v25's content_documents_social_source_check still wants a value until the v26 epoch drops it.
-          source: 'manual',
           metadata: data.call_to_action ? { call_to_action: data.call_to_action } : {},
         }, [], { additionalQueriesAfter: [
           ...insertInitialMediaPlacements({ organizationId, placement: { owner_type: 'content_document', owner_id: id, slot: 'cover' }, media: cover, now }),
