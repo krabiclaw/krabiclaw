@@ -13,7 +13,7 @@ import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import type { DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 import { requestInsertQueries } from '../../server/domain/requests.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
-import { createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
+import { applyResendEmailEvent, createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { executeGuestThreadOperation, operationDedupeKey } from '../../server/domain/guest-threads/operations.ts'
 import { creationRequestHash } from '../../server/utils/organization-events.ts'
 
@@ -244,19 +244,16 @@ test('a scheduled reply keeps its exact failure and Inbox retry completes the sa
     const expired = await createDeliveryReceipt(db, { entryId: historical.id, channel: 'email', provider: 'resend', purpose: 'member_reply', idempotencyKey: 'expired-history' })
     await recordDeliveryOutcome(db, { deliveryId: expired.id, status: 'sent', providerMessageId: 'expired-history' })
 
-    let readbackAvailable = false
+    let refuseNext = true
     const posts: Array<{ subject: string; to: string[]; headers?: Record<string, string>; html: string; text: string }> = []
-    const gets: string[] = []
     t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
-      if (init.method === 'GET') {
-        gets.push(url)
-        const sent = url.match(/^https:\/\/api\.resend\.com\/emails\/sent-(\d+)$/u)
-        if (!sent || !readbackAvailable) return Response.json({ statusCode: 404, name: 'not_found', message: 'Email not found' }, { status: 404 })
-        const message = posts[Number(sent[1]) - 1]!
-        return Response.json({ id: `sent-${sent[1]}`, message_id: `<sent-${sent[1]}@resend.dev>`, to: message.to, subject: message.subject, html: message.html, text: message.text, last_event: 'delivered' })
-      }
+      // Only sends: nothing reads an email back from Resend.
       assert.equal(url, 'https://api.resend.com/emails')
       assert.equal(init.method, 'POST')
+      if (refuseNext) {
+        refuseNext = false
+        return Response.json({ statusCode: 503, name: 'application_error', message: 'Resend is unavailable' }, { status: 503 })
+      }
       posts.push(JSON.parse(String(init.body)))
       return Response.json({ id: `sent-${posts.length}` })
     })
@@ -264,32 +261,33 @@ test('a scheduled reply keeps its exact failure and Inbox retry completes the sa
     const saved = (id: string) => db.prepare('SELECT status, reason, error_code, entry_id, sent_at FROM send_later_messages WHERE id = ?').bind(id).first<{ status: string; reason: string | null; error_code: string | null; entry_id: string | null; sent_at: string | null }>()
     const retry = (body: string, id: string) => executeGuestThreadOperation(db, { threadId: 'recovery-thread', organizationId: ORG, action: 'reply', actorUserId: ADMIN, body, idempotencyKey: `send-later:${id}`, env })
 
-    // The provider accepts the email, but fresh RFC readback fails. The job
-    // records that uncertainty and its exact entry instead of staying Sending.
+    // Resend refuses the send: the job is failed with Resend's error and its exact entry, not left Sending.
     const reply = await schedule('Your request is handled.')
-    assert.deepEqual(await sendDueSendLaterMessages(db, env, minutes(2)), { sent: 0, failed: 0, needs_review: 1 })
+    assert.deepEqual(await sendDueSendLaterMessages(db, env, minutes(2)), { sent: 0, failed: 1, needs_review: 0 })
     const failed = (await saved(reply.id))!
-    assert.equal(failed.status, 'needs_review')
-    assert.equal(failed.reason, 'Resend conversation email readback failed (404 not_found): Email not found')
-    assert.equal(failed.error_code, 'SEND_LATER_DELIVERY_UNCONFIRMED')
+    assert.equal(failed.status, 'failed')
+    assert.match(failed.reason!, /Resend is unavailable/u)
+    assert.equal(failed.error_code, 'DELIVERY_FAILED')
     assert.ok(failed.entry_id)
     const message = await db.prepare('SELECT actor_user_id, body, dedupe_key FROM activity_entries WHERE id = ?').bind(failed.entry_id).first<{ actor_user_id: string; body: string; dedupe_key: string }>()
     assert.deepEqual(message, { actor_user_id: OWNER, body: reply.body, dedupe_key: operationDedupeKey({ threadId: reply.threadId, idempotencyKey: `send-later:${reply.id}` }) })
     assert.equal((await listSendLaterMessages(db, owner, reply.threadId))[0]?.entryId, failed.entry_id)
-    assert.equal(posts.length, 1)
-    assert.equal(posts[0]?.headers?.['In-Reply-To'], undefined, 'missing historical RFC metadata does not produce an invented parent')
-    assert.equal(posts[0]?.headers?.References, undefined)
-    assert.equal(gets.some(url => url.endsWith('/expired-history')), false, 'expired historical provider email is never needed to send a new reply')
+    assert.equal(posts.length, 0)
     assert.deepEqual(await sendDueSendLaterMessages(db, env, minutes(3)), { sent: 0, failed: 0, needs_review: 0 })
-    assert.equal(posts.length, 1, 'uncertain acceptance is never automatically resent')
+    assert.equal(posts.length, 0, 'a failed job is not resent by the next run')
 
-    // Inbox Retry resumes the same receipt's required readback. Another admin
-    // can retry it; ownership remains with the original immutable author.
-    readbackAvailable = true
+    // Inbox Retry sends the same reply under the same key. Another admin can
+    // retry it; ownership remains with the original immutable author.
     assert.equal((await retry(reply.body, reply.id)).ok, true)
     const completed = (await saved(reply.id))!
     assert.deepEqual([completed.status, completed.reason, completed.error_code, completed.entry_id], ['sent', null, null, failed.entry_id])
     assert.ok(completed.sent_at)
+    assert.equal(posts.length, 1)
+    assert.equal(posts[0]?.headers?.['In-Reply-To'], undefined, 'missing historical RFC metadata does not produce an invented parent')
+    assert.equal(posts[0]?.headers?.References, undefined)
+    // Resend's webhook records the email's RFC Message-ID, which later replies answer.
+    assert.equal(await applyResendEmailEvent(db, env, { type: 'email.sent', created_at: now,
+      data: { email_id: 'sent-1', created_at: now, from: 'hello@krabiclaw.com', to: ['delivered@resend.dev'], subject: posts[0]!.subject, message_id: '<sent-1@resend.dev>' } } as Parameters<typeof applyResendEmailEvent>[2]), 'unchanged')
     assert.equal(await db.prepare('SELECT email_message_id FROM guest_thread_deliveries WHERE entry_id = ?').bind(failed.entry_id).first('email_message_id'), '<sent-1@resend.dev>')
     assert.deepEqual(await listSendLaterMessages(db, owner, reply.threadId), [], 'completed scheduled work disappears from the author’s outstanding work')
     assert.equal((await retry(reply.body, reply.id)).ok, true)
@@ -314,10 +312,9 @@ test('a scheduled reply keeps its exact failure and Inbox retry completes the sa
     assert.equal((await retry(legacy.body, legacy.id)).ok, true)
     assert.equal(posts.length, 2, 'the original pending receipt sends once and settled retry sends nothing')
 
-    // A retained provider identity and RFC ID already prove physical delivery.
-    // An interrupted dispatcher's saved error still has to clear through that
-    // dispatcher, or Today would keep showing the completed job as attention.
-    await db.prepare("UPDATE guest_thread_deliveries SET error = 'Interrupted after RFC readback' WHERE entry_id = ?").bind(original.id).run()
+    // Resend's accepted id proves the send. An interrupted dispatcher's saved error still has to
+    // clear through that dispatcher, or Today would keep showing the completed job as attention.
+    await db.prepare("UPDATE guest_thread_deliveries SET error = 'Interrupted after Resend accepted it' WHERE entry_id = ?").bind(original.id).run()
     assert.equal((await retry(legacy.body, legacy.id)).ok, true)
     assert.equal(await db.prepare('SELECT error FROM guest_thread_deliveries WHERE entry_id = ?').bind(original.id).first('error'), null)
     assert.equal(posts.length, 2)
@@ -328,13 +325,13 @@ test('a scheduled reply keeps its exact failure and Inbox retry completes the sa
     await assert.rejects(retry(notStarted.body, notStarted.id), /already-started scheduled message/)
     assert.equal(posts.length, 2, 'pending and cancelled scheduled replies cannot be started by Retry')
 
-    // Corrupt recorded RFC metadata fails before dispatch and still links the
-    // actual entry and reason; a later cron cannot silently resend it.
+    // Corrupt recorded RFC metadata fails before dispatch: the job is failed with the actual entry and
+    // reason, the run reports the error, and a later cron does not resend it.
     await appendEntry(db, { threadId: reply.threadId, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Bad metadata', payloadJson: { email: { from: 'delivered@resend.dev', messageId: 'invalid-rfc-id', subject: 'Question' } } })
     const invalid = await schedule('Cannot use corrupt metadata.')
-    assert.deepEqual(await sendDueSendLaterMessages(db, env, minutes(2)), { sent: 0, failed: 0, needs_review: 1 })
+    await assert.rejects(sendDueSendLaterMessages(db, env, minutes(2)), /Received conversation email has invalid threading metadata/u)
     const refused = (await saved(invalid.id))!
-    assert.deepEqual([refused.status, refused.reason, refused.error_code], ['needs_review', 'Received conversation email has invalid threading metadata', 'SEND_LATER_DELIVERY_UNCONFIRMED'])
+    assert.deepEqual([refused.status, refused.reason, refused.error_code], ['failed', 'Received conversation email has invalid threading metadata', 'SEND_LATER_DELIVERY_FAILED'])
     assert.ok(refused.entry_id)
     assert.equal(await db.prepare('SELECT body FROM activity_entries WHERE id = ?').bind(refused.entry_id).first('body'), invalid.body)
     assert.deepEqual(await sendDueSendLaterMessages(db, env, minutes(3)), { sent: 0, failed: 0, needs_review: 0 })

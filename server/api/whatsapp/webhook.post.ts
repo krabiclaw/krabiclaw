@@ -1,29 +1,21 @@
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { fetchWhatsAppMedia, sendWhatsAppText } from '~/server/utils/whatsapp'
-import { attachGuestPhotos, messagePreview, sortGuestFiles, type MessagePhoto } from '~/server/domain/guest-threads/attachments'
-import { advanceDeliveryStatus, isDeliverySent } from '~/server/domain/guest-threads/deliveries'
-import type { GuestThreadDeliveryRow } from '~/server/domain/guest-threads/types'
+import { attachGuestPhotos, sortGuestFiles, type MessagePhoto } from '~/server/domain/guest-threads/attachments'
+import { advanceDeliveryStatus } from '~/server/domain/guest-threads/deliveries'
 import { parseMetaMsisdn } from '~/utils/phone'
-import {
-  getWhatsAppWorkspaceState, patchWhatsAppWorkspaceState, type JsonSerializable, } from '~/server/utils/mcp-context'
-import { execute, queryAll, queryFirst } from '~/server/db'
+import { isLastWhatsAppInbound, recordWhatsAppInbound } from '~/server/utils/mcp-context'
+import { execute, queryFirst } from '~/server/db'
 import { updateThreadProjectionIfLatestEntry } from '~/server/domain/guest-threads/repository'
 import { getGuestRequest, requestSummary } from '~/server/domain/requests'
-import { executeGuestThreadOperation, guestReplyDestination, operationDedupeKey } from '~/server/domain/guest-threads/operations'
-import { getGuestThreadDetail } from '~/server/domain/guest-threads/detail'
-import { inboxGuestNames } from '~/server/domain/guest-threads/inbox'
+import { REPLY_BY_QUOTING, replyToAlertEntry } from '~/server/domain/guest-threads/member-reply'
 import { appendEntry, findEntryByDedupeKey } from '~/server/domain/guest-threads/entries'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { notifyGuestThreadReply } from '~/server/utils/notifications'
 import { findSubmissionByPhone } from '~/server/utils/submission-messages'
-import { isAuthorizedWhatsAppRecipient, isOrganizationWideRole, resolveMemberId, resolveOrganizationMembership } from '~/server/utils/member-access'
 import { findVerifiedAuthUserByPhone } from '~/server/utils/auth'
-import {
-  PROMPT_QUOTE_NOTIFICATION_MESSAGE, REPLY_FAILED_ALERTED_MESSAGE, REPLY_SENT_CONFIRMATION, REPLY_UNCERTAIN_MESSAGE, buildCollectReplyPrompt, buildConfirmSendPrompt, buildDisambiguationPrompt, buildReplyFailedMessage, decideWhatsAppReplyRouting, maskEmailForDisplay, type DisambiguationCandidate, type PendingWhatsAppReplyState, } from '~/server/utils/whatsapp-reply-routing'
 
 interface WhatsAppMessage {
   id: string
-  message_id?: string
   from: string
   timestamp?: string
   type: 'text' | 'image' | 'document' | string
@@ -113,499 +105,43 @@ async function resolveUser(env: ApiRecord, from: string): Promise<UserRow | null
   return await findVerifiedAuthUserByPhone(env as CloudflareEnv, normalized)
 }
 
-function parsePendingReplyState(raw: string | null | undefined): PendingWhatsAppReplyState | null {
-  if (!raw) return null
-  const parsed = JSON.parse(raw) as { kind?: unknown }
-  // The same pending_confirmation column also carries an unrelated
-  // `{ intent: 'pending_media' }` marker from the media-upload flow — only claim
-  // objects that actually match one of our reply-routing state shapes. A shape
-  // this router does not own is not an error; JSON that will not parse at all is
-  // corruption, and reading it as "no pending state" dropped the guest's reply.
-  // A confirmation is one reply, sent once under its own id; one written without an id cannot be.
-  if ((parsed.kind === 'confirm_send' && typeof (parsed as { id?: unknown }).id === 'string') || parsed.kind === 'disambiguate' || parsed.kind === 'collect_reply') {
-    return parsed as PendingWhatsAppReplyState
-  }
-  return null
-}
-
-function submissionTypeLabel(type: string): string {
-  if (type === 'reservation') return 'Reservation'
-  if (type === 'booking') return 'Booking'
-  return 'Message'
-}
-
-interface QuotedDeliveryMatch {
-  threadId: string
-  organizationId: string
-  locationId: string | null
-  /** Where a reply goes, said for the manager. */
-  destination: string
-}
-
 /**
- * Where a reply to this conversation goes, said for the manager, by the reply
- * operation's own rule (`guestReplyDestination`); otherwise why it cannot go.
+ * A member's own WhatsApp message. Quoting their alert about a guest's or
+ * teammate's message answers that conversation: it is the dashboard's own send,
+ * as the member the phone was verified for, and the member is told the outcome. Anything else gets one line
+ * saying how to answer. The reply's key is the WhatsApp message's id, so Meta
+ * redelivering it sends nothing twice.
  */
-async function replyDestination(db: D1Database, threadId: string, organizationId: string): Promise<{ destination: string } | { refused: string }> {
-  const thread = await getGuestRequest(db, threadId, organizationId)
-  if (!thread) return { refused: 'This conversation no longer exists.' }
-  const destination = await guestReplyDestination(db, thread)
-  if (destination.channel === null) return { refused: destination.reason }
-  if (destination.channel === 'airbnb') return { destination: 'through Airbnb' }
-  if (destination.channel === 'email') return { destination: `by email to ${maskEmailForDisplay(destination.email)}` }
-  return { destination: destination.email ? `to their KrabiClaw inbox and by email to ${maskEmailForDisplay(destination.email)}` : 'to their KrabiClaw inbox' }
-}
-
-async function resolveQuotedDelivery(
-  db: D1Database, env: ApiRecord, providerMessageId: string, phone: string, ): Promise<QuotedDeliveryMatch | { refused: string } | null> {
-  const thread = await queryFirst<{
-    request_id: string
-    organization_id: string
-    location_id: string | null
-  }>(db, `
-    SELECT gt.id AS request_id, gt.organization_id, gt.location_id
-    FROM guest_thread_deliveries d
-    JOIN activity_entries e ON e.id = d.entry_id
-    JOIN requests gt ON gt.id = e.request_id
-    WHERE d.provider = 'meta' AND d.provider_message_id = ?
-    LIMIT 1
-  `, [providerMessageId])
-  if (!thread) return null
-
-  const authorized = await isAuthorizedWhatsAppRecipient(db, {
-    env: env as CloudflareEnv,
-    phone, organizationId: thread.organization_id })
-  if (!authorized) return null
-
-  // The manager chose this conversation: one that cannot be replied to says why, never another in its place.
-  const reply = await replyDestination(db, thread.request_id, thread.organization_id)
-  if ('refused' in reply) return reply
-  return { threadId: thread.request_id, organizationId: thread.organization_id, locationId: thread.location_id, destination: reply.destination }
-}
-
-async function listRecentGuestDeliveryCandidates(db: D1Database, env: ApiRecord, userId: string): Promise<DisambiguationCandidate[]> {
-  const sinceIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-  const rows = await queryAll<{
-    threadId: string
-    organizationId: string
-    locationId: string | null
-    submissionType: string
-  }>(db, `
-    SELECT gt.id AS threadId, gt.organization_id AS organizationId,
-           gt.location_id AS locationId, gt.kind AS submissionType, MAX(d.created_at) AS createdAt
-    FROM guest_thread_deliveries d
-    JOIN activity_entries e ON e.id = d.entry_id
-    JOIN requests gt ON gt.id = e.request_id
-    JOIN member m ON m.organizationId = gt.organization_id AND m.userId = ? AND m.role IN ('owner', 'admin')
-    WHERE d.channel = 'whatsapp' AND d.created_at > ?
-    GROUP BY gt.id
-    ORDER BY createdAt DESC
-    LIMIT 25
-  `, [userId, sinceIso])
-
-  const authorizedRows = (await Promise.all((rows ?? []).map(async (row) => {
-    const membership = await resolveOrganizationMembership(env as CloudflareEnv, {
-      organizationId: row.organizationId,
-      userId,
-    })
-    // Only the roles WhatsApp replies are authorized for see a thread's guest,
-    // and only conversations the inbox lets them write to are offered.
-    if (!membership || !isOrganizationWideRole(membership.role)) return null
-    if (!('destination' in await replyDestination(db, row.threadId, row.organizationId))) return null
-    // The guest as the inbox names them: a mirrored Airbnb conversation has no submitted name.
-    const detail = await getGuestThreadDetail(db, row.threadId, row.organizationId)
-    if (!detail) throw new Error(`WhatsApp reply candidate ${row.threadId} has no conversation`)
-    return { ...row, guestName: inboxGuestNames(detail).guestFullName }
-  }))).filter((row): row is NonNullable<typeof row> => Boolean(row)).slice(0, 5)
-  return authorizedRows.map((r) => ({
-    threadId: r.threadId, organizationId: r.organizationId, locationId: r.locationId, label: `${submissionTypeLabel(r.submissionType)} from ${r.guestName}`, }))
-}
-
-type ReplyVerdict = { notice: string; report: unknown | null }
-
-/**
- * What the manager reads about a reply the operation returned, and whether it is an error to
- * report. A refusal (4xx) is told in the operation's words, never a reason code; a reply that
- * may already be with the guest says so; any failure (5xx) is never shown raw.
- */
-function returnedReplyVerdict(outcome: Awaited<ReturnType<typeof executeGuestThreadOperation>> | { ok: false; status: 404; reason: 'thread_not_found' }): ReplyVerdict {
-  if (outcome.ok) return { notice: REPLY_SENT_CONFIRMATION, report: null }
-  const failure = new Error(`WhatsApp reply ${outcome.reason}${'code' in outcome ? ` ${outcome.code}` : ''}: ${'message' in outcome ? outcome.message : outcome.status}`)
-  if (outcome.reason === 'delivery_failed' && (outcome.code === 'CHANNEL_REPLY_UNCERTAIN' || outcome.code === 'CHANNEL_REPLY_REVIEW_REQUIRED')) {
-    return { notice: REPLY_UNCERTAIN_MESSAGE, report: outcome.status >= 500 ? failure : null }
-  }
-  if (outcome.status >= 500) return { notice: REPLY_FAILED_ALERTED_MESSAGE, report: failure }
-  switch (outcome.reason) {
-    case 'thread_not_found': case 'source_not_found': return { notice: buildReplyFailedMessage('This conversation no longer exists.'), report: null }
-    case 'empty_body': return { notice: buildReplyFailedMessage('Write a message before sending it.'), report: null }
-    case 'missing_idempotency_key': return { notice: REPLY_FAILED_ALERTED_MESSAGE, report: failure }
-    default: return { notice: buildReplyFailedMessage(outcome.message), report: null }
-  }
-}
-
-/**
- * The same for an error the operation threw. A reply this key already wrote (an account-inbox
- * reply has no delivery) or handed to a provider (sending, uncertain, accepted or later) may be
- * with the guest whatever failed after. Otherwise only a refusal the operation throws by design
- * (a 4xx with its code) is told as it is; everything else is reported, not shown.
- */
-async function thrownReplyVerdict(db: D1Database, error: unknown, threadId: string, idempotencyKey: string): Promise<ReplyVerdict> {
-  const written = await queryAll<{ id: string; status: string | null; provider_message_id: string | null; channel: string | null; provider: string | null; purpose: string | null; email_message_id: string | null }>(db,
-    `SELECT e.id, d.status, d.provider_message_id, d.channel, d.provider, d.purpose, d.email_message_id
-       FROM activity_entries e LEFT JOIN guest_thread_deliveries d ON d.entry_id = e.id WHERE e.dedupe_key = ?`,
-    [operationDedupeKey({ threadId, idempotencyKey })]).then(rows => ({ rows }), (lookupError: unknown) => ({ lookupError }))
-  if ('lookupError' in written) return { notice: REPLY_UNCERTAIN_MESSAGE, report: new AggregateError([error, written.lookupError], 'The reply failed and whether it was written could not be read', { cause: error }) }
-  if (written.rows.length) {
-    const handedOver = written.rows.some(row => row.status === null || row.status === 'sending' || row.status === 'uncertain' || row.provider_message_id !== null
-      || isDeliverySent(row as unknown as GuestThreadDeliveryRow))
-    if (handedOver) return { notice: REPLY_UNCERTAIN_MESSAGE, report: error }
-  }
-  if (error instanceof HTTPError && error.status >= 400 && error.status < 500 && typeof (error.data as { code?: unknown } | undefined)?.code === 'string') {
-    return { notice: buildReplyFailedMessage(error.message), report: null }
-  }
-  return { notice: REPLY_FAILED_ALERTED_MESSAGE, report: error }
-}
-
-// Issue #293 Section C direct-reply routing contract, applied only to messages from a
-// resolveUser-verified platform user (managers). Handles all I/O (lookups,
-// authorization, sends, channel-state persistence) around the pure decision function in
-// server/utils/whatsapp-reply-routing.ts.
-async function routeManagerWhatsAppMessage(
-  db: D1Database,
-  env: ApiRecord,
-  opts: {
-    message: WhatsAppMessage
-    toPhone: string
-    userId: string
-    existingState: Awaited<ReturnType<typeof getWhatsAppWorkspaceState>>
-    messageId: string
-    /** A failure in a message this route handles: reported, while the message is answered. */
-    report: (error: unknown) => Promise<void>
-  },
-): Promise<void> {
-  const rawText = messageText(opts.message)
-  const pendingState = parsePendingReplyState(opts.existingState?.pending_confirmation)
-  const contextId = opts.message.context?.id ?? null
-  const hasQuotedContext = Boolean(contextId)
-
-  const clearPending = () =>
-    patchWhatsAppWorkspaceState(db, {
-      userId: opts.userId,
-      pendingConfirmation: null,
-      lastInboundId: opts.messageId,
-    })
-  // A message the manager must read that Meta refused fails the webhook, as every prompt here does.
-  const sendOrThrow = async (text: string, failure: string) => {
-    const sendResult = await sendWhatsAppText(env, opts.toPhone, text)
-    if (!sendResult.success) throw new Error(sendResult.error || failure)
-  }
-  // A message that settles the reply (its outcome, or why it cannot go) writes its state first,
-  // so neither Meta's redelivery nor a repeated word acts on it again: a guest never gets a
-  // duplicate. The message is then handled; a failure, or a notice Meta refused, is reported.
-  const settle = async (text: string, failure: string, error: unknown = null) => {
-    await clearPending()
-    const told = await sendWhatsAppText(env, opts.toPhone, text).then(
-      result => result.success ? null : new Error(result.error || failure), (sendError: unknown) => sendError)
-    if (error !== null && told) await opts.report(new AggregateError([error, told], 'The reply failed and the manager could not be told', { cause: error }))
-    else if (error !== null) await opts.report(error)
-    else if (told) await opts.report(told)
-  }
-
-  async function resolveFreshDispatch(): Promise<{
-    quotedDeliveryMatch: 'authorized_thread_found' | 'unmatched' | null
-    quotedDelivery: QuotedDeliveryMatch | null
-    quotedRefusal: string | null
-    recentDeliveryCount: number
-    recentCandidates: DisambiguationCandidate[]
-  }> {
-    let quotedDelivery: QuotedDeliveryMatch | null = null
-    let quotedRefusal: string | null = null
-    let quotedDeliveryMatch: 'authorized_thread_found' | 'unmatched' | null = null
-    if (hasQuotedContext) {
-      const quoted = await resolveQuotedDelivery(db, env, contextId!, opts.toPhone)
-      if (quoted && 'refused' in quoted) quotedRefusal = quoted.refused
-      else quotedDelivery = quoted
-      quotedDeliveryMatch = quotedDelivery ? 'authorized_thread_found' : 'unmatched'
-    }
-
-    let recentCandidates: DisambiguationCandidate[] = []
-    if (!quotedDelivery && quotedRefusal === null) {
-      recentCandidates = await listRecentGuestDeliveryCandidates(db, env, opts.userId)
-    }
-
-    return {
-      quotedDeliveryMatch,
-      quotedDelivery,
-      quotedRefusal,
-      recentDeliveryCount: recentCandidates.length,
-      recentCandidates,
-    }
-  }
-
-  if (!pendingState) {
-    const fresh = await resolveFreshDispatch()
-    if (fresh.quotedRefusal !== null) {
-      await settle(buildReplyFailedMessage(fresh.quotedRefusal), 'Failed to send WhatsApp reply refusal')
-      return
-    }
-
-    const decision = decideWhatsAppReplyRouting({
-      hasQuotedContext,
-      quotedDeliveryMatch: fresh.quotedDeliveryMatch,
-      pendingState: null,
-      recentDeliveryCount: fresh.recentDeliveryCount,
-      text: rawText,
-    })
-
-    switch (decision.action) {
-      case 'start_confirm_send': {
-        const trimmedText = rawText.trim()
-        if (!trimmedText) {
-          // Captionless media or empty reply — resend the prompt without advancing
-          const match = fresh.quotedDelivery!
-          await sendOrThrow(buildConfirmSendPrompt(match.destination), 'Failed to send WhatsApp confirmation prompt')
-          return
-        }
-        const match = fresh.quotedDelivery!
-        const newState: PendingWhatsAppReplyState = {
-          kind: 'confirm_send',
-          id: crypto.randomUUID(),
-          threadId: match.threadId,
-          organizationId: match.organizationId,
-          locationId: match.locationId,
-          replyBody: trimmedText,
-        }
-        const sendResult = await sendWhatsAppText(env, opts.toPhone, buildConfirmSendPrompt(match.destination))
-        if (!sendResult.success) {
-          throw new Error(sendResult.error || 'Failed to send WhatsApp confirmation prompt')
-        }
-        await patchWhatsAppWorkspaceState(db, {
-          userId: opts.userId,
-          pendingConfirmation: newState,
-          lastInboundId: opts.messageId,
-        })
-        return
-      }
-      case 'start_disambiguation': {
-        const newState: PendingWhatsAppReplyState = { kind: 'disambiguate', candidates: fresh.recentCandidates }
-        const sendResult = await sendWhatsAppText(env, opts.toPhone, buildDisambiguationPrompt(fresh.recentCandidates))
-        if (!sendResult.success) {
-          throw new Error(sendResult.error || 'Failed to send WhatsApp disambiguation prompt')
-        }
-        await patchWhatsAppWorkspaceState(db, {
-          userId: opts.userId,
-          pendingConfirmation: newState as unknown as JsonSerializable,
-          lastInboundId: opts.messageId,
-        })
-        return
-      }
-      case 'prompt_quote_notification':
-      default: {
-        const sendResult = await sendWhatsAppText(env, opts.toPhone, PROMPT_QUOTE_NOTIFICATION_MESSAGE)
-        if (!sendResult.success) {
-          throw new Error(sendResult.error || 'Failed to send WhatsApp routing prompt')
-        }
-        await patchWhatsAppWorkspaceState(db, {
-          userId: opts.userId,
-          pendingConfirmation: null,
-          lastInboundId: opts.messageId,
-        })
-        return
-      }
-    }
-  }
-
-  // A pending confirm_send / disambiguate / collect_reply state exists — resume it.
-  if (pendingState.kind === 'confirm_send') {
-    const decision = decideWhatsAppReplyRouting({
-      hasQuotedContext: false,
-      quotedDeliveryMatch: null,
-      pendingState,
-      recentDeliveryCount: 0,
-      text: rawText,
-    })
-    if (decision.action === 'confirm_send_execute') {
-      // The confirmation is spent before anything is sent: a repeated YES, or Meta redelivering
-      // this one, finds nothing to send, and the reply's key is the confirmation's own.
-      await clearPending()
-      // Reauthorize before executing the reply to ensure the member still has access
-      const authorized = await isAuthorizedWhatsAppRecipient(db, {
-        env: env as CloudflareEnv,
-        phone: opts.toPhone,
-        organizationId: pendingState.organizationId,
-      })
-      if (!authorized) {
-        await settle('Your WhatsApp access has been revoked. Please contact your organization administrator.', 'Failed to send WhatsApp access notice')
-        return
-      }
-      const actorMemberId = await resolveMemberId({
-        organizationId: pendingState.organizationId,
-        userId: opts.userId,
-        env,
-      })
-      const idempotencyKey = `whatsapp:${pendingState.id}:reply`
-      const attempt = actorMemberId
-        ? await executeGuestThreadOperation(db, { threadId: pendingState.threadId, organizationId: pendingState.organizationId, action: 'reply', actorUserId: opts.userId, body: pendingState.replyBody, env, idempotencyKey })
-          .then(outcome => ({ outcome }), (error: unknown) => ({ error }))
-        : { outcome: { ok: false as const, status: 404 as const, reason: 'thread_not_found' as const } }
-      const verdict = 'error' in attempt
-        ? await thrownReplyVerdict(db, attempt.error, pendingState.threadId, idempotencyKey)
-        : returnedReplyVerdict(attempt.outcome)
-      // The reply has gone: the manager is told so even when refreshing the inbox fails, and that failure is reported.
-      const refreshFailure = 'outcome' in attempt && attempt.outcome.ok
-        ? await publishGuestInboxThreadEvent(env, db, { threadId: attempt.outcome.thread.id, type: 'thread.changed' }).then(() => null, (error: unknown) => error)
-        : null
-      await settle(verdict.notice, 'Failed to send WhatsApp reply outcome', verdict.report ?? refreshFailure)
-      return
-    }
-    // Non-affirmative reply: the pending confirmation is dropped before anything else, so a
-    // later "yes" finds nothing to send, and this message is dispatched fresh (issue #293).
-    await clearPending()
-  } else if (pendingState.kind === 'disambiguate') {
-    const decision = decideWhatsAppReplyRouting({
-      hasQuotedContext: false,
-      quotedDeliveryMatch: null,
-      pendingState,
-      recentDeliveryCount: 0,
-      text: rawText,
-    })
-    if (decision.action === 'disambiguation_pick') {
-      const chosen = pendingState.candidates[decision.index - 1]!
-
-      // Reauthorize before disambiguation transition to ensure the member still has access
-      const authorized = await isAuthorizedWhatsAppRecipient(db, {
-        env: env as CloudflareEnv,
-        phone: opts.toPhone,
-        organizationId: chosen.organizationId,
-      })
-      if (!authorized) {
-        await settle('Your WhatsApp access has been revoked. Please contact your organization administrator.', 'Failed to send WhatsApp access notice')
-        return
-      }
-
-      // The conversation can have changed since it was offered; then the reply is refused as the inbox refuses it.
-      const reply = await replyDestination(db, chosen.threadId, chosen.organizationId)
-      if ('refused' in reply) {
-        await settle(buildReplyFailedMessage(reply.refused), 'Failed to send WhatsApp reply refusal')
-        return
-      }
-      const destination = reply.destination
-      const newState: PendingWhatsAppReplyState = {
-        kind: 'collect_reply',
-        threadId: chosen.threadId,
-        organizationId: chosen.organizationId,
-        locationId: chosen.locationId,
-      }
-      const sendResult = await sendWhatsAppText(env, opts.toPhone, buildCollectReplyPrompt(destination))
-      if (!sendResult.success) throw new Error(sendResult.error || 'Failed to send WhatsApp reply prompt')
-      await patchWhatsAppWorkspaceState(db, {
-        userId: opts.userId,
-        pendingConfirmation: newState,
-        lastInboundId: opts.messageId,
-      })
-      return
-    }
-    // Not a pick: the choice is dropped first, then this message is dispatched fresh.
-    await clearPending()
-  } else {
-    // collect_reply: any non-empty text becomes the reply body, moving to confirm_send.
-    // Reauthorize before reading the conversation, as the pick and the send do.
-    const authorized = await isAuthorizedWhatsAppRecipient(db, {
-      env: env as CloudflareEnv,
-      phone: opts.toPhone,
-      organizationId: pendingState.organizationId,
-    })
-    if (!authorized) {
-      await settle('Your WhatsApp access has been revoked. Please contact your organization administrator.', 'Failed to send WhatsApp access notice')
-      return
-    }
-    const reply = await replyDestination(db, pendingState.threadId, pendingState.organizationId)
-    if ('refused' in reply) {
-      await settle(buildReplyFailedMessage(reply.refused), 'Failed to send WhatsApp reply refusal')
-      return
-    }
-    const destination = reply.destination
-    // A captionless photo or an empty message is no reply: ask again without advancing.
-    if (!rawText.trim()) {
-      await sendOrThrow(buildCollectReplyPrompt(destination), 'Failed to send WhatsApp reply prompt')
-      return
-    }
-    const newState: PendingWhatsAppReplyState = {
-      kind: 'confirm_send',
-      id: crypto.randomUUID(),
-      threadId: pendingState.threadId,
-      organizationId: pendingState.organizationId,
-      locationId: pendingState.locationId,
-      replyBody: rawText.trim(),
-    }
-    const sendResult = await sendWhatsAppText(env, opts.toPhone, buildConfirmSendPrompt(destination))
-    if (!sendResult.success) throw new Error(sendResult.error || 'Failed to send WhatsApp confirmation prompt')
-    await patchWhatsAppWorkspaceState(db, {
-      userId: opts.userId,
-      pendingConfirmation: newState,
-      lastInboundId: opts.messageId,
-    })
+async function answerMember(db: D1Database, env: ApiRecord, message: WhatsAppMessage, toPhone: string, userId: string): Promise<void> {
+  const quoted = message.context?.id
+    ? await queryFirst<{ entry_id: string }>(db, `
+        SELECT d.entry_id FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id LEFT JOIN requests r ON r.id = e.request_id
+         WHERE d.provider = 'meta' AND d.channel = 'whatsapp' AND d.purpose = 'owner_alert' AND d.provider_message_id = ?
+           AND (e.kind = 'message' OR (e.kind = 'submission' AND r.kind = 'contact') OR e.dedupe_key LIKE 'team-message:%')
+         LIMIT 1`, [message.context.id])
+    : null
+  if (!quoted) {
+    const sent = await sendWhatsAppText(env, toPhone, REPLY_BY_QUOTING)
+    if (!sent.success) throw new Error(sent.error || 'Failed to send the WhatsApp reply hint')
     return
   }
-
-  // Cancelled confirm_send/disambiguate above — redispatch this same message fresh.
-  const fresh = await resolveFreshDispatch()
-  if (fresh.quotedRefusal !== null) {
-    await settle(buildReplyFailedMessage(fresh.quotedRefusal), 'Failed to send WhatsApp reply refusal')
-    return
-  }
-
-  const decision = decideWhatsAppReplyRouting({
-    hasQuotedContext,
-    quotedDeliveryMatch: fresh.quotedDeliveryMatch,
-    pendingState: null,
-    recentDeliveryCount: fresh.recentDeliveryCount,
-    text: rawText,
+  const outcome = await replyToAlertEntry(env as CloudflareEnv, {
+    entryId: quoted.entry_id, userId, body: messageText(message), files: await messageFiles(env, message), idempotencyKey: `whatsapp:${message.id}`,
   })
-
-  switch (decision.action) {
-    case 'start_confirm_send': {
-      const match = fresh.quotedDelivery!
-      // A captionless photo or an empty message is no reply: ask again without advancing.
-      if (!rawText.trim()) {
-        await sendOrThrow(buildConfirmSendPrompt(match.destination), 'Failed to send WhatsApp confirmation prompt')
-        return
-      }
-      const newState: PendingWhatsAppReplyState = {
-        kind: 'confirm_send',
-        id: crypto.randomUUID(),
-        threadId: match.threadId,
-        organizationId: match.organizationId,
-        locationId: match.locationId,
-        replyBody: rawText.trim(),
-      }
-      await sendOrThrow(buildConfirmSendPrompt(match.destination), 'Failed to send WhatsApp confirmation prompt')
-      await patchWhatsAppWorkspaceState(db, {
-        userId: opts.userId,
-        pendingConfirmation: newState,
-        lastInboundId: opts.messageId,
-      })
-      return
-    }
-    case 'start_disambiguation': {
-      const newState: PendingWhatsAppReplyState = { kind: 'disambiguate', candidates: fresh.recentCandidates }
-      await sendOrThrow(buildDisambiguationPrompt(fresh.recentCandidates), 'Failed to send WhatsApp disambiguation prompt')
-      await patchWhatsAppWorkspaceState(db, {
-        userId: opts.userId,
-        pendingConfirmation: newState as unknown as JsonSerializable,
-        lastInboundId: opts.messageId,
-      })
-      return
-    }
-    case 'prompt_quote_notification':
-    default: {
-      await settle(PROMPT_QUOTE_NOTIFICATION_MESSAGE, 'Failed to send WhatsApp routing prompt')
-      return
-    }
-  }
+  // The member reads the outcome first. A failed reply, or an outcome Meta would not carry, then fails
+  // this message, so Meta delivers it again; the replay under the same key sends nothing twice.
+  const told = await sendWhatsAppText(env, toPhone, outcome.notice)
+  if (outcome.report !== null) throw outcome.report instanceof Error ? outcome.report : new Error(String(outcome.report), { cause: outcome.report })
+  if (!told.success) throw new Error(told.error || 'Failed to send the WhatsApp reply outcome')
 }
 
-async function handleMessage(db: D1Database, env: ApiRecord, message: WhatsAppMessage, event: H3Event): Promise<void> {
+function metaMessageTime(message: WhatsAppMessage): string {
+  const seconds = Number(message.timestamp)
+  if (!Number.isInteger(seconds) || seconds <= 0) throw new Error(`Meta sent WhatsApp message ${message.id} without its timestamp`)
+  return new Date(seconds * 1000).toISOString()
+}
+
+async function handleMessage(db: D1Database, env: ApiRecord, message: WhatsAppMessage): Promise<void> {
 
   const toPhone = parseMetaMsisdn(message.from)
   const user = await resolveUser(env, message.from)
@@ -654,7 +190,6 @@ async function handleMessage(db: D1Database, env: ApiRecord, message: WhatsAppMe
           guestEmail: summary.guestEmail,
           guestPhone: summary.guestPhone,
           inboundChannel: 'whatsapp',
-          messagePreview: messagePreview(text, photos.length),
         })
       }
       return
@@ -663,25 +198,12 @@ async function handleMessage(db: D1Database, env: ApiRecord, message: WhatsAppMe
     return
   }
 
-  // Idempotency check: skip if this message was already processed. Checked before the
-  // manager-routing tiers since those tiers also send replies and mutate channel state —
-  // a webhook retry must not run them twice either.
-  const messageId = message.id || message.message_id
-  const existingState = await getWhatsAppWorkspaceState(db, user.id)
-  if (existingState?.last_inbound_id === messageId) {
-    console.log('[whatsapp] Skipping duplicate message:', messageId)
-    return
-  }
-
-  await routeManagerWhatsAppMessage(db, env, {
-    message,
-    toPhone,
-    userId: user.id,
-    existingState,
-    messageId: messageId ?? message.id,
-    // Through the same error hook a thrown error reaches (server/plugins/error-logger.ts).
-    report: async error => { await useNitroHooks().callHook('error', error instanceof Error ? error : new Error(String(error), { cause: error }), { event, tags: ['whatsapp'] }) },
-  })
+  // Meta redelivering a message already answered runs nothing again.
+  if (await isLastWhatsAppInbound(db, user.id, message.id)) return
+  const sentAt = metaMessageTime(message)
+  await answerMember(db, env, message, toPhone, user.id)
+  // Meta's own time for the message opens the member's service window.
+  await recordWhatsAppInbound(db, { userId: user.id, messageId: message.id, sentAt })
 }
 
 function formatStatusError(errors: WhatsAppStatusError[] | undefined): string | null {
@@ -764,7 +286,7 @@ export default defineHandler(async (event) => {
   const statuses = inboundStatuses(payload)
 
   for (const message of messages) {
-    await handleMessage(db, env, message, event)
+    await handleMessage(db, env, message)
   }
   for (const status of statuses) {
     await handleStatus(db, env, status)
@@ -772,7 +294,5 @@ export default defineHandler(async (event) => {
 
   return jsonResponse({ success: true })
 })
-import { defineHandler, HTTPError } from 'nitro';
-import { useNitroHooks } from 'nitro/app'
-import type { H3Event } from 'nitro/h3'
+import { defineHandler } from 'nitro';
 import {  readRawBody  } from 'nitro/h3';

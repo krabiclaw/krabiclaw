@@ -5,7 +5,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import * as schema from '../../server/db/schema.ts'
 import { getConfig, setConfig } from '../../server/utils/organization-config.ts'
 import { deleteIntegration, listIntegrations, readIntegration, storeIntegration } from '../../server/utils/organization-integrations.ts'
-import { getWhatsAppWorkspaceState, patchWhatsAppWorkspaceState, getMcpWorkspacePreference, upsertMcpWorkspacePreference } from '../../server/utils/mcp-context.ts'
+import { isLastWhatsAppInbound, recordWhatsAppInbound, whatsAppServiceWindowOpen, getMcpWorkspacePreference, upsertMcpWorkspacePreference } from '../../server/utils/mcp-context.ts'
 
 test('organization settings and workspace patches preserve independent owners and hold no provider credentials', async () => {
   const miniflare = new Miniflare({ workers: [{ config: {
@@ -48,12 +48,15 @@ test('organization settings and workspace patches preserve independent owners an
     assert.equal(await readIntegration(db, 'org', 'google_analytics'), null)
     await setConfig(db, 'org', 'press_email', 'desk@example.test')
 
-    await patchWhatsAppWorkspaceState(db, { userId: 'user', pendingConfirmation: { intent: 'one' } })
-    await Promise.all([patchWhatsAppWorkspaceState(db, { userId: 'user', lastInboundId: 'inbound' }), upsertMcpWorkspacePreference(db, { userId: 'user', organizationId: 'org', locationId: null })])
-    assert.equal((await getWhatsAppWorkspaceState(db, 'user'))?.pending_confirmation, '{"intent":"one"}')
-    assert.equal((await getWhatsAppWorkspaceState(db, 'user'))?.last_inbound_id, 'inbound')
+    // A member's WhatsApp message and their MCP workspace share a row; neither write clobbers the other.
+    const sentAt = new Date().toISOString()
+    await Promise.all([recordWhatsAppInbound(db, { userId: 'user', messageId: 'inbound', sentAt }), upsertMcpWorkspacePreference(db, { userId: 'user', organizationId: 'org', locationId: null })])
+    assert.equal(await isLastWhatsAppInbound(db, 'user', 'inbound'), true)
+    assert.equal(await isLastWhatsAppInbound(db, 'user', 'another'), false)
     assert.equal((await getMcpWorkspacePreference(db, 'user'))?.organization_id, 'org')
-    await patchWhatsAppWorkspaceState(db, { userId: 'user', pendingConfirmation: null })
-    assert.equal((await getMcpWorkspacePreference(db, 'user'))?.organization_id, 'org')
+    // Meta's service window is the 24 hours after the member's own message.
+    assert.equal(await whatsAppServiceWindowOpen(db, 'user', new Date(Date.parse(sentAt) + 23 * 3_600_000)), true)
+    assert.equal(await whatsAppServiceWindowOpen(db, 'user', new Date(Date.parse(sentAt) + 24 * 3_600_000)), false)
+    assert.equal(await whatsAppServiceWindowOpen(db, 'nobody'), false)
   } finally { await miniflare.dispose() }
 })

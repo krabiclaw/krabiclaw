@@ -35,7 +35,7 @@ export function successfulBusinessReplySql(reply: string): string {
       SELECT 1 FROM guest_thread_deliveries delivery
       WHERE delivery.entry_id = ${reply}.id AND delivery.purpose = 'member_reply'
         AND delivery.provider <> 'log_only' AND NULLIF(TRIM(delivery.provider_message_id), '') IS NOT NULL
-        AND delivery.status IN ('accepted', 'sent', 'delivered', 'read') AND COALESCE(delivery.non_delivery_confirmed, 0) = 0
+        AND delivery.status IN ('accepted', 'sent', 'delivered', 'read')
     ))) OR (${reply}.event_name = 'channel.message_mirrored' AND ${reply}.channel = 'airbnb'
       AND NULLIF(TRIM(json_extract(${reply}.payload_json, '$.provider_message_id')), '') IS NOT NULL
       AND NOT EXISTS (

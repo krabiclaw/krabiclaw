@@ -296,7 +296,6 @@ export async function mirrorChannexMessageEvent(db: DbClient, env: ChannelEnv, v
     threadId: request.id, sourceEntryId: entry.id, submissionType: 'stay', submissionId: request.id,
     participantLabel: summary.participantLabel, guestEmail: summary.guestEmail, guestPhone: summary.guestPhone,
     inboundChannel: 'airbnb',
-    messagePreview: entry.body?.trim() || (attachments === 1 ? 'Sent an attachment' : `Sent ${attachments} attachments`),
   })
   return mirrored
 }
@@ -311,8 +310,8 @@ export async function backfillChannexMessages(db: DbClient, env: ChannelEnv, pro
 
 /** Channel replies use the same canonical ledger, photo owner and delivery receipts as every inbox reply. */
 export type ChannelReplyOutcome = { ok: true } | {
-  ok: false; status: 409 | 502; code: 'CHANNEL_REPLY_REVIEW_REQUIRED' | 'CHANNEL_REPLY_UNCERTAIN' | 'CHANNEL_REPLY_FAILED'; field: 'delivery.status'; message: string
-  mutation_applied: true; operation_completed: false; request_id: string; retry_with_same_idempotency_key: boolean
+  ok: false; status: 409 | 502; code: 'CHANNEL_REPLY_FAILED'; field: 'delivery.status'; message: string
+  mutation_applied: true; operation_completed: false; request_id: string; retry_with_same_idempotency_key: true
   provider_error?: ChannexError['data']
 }
 
@@ -334,9 +333,6 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
   const key = `guest-thread-operation:${input.mapping.request_id}:${input.idempotencyKey}`
   const deliveryId = `guest-thread-channex:${input.mapping.request_id}:${input.idempotencyKey}`
   const requestHash = input.requestHash
-  const reviewRequired = (): ChannelReplyOutcome => ({ ok: false, status: 409, code: 'CHANNEL_REPLY_REVIEW_REQUIRED', field: 'delivery.status',
-    message: 'This reply was already attempted and has no successful recorded receipt. Review its provider conversation before sending again',
-    mutation_applied: true, operation_completed: false, request_id: input.mapping.request_id, retry_with_same_idempotency_key: false })
   let entry = await findEntryByDedupeKey(db, key)
   if (entry) {
     assertReplyIntent(entry, input.body, requestHash, eventName)
@@ -347,7 +343,6 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
       await updateThreadProjectionIfLatestEntry(db, input.mapping.request_id, entry.id)
       return { ok: true }
     }
-    if (receipt.status !== 'pending' && !(receipt.status === 'failed' && receipt.non_delivery_confirmed === 1)) return reviewRequired()
   }
   // Whether the home may still be written to is the caller's (guestReplyDestination);
   // proven accepted replays above remain safe even after it is disconnected.
@@ -399,7 +394,6 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
     await updateThreadProjectionIfLatestEntry(db, input.mapping.request_id, entry.id)
     return { ok: true }
   }
-  if (receipt.status !== 'pending' && !(receipt.status === 'failed' && receipt.non_delivery_confirmed === 1)) return reviewRequired()
   let photo: ReturnType<typeof assertMessagePhotos>[number] | undefined
   if (input.photoCount) {
     const placed = (await readMediaPlacements(db, { organizationId: input.mapping.organization_id, ownerType: 'activity_entry', ownerIds: [entry.id], slot: 'attachments' })).get(entry.id) ?? []
@@ -423,20 +417,21 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
     photo = assertMessagePhotos([{ filename: asset.file_name, bytes }])[0]!
     if (asset.provider === 'cloudflare_r2' && photo.contentType !== asset.mime_type) fail(409, 'CHANNEL_REPLY_PHOTO_UNAVAILABLE', 'The saved reply photo type differs from its recorded file', 'photos')
   }
-  // Only a definite non-delivery may be explicitly retried under its same intent.
-  // A concurrent accepted, sending or uncertain result cannot enter this claim.
-  const claim = await execute(db, "UPDATE guest_thread_deliveries SET status = 'sending', error = NULL, non_delivery_confirmed = NULL, updated_at = ? WHERE id = ? AND (status = 'pending' OR (status = 'failed' AND non_delivery_confirmed = 1))", [new Date().toISOString(), deliveryId])
-  if (claim.meta.changes !== 1) return reviewRequired()
+  // One send at a time per reply: a pending or failed reply is claimed; one already being sent is not.
+  const claim = await execute(db, "UPDATE guest_thread_deliveries SET status = 'sending', error = NULL, updated_at = ? WHERE id = ? AND status IN ('pending', 'failed')", [new Date().toISOString(), deliveryId])
+  if (claim.meta.changes !== 1) {
+    return { ok: false, status: 409, code: 'CHANNEL_REPLY_FAILED', field: 'delivery.status', message: 'This reply is already being sent.',
+      mutation_applied: true, operation_completed: false, request_id: input.mapping.request_id, retry_with_same_idempotency_key: true }
+  }
+  // Channex answers with the message it stored, which is sent, or with an error, which is failed:
+  // the reply can be sent again under its same key.
   try {
     const message = await sendChannexMessage(env, input.mapping.external_thread_id, input.body, photo)
-    await recordDeliveryOutcome(db, { deliveryId, status: 'accepted', providerMessageId: message.id, nonDeliveryConfirmed: false })
+    await recordDeliveryOutcome(db, { deliveryId, status: 'accepted', providerMessageId: message.id })
   } catch (error) {
-    const nonDeliveryConfirmed = error instanceof ChannexError && !error.uncertain && error.writeRefused
-    const uncertain = !nonDeliveryConfirmed
-    await recordDeliveryOutcome(db, { deliveryId, status: uncertain ? 'uncertain' : 'failed', error: error instanceof Error ? error.message : String(error), nonDeliveryConfirmed })
-    return { ok: false, status: 502, code: uncertain ? 'CHANNEL_REPLY_UNCERTAIN' : 'CHANNEL_REPLY_FAILED', field: 'delivery.status',
-      message: uncertain ? 'Channex may have accepted the reply. Review the conversation before sending again' : 'This reply was not sent. You can retry the same reply.',
-      mutation_applied: true, operation_completed: false, request_id: input.mapping.request_id, retry_with_same_idempotency_key: !uncertain,
+    await recordDeliveryOutcome(db, { deliveryId, status: 'failed', error: error instanceof Error ? error.message : String(error) })
+    return { ok: false, status: 502, code: 'CHANNEL_REPLY_FAILED', field: 'delivery.status', message: 'This reply was not sent. You can retry the same reply.',
+      mutation_applied: true, operation_completed: false, request_id: input.mapping.request_id, retry_with_same_idempotency_key: true,
       ...(error instanceof ChannexError ? { provider_error: error.data } : {}) }
   }
   await updateThreadProjectionIfLatestEntry(db, input.mapping.request_id, entry.id)
