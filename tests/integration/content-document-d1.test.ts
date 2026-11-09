@@ -82,8 +82,9 @@ test('document scopes, translations, block ownership and concurrent edits persis
     const appended = await appendContentBlock(db, translatedLinks.document.id, {
       source_block_id: 'link-b', type: 'cta', data: { label: 'Translated B' },
     }, { actorId: null })
-    const appendedLink = appended.blocks.find(block => block.source_block_id === 'link-b')
+    const appendedLink = (await listBlocksForDocument(db, translatedLinks.document.id)).find(block => block.id === appended.id)
     assert.ok(appendedLink)
+    assert.equal(appendedLink.source_block_id, 'link-b')
     let translatedBlocks = await listBlocksForDocument(db, translatedLinks.document.id)
     let firstLink = translatedBlocks.find(block => block.id === 'link-a-th')!
     assert.equal(firstLink.source_block_id, 'link-a')

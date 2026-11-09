@@ -5,7 +5,10 @@ import { assertPublishedHost } from '~/server/utils/public-provider'
 import { creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
 import { locationAllowsBooking } from '~/shared/reservation-hours'
-import { providerUnavailableSql, sessionMemberSql } from '~/server/utils/provider-allocation'
+import { providerAvailabilityParams, providerUnavailableSql, sessionMemberSql } from '~/server/utils/provider-allocation'
+import { memberAvailabilityJson, workingWindows } from '~/server/domain/member-scheduling'
+import type { CloudflareEnv } from '~/server/utils/auth'
+import type { WorkingHours } from '~/shared/member-scheduling'
 import { PUBLIC_BOOKING_WINDOW_DAYS } from '~/shared/bookings'
 import { HTTPError } from 'nitro'
 import { requireOrganizationProduct } from '~/server/utils/product-management'
@@ -319,8 +322,8 @@ async function sessionProviders(db: DbClient, config: ProductBookingConfigRecord
  */
 export async function prepareProviderHoursSessions(db: DbClient, config: ProductBookingConfigRecord, input: { actorId: string; now: string }): Promise<BatchQuery[]> {
   const duration = resolvedDuration(config)
-  const providers = await queryAll<{ member_id: string; timezone: string; windows_json: string; time_off_json: string }>(db, `
-    SELECT ms.member_id, ms.timezone, ms.windows_json, ms.time_off_json FROM member_scheduling ms
+  const providers = await queryAll<{ member_id: string; timezone: string; weekly_json: string; time_off_json: string }>(db, `
+    SELECT ms.member_id, ms.timezone, ms.weekly_json, ms.time_off_json FROM member_scheduling ms
       JOIN member m ON m.id=ms.member_id AND m.organizationId=ms.organization_id
      WHERE ms.organization_id=? AND ms.timezone IS NOT NULL AND (ms.member_id=? OR EXISTS (
        SELECT 1 FROM team t JOIN teamMember tm ON tm.teamId=t.id WHERE t.id=? AND t.organizationId=ms.organization_id AND tm.userId=m.userId))
@@ -331,7 +334,7 @@ export async function prepareProviderHoursSessions(db: DbClient, config: Product
   for (const provider of providers) {
     const slots: Array<{ starts_at: string; ends_at: string }> = []
     const timeOff = JSON.parse(provider.time_off_json) as Array<{ start: string; end: string }>
-    for (const window of JSON.parse(provider.windows_json) as Array<{ start: string; end: string }>) {
+    for (const window of workingWindows(provider.timezone, JSON.parse(provider.weekly_json) as WorkingHours[], { from: new Date(input.now), until: new Date(horizon) })) {
       for (let start = Date.parse(window.start); start + duration * 60_000 <= Date.parse(window.end); start += duration * 60_000) {
         const slot = { starts_at: new Date(start).toISOString(), ends_at: new Date(start + duration * 60_000).toISOString() }
         if (slot.starts_at <= input.now) continue
@@ -760,6 +763,10 @@ export async function prepareProductBookingSetup(db: DbClient, input: {
     }
     if (!futureSessions) badRequest('Provide at least one future session before creating a bookable offering')
   }
+  const bookableFrom = input.now, bookableUntil = new Date(Date.parse(input.now) + PUBLIC_BOOKING_WINDOW_DAYS * 86_400_000).toISOString()
+  // The sessions this batch inserts are not stored yet: their providers come from the configuration.
+  const stored = await sessionProviderIds(db, input.organizationId, { productId: input.productId, fromInstant: bookableFrom })
+  const availability = await memberAvailabilityJson(db, input.env, input.organizationId, { from: bookableFrom, until: bookableUntil }, [...new Set([...await configuredProviderIds(db, config), ...stored.members])])
   queries.push({
     query: `UPDATE product_booking_configs SET updated_at=CASE WHEN EXISTS (
       SELECT 1 FROM product_sessions s WHERE s.organization_id=? AND s.product_id=?
@@ -767,7 +774,7 @@ export async function prepareProductBookingSetup(db: DbClient, input: {
         AND (s.capacity IS NULL OR s.capacity>${sessionHeldCapacitySql('s')}+COALESCE((SELECT SUM(b.party_size) FROM bookings b WHERE b.product_session_id=s.id AND ${CAPACITY_CONSUMING_SQL}),0))
         AND (${locationGuard.query}) AND NOT ${providerUnavailableSql('s')}
     ) THEN updated_at ELSE NULL END WHERE organization_id=? AND product_id=?`,
-    params: [input.organizationId, input.productId, locationId, input.now, ...locationGuard.params!, input.organizationId, input.productId],
+    params: [input.organizationId, input.productId, locationId, input.now, ...locationGuard.params!, ...providerAvailabilityParams(availability), input.organizationId, input.productId],
   })
   return queries
 }
@@ -781,6 +788,27 @@ export function sessionHeldCapacitySql(sessionAlias: string, convertingPaymentSq
 
 type SessionLocation = { id: string; timezone: string; status: string; opening_hours: string | null; special_hours: string | null }
 
+/**
+ * The providers the sessions a statement covers may name, so the availability
+ * it binds asks Google about those members only. Sessions with no provider
+ * need no entry.
+ */
+async function sessionProviderIds(db: DbClient, organizationId: string, filter: { productId?: string | null; locationId?: string | null; sessionId?: string | null; fromInstant?: string | null; toInstant?: string | null }): Promise<{ members: string[]; from: string | null; until: string | null }> {
+  const rows = await queryAll<{ member: string | null; from: string; until: string }>(db, `SELECT ${sessionMemberSql('s')} AS member, MIN(s.starts_at) AS "from", MAX(s.ends_at) AS until FROM product_sessions s
+    WHERE s.organization_id=? AND (? IS NULL OR s.product_id=?) AND (? IS NULL OR s.location_id=?) AND (? IS NULL OR s.id=?) AND (? IS NULL OR s.starts_at>=?) AND (? IS NULL OR s.starts_at<?)
+    GROUP BY 1`,
+  [organizationId, filter.productId ?? null, filter.productId ?? null, filter.locationId ?? null, filter.locationId ?? null, filter.sessionId ?? null, filter.sessionId ?? null, filter.fromInstant ?? null, filter.fromInstant ?? null, filter.toInstant ?? null, filter.toInstant ?? null])
+  const named = rows.filter(row => row.member)
+  return { members: named.map(row => row.member!), from: named.map(row => row.from).sort()[0] ?? null, until: named.map(row => row.until).sort().at(-1) ?? null }
+}
+
+/** The members a provider-mode configuration schedules: its member, or its team's. */
+async function configuredProviderIds(db: DbClient, config: ProductBookingConfigRecord): Promise<string[]> {
+  if (config.scheduling_mode !== 'provider') return []
+  if (config.assigned_member_id) return [config.assigned_member_id]
+  return (await queryAll<{ id: string }>(db, `SELECT m.id FROM team t JOIN teamMember tm ON tm.teamId=t.id JOIN member m ON m.userId=tm.userId AND m.organizationId=t.organizationId WHERE t.id=? AND t.organizationId=?`, [config.assigned_team_id, config.organization_id])).map(row => row.id)
+}
+
 async function sessionLocationGuard(db: DbClient, input: SessionAllocationInput): Promise<BatchQuery> {
   const session = await queryFirst<ProductSession>(db, 'SELECT * FROM product_sessions WHERE id=? AND organization_id=? AND product_id=?', [input.sessionId, input.organizationId, input.productId])
   if (!session) return { query: '0', params: [] }
@@ -792,6 +820,7 @@ async function sessionLocationGuard(db: DbClient, input: SessionAllocationInput)
 }
 
 export async function listSessions(db: DbClient, input: {
+  env: CloudflareEnv
   organizationId: string
   productId?: string
   locationId?: string
@@ -804,6 +833,9 @@ export async function listSessions(db: DbClient, input: {
     await requireBookingConfig(db, input.organizationId, input.productId)
   }
   const statuses = input.statuses ?? ['scheduled']
+  // Google is asked about the span the stored provider sessions actually cover, not the whole window.
+  const providers = await sessionProviderIds(db, input.organizationId, { productId: input.productId, locationId: input.locationId, fromInstant: input.fromInstant, toInstant: input.toInstant })
+  const availability = providers.members.length ? await memberAvailabilityJson(db, input.env, input.organizationId, { from: providers.from!, until: providers.until! }, providers.members) : '{}'
   const sessions = await queryAll<SessionAvailability>(db, `
     SELECT s.id, s.organization_id, s.product_id, s.location_id, s.availability_rule_id, ${sessionMemberSql('s')} AS assigned_member_id,
            s.source_occurrence_key, s.timezone, s.starts_at, s.ends_at, s.capacity, s.status, s.created_at, s.updated_at,
@@ -827,6 +859,7 @@ export async function listSessions(db: DbClient, input: {
       AND s.status IN (SELECT value FROM json_each(?))
     ORDER BY s.starts_at, s.id
   `, [
+    ...providerAvailabilityParams(availability, 2),
     input.organizationId,
     input.productId ?? null, input.productId ?? null,
     input.locationId ?? null, input.locationId ?? null,
@@ -872,6 +905,7 @@ export class CapacityUnavailableError extends Error {
  * failure anywhere leaves the guest's original seat untouched.
  */
 export interface SessionAllocationInput {
+  env: CloudflareEnv
   organizationId: string; productId: string; sessionId: string; partySize: number; now: string
   /** Publication keeps its page when sale is disabled; bookings require active sale by default. */
   requireActive?: boolean
@@ -885,6 +919,8 @@ export interface SessionAllocationInput {
 
 export async function sessionAllocationPredicate(db: DbClient, input: SessionAllocationInput): Promise<BatchQuery> {
   const location = await sessionLocationGuard(db, input)
+  const span = await queryFirst<{ starts_at: string; ends_at: string }>(db, 'SELECT starts_at, ends_at FROM product_sessions WHERE id=? AND organization_id=?', [input.sessionId, input.organizationId])
+  const availability = span ? await memberAvailabilityJson(db, input.env, input.organizationId, { from: span.starts_at, until: span.ends_at }, (await sessionProviderIds(db, input.organizationId, { sessionId: input.sessionId })).members) : '{}'
   return { query: `${input.capturedPaymentId ? `EXISTS (SELECT 1 FROM payment_checkout_holds h JOIN payments p ON p.id=h.payment_id WHERE p.id=? AND p.organization_id=? AND p.state='captured' AND p.refunded_amount=0 AND h.status IN ('active','released') AND h.expires_at>? AND h.session_id=? AND h.quantity=? AND h.organization_id=p.organization_id AND h.amount=p.amount AND h.currency=p.currency) AND ` : ''}${input.requireUndecided
         ? `EXISTS (SELECT 1 FROM requests WHERE id = ? AND organization_id = ? AND updated_at = ?)
            AND NOT EXISTS (SELECT 1 FROM activity_entries WHERE dedupe_key = ?) AND `
@@ -915,7 +951,7 @@ export async function sessionAllocationPredicate(db: DbClient, input: SessionAll
       ...(input.requireUndecided
         ? [input.requireUndecided.requestId, input.requireUndecided.organizationId, input.requireUndecided.updatedAt, input.requireUndecided.decisionDedupeKey]
         : []),
-      input.sessionId, input.organizationId, input.productId, ...location.params!, input.now, input.replacingBookingId ?? null, input.capturedPaymentId ?? null, ...(input.capturedPaymentId ? [input.capturedPaymentId] : []), input.partySize, input.capturedPaymentId ?? null, input.replacingBookingId ?? null,
+      input.sessionId, input.organizationId, input.productId, ...location.params!, input.now, ...providerAvailabilityParams(availability), input.replacingBookingId ?? null, input.capturedPaymentId ?? null, ...(input.capturedPaymentId ? [input.capturedPaymentId] : []), input.partySize, input.capturedPaymentId ?? null, input.replacingBookingId ?? null,
   ] }
 }
 
@@ -934,6 +970,7 @@ export async function sessionMoveQuery(db: DbClient, input: SessionAllocationInp
 }
 
 export async function sessionClaimQuery(db: DbClient, input: {
+  env: CloudflareEnv
   bookingId: string
   organizationId: string
   productId: string
@@ -1003,6 +1040,7 @@ export async function sessionClaimQuery(db: DbClient, input: {
  * a second time.
  */
 export async function claimSessionCapacity(db: DbClient, input: {
+  env: CloudflareEnv
   organizationId: string
   productId: string
   sessionId: string
@@ -1083,17 +1121,17 @@ export async function setBookingStatus(db: DbClient, input: {
  * a session. A series change is an explicit, scoped operation the caller makes
  * over the sessions it names.
  */
-export async function getSessionAvailability(db: DbClient, organizationId: string, productId: string, sessionId: string): Promise<SessionAvailability> {
+export async function getSessionAvailability(db: DbClient, env: CloudflareEnv, organizationId: string, productId: string, sessionId: string): Promise<SessionAvailability> {
   const session = await queryFirst<ProductSession>(db, 'SELECT * FROM product_sessions WHERE organization_id=? AND product_id=? AND id=?', [organizationId, productId, sessionId])
   if (!session) throw new HTTPError({ statusCode: 404, statusMessage: 'Session not found for this offering' })
-  const sessions = await listSessions(db, { organizationId, productId, fromInstant: session.starts_at, toInstant: session.ends_at, statuses: ['scheduled', 'cancelled'] })
+  const sessions = await listSessions(db, { env, organizationId, productId, fromInstant: session.starts_at, toInstant: session.ends_at, statuses: ['scheduled', 'cancelled'] })
   const result = sessions.find(row => row.id === sessionId)
   if (!result) throw new Error('The saved session could not be read back')
   return result
 }
 
 export async function createSession(db: DbClient, input: {
-  organizationId: string; productId: string; locationId: string; startsAt: string; endsAt: string; capacity?: number | null; actorId: string; idempotencyKey: string
+  env: CloudflareEnv; organizationId: string; productId: string; locationId: string; startsAt: string; endsAt: string; capacity?: number | null; actorId: string; idempotencyKey: string
 }): Promise<SessionAvailability[]> {
   if (typeof input.idempotencyKey !== 'string') badRequest('An idempotency key is required')
   const key = input.idempotencyKey.trim()
@@ -1106,7 +1144,7 @@ export async function createSession(db: DbClient, input: {
     if (record.requestHash !== requestHash) throw new HTTPError({ statusCode: 409, statusMessage: 'This idempotency key belongs to a different session' })
     const ids = record.metadata.session_ids
     if (!Array.isArray(ids) || !ids.length || ids.some(id => typeof id !== 'string')) throw new Error('The session creation record does not identify its sessions')
-    return Promise.all(ids.map(id => getSessionAvailability(db, input.organizationId, input.productId, id)))
+    return Promise.all(ids.map(id => getSessionAvailability(db, input.env, input.organizationId, input.productId, id)))
   }
   const earlier = await replay()
   if (earlier) return earlier
@@ -1131,10 +1169,11 @@ export async function createSession(db: DbClient, input: {
     if (isUniqueDedupeConflict(error)) { const concurrent = await replay(); if (concurrent) return concurrent }
     throw error
   }
-  return Promise.all(sessions.map(session => getSessionAvailability(db, input.organizationId, input.productId, session.id)))
+  return Promise.all(sessions.map(session => getSessionAvailability(db, input.env, input.organizationId, input.productId, session.id)))
 }
 
 export async function updateSession(db: DbClient, input: {
+  env: CloudflareEnv
   organizationId: string
   sessionId: string
   productId?: string
@@ -1174,6 +1213,7 @@ export async function updateSession(db: DbClient, input: {
   }
 
   const now = new Date().toISOString()
+  const availability = await memberAvailabilityJson(db, input.env, input.organizationId, { from: startsAt, until: endsAt }, (await sessionProviderIds(db, input.organizationId, { sessionId: input.sessionId })).members)
   const location = session.location_id ? await queryFirst<SessionLocation>(db, 'SELECT id,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id=?', [input.organizationId, session.location_id]) : null
   const moved = startsAt !== session.starts_at || endsAt !== session.ends_at
   if (moved && session.location_id && (!location || !locationAllowsBooking({ starts_at: startsAt, ends_at: endsAt }, location))) badRequest('This session is outside opening hours or during a closure')
@@ -1203,7 +1243,7 @@ export async function updateSession(db: DbClient, input: {
       startsAt, endsAt, capacity,
       input.status ?? session.status, now, input.actorId,
       input.organizationId, input.sessionId, session.updated_at,
-      ...(capacity === null ? [] : [capacity]), ...locationGuard.params!, startsAt, endsAt, input.status ?? session.status, startsAt, endsAt,
+      ...(capacity === null ? [] : [capacity]), ...locationGuard.params!, startsAt, endsAt, input.status ?? session.status, startsAt, endsAt, ...providerAvailabilityParams(availability),
     ],
   }, organizationEventQuery({ organizationId: input.organizationId, locationId: session.location_id, actorId: input.actorId, eventType: 'product.updated', entityType: 'session', entityId: session.id, onlyIfPreviousChangedOneRow: true,
     beforeState: { starts_at: session.starts_at, ends_at: session.ends_at, capacity: session.capacity, status: session.status }, afterState: { starts_at: startsAt, ends_at: endsAt, capacity, status: input.status ?? session.status } }),
@@ -1214,7 +1254,7 @@ export async function updateSession(db: DbClient, input: {
       statusMessage: 'This session, its opening hours or its capacity changed, or it has live bookings; reload and resolve the conflict',
     })
   }
-  return getSessionAvailability(db, input.organizationId, session.product_id, session.id)
+  return getSessionAvailability(db, input.env, input.organizationId, session.product_id, session.id)
 }
 
 /** The local calendar date a session falls on, for grouping in a UI. */

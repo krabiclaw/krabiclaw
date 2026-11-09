@@ -19,7 +19,7 @@ export default defineHandler(async (event) => {
   const sessionId = getRouterParam(event, 'sessionId')
   if (!organizationId || !productId || !sessionId) return jsonResponse({ error: 'Organization, product and session IDs are required' }, { status: 400 })
   try {
-    const { db, session: auth, organization } = await requireProductAccess(event, organizationId, productId)
+    const { db, env, session: auth, organization } = await requireProductAccess(event, organizationId, productId)
     // A product id in the path is not authorized by the site in the path.
     await requireOrganizationProduct(db, { organizationId: organization.id, productId })
     const body = await readStrictBody<{ starts_at?: unknown; ends_at?: unknown; capacity?: unknown; status?: unknown; expected_updated_at: string }>(event, {
@@ -36,6 +36,7 @@ export default defineHandler(async (event) => {
       return jsonResponse({ error: 'capacity must be a non-negative integer or null' }, { status: 400 })
     }
     const session = await updateSession(db, {
+      env,
       organizationId: organization.id, productId, sessionId, actorId: auth.user.id,
       expectedUpdatedAt: body.expected_updated_at,
       startsAt: typeof body.starts_at === 'string' ? body.starts_at : undefined,

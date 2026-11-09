@@ -135,8 +135,9 @@ It requires the target Worker to be running and `CANARY_LOGIN_PASSWORD` for the
 authorized account (`--email` selects it). Remote targets also require an explicit
 `--base-url`.
 
-Only production runs the `social-card-backfill` task, bounded to a small number
-of owners per night. Staging schedules only the Channex sync, ARI and revision queues.
+Social cards are rendered by the write that changes their inputs and only where
+Cloudflare Images is configured (production). Staging schedules only the Channex
+sync, ARI and revision queues.
 
 An explicitly requested ordinary staging refresh uses `corepack yarn db:pull:staging`.
 It reads the deployed production Worker's `DB` source and preserves staging's `jwks` signing

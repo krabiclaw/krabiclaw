@@ -1,4 +1,3 @@
-import { refreshProductBusy } from '~/server/domain/member-scheduling'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { CapacityUnavailableError, claimSessionCapacity, requireBookingConfig } from '~/server/utils/availability'
 import { cloudflareEnv, cleanString } from '~/server/utils/api-response'
@@ -254,7 +253,6 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     }
   }
 
-  await refreshProductBusy(db, env, organization.id, product.id)
   const cancellation = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', threadId)
   const cancellationTokenHash = await hashReservationCancelToken(cancellation.token)
   if (requiresPayment && !await hasOrganizationEntitlement(env,organizationId,'payments')) return creationResult({error:'Payments entitlement is required to collect online payment',code:'payment_required'}, {status:409})
@@ -301,6 +299,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     // raises nothing, so a thread written ahead of it would commit on its own.
     // The booking takes its request id once the thread exists.
     const claim = await claimSessionCapacity(db, {
+      env,
       organizationId: organization.id, productId: product.id, sessionId: session.id,
       productVariantId, partySize, userId, requestId: null,
       following: bookingId => [

@@ -667,7 +667,7 @@ test('a v15 export transfers into the v16 baseline: required clocks and currenci
   const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-v15-transfer-'))
   const v15 = JSON.parse(readFileSync('migrations-history/v15/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
   const weekly = Array.from({ length: 7 }, (_, weekday) => ({ weekday, start: '09:00', end: '10:00' }))
-  const windows = workingWindows('America/New_York', weekly)
+  const windows = workingWindows('America/New_York', weekly, { from: new Date(now), until: new Date(Date.parse(now) + 45 * 86_400_000) })
   const export15 = (name: string, { timezone = 'America/New_York', currency = 'USD' as string | null, member = 'member-1' as string | null, hours = true, secondProvider = false, team = false } = {}) => {
     const path = join(directory, name)
     const source = new Database(path)
@@ -678,11 +678,11 @@ test('a v15 export transfers into the v16 baseline: required clocks and currenci
     source.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', 'org', 'en', 1, 'published')").run()
     source.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('user-1', 'Provider', 'p@example.com', 1, 1, 1)").run()
     source.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('member-1', 'org', 'user-1', 'owner', 1)").run()
-    if (hours) source.prepare("INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until, calendar_revision, updated_at, updated_by) VALUES ('member-1', 'org', 'America/New_York', ?, '[]', ?, ?, 'revision', ?, 'user-1')").run(JSON.stringify(weekly), JSON.stringify(windows.intervals), windows.until, now)
+    if (hours) source.prepare("INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until, calendar_revision, updated_at, updated_by) VALUES ('member-1', 'org', 'America/New_York', ?, '[]', ?, ?, 'revision', ?, 'user-1')").run(JSON.stringify(weekly), JSON.stringify(windows), '2026-11-27T00:00:00.000Z', now)
     if (secondProvider || team) {
       source.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('user-2', 'Second provider', 'second@example.com', 1, 1, 1)").run()
       source.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('member-2', 'org', 'user-2', 'owner', 1)").run()
-      source.prepare("INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until, calendar_revision, updated_at, updated_by) VALUES ('member-2', 'org', 'America/New_York', ?, '[]', ?, ?, 'revision', ?, 'user-2')").run(JSON.stringify(weekly), JSON.stringify(windows.intervals), windows.until, now)
+      source.prepare("INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until, calendar_revision, updated_at, updated_by) VALUES ('member-2', 'org', 'America/New_York', ?, '[]', ?, ?, 'revision', ?, 'user-2')").run(JSON.stringify(weekly), JSON.stringify(windows), '2026-11-27T00:00:00.000Z', now)
     }
     source.prepare("INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES ('consult', 'org', 'service', 'Consult', 'consult', 'user-1', 'user-1')").run()
     source.prepare("INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES ('consult-default', 'org', 'consult', 'Consult', 'user-1', 'user-1')").run()
@@ -732,7 +732,7 @@ test('a v15 export transfers into the v16 baseline: required clocks and currenci
       assert.equal(generated.length, 60)
       assert(generated.every(row => row.assigned_member_id === 'member-1' && row.timezone === 'America/New_York' && row.capacity === 1 && row.status === 'scheduled'
         && Date.parse(row.ends_at) - Date.parse(row.starts_at) === 30 * 60_000
-        && windows.intervals.some(window => window.start <= row.starts_at && window.end >= row.ends_at)))
+        && windows.some(window => window.start <= row.starts_at && window.end >= row.ends_at)))
       const before = target.prepare('SELECT * FROM product_sessions ORDER BY id').all()
       const config = target.prepare("SELECT * FROM product_booking_configs WHERE product_id = 'consult'").get()
       const queries = await prepareProviderHoursSessions(drizzle(target) as unknown as Parameters<typeof prepareProviderHoursSessions>[0], config as Parameters<typeof prepareProviderHoursSessions>[1], { actorId: 'another-operator', now: '2026-10-13T00:01:00.000Z' })

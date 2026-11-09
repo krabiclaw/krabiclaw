@@ -104,7 +104,7 @@ export async function handleTaskTools(ctx: McpExecutorContext): Promise<unknown>
         ...(args.notes !== undefined ? { notes: args.notes } : {}), ...(args.title !== undefined ? { title: args.title } : {}) }) }
     case 'complete_task':
     case 'skip_task': {
-      const file = args.file === undefined ? null : toolFileReference(args.file, 'file')
+      const file = toolName === 'complete_task' && args.file !== undefined ? toolFileReference(args.file, 'file') : null
       const photos = file ? await (async () => {
         const resolved = await resolveUserUploadedMediaFile(file, MAX_IMAGE_BYTES)
         if (resolved.kind !== 'image') throw new HTTPError({ statusCode: 422, statusMessage: 'A task accepts only photos', data: { code: 'INVALID_PHOTO', field: 'file' } })

@@ -75,7 +75,6 @@ export interface Post {
   call_to_action: PostCallToAction | null
   status: 'draft' | 'published'
   visibility: 'listed' | 'unlisted'
-  source: 'manual' | 'template'
   published_at: string | null
   public_path: string
   canonical_url: string | null
@@ -99,14 +98,13 @@ interface PostRow {
   metadata_json: string
   status: Post['status']
   visibility: Post['visibility']
-  source: Post['source']
   published_at: string | null
   created_by: string | null
   created_at: string
   updated_at: string
 }
 
-const POST_COLUMNS = `p.id, p.organization_id, p.location_id, p.slug, p.title, p.summary AS body, p.metadata_json, p.status, p.visibility, p.source,
+const POST_COLUMNS = `p.id, p.organization_id, p.location_id, p.slug, p.title, p.summary AS body, p.metadata_json, p.status, p.visibility,
   p.published_at, p.created_by, p.created_at, p.updated_at`
 
 function callToActionOf(metadataJson: string): PostCallToAction | null {
@@ -323,7 +321,7 @@ export async function postMediaMutationQueries(db: DbClient, input: { organizati
   const updatedAt = new Date(Math.max(Date.now(), Date.parse(post.updated_at) + 1)).toISOString()
   return [
     postPublicationIdleQuery(input.organizationId, input.ownerId),
-    { query: `UPDATE content_documents SET updated_at = ?, source = 'manual' WHERE id = ? AND organization_id = ? AND kind = 'social_post' AND row_role = 'root'`,
+    { query: `UPDATE content_documents SET updated_at = ? WHERE id = ? AND organization_id = ? AND kind = 'social_post' AND row_role = 'root'`,
       params: [updatedAt, input.ownerId, input.organizationId] },
   ]
 }
@@ -386,7 +384,9 @@ export async function createPost(
         await createContentDocumentWithBlocks(db, {
           id, rowRole: 'root', kind: 'social_post', locale: await getSourceLocale(db, organizationId), organizationId,
           locationId: data.location_id ?? null, slug, title: data.title ?? null, summary: data.body ?? null,
-          status: 'draft', visibility: data.visibility ?? 'listed', source: 'manual', createdBy, updatedBy: createdBy,
+          status: 'draft', visibility: data.visibility ?? 'listed', createdBy, updatedBy: createdBy,
+          // Unread for social posts; v25's content_documents_social_source_check still wants a value until the v26 epoch drops it.
+          source: 'manual',
           metadata: data.call_to_action ? { call_to_action: data.call_to_action } : {},
         }, [], { additionalQueriesAfter: [
           ...insertInitialMediaPlacements({ organizationId, placement: { owner_type: 'content_document', owner_id: id, slot: 'cover' }, media: cover, now }),
@@ -454,7 +454,6 @@ export async function updatePost(
     return await getPost(db, env, organizationId, postId)
   }
   if (data.location_id !== undefined) await validatePostLocation(db, organizationId, data.location_id)
-  const contentChanged = data.title !== undefined || data.body !== undefined || data.call_to_action !== undefined
   const payloadChanged = data.body !== undefined || data.call_to_action !== undefined
   if (payloadChanged) await assertPublicationIdle(db, organizationId, postId)
 
@@ -464,7 +463,6 @@ export async function updatePost(
   if (data.visibility !== undefined) changes.visibility = data.visibility
   if (data.location_id !== undefined) changes.location_id = data.location_id
   if (data.call_to_action) changes.metadata = { call_to_action: data.call_to_action }
-  if (contentChanged) changes.source = 'manual'
   await updateContentDocument(db, postId, {
     expected_updated_at: input.expectedUpdatedAt, changes,
     additionalQueriesBefore: payloadChanged ? [postPublicationIdleQuery(organizationId, postId)] : [],

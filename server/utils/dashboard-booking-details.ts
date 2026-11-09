@@ -1,5 +1,6 @@
 import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
-import { readMemberScheduling, refreshMemberBusy } from '~/server/domain/member-scheduling'
+import { memberBusyIntervals } from '~/server/domain/member-scheduling'
+import type { CloudflareEnv } from '~/server/utils/auth'
 import { getGuestRequest, REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import type { H3Event } from 'nitro'
@@ -259,14 +260,11 @@ export async function loadDashboardBookingDetails(
   const row = await loadBookingRow(context.db, { organizationId: context.organization.id }, input.type, input.bookingId)
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   await assertBookingAccess(context, row)
-  // The provider's busy status is read after the same refresh public
-  // availability performs; a failed refresh is stored as its busy_error.
-  if (row.assigned_member_id) await refreshMemberBusy(context.db, context.env, row.assigned_member_id)
   const canReadPayments=await roleAllows({organizationId:context.organization.id,role:context.organization.role,permissions:{payments:['read']}})
   const canReassignProvider = input.type === 'booking' && row.scheduling_mode === 'provider' && row.session_status === 'scheduled'
     && ['pending', 'confirmed'].includes(row.status) && row.starts_at > new Date().toISOString() && isOrganizationWideRole(context.organization.role)
     && await roleAllows({ organizationId: context.organization.id, role: context.organization.role, permissions: { members: ['update'] } })
-  return composeBookingDetails(context.db, row, input.type, { canReadPayments, canReassignProvider })
+  return composeBookingDetails(context.db, row, input.type, { env: context.env, canReadPayments, canReassignProvider })
 }
 
 /**
@@ -299,7 +297,7 @@ async function composeBookingDetails(
   db: DbClient,
   row: BookingRow,
   type: DashboardBookingType,
-  reader: { canReadPayments: boolean; canReassignProvider: boolean; buyerUserId?: undefined } | { buyerUserId: string; canReadPayments?: undefined; canReassignProvider?: undefined },
+  reader: { env: CloudflareEnv; canReadPayments: boolean; canReassignProvider: boolean; buyerUserId?: undefined } | { buyerUserId: string; env?: undefined; canReadPayments?: undefined; canReassignProvider?: undefined },
 ): Promise<DashboardBookingDetails> {
   if (row.location_id !== null && !row.location_title) throw new HTTPError({ statusCode: 500, message: 'The booking location is missing its title' })
 
@@ -322,8 +320,13 @@ async function composeBookingDetails(
       : queryFirst<{ contactPhone: string | null }>(db, 'SELECT contact_phone AS contactPhone FROM organization WHERE id = ?', [row.organization_id]),
   ])
 
-  const provider=!reader.buyerUserId&&row.assigned_member_id?await queryFirst<{name:string|null;busy_error:string|null;busy_checked_at:string|null;conflict:number}>(db,`SELECT ${MEMBER_NAME_SQL} name,ms.busy_error,ms.busy_checked_at,EXISTS(SELECT 1 FROM json_each(ms.busy_json) busy WHERE json_extract(busy.value,'$.start')<? AND json_extract(busy.value,'$.end')>?) conflict FROM member m LEFT JOIN user u ON u.id=m.userId LEFT JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE m.id=? AND m.organizationId=?`,[row.ends_at,row.starts_at,row.assigned_member_id,row.organization_id]):null
-  const scheduling=!reader.buyerUserId&&row.assigned_member_id ? await readMemberScheduling(db,row.organization_id,row.assigned_member_id) : null
+  const provider=!reader.buyerUserId&&row.assigned_member_id?await queryFirst<{name:string|null}>(db,`SELECT ${MEMBER_NAME_SQL} name FROM member m LEFT JOIN user u ON u.id=m.userId LEFT JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE m.id=? AND m.organizationId=?`,[row.assigned_member_id,row.organization_id]):null
+  // The provider's Google calendar is asked about this booking's time when the team reads it; a calendar that cannot be read says why.
+  let providerConflict=false, providerCalendarStatus: string|null=null
+  if (reader.env && row.assigned_member_id) {
+    try { providerConflict=(await memberBusyIntervals(db,reader.env,row.organization_id,row.assigned_member_id,{from:row.starts_at,until:row.ends_at})).some(busy=>busy.start<row.ends_at&&busy.end>row.starts_at) }
+    catch (error) { providerCalendarStatus=error instanceof Error?error.message:String(error) }
+  }
   const paymentIds=reader.buyerUserId
     ?await queryAll<{id:string}>(db,'SELECT id FROM payments WHERE organization_id=? AND subject_type=? AND subject_id=? AND buyer_user_id=? ORDER BY created_at,id',[row.organization_id,type,row.operational_id,reader.buyerUserId])
     :reader.canReadPayments?await queryAll<{id:string}>(db,'SELECT id FROM payments WHERE organization_id=? AND subject_type=? AND subject_id=? ORDER BY created_at,id',[row.organization_id,type,row.operational_id]):[]
@@ -336,7 +339,7 @@ async function composeBookingDetails(
   const guestCanRetryCancellation = Boolean(reader.buyerUserId && row.status === 'cancelled' && row.cancellation_used_at
     && await canRetryGuestVisitRefund(db, { organizationId: row.organization_id, subjectType: type, subjectId: row.operational_id, requestId: row.id, buyerUserId: reader.buyerUserId }))
   return {
-    assignedMemberId: row.assigned_member_id, assignedMemberName:provider?.name??null,providerConflict:Boolean(provider?.conflict),providerCalendarStatus: scheduling?.calendar_ids.length && scheduling.calendar_status !== 'ready' ? scheduling.busy_error || `Busy-calendar status: ${scheduling.calendar_status}` : null,operationalUpdatedAt:row.operational_updated_at,
+    assignedMemberId: row.assigned_member_id, assignedMemberName:provider?.name??null,providerConflict,providerCalendarStatus,operationalUpdatedAt:row.operational_updated_at,
     canReassignProvider: reader.canReassignProvider === true,
     id: row.id,
     operationalBookingId: row.operational_id,

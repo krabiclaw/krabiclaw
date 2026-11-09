@@ -4,7 +4,7 @@ import { symmetricEncrypt } from 'better-auth/crypto'
 import { Miniflare } from 'miniflare'
 import { generateSQLiteDrizzleJson,generateSQLiteMigration } from 'drizzle-kit/api'
 import * as schema from '../../server/db/schema.ts'
-import { writeMemberScheduling, readMemberScheduling, memberSchedulingList, requireSchedulingAccess, refreshMemberBusy, refreshWorkingWindows, workingWindows, selectBusyCalendars } from '../../server/domain/member-scheduling.ts'
+import { writeMemberScheduling, readMemberScheduling, memberSchedulingList, requireSchedulingAccess, workingWindows, selectBusyCalendars } from '../../server/domain/member-scheduling.ts'
 import { claimSessionCapacity, CapacityUnavailableError } from '../../server/utils/availability.ts'
 import { publicProductHosts } from '../../server/utils/public-provider.ts'
 import { requestInsertQueries, threadPayloadForGuest, getGuestRequest } from '../../server/domain/requests.ts'
@@ -16,7 +16,7 @@ import { memberAccessPrincipal, resolveOrganizationMembership } from '../../serv
 import { respondToBookingChange, bookingChangeViews } from '../../server/domain/guest-threads/booking-changes.ts'
 import { reassignBookingProvider } from '../../server/domain/provider-reassignment.ts'
 import { storeCalendarSelection, readCalendarIntegration, disconnectCalendar, syncCalendarOrganization } from '../../server/utils/google-calendar.ts'
-import { BUSY_FRESHNESS_MS, MEMBER_BUSY_SCOPES } from '../../shared/member-scheduling.ts'
+import { MEMBER_BUSY_SCOPES } from '../../shared/member-scheduling.ts'
 import { roleSatisfies } from '../../server/utils/mcp-auth.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
@@ -38,7 +38,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   await assert.rejects(()=>requireSchedulingAccess(owner,'one'),{statusCode:404,message:'Member not found'})
   await assert.rejects(()=>writeMemberScheduling(own,'member-two',hours))
   await assert.rejects(()=>writeMemberScheduling(own,'member-one',{...hours,public_approved:true}))
-  assert.equal(await readMemberScheduling(db,'org','member-one'),null,'membership can exist before either profile or hours are saved')
+  assert.equal(await readMemberScheduling(db,env,'org','member-one'),null,'membership can exist before either profile or hours are saved')
   assert.deepEqual((await memberSchedulingList(owner)).members.map(({id,name})=>({id,name})).sort((a,b)=>a.id.localeCompare(b.id)),[{id:'member-one',name:'one'},{id:'member-owner',name:'owner'},{id:'member-two',name:'two'}],'members without an authored name use their account name')
   await assert.rejects(()=>memberSchedulingList({...own,userId:'outsider'}),{statusCode:403,message:'Membership required'})
   const initialInvalidations=await db.prepare("SELECT count(*) n FROM public_resource_cache_invalidations WHERE organization_id='org'").first('n')
@@ -55,8 +55,6 @@ test('member self-service uses Better Auth permissions, public approval is admin
   for(const field of ['timezone','weekly_json','time_off_json','windows_json','windows_until'])assert.equal(profileRow?.[field],null,'a profile does not fabricate working facts')
   await assert.rejects(db.prepare("UPDATE member_scheduling SET timezone='UTC' WHERE member_id='member-one'").run(),/member_scheduling_hours_check/)
   await assert.rejects(db.prepare("UPDATE member_scheduling SET weekly_json='[]' WHERE member_id='member-one'").run(),/member_scheduling_hours_check/)
-  await refreshWorkingWindows(db)
-  assert.deepEqual(await db.prepare("SELECT * FROM member_scheduling WHERE member_id='member-one'").first(),profileRow,'window refresh excludes profile-only members')
   await assert.rejects(()=>selectBusyCalendars(own,'member-one',{account_id:null,calendar_ids:[]}),{statusCode:409,message:'Save member hours first before selecting busy-input calendars'})
   await assert.rejects(()=>writeMemberScheduling(own,'member-one',{expected_updated_at:profile.updated_at,timezone:'UTC'}),/together the first time/)
   await assert.rejects(()=>writeMemberScheduling(own,'member-one',{expected_updated_at:profile.updated_at,weekly:[]}),/together the first time/)
@@ -82,7 +80,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   const approved=await writeMemberScheduling(owner,'member-one',{...hours,expected_updated_at:saved!.updated_at,public_approved:true})
   assert.equal(Date.parse(approved.updated_at),Date.parse(saved.updated_at)+1,'the revision advances even within the same millisecond')
   clock.mock.restore()
-  assert.equal((await readMemberScheduling(db,'org','member-one'))?.public_approved,1)
+  assert.equal((await readMemberScheduling(db,env,'org','member-one'))?.public_approved,1)
   await assert.rejects(()=>writeMemberScheduling(own,'member-one',{...hours,expected_updated_at:saved!.updated_at}),/changed/)
   const changed=await writeMemberScheduling(own,'member-one',{...hours,expected_updated_at:approved!.updated_at,public_name:'Changed public name'})
   assert.equal(changed?.public_approved,0,'self-edited content loses prior approval')
@@ -110,7 +108,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
    storeCalendarSelection(db,'org',{account_id:'busy-linked',calendar_id:'same-calendar',calendar_name:'Synthetic calendar'}),
   ])
   assert.equal(raced.filter(result=>result.status==='fulfilled').length,1,'input and output selection cannot race into the same calendar')
-  const inputSelection = await readMemberScheduling(db,'org','member-one')
+  const inputSelection = await readMemberScheduling(db,env,'org','member-one')
   const outputSelection = await readCalendarIntegration(db,'org')
   assert.equal(Number(Boolean(inputSelection?.calendar_account_id))+Number(Boolean(outputSelection)),1)
   await selectBusyCalendars(own,'member-one',{account_id:null,calendar_ids:[]})
@@ -134,29 +132,17 @@ test('member self-service uses Better Auth permissions, public approval is admin
    if(rejectLast&&duration<30*86400000)return rejectLast==='invalid'?new Response('not JSON',{status:502}):Response.json({error:{message:'Provider rejected the final window'}},{status:400})
    return Response.json({calendars:{'busy-calendar':{busy:Date.parse(distant.start)>=Date.parse(body.timeMin)&&Date.parse(distant.start)<Date.parse(body.timeMax)?[distant]:[]}}})
   })
-  assert.equal(await refreshMemberBusy(db,env,'member-one',true),undefined)
+  const ready=await readMemberScheduling(db,env,'org','member-one')
+  assert.deepEqual({status:ready?.calendar_status,error:ready?.calendar_error},{status:'ready',error:null},'a member read asks Google for the horizon ahead')
   assert.equal(Date.parse(ranges.at(-1)!.timeMax)-Date.parse(ranges[0]!.timeMin),94*86400000)
   for(let i=1;i<ranges.length;i++)assert.equal(ranges[i]!.timeMin,ranges[i-1]!.timeMax,'busy coverage has no gaps')
-  const complete=await db.prepare("SELECT busy_json,busy_from,busy_until,busy_error FROM member_scheduling WHERE member_id='member-one'").first()
-  assert.deepEqual(JSON.parse(String(complete?.busy_json)),[distant])
-  assert.equal(complete?.busy_error,null)
+  assert.deepEqual(await db.prepare("SELECT busy_json,busy_checked_at FROM member_scheduling WHERE member_id='member-one'").first(),{busy_json:'[]',busy_checked_at:null},'nothing Google said is stored')
   rejectLast='provider'
-  assert.equal((await refreshMemberBusy(db,env,'member-one',true))?.error,'Google busy-calendar check failed (400): Provider rejected the final window')
-  const incomplete=await db.prepare("SELECT busy_json,busy_from,busy_until FROM member_scheduling WHERE member_id='member-one'").first()
-  assert.deepEqual(incomplete,{busy_json:complete?.busy_json,busy_from:complete?.busy_from,busy_until:complete?.busy_until},'failed final window cannot replace complete coverage')
-  const requestsAfterFailure=ranges.length
-  assert.equal((await refreshMemberBusy(db,env,'member-one'))?.error,'Google busy-calendar check failed (400): Provider rejected the final window')
-  assert.equal(ranges.length,requestsAfterFailure,'public reads retain the visible failed result without calling Google again during the retry interval')
-  assert.equal((await readMemberScheduling(db,'org','member-one'))?.calendar_status,'error')
+  const failedRead=await readMemberScheduling(db,env,'org','member-one')
+  assert.deepEqual({status:failedRead?.calendar_status,error:failedRead?.calendar_error},{status:'error',error:'Google busy-calendar check failed (400): Provider rejected the final window'},'a read reports the calendar Google refused')
   rejectLast='invalid'
-  assert.match((await refreshMemberBusy(db,env,'member-one',true))!.error,/^Google busy-calendar check failed \(502\): Invalid error response/)
-  assert.deepEqual(await db.prepare("SELECT busy_json,busy_from,busy_until FROM member_scheduling WHERE member_id='member-one'").first(),incomplete)
-  assert(ranges.length>requestsAfterFailure,'explicit Recheck bypasses the retry interval')
+  assert.match((await readMemberScheduling(db,env,'org','member-one'))!.calendar_error!,/^Google busy-calendar check failed \(502\)/)
   rejectLast=false
-  const afterRetryInterval=Date.now()+BUSY_FRESHNESS_MS
-  t.mock.method(Date,'now',()=>afterRetryInterval)
-  assert.equal(await refreshMemberBusy(db,env,'member-one'),undefined)
-  assert.equal((await readMemberScheduling(db,'org','member-one'))?.busy_error,null,'a successful check after the interval clears the persisted error')
   t.mock.restoreAll()
   await selectBusyCalendars(own,'member-one',{account_id:null,calendar_ids:[]})
   const day=new Date(Date.now()+3*86400000).toISOString().slice(0,10),start=`${day}T14:00:00.000Z`,end=`${day}T15:00:00.000Z`
@@ -166,10 +152,10 @@ test('member self-service uses Better Auth permissions, public approval is admin
    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,scheduling_mode,assigned_member_id,duration_minutes,default_capacity,held_online,created_by,updated_by)VALUES(?,'org','provider',?,60,1,1,'owner','owner')").bind(id,member).run()
    await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES(?,'org',?,?,'UTC',?,?,1,'owner','owner')").bind(`session-${id}`,id,member,start,end).run()
   }
-  const stable=()=>db.prepare("SELECT timezone,weekly_json,time_off_json,windows_json,windows_until,calendar_account_id,calendar_ids_json,calendar_revision,busy_json,busy_from,busy_until,busy_checked_at,busy_error FROM member_scheduling WHERE member_id='member-one'").first()
+  const stable=()=>db.prepare("SELECT timezone,weekly_json,time_off_json,calendar_account_id,calendar_ids_json FROM member_scheduling WHERE member_id='member-one'").first()
   const stableBefore=await stable()
   const sessionsBefore=(await db.prepare('SELECT * FROM product_sessions ORDER BY id').all()).results
-  const current=await readMemberScheduling(db,'org','member-one')
+  const current=await readMemberScheduling(db,env,'org','member-one')
   const profileOnly=await writeMemberScheduling(own,'member-one',{expected_updated_at:current!.updated_at,public_bio:null})
   assert.equal(profileOnly.public_bio,null,'explicit null clears the profile field')
   assert.deepEqual(await stable(),stableBefore,'profile edits retain all schedule, window and calendar bytes')
@@ -180,7 +166,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   let afterFailedProfile:Awaited<ReturnType<typeof writeMemberScheduling>>|null=null
   try {
    await assert.rejects(()=>writeMemberScheduling(own,'member-one',{expected_updated_at:profileOnly.updated_at,weekly:shorterHours}),/Injected session completion failure/)
-   const pending=await readMemberScheduling(db,'org','member-one')
+   const pending=await readMemberScheduling(db,env,'org','member-one')
    assert.deepEqual(pending!.weekly,shorterHours,'the reported failure can follow a persisted Hours change')
    assert.deepEqual((await db.prepare('SELECT * FROM product_sessions ORDER BY id').all()).results,sessionsBefore,'a failed session batch commits no partial slots')
    const pendingBytes=await stable()
@@ -197,22 +183,25 @@ test('member self-service uses Better Auth permissions, public approval is admin
   await writeMemberScheduling(own,'member-one',{expected_updated_at:completed.updated_at,timezone:completed.timezone!,weekly:completed.weekly!,time_off:completed.time_off!})
   assert.deepEqual(await stable(),completedBytes,'unchanged Hours retain all window and calendar bytes')
   assert.deepEqual((await db.prepare('SELECT * FROM product_sessions ORDER BY id').all()).results,completedSessions,'idempotent Hours completion retains every persisted session byte')
-  await db.prepare("UPDATE member_scheduling SET calendar_account_id='missing-account',calendar_ids_json='[\"busy-calendar\"]',busy_checked_at=?,busy_from=?,busy_until=?,busy_error=NULL WHERE member_id='member-one'").bind(new Date().toISOString(),new Date().toISOString(),`${day}T20:00:00.000Z`).run()
-  const failed=await refreshMemberBusy(db,env,'member-one',true)
-  assert(failed?.error)
-  assert((await readMemberScheduling(db,'org','member-one'))?.busy_error)
-  await assert.rejects(()=>claimSessionCapacity(db,{organizationId:'org',productId:'one',sessionId:'session-one',productVariantId:'variant-one',partySize:1}),CapacityUnavailableError)
-  const healthy=await claimSessionCapacity(db,{organizationId:'org',productId:'two',sessionId:'session-two',productVariantId:'variant-two',partySize:1})
+  await db.prepare("UPDATE member_scheduling SET calendar_account_id='missing-account',calendar_ids_json='[\"busy-calendar\"]' WHERE member_id='member-one'").run()
+  const unreadable=await readMemberScheduling(db,env,'org','member-one')
+  assert.equal(unreadable?.calendar_status,'disconnected')
+  // A calendar that cannot be read fails the claim visibly instead of guessing the member is free.
+  await assert.rejects(()=>claimSessionCapacity(db,{env,organizationId:'org',productId:'one',sessionId:'session-one',productVariantId:'variant-one',partySize:1}),(error: unknown)=>!(error instanceof CapacityUnavailableError))
+  assert.equal(await db.prepare("SELECT count(*) n FROM bookings WHERE product_session_id='session-one'").first('n'),0)
+  const healthy=await claimSessionCapacity(db,{env,organizationId:'org',productId:'two',sessionId:'session-two',productVariantId:'variant-two',partySize:1})
   assert.equal(await db.prepare('SELECT assigned_member_id FROM bookings WHERE id=?').bind(healthy.bookingId).first('assigned_member_id'),'member-two')
   await db.prepare("UPDATE member_scheduling SET calendar_account_id=NULL WHERE member_id='member-one'").run()
-  assert((await claimSessionCapacity(db,{organizationId:'org',productId:'one',sessionId:'session-one',productVariantId:'variant-one',partySize:1})).bookingId)
-  await db.prepare("UPDATE member_scheduling SET calendar_account_id='busy-linked',busy_json=? WHERE member_id='member-one'").bind(JSON.stringify([{start,end}])).run()
-  const laterConflict = await readMemberScheduling(db,'org','member-one')
+  assert((await claimSessionCapacity(db,{env,organizationId:'org',productId:'one',sessionId:'session-one',productVariantId:'variant-one',partySize:1})).bookingId)
+  await db.prepare("UPDATE member_scheduling SET calendar_account_id='busy-linked' WHERE member_id='member-one'").run()
+  t.mock.method(globalThis,'fetch',async(input)=>{assert.equal(String(input),'https://www.googleapis.com/calendar/v3/freeBusy');return Response.json({calendars:{'busy-calendar':{busy:[{start,end}]}}})})
+  const laterConflict = await readMemberScheduling(db,env,'org','member-one')
   assert.equal(laterConflict?.calendar_conflict_count,1)
   assert.deepEqual(laterConflict?.calendar_conflicts,[{session_id:'session-one',starts_at:start,ends_at:end,booking_count:1}])
   assert.equal(await db.prepare("SELECT status FROM bookings WHERE product_session_id='session-one'").first('status'),'confirmed','later busy conflicts remain visible without cancelling the booking')
   await selectBusyCalendars(own,'member-one',{account_id:null,calendar_ids:[]})
-  assert.equal((await readMemberScheduling(db,'org','member-one'))?.calendar_conflict_count,0)
+  t.mock.restoreAll()
+  assert.equal((await readMemberScheduling(db,env,'org','member-one'))?.calendar_conflict_count,0)
   const following=new Date(Date.parse(start)+14*86400000).toISOString(),followingEnd=new Date(Date.parse(end)+14*86400000).toISOString()
   await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES('group','org','two','member-two','UTC',?,?,3,'owner','owner')").bind(following,followingEnd).run()
   await db.prepare("INSERT INTO organization_locales(id,organization_id,locale,is_source,status)VALUES('org-en','org','en',1,'published')").run()
@@ -226,7 +215,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
    const requestId=`client-${index}`,now=new Date().toISOString()
    const queries=requestInsertQueries({id:requestId,kind:'booking',organization_id:'org',location_id:null,user_id:'outsider',review_id:null,payload:threadPayloadForGuest({name:'Client',email:'outsider@example.test',phone:null}),created_at:now,updated_at:now})
    await db.batch(queries.map(query=>db.prepare(query.query).bind(...query.params!)))
-   group.push(await claimSessionCapacity(db,{organizationId:'org',productId:'two',sessionId:'group',productVariantId:'variant-two',partySize:1,requestId,userId:'outsider'}))
+   group.push(await claimSessionCapacity(db,{env,organizationId:'org',productId:'two',sessionId:'group',productVariantId:'variant-two',partySize:1,requestId,userId:'outsider'}))
   }
   const read=()=>db.prepare('SELECT id,product_session_id,assigned_member_id,updated_at FROM bookings WHERE id=?').bind(group[0]!.bookingId).first<{id:string;product_session_id:string;assigned_member_id:string;updated_at:string}>()
   const original=await read()
@@ -353,9 +342,10 @@ test('member self-service uses Better Auth permissions, public approval is admin
 })
 
 test('member working windows retain IANA timezone across DST and merge adjacent hours',()=>{
- const {intervals}=workingWindows('America/New_York',[{weekday:1,start:'09:00',end:'12:00'},{weekday:1,start:'12:00',end:'17:00'}],new Date('2026-10-26T00:00:00.000Z'))
+ const span={from:new Date('2026-10-26T00:00:00.000Z'),until:new Date('2027-10-31T00:00:00.000Z')}
+ const intervals=workingWindows('America/New_York',[{weekday:1,start:'09:00',end:'12:00'},{weekday:1,start:'12:00',end:'17:00'}],span)
  assert(intervals.some(i=>i.start==='2026-10-26T13:00:00.000Z'&&i.end==='2026-10-26T21:00:00.000Z'))
  assert(intervals.some(i=>i.start==='2026-11-02T14:00:00.000Z'&&i.end==='2026-11-02T22:00:00.000Z'))
- assert.throws(()=>workingWindows('America/New_York',[{weekday:0,start:'01:30',end:'03:30'}],new Date('2026-10-26T00:00:00.000Z')),/multiple|ambiguous/i)
- assert.throws(()=>workingWindows('America/New_York',[{weekday:0,start:'02:30',end:'03:30'}],new Date('2027-03-01T00:00:00.000Z')),/exist|invalid/i)
+ assert.throws(()=>workingWindows('America/New_York',[{weekday:0,start:'01:30',end:'03:30'}],span),/multiple|ambiguous/i)
+ assert.throws(()=>workingWindows('America/New_York',[{weekday:0,start:'02:30',end:'03:30'}],{from:new Date('2027-03-01T00:00:00.000Z'),until:new Date('2027-04-01T00:00:00.000Z')}),/exist|invalid/i)
 })

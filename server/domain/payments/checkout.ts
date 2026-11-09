@@ -1,5 +1,4 @@
 import { STAY_BOOKED_POLICIES } from '~/shared/stay-cancellation'
-import { refreshProductBusy } from '~/server/domain/member-scheduling'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { platformLocale } from '~/shared/platform-locales'
 import { requireLocationReservationConfig, reservationAllocationPredicate, reservationPolicySummarySource } from '~/server/utils/reservations'
@@ -196,8 +195,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     const following: BatchQuery[] = []
     if (input.subjectType === 'booking') {
       if (!session || !catalogPriceId) throw new Error('The selected session or price is missing')
-      await refreshProductBusy(db, env, input.organizationId, input.productId)
-      const allocation = await sessionAllocationPredicate(db, { organizationId: input.organizationId, productId: input.productId, sessionId: session.id, partySize: input.quantity, now })
+      const allocation = await sessionAllocationPredicate(db, { env, organizationId: input.organizationId, productId: input.productId, sessionId: session.id, partySize: input.quantity, now })
       hold = { query: `INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at,assigned_member_id,location_id,timezone)
         SELECT ?,?,?,?,?,?,?,?,?,?,?,?,s.starts_at,s.ends_at,'active',?,?,${sessionMemberSql('s')},s.location_id,s.timezone FROM product_sessions s JOIN product_booking_configs c ON c.product_id=s.product_id AND c.organization_id=s.organization_id WHERE s.id=? AND s.organization_id=? AND s.product_id=? AND ${allocation.query}`,
         params: [holdId,input.organizationId,input.productId,input.variantId,catalogPriceId,session.id,input.buyerUserId,input.requestId,id,input.quantity,amount,price.currency,expiresAt,now,session.id,input.organizationId,input.productId,...allocation.params!] }

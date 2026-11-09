@@ -429,10 +429,11 @@ export async function listProducts(db: DbClient, organizationId: string): Promis
 /** Public experiences use the same readiness check as publication, including sold-out sessions. */
 async function publicProductWindow(db: DbClient, organizationId: string, products: Product[], window?: { limit: number; offset: number }, env?: CloudflareEnv, sharedPaymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup>, bookableOnly = false): Promise<Product[]> {
   let setup: ReturnType<typeof readStripeCheckoutSetup> | undefined
-  const paymentSetup = sharedPaymentSetup ?? (() => {
-    if (!env) throw new Error('The organization environment is required to assess paid booking readiness')
-    return setup ??= readStripeCheckoutSetup(db, organizationId, env)
-  })
+  const requireEnv = () => {
+    if (!env) throw new Error('The organization environment is required to assess booking readiness')
+    return env
+  }
+  const paymentSetup = sharedPaymentSetup ?? (() => setup ??= readStripeCheckoutSetup(db, organizationId, requireEnv()))
   // Readiness needs the currency and the scheduled sessions; a catalog of N
   // products read both N times. They are read once here and handed down.
   const needsReadiness = products.filter(product => bookableOnly ? Boolean(product.booking || product.order_url) || product.kind === 'stay' : product.kind === 'experience' || product.kind === 'stay' || Boolean(product.booking))
@@ -440,7 +441,7 @@ async function publicProductWindow(db: DbClient, organizationId: string, product
   const [activeLocationIds, currency, allSessions] = await Promise.all([
     bookableOnly ? queryAll<{ id: string }>(db, "SELECT id FROM business_locations WHERE organization_id = ? AND status = 'active'", [organizationId]).then(rows => new Set(rows.map(location => location.id))) : undefined,
     needsReadiness.some(product => !product.order_url) ? organizationDefaultCurrency(db, organizationId) : undefined,
-    needsReadiness.some(product => !product.order_url) ? listSessions(db, { organizationId, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 400 * 86_400_000).toISOString() }) : [],
+    needsReadiness.some(product => !product.order_url) ? listSessions(db, { env: requireEnv(), organizationId, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 400 * 86_400_000).toISOString() }) : [],
   ])
   const sessionsByProduct = new Map<string, SessionAvailability[]>()
   for (const session of allSessions) {
@@ -2092,9 +2093,10 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
   if (product.order_url) return { ready: missing.length === 0, missing }
   if (!product.booking) missing.push('booking')
   else if (!product.booking.duration_minutes) missing.push('booking.duration_minutes')
+  if (!options.env) throw new Error('The organization environment is required to assess booking readiness')
   const currency = options.currency ?? await organizationDefaultCurrency(db, organizationId)
   const { listSessions, sessionAllocationPredicate } = await import('~/server/utils/availability')
-  const sessions = (options.sessions ?? await listSessions(db, { organizationId, productId: product.id, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 400 * 86_400_000).toISOString() }))
+  const sessions = (options.sessions ?? await listSessions(db, { env: options.env, organizationId, productId: product.id, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 400 * 86_400_000).toISOString() }))
     .filter(session => session.location_id === null
       ? options.locationId === undefined && Boolean(product.booking?.held_online)
       : locations.some(location => location.location_id === session.location_id && location.published && (!requireActive || location.active)))
@@ -2122,7 +2124,7 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
     if (!candidate) missing.push('booking.schedule')
     return { ready: missing.length === 0, missing }
   }
-  const allocation = candidate ? await sessionAllocationPredicate(db, { organizationId, productId: product.id, sessionId: candidate.id, partySize: 0, now: new Date().toISOString(), requireActive: Boolean(requireActive) }) : undefined
+  const allocation = candidate ? await sessionAllocationPredicate(db, { env: options.env, organizationId, productId: product.id, sessionId: candidate.id, partySize: 0, now: new Date().toISOString(), requireActive: Boolean(requireActive) }) : undefined
   if (allocation) {
     allocation.query = `(${allocation.query}) AND EXISTS (SELECT 1 FROM organization WHERE id=? AND default_currency=?)
       AND EXISTS (SELECT 1 FROM product_booking_configs WHERE organization_id=? AND product_id=? AND held_online=? AND online_payment_required=?)

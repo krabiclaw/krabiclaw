@@ -63,9 +63,10 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     // the thread is written only where that claim landed. Exactly as the public
     // booking route writes it — claim first, thread conditional on it, then the
     // booking takes the thread's id.
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db } as CloudflareEnv
     async function bookSession(id: string) {
       return claimSessionCapacity(db, {
-        organizationId: ORG, productId: 'product-proof', sessionId: 'session-proof',
+        env, organizationId: ORG, productId: 'product-proof', sessionId: 'session-proof',
         productVariantId: 'variant-proof', partySize: 1, userId: null, requestId: null,
         following: bookingId => [
           ...requestInsertQueries({

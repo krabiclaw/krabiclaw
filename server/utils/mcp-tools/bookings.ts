@@ -1,6 +1,5 @@
 import { paginationInputSchema, pageInfoObject, organizationTool, PHONE_FORMAT, type McpToolDefinition } from './shared'
 import { reassignBookingProvider } from '~/server/domain/provider-reassignment'
-import { refreshProductBusy } from '~/server/domain/member-scheduling'
 import { HTTPError } from 'nitro'
 import { createTableReservation } from '~/server/domain/table-reservations'
 import { renderStructuredResponse } from '~/server/utils/mcp-render'
@@ -103,14 +102,14 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
   if (toolName === 'create_product_session' || toolName === 'update_product_session') {
     const productId = requiredString(args, 'product_id')
     await assertProductAccess(db, { ...principal, productId })
-    const current = toolName === 'update_product_session' ? await getSessionAvailability(db, organizationId, productId, requiredString(args, 'session_id')) : null
+    const current = toolName === 'update_product_session' ? await getSessionAvailability(db, env, organizationId, productId, requiredString(args, 'session_id')) : null
     const locationId = current ? current.location_id : requiredString(args, 'location_id')
     if (managesBookings) await assertResourceAccess(db, { ...principal, resourceLocationId: locationId })
     if (current) {
-      return { session: await updateSession(db, { organizationId, productId, sessionId: current.id, actorId: organization.userId, expectedUpdatedAt: requiredString(args, 'expected_updated_at'), startsAt: optionalString(args, 'starts_at') ?? undefined, endsAt: optionalString(args, 'ends_at') ?? undefined, capacity: args.capacity as number | null | undefined, status: args.status as 'scheduled' | 'cancelled' | undefined }) }
+      return { session: await updateSession(db, { env, organizationId, productId, sessionId: current.id, actorId: organization.userId, expectedUpdatedAt: requiredString(args, 'expected_updated_at'), startsAt: optionalString(args, 'starts_at') ?? undefined, endsAt: optionalString(args, 'ends_at') ?? undefined, capacity: args.capacity as number | null | undefined, status: args.status as 'scheduled' | 'cancelled' | undefined }) }
     }
     if (locationId === null) throw new HTTPError({ statusCode: 400, statusMessage: 'Online sessions come from the provider\'s working hours' })
-    return { sessions: await createSession(db, { organizationId, productId, locationId, actorId: organization.userId, startsAt: requiredString(args, 'starts_at'), endsAt: requiredString(args, 'ends_at'), capacity: args.capacity as number | null | undefined, idempotencyKey: requiredString(args, 'idempotency_key') }) }
+    return { sessions: await createSession(db, { env, organizationId, productId, locationId, actorId: organization.userId, startsAt: requiredString(args, 'starts_at'), endsAt: requiredString(args, 'ends_at'), capacity: args.capacity as number | null | undefined, idempotencyKey: requiredString(args, 'idempotency_key') }) }
   }
 
   if (toolName === 'list_product_booking_sessions') {
@@ -123,8 +122,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     const product = await queryFirst(db, 'SELECT id FROM products WHERE id = ? AND organization_id = ?', [productId, organizationId])
     if (!product) throw new HTTPError({ statusCode: 404, message: 'Product not found in this organization' })
     await requireBookingConfig(db, organizationId, productId)
-    await refreshProductBusy(db,env,organizationId,productId)
-    const sessions = await listSessions(db, { organizationId, productId, fromInstant: new Date(start).toISOString(), toInstant: new Date(end).toISOString() })
+    const sessions = await listSessions(db, { env, organizationId, productId, fromInstant: new Date(start).toISOString(), toInstant: new Date(end).toISOString() })
     const page = paginateMcpCollection(sessions, args, { resource: `booking-sessions:${organizationId}:${productId}:${from}:${to}` })
     return { sessions: page.items, page_info: page.page_info }
   }

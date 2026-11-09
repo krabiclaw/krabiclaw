@@ -398,7 +398,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
       `${base}/calendar?${new URLSearchParams({ product_id: gap.productId, date: gap.from, month: gap.from.slice(0, 7) })}`, 95,
       { goal: goalFor('availability'), locationId: gap.locationId, productId: gap.productId, recency: gap.from, icon: 'i-lucide-calendar-range' })
   } else if (canOperate && (organization.vertical === 'experience' || organization.vertical === 'service')) {
-    const sessions = await listSessions(db, { organizationId, locationId: input.locationId, fromInstant: now.toISOString(), toInstant: new Date(now.getTime() + 7 * 86_400_000).toISOString() })
+    const sessions = await listSessions(db, { env: principal.env, organizationId, locationId: input.locationId, fromInstant: now.toISOString(), toInstant: new Date(now.getTime() + 7 * 86_400_000).toISOString() })
     const open = sessions.find(session => session.remaining !== null && session.remaining > 0 && !session.is_full)
     const product = open && products.find(product => product.id === open.product_id)
     if (open && product && canWrite && enabled('social') && canPreparePost) offer('post.create', JSON.stringify(['session', product.id, open.id]),

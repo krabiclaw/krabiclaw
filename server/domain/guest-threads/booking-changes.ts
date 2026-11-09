@@ -1,5 +1,4 @@
 import { reservationAllocationPredicate, requireLocationReservationConfig, visitReschedulePolicyPredicate } from '~/server/utils/reservations'
-import { refreshProductBusy } from '~/server/domain/member-scheduling'
 import { recordBookingChangeAnswer } from '~/server/domain/booking-analytics'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { HTTPError } from 'nitro'
@@ -173,12 +172,13 @@ interface Destination { assignedMemberId?: string | null; locationId: string | n
  * For a reservation the slot is checked against the location's configured
  * capacity for that start time.
  */
-async function validateDestination(db: DbClient, thread: GuestThreadRow, before: Source, after: Fields, decisionDedupeKey?: string): Promise<Destination> {
+async function validateDestination(db: DbClient, env: CloudflareEnv, thread: GuestThreadRow, before: Source, after: Fields, decisionDedupeKey?: string): Promise<Destination> {
   const reschedulePolicy = visitReschedulePolicyPredicate({ startsAt: before.startsAt, overridePolicy: after.overridePolicy })
   if (!await queryFirst(db, `SELECT 1 WHERE ${reschedulePolicy.query}`, reschedulePolicy.params)) throw new HTTPError({ statusCode: 409, message: 'Changes close 24 hours before the start. The business can explicitly approve an exception.', data: { code: 'policy_exception_required' } })
   if (after.kind === 'booking') {
     if (before.recordKind !== 'booking' || !before.productId) throw new HTTPError({ statusCode: 409, message: 'This conversation is a reservation, not a booking' })
     const [target] = await listSessions(db, {
+    env,
       organizationId: thread.organization_id, productId: before.productId,
       fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 400 * 86_400_000).toISOString(),
     })
@@ -191,7 +191,7 @@ async function validateDestination(db: DbClient, thread: GuestThreadRow, before:
     const commitment = await queryFirst<{ member: string | null; configMember: string | null; configTeam: string | null; mode: string }>(db,
       'SELECT s.assigned_member_id member,c.assigned_member_id configMember,c.assigned_team_id configTeam,c.scheduling_mode mode FROM product_sessions s JOIN product_booking_configs c ON c.organization_id=s.organization_id AND c.product_id=s.product_id WHERE s.id=? AND s.organization_id=?', [target.id, thread.organization_id])
     if (!commitment) throw new HTTPError({ statusCode: 409, message: 'The proposed consultation settings are missing' })
-    const allocation = await sessionAllocationPredicate(db, { organizationId: thread.organization_id, productId: before.productId, sessionId: target.id, partySize: after.partySize, replacingBookingId: before.recordId, now: new Date().toISOString() })
+    const allocation = await sessionAllocationPredicate(db, { env, organizationId: thread.organization_id, productId: before.productId, sessionId: target.id, partySize: after.partySize, replacingBookingId: before.recordId, now: new Date().toISOString() })
     if (!await queryFirst(db, `SELECT 1 WHERE ${allocation.query}`, allocation.params)) throw new HTTPError({ statusCode: 409, message: service ? 'The proposed consultation time or attorney is no longer available' : 'That session filled up or is no longer available' })
     const booking = await queryFirst<{ product_variant_id: string; user_id: string | null }>(db,
       'SELECT product_variant_id, user_id FROM bookings WHERE id = ?', [before.recordId])
@@ -216,7 +216,7 @@ async function validateDestination(db: DbClient, thread: GuestThreadRow, before:
           AND (${service ? eligibility.query : '1'}) AND (${writeGuard?.query ?? '1'})`,
           params: [before.assignedMemberId, before.sessionId, before.partySize, before.status, before.operationalUpdatedAt!, before.startsAt, before.endsAt, before.timezone, before.locationId, target.id, thread.organization_id, target.starts_at, target.ends_at, target.timezone, target.location_id, commitment.member, commitment.configMember, commitment.configTeam, commitment.mode, ...(service ? eligibility.params! : []), ...(writeGuard?.params ?? [])] }
         return sessionMoveQuery(db, {
-          bookingId, organizationId: thread.organization_id, productId: before.productId!,
+          env, bookingId, organizationId: thread.organization_id, productId: before.productId!,
           sessionId: target.id, partySize: after.partySize, replacingBookingId: before.recordId, writeGuard: guarded,
           requireUndecided: { requestId: thread.id, organizationId: thread.organization_id, updatedAt: before.updatedAt, decisionDedupeKey: decisionDedupeKey ?? '' }, now,
         })
@@ -435,8 +435,7 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
     if (before.endsAt <= new Date().toISOString()) throw new HTTPError({statusCode:409,message:'This visit has ended and cannot be rescheduled'})
     if (parsed.data.expectedOperationalUpdatedAt !== undefined && before.operationalUpdatedAt !== parsed.data.expectedOperationalUpdatedAt) throw new HTTPError({ statusCode: 409, message: 'The consultation changed. Reload before requesting an attorney change.' })
     if (before.updatedAt !== meta.expectedUpdatedAt) throw new HTTPError({ statusCode: 409, message: 'The reservation changed. Reload before sending a request.' })
-    if (before.productId) await refreshProductBusy(db, env, thread.organization_id, before.productId)
-    const destination = await validateDestination(db, thread, before, after)
+    const destination = await validateDestination(db, env, thread, before, after)
     // Moving a reservation to another branch at the same time for the same
     // party is a change; comparing only the label and the party size rejected it.
     if (destination.startsAt === before.startsAt && destination.endsAt === before.endsAt && destination.timezone === before.timezone
@@ -510,8 +509,7 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
     if (!['pending', 'confirmed'].includes(before.status)) throw new HTTPError({ statusCode: 409, message: 'This reservation or booking can no longer be changed' })
     if (before.endsAt <= new Date().toISOString()) throw new HTTPError({ statusCode: 409, message: 'This visit has ended and cannot be rescheduled' })
     if (parsed.data.expectedUpdatedAt !== undefined && before.updatedAt !== parsed.data.expectedUpdatedAt) throw new HTTPError({ statusCode: 409, message: 'The reservation changed. Reload before moving it.' })
-    if (before.productId) await refreshProductBusy(db, env, thread.organization_id, before.productId)
-    const destination = await validateDestination(db, thread, before, after, dedupeKey)
+    const destination = await validateDestination(db, env, thread, before, after, dedupeKey)
     if (!destination.claim) throw new Error('A move destination always claims its slot')
     if (destination.startsAt === before.startsAt && destination.endsAt === before.endsAt && destination.timezone === before.timezone && after.partySize === before.partySize && destination.locationId === before.locationId) {
       throw new HTTPError({ statusCode: 400, message: 'Choose at least one change' })
@@ -614,8 +612,7 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
 
   if (!result && input.decision) {
     if (!['pending', 'confirmed'].includes(current.status)) throw new HTTPError({ statusCode: 409, message: 'This reservation or booking can no longer be changed' })
-    if(input.decision==='accept' && current.productId)await refreshProductBusy(db,env,thread.organization_id,current.productId)
-    const destination = input.decision === 'accept' ? await validateDestination(db, thread as GuestThreadRow, current, proposal.after, resultId) : null
+    const destination = input.decision === 'accept' ? await validateDestination(db, env, thread as GuestThreadRow, current, proposal.after, resultId) : null
     if (destination && (destination.label !== proposal.afterLabel || (proposal.afterStartsAt && destination.startsAt !== proposal.afterStartsAt) || (proposal.afterEndsAt && destination.endsAt !== proposal.afterEndsAt) || (proposal.afterTimezone && destination.timezone !== proposal.afterTimezone) || (proposal.afterLocationId !== undefined && destination.locationId !== proposal.afterLocationId) || (proposal.afterAssignedMemberId !== undefined && (destination.assignedMemberId ?? null) !== proposal.afterAssignedMemberId))) throw new HTTPError({ statusCode: 409, message: 'The proposed time has changed. Ask the business for a new change request.' })
     const id = crypto.randomUUID()
     const now = new Date().toISOString()

@@ -1,6 +1,5 @@
 import type Stripe from 'stripe'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { refreshMemberBusy } from '~/server/domain/member-scheduling'
 import { reservationClaimQuery } from '~/server/utils/reservations'
 import { notifyTableReservationCreated } from '~/server/domain/table-reservations'
 import { localNow } from '~/utils/timezone'
@@ -93,8 +92,7 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,int
     const convertedColumn = kind === 'booking' ? 'converted_booking_id' : 'converted_reservation_id'
     if (kind === 'booking') {
       if (!hold.product_id || !hold.variant_id || !hold.session_id) throw new Error('Booking hold has no offering or session')
-      if (hold.assigned_member_id) await refreshMemberBusy(db,env,hold.assigned_member_id,true)
-      claim = await sessionClaimQuery(db, {bookingId:subjectId,organizationId:hold.organization_id,productId:hold.product_id,sessionId:hold.session_id,productVariantId:hold.variant_id,partySize:hold.quantity,userId:hold.buyer_user_id,requestId:hold.request_id,now,capturedPaymentId:payment.id,capturedAt:new Date(charge.created*1000).toISOString()})
+      claim = await sessionClaimQuery(db, {env,bookingId:subjectId,organizationId:hold.organization_id,productId:hold.product_id,sessionId:hold.session_id,productVariantId:hold.variant_id,partySize:hold.quantity,userId:hold.buyer_user_id,requestId:hold.request_id,now,capturedPaymentId:payment.id,capturedAt:new Date(charge.created*1000).toISOString()})
       assignment.push(sessionAssignmentQuery(hold.session_id, hold.organization_id, subjectId))
     } else {
       if (hold.product_id || !hold.location_id || !hold.timezone) throw new Error('Reservation hold has invalid location facts')

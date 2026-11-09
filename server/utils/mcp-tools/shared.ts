@@ -435,7 +435,6 @@ export const postObject = {
     call_to_action: { anyOf: [{ type: 'object', properties: { label: { type: 'string' }, url: { type: 'string' } }, required: ['label', 'url'], additionalProperties: false }, { type: 'null' }] },
     status: { type: 'string', enum: ['draft', 'published'] },
     visibility: { type: 'string', enum: ['listed', 'unlisted'] },
-    source: { type: 'string', enum: ['manual', 'template'], description: 'The organization authored this website post or created it from a template.' },
     published_at: { type: ['string', 'null'] },
     public_path: { type: 'string' },
     canonical_url: { type: ['string', 'null'] },
@@ -896,7 +895,8 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   append_content_block: { ...W, openWorldHint: true },
   attach_media: { ...W, openWorldHint: true, idempotentHint: true },
   update_menu: { ...D, openWorldHint: true, idempotentHint: true },
-  batch_create_products: { ...W, idempotentHint: true },
+  // A new home is counted on the business's Stripe subscription as it is written.
+  batch_create_products: { ...W, openWorldHint: true, idempotentHint: true },
   create_blog_post: D,
   create_location: { ...W, openWorldHint: true, idempotentHint: true },
   create_post: D,
@@ -1002,6 +1002,7 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   reorder_collections: { ...D, openWorldHint: true },
   reorder_blog_posts: { ...D, openWorldHint: true },
   list_article_categories: R,
+  // An empty category is not shown publicly, and only an empty one can be created or deleted here.
   create_article_category: W,
   update_article_category: { ...D, openWorldHint: true },
   delete_article_category: D,
@@ -1022,7 +1023,7 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   // Can download an optional photo from a host-supplied URL.
   complete_task: { ...D, openWorldHint: true },
   skip_task: D,
-  // Records what the selector found against its evidence and supersedes what changed; a repeat records nothing new.
+  // Records what the selector found against its evidence as open rows; existing rows are left as they are, so a repeat records nothing new.
   list_opportunities: { ...W, idempotentHint: true },
   accept_opportunity: { ...D, openWorldHint: true },
   dismiss_opportunity: D,
