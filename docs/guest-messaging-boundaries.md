@@ -67,8 +67,10 @@ text, with the email's files as the reply's photos. A wrong sender, a forged or
 foreign signature, a member who left or lost access, and any reply the operation
 refuses bounce with the reason. A reply that may have reached the guest bounces
 saying so, and its failure is reported. A failure the member cannot act on fails
-the delivery and is reported. The email's Message-ID keys the reply, so a
-redelivered email sends nothing twice.
+the delivery and is reported. So does a reply that saved while the work that
+shows it failed, such as telling teammates or refreshing open inboxes: the
+redelivery replays the reply's key, which finishes that work. The email's
+Message-ID keys the reply, so a redelivered email sends nothing twice.
 
 Every earlier format is retired, by the owner's decision that no backward
 compatibility is required: `reply+<type>-<id>-<token>` and the compact

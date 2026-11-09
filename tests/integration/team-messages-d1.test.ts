@@ -327,6 +327,15 @@ test('members talk in team conversations, see unread state and receive recorded 
     await receiveMemberEmail(env, emailedReply, unexpectedReport)
     await receiveMemberEmail(env, emailedReply, unexpectedReport)
     assert.deepEqual((await listTeamMessages(db, owner, contextualGroup.id, {})).messages.filter(message => message.body === 'On my way').map(message => message.senderId), ['cleaner'])
+    // The reply saves but open apps cannot be told: the delivery fails so its redelivery finishes the work,
+    // and the redelivery writes no second message.
+    const hubs = env.GUEST_INBOX_HUBS!
+    env.GUEST_INBOX_HUBS = { idFromName: (name: string) => hubs.idFromName(name), get: () => ({ fetch: () => Promise.resolve(new Response(null, { status: 500 })) }) } as unknown as typeof hubs
+    const unfinished = { ...emailedReply, body: 'Keys are in the box', messageId: '<team-reply-unfinished@mail.example.test>' }
+    await assert.rejects(receiveMemberEmail(env, unfinished, unexpectedReport), (error: unknown) => (error as { data?: { code?: string } }).data?.code === 'DASHBOARD_PUBLICATION_FAILED')
+    env.GUEST_INBOX_HUBS = hubs
+    await receiveMemberEmail(env, unfinished, unexpectedReport)
+    assert.deepEqual((await listTeamMessages(db, owner, contextualGroup.id, {})).messages.filter(message => message.body === 'Keys are in the box').map(message => message.senderId), ['cleaner'])
     // The signature is the cleaner's: another member replying from their own address is refused.
     await assert.rejects(receiveMemberEmail(env, { ...emailedReply, from: 'owner@example.test', messageId: '<team-forged@mail.example.test>' }, unexpectedReport), InboundEmailRejection)
     assert.equal((await listTeamMessages(db, owner, contextualGroup.id, {})).messages.filter(message => message.body === 'On my way').length, 1)

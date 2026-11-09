@@ -105,9 +105,10 @@ async function replyAsMember(env: ExecuteOperationInput['env'], input: { threadI
   if ('error' in attempt) return await thrownOutcome(db, attempt.error, thread.id, input.idempotencyKey)
   const told = returnedOutcome(attempt.outcome)
   if (!attempt.outcome.ok) return told
-  // The reply has gone: the member is told so even when refreshing open inboxes fails, and that failure is reported.
-  const refresh = await publishGuestInboxThreadEvent(env, db, { threadId: thread.id, type: 'thread.changed' }).then(() => null, (error: unknown) => error)
-  return { ...told, report: refresh }
+  // A reply is not sent until open inboxes show it. A failed refresh fails the email or WhatsApp
+  // delivery; its redelivery replays this key, which sends nothing twice and refreshes again.
+  await publishGuestInboxThreadEvent(env, db, { threadId: thread.id, type: 'thread.changed' })
+  return told
 }
 
 /** Posts to a team conversation as the member, by the operation the dashboard's own send uses. */
@@ -122,9 +123,13 @@ async function replyToTeamAsMember(env: ExecuteOperationInput['env'], input: { o
     return { sent: true, notice: REPLY_SENT, report: null }
   }).catch(async (error: unknown) => {
     if (error instanceof HTTPError && error.status >= 400 && error.status < 500) return { sent: false, notice: replyNotSent(error.message), report: null }
-    // A message that saved is in the conversation whatever failed after it, so sending it again would repeat it.
     const saved = await queryFirst(env.DB, 'SELECT 1 FROM team_messages WHERE organization_id = ? AND thread_id = ? AND idempotency_key = ?', [input.organizationId, input.threadId, idempotencyKey])
-    return saved ? { sent: true, notice: REPLY_SENT, report: error } : { sent: false, notice: REPLY_FAILED_ALERTED, report: error }
+      .catch((readError: unknown) => { throw new AggregateError([error, readError], 'The team reply failed and whether it saved could not be read', { cause: error }) })
+    // A message that saved is not sent until its teammates are told and open apps refresh. The
+    // failure fails the email or WhatsApp delivery, and its redelivery replays this key, which
+    // finishes that work without writing the message again.
+    if (saved) throw error
+    return { sent: false, notice: REPLY_FAILED_ALERTED, report: error }
   })
 }
 
