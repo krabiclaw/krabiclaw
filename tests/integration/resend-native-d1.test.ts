@@ -200,6 +200,9 @@ const emailEvent = (type: string, emailId: string, extra: Record<string, unknown
   data: { email_id: emailId, created_at: '2026-09-27T00:00:00.000Z', from: 'hello@krabiclaw.com', to: ['guest@provider-proof.com'], subject: 'Proof', message_id: '<proof@resend.provider-proof.com>', ...extra },
 }) as Parameters<typeof applyResendEmailEvent>[2]
 
+/** A member reply these tests expect to complete reports nothing; a report fails the test with its error. */
+const unexpectedReport = async (error: unknown) => { throw error }
+
 test('email purpose controls Resend unsubscribe headers and invalid required state never reaches the provider', async (t) => {
   const resend = fakeResend(t)
   const localUnsubscribe = await buildUnsubscribeUrls({
@@ -526,19 +529,20 @@ test('message alerts thread per recipient and replying to one answers the guest 
     assert.match(alerts[2]!.text as string, /Thanks![\s\S]*Earlier in this conversation[\s\S]*Jamie Rivera: Is parking free\?[\s\S]*Jamie Rivera: Can I park a van\?/u)
     const replyTo = [alerts[0]!.reply_to].flat()[0] as string
     const address = parseReplyToAddress(env, replyTo)
-    assert.equal(address?.kind, 'member')
-    assert.deepEqual([...new Set(alerts.map(email => [email.reply_to].flat()[0]))], [replyTo], 'every alert in the conversation answers it')
+    // Each alert's reply-to names the guest message it was about, and every one answers the same conversation.
+    assert.equal(new Set(alerts.map(email => [email.reply_to].flat()[0])).size, 3)
 
     // The owner answers from their mail client: the guest is emailed as the dashboard would, by the owner.
-    await receiveMemberEmail(env, { threadId: asked, token: address!.token, from: 'Owner@provider-proof.com', body: 'Yes, parking is free.', files: [], messageId: '<owner-1@provider-proof.com>' })
+    assert.ok(address?.kind === 'member')
+    await receiveMemberEmail(env, { entryId: address.entryId, token: address.token, from: 'Owner@provider-proof.com', body: 'Yes, parking is free.', files: [], messageId: '<owner-1@provider-proof.com>' }, unexpectedReport)
     const toGuest = [...resend.emails.values()].filter(email => (email.to as string[])[0] === 'guest@provider-proof.com')
     assert.equal(toGuest.length, 1)
     assert.match(toGuest[0]!.text as string, /Yes, parking is free\./u)
     assert.deepEqual((await db.prepare("SELECT actor_user_id, body FROM activity_entries WHERE request_id = ? AND event_name = 'thread.member_reply'").bind(asked).all()).results,
       [{ actor_user_id: 'owner', body: 'Yes, parking is free.' }])
     // A forged signature bounces, and nothing more reaches the guest.
-    await assert.rejects(receiveMemberEmail(env, { threadId: asked, token: await buildMemberReplyToken('another-secret', asked, 'owner'), from: 'owner@provider-proof.com',
-      body: 'Hello', files: [], messageId: '<owner-2@provider-proof.com>' }), InboundEmailRejection)
+    await assert.rejects(receiveMemberEmail(env, { entryId: address.entryId, token: await buildMemberReplyToken('another-secret', address.entryId, 'owner'), from: 'owner@provider-proof.com',
+      body: 'Hello', files: [], messageId: '<owner-2@provider-proof.com>' }, unexpectedReport), InboundEmailRejection)
     assert.equal([...resend.emails.values()].filter(email => (email.to as string[])[0] === 'guest@provider-proof.com').length, 1)
   } finally {
     await runtime.dispose()

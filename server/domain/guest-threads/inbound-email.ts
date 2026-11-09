@@ -11,7 +11,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { notifyGuestThreadReply } from '~/server/utils/notifications'
 import { getSubmissionOrganization, verifyMemberReplyToken, verifyReplyToken, type SubmissionType } from '~/server/utils/submission-messages'
 import { queryFirst } from '~/server/db'
-import { replyAsMember } from './member-reply'
+import { REPLY_FAILED_ALERTED, replyAsMember } from './member-reply'
 
 /**
  * An inbound email that delivering again cannot make acceptable. The message is
@@ -94,7 +94,8 @@ export async function receiveGuestEmail(env: CloudflareEnv, email: InboundGuestE
 }
 
 export interface InboundMemberEmail {
-  threadId: string
+  /** The conversation event the alert was about. */
+  entryId: string
   token: string
   /** The envelope sender: the member's own account address. */
   from: string
@@ -108,16 +109,23 @@ export interface InboundMemberEmail {
  * A member replying to their alert about a conversation. The sender's address
  * names the member and the address's signature proves the alert went to them
  * about this thread; the reply is then the inbox's own, as that member. Anything
- * that stops it bounces with the reason; a failure the member cannot act on is
- * thrown so the delivery is recorded failed.
+ * that stops it bounces with the reason.
  */
-export async function receiveMemberEmail(env: CloudflareEnv, email: InboundMemberEmail): Promise<void> {
+export async function receiveMemberEmail(env: CloudflareEnv, email: InboundMemberEmail, report: (error: unknown) => Promise<void>): Promise<void> {
   const user = await queryFirst<{ id: string }>(env.DB, 'SELECT id FROM user WHERE lower(email) = ? AND "emailVerified" = 1', [email.from.trim().toLowerCase()])
-  if (!user || !await verifyMemberReplyToken(env, email.threadId, user.id, email.token)) {
+  if (!user || !await verifyMemberReplyToken(env, email.entryId, user.id, email.token)) {
     throw new InboundEmailRejection('This reply address is not valid for the address you replied from. Reply from the address the alert was sent to, or answer from the dashboard.')
   }
-  const outcome = await replyAsMember(env, { threadId: email.threadId, userId: user.id, body: email.body, files: email.files, idempotencyKey: `email:${email.messageId}` })
-  if (outcome.report !== null) throw outcome.report instanceof Error ? outcome.report : new Error(String(outcome.report), { cause: outcome.report })
+  const entry = await queryFirst<{ request_id: string | null }>(env.DB, 'SELECT request_id FROM activity_entries WHERE id = ?', [email.entryId])
+  if (!entry?.request_id) throw new InboundEmailRejection('This conversation no longer exists.')
+  const outcome = await replyAsMember(env, { threadId: entry.request_id, userId: user.id, body: email.body, files: email.files, idempotencyKey: `email:${email.messageId}` })
+  // A failure the member cannot act on fails the delivery. Any other failure is
+  // reported while the member still reads the outcome: that the reply went, or
+  // that it may have reached the guest, so they do not send it again.
+  if (outcome.report !== null && outcome.notice === REPLY_FAILED_ALERTED) {
+    throw outcome.report instanceof Error ? outcome.report : new Error(String(outcome.report), { cause: outcome.report })
+  }
+  if (outcome.report !== null) await report(outcome.report)
   if (!outcome.sent) throw new InboundEmailRejection(outcome.notice)
 }
 

@@ -191,6 +191,9 @@ function booking(id = 'booking'): ChannelBooking {
     guest_name: 'Actual', guest_surname: 'Guest', guest_email: null, guest_phone: null, total_minor: 30_000, currency: 'USD' }
 }
 
+/** A member reply these tests expect to complete reports nothing; a report fails the test with its error. */
+const unexpectedReport = async (error: unknown) => { throw error }
+
 test('empty greenfield collections are valid; inquiries mirror into the canonical inbox without invented guest contact or clock', async () => {
   const { runtime, db, env, productId } = await boot()
   const provider = new Provider(), realFetch = globalThis.fetch
@@ -1142,30 +1145,41 @@ test('an Airbnb photo is in the owner alert, and replying to the alert answers t
     assert.match(sent.text, /Earlier in this conversation\s+[^:]+: Hello/u)
     assert.match(sent.text, /Reply to this email or from the dashboard\./u)
     assert.doesNotMatch(sent.text, /are not delivered/u)
+    // The reply address names the guest's message the alert was about.
+    const guestEntry = await db.prepare("SELECT id FROM activity_entries WHERE dedupe_key = 'channex-message:guest-photo'").first<string>('id')
     const address = parseReplyToAddress(env, sent.replyTo)
-    assert.deepEqual(address && { kind: address.kind, threadId: 'threadId' in address ? address.threadId : null }, { kind: 'member', threadId })
+    assert.deepEqual(address && { kind: address.kind, entryId: 'entryId' in address ? address.entryId : null }, { kind: 'member', entryId: guestEntry })
 
     // The owner replies to that email: the words reach the Airbnb conversation as the host's, once.
-    const reply = { threadId, token: address!.token, from: 'owner@example.test', body: 'Lift the handle as you turn the key.', files: [], messageId: '<owner-reply-1@mail.example.test>' }
-    await receiveMemberEmail(env, reply)
+    const reply = { entryId: guestEntry!, token: address!.token, from: 'owner@example.test', body: 'Lift the handle as you turn the key.', files: [], messageId: '<owner-reply-1@mail.example.test>' }
+    await receiveMemberEmail(env, reply, unexpectedReport)
     assert.equal(provider.sends, 1)
     assert.equal(provider.messages.at(-1)!.attributes.message, 'Lift the handle as you turn the key.')
     const answered = await db.prepare("SELECT actor_user_id, channel, body FROM activity_entries WHERE request_id = ? AND event_name = 'thread.member_reply'").bind(threadId).all()
     assert.deepEqual(answered.results, [{ actor_user_id: OWNER, channel: 'airbnb', body: 'Lift the handle as you turn the key.' }])
     // The same email delivered again sends nothing again.
-    await receiveMemberEmail(env, reply)
+    await receiveMemberEmail(env, reply, unexpectedReport)
     assert.equal(provider.sends, 1)
 
     // Another address replying with this signature, or one tampered with, bounces with the reason.
-    await assert.rejects(receiveMemberEmail(env, { ...reply, from: 'someone@example.test', messageId: '<other@mail.example.test>' }), InboundEmailRejection)
-    await assert.rejects(receiveMemberEmail(env, { ...reply, token: '0'.repeat(24), messageId: '<forged@mail.example.test>' }), InboundEmailRejection)
+    await assert.rejects(receiveMemberEmail(env, { ...reply, from: 'someone@example.test', messageId: '<other@mail.example.test>' }, unexpectedReport), InboundEmailRejection)
+    await assert.rejects(receiveMemberEmail(env, { ...reply, token: '0'.repeat(24), messageId: '<forged@mail.example.test>' }, unexpectedReport), InboundEmailRejection)
     // Airbnb takes a photo or words, not both: the owner is told so, and nothing is sent.
-    await assert.rejects(receiveMemberEmail(env, { ...reply, files: [{ bytes: GUEST_PHOTO, filename: 'door.avif' }], messageId: '<both@mail.example.test>' }),
+    await assert.rejects(receiveMemberEmail(env, { ...reply, files: [{ bytes: GUEST_PHOTO, filename: 'door.avif' }], messageId: '<both@mail.example.test>' }, unexpectedReport),
       (error: unknown) => error instanceof InboundEmailRejection && error.message === 'Reply not sent: Send one Airbnb photo at a time, separately from text')
+    // Airbnb took the words but the connection ended: the owner is told it may have reached the
+    // guest, so they do not send it again, and the failure is reported beside that answer.
+    provider.uncertain = true
+    const reported: unknown[] = []
+    await assert.rejects(receiveMemberEmail(env, { ...reply, body: 'The spare key is under the mat.', messageId: '<uncertain@mail.example.test>' }, async (error) => { reported.push(error) }),
+      (error: unknown) => error instanceof InboundEmailRejection && error.message === 'This reply may have reached the guest. Check the conversation before sending again.')
+    assert.equal(reported.length, 1)
+    assert.equal(provider.sends, 2)
+    provider.uncertain = false
     // A member who has left the business is refused before anything is sent.
     await db.prepare("DELETE FROM member WHERE id = 'owner-member'").run()
-    await assert.rejects(receiveMemberEmail(env, { ...reply, messageId: '<after-leaving@mail.example.test>' }),
+    await assert.rejects(receiveMemberEmail(env, { ...reply, messageId: '<after-leaving@mail.example.test>' }, unexpectedReport),
       (error: unknown) => error instanceof InboundEmailRejection && error.message === 'Reply not sent: You are no longer a member of this business.')
-    assert.equal(provider.sends, 1)
+    assert.equal(provider.sends, 2)
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })

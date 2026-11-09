@@ -70,41 +70,37 @@ export function buildReplyLocalPart(submissionType: ReplySubmissionType, submiss
 }
 
 /**
- * A member's reply to their own alert about a conversation:
- * rm<conversation id><24-char-hmac>@reply.<domain>. The id is written as stored
- * (a UUID makes 62 characters). The signature covers the thread and the member's
- * user id, which is not in the address: the sender's address names the member,
- * and the signature proves the alert was sent to them about this thread.
+ * A member's reply to their own alert: rm<entry uuid><24-char-hmac>@reply.<domain>.
+ * The entry is the conversation event the alert is about, so it names one
+ * conversation; a conversation's own id can be a 64-character hash, which does
+ * not fit the local part. The signature covers the entry and the member's user
+ * id, which is not in the address: the sender's address names the member, and
+ * the signature proves the alert was sent to them.
  */
-export async function buildMemberReplyToken(secret: string, threadId: string, userId: string): Promise<string> {
-  return hmacHex(secret, `member:${threadId}:${userId}`, TOKEN_BYTES)
+export async function buildMemberReplyToken(secret: string, entryId: string, userId: string): Promise<string> {
+  return hmacHex(secret, `member:${entryId.toLowerCase()}:${userId}`, TOKEN_BYTES)
 }
 
-export async function verifyMemberReplyTokenValue(secret: string, threadId: string, userId: string, token: string): Promise<boolean> {
-  return timingSafeEqual(await buildMemberReplyToken(secret, threadId, userId), token)
+export async function verifyMemberReplyTokenValue(secret: string, entryId: string, userId: string, token: string): Promise<boolean> {
+  return timingSafeEqual(await buildMemberReplyToken(secret, entryId, userId), token)
 }
 
-export function buildMemberReplyLocalPart(threadId: string, token: string): string | null {
-  const local = `rm${threadId}${token}`
-  return MEMBER_LOCAL_PART.test(local) && local.length <= 64 ? local : null
+export function buildMemberReplyLocalPart(entryId: string, token: string): string | null {
+  const compactId = compactUuid(entryId)
+  if (!compactId || !/^[0-9a-f]{24}$/i.test(token)) return null
+  return `rm${compactId}${token}`
 }
-
-const MEMBER_LOCAL_PART = /^rm([0-9a-z-]+)([0-9a-f]{24})$/u
 
 export type ParsedReplyLocalPart =
   | { kind: 'guest'; submissionType: ReplySubmissionType; submissionId: string; token: string }
-  | { kind: 'member'; threadId: string; token: string }
+  | { kind: 'member'; entryId: string; token: string }
 
 export function parseReplyLocalPart(local: string): ParsedReplyLocalPart | null {
-  const guest = /^r([cres])([0-9a-f]{32})([0-9a-f]{24})$/i.exec(local)
-  if (guest) {
-    return {
-      kind: 'guest',
-      submissionType: CODE_TO_TYPE[guest[1]!.toLowerCase() as 'c' | 'r' | 'e' | 's'],
-      submissionId: expandUuid(guest[2]!.toLowerCase()),
-      token: guest[3]!.toLowerCase(),
-    }
-  }
-  const member = MEMBER_LOCAL_PART.exec(local.toLowerCase())
-  return member ? { kind: 'member', threadId: member[1]!, token: member[2]! } : null
+  const match = /^r([cresm])([0-9a-f]{32})([0-9a-f]{24})$/i.exec(local)
+  if (!match) return null
+  const code = match[1]!.toLowerCase()
+  const id = expandUuid(match[2]!.toLowerCase())
+  const token = match[3]!.toLowerCase()
+  if (code === 'm') return { kind: 'member', entryId: id, token }
+  return { kind: 'guest', submissionType: CODE_TO_TYPE[code as 'c' | 'r' | 'e' | 's'], submissionId: id, token }
 }

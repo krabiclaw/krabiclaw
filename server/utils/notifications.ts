@@ -602,7 +602,7 @@ function memberNotificationSends(
         unsubscribeUrl: recipient.unsubscribeUrl,
       })
       // An alert about a conversation answers it: replying sends to the guest as this member.
-      const replyTo = input.context.guestThreadId ? await buildMemberReplyToAddress(env, input.context.guestThreadId, recipient.userId) : null
+      const replyTo = input.context.guestThreadId ? await buildMemberReplyToAddress(env, input.context.sourceEntryId, recipient.userId) : null
       await sendEmailNotification(env, db, {
         ...input, to, title: input.message.title, replyTo,
         email: { subject: sanitizeEmailHeaderValue(input.message.title), ...rendered },

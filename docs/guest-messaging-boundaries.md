@@ -43,15 +43,18 @@ This note exists so future sessions do not collapse three different systems into
 ## Member reply address
 
 A member's alert about a conversation carries the reply-to
-`rm<conversation id><24-hex-HMAC>@reply.<platform-domain>`. The HMAC uses the
-guest address's secret and signs `member:<conversation id>:<user id>`. The user
-id is not in the address. Inbound email names the member by the envelope sender,
+`rm<32-hex entry UUID><24-hex-HMAC>@reply.<platform-domain>`. The entry is the
+conversation event the alert is about, so it names one conversation. Booking and
+reservation conversation ids are 64-character hashes, which cannot fit the
+64-character local part. The HMAC uses the guest address's secret and signs
+`member:<entry id>:<user id>`. The user id is not in the address. Inbound email names the member by the envelope sender,
 which must be a verified account email, and the signature must match that
 member and conversation. The reply is the inbox's quoted-history and signature
 stripped text, with the email's files as the reply's photos. A wrong sender, a
 forged or foreign signature, a member who left or lost access, and any reply the
-operation refuses bounce with the reason. A failure the member cannot act on
-fails the delivery and is reported. The email's Message-ID keys the reply, so a
+operation refuses bounce with the reason. A reply that may have reached the guest
+bounces saying so, and its failure is reported. A failure the member cannot act
+on fails the delivery and is reported. The email's Message-ID keys the reply, so a
 redelivered email sends nothing twice. No table records these addresses.
 
 ## Epoch 5 reply-address contract

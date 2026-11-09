@@ -293,14 +293,14 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   expect(replied.stream.filter(item => item.type === 'message' && item.body === nextStaffBody)).toMatchObject([{ side: 'business', author: 'You' }])
 
   // The owner was alerted to each guest email, in one conversation: one subject,
-  // and a signed reply-to that answers the guest as that owner.
+  // and on each a signed reply-to naming that message, which answers the guest as that owner.
   const alerts = (await readDeliveries('read owner alerts')).filter(delivery => delivery.purpose === 'owner_alert' && delivery.email_json !== null)
     .map(delivery => JSON.parse(delivery.email_json!) as FrozenEmail).filter(email => email.message.replyTo?.startsWith('rm'))
   expect(alerts.length).toBeGreaterThanOrEqual(2)
   const ownerAddress = alerts[0]!.message.to
   const ownerAlerts = alerts.filter(email => email.message.to === ownerAddress)
   expect(new Set(ownerAlerts.map(email => email.message.subject)).size).toBe(1)
-  expect(new Set(ownerAlerts.map(email => email.message.replyTo)).size).toBe(1)
+  expect(new Set(ownerAlerts.map(email => email.message.replyTo)).size).toBe(ownerAlerts.length)
   expect(ownerAlerts.some(email => email.message.text.includes(body))).toBe(true)
   expect(ownerAlerts.every(email => email.message.text.includes('Reply to this email or from the dashboard.'))).toBe(true)
   const memberReplyTo = ownerAlerts[0]!.message.replyTo!

@@ -49,17 +49,17 @@ export async function verifyReplyToken(
   return verifyReplyTokenValue(env.EMAIL_REPLY_SECRET, submissionType, submissionId, token)
 }
 
-/** The reply-to on a member's alert about a conversation: replying to it answers the guest as that member. */
-export async function buildMemberReplyToAddress(env: ReplyAddressEnv, threadId: string, userId: string): Promise<string> {
+/** The reply-to on a member's alert about a conversation event: replying to it answers the guest as that member. */
+export async function buildMemberReplyToAddress(env: ReplyAddressEnv, entryId: string, userId: string): Promise<string> {
   if (!env.EMAIL_REPLY_SECRET) throw new Error('EMAIL_REPLY_SECRET is required to sign a member reply address')
-  const localPart = buildMemberReplyLocalPart(threadId, await buildMemberReplyToken(env.EMAIL_REPLY_SECRET, threadId, userId))
-  if (!localPart) throw new Error(`Conversation ${threadId} has no addressable id`)
+  const localPart = buildMemberReplyLocalPart(entryId, await buildMemberReplyToken(env.EMAIL_REPLY_SECRET, entryId, userId))
+  if (!localPart) throw new Error(`Conversation entry ${entryId} has no addressable id`)
   return `${localPart}@${getReplyDomain(env)}`
 }
 
-export async function verifyMemberReplyToken(env: ReplyAddressEnv, threadId: string, userId: string, token: string): Promise<boolean> {
+export async function verifyMemberReplyToken(env: ReplyAddressEnv, entryId: string, userId: string, token: string): Promise<boolean> {
   if (!env.EMAIL_REPLY_SECRET) return false
-  return verifyMemberReplyTokenValue(env.EMAIL_REPLY_SECRET, threadId, userId, token)
+  return verifyMemberReplyTokenValue(env.EMAIL_REPLY_SECRET, entryId, userId, token)
 }
 
 export function parseReplyToAddress(env: ReplyAddressEnv, address: string): ParsedReplyLocalPart | null {

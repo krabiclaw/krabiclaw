@@ -49,7 +49,7 @@ async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-async function processEmail(message: ForwardableEmailMessage, env: unknown): Promise<void> {
+async function processEmail(message: ForwardableEmailMessage, env: unknown, report: (error: unknown) => Promise<void>): Promise<void> {
   if (!isCloudflareEnvironment(env)) throw new Error('Inbound email needs the DB binding and EMAIL_REPLY_SECRET')
 
   const reply = parseReplyToAddress(env, message.to)
@@ -67,7 +67,7 @@ async function processEmail(message: ForwardableEmailMessage, env: unknown): Pro
   })
   const from = message.from.trim().toLowerCase()
   if (reply.kind === 'member') {
-    await receiveMemberEmail(env, { threadId: reply.threadId, token: reply.token, from, body: guestReplyText(parsed), files, messageId })
+    await receiveMemberEmail(env, { entryId: reply.entryId, token: reply.token, from, body: guestReplyText(parsed), files, messageId }, report)
     return
   }
   await receiveGuestEmail(env, {
@@ -93,7 +93,10 @@ export default definePlugin((nitroApp) => {
   // the Message-ID dedupe keeps a redelivery from recording it twice.
   nitroApp.hooks.hook('cloudflare:email', async ({ message, env }) => {
     try {
-      await processEmail(message, env)
+      // A failure reported while the sender is still answered goes where a thrown error does (server/plugins/error-logger.ts).
+      await processEmail(message, env, async (error) => {
+        await nitroApp.hooks.callHook('error', error instanceof Error ? error : new Error(String(error), { cause: error }), { tags: ['email'] })
+      })
     } catch (error) {
       const rejected = error instanceof InboundEmailRejection
       console.error(rejected ? 'email_inbound_rejected' : 'email_inbound_processing_failed', {
