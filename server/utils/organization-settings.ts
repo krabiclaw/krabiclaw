@@ -511,13 +511,17 @@ async function attemptOrganizationUpdate(
   if (cardInputChanged) {
     await refreshSocialCard({ db, env, owner: { owner_type: 'organization', owner_id: organizationId }, actorId: userId })
   }
-  // The business name is drawn on every card it owns, so a rename redraws them all here.
+  // The business name is drawn on every card it owns, so a rename redraws them
+  // all here, and a card that did not redraw fails the rename's completion.
   if (updates.name !== undefined) {
+    const failed: string[] = []
     for (let after: string | null = null; ;) {
       const page: Awaited<ReturnType<typeof regenerateOrganizationSocialCards>> = await regenerateOrganizationSocialCards({ db, env, organizationId, actorId: userId, after, limit: 25 })
+      for (const result of page.results) if (result.kind === 'failed') failed.push(`${result.owner.owner_type} ${result.owner.owner_id}: ${result.error}`)
       if (!page.next_cursor) break
       after = page.next_cursor
     }
+    if (failed.length) throw new HTTPError({ statusCode: 502, statusMessage: `The name was saved, but ${failed.length} social card(s) did not redraw: ${failed.join('; ')}`, data: { code: 'POST_WRITE_COMPLETION_FAILED', field: 'social_cards', committed: true } })
   }
 
   const settings = await loadSettingsPayload(db, env, organizationId)
