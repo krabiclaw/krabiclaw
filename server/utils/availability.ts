@@ -730,6 +730,8 @@ export async function prepareProductBookingSetup(db: DbClient, input: {
   const queries: BatchQuery[] = [...configQueries]
   // The offering is created only if a guest could book something now, at the location as it was read.
   let locationGuard: BatchQuery = { query: 's.location_id IS NULL', params: [] }
+  // The offering is created only if a guest could book something now: a session inside the public window, as the public listing bounds it.
+  let bookableUntil = new Date(Date.parse(input.now) + PUBLIC_BOOKING_WINDOW_DAYS * 86_400_000).toISOString()
   if (locationId === null) {
     // Online: the provider's working hours are the times. Weekly slots and
     // dated sessions would be a second schedule beside theirs.
@@ -738,6 +740,7 @@ export async function prepareProductBookingSetup(db: DbClient, input: {
   } else {
     const location = await queryFirst<SessionLocation>(db, 'SELECT id,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id=?', [input.organizationId, locationId])
     if (!location || location.status !== 'active') badRequest('Choose an active location in this business')
+    bookableUntil = bookingWindow(location.timezone).toInstant
     locationGuard = { query: `EXISTS (SELECT 1 FROM business_locations l WHERE l.id=s.location_id AND l.organization_id=s.organization_id AND l.status='active' AND l.timezone IS ? AND l.opening_hours IS ? AND l.special_hours IS ?)`, params: [location.timezone, location.opening_hours, location.special_hours] }
     const existingRules = input.productInSameBatch ? [] : (await listAvailabilityRules(db, input.organizationId, input.productId)).filter(rule => rule.location_id === locationId)
     const schedule = prepareWeeklySchedule({ ...input, locationId, slots: weeklySlots ?? existingRules.map(rule => ({ weekday: rule.weekday, start_time: rule.start_time })) }, config, location.timezone, existingRules)
@@ -763,20 +766,19 @@ export async function prepareProductBookingSetup(db: DbClient, input: {
     }
     if (!futureSessions) badRequest('Provide at least one future session before creating a bookable offering')
   }
-  // Google is asked across the public window and every dated session this batch queues, whole.
   const bookableFrom = input.now
-  const bookableUntil = [new Date(Date.parse(input.now) + PUBLIC_BOOKING_WINDOW_DAYS * 86_400_000).toISOString(), ...(oneOffSessions ?? []).map(session => sessionInstants(session.starts_at, session.ends_at).ends_at)].sort().at(-1)!
   // The sessions this batch inserts are not stored yet: their providers come from the configuration.
   const stored = await sessionProviderIds(db, input.organizationId, { productId: input.productId, fromInstant: bookableFrom })
-  const availability = await memberAvailabilityJson(db, input.env, input.organizationId, { from: bookableFrom, until: bookableUntil }, [...new Set([...await configuredProviderIds(db, config), ...stored.members])])
+  // Sessions start inside the window and may run past its end.
+  const availability = await memberAvailabilityJson(db, input.env, input.organizationId, { from: bookableFrom, until: new Date(Date.parse(bookableUntil) + 86_400_000).toISOString() }, [...new Set([...await configuredProviderIds(db, config), ...stored.members])])
   queries.push({
     query: `UPDATE product_booking_configs SET updated_at=CASE WHEN EXISTS (
       SELECT 1 FROM product_sessions s WHERE s.organization_id=? AND s.product_id=?
-        AND s.location_id IS ? AND s.starts_at>? AND s.status='scheduled'
+        AND s.location_id IS ? AND s.starts_at>? AND s.starts_at<? AND s.status='scheduled'
         AND (s.capacity IS NULL OR s.capacity>${sessionHeldCapacitySql('s')}+COALESCE((SELECT SUM(b.party_size) FROM bookings b WHERE b.product_session_id=s.id AND ${CAPACITY_CONSUMING_SQL}),0))
         AND (${locationGuard.query}) AND NOT ${providerUnavailableSql('s')}
     ) THEN updated_at ELSE NULL END WHERE organization_id=? AND product_id=?`,
-    params: [input.organizationId, input.productId, locationId, input.now, ...locationGuard.params!, ...providerAvailabilityParams(availability), input.organizationId, input.productId],
+    params: [input.organizationId, input.productId, locationId, input.now, bookableUntil, ...locationGuard.params!, ...providerAvailabilityParams(availability), input.organizationId, input.productId],
   })
   return queries
 }
@@ -791,17 +793,17 @@ export function sessionHeldCapacitySql(sessionAlias: string, convertingPaymentSq
 type SessionLocation = { id: string; timezone: string; status: string; opening_hours: string | null; special_hours: string | null }
 
 /**
- * The providers the sessions a statement covers may name, so the availability
- * it binds asks Google about those members only. Sessions with no provider
- * need no entry.
+ * The providers the scheduled sessions a statement covers may name, so the
+ * availability it binds asks Google about those members only. A cancelled
+ * session and a session with no provider need no entry.
  */
-async function sessionProviderIds(db: DbClient, organizationId: string, filter: { productId?: string | null; productIds?: string[] | null; locationId?: string | null; sessionId?: string | null; fromInstant?: string | null; toInstant?: string | null; statuses?: ProductSessionStatus[] | null }): Promise<{ members: string[]; from: string | null; until: string | null }> {
+async function sessionProviderIds(db: DbClient, organizationId: string, filter: { productId?: string | null; productIds?: string[] | null; locationId?: string | null; sessionId?: string | null; fromInstant?: string | null; toInstant?: string | null }): Promise<{ members: string[]; from: string | null; until: string | null }> {
   const rows = await queryAll<{ member: string | null; from: string; until: string }>(db, `SELECT ${sessionMemberSql('s')} AS member, MIN(s.starts_at) AS "from", MAX(s.ends_at) AS until FROM product_sessions s
-    WHERE s.organization_id=? AND (? IS NULL OR s.product_id=?) AND (? IS NULL OR s.product_id IN (SELECT value FROM json_each(?))) AND (? IS NULL OR s.location_id=?) AND (? IS NULL OR s.id=?)
-      AND (? IS NULL OR s.starts_at>=?) AND (? IS NULL OR s.starts_at<?) AND (? IS NULL OR s.status IN (SELECT value FROM json_each(?)))
+    WHERE s.organization_id=? AND s.status='scheduled' AND (? IS NULL OR s.product_id=?) AND (? IS NULL OR s.product_id IN (SELECT value FROM json_each(?))) AND (? IS NULL OR s.location_id=?) AND (? IS NULL OR s.id=?)
+      AND (? IS NULL OR s.starts_at>=?) AND (? IS NULL OR s.starts_at<?)
     GROUP BY 1`,
   [organizationId, filter.productId ?? null, filter.productId ?? null, filter.productIds ? JSON.stringify(filter.productIds) : null, filter.productIds ? JSON.stringify(filter.productIds) : null, filter.locationId ?? null, filter.locationId ?? null, filter.sessionId ?? null, filter.sessionId ?? null,
-    filter.fromInstant ?? null, filter.fromInstant ?? null, filter.toInstant ?? null, filter.toInstant ?? null, filter.statuses ? JSON.stringify(filter.statuses) : null, filter.statuses ? JSON.stringify(filter.statuses) : null])
+    filter.fromInstant ?? null, filter.fromInstant ?? null, filter.toInstant ?? null, filter.toInstant ?? null])
   const named = rows.filter(row => row.member)
   return { members: named.map(row => row.member!), from: named.map(row => row.from).sort()[0] ?? null, until: named.map(row => row.until).sort().at(-1) ?? null }
 }
@@ -840,7 +842,7 @@ export async function listSessions(db: DbClient, input: {
   }
   const statuses = input.statuses ?? ['scheduled']
   // Google is asked about the span the stored provider sessions actually cover, not the whole window.
-  const providers = await sessionProviderIds(db, input.organizationId, { productId: input.productId, productIds: input.productIds, locationId: input.locationId, fromInstant: input.fromInstant, toInstant: input.toInstant, statuses })
+  const providers = await sessionProviderIds(db, input.organizationId, { productId: input.productId, productIds: input.productIds, locationId: input.locationId, fromInstant: input.fromInstant, toInstant: input.toInstant })
   const availability = providers.members.length ? await memberAvailabilityJson(db, input.env, input.organizationId, { from: providers.from!, until: providers.until! }, providers.members) : '{}'
   const sessions = await queryAll<SessionAvailability>(db, `
     SELECT s.id, s.organization_id, s.product_id, s.location_id, s.availability_rule_id, ${sessionMemberSql('s')} AS assigned_member_id,

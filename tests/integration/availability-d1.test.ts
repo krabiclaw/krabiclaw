@@ -761,6 +761,10 @@ test('new legal consultations require an eligible named attorney while experienc
       booking: { env, data: { location_id: null, duration_minutes: 60, default_capacity: 1, scheduling_mode: 'provider', assigned_member_id: 'morgan' } } })
     const freshSessions = await listSessions(db, { env, organizationId: ORG, productId: fresh.id, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 14 * 86_400_000).toISOString() })
     assert(freshSessions.some(session => session.assigned_member_id === 'morgan' && !session.is_full), 'the configured attorney holds bookable sessions from the first write')
+    // A dated session beyond the public window is nothing a guest can book now, so it does not make the offering bookable.
+    const distantStart = new Date(Date.now() + 60 * 86_400_000); distantStart.setUTCHours(10, 0, 0, 0)
+    await assert.rejects(createProduct(db, { env, organizationId: ORG, actor: { actorId: ACTOR }, product: { kind: 'service', name: 'Distant consultation', variants: [{ name: 'Standard', prices: [{ unit_amount: 100_000, currency: 'THB', type: 'one_time' }] }] },
+      booking: { env, data: { location_id: LOCATION, duration_minutes: 60, default_capacity: 1, assigned_member_id: 'morgan', sessions: [{ starts_at: distantStart.toISOString(), ends_at: new Date(distantStart.getTime() + 3_600_000).toISOString() }] } } }), { statusCode: 409 })
     const bookedBeforeDeparture = await db.prepare('SELECT * FROM bookings WHERE id=?').bind(booked.bookingId).first()
     const sessionBeforeDeparture = await db.prepare("SELECT * FROM product_sessions WHERE id='consultation-morgan'").first()
     await db.prepare("INSERT INTO session (id,expiresAt,token,userId) VALUES ('owner-session',unixepoch()+3600,'owner-session-token',?)").bind(ACTOR).run()

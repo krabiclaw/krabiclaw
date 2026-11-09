@@ -5,7 +5,7 @@ import { createTableReservation } from '~/server/domain/table-reservations'
 import { renderStructuredResponse } from '~/server/utils/mcp-render'
 import { assertResourceAccess, assertProductAccess, assertAssignedBookingAccess, assignedBookingSql, roleAllows, memberAccessPrincipal } from '~/server/utils/member-access'
 import { queryAll, queryFirst } from '~/server/db'
-import { createSession, getSessionAvailability, listSessions, requireBookingConfig, updateSession } from '~/server/utils/availability'
+import { createSession, listSessions, requireBookingConfig, updateSession } from '~/server/utils/availability'
 import { mcpPageInfo, mcpPageWindow, paginateMcpCollection } from '~/server/utils/mcp-pagination'
 import { createProductBooking } from '~/server/domain/product-bookings'
 import { getGuestRequest, getThreadOperationalRecord, type ThreadOperationalRecord, type ThreadPayload } from '~/server/domain/requests'
@@ -102,7 +102,8 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
   if (toolName === 'create_product_session' || toolName === 'update_product_session') {
     const productId = requiredString(args, 'product_id')
     await assertProductAccess(db, { ...principal, productId })
-    const current = toolName === 'update_product_session' ? await getSessionAvailability(db, env, organizationId, productId, requiredString(args, 'session_id')) : null
+    const current = toolName === 'update_product_session' ? await queryFirst<{ id: string; location_id: string | null }>(db, 'SELECT id, location_id FROM product_sessions WHERE organization_id=? AND product_id=? AND id=?', [organizationId, productId, requiredString(args, 'session_id')]) : null
+    if (toolName === 'update_product_session' && !current) throw new HTTPError({ statusCode: 404, statusMessage: 'Session not found for this offering' })
     const locationId = current ? current.location_id : requiredString(args, 'location_id')
     if (managesBookings) await assertResourceAccess(db, { ...principal, resourceLocationId: locationId })
     if (current) {
