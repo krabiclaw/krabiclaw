@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e4840381-b413-4598-9c31-61817f4674a6",
+  "id": "b9c264a1-732a-456d-804f-f4f07317dcb3",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -15519,12 +15519,10 @@
           "tableTo": "stays",
           "columnsFrom": [
             "organization_id",
-            "product_id",
             "stay_id"
           ],
           "columnsTo": [
             "organization_id",
-            "product_id",
             "id"
           ],
           "onDelete": "cascade",
@@ -16441,6 +16439,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "booked_product_id": {
+          "name": "booked_product_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "channel": {
           "name": "channel",
           "type": "text",
@@ -16828,11 +16833,30 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "stays_booked_home_scope_fk": {
+          "name": "stays_booked_home_scope_fk",
+          "tableFrom": "stays",
+          "tableTo": "product_stay_configs",
+          "columnsFrom": [
+            "organization_id",
+            "booked_product_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "product_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {
+        "stays_booked_home_check": {
+          "name": "stays_booked_home_check",
+          "value": "booked_product_id IS NULL OR booked_product_id <> product_id"
+        },
         "stays_dates_check": {
           "name": "stays_dates_check",
           "value": "date(check_in_date, '+0 days') IS check_in_date AND date(check_out_date, '+0 days') IS check_out_date AND check_out_date > check_in_date"
@@ -18186,6 +18210,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "automatic": {
+          "name": "automatic",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "idempotency_key": {
           "name": "idempotency_key",

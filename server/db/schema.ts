@@ -1399,7 +1399,11 @@ export const product_nights = sqliteTable("product_nights", {
 export const stays = sqliteTable("stays", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	// The home the guest actually sleeps in: its nights, turnover and messages follow it.
 	product_id: text().notNull(),
+	// The listing a channel reservation is booked on, when the host moved the
+	// guest to another home; NULL when they sleep where they booked.
+	booked_product_id: text(),
 	channel: text().$type<'airbnb' | 'vrbo' | 'booking_com' | 'direct'>().notNull(),
 	owner: text().$type<'app' | 'channel'>().notNull(),
 	status: text().$type<'pending' | 'confirmed' | 'cancelled'>().notNull(),
@@ -1451,6 +1455,8 @@ export const stays = sqliteTable("stays", {
 	answers: text().default("[]").notNull(),
 }, (table) => [
 	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "stays_home_scope_fk" }).onDelete("no action"),
+	foreignKey({ columns: [table.organization_id, table.booked_product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "stays_booked_home_scope_fk" }).onDelete("no action"),
+	check("stays_booked_home_check", sql`booked_product_id IS NULL OR booked_product_id <> product_id`),
 	unique("stays_org_product_id_unique").on(table.organization_id, table.product_id, table.id),
 	unique("stays_org_id_unique").on(table.organization_id, table.id),
 	uniqueIndex("stays_idempotency_unique").on(table.organization_id, table.idempotency_key).where(sql`idempotency_key IS NOT NULL`),
@@ -1597,7 +1603,7 @@ export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", 
 	created_at: text().notNull(),
 	updated_at: text().notNull(),
 }, (table) => [
-	foreignKey({ columns: [table.organization_id, table.product_id, table.stay_id], foreignColumns: [stays.organization_id, stays.product_id, stays.id], name: "scheduled_guest_messages_stay_scope_fk" }).onDelete("cascade"),
+	foreignKey({ columns: [table.organization_id, table.stay_id], foreignColumns: [stays.organization_id, stays.id], name: "scheduled_guest_messages_stay_scope_fk" }).onDelete("cascade"),
 	foreignKey({ columns: [table.organization_id, table.request_id], foreignColumns: [requests.organization_id, requests.id], name: "scheduled_guest_messages_request_scope_fk" }).onDelete("no action"),
 	foreignKey({ columns: [table.organization_id, table.template_id], foreignColumns: [message_templates.organization_id, message_templates.id], name: "scheduled_guest_messages_template_scope_fk" }).onDelete("no action"),
 	uniqueIndex("scheduled_guest_messages_template_stay_unique").on(table.template_id, table.stay_id),
@@ -2443,12 +2449,16 @@ export const team_thread_members = sqliteTable("team_thread_members", {
 // A message's photos are media placements (team_message / attachments).
 // sender_user_id is NULL only once the sender's account has been deleted.
 // The sender's idempotency key replays the same message instead of a second one.
+// An automatic message is one KrabiClaw wrote into the conversation (a job, a
+// reminder, a move); it is shown as sent automatically, alerts only the people
+// it is for, and is never counted as unread.
 export const team_messages = sqliteTable("team_messages", {
 	id: text().primaryKey(),
 	organization_id: text().notNull(),
 	thread_id: text().notNull(),
 	sender_user_id: text().references(() => user.id, { onDelete: "set null" }),
 	body: text().notNull(),
+	automatic: integer({ mode: "boolean" }).default(false).notNull(),
 	idempotency_key: text().notNull(),
 	request_hash: text().notNull(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
