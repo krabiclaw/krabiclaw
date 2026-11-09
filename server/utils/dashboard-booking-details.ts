@@ -320,8 +320,10 @@ async function composeBookingDetails(
   ])
 
   const provider=!reader.buyerUserId&&row.assigned_member_id?await queryFirst<{name:string|null}>(db,`SELECT ${MEMBER_NAME_SQL} name FROM member m LEFT JOIN user u ON u.id=m.userId LEFT JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE m.id=? AND m.organizationId=?`,[row.assigned_member_id,row.organization_id]):null
-  // The provider's Google calendar is asked about this booking's time when the team reads it.
-  const providerConflict=reader.env && row.assigned_member_id
+  const now = new Date().toISOString()
+  const complete = isBookingComplete({ status: row.status as BookingStatus, ends_at: row.ends_at }, now)
+  // A live booking's provider calendar is asked about its time when the team reads it; a past or cancelled one has nothing to conflict with.
+  const providerConflict=reader.env && row.assigned_member_id && !complete && row.status!=='cancelled'
     ? (await memberBusyIntervals(db,reader.env,row.organization_id,row.assigned_member_id,{from:row.starts_at,until:row.ends_at})).some(busy=>busy.start<row.ends_at&&busy.end>row.starts_at)
     : false
   const paymentIds=reader.buyerUserId
@@ -331,8 +333,6 @@ async function composeBookingDetails(
     const detail=await readPaymentDetails(db,row.organization_id,id)
     return {payment:paymentDisplay(detail.payment),refunds:paymentRefundsDisplay(detail.refunds),order:paymentOrderDisplay(detail.order)}
   }))
-  const now = new Date().toISOString()
-  const complete = isBookingComplete({ status: row.status as BookingStatus, ends_at: row.ends_at }, now)
   const guestCanRetryCancellation = Boolean(reader.buyerUserId && row.status === 'cancelled' && row.cancellation_used_at
     && await canRetryGuestVisitRefund(db, { organizationId: row.organization_id, subjectType: type, subjectId: row.operational_id, requestId: row.id, buyerUserId: reader.buyerUserId }))
   return {
