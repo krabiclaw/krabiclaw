@@ -691,21 +691,25 @@ export async function postAutomaticTeamMessage(env: TeamEnv, db: DbClient, input
   alertUserIds: readonly string[]
   /** How the alert names the writer: the business. */
   senderName: string
+  /** An existing conversation to post into, seats as they are: what a job's former people are told goes where the job was. */
+  threadId?: string
 }): Promise<{ threadId: string; messageId: string; created: boolean }> {
   const body = input.body.trim()
   if (!body || body.length > MAX_BODY) throw new Error(`An automatic team message must be 1 to ${MAX_BODY} characters`)
   if (input.idempotencyKey.length < 1 || input.idempotencyKey.length > 200) throw new Error('An automatic team message key must be 1 to 200 characters')
   const seatIds = [...new Set(input.seatMemberIds)].sort()
-  if (!seatIds.length) throw new Error('An automatic team message needs a roster')
-  const participantsKey = await jobThreadParticipantsKey(input.subject, seatIds)
+  if (!seatIds.length && !input.threadId) throw new Error('An automatic team message needs a roster')
+  const participantsKey = input.threadId ? null : await jobThreadParticipantsKey(input.subject, seatIds)
   const now = new Date().toISOString()
-  const thread = `SELECT id FROM team_threads WHERE organization_id = ? AND participants_key = ?`
-  const threadParams = [input.organizationId, participantsKey]
-  const threadId = (await queryFirst<{ id: string }>(db, thread, threadParams))?.id ?? crypto.randomUUID()
+  const thread = input.threadId ? 'SELECT id FROM team_threads WHERE organization_id = ? AND id = ?' : 'SELECT id FROM team_threads WHERE organization_id = ? AND participants_key = ?'
+  const threadParams = [input.organizationId, input.threadId ?? participantsKey!]
+  const existing = (await queryFirst<{ id: string }>(db, thread, threadParams))?.id
+  if (input.threadId && !existing) throw new Error(`Team conversation ${input.threadId} does not exist in organization ${input.organizationId}`)
+  const threadId = existing ?? crypto.randomUUID()
   const messageId = crypto.randomUUID()
   const requestHash = await creationRequestHash({ body, automatic: true })
   await executeBatch(db, [
-    {
+    ...(input.threadId ? [] : [{
       // Only while every seat is a current member; a roster that has lost someone is not opened.
       query: `INSERT INTO team_threads (id, organization_id, stay_id, booking_id, location_id, created_by_user_id, name, is_group, participants_key, last_message_at, created_at)
               SELECT ?, ?, ?, ?, NULL, NULL, NULL, 0, ?, ?, ? WHERE EXISTS (SELECT 1 FROM ${input.subject.kind === 'stay' ? 'stays' : 'bookings'} WHERE organization_id = ? AND id = ?)
@@ -717,10 +721,10 @@ export async function postAutomaticTeamMessage(env: TeamEnv, db: DbClient, input
       query: `INSERT INTO team_thread_members (thread_id, organization_id, member_id, last_read_at, created_at) SELECT id, organization_id, ?, NULL, ? FROM team_threads WHERE id = ?
               ON CONFLICT DO NOTHING`,
       params: [memberId, now, threadId],
-    })),
+    }))]),
     {
       query: `INSERT INTO team_messages (id, organization_id, thread_id, sender_user_id, automatic, body, idempotency_key, request_hash, created_at)
-              SELECT ?, organization_id, id, NULL, 1, ?, ?, ?, ? FROM team_threads WHERE organization_id = ? AND participants_key = ?
+              SELECT ?, organization_id, id, NULL, 1, ?, ?, ?, ? FROM team_threads WHERE id = (${thread})
               ON CONFLICT (thread_id, idempotency_key) DO NOTHING`,
       params: [messageId, body, input.idempotencyKey, requestHash, now, ...threadParams],
     },

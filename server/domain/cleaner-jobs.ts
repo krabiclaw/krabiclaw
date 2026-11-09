@@ -114,8 +114,8 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
     [organizationId, d1JsonStringSet([...threads.keys()])])) seatUsers.set(seat.thread_id, [...seatUsers.get(seat.thread_id) ?? [], seat.user_id])
   }
   const hostUsers = members.filter(member => isOrganizationWideRole(member.role)).map(member => member.userId)
-  const post = async (subject: JobSubject, seats: readonly string[], key: string, body: string, alertUserIds: readonly string[]) => {
-    const result = await postAutomaticTeamMessage(env, db, { organizationId, subject, seatMemberIds: seats, body, idempotencyKey: key, alertUserIds, senderName: organization.name })
+  const post = async (subject: JobSubject, seats: readonly string[], key: string, body: string, alertUserIds: readonly string[], threadId?: string) => {
+    const result = await postAutomaticTeamMessage(env, db, { organizationId, subject, seatMemberIds: seats, body, idempotencyKey: key, alertUserIds, senderName: organization.name, threadId })
     keysByThread.set(result.threadId, (keysByThread.get(result.threadId) ?? new Set()).add(key))
     return result
   }
@@ -153,7 +153,7 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
         const seated = seatUsers.get(threadId) ?? []
         const body = task.status === 'open' ? `No longer yours: ${view!.sheet.heading.toLowerCase()} ${about} ${view!.sheet.title}${view!.sheet.date ? `, ${view!.sheet.date}` : ''}.`
           : `Cancelled: ${view ? `${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${view.sheet.date ? `, ${view.sheet.date}` : ''}` : 'this job'}.`
-        await post(subject, seated.map(userId => members.find(member => member.userId === userId)?.id).filter((id): id is string => Boolean(id)), closedKey, body, seated.filter(userId => !hostUsers.includes(userId)))
+        await post(subject, [], closedKey, body, seated.filter(userId => !hostUsers.includes(userId)), threadId)
       }
       if (task.status !== 'open' || !view) continue
       // A job nobody holds has been told to whoever held it; there is nobody to remind.

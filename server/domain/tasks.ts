@@ -649,7 +649,8 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     complete: row.status === 'open' && action?.type === 'complete' && reachable,
     skip: row.status === 'open' && reachable,
     reopen: personClosed && (viewer.manage || row.closed_by_user_id === viewer.principal.userId),
-    assign: viewer.manage && row.status === 'open',
+    // A consultation job follows its booking's attorney; it is reassigned by reassigning the booking.
+    assign: viewer.manage && row.status === 'open' && row.kind !== 'consultation_prep' && row.kind !== 'consultation_follow_up',
     edit: viewer.manage && row.status === 'open',
   }
   if (row.status !== 'open') action = can.reopen ? { type: 'reopen', label: row.status === 'done' ? 'Undo Done' : 'Undo' } : null
@@ -1002,9 +1003,11 @@ export async function closeTask(db: DbClient, viewer: TaskViewer, taskId: string
   const now = new Date().toISOString()
   const organizationId = viewer.principal.organizationId
   // A job closes in its conversation too: the note and photos are the person's own message there, and nobody is alerted.
+  // The conversation that carries this job is the one its automatic post went to, and the closer must still sit in it.
   const thread = isJobTask(current) ? await queryFirst<{ id: string }>(db, `SELECT t.id FROM team_threads t
+      JOIN team_messages m ON m.organization_id = t.organization_id AND m.thread_id = t.id AND m.automatic = 1 AND m.idempotency_key = ?
       JOIN team_thread_members s ON s.organization_id = t.organization_id AND s.thread_id = t.id
-     WHERE t.organization_id = ? AND ${jobSubject(current).kind === 'booking' ? 't.booking_id' : 't.stay_id'} = ? AND s.member_id = ? ORDER BY t.last_message_at DESC, t.id LIMIT 1`, [organizationId, jobSubject(current).id, viewer.memberId]) : null
+     WHERE t.organization_id = ? AND s.member_id = ? ORDER BY m.created_at DESC, t.id LIMIT 1`, [`job:${current.id}:${current.product_id}`, organizationId, viewer.memberId]) : null
   const assetIds = input.photos.length ? await uploadMessagePhotos(db, input.env, organizationId, input.photos, { source: 'uploaded', userId: viewer.principal.userId })
     .catch((error: unknown) => error instanceof MessagePhotoRejection ? fail(422, 'INVALID_PHOTO', error.message, 'photos') : Promise.reject(error)) : []
   const closed = `EXISTS (SELECT 1 FROM tasks WHERE organization_id = ? AND id = ? AND version = ? AND status = ?)`

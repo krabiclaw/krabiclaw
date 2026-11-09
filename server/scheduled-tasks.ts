@@ -25,6 +25,7 @@ export type ScheduledTaskName =
   | 'airbnb-sync'
   | 'channex-ari-delivery'
   | 'reply-task-expiry'
+  | 'jobs-wake-daily'
 
 type TaskLoader = () => Promise<{ default: ScheduledTaskDefinition }>
 
@@ -33,7 +34,7 @@ export const SCHEDULED_TASKS: Readonly<Record<string, readonly ScheduledTaskName
   '*/5 * * * *': ['google-calendar-sync', 'scheduled-guest-messages', 'stay-checkout-holds', 'stay-calendar-links'],
   '*/2 * * * *': ['public-resource-cache-invalidation', 'airbnb-sync', 'channex-ari-delivery', 'send-later-messages'],
   '*/10 * * * *': ['domain-reconciliation', 'channex-revision-feed'],
-  '0 3 * * *': ['reply-task-expiry', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request', 'marketing-ad-spend-daily'],
+  '0 3 * * *': ['reply-task-expiry', 'jobs-wake-daily', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request', 'marketing-ad-spend-daily'],
   '0 0 * * SUN': ['google-places-sync'],
   '0 * * * *': ['review-request-automation', 'sessions-materialize'],
   // Staging only ([env.staging.triggers]): the Channex certification run needs imports, pending
@@ -52,6 +53,7 @@ const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
   'airbnb-sync': async () => import('./tasks/airbnb-sync'),
   'channex-ari-delivery': async () => import('./tasks/channex-ari-delivery'),
   'reply-task-expiry': async () => import('./tasks/reply-task-expiry'),
+  'jobs-wake-daily': async () => import('./tasks/jobs-wake-daily'),
   'public-resource-cache-invalidation': async () => import('./tasks/public-resource-cache-invalidation'),
   'domain-reconciliation': async () => import('./tasks/domain-reconciliation'),
   'analytics-aggregate-daily': async () => import('./tasks/analytics-aggregate-daily'),

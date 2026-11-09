@@ -373,6 +373,11 @@ async function pay() {
       const next = await stripe.handleNextAction({ clientSecret: confirmed.client_secret })
       if (next.error) throw new Error(next.error.message ?? t('payment.declined'))
       if (next.paymentIntent?.status !== 'succeeded' && next.paymentIntent?.status !== 'processing' && next.paymentIntent?.status !== 'requires_capture') throw new Error(t('payment.declined'))
+    } else if (confirmed.status === 'canceled') {
+      // What it paid for was taken while the buyer authorized; the authorization was cancelled and nothing was charged.
+      outcome.value = 'expired'
+      review.value = null
+      return
     } else if (confirmed.status !== 'succeeded' && confirmed.status !== 'processing') {
       throw new Error(t('payment.declined'))
     }
