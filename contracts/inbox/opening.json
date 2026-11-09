@@ -10,7 +10,7 @@
     },
     "guestName": "Ana Ruiz",
     "home": "74 D · Sky",
-    "id": "00000000-0000-4000-8000-000000000068",
+    "id": "00000000-0000-4000-8000-000000000088",
     "kind": "guest",
     "pending": [],
     "recordId": "site-stay",
@@ -18,14 +18,14 @@
     "recordTitle": "Reservation",
     "stream": [
       {
-        "id": "day:00000000-0000-4000-8000-000000000071",
+        "id": "day:00000000-0000-4000-8000-000000000091",
         "label": "Today",
         "type": "day"
       },
       {
         "author": "Ana Ruiz",
         "body": "74 D · Sky from Fri, Nov 20 to Mon, Nov 23 for 2 guests. Ana Ruiz, +1 303 555 0123.",
-        "id": "00000000-0000-4000-8000-000000000071",
+        "id": "00000000-0000-4000-8000-000000000091",
         "label": null,
         "photos": [],
         "receipt": null,
@@ -40,7 +40,7 @@
       {
         "author": "Ana Ruiz",
         "body": "We arrive late, around 9 PM.",
-        "id": "00000000-0000-4000-8000-000000000072",
+        "id": "00000000-0000-4000-8000-000000000092",
         "label": null,
         "photos": [],
         "receipt": null,

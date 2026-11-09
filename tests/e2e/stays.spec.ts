@@ -4607,11 +4607,14 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
           .find(item => item.stayId === stays[0]!.id && item.job?.id === turnover.id)
         return jobThread?.id ?? ''
       }, { timeout: 30_000, message: 'the organization’s jobs open the cleaner’s conversation for the turnover' }).not.toBe('')
+      // The job is posted once; a wake that saw the moment between unassigning and reassigning also told the
+      // cleaner it was no longer theirs, and nothing else is said in the conversation.
       await expect.poll(async () => {
         const read = await cleaner.request.get(api(`team/threads/${jobThread!.id}/messages`))
         await expectStatus(read, 200)
-        return (await read.json() as { messages: Array<{ automatic: boolean; body: string }> }).messages.filter(message => message.automatic).map(message => message.body.split('\n')[0])
-      }, { timeout: 30_000, message: 'the job is posted into the conversation as an automatic message' }).toEqual(['Turnover: Assigned Cabin'])
+        const lines = (await read.json() as { messages: Array<{ automatic: boolean; body: string }> }).messages.filter(message => message.automatic).map(message => message.body.split('\n')[0])
+        return { job: lines.filter(line => line === 'Turnover: Assigned Cabin').length, other: lines.filter(line => line !== 'Turnover: Assigned Cabin' && !/^No longer yours: turnover at Assigned Cabin, /.test(line)) }
+      }, { timeout: 30_000, message: 'the job is posted into the conversation as an automatic message' }).toEqual({ job: 1, other: [] })
       expect(jobThread!.unread).toBe(false)
       const alertsResponse = await cleaner.request.get(api('notifications'))
       await expectStatus(alertsResponse, 200)

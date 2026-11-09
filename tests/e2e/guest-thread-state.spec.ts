@@ -1058,8 +1058,10 @@ test('buyer conversation approves and declines canonical changes without moving 
   try {
     await loginAs(owner, baseURL, 'user-e2e-demo-owner')
     await loginAs(page.request, baseURL, 'user-e2e-buyer')
+    // A visit is changed only 24 hours or more before it starts, so the slot sits at least two full
+    // days out whatever the location's clock says relative to this run's.
     let slot: { date: string; time: string } | null = null
-    for (let offset = 1; offset <= 7 && !slot; offset++) {
+    for (let offset = 3; offset <= 9 && !slot; offset++) {
       const date = new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
       const available = await page.request.get('/api/public/reservations/availability', {
         params: { date, location_id: demoLocationId() }, headers: seededSiteHeaders('restaurant'),
