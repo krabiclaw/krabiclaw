@@ -4583,20 +4583,38 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const otherLocation = await cleaner.request.get(api('today'), { params: { range: 'upcoming', locationId: homes[1]!.location_id } })
       await expectStatus(otherLocation, 200)
       expect((await otherLocation.json() as BusinessToday).tasks).toEqual([])
-      // The host takes the turnover back and gives it to the cleaner again: the alert reaches the member's
-      // own feed and unread count, and opening the task reads it.
+      // The host takes the turnover back and gives it to the cleaner again. A cleaner's job is a team
+      // conversation with the owners: the organization's jobs post it there as an automatic message once
+      // they wake, that message is the cleaner's alert, there is no task alert beside it, and reading the
+      // alert clears it from the cleaner's count.
       const unassigned = await call<{ task: { version: number } }>('update_task', { task_id: turnover.id, expected_version: turnover.version, assigned_member_id: null })
       expect(unassigned.error).toBeNull()
       const reassigned = await call<{ task: { version: number } }>('update_task', { task_id: turnover.id, expected_version: unassigned.data!.task.version, assigned_member_id: memberId })
       expect(reassigned.error).toBeNull()
-      const taskAlert = `?task=${encodeURIComponent(turnover.id)}`
+      let jobThreadId = ''
+      await expect.poll(async () => {
+        const threads = await cleaner.request.get(api('team/threads'))
+        await expectStatus(threads, 200)
+        const thread = (await threads.json() as { threads: Array<{ id: string; stayId: string | null; job: { id: string } | null }> }).threads
+          .find(item => item.stayId === stays[0]!.id && item.job?.id === turnover.id)
+        jobThreadId = thread?.id ?? ''
+        return jobThreadId
+      }, { timeout: 30_000, message: 'the organization’s jobs open the cleaner’s conversation for the turnover' }).not.toBe('')
+      await expect.poll(async () => {
+        const read = await cleaner.request.get(api(`team/threads/${jobThreadId}/messages`))
+        await expectStatus(read, 200)
+        return (await read.json() as { messages: Array<{ automatic: boolean; body: string }> }).messages.filter(message => message.automatic).map(message => message.body.split('\n')[0])
+      }, { timeout: 30_000, message: 'the job is posted into the conversation as an automatic message' }).toEqual(['Turnover: Assigned Cabin'])
+      const threadAlert = `/messages/team/${encodeURIComponent(jobThreadId)}?view=team`
       const alertsResponse = await cleaner.request.get(api('notifications'))
       await expectStatus(alertsResponse, 200)
-      const alerts = await alertsResponse.json() as { notifications: Array<{ template: string; deep_link: string | null; read_at: string | null }>; unread_count: number }
-      expect(alerts.notifications.filter(alert => alert.template === 'task_assigned' && alert.deep_link?.endsWith(taskAlert))).toEqual([expect.objectContaining({ read_at: null })])
+      const alerts = await alertsResponse.json() as { notifications: Array<{ id: string; template: string; deep_link: string | null; read_at: string | null }>; unread_count: number }
+      expect(alerts.notifications.filter(alert => alert.template === 'task_assigned')).toEqual([])
+      const jobAlerts = alerts.notifications.filter(alert => alert.template === 'team_message' && alert.deep_link?.endsWith(threadAlert))
+      expect(jobAlerts).toEqual([expect.objectContaining({ read_at: null })])
       const unreadBeforeOpening = alerts.unread_count
       expect(unreadBeforeOpening).toBeGreaterThanOrEqual(1)
-      await expectStatus(await cleaner.request.post(`/api/organizations/${organizationId}/tasks/${turnover.id}/read`, { data: {} }), 200)
+      await expectStatus(await cleaner.request.patch(api(`notifications/${jobAlerts[0]!.id}/read`), { data: {} }), 200)
       const countResponse = await cleaner.request.get(api('notifications/unread-count'))
       await expectStatus(countResponse, 200)
       expect((await countResponse.json() as { unread_count: number }).unread_count).toBe(unreadBeforeOpening - 1)

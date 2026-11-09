@@ -1,5 +1,6 @@
 <template>
-  <USlideover v-model:open="open" :title="task?.sheet.heading ?? 'Task'" side="right" data-testid="today-task-sheet" :ui="{ body: 'space-y-5' }">
+  <!-- The slideover root renders no element, so the test id rides on its content. -->
+  <USlideover v-model:open="open" :title="task?.sheet.heading ?? 'Task'" side="right" :content="{ 'data-testid': 'today-task-sheet' }" :ui="{ body: 'space-y-5' }">
     <template #body>
       <template v-if="task">
         <div class="text-center">
