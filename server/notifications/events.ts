@@ -1,4 +1,4 @@
-import type { MemberAlertMessage, NotificationFact, NotificationQuote, NotificationSection } from './messages'
+import type { MemberAlertMessage, NotificationFact, NotificationHistory, NotificationQuote, NotificationSection } from './messages'
 import { formatFormAnswer, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { formatPhone } from '~/utils/phone'
 import { formatCalendarDate, formatCalendarRange } from '~/utils/timezone'
@@ -305,10 +305,8 @@ export interface ContactEventInput {
   replyUrl: string
 }
 
-/** Where a reply to a message alert goes: KrabiClaw, not this email, until email replies reach the channel. */
-function replyNote(name: string): string {
-  return `Reply from the dashboard or the KrabiClaw app. Replies to this email are not delivered to ${name}.`
-}
+/** A message alert's reply-to answers the guest as the member it was sent to. */
+const REPLY_NOTE = 'Reply to this email or from the dashboard.'
 
 export function contactReceivedMessage(input: ContactEventInput): MemberAlertMessage {
   // The product a guest is asking about is the whole point of the message, and
@@ -330,7 +328,7 @@ export function contactReceivedMessage(input: ContactEventInput): MemberAlertMes
     ),
     quote: { author: input.guestName, body: input.message, translation: null, photos: [] },
     primaryAction: { url: input.replyUrl, label: 'Reply' },
-    finePrint: replyNote(first),
+    finePrint: REPLY_NOTE,
     category: 'messages',
     emailPurpose: 'transactional',
     emailReason: `You received this email because someone contacted ${input.organizationName} and you receive its website messages.`,
@@ -376,8 +374,14 @@ export interface MessageEventInput {
   conversationLabel: string
   /** The home, class or booking the conversation belongs to, when it belongs to one. */
   about: string | null
+  /** What lists, push and WhatsApp say: the words, or what was sent when there are none. */
   messagePreview: string
+  /** The words as written; empty when the message is only photos or files. */
+  body: string
+  photos: NotificationQuote['photos']
   translation: NotificationQuote['translation']
+  /** The conversation's last messages before this one, oldest first. */
+  history: NotificationHistory
   record: ConversationRecord | null
   organizationName: string | null
   replyUrl: string
@@ -400,9 +404,10 @@ export function messageReceived(input: MessageEventInput): MemberAlertMessage {
       fact('guestEmail', 'Email', input.sender.kind === 'person' ? input.sender.email : null),
       fact('message', 'Message', input.messagePreview, true),
     ),
-    quote: { author: first, body: input.messagePreview, translation: input.translation, photos: [] },
+    quote: { author: first, body: input.body, translation: input.translation, photos: input.photos },
+    history: input.history,
     primaryAction: { url: input.replyUrl, label: 'Reply' },
-    finePrint: replyNote(first),
+    finePrint: REPLY_NOTE,
     sections: input.record && !support ? [recordSection(input.record)] : [],
     category: 'messages',
     emailPurpose: 'transactional',
@@ -417,6 +422,7 @@ export interface InquiryEventInput {
   guestName: string
   /** The guest's words that asked, as the conversation recorded them. */
   message: string
+  photos: NotificationQuote['photos']
   translation: NotificationQuote['translation']
   record: ConversationRecord & { replyBy: string }
   organizationName: string
@@ -438,9 +444,9 @@ export function inquiryReceivedMessage(input: InquiryEventInput): MemberAlertMes
       fact('subject', 'Inquiry', `Airbnb inquiry · ${record.homeName}`, true),
       fact('message', 'Asking for', `Reply by ${record.replyBy} · ${dates} · ${nights} night${nights === 1 ? '' : 's'} · ${record.guests}`, true),
     ),
-    quote: { author: first, body: input.message, translation: input.translation, photos: [] },
+    quote: { author: first, body: input.message, translation: input.translation, photos: input.photos },
     primaryAction: { url: input.replyUrl, label: 'Reply' },
-    finePrint: replyNote(first),
+    finePrint: REPLY_NOTE,
     sections: [recordSection(record)],
     category: 'messages',
     emailPurpose: 'transactional',

@@ -1,7 +1,7 @@
 import type { ForwardableEmailMessage } from '@cloudflare/workers-types'
 import { definePlugin } from 'nitro'
 import PostalMime from 'postal-mime'
-import { guestReplyText, InboundEmailRejection, receiveGuestEmail } from '~/server/domain/guest-threads/inbound-email'
+import { guestReplyText, InboundEmailRejection, receiveGuestEmail, receiveMemberEmail } from '~/server/domain/guest-threads/inbound-email'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { parseReplyToAddress } from '~/server/utils/submission-messages'
 import { isEmailMessageId } from '~/server/utils/email-delivery'
@@ -61,18 +61,24 @@ async function processEmail(message: ForwardableEmailMessage, env: unknown): Pro
   if (rfcMessageId !== null && !isEmailMessageId(rfcMessageId)) throw new InboundEmailRejection('This email has an invalid Message-ID.')
   const messageId = rfcMessageId ?? `content-sha256:${await sha256Hex(rawEmail)}`
 
+  const files = parsed.attachments.map((attachment) => {
+    if (!(attachment.content instanceof ArrayBuffer)) throw new Error('postal-mime returned an attachment that is not an ArrayBuffer')
+    return { bytes: new Uint8Array(attachment.content), filename: attachment.filename || 'attachment' }
+  })
+  const from = message.from.trim().toLowerCase()
+  if (reply.kind === 'member') {
+    await receiveMemberEmail(env, { threadId: reply.threadId, token: reply.token, from, body: guestReplyText(parsed), files, messageId })
+    return
+  }
   await receiveGuestEmail(env, {
     submissionType: reply.submissionType,
     submissionId: reply.submissionId,
     token: reply.token,
     body: guestReplyText(parsed),
-    files: parsed.attachments.map((attachment) => {
-      if (!(attachment.content instanceof ArrayBuffer)) throw new Error('postal-mime returned an attachment that is not an ArrayBuffer')
-      return { bytes: new Uint8Array(attachment.content), filename: attachment.filename || 'attachment' }
-    }),
+    files,
     messageId,
     headers: {
-      from: message.from.trim().toLowerCase(),
+      from,
       subject: parsed.subject ?? null,
       messageId: rfcMessageId,
       inReplyTo: parsed.inReplyTo ?? null,

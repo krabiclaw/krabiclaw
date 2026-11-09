@@ -26,9 +26,10 @@ import { guestThreadListPage, parseGuestThreadListQuery } from '../../server/uti
 import { assertAssignedBookingAccess, memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
 import whatsappWebhook from '../../server/api/whatsapp/webhook.post.ts'
-import { getWhatsAppWorkspaceState } from '../../server/utils/mcp-context.ts'
 import { useNitroHooks } from 'nitro/app'
 import { ChannexError } from '../../server/integrations/channex/client.ts'
+import { InboundEmailRejection, receiveMemberEmail } from '../../server/domain/guest-threads/inbound-email.ts'
+import { parseReplyToAddress } from '../../server/utils/submission-messages.ts'
 
 const ORG = 'org', OWNER = 'owner'
 const NOW = '2026-10-16T00:00:00.000Z'
@@ -173,7 +174,7 @@ async function boot() {
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('owner-member', ?, ?, 'owner', 0)").bind(ORG, OWNER).run()
     await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
       VALUES ('location', ?, 'cabin', 'Cabin', 'active', 'America/Denver', ?, ?)`).bind(ORG, NOW, NOW).run()
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), MEDIA_BASE_URL: 'https://media.example.test', CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'test-provider-key', BETTER_AUTH_SECRET: 'stay-billing-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), MEDIA_BASE_URL: 'https://media.example.test', CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'test-provider-key', BETTER_AUTH_SECRET: 'stay-billing-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests', EMAIL_REPLY_SECRET: 'member-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     const home = await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
       kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
       stay: { location_id: 'location', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: 'owner-member', assigned_team_id: null },
@@ -1047,8 +1048,8 @@ test('explicit provider instants order replies across offsets without losing sub
 
 // A WhatsApp reply to an Airbnb conversation that fails, whether the reply operation throws or
 // returns the failure, is never shown raw: the manager reads a fixed notice (or that it may have
-// reached the guest), the pending reply is cleared, and the failure is reported through the error
-// hook while the message is answered, so Meta's redelivery runs nothing again.
+// reached the guest), and the failure is reported through the error hook while the message is
+// answered, so Meta's redelivery runs nothing again.
 test('a failed WhatsApp reply tells the manager a fixed notice and reports the failure', async () => {
   const { runtime, db, env: base } = await boot()
   const provider = new Provider(), realFetch = globalThis.fetch
@@ -1076,17 +1077,16 @@ test('a failed WhatsApp reply tells the manager a fixed notice and reports the f
     app.post('/api/whatsapp/webhook', whatsappWebhook)
     let inbound = 0
     const write = async (text: string, quoting?: string) => {
-      const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ value: { messages: [{ id: `wamid-${++inbound}`, from: '66812345678', type: 'text', text: { body: text }, ...(quoting && { context: { id: quoting } }) }] } }] }] })
+      const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ value: { messages: [{ id: `wamid-${++inbound}`, from: '66812345678', timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: text }, ...(quoting && { context: { id: quoting } }) }] } }] }] })
       return await app.request(Object.assign(new Request('https://proof.example/api/whatsapp/webhook', {
         method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': `sha256=${createHmac('sha256', 'whatsapp-secret').update(body).digest('hex')}` }, body,
       }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     }
-    const pending = async () => (await getWhatsAppWorkspaceState(db, OWNER))?.pending_confirmation ?? null
 
     const alerted = 'Reply not sent. The team has been alerted.'
     const mayHaveReached = 'This reply may have reached the guest. Check the conversation before sending again.'
     // Each failure: how it is made, the webhook status it reports with, the exact messages the manager
-    // receives for that YES, and how many writes reached Airbnb.
+    // receives for that reply, and how many writes reached Airbnb.
     const reported: unknown[] = []
     useNitroHooks().hook('error', error => { reported.push(error) })
     const cases = [
@@ -1102,20 +1102,70 @@ test('a failed WhatsApp reply tells the manager a fixed notice and reports the f
     for (const { mode, notices, writes, reports } of cases) {
       failure = null
       Object.assign(provider, { propertyId: 'property', refuseMessage: false, uncertain: false })
-      assert.equal((await write(`Reply for ${mode}`, 'meta-alert')).status, 200)
-      assert.equal(sent.at(-1), 'This reply will be sent through Airbnb. Reply YES to send.')
       if (mode === 'channex') failure = 'channex'
       if (mode === 'invariant') provider.propertyId = 'another-property'
       if (mode === 'refused') provider.refuseMessage = true
       if (mode === 'uncertain') provider.uncertain = true
       const [sentBefore, writesBefore, reportedBefore] = [sent.length, provider.sends, reported.length]
-      const confirmed = await write('YES')
+      const confirmed = await write(`Reply for ${mode}`, 'meta-alert')
       assert.equal(confirmed.status, 200, `${mode}: the message is answered, so Meta does not redeliver it`)
       assert.equal(reported.length - reportedBefore, 1, `${mode}: the failure is reported once`)
       assert.ok(reports(reported.at(-1)), `${mode}: the reported error is the reply's own`)
       assert.deepEqual(sent.slice(sentBefore), notices, `${mode}: exactly these messages reach the manager, and nothing raw`)
-      assert.equal(await pending(), null, `${mode}: the pending reply is cleared`)
       assert.equal(provider.sends - writesBefore, writes, `${mode}: writes that reached Airbnb`)
     }
+  } finally { globalThis.fetch = realFetch; await runtime.dispose() }
+})
+
+// A guest's Airbnb photo reaches the owner's alert as the stored photo, under
+// the conversation so far, and replying to that alert email answers on Airbnb
+// as the owner. Only Channex's HTTP boundary is a stand-in; email is log-only,
+// so the alert is read from its recorded delivery.
+test('an Airbnb photo is in the owner alert, and replying to the alert answers the guest on Airbnb', async () => {
+  const { runtime, db, env } = await boot()
+  const provider = new Provider(), realFetch = globalThis.fetch
+  globalThis.fetch = provider.fetch as typeof fetch
+  try {
+    assert.deepEqual(await backfillChannexMessages(db, env, 'property', ORG), { threads: 1 })
+    provider.messages.push(provider.message('guest-photo', 'guest', 'The lock is jammed', ['/attachment/file']))
+    await mirrorChannexMessageEvent(db, env, { event: 'message', property_id: 'property', payload: { id: 'guest-photo', message_thread_id: 'thread', property_id: 'property' } })
+    const threadId = (await db.prepare('SELECT request_id FROM channel_threads').first<{ request_id: string }>())!.request_id
+    const photo = await db.prepare(`SELECT ma.public_url FROM media_placements mp JOIN media_assets ma ON ma.id = mp.asset_id JOIN activity_entries e ON e.id = mp.owner_id
+      WHERE e.dedupe_key = 'channex-message:guest-photo' AND mp.slot = 'attachments'`).first<string>('public_url')
+    assert.match(photo!, /^https:\/\/media\.example\.test\//u)
+    const alert = await db.prepare(`SELECT d.email_json FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
+      WHERE e.dedupe_key = 'channex-message:guest-photo' AND d.channel = 'email' AND d.purpose = 'owner_alert'`).first<string>('email_json')
+    const sent = JSON.parse(alert!).message as { to: string; subject: string; html: string; text: string; replyTo: string }
+    assert.equal(sent.to, 'owner@example.test')
+    assert.ok(sent.html.includes(`src="${photo}"`), 'the alert shows the photo as the media store serves it')
+    assert.match(sent.text, /The lock is jammed/u)
+    assert.match(sent.text, /Earlier in this conversation\s+[^:]+: Hello/u)
+    assert.match(sent.text, /Reply to this email or from the dashboard\./u)
+    assert.doesNotMatch(sent.text, /are not delivered/u)
+    const address = parseReplyToAddress(env, sent.replyTo)
+    assert.deepEqual(address && { kind: address.kind, threadId: 'threadId' in address ? address.threadId : null }, { kind: 'member', threadId })
+
+    // The owner replies to that email: the words reach the Airbnb conversation as the host's, once.
+    const reply = { threadId, token: address!.token, from: 'owner@example.test', body: 'Lift the handle as you turn the key.', files: [], messageId: '<owner-reply-1@mail.example.test>' }
+    await receiveMemberEmail(env, reply)
+    assert.equal(provider.sends, 1)
+    assert.equal(provider.messages.at(-1)!.attributes.message, 'Lift the handle as you turn the key.')
+    const answered = await db.prepare("SELECT actor_user_id, channel, body FROM activity_entries WHERE request_id = ? AND event_name = 'thread.member_reply'").bind(threadId).all()
+    assert.deepEqual(answered.results, [{ actor_user_id: OWNER, channel: 'airbnb', body: 'Lift the handle as you turn the key.' }])
+    // The same email delivered again sends nothing again.
+    await receiveMemberEmail(env, reply)
+    assert.equal(provider.sends, 1)
+
+    // Another address replying with this signature, or one tampered with, bounces with the reason.
+    await assert.rejects(receiveMemberEmail(env, { ...reply, from: 'someone@example.test', messageId: '<other@mail.example.test>' }), InboundEmailRejection)
+    await assert.rejects(receiveMemberEmail(env, { ...reply, token: '0'.repeat(24), messageId: '<forged@mail.example.test>' }), InboundEmailRejection)
+    // Airbnb takes a photo or words, not both: the owner is told so, and nothing is sent.
+    await assert.rejects(receiveMemberEmail(env, { ...reply, files: [{ bytes: GUEST_PHOTO, filename: 'door.avif' }], messageId: '<both@mail.example.test>' }),
+      (error: unknown) => error instanceof InboundEmailRejection && error.message === 'Reply not sent: Send one Airbnb photo at a time, separately from text')
+    // A member who has left the business is refused before anything is sent.
+    await db.prepare("DELETE FROM member WHERE id = 'owner-member'").run()
+    await assert.rejects(receiveMemberEmail(env, { ...reply, messageId: '<after-leaving@mail.example.test>' }),
+      (error: unknown) => error instanceof InboundEmailRejection && error.message === 'Reply not sent: You are no longer a member of this business.')
+    assert.equal(provider.sends, 1)
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })

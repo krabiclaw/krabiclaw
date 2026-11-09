@@ -69,16 +69,42 @@ export function buildReplyLocalPart(submissionType: ReplySubmissionType, submiss
   return `r${typeCode}${compactId}${token}`
 }
 
-export function parseReplyLocalPart(local: string): { submissionType: ReplySubmissionType; submissionId: string; token: string } | null {
-  const compactMatch = /^r([cres])([0-9a-f]{32})([0-9a-f]{24})$/i.exec(local)
-  if (compactMatch) {
-    const code = compactMatch[1]!.toLowerCase() as 'c' | 'r' | 'e' | 's'
+/**
+ * A member's reply to their own alert about a conversation:
+ * rm<conversation id><24-char-hmac>@reply.<domain>. The id is written as stored
+ * (a UUID makes 62 characters). The signature covers the thread and the member's
+ * user id, which is not in the address: the sender's address names the member,
+ * and the signature proves the alert was sent to them about this thread.
+ */
+export async function buildMemberReplyToken(secret: string, threadId: string, userId: string): Promise<string> {
+  return hmacHex(secret, `member:${threadId}:${userId}`, TOKEN_BYTES)
+}
+
+export async function verifyMemberReplyTokenValue(secret: string, threadId: string, userId: string, token: string): Promise<boolean> {
+  return timingSafeEqual(await buildMemberReplyToken(secret, threadId, userId), token)
+}
+
+export function buildMemberReplyLocalPart(threadId: string, token: string): string | null {
+  const local = `rm${threadId}${token}`
+  return MEMBER_LOCAL_PART.test(local) && local.length <= 64 ? local : null
+}
+
+const MEMBER_LOCAL_PART = /^rm([0-9a-z-]+)([0-9a-f]{24})$/u
+
+export type ParsedReplyLocalPart =
+  | { kind: 'guest'; submissionType: ReplySubmissionType; submissionId: string; token: string }
+  | { kind: 'member'; threadId: string; token: string }
+
+export function parseReplyLocalPart(local: string): ParsedReplyLocalPart | null {
+  const guest = /^r([cres])([0-9a-f]{32})([0-9a-f]{24})$/i.exec(local)
+  if (guest) {
     return {
-      submissionType: CODE_TO_TYPE[code],
-      submissionId: expandUuid(compactMatch[2]!.toLowerCase()),
-      token: compactMatch[3]!.toLowerCase(),
+      kind: 'guest',
+      submissionType: CODE_TO_TYPE[guest[1]!.toLowerCase() as 'c' | 'r' | 'e' | 's'],
+      submissionId: expandUuid(guest[2]!.toLowerCase()),
+      token: guest[3]!.toLowerCase(),
     }
   }
-
-  return null
+  const member = MEMBER_LOCAL_PART.exec(local.toLowerCase())
+  return member ? { kind: 'member', threadId: member[1]!, token: member[2]! } : null
 }

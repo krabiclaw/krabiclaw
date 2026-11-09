@@ -9,8 +9,10 @@ import { sendEmail } from '../../server/utils/email-delivery.ts'
 import { applyResendEmailEvent, compareDeliveryStatus, createDeliveryReceipt, deliverReceiptEmail, getDeliveryById, isDeliverySent } from '../../server/domain/guest-threads/deliveries.ts'
 import { renderNotificationEmail } from '../../server/emails/render.ts'
 import { guestContactReceivedMessage, guestThreadReplyMessage } from '../../server/notifications/guest-events.ts'
-import { receiveGuestEmail } from '../../server/domain/guest-threads/inbound-email.ts'
-import { buildReplyToken } from '../../server/utils/reply-address.ts'
+import { InboundEmailRejection, receiveGuestEmail, receiveMemberEmail } from '../../server/domain/guest-threads/inbound-email.ts'
+import { buildMemberReplyToken, buildReplyToken } from '../../server/utils/reply-address.ts'
+import { notifyGuestThreadReply } from '../../server/utils/notifications.ts'
+import { parseReplyToAddress } from '../../server/utils/submission-messages.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { reconcileProductNewsContacts, reconcileProductNewsFromProvider, syncProductNewsContact } from '../../server/domain/product-news-contacts.ts'
 import { disableCategoryEmail, getNotificationPreferences, setNotificationPreference } from '../../server/domain/notification-preferences.ts'
@@ -486,6 +488,61 @@ test('conversation email uses provider-assigned ancestry and freezes each delive
       assert.equal(resend.calls.filter(call => call.path === '/emails' && call.method === 'POST').length, beforeExpiredRetry, 'expired retries never contact the send API')
     } finally { t.mock.timers.reset() }
   } finally { await runtime.dispose() }
+})
+
+// A member's alerts about one conversation are one email thread in every mail
+// client: the same subject, and each answers the alert before it by the RFC
+// Message-ID Resend assigned. Its reply-to answers the guest as that member.
+test('message alerts thread per recipient and replying to one answers the guest as the member', async (t) => {
+  const resend = fakeResend(t)
+  const { runtime, db, hubs } = await runtimeWithSchema()
+  try {
+    const env = { ...PROVIDER_ENV, DB: db, GUEST_INBOX_HUBS: hubs, BETTER_AUTH_SECRET: 'alert-thread-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+      STRIPE_SECRET_KEY: 'sk_test_alert_thread_no_stripe_requests', EMAIL_REPLY_SECRET: 'alert-thread-proof', WHATSAPP_DELIVERY_MODE: 'log_only' } as unknown as CloudflareEnv
+    await db.prepare("INSERT INTO organization (id,name,slug,subdomain,default_currency,timezone) VALUES ('inn','Harbor Inn','harbor','harbor','USD','UTC')").run()
+    await db.prepare("INSERT INTO organization_locales (id,organization_id,locale,is_source,status) VALUES ('inn-en','inn','en',1,'published')").run()
+    await db.prepare("INSERT INTO user (id,name,email,emailVerified) VALUES ('owner','Owner','owner@provider-proof.com',1)").run()
+    await db.prepare("INSERT INTO member (id,organizationId,userId,role) VALUES ('owner-member','inn','owner','owner')").run()
+    const now = new Date().toISOString()
+    // Conversations are addressed by their UUID, as every request id is.
+    const asked = crypto.randomUUID()
+    await db.batch(requestInsertQueries({ id: asked, kind: 'contact', organization_id: 'inn', location_id: null, user_id: null, review_id: null,
+      payload: { guest: { name: 'Jamie Rivera', email: 'guest@provider-proof.com', phone: null }, subject: 'Parking', message: 'Is there parking?', consent_at: null, ip_hash: null },
+      created_at: now, updated_at: now }).map(write => db.prepare(write.query).bind(...write.params)))
+    for (const body of ['Is parking free?', 'Can I park a van?', 'Thanks!']) {
+      const entry = await appendEntry(db, { threadId: asked, kind: 'message', actorKind: 'guest', channel: 'email', body, dedupeKey: `guest:${body}` })
+      await notifyGuestThreadReply(env, db, { organizationId: 'inn', threadId: asked, sourceEntryId: entry.id, submissionType: 'contact', submissionId: asked,
+        participantLabel: 'Jamie Rivera', guestEmail: 'guest@provider-proof.com', inboundChannel: 'email' })
+    }
+    const alerts = [...resend.emails.values()].filter(email => (email.to as string[])[0] === 'owner@provider-proof.com')
+    assert.equal(alerts.length, 3)
+    const ids = alerts.map(email => email.message_id as string)
+    assert.equal(alerts[0]!.subject, 'Message from Jamie')
+    assert.deepEqual(alerts.map(email => email.subject), ['Message from Jamie', 'Message from Jamie', 'Message from Jamie'])
+    assert.equal(alerts[0]!.headers, undefined, 'the first alert starts the thread')
+    assert.deepEqual(alerts[1]!.headers, { 'In-Reply-To': ids[0], References: ids[0] })
+    assert.deepEqual(alerts[2]!.headers, { 'In-Reply-To': ids[1], References: `${ids[0]} ${ids[1]}` })
+    // Each alert reads in its conversation: the new words lead, the earlier ones follow quietly.
+    assert.match(alerts[2]!.text as string, /Thanks![\s\S]*Earlier in this conversation[\s\S]*Jamie Rivera: Is parking free\?[\s\S]*Jamie Rivera: Can I park a van\?/u)
+    const replyTo = [alerts[0]!.reply_to].flat()[0] as string
+    const address = parseReplyToAddress(env, replyTo)
+    assert.equal(address?.kind, 'member')
+    assert.deepEqual([...new Set(alerts.map(email => [email.reply_to].flat()[0]))], [replyTo], 'every alert in the conversation answers it')
+
+    // The owner answers from their mail client: the guest is emailed as the dashboard would, by the owner.
+    await receiveMemberEmail(env, { threadId: asked, token: address!.token, from: 'Owner@provider-proof.com', body: 'Yes, parking is free.', files: [], messageId: '<owner-1@provider-proof.com>' })
+    const toGuest = [...resend.emails.values()].filter(email => (email.to as string[])[0] === 'guest@provider-proof.com')
+    assert.equal(toGuest.length, 1)
+    assert.match(toGuest[0]!.text as string, /Yes, parking is free\./u)
+    assert.deepEqual((await db.prepare("SELECT actor_user_id, body FROM activity_entries WHERE request_id = ? AND event_name = 'thread.member_reply'").bind(asked).all()).results,
+      [{ actor_user_id: 'owner', body: 'Yes, parking is free.' }])
+    // A forged signature bounces, and nothing more reaches the guest.
+    await assert.rejects(receiveMemberEmail(env, { threadId: asked, token: await buildMemberReplyToken('another-secret', asked, 'owner'), from: 'owner@provider-proof.com',
+      body: 'Hello', files: [], messageId: '<owner-2@provider-proof.com>' }), InboundEmailRejection)
+    assert.equal([...resend.emails.values()].filter(email => (email.to as string[])[0] === 'guest@provider-proof.com').length, 1)
+  } finally {
+    await runtime.dispose()
+  }
 })
 
 test('Resend delivery events move a guest-thread delivery forward only and publish when it moves', async (t) => {

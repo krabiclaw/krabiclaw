@@ -45,7 +45,7 @@ export default defineHandler(async (event) => {
 
   const summary = await requestSummary(db, thread)
   await notifyGuestThreadReply(env, db, {
-    organizationId: match.organizationId, locationId: summary.locationId, threadId: thread.id, sourceEntryId: entry.id, submissionType: match.submissionType, submissionId: match.submissionId, participantLabel: summary.participantLabel, guestEmail: summary.guestEmail, guestPhone: summary.guestPhone, inboundChannel: 'whatsapp', messagePreview: text, })
+    organizationId: match.organizationId, locationId: summary.locationId, threadId: thread.id, sourceEntryId: entry.id, submissionType: match.submissionType, submissionId: match.submissionId, participantLabel: summary.participantLabel, guestEmail: summary.guestEmail, guestPhone: summary.guestPhone, inboundChannel: 'whatsapp', })
 
   return jsonResponse({ received: true, match, messageId })
 })

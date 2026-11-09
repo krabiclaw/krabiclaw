@@ -1,9 +1,13 @@
 import { queryFirst, type DbClient } from '~/server/db'
 import {
+  buildMemberReplyLocalPart,
+  buildMemberReplyToken,
   buildReplyLocalPart,
   buildReplyToken,
   parseReplyLocalPart,
+  verifyMemberReplyTokenValue,
   verifyReplyTokenValue,
+  type ParsedReplyLocalPart,
   type ReplySubmissionType,
 } from '~/server/utils/reply-address'
 import { getReplyDomain } from '~/server/utils/reply-domain'
@@ -45,7 +49,20 @@ export async function verifyReplyToken(
   return verifyReplyTokenValue(env.EMAIL_REPLY_SECRET, submissionType, submissionId, token)
 }
 
-export function parseReplyToAddress(env: ReplyAddressEnv, address: string): { submissionType: ReplySubmissionType; submissionId: string; token: string } | null {
+/** The reply-to on a member's alert about a conversation: replying to it answers the guest as that member. */
+export async function buildMemberReplyToAddress(env: ReplyAddressEnv, threadId: string, userId: string): Promise<string> {
+  if (!env.EMAIL_REPLY_SECRET) throw new Error('EMAIL_REPLY_SECRET is required to sign a member reply address')
+  const localPart = buildMemberReplyLocalPart(threadId, await buildMemberReplyToken(env.EMAIL_REPLY_SECRET, threadId, userId))
+  if (!localPart) throw new Error(`Conversation ${threadId} has no addressable id`)
+  return `${localPart}@${getReplyDomain(env)}`
+}
+
+export async function verifyMemberReplyToken(env: ReplyAddressEnv, threadId: string, userId: string, token: string): Promise<boolean> {
+  if (!env.EMAIL_REPLY_SECRET) return false
+  return verifyMemberReplyTokenValue(env.EMAIL_REPLY_SECRET, threadId, userId, token)
+}
+
+export function parseReplyToAddress(env: ReplyAddressEnv, address: string): ParsedReplyLocalPart | null {
   const parts = address.split('@')
   if (parts.length !== 2 || parts[1]?.toLowerCase() !== getReplyDomain(env).toLowerCase()) return null
   return parseReplyLocalPart(parts[0] ?? '')

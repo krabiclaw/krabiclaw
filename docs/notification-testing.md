@@ -20,7 +20,7 @@ browser Web Push where a device is registered.
 | Task assigned or starting | Assigned person's Notifications and task detail. Email and push default on. WhatsApp is available by preference. | Staff work only. |
 | New bookings and reservations, guest cancellations, and material changes | Notifications, email and push to workspace managers and responsible recipients. WhatsApp for events with templates, including booking changes. Calendar sync exceptions have email and push. The alert opens the booking record. | Guest transaction email to the booked contact. Owned records can appear in account Notifications and Activity. Guest WhatsApp and push are separate from staff preferences. |
 | New, changed, cancelled or overlapping channel stays | Managers and responsible home staff receive in-app alerts. Staff receive the turnover view and no financial facts. Email and push are eligible. The change event has a WhatsApp template. Historical imports do not alert. | The originating channel owns its guest notices. Direct stays use the transaction email path. |
-| Guest, Airbnb and team messages | Guest and team conversations contribute to the Messages count. Email, approved WhatsApp and push are eligible for responsible recipients. | Guest replies use the conversation's delivery route and receipts. An owned conversation has account unread state. |
+| Guest, Airbnb and team messages | Guest and team conversations contribute to the Messages count. Email, approved WhatsApp and push are eligible for responsible recipients. A guest message alert shows the guest's words, photos and translation, the conversation's last messages, then the stay or inquiry and one Reply action. Replying to the alert email, or quoting the WhatsApp alert, answers the guest as that member. | Guest replies use the conversation's delivery route and receipts. An owned conversation has account unread state. |
 | Payments, refunds, disputes and payouts | Financial events enter the authorized workspace history and use their configured delivery. Organization and billing email defaults on. | Buyer receipts and refunds are transaction email and account Activity for the authorized buyer. |
 | Reviews and review requests | Review alerts use the review preference. Email defaults on. New review has a WhatsApp template. | The opted-in review invitation uses its tracked guest link and email receipt. |
 | Invitations and account security | Better Auth owns sign-in and invitation lifecycle. Account security email is required. | Email goes to the invitee or account holder and opens the invite or verification flow. |
@@ -94,6 +94,37 @@ through the built Worker. The opt-in native transport test uses only Resend's
 provider IDs and subjects. It does not inspect a real Gmail or Outlook inbox.
 The configured Resend API key must permit both sending and retrieving sent email.
 
+## Message alerts
+
+A guest message alert is built from the conversation's own records. Its photos
+are the message's media placements, whether Airbnb's mirrored attachments or a
+guest's emailed, web or WhatsApp photos. Each is linked by its public media URL,
+which mail clients, browsers and Meta fetch directly. A message with no words
+reads "Sent a photo", or "Sent an attachment" for files that are not photos, in
+lists, push and WhatsApp. The email shows the photos themselves.
+
+No approved WhatsApp template has an image header. The template alert says what
+was sent, and each photo follows as a WhatsApp image message only while the
+member's 24-hour service window is open. That window starts at Meta's timestamp
+on the member's last WhatsApp message to KrabiClaw. Browser push shows the
+first photo. App push carries text only, because APNs shows an image only through
+a notification service extension, which the app does not have.
+
+Every email alert about a conversation threads per recipient. It keeps the
+subject of the first alert sent to that address. It sends `In-Reply-To` with the
+previous alert's Message-ID and `References` with all of them. Alerts therefore
+read Resend's assigned RFC Message-ID like guest email does. Alerts to other
+recipients and the guest's own emails are never part of that ancestry. A
+log-only alert has no RFC identity, so staging alerts share a subject but carry
+no threading headers. Each alert's reply-to is that member's signed reply
+address (`docs/guest-messaging-boundaries.md`).
+
+`resend-native-d1.test.ts` asserts the exact headers and subject of three alerts
+and a member's emailed reply reaching the guest. `channex-messages-d1.test.ts`
+asserts an Airbnb photo in the recorded alert HTML and an emailed reply reaching
+Channex once. `whatsapp-entitlement-d1.test.ts` asserts a quoted WhatsApp reply,
+the single hint for an unquoted message, refusals and Meta redelivery.
+
 ## Review invitation retries
 
 An ended visit gets one initial invitation. A retry resumes that invitation;
@@ -143,7 +174,7 @@ Verify a guest submission through the real Worker boundary:
 5. Open the thread as a dashboard user and confirm that `notification_reads` records the acknowledgement for that user only.
 6. Confirm that the organization WebSocket emits the typed invalidation and that disconnecting it shows the dashboard failure state.
 
-For inbound replies, use the development inbound email or WhatsApp route. Repeating the same provider message ID must return the existing entry instead of appending another one.
+For inbound guest replies, use the development inbound email or WhatsApp route. Repeating the same provider message ID must return the existing entry instead of appending another one. For a member's reply, send the raw email below to the member reply address from the alert's recorded `email_json`, from the member's own account address.
 
 The development email route does not prove the native MIME entrypoint. Also send
 a raw multipart email through Wrangler's `/cdn-cgi/local/email` endpoint, using a

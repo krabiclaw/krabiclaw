@@ -10,7 +10,7 @@ This note exists so future sessions do not collapse three different systems into
 
 ## Current product truth
 
-- Owner WhatsApp is a **ChowBot control surface**, not a guaranteed guest reply channel.
+- A member answers a guest from their alert. Replying to the alert email, or quoting the WhatsApp alert, runs the inbox's own reply operation as that member. It sends at once, with no confirmation, menu or follow-up prompt. The member must still belong to the business and pass the inbox's reply permission check. The member is told the outcome: sent, refused with the reason, or that it may have reached the guest. An owner WhatsApp message that quotes no alert gets one line saying to reply to the guest's message.
 - Direct guest replies use email. A mapped Airbnb conversation uses Channex's Messages API, including inquiries whose guest contact is withheld.
 - A direct stay whose guest has no email is reached in their KrabiClaw account inbox when the stay is theirs (a stay they bought), and emailed too when that account has a verified email. A guest with neither cannot be written to: the conversation shows no composer and a reply is refused with `GUEST_UNREACHABLE`.
 - Guest replies can be ingested back into the thread ledger from email, and from WhatsApp only when an inbound message can already be matched to an authorized guest thread by phone.
@@ -18,8 +18,8 @@ This note exists so future sessions do not collapse three different systems into
 
 ## Cleanup direction now
 
-- Do not imply that a verified WhatsApp number enables replying to guests over WhatsApp.
-- Do not expose owner-side outbound WhatsApp reply for guest submissions until guest delivery is trustworthy.
+- A verified WhatsApp number lets a member answer by quoting an alert. It does not make WhatsApp a channel to the guest: the reply goes where `guestReplyDestination` says, by email, Airbnb or the guest's account inbox.
+- Guests still write in on WhatsApp only when their phone matches an authorized guest thread, as above.
 - Keep notification CTAs pointing owners into the dashboard inbox. Its canonical operation endpoint selects the conversation's address: email for direct conversations or Channex for mapped Airbnb conversations. A channel stay without a mapped thread fails explicitly instead of sending to a recorded email address.
 
 ## Canonical thread model
@@ -39,6 +39,20 @@ This note exists so future sessions do not collapse three different systems into
 - The inbox renders server-authorized actions from the guest-thread source adapter registry. Dashboard UI must not infer confirm/cancel/complete policy from raw source status or call source-specific editor mutation endpoints.
 - Reuse the shared conversation shell where it helps the UX, but never back guest threads with assistant/tool-call history.
 - Signed-in buyers use the same ledger through their authorized account messages. Provider threads are addressed through their mapped channel rather than attached to a local buyer by provider user ID.
+
+## Member reply address
+
+A member's alert about a conversation carries the reply-to
+`rm<conversation id><24-hex-HMAC>@reply.<platform-domain>`. The HMAC uses the
+guest address's secret and signs `member:<conversation id>:<user id>`. The user
+id is not in the address. Inbound email names the member by the envelope sender,
+which must be a verified account email, and the signature must match that
+member and conversation. The reply is the inbox's quoted-history and signature
+stripped text, with the email's files as the reply's photos. A wrong sender, a
+forged or foreign signature, a member who left or lost access, and any reply the
+operation refuses bounce with the reason. A failure the member cannot act on
+fails the delivery and is reported. The email's Message-ID keys the reply, so a
+redelivered email sends nothing twice. No table records these addresses.
 
 ## Epoch 5 reply-address contract
 

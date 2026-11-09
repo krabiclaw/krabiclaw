@@ -1,5 +1,5 @@
 // The dashboard's push service worker (server/utils/web-push.ts sends to it).
-// A push carries { title, body, url, tag }; a click opens that dashboard link.
+// A push carries { title, body, url, tag, image }; a click opens that dashboard link.
 
 self.addEventListener('install', () => {
   self.skipWaiting()
@@ -16,6 +16,7 @@ self.addEventListener('push', (event) => {
     icon: '/krabi-claw-logo.png',
     badge: '/krabi-claw-logo-192.png',
     ...(alert.tag ? { tag: alert.tag } : {}),
+    ...(alert.image ? { image: alert.image } : {}),
     data: { url: alert.url },
   }))
 })

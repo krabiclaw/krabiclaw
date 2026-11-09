@@ -4,12 +4,14 @@ import { compile } from 'html-to-text'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { getGuestRequest, getThreadOperationalRecord, requestSummary } from '~/server/domain/requests'
 import { appendEntry, GuestThreadEntryDedupeConflictError, GuestThreadEntryOwnershipError } from '~/server/domain/guest-threads/entries'
-import { attachGuestPhotos, messagePreview, sortGuestFiles, type MessagePhoto, assertMessagePhotos } from '~/server/domain/guest-threads/attachments'
+import { attachGuestPhotos, sortGuestFiles, type MessagePhoto, assertMessagePhotos } from '~/server/domain/guest-threads/attachments'
 import { updateThreadProjectionIfLatestEntry } from '~/server/domain/guest-threads/repository'
 import type { GuestThreadEntryRow } from '~/server/domain/guest-threads/types'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { notifyGuestThreadReply } from '~/server/utils/notifications'
-import { getSubmissionOrganization, verifyReplyToken, type SubmissionType } from '~/server/utils/submission-messages'
+import { getSubmissionOrganization, verifyMemberReplyToken, verifyReplyToken, type SubmissionType } from '~/server/utils/submission-messages'
+import { queryFirst } from '~/server/db'
+import { replyAsMember } from './member-reply'
 
 /**
  * An inbound email that delivering again cannot make acceptable. The message is
@@ -91,6 +93,34 @@ export async function receiveGuestEmail(env: CloudflareEnv, email: InboundGuestE
   })
 }
 
+export interface InboundMemberEmail {
+  threadId: string
+  token: string
+  /** The envelope sender: the member's own account address. */
+  from: string
+  body: string
+  files: MessagePhoto[]
+  /** Dedupe identity; a content hash is used when no RFC Message-ID was sent. */
+  messageId: string
+}
+
+/**
+ * A member replying to their alert about a conversation. The sender's address
+ * names the member and the address's signature proves the alert went to them
+ * about this thread; the reply is then the inbox's own, as that member. Anything
+ * that stops it bounces with the reason; a failure the member cannot act on is
+ * thrown so the delivery is recorded failed.
+ */
+export async function receiveMemberEmail(env: CloudflareEnv, email: InboundMemberEmail): Promise<void> {
+  const user = await queryFirst<{ id: string }>(env.DB, 'SELECT id FROM user WHERE lower(email) = ? AND "emailVerified" = 1', [email.from.trim().toLowerCase()])
+  if (!user || !await verifyMemberReplyToken(env, email.threadId, user.id, email.token)) {
+    throw new InboundEmailRejection('This reply address is not valid for the address you replied from. Reply from the address the alert was sent to, or answer from the dashboard.')
+  }
+  const outcome = await replyAsMember(env, { threadId: email.threadId, userId: user.id, body: email.body, files: email.files, idempotencyKey: `email:${email.messageId}` })
+  if (outcome.report !== null) throw outcome.report instanceof Error ? outcome.report : new Error(String(outcome.report), { cause: outcome.report })
+  if (!outcome.sent) throw new InboundEmailRejection(outcome.notice)
+}
+
 /** Authenticated web replies use the same immutable guest-message pipeline as email. */
 export async function receiveGuestWebReply(env:CloudflareEnv,input:{threadId:string;userId:string;body:string;photos:MessagePhoto[];idempotencyKey:string}):Promise<void> {
   if(!/^[a-zA-Z0-9_-]{8,128}$/u.test(input.idempotencyKey))throw new HTTPError({statusCode:400,statusMessage:'A valid idempotency key is required'})
@@ -139,6 +169,6 @@ async function receiveGuestReply(env:CloudflareEnv,input:{threadId:string;organi
     organizationId:input.organizationId,locationId:summary.locationId,threadId:thread.id,sourceEntryId:entry.id,
     submissionType:input.submissionType,submissionId:input.threadId,
     participantLabel:summary.participantLabel,guestEmail:summary.guestEmail,guestPhone:summary.guestPhone,
-    inboundChannel:input.channel,messagePreview:messagePreview(input.body,photos.length),
+    inboundChannel:input.channel,
   })
 }

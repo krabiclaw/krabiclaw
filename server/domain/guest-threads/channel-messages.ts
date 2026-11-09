@@ -296,7 +296,6 @@ export async function mirrorChannexMessageEvent(db: DbClient, env: ChannelEnv, v
     threadId: request.id, sourceEntryId: entry.id, submissionType: 'stay', submissionId: request.id,
     participantLabel: summary.participantLabel, guestEmail: summary.guestEmail, guestPhone: summary.guestPhone,
     inboundChannel: 'airbnb',
-    messagePreview: entry.body?.trim() || (attachments === 1 ? 'Sent an attachment' : `Sent ${attachments} attachments`),
   })
   return mirrored
 }

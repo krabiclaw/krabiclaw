@@ -242,61 +242,25 @@ export async function upsertMcpWorkspacePreference(
   ])
 }
 
-export type JsonSerializable = string | number | boolean | null | { [key: string]: JsonSerializable } | JsonSerializable[]
-
-function nowIso() {
-  return new Date().toISOString()
+/**
+ * The last WhatsApp message a member sent KrabiClaw: its id, so Meta redelivering
+ * it is answered once, and Meta's own time for it, which opens the 24-hour
+ * service window in which a photo can follow an alert.
+ */
+export async function lastWhatsAppInboundId(db: DbClient, userId: string): Promise<string | null> {
+  const row = await queryFirst<{ id: string | null }>(db, 'SELECT whatsapp_last_inbound_id AS id FROM user_workspace_state WHERE user_id = ?', [userId])
+  return row?.id ?? null
 }
 
-function jsonOrNull(value: JsonSerializable | null | undefined): string | null {
-  return value == null ? null : JSON.stringify(value)
-}
-
-export async function getWhatsAppWorkspaceState(
-  db: DbClient,
-  userId: string,
-): Promise<{
-  user_id: string
-  pending_confirmation: string | null
-  last_inbound_id: string | null
-  updated_at: string
-} | null> {
-  const result = await queryFirst<{
-    user_id: string
-    pending_confirmation: string | null
-    last_inbound_id: string | null
-    updated_at: string
-  }>(db, `
-    SELECT user_id, whatsapp_pending_confirmation AS pending_confirmation, whatsapp_last_inbound_id AS last_inbound_id, whatsapp_updated_at AS updated_at
-      FROM user_workspace_state
-     WHERE user_id = ? AND whatsapp_updated_at IS NOT NULL LIMIT 1
-  `, [userId])
-  return result ?? null
-}
-
-export async function patchWhatsAppWorkspaceState(
-  db: DbClient,
-  opts: {
-    userId: string
-    pendingConfirmation?: JsonSerializable | null
-    lastInboundId?: string | null
-  }
-): Promise<void> {
-  const updateFields: string[] = []
-  if ('pendingConfirmation' in opts) updateFields.push('whatsapp_pending_confirmation = excluded.whatsapp_pending_confirmation')
-  if ('lastInboundId' in opts) updateFields.push('whatsapp_last_inbound_id = excluded.whatsapp_last_inbound_id')
-  updateFields.push('whatsapp_updated_at = excluded.whatsapp_updated_at')
-
+export async function recordWhatsAppInbound(db: DbClient, input: { userId: string; messageId: string; sentAt: string }): Promise<void> {
   await execute(db, `
-    INSERT INTO user_workspace_state
-      (user_id, whatsapp_pending_confirmation, whatsapp_last_inbound_id, whatsapp_updated_at)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(user_id) DO UPDATE SET
-      ${updateFields.join(',\n      ')}
-  `, [
-    opts.userId,
-    jsonOrNull(opts.pendingConfirmation),
-    opts.lastInboundId ?? null,
-    nowIso(),
-  ])
+    INSERT INTO user_workspace_state (user_id, whatsapp_last_inbound_id, whatsapp_updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET whatsapp_last_inbound_id = excluded.whatsapp_last_inbound_id, whatsapp_updated_at = excluded.whatsapp_updated_at
+  `, [input.userId, input.messageId, input.sentAt])
+}
+
+export async function whatsAppServiceWindowOpen(db: DbClient, userId: string, now = new Date()): Promise<boolean> {
+  const row = await queryFirst<{ at: string | null }>(db, 'SELECT whatsapp_updated_at AS at FROM user_workspace_state WHERE user_id = ?', [userId])
+  return row?.at != null && now.getTime() - Date.parse(row.at) < 24 * 60 * 60 * 1000
 }

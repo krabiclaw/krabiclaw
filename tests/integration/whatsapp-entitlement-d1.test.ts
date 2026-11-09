@@ -16,8 +16,8 @@ import { createDeliveryReceipt, getDeliveryById, isDeliverySent, isVisibleDelive
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import whatsappWebhook from '../../server/api/whatsapp/webhook.post.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { createStay, getStay, updateStay } from '../../server/domain/stays.ts'
-import { getWhatsAppWorkspaceState } from '../../server/utils/mcp-context.ts'
+import { createStay } from '../../server/domain/stays.ts'
+import { whatsAppServiceWindowOpen } from '../../server/utils/mcp-context.ts'
 import { useNitroHooks } from 'nitro/app'
 
 // Real D1 billing, membership, preferences and notification persistence. Only
@@ -98,7 +98,7 @@ test('organization messaging entitlement fences Meta calls while preserving noti
         assert.equal(metaCalls - before, organizationId === 'paid' ? 1 : 0)
         const entry = await appendEntry(db, { threadId: id, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Reply', dedupeKey: `reply-${id}` })
         const replyBefore = metaCalls
-        await notifyGuestThreadReply(providerEnv, db, { organizationId, threadId: id, sourceEntryId: entry.id, submissionType: 'contact', submissionId: id, participantLabel: 'Guest', guestEmail: 'guest@proof.example', inboundChannel: 'email', messagePreview: 'Reply' })
+        await notifyGuestThreadReply(providerEnv, db, { organizationId, threadId: id, sourceEntryId: entry.id, submissionType: 'contact', submissionId: id, participantLabel: 'Guest', guestEmail: 'guest@proof.example', inboundChannel: 'email' })
         assert.equal(metaCalls - replyBefore, organizationId === 'paid' ? 1 : 0)
         const rows = (await db.prepare('SELECT d.channel,d.status FROM guest_thread_deliveries d JOIN activity_entries e ON e.id=d.entry_id WHERE e.request_id=?').bind(id).all<{ channel: string; status: string }>()).results
         assert(rows.some(row => row.channel === 'email' && row.status === 'sent'), 'email fallback persists')
@@ -108,7 +108,7 @@ test('organization messaging entitlement fences Meta calls while preserving noti
       await db.prepare("UPDATE user_notification_preferences SET whatsapp_enabled=0 WHERE category='messages'").run()
       const entry = await appendEntry(db, { threadId: 'contact-paid', kind: 'message', actorKind: 'guest', channel: 'email', body: 'Opted out', dedupeKey: 'reply-optout' })
       const before = metaCalls
-      await notifyGuestThreadReply(providerEnv, db, { organizationId: 'paid', threadId: 'contact-paid', sourceEntryId: entry.id, submissionType: 'contact', submissionId: 'contact-paid', participantLabel: 'Guest', inboundChannel: 'email', messagePreview: 'Opted out' })
+      await notifyGuestThreadReply(providerEnv, db, { organizationId: 'paid', threadId: 'contact-paid', sourceEntryId: entry.id, submissionType: 'contact', submissionId: 'contact-paid', participantLabel: 'Guest', inboundChannel: 'email' })
       assert.equal(metaCalls, before)
       // A notification whose organization downgrades is explicitly skipped,
       // not represented as a failed or sent delivery.
@@ -169,10 +169,10 @@ test('the WhatsApp webhook accepts only what Meta signed with the configured app
   }
 })
 
-// A manager replying from WhatsApp is offered exactly the conversations the inbox
-// shows a composer for, and a conversation that changed after it was offered is
-// refused with the reason the reply operation gives. Only Meta's HTTP boundary is intercepted.
-test('a WhatsApp reply offers the conversations the inbox can write to and refuses one that changed', async () => {
+// An owner quoting their WhatsApp alert sends the inbox's own reply straight to
+// the guest, as themself; anything unquoted gets one line of help. The guest
+// email goes through the log-only receipt path; only Meta's HTTP boundary is intercepted.
+test('an owner answers a guest by quoting their WhatsApp alert, with nothing asked first', async () => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'whatsapp-reply-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
@@ -226,89 +226,54 @@ test('a WhatsApp reply offers the conversations the inbox can write to and refus
     const app = new H3()
     app.post('/api/whatsapp/webhook', whatsappWebhook)
     let inbound = 0
-    const write = async (text: string, quoting?: string, status = 200) => {
-      const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ value: { messages: [{ id: `wamid-${++inbound}`, from: '66812345678', type: 'text', text: { body: text }, ...(quoting && { context: { id: quoting } }) }] } }] }] })
+    /** Delivers one owner message as Meta signs it, and returns what the owner was sent back. */
+    const write = async (text: string, quoting?: string, id = `wamid-${++inbound}`) => {
+      const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ value: { messages: [{ id, from: '66812345678', timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: text }, ...(quoting && { context: { id: quoting } }) }] } }] }] })
+      const before = sent.length
       const response = await app.request(Object.assign(new Request('https://proof.example/api/whatsapp/webhook', {
         method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': `sha256=${createHmac('sha256', 'whatsapp-secret').update(body).digest('hex')}` }, body,
       }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
-      assert.equal(response.status, status, await response.clone().text())
-      return sent.at(-1)!
+      assert.equal(response.status, 200, await response.clone().text())
+      return sent.slice(before)
     }
-    const pending = async () => (await getWhatsAppWorkspaceState(db, 'owner'))?.pending_confirmation
-    const pick = (list: string, name: string) => list.split('\n').find(line => line.endsWith(`from ${name}`))!.split('.')[0]!
+    const replies = async (stay: { request_id: string | null }) => (await db.prepare("SELECT body FROM activity_entries WHERE request_id = ? AND event_name = 'thread.member_reply'")
+      .bind(stay.request_id).all<{ body: string }>()).results.map(row => row.body)
 
-    // Quoting Dee's alert names her conversation: it cannot be replied to, and the manager is told why, not offered another.
-    assert.equal(await write('Hello Dee', 'meta-alert-dee'), 'Reply not sent: This guest has no email or KrabiClaw account to reply to.')
-    assert.equal(await pending(), null)
-    // Dee is never offered either: there is nothing to reply to her through.
-    const offered = await write('Can I reply?')
-    assert.match(offered, /Reply to which\?/u)
-    assert.match(offered, /from Ana/u)
-    assert.match(offered, /from Bo/u)
-    assert.doesNotMatch(offered, /Dee/u)
-    // Picking Ana says where the reply goes, as the reply operation would send it.
-    assert.equal(await write(pick(offered, 'Ana')), 'Type your reply now — it will be sent by email to a***@example.test.')
-    assert.equal(await write('See you at 4'), 'This reply will be sent by email to a***@example.test. Reply YES to send.')
-    // The host takes Ana's email off her stay before YES: the reply operation refuses, and its reason reaches the manager.
-    await updateStay(db, env, manager, ana.id, { expected_version: ana.version, guest_email: null })
-    assert.equal(await write('YES'), 'Reply not sent: This guest has no email or KrabiClaw account to reply to.')
-    assert.equal(await pending(), null)
-    // Ana is no longer offered. Bo loses his email after the list and before the pick: refused the same way.
-    const again = await write('Another reply')
-    assert.doesNotMatch(again, /Ana/u)
-    await updateStay(db, env, manager, bo.id, { expected_version: bo.version, guest_email: null })
-    assert.equal(await write(pick(again, 'Bo')), 'Reply not sent: This guest has no email or KrabiClaw account to reply to.')
-    assert.equal(await pending(), null)
-    await updateStay(db, env, manager, bo.id, { expected_version: (await getStay(db, manager, bo.id)).version, guest_email: 'bo@example.test' })
-    const repliesToBo = async () => db.prepare("SELECT count(*) AS n FROM activity_entries WHERE request_id = ? AND event_name = 'thread.member_reply'").bind(bo.request_id).first('n')
+    // A message that quotes no alert is answered with one line, and nothing is sent to anyone.
+    assert.deepEqual(await write('Can I reply?'), ['To answer a guest, reply to their message.'])
+    assert.deepEqual([...await replies(ana), ...await replies(bo), ...await replies(dee)], [])
+    assert.equal(await whatsAppServiceWindowOpen(db, 'owner'), true, 'the owner\'s own message opens their service window')
 
-    // The confirmation is spent before the reply is sent: when Meta refuses "Reply sent.", another
-    // "yes" finds nothing to send, and the guest gets the reply once. The refused notice is reported.
-    assert.equal(await write(pick(await write('Reply to Bo'), 'Bo')), 'Type your reply now — it will be sent by email to b***@example.test.')
-    assert.equal(await write('The gate code is 4512'), 'This reply will be sent by email to b***@example.test. Reply YES to send.')
+    // Quoting Ana's alert sends the words to Ana at once, as the inbox would, and says so.
+    assert.deepEqual(await write('See you at 4', 'meta-alert-ana', 'wamid-ana'), ['Reply sent.'])
+    assert.deepEqual(await replies(ana), ['See you at 4'])
+    const delivery = await db.prepare(`SELECT d.channel, d.purpose, json_extract(d.email_json, '$.message.to') AS recipient FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
+      WHERE e.request_id = ? AND e.event_name = 'thread.member_reply'`).bind(ana.request_id).first<{ channel: string; purpose: string; recipient: string }>()
+    assert.deepEqual(delivery, { channel: 'email', purpose: 'member_reply', recipient: 'ana@example.test' })
+    // Meta redelivering that message answers nothing again and sends nothing again.
+    assert.deepEqual(await write('See you at 4', 'meta-alert-ana', 'wamid-ana'), [])
+    assert.deepEqual(await replies(ana), ['See you at 4'])
+    // Redelivered after another message, the reply's key still names one reply: Ana gets it once.
+    await write('Something else')
+    assert.deepEqual(await write('See you at 4', 'meta-alert-ana', 'wamid-ana'), ['Reply sent.'])
+    assert.deepEqual(await replies(ana), ['See you at 4'])
+
+    // Dee can only be reached by phone: quoting her alert says why the reply cannot go, and writes nothing.
+    assert.deepEqual(await write('Hello Dee', 'meta-alert-dee'), ['Reply not sent: This guest has no email or KrabiClaw account to reply to.'])
+    assert.deepEqual(await replies(dee), [])
+
+    // The reply went and Meta refused to carry its outcome: the guest has the reply once, and the refusal is reported.
     refuse.add('Reply sent.')
-    let before = sent.length
     const reportedBefore = reported.length
-    await write('YES')
-    assert.deepEqual(sent.slice(before), ['Reply sent.'])
-    assert.equal(reported.length - reportedBefore, 1, 'the refused notice is reported')
-    assert.equal(await repliesToBo(), 1)
+    assert.deepEqual(await write('The gate code is 4512', 'meta-alert-bo'), ['Reply sent.'])
     refuse.delete('Reply sent.')
-    await write('yes')
-    assert.equal(await repliesToBo(), 1, 'a second yes sends nothing')
+    assert.equal(reported.length - reportedBefore, 1, 'the refused notice is reported')
+    assert.deepEqual(await replies(bo), ['The gate code is 4512'])
 
-    // Cancelling drops the confirmation before anything else: when Meta refuses the next prompt,
-    // an "ok" afterwards does not send the reply the manager cancelled.
-    assert.equal(await write(pick(await write('Reply to Bo again'), 'Bo')), 'Type your reply now — it will be sent by email to b***@example.test.')
-    assert.equal(await write('Never mind this one'), 'This reply will be sent by email to b***@example.test. Reply YES to send.')
-    refuse.add('Reply to which?')
-    // The refused question fails the webhook (a question is sent before its state is written); the cancel is already written.
-    assert.equal((await write('no, cancel', undefined, 500)).startsWith('Reply to which?'), true)
-    refuse.delete('Reply to which?')
-    await write('ok')
-    assert.equal(await repliesToBo(), 1, 'the cancelled reply is never sent')
-
-    // The reply went and only the inbox refresh failed: the manager still reads "Reply sent.", and the failure is reported.
-    assert.equal(await write(pick(await write('Reply to Bo once more'), 'Bo')), 'Type your reply now — it will be sent by email to b***@example.test.')
-    assert.equal(await write('The porch light is on'), 'This reply will be sent by email to b***@example.test. Reply YES to send.')
-    const hubs = env.GUEST_INBOX_HUBS!
-    env.GUEST_INBOX_HUBS = { idFromName: (name: string) => hubs.idFromName(name), get: (id: Parameters<typeof hubs.get>[0]) => ({
-      fetch: (url: string, init: RequestInit) => JSON.parse(String(init.body)).type === 'thread.changed' ? Promise.resolve(new Response(null, { status: 500 })) : hubs.get(id).fetch(url, init),
-    }) } as unknown as typeof hubs
-    const reportedBeforeRefresh = reported.length
-    assert.equal(await write('YES'), 'Reply sent.')
-    env.GUEST_INBOX_HUBS = hubs
-    assert.equal(reported.length - reportedBeforeRefresh, 1, 'the failed refresh is reported')
-    assert.equal(await repliesToBo(), 2)
-
-    // A member removed after the pick is told their access ended before their reply is read, and nothing of the
-    // conversation (where it would go, or why it could not) reaches them.
-    assert.equal(await write(pick(await write('One more'), 'Bo')), 'Type your reply now — it will be sent by email to b***@example.test.')
+    // A member removed from the business is told so, and nothing reaches the guest.
     await db.prepare("DELETE FROM member WHERE id = 'member-paid'").run()
-    before = sent.length
-    await write('Here is my reply')
-    assert.deepEqual(sent.slice(before), ['Your WhatsApp access has been revoked. Please contact your organization administrator.'])
-    assert.equal(await pending(), null)
+    assert.deepEqual(await write('Here is my reply', 'meta-alert-bo'), ['Reply not sent: You are no longer a member of this business.'])
+    assert.deepEqual(await replies(bo), ['The gate code is 4512'])
   } finally {
     globalThis.fetch = originalFetch
     await runtime.dispose()

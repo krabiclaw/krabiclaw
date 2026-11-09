@@ -15,10 +15,10 @@ import type {
   GuestThreadSubmissionType,
 } from './types'
 
-/** Email delivery also retains the provider's RFC ID before a later reply can depend on it. */
+/** Email delivery also retains the provider's RFC ID before a later reply or alert can depend on it. */
 export function isDeliverySent(delivery: GuestThreadDeliveryRow): boolean {
   const sent = delivery.status === 'accepted' || delivery.status === 'sent' || delivery.status === 'delivered' || delivery.status === 'read'
-  return sent && (delivery.channel !== 'email' || delivery.provider !== 'resend' || delivery.purpose === 'owner_alert' || isEmailMessageId(delivery.email_message_id))
+  return sent && (delivery.channel !== 'email' || delivery.provider !== 'resend' || isEmailMessageId(delivery.email_message_id))
 }
 
 interface EmailSnapshot {
@@ -120,6 +120,32 @@ async function conversationEmailParent(db: DbClient, delivery: GuestThreadDelive
   } : null
 }
 
+/**
+ * A member's alerts about one conversation are one email thread: each keeps the
+ * subject of the first alert sent to that recipient and answers the alert before
+ * it, so every mail client threads them, not only Gmail by subject. Alerts to
+ * other recipients, and the guest's own emails, are never its ancestry.
+ */
+async function alertEmailParent(db: DbClient, delivery: GuestThreadDeliveryRow, threadId: string, recipient: string) {
+  const earlier = await queryAll<{ email_json: string; email_message_id: string | null; provider: string }>(db, `
+    SELECT d.email_json, d.email_message_id, d.provider
+    FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
+    WHERE e.request_id = ? AND d.id <> ? AND d.channel = 'email' AND d.purpose = 'owner_alert' AND d.email_json IS NOT NULL
+      AND d.status IN ('accepted', 'sent', 'delivered', 'read')
+    ORDER BY d.created_at, d.id
+  `, [threadId, delivery.id])
+  const alerts = earlier.map(row => ({ ...row, snapshot: readEmailSnapshot(row.email_json) }))
+    .filter(row => row.snapshot.message.to.trim().toLowerCase() === recipient)
+  if (!alerts.length) return null
+  // A log-only alert was never mailed, so it has no RFC identity to answer.
+  const references = alerts.flatMap(row => row.provider === 'resend' && row.email_message_id !== null ? [row.email_message_id] : [])
+  if (!references.every(isEmailMessageId)) throw new Error('Prior alert email has an invalid RFC Message-ID')
+  return {
+    subject: alerts[0]!.snapshot.message.subject,
+    ...(references.length ? { inReplyTo: references.at(-1)!, references } : {}),
+  }
+}
+
 /** The one receipt-backed email dispatcher, shared by notifications and replies. */
 export async function deliverReceiptEmail(db: DbClient, input: {
   env: ReplyEmailEnv; delivery: GuestThreadDeliveryRow; threadId: string | null; email: EmailInput
@@ -129,7 +155,7 @@ export async function deliverReceiptEmail(db: DbClient, input: {
   if (delivery.provider !== (getEmailDeliveryMode(input.env) === 'provider' ? 'resend' : 'log_only')) throw new Error('Email delivery mode differs from its recorded provider')
   const entry = await queryFirst<{ request_id: string | null; sequence: number | null }>(db, 'SELECT request_id, sequence FROM activity_entries WHERE id = ?', [delivery.entry_id])
   if (!entry || entry.request_id !== input.threadId) throw new Error('Email delivery does not belong to the targeted conversation')
-  const threaded = input.threadId !== null && delivery.purpose !== 'owner_alert'
+  const threaded = input.threadId !== null
   if (threaded && entry.sequence === null) throw new Error('Conversation email delivery has no ledger sequence')
   try {
     if (!isDeliverySent(delivery) && !delivery.provider_message_id) {
@@ -137,7 +163,10 @@ export async function deliverReceiptEmail(db: DbClient, input: {
         if (delivery.provider === 'resend' && Date.now() - Date.parse(delivery.created_at) >= 24 * 60 * 60 * 1000) {
           throw new Error('This email has no recorded provider identity and is past Resend\'s 24-hour idempotency window. Review its provider delivery before sending again.')
         }
-        const parent = threaded ? await conversationEmailParent(db, delivery, input.threadId!, entry.sequence!, input.email.to.trim().toLowerCase()) : null
+        const recipient = input.email.to.trim().toLowerCase()
+        const parent = !threaded ? null
+          : delivery.purpose === 'owner_alert' ? await alertEmailParent(db, delivery, input.threadId!, recipient)
+            : await conversationEmailParent(db, delivery, input.threadId!, entry.sequence!, recipient)
         const snapshot: EmailSnapshot = {
           preparedAt: new Date().toISOString(),
           sender: delivery.provider === 'resend' || input.env.EMAIL_FROM?.trim() ? emailSender(input.env, input.email.fromName) : null,
@@ -165,7 +194,7 @@ export async function deliverReceiptEmail(db: DbClient, input: {
         if (result.status === 'failed') return delivery
       }
     }
-    if (delivery.provider === 'resend' && delivery.purpose !== 'owner_alert' && delivery.provider_message_id && delivery.email_message_id === null) await readProviderEmail(db, input.env, delivery)
+    if (delivery.provider === 'resend' && delivery.provider_message_id && delivery.email_message_id === null) await readProviderEmail(db, input.env, delivery)
     await execute(db, "UPDATE guest_thread_deliveries SET error = NULL WHERE id = ? AND status IN ('accepted','sent','delivered','read')", [delivery.id])
     const completed = await getDeliveryById(db, delivery.id)
     if (!completed) throw new Error('Email delivery disappeared after dispatch')
