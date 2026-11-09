@@ -127,7 +127,6 @@ const RETIRED_COLUMNS = {
   // v24: whether a reply is owed is an open guest_reply task.
   requests: ['conversation_state', 'resolved_at'],
   // v26: the buyer confirms a PaymentIntent on the site; nothing wrote these.
-  payment_attempts: ['stripe_checkout_id', 'checkout_url'],
   // v26: working windows and Google busy times are read live, never stored.
   member_scheduling: ['windows_json', 'windows_until', 'calendar_revision', 'busy_json', 'busy_from', 'busy_until', 'busy_checked_at', 'busy_error'],
 }
@@ -918,6 +917,24 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
         assert(hosted.length === 0, `Payment attempts hold Hosted Checkout fields nothing maps: ${hosted.slice(0, 8).map(row => row.id).join(', ')}; no rows were copied`)
         const discarded = stage.prepare(`SELECT count(*) AS n FROM payment_attempts WHERE ${dead}`).get().n
         if (discarded) manifest.transforms.push({ name: 'dead_test_hosted_checkout_fields_discarded', changes: discarded })
+      }
+      if (tableNames(stage).includes('payment_attempts')) {
+        // A purchase has one attempt and one claim; both become columns of the payment.
+        const repeated = stage.prepare(`SELECT payment_id FROM payment_attempts GROUP BY payment_id HAVING count(*) > 1 UNION SELECT payment_id FROM payment_claims GROUP BY payment_id HAVING count(*) > 1`).all()
+        assert(repeated.length === 0, `Payments with more than one attempt or claim: ${repeated.slice(0, 8).map(row => row.payment_id).join(', ')}; no rows were copied`)
+        for (const column of ['idempotency_key', 'checkout_expires_at', 'review_json', 'return_token', 'return_token_hash', 'return_expires_at', 'claimed_at', 'claimed_user_id']) stage.exec(`ALTER TABLE payments ADD COLUMN ${column} TEXT`)
+        const folded = stage.prepare(`UPDATE payments SET
+          idempotency_key = (SELECT idempotency_key FROM payment_attempts a WHERE a.payment_id = payments.id),
+          checkout_expires_at = (SELECT expires_at FROM payment_attempts a WHERE a.payment_id = payments.id),
+          review_json = (SELECT review_json FROM payment_attempts a WHERE a.payment_id = payments.id),
+          return_token = (SELECT return_token FROM payment_attempts a WHERE a.payment_id = payments.id),
+          return_token_hash = (SELECT token_hash FROM payment_claims c WHERE c.payment_id = payments.id),
+          return_expires_at = (SELECT expires_at FROM payment_claims c WHERE c.payment_id = payments.id),
+          claimed_at = (SELECT claimed_at FROM payment_claims c WHERE c.payment_id = payments.id),
+          claimed_user_id = (SELECT claimed_user_id FROM payment_claims c WHERE c.payment_id = payments.id)
+          WHERE id IN (SELECT payment_id FROM payment_attempts UNION SELECT payment_id FROM payment_claims)`).run().changes
+        stage.exec('DROP TABLE payment_claims; DROP TABLE payment_attempts')
+        if (folded) manifest.transforms.push({ name: 'payment_attempts_and_claims_folded_into_payments', changes: folded })
       }
       // A superseded opportunity is evidence that went stale before anyone
       // decided about it. Nothing reads it: undecided, with no task, it goes.

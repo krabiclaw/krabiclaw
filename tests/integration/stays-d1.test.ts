@@ -1727,8 +1727,7 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     await db.prepare(`INSERT INTO payment_checkout_holds (id, organization_id, product_id, location_id, timezone, buyer_user_id, payment_id, quantity, amount, currency, starts_at, ends_at, status, converted_stay_id, expires_at, created_at)
       VALUES ('stay-hold', ?, ?, 'cabin-site', 'America/Denver', ?, 'stay-pay', 2, 45000, 'USD', '2026-11-01', '2026-11-04', 'active', NULL, '2099-01-01T00:00:00.000Z', ?)`).bind(ORG, cabin.id, checkoutGuest, NOW).run()
     const claim = crypto.randomUUID() + crypto.randomUUID()
-    await db.prepare("INSERT INTO payment_attempts (id, payment_id, idempotency_key, stripe_payment_intent_id, return_token, status, expires_at, created_at, updated_at) VALUES ('a:stay-pay', 'stay-pay', 'checkout:stay', 'pi_stay-pay', ?, 'open', '2099-01-01T00:00:00.000Z', ?, ?)").bind(claim, NOW, NOW).run()
-    await db.prepare("INSERT INTO payment_claims (token_hash, payment_id, expires_at) VALUES (?, 'stay-pay', '2099-01-01T00:00:00.000Z')").bind(await tokenHash(claim)).run()
+    await db.prepare("UPDATE payments SET idempotency_key = 'checkout:stay', stripe_payment_intent_id = 'pi_stay-pay', return_token = ?, checkout_expires_at = '2099-01-01T00:00:00.000Z', return_token_hash = ?, return_expires_at = '2099-01-01T00:00:00.000Z' WHERE id = 'stay-pay'").bind(claim, await tokenHash(claim)).run()
     const charge = { id: 'ch_stay', object: 'charge', livemode: false, amount: 45_000, currency: 'usd', created: 1_790_000_000, payment_intent: 'pi_stay-pay', payment_method: 'pm_card', receipt_url: 'https://pay.stripe.com/receipts/stay', billing_details: { email: 'ana@example.com' } }
     const originalFetch = globalThis.fetch
     t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
@@ -1758,7 +1757,7 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     const returned = await back.json() as { state: string; kind: string; activity_id: string; receipt_token: string }
     assert.deepEqual({ state: returned.state, kind: returned.kind, activity_id: returned.activity_id }, { state: 'paid', kind: 'stay', activity_id: activityId })
     assert.equal(typeof returned.receipt_token, 'string')
-    assert.deepEqual(await db.prepare("SELECT claimed_user_id FROM payment_claims WHERE payment_id = 'stay-pay'").first(), { claimed_user_id: buyer })
+    assert.deepEqual(await db.prepare("SELECT claimed_user_id FROM payments WHERE id = 'stay-pay'").first(), { claimed_user_id: buyer })
     // The claim moved the stay, its payment and its hold to the browser that paid.
     assert.deepEqual(await db.prepare("SELECT (SELECT user_id FROM stays WHERE id = ?) AS stay, (SELECT buyer_user_id FROM payments WHERE id = 'stay-pay') AS payment, (SELECT buyer_user_id FROM payment_checkout_holds WHERE id = 'stay-hold') AS hold").bind(stay.id).first(), { stay: buyer, payment: buyer, hold: buyer })
     // The confirmation page reads the stay its link names, here from a browser with no session at all, as

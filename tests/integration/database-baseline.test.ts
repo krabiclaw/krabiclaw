@@ -216,8 +216,8 @@ test('a v25 replacement names business scheduling with no default to fall back o
       assert.throws(() => target.prepare("INSERT INTO product_booking_configs(product_id,organization_id,created_by,updated_by) VALUES('unnamed','host','owner','owner')").run(), /NOT NULL constraint failed: product_booking_configs.scheduling_mode/)
       assert.throws(() => target.prepare("UPDATE product_booking_configs SET scheduling_mode = 'legacy' WHERE product_id = 'class'").run(), /product_booking_configs_scheduling_mode_check/)
       assert.deepEqual(target.prepare("SELECT name FROM sqlite_schema WHERE name IN ('inventory_items', 'inventory_levels')").all(), [])
-      assert.equal((target.prepare("SELECT count(*) AS n FROM pragma_table_info('payment_attempts') WHERE name IN ('stripe_checkout_id', 'checkout_url')").get() as { n: number }).n, 0)
-      assert.deepEqual(target.prepare("SELECT id, payment_id, status, expires_at FROM payment_attempts").all(), [{ id: 'hosted', payment_id: 'test-payment', status: 'open', expires_at: '2026-10-06T01:18:32.658Z' }])
+      assert.deepEqual(target.prepare("SELECT name FROM sqlite_schema WHERE name IN ('payment_attempts', 'payment_claims')").all(), [])
+      assert.deepEqual(target.prepare("SELECT id, idempotency_key, checkout_expires_at, return_token FROM payments WHERE id = 'test-payment'").all(), [{ id: 'test-payment', idempotency_key: 'checkout:host:hosted', checkout_expires_at: '2026-10-06T01:18:32.658Z', return_token: 'token' }])
       assert.deepEqual(target.prepare('SELECT id, status FROM opportunities').all(), [{ id: 'current', status: 'open' }])
       assert.deepEqual(target.pragma('foreign_key_check'), [])
     } finally { target.close() }

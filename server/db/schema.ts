@@ -1527,7 +1527,7 @@ export const stay_calendar_links = sqliteTable("stay_calendar_links", {
 //   it is cancelled or converted. An overbooked or cancelled stay holds none.
 // A hold's claim counts only while its hold is active and unexpired. Every
 //   batch that claims nights first deletes, in its range, the claims of holds
-//   that no longer count; the stay-checkout-holds task deletes the rest and
+//   that no longer count; the checkout-holds task deletes the rest and
 //   reopens those nights on the home's channel.
 // Deletion: cascades from the stay or the hold.
 export const stay_nights = sqliteTable("stay_nights", {
@@ -3241,6 +3241,18 @@ export const payments = sqliteTable("payments", {
  stripe_payment_intent_id: text(),
  stripe_charge_id: text(),
  receipt_url: text(),
+ /** The buyer's checkout request; a retry with this key reopens the same purchase. */
+ idempotency_key: text().unique(),
+ /** The time the buyer has to pay; the pay page refuses past it. */
+ checkout_expires_at: text(),
+ /** The amount and payment method the buyer was shown and confirmed: `{ payment_method_id, subtotal, surcharge, total, reviewed_at }`. */
+ review_json: text(),
+ /** Handed back on a checkout retry; only its hash authorizes the pay page. */
+ return_token: text(),
+ return_token_hash: text().unique(),
+ return_expires_at: text(),
+ claimed_at: text(),
+ claimed_user_id: text().references(() => user.id, { onDelete: "set null" }),
  created_at: text().notNull(),
  updated_at: text().notNull(),
 }, t => [
@@ -3250,21 +3262,6 @@ export const payments = sqliteTable("payments", {
  check("payments_amounts_check", sql`amount >= 0 AND captured_amount >= 0 AND refunded_amount >= 0 AND refunded_amount <= captured_amount`),
  check("payments_currency_check", sql`length(currency) = 3 AND currency = upper(currency)`),
 ]);
-
-export const payment_attempts = sqliteTable("payment_attempts", {
- id: text().primaryKey(),
- payment_id: text().notNull().references(() => payments.id, { onDelete: "restrict" }),
- idempotency_key: text().notNull().unique(),
- stripe_payment_intent_id: text(),
- /** The amount and payment method the buyer was shown and confirmed: `{ payment_method_id, subtotal, surcharge, total, reviewed_at }`. */
- review_json: text(),
- return_token: text().notNull(),
- status: text().default("creating").notNull(),
- expires_at: text().notNull(),
- error: text(),
- created_at: text().notNull(),
- updated_at: text().notNull(),
-});
 
 export const payment_checkout_holds = sqliteTable("payment_checkout_holds", {
  id: text().primaryKey(),
@@ -3391,14 +3388,6 @@ export const stripe_connected_customers = sqliteTable("stripe_connected_customer
  stripe_customer_id: text().notNull(),
  created_at: text().notNull(),
 }, t => [primaryKey({ columns: [t.user_id, t.stripe_account_id, t.livemode] })]);
-export const payment_claims = sqliteTable("payment_claims", {
- token_hash: text().primaryKey(),
- payment_id: text().notNull().references(() => payments.id, { onDelete: "restrict" }),
- expires_at: text().notNull(),
- claimed_at: text(),
- claimed_user_id: text().references(() => user.id, { onDelete: "set null" }),
-});
-
 // Provider report progress and attributable cost snapshots support late correction;
 // Stripe remains the financial record authority. Unattributed fees are never billed.
 export const payment_fee_reports = sqliteTable("payment_fee_reports", {

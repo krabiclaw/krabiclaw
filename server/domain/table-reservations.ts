@@ -142,7 +142,7 @@ export async function createTableReservation(event: H3Event, input: {
   }
   const completed = await replay()
   if (completed) return completed
-  const checkoutAttempt = await queryFirst<{ price_snapshot_json: string; fingerprint: string | null }>(db, `SELECT p.price_snapshot_json, json_extract(r.payload_json, '$.provenance.fingerprint') AS fingerprint FROM payment_attempts a JOIN payments p ON p.id = a.payment_id JOIN requests r ON r.id = ? AND r.organization_id = p.organization_id WHERE a.idempotency_key = ? AND p.organization_id = ? AND p.subject_type = 'reservation'`, [id, `checkout:${organizationId}:${idempotencyKey}`, organizationId])
+  const checkoutAttempt = await queryFirst<{ price_snapshot_json: string; fingerprint: string | null }>(db, `SELECT p.price_snapshot_json, json_extract(r.payload_json, '$.provenance.fingerprint') AS fingerprint FROM payments p JOIN requests r ON r.id = ? AND r.organization_id = p.organization_id WHERE p.idempotency_key = ? AND p.organization_id = ? AND p.subject_type = 'reservation'`, [id, `checkout:${organizationId}:${idempotencyKey}`, organizationId])
   if (checkoutAttempt) {
     if (checkoutAttempt.fingerprint !== fingerprint) return creationResult({ error: 'This idempotency key belongs to different reservation details', code: 'idempotency_conflict' }, { status: 409 })
     const snapshot: unknown = JSON.parse(checkoutAttempt.price_snapshot_json)

@@ -29,7 +29,7 @@ export function anonymousLinkQueries(from: string, to: string, now: string): Bat
       query: `UPDATE ${table} SET buyer_user_id = ? WHERE buyer_user_id = ?`,
       params: [to, from],
     })),
-    { query: 'UPDATE payment_claims SET claimed_user_id = ? WHERE claimed_user_id = ?', params: [to, from] },
+    { query: 'UPDATE payments SET claimed_user_id = ? WHERE claimed_user_id = ?', params: [to, from] },
     {
       query: "UPDATE activity_entries SET actor_user_id=? WHERE kind='acknowledgement' AND actor_user_id=? AND parent_id IN (SELECT id FROM activity_entries WHERE kind='notification' AND scope_kind='global' AND target_user_id=?)",
       params: [to, from, from],

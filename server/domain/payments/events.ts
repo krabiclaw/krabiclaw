@@ -8,7 +8,7 @@ import { execute, executeBatch, queryAll, queryFirst, type DbClient, type BatchQ
 import { isRecord } from '~/server/utils/type-guards'
 import { sessionClaimQuery, sessionAssignmentQuery } from '~/server/utils/availability'
 import { processStripeWebhookEvent } from '~/server/utils/stripe-webhook-events'
-import { platformLivemode } from '~/server/utils/stripe-connect'
+import { paymentsStripe, platformLivemode } from '~/server/utils/stripe-connect'
 import { executeRefund, reconcileRefundState, requirePayment, assertMinorAmount, type Payment } from './index'
 import { notifyPaymentFinancialEvent, reconcilePayoutEvent } from './notifications'
 import { recordPaymentPaid } from '~/server/domain/booking-analytics'
@@ -35,10 +35,8 @@ export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:P
   await deliverPaymentsUsage(db,env,payment.organization_id)
 }
 async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,intent:Stripe.PaymentIntent, env:CloudflareEnv, captured:{savedCard?:boolean}) {
-  if (intent.livemode !== Boolean(payment.livemode) || intent.currency.toUpperCase() !== payment.currency || intent.metadata.krabiclaw_payment_id !== payment.id || (payment.stripe_payment_intent_id && payment.stripe_payment_intent_id !== intent.id)) throw new Error('Stripe PaymentIntent financial identity mismatch')
+  if (intent.livemode !== Boolean(payment.livemode) || intent.currency.toUpperCase() !== payment.currency || intent.metadata.krabiclaw_payment_id !== payment.id || payment.stripe_payment_intent_id !== intent.id) throw new Error('Stripe PaymentIntent financial identity mismatch')
   // The intent is the one this purchase opened, on this account and mode; what it charged is Stripe's.
-  const attempt=await queryFirst<{id:string}>(db,'SELECT id FROM payment_attempts WHERE payment_id=? AND stripe_payment_intent_id=? LIMIT 1',[payment.id,intent.id])
-  if(!attempt) throw new Error('PaymentIntent is not an authorized purchase attempt')
   const snapshot=JSON.parse(payment.price_snapshot_json) as {billing_fx?:unknown}
   const now = new Date().toISOString()
   if (intent.status !== 'succeeded') {
@@ -50,7 +48,12 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,int
       await execute(db,"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",[payment.id])
       if (payment.subject_type === 'stay') await releaseLapsedStayHolds(db, env, payment.id)
     }
-    if (intent.status === 'requires_payment_method' && intent.last_payment_error) await notifyPaymentFinancialEvent(db,stripe,env,payment,{kind:'payment_failed',nativeId:intent.id,status:intent.status,amount:intent.amount})
+    if (intent.status === 'requires_payment_method' && intent.last_payment_error) {
+      // A bank debit that failed days later gives back the 14 days it was holding.
+      const until=confirmationHoldUntil(payment)
+      await execute(db,"UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND status='active' AND expires_at>?",[until,payment.id,until])
+      await notifyPaymentFinancialEvent(db,stripe,env,payment,{kind:'payment_failed',nativeId:intent.id,status:intent.status,amount:intent.amount})
+    }
     return
   }
   if (intent.application_fee_amount) throw new Error('Direct charges carry no application fee')
@@ -74,6 +77,8 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,int
   const method=intent.customer&&methodId?await stripe.paymentMethods.retrieve(methodId,{}, {stripeAccount:payment.stripe_account_id}):null
   captured.savedCard=Boolean(method&&method.created<intent.created)
   const capture={kind:'payment_captured' as const,nativeId:intent.id,status:intent.status,amount:intent.amount_received,email:charge.billing_details.email??null}
+  // Once this purchase has been sent back to the buyer, a redelivery finishes that and never books it.
+  if(await queryFirst(db,'SELECT 1 FROM payment_refunds WHERE payment_id=? AND idempotency_key=?',[payment.id,unfulfillableKey(intent)])){await refundUnfulfillable(db,stripe,env,recorded,intent,capture);return}
   if (payment.subject_type === 'stay' && recorded.refunded_amount === 0) { await settleStayPayment(db, stripe, env, recorded, intent, capture); return }
   if (recorded.refunded_amount > 0 || !['booking', 'reservation'].includes(payment.subject_type)) {await notifyPaymentFinancialEvent(db,stripe,env,recorded,capture);return}
   const hold = await queryFirst<Hold>(db,'SELECT * FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?',[payment.id,payment.organization_id])
@@ -110,7 +115,7 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,int
     }
     if (!created) {
       const converted = await queryFirst<{status:string}>(db,'SELECT status FROM payment_checkout_holds WHERE id=?',[hold.id])
-      if (converted?.status !== 'converted') throw new Error(`Payment ${payment.id} was captured but hold ${hold.id} could not become a booking`)
+      if (converted?.status !== 'converted') {await refundUnfulfillable(db,stripe,env,recorded,intent,capture);return}
     }
   }
   if(!await queryFirst(db,'SELECT id FROM organization WHERE id=?',[payment.organization_id])&&await queryFirst(db,'SELECT organization_id FROM payment_servicing_tenants WHERE organization_id=? AND stripe_account_id=? AND livemode=?',[payment.organization_id,payment.stripe_account_id,payment.livemode])){await notifyPaymentFinancialEvent(db,stripe,env,recorded,capture);return}
@@ -163,7 +168,6 @@ async function settleStayPayment(db: DbClient, stripe: Stripe, env: CloudflareEn
   if (!isStayPurchase(purchase) || purchase.product_id !== hold.product_id || purchase.total_minor !== payment.amount) throw new Error('Captured stay payment has no valid stay purchase')
   let stayId = hold.converted_stay_id
   if (hold.status !== 'converted') {
-    const now = new Date().toISOString()
     let created = false
     try {
       const converted = await convertStayHold(db, { payment, hold: { ...hold, product_id: hold.product_id, location_id: hold.location_id }, purchase })
@@ -175,7 +179,7 @@ async function settleStayPayment(db: DbClient, stripe: Stripe, env: CloudflareEn
     if (!created) {
       const converted = await queryFirst<{ status: string; converted_stay_id: string | null }>(db, 'SELECT status, converted_stay_id FROM payment_checkout_holds WHERE id=?', [hold.id])
       if (converted?.status === 'converted' && converted.converted_stay_id) stayId = converted.converted_stay_id
-      else throw new Error(`Payment ${payment.id} was captured but hold ${hold.id} could not become a stay`)
+      else {await refundUnfulfillable(db,stripe,env,payment,intent,capture);return}
     }
   }
   if (!stayId) throw new Error('Converted stay hold has no stay')
@@ -185,6 +189,52 @@ async function settleStayPayment(db: DbClient, stripe: Stripe, env: CloudflareEn
     notifyStayBooked(env, db, payment.organization_id, stayId),
   ])
   raiseSettledFailures('Captured stay completion', payment.id, outcomes, ['channel and publication', 'capture notification', 'stay confirmation'])
+}
+
+const CONFIRMATION_HOLD_MS=60*60*1000
+const BUYER_WINDOW_MARGIN_MS=30*60*1000
+const HOLD_LAPSE_MARGIN_MS=20*60*1000
+
+/** When a hold on a payment that has begun confirming ends: an hour on, and always past the time the buyer has to pay. */
+export function confirmationHoldUntil(payment:Pick<Payment,'checkout_expires_at'>):string{
+ const buyerWindow=Date.parse(payment.checkout_expires_at??'')
+ if(!Number.isFinite(buyerWindow))throw new Error('Payment has no checkout window')
+ return new Date(Math.max(Date.now()+CONFIRMATION_HOLD_MS,buyerWindow+BUYER_WINDOW_MARGIN_MS)).toISOString()
+}
+
+function unfulfillableKey(intent:Pick<Stripe.PaymentIntent,'id'>):string{return `unfulfillable:${intent.id}`}
+
+/** A captured purchase whose capacity is gone goes back to the buyer in full through the ordinary refund; a redelivery repeats it idempotently. */
+async function refundUnfulfillable(db:DbClient,stripe:Stripe,env:CloudflareEnv,payment:Payment,intent:Stripe.PaymentIntent,capture:Parameters<typeof notifyPaymentFinancialEvent>[4]){
+ await execute(db,"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",[payment.id])
+ const outcomes=await Promise.allSettled([executeRefund(db,stripe,payment,null,unfulfillableKey(intent),'requested_by_customer',null,env),notifyPaymentFinancialEvent(db,stripe,env,payment,capture)])
+ raiseSettledFailures('Unfulfillable payment refund',payment.id,outcomes,['refund','capture notification'])
+}
+
+/**
+ * Automatic confirmation lets a browser that was given the client secret finish
+ * a payment without us, so a confirmation still open when its hold is about to
+ * lapse is cancelled at Stripe first: it cannot complete on capacity that has
+ * gone back on sale. Stripe's own status decides, per payment. An intent that
+ * never began confirming needs nothing: no browser holds its secret and the pay
+ * page refuses it past the buyer's window.
+ */
+export async function closeConfirmationsBeforeHoldsLapse(db:DbClient,env:CloudflareEnv):Promise<{closed:number}>{
+ const now=new Date()
+ const payments=await queryAll<Payment>(db,`SELECT p.* FROM payments p JOIN payment_checkout_holds h ON h.payment_id=p.id
+  WHERE p.captured_amount=0 AND p.stripe_payment_intent_id IS NOT NULL AND p.review_json IS NOT NULL AND p.checkout_expires_at<=?
+   AND h.status='active' AND h.expires_at>? AND h.expires_at<=? LIMIT 100`,[now.toISOString(),now.toISOString(),new Date(now.getTime()+HOLD_LAPSE_MARGIN_MS).toISOString()])
+ const outcomes=await Promise.allSettled(payments.map(async payment=>{
+  const stripe=paymentsStripe(env,Boolean(payment.livemode))
+  const account={stripeAccount:payment.stripe_account_id}
+  const intent=await stripe.paymentIntents.retrieve(payment.stripe_payment_intent_id!,{},account)
+  const open=intent.status==='requires_action'||(intent.status==='requires_payment_method'&&Boolean(intent.last_payment_error))
+  await reconcilePaymentIntent(db,stripe,payment,open?await stripe.paymentIntents.cancel(intent.id,{cancellation_reason:'abandoned'},{...account,idempotencyKey:`krabiclaw-lapse:${payment.id}`}):intent,env)
+  return open
+ }))
+ const failures=outcomes.flatMap(outcome=>outcome.status==='rejected'?[outcome.reason]:[])
+ if(failures.length)throw new AggregateError(failures,`${failures.length} payment confirmations could not be closed before their holds lapsed`)
+ return {closed:outcomes.filter(outcome=>outcome.status==='fulfilled'&&outcome.value).length}
 }
 
 export function paymentEventKey(event:Pick<Stripe.Event,'id'|'account'|'livemode'>):string{return `payments:${event.account??'unscoped'}:${Number(event.livemode)}:${event.id}`}

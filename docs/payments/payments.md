@@ -180,7 +180,7 @@ Stripe's settlement timing and payout schedule are separate. KrabiClaw does not
 apply Airbnb check-in payout-release rules. Bank changes use Stripe Express;
 sent payouts cannot be redirected. Merchant refunds require authenticated browser
 approval. A paid visit's rejection or cancellation, a guest's own cancellation of
-a deposit-paid reservation inside its terms, and the recovery of a capture
+a deposit-paid reservation inside its terms, and the refund of a capture
 nothing could be fulfilled for are each Stripe's full-remaining refund: the
 request names no amount, Stripe returns whatever it still holds for the
 payment, and the recorded amount is the one Stripe reports. The approval screen
@@ -379,7 +379,7 @@ returns non-2xx and Stripe redelivers the event until the write lands.
 
 The buyer pays on the business's own site at `/pay/<payment id>`, not on a hosted
 Checkout. `createPaymentCheckout` opens a Stripe PaymentIntent on the connected
-account (`payment_attempts.stripe_payment_intent_id`) and hands the browser the
+account (`payments.stripe_payment_intent_id`) and hands the browser the
 page path and a purchase claim, carried in the URL fragment so no server, log or
 referrer sees it. Stripe's Payment Element, mounted on the connected account in
 deferred mode with the business's payment method configuration, collects the
@@ -419,13 +419,38 @@ intents settle via `reconcilePaymentIntent` when the `payment_intent.succeeded`
 webhook fires. Clearing failures still generate financial notifications. An
 intent in `requires_payment_method` with `last_payment_error` remains payable
 and retains its active hold so the buyer can retry, including after a
-recoverable confirmation decline. A canceled intent is terminal: it marks the
-payment failed and releases the active hold.
+recoverable confirmation decline, until its window ends. A bank debit that
+fails after that gives back the 14 days it was holding. A canceled intent is
+terminal: it releases the active hold.
 
-**Expiry.** The buyer's time to pay is the attempt's `expires_at`. Every
-availability query ignores a hold past it, and the confirm endpoint refuses an
-attempt past it, so an unpaid intent simply stays unused at Stripe. A capture that
-lands late anyway takes the unfulfillable-capture path and is refunded.
+**Expiry.** The buyer's time to pay is `payments.checkout_expires_at`. Every
+availability query ignores a hold past `expires_at`, and the confirm endpoint
+refuses a payment past its window. Stripe says what happened to a payment; the
+hold says who has the capacity, and confirming keeps it in step:
+
+- Before the confirm request goes to Stripe, one conditional write extends the
+  active, unexpired hold to at least an hour on and past the buyer's window. A
+  hold that has already lapsed stops the confirmation there, so Stripe is never
+  asked to take money for capacity that has gone.
+- These intents use automatic confirmation, because Stripe refuses
+  `confirmation_method: manual` alongside `automatic_payment_methods`. So anyone
+  holding the client secret could confirm from a browser. The browser only gets
+  the secret when Stripe says `requires_action`.
+- `checkout-holds`, every five minutes, reads Stripe for each reviewed payment
+  whose buyer window is over and whose hold has under 20 minutes left. An intent
+  still in `requires_action`, or back in `requires_payment_method` after a
+  failure, is cancelled at Stripe before its hold lapses; a success is settled.
+  An intent that never began confirming is left alone: no browser holds its
+  secret and the pay page refuses it.
+- A cancellation asks Stripe first and releases the hold only after Stripe has
+  cancelled the intent.
+
+**A capture with no booking.** Conversion that fails for a reason that can pass
+returns non-2xx and Stripe redelivers; conversion is idempotent on the hold. A
+capture whose capacity is genuinely gone is refunded in full through the ordinary
+refund under the key `unfulfillable:<intent>`, and a redelivery that finds that
+refund repeats it rather than booking. Delayed webhook delivery has not been seen
+to cost a booking; it is covered as a condition, not an incident.
 
 **Tax.** A business in a Stripe Tax business location
 (https://docs.stripe.com/tax/supported-countries) with active Stripe Tax

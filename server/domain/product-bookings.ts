@@ -157,8 +157,8 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   if (existing) return existing
 
   const checkoutAttempt = await queryFirst<{ price_snapshot_json: string; fingerprint: string | null }>(db, `SELECT p.price_snapshot_json, json_extract(r.payload_json,'$.provenance.fingerprint') AS fingerprint
-    FROM payment_attempts a JOIN payments p ON p.id=a.payment_id JOIN requests r ON r.id=? AND r.organization_id=p.organization_id
-    WHERE a.idempotency_key=? AND p.organization_id=?`, [threadId, `checkout:${organizationId}:${idempotencyKey}`, organizationId])
+    FROM payments p JOIN requests r ON r.id=? AND r.organization_id=p.organization_id
+    WHERE p.idempotency_key=? AND p.organization_id=?`, [threadId, `checkout:${organizationId}:${idempotencyKey}`, organizationId])
   if (checkoutAttempt) {
     if (checkoutAttempt.fingerprint !== fingerprint) return creationResult({ error: 'This key already identifies a different checkout request. Read its purchase before continuing.', code: 'idempotency_conflict' }, { status: 409 })
     const snapshot: unknown = JSON.parse(checkoutAttempt.price_snapshot_json)
@@ -428,7 +428,7 @@ export async function createStayBooking(event: H3Event, context: { organizationI
   const request = { product_id: home.product_id, check_in_date: body.check_in_date, check_out_date: body.check_out_date, adults: body.adults, children: body.children ?? 0, infants: body.infants ?? 0 }
   const fingerprint = await hashIdentifier(JSON.stringify({ slug, ...request, guest: { name: guestName, email: guestEmail, phone, notes }, answers: formAnswersFingerprint(body.answers) }))
 
-  const retrying = await queryFirst(db, 'SELECT 1 FROM payment_attempts a JOIN payments p ON p.id = a.payment_id WHERE a.idempotency_key = ? AND p.organization_id = ?', [`checkout:${organizationId}:${idempotencyKey}`, organizationId])
+  const retrying = await queryFirst(db, 'SELECT 1 FROM payments WHERE idempotency_key = ? AND organization_id = ?', [`checkout:${organizationId}:${idempotencyKey}`, organizationId])
   // A new checkout checks and freezes the answers with the purchase; a retry is
   // held to the purchase it froze, answers included, and does not read the
   // questions again (createPaymentCheckout reads `guest` only for a new checkout).

@@ -1271,22 +1271,6 @@ CREATE TABLE `organization_services` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `organization_services_current_unique` ON `organization_services` (`organization_id`,`service`) WHERE ended_at IS NULL;--> statement-breakpoint
-CREATE TABLE `payment_attempts` (
-	`id` text PRIMARY KEY NOT NULL,
-	`payment_id` text NOT NULL,
-	`idempotency_key` text NOT NULL,
-	`stripe_payment_intent_id` text,
-	`review_json` text,
-	`return_token` text NOT NULL,
-	`status` text DEFAULT 'creating' NOT NULL,
-	`expires_at` text NOT NULL,
-	`error` text,
-	`created_at` text NOT NULL,
-	`updated_at` text NOT NULL,
-	FOREIGN KEY (`payment_id`) REFERENCES `payments`(`id`) ON UPDATE no action ON DELETE restrict
-);
---> statement-breakpoint
-CREATE UNIQUE INDEX `payment_attempts_idempotency_key_unique` ON `payment_attempts` (`idempotency_key`);--> statement-breakpoint
 CREATE TABLE `payment_authorizations` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,
@@ -1335,16 +1319,6 @@ CREATE TABLE `payment_checkout_holds` (
 CREATE UNIQUE INDEX `payment_checkout_holds_payment_id_unique` ON `payment_checkout_holds` (`payment_id`);--> statement-breakpoint
 CREATE INDEX `payment_holds_capacity_idx` ON `payment_checkout_holds` (`session_id`,`status`,`expires_at`);--> statement-breakpoint
 CREATE INDEX `payment_holds_reservation_idx` ON `payment_checkout_holds` (`organization_id`,`location_id`,`starts_at`,`status`,`expires_at`);--> statement-breakpoint
-CREATE TABLE `payment_claims` (
-	`token_hash` text PRIMARY KEY NOT NULL,
-	`payment_id` text NOT NULL,
-	`expires_at` text NOT NULL,
-	`claimed_at` text,
-	`claimed_user_id` text,
-	FOREIGN KEY (`payment_id`) REFERENCES `payments`(`id`) ON UPDATE no action ON DELETE restrict,
-	FOREIGN KEY (`claimed_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null
-);
---> statement-breakpoint
 CREATE TABLE `payment_cost_snapshots` (
 	`source_id` text PRIMARY KEY NOT NULL,
 	`organization_id` text,
@@ -1479,13 +1453,24 @@ CREATE TABLE `payments` (
 	`stripe_payment_intent_id` text,
 	`stripe_charge_id` text,
 	`receipt_url` text,
+	`idempotency_key` text,
+	`checkout_expires_at` text,
+	`review_json` text,
+	`return_token` text,
+	`return_token_hash` text,
+	`return_expires_at` text,
+	`claimed_at` text,
+	`claimed_user_id` text,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,
 	FOREIGN KEY (`buyer_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`claimed_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
 	CONSTRAINT "payments_amounts_check" CHECK(amount >= 0 AND captured_amount >= 0 AND refunded_amount >= 0 AND refunded_amount <= captured_amount),
 	CONSTRAINT "payments_currency_check" CHECK(length(currency) = 3 AND currency = upper(currency))
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX `payments_idempotency_key_unique` ON `payments` (`idempotency_key`);--> statement-breakpoint
+CREATE UNIQUE INDEX `payments_return_token_hash_unique` ON `payments` (`return_token_hash`);--> statement-breakpoint
 CREATE INDEX `payments_tenant_created_idx` ON `payments` (`organization_id`,`created_at`);--> statement-breakpoint
 CREATE INDEX `payments_buyer_idx` ON `payments` (`buyer_user_id`,`created_at`);--> statement-breakpoint
 CREATE UNIQUE INDEX `payments_provider_unique` ON `payments` (`stripe_account_id`,`livemode`,`stripe_payment_intent_id`);--> statement-breakpoint

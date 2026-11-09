@@ -38,8 +38,26 @@ export interface Payment {
   stripe_payment_intent_id: string | null
   stripe_charge_id: string | null
   receipt_url: string | null
+  idempotency_key: string | null
+  checkout_expires_at: string | null
+  review_json: string | null
+  return_token: string | null
+  return_token_hash: string | null
+  return_expires_at: string | null
+  claimed_at: string | null
+  claimed_user_id: string | null
   created_at: string
   updated_at: string
+}
+/** The columns that authorize the pay page never leave the payment record. */
+export type VisiblePayment = Omit<Payment, 'idempotency_key' | 'review_json' | 'return_token' | 'return_token_hash'>
+function visiblePayment(payment: Payment): VisiblePayment {
+  const visible: Partial<Payment> = { ...payment }
+  delete visible.idempotency_key
+  delete visible.review_json
+  delete visible.return_token
+  delete visible.return_token_hash
+  return visible as VisiblePayment
 }
 export type FinancialAction = 'read' | 'refund' | 'disputes' | 'payouts' | 'integration'
 export interface FinancialPrincipal { organizationId: string; userId: string; role: string }
@@ -78,7 +96,7 @@ export async function readPaymentDetails(db:DbClient,env:CloudflareEnv,organizat
    readPaymentOrder(db,organizationId,recorded.id),
   stripePaymentFacts(env,recorded),
  ])
- const payment=stripeFacts?{...recorded,captured_amount:stripeFacts.captured,refunded_amount:stripeFacts.refunded}:recorded
+ const payment=visiblePayment(stripeFacts?{...recorded,captured_amount:stripeFacts.captured,refunded_amount:stripeFacts.refunded}:recorded)
  // Stripe's refunds, with the note and author only we hold; a refund not yet sent to Stripe exists only here.
  const refunds=stripeFacts?[...stripeFacts.refunds.map(refund=>({...refundRows.find(row=>row.stripe_refund_id===refund.id),id:refundRows.find(row=>row.stripe_refund_id===refund.id)?.id??refund.id,stripe_refund_id:refund.id,amount:refund.amount,status:refund.status??'pending'})),...refundRows.filter(row=>!row.stripe_refund_id)]:refundRows
  return {payment,refunds,disputes:stripeFacts?stripeFacts.disputes.map(dispute=>{const row=disputeRows.find(item=>item.stripe_dispute_id===dispute.id);return {id:row?.id??dispute.id,stripe_dispute_id:dispute.id,amount:dispute.amount,currency:dispute.currency.toUpperCase(),reason:dispute.reason,status:dispute.status,evidence_due_at:dispute.evidence_details?.due_by?new Date(dispute.evidence_details.due_by*1000).toISOString():null,updated_at:row?.updated_at??new Date(dispute.created*1000).toISOString()}}):disputeRows,visit:booking?.request_id?{kind:payment.subject_type,request_id:booking.request_id}:null,order}
@@ -93,7 +111,7 @@ export async function listPayments(db: DbClient, principal: FinancialPrincipal, 
   if (input.earnings_type !== undefined && input.earnings_type !== 'paid' && input.earnings_type !== 'refunded') throw new HTTPError({ statusCode: 400, statusMessage: 'earnings_type must be paid or refunded' })
   const rows = await queryAll<Payment>(db, `SELECT * FROM payments WHERE organization_id = ? AND created_at >= ? AND created_at < ? AND id > ? AND (? IS NULL OR location_id = ?) AND (? IS NULL OR (CASE WHEN ? = 'refunded' THEN refunded_amount > 0 ELSE refunded_amount < captured_amount END)) ORDER BY id LIMIT ?`,
     [principal.organizationId, from.toISOString(), to.toISOString(), input.after ?? '', input.location_id ?? null, input.location_id ?? null, input.earnings_type ?? null, input.earnings_type ?? null, limit + 1])
-  return { organization_id: principal.organizationId, timezone: 'UTC', from: from.toISOString(), to: to.toISOString(), payments: rows.slice(0, limit), next_cursor: rows.length > limit ? rows[limit - 1]!.id : null }
+  return { organization_id: principal.organizationId, timezone: 'UTC', from: from.toISOString(), to: to.toISOString(), payments: rows.slice(0, limit).map(visiblePayment), next_cursor: rows.length > limit ? rows[limit - 1]!.id : null }
 }
 export async function paymentPayouts(db: DbClient, env: CloudflareEnv, principal: FinancialPrincipal, after?: string) {
   await authorizePayments(principal, 'payouts')
