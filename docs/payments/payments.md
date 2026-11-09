@@ -458,7 +458,8 @@ history and operating-usage reads, plus `get_payments_dashboard_link` for a setu
 URL lookup. Refund preparation/execution and Checkout creation are dashboard/public
 booking operations. After authenticated browser approval, paid rejection commits
 cancellation, allocation release and full refund intent in one guarded D1 batch,
-then asks Stripe for the refund once. Ordinary cancellation is distinct.
+then asks Stripe for the refund, repeating the same idempotent request only if its
+response is lost. Ordinary cancellation is distinct.
 
 Every reservation, class and consultation has one cancellation rule, Airbnb's
 1-day policy, and it is not a setting. A guest who cancels at least 24 hours

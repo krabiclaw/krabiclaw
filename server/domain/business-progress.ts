@@ -297,7 +297,7 @@ export async function readBusinessRecommendations(db: DbClient, principal: Membe
     }
     const connectedChannel = (['instagram', 'facebook', 'discord'] as const).find(channel => connections?.channels.some(connection => connection.channel === channel && connection.connected && connection.problems.length === 0)) ?? null
     const entitled = await hasOrganizationEntitlement(principal.env, organizationId, 'managed_service')
-    const receipts = await queryAll<{ post_id: string }>(db, 'SELECT post_id FROM post_publications WHERE organization_id=?', [organizationId])
+    const receipts = await queryAll<{ post_id: string }>(db, "SELECT post_id FROM post_publications WHERE organization_id=? AND state <> 'failed'", [organizationId])
     const draftPosts = posts.filter(post => (post.status === 'draft' || connectedChannel && entitled) && !receipts.some(receipt => receipt.post_id === post.id))
     for (const post of draftPosts) offer('post.publish', post.id, post.title ? `Finish sharing “${post.title}”` : 'Finish your photo or social post',
       `${post.status === 'published' ? 'The website post is published; no completed social publication is recorded.' : 'Continue the post already in progress.'}${!connectedChannel && !socialEvidenceUnavailable ? ' Connect a social account to publish it there.' : ''}`,

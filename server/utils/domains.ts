@@ -755,7 +755,7 @@ export async function syncDomainWithCloudflare(
   } catch (error) {
     const normalizedError = error instanceof Error ? error : new Error('Unknown error')
     // The domain carries the reason its last check failed, where the dashboard reads it.
-    await execute(db, `UPDATE organization_domains SET error_message = ?, updated_at = ? WHERE id = ? AND status NOT IN ('deleted', 'disabled')`,
+    await execute(db, `UPDATE organization_domains SET error_message = ?, updated_at = ? WHERE id = ? AND desired_state = 'active' AND status NOT IN ('deleted', 'disabled')`,
       [normalizedError.message, new Date().toISOString(), domainId])
     if (normalizedError.name === 'AbortError') {
       const abortError = new Error('Domain sync aborted')
@@ -978,7 +978,7 @@ export async function reconcileDueDomains(env: DomainEnv, db: D1Database, limit 
   const rows = await queryAll<{ id: string }>(db, `
     SELECT id FROM organization_domains WHERE type = 'custom' AND desired_state = 'active'
       AND status IN ('pending', 'verifying', 'failed', 'blocked')
-    ORDER BY created_at LIMIT ?
+    ORDER BY updated_at, id LIMIT ?
   `, [limit])
   let failed = 0
   const failures: string[] = []
