@@ -306,7 +306,7 @@ export interface ContactEventInput {
 }
 
 /** A message alert's reply-to answers the guest as the member it was sent to. */
-const REPLY_NOTE = 'Reply to this email or from the dashboard.'
+export const REPLY_NOTE = 'Reply to this email or from the dashboard.'
 
 export function contactReceivedMessage(input: ContactEventInput): MemberAlertMessage {
   // The product a guest is asking about is the whole point of the message, and

@@ -55,6 +55,7 @@ import {
   stayCancelledMessage,
   stayTurnoverAlert,
   taskAlertMessage,
+  REPLY_NOTE,
 } from '~/server/notifications/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { createCanonicalNotification, isConversationNotification, isScheduleNotification, notifyBuyerThread, type NotificationSeverity } from '~/server/utils/notification-center'
@@ -614,10 +615,10 @@ function memberNotificationSends(
         preferencesUrl: `https://${getPlatformDomain(env)}/dashboard/account/profile/notifications`,
         unsubscribeUrl: recipient.unsubscribeUrl,
       })
-      // An alert about a conversation answers it: replying sends to that conversation as this member.
+      // Only an email that says it can be answered carries a reply address: an alert about a new booking or cancellation does not send the member's reply to the guest.
       await sendEmailNotification(env, db, {
         ...input, to, title: input.message.title,
-        ...(input.context.guestThreadId || input.target.kind === 'team' ? { replyAs: { kind: 'member' as const, userId: recipient.userId } } : {}),
+        ...(input.message.finePrint === REPLY_NOTE ? { replyAs: { kind: 'member' as const, userId: recipient.userId } } : {}),
         email: { subject: sanitizeEmailHeaderValue(input.message.title), ...rendered },
         unsubscribeOneClickUrl: recipient.unsubscribeOneClickUrl,
         delivery: threadDelivery(input.context, 'owner_alert', 'email', input.template, to, input.eventKey),
