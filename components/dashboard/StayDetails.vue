@@ -17,7 +17,17 @@
         color="error"
         icon="i-lucide-triangle-alert"
         title="Overbooked"
-        :description="`${channelName} confirmed this stay on nights another stay holds. Cancel this stay on ${channelName}, or cancel the other stay where it was booked.`"
+        :description="`${channelName} confirmed this stay on nights another stay holds. Move this guest to another home, cancel this stay on ${channelName}, or cancel the other stay where it was booked.`"
+      />
+      <UAlert
+        v-if="manage && detail?.booked_home_name"
+        class="mb-5"
+        color="info"
+        variant="soft"
+        icon="i-lucide-move-right"
+        title="Moved"
+        :description="`Booked as ${detail.booked_home_name} on ${channelName}. These nights are held on the home the guest moved to.`"
+        :actions="[{ label: 'Undo move', color: 'neutral', variant: 'outline', loading: busy === 'undo_move', onClick: undoMove }]"
       />
       <UAlert v-if="!personalScope && guest.state === 'missing'" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" title="Guest name missing" description="This stay was made in KrabiClaw, which requires a guest name, but it has none." />
       <div class="flex flex-col items-center pb-12 text-center" :class="homeImageUrl ? 'pt-2' : 'pt-10'">
@@ -192,6 +202,7 @@
           <dd class="text-right text-base text-highlighted">{{ STAY_CHANNEL_LABELS[detail.channel] }}</dd>
         </div>
       </dl>
+      <UButton v-if="manage && detail.status !== 'cancelled'" class="mt-4" color="neutral" variant="outline" label="Move guest" :to="`/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/bookings/stay/${encodeURIComponent(detail.id)}/move`" data-testid="stay-move" />
       <p v-if="!personalScope && channelManaged" class="mt-4 text-base text-muted">
         Payments, changes and cancellations for this stay are managed on
         <ULink v-if="detail.channel_booking_url" :to="detail.channel_booking_url" target="_blank" rel="noopener noreferrer" class="text-highlighted underline">{{ channelName }}</ULink><template v-else>{{ channelName }}</template>.
@@ -420,6 +431,22 @@ async function deletePayment(paymentId: string) {
 // operation is the writer; it refuses a stay that no longer qualifies.
 const canMarkNoShow = computed(() => !props.personalScope && manage.value && detail.value?.channel === 'direct' && detail.value.status === 'confirmed'
   && !detail.value.no_show_at && Boolean(detail.value.request_id) && detail.value.check_in_date <= localDateAt(new Date(), detail.value.timezone))
+
+async function undoMove() {
+  const value = detail.value
+  if (!value?.booked_product_id) return
+  if (!await confirmDialog.open({ title: 'Undo this move', description: `The guest goes back to ${value.booked_home_name} and is messaged its address and entry details.`, confirmLabel: 'Undo move', cancelLabel: 'Keep the move' })) return
+  busy.value = 'undo_move'
+  actionError.value = null
+  try {
+    await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/move`, { method: 'POST', validate: (response: unknown): response is { stay: Record<string, unknown> } => isRecord(response) && isRecord(response.stay), body: { expected_version: value.version, product_id: value.booked_product_id } })
+    await refresh()
+  } catch (cause) {
+    actionError.value = getErrorMessage(cause, 'The move could not be undone.')
+  } finally {
+    busy.value = null
+  }
+}
 
 async function markNoShow() {
   const value = detail.value
