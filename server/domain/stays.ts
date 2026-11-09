@@ -2783,8 +2783,9 @@ export function stayHoldPredicate(input: { organizationId: string; productId: st
   return {
     query: `EXISTS (SELECT 1 FROM products p JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
               WHERE p.organization_id = ? AND p.id = ? AND ${PUBLIC_STAY_SQL})
-            AND NOT EXISTS (SELECT 1 FROM product_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ? AND closed = 1)`,
-    params: [input.organizationId, input.productId, input.organizationId, input.productId, input.checkIn, input.checkOut],
+            AND NOT EXISTS (SELECT 1 FROM product_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ? AND closed = 1)
+            AND NOT EXISTS (SELECT 1 FROM stays WHERE organization_id = ? AND booked_product_id = ? AND status <> 'cancelled' AND check_in_date < ? AND check_out_date > ?)`,
+    params: [input.organizationId, input.productId, input.organizationId, input.productId, input.checkIn, input.checkOut, input.organizationId, input.productId, input.checkOut, input.checkIn],
   }
 }
 

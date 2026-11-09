@@ -19,7 +19,7 @@ const level = useRouteLevel()
 const api = useDashboardApi()
 const toast = useToast()
 const stayId = String(route.params.bookingId ?? '')
-if (route.params.bookingType !== 'stay') showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
+if (route.params.bookingType !== 'stay') throw createError({ statusCode: 404, statusMessage: 'Page not found', fatal: true })
 
 const isOptions = (value: unknown): value is { options: MoveOption[] } => isRecord(value) && Array.isArray(value.options)
 const isManagedStay = (value: unknown): value is { stay: MoveStayRecord; manage: true } => isRecord(value) && value.manage === true && isRecord(value.stay) && typeof value.stay.version === 'number'

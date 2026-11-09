@@ -714,7 +714,8 @@ export async function postAutomaticTeamMessage(env: TeamEnv, db: DbClient, input
       params: [threadId, input.organizationId, input.subject.kind === 'stay' ? input.subject.id : null, input.subject.kind === 'booking' ? input.subject.id : null, participantsKey, now, now, input.organizationId, input.subject.id, input.organizationId, d1JsonStringSet(seatIds), seatIds.length],
     },
     ...seatIds.map(memberId => ({
-      query: `INSERT INTO team_thread_members (thread_id, organization_id, member_id, last_read_at, created_at) SELECT id, organization_id, ?, NULL, ? FROM team_threads WHERE id = ?`,
+      query: `INSERT INTO team_thread_members (thread_id, organization_id, member_id, last_read_at, created_at) SELECT id, organization_id, ?, NULL, ? FROM team_threads WHERE id = ?
+              ON CONFLICT DO NOTHING`,
       params: [memberId, now, threadId],
     })),
     {

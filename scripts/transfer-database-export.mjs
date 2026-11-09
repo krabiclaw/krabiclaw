@@ -922,6 +922,8 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
         // A purchase has one attempt and one claim; both become columns of the payment.
         const repeated = stage.prepare(`SELECT payment_id FROM payment_attempts GROUP BY payment_id HAVING count(*) > 1 UNION SELECT payment_id FROM payment_claims GROUP BY payment_id HAVING count(*) > 1`).all()
         assert(repeated.length === 0, `Payments with more than one attempt or claim: ${repeated.slice(0, 8).map(row => row.payment_id).join(', ')}; no rows were copied`)
+        const divergent = stage.prepare(`SELECT a.id FROM payment_attempts a JOIN payments p ON p.id = a.payment_id WHERE a.stripe_payment_intent_id IS NOT NULL AND a.stripe_payment_intent_id IS NOT p.stripe_payment_intent_id`).all()
+        assert(divergent.length === 0, `Payment attempts name an intent their payment does not: ${divergent.slice(0, 8).map(row => row.id).join(', ')}; no rows were copied`)
         for (const column of ['idempotency_key', 'checkout_expires_at', 'review_json', 'return_token', 'return_token_hash', 'return_expires_at', 'claimed_at', 'claimed_user_id']) stage.exec(`ALTER TABLE payments ADD COLUMN ${column} TEXT`)
         const folded = stage.prepare(`UPDATE payments SET
           idempotency_key = (SELECT idempotency_key FROM payment_attempts a WHERE a.payment_id = payments.id),
