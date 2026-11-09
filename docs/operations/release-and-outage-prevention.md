@@ -892,7 +892,7 @@ held 16 and 7.
 Both v26 databases were created with `--location wnam` on 2026-11-09, and
 Cloudflare reported WNAM before binding or loading:
 
-- `krabiclaw-staging-v26`: `f24889f7-60a7-4606-8a5d-72258f734050`
+- `krabiclaw-staging-v26`: `041c627b-b0e9-4543-bc06-f88a93f03ac7`
 - `krabiclaw-production-v26`: `f9f2f077-46c9-47bb-875f-3f77668e2832`
 
 Staging moves with this release. Its baseline was applied through the native
