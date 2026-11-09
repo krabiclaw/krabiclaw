@@ -2,6 +2,7 @@ import { Buffer } from 'node:buffer'
 import { createHmac, randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import { loginAs } from './helpers/auth'
+import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import type { InboxRow, InboxStreamItem, InboxThread } from '../../server/domain/guest-threads/types'
 import { seededTenant } from './seed/manifest'
@@ -298,9 +299,10 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   // and on each a signed reply-to naming that message, which answers the guest as that owner.
   const alerts = (await readDeliveries('read owner alerts')).filter(delivery => delivery.purpose === 'owner_alert' && delivery.email_json !== null)
     .map(delivery => JSON.parse(delivery.email_json!) as FrozenEmail).filter(email => email.message.replyTo?.startsWith('rm'))
-  expect(alerts.length).toBeGreaterThanOrEqual(2)
-  const ownerAddress = alerts[0]!.message.to
+  // The signed-in owner replies, so the inbox labels the reply "You"; every other member alerted is someone else.
+  const ownerAddress = findE2eAuthFixture('user-e2e-demo-owner').email
   const ownerAlerts = alerts.filter(email => email.message.to === ownerAddress)
+  expect(ownerAlerts.length).toBeGreaterThanOrEqual(2)
   expect(new Set(ownerAlerts.map(email => email.message.subject)).size).toBe(1)
   expect(new Set(ownerAlerts.map(email => email.message.replyTo)).size).toBe(ownerAlerts.length)
   expect(ownerAlerts.some(email => email.message.text.includes(body))).toBe(true)

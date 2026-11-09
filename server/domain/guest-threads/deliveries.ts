@@ -124,7 +124,7 @@ async function conversationEmailParent(db: DbClient, delivery: GuestThreadDelive
 
 /** The conversation an entry belongs to: its guest conversation, or a team message's team conversation. */
 const ENTRY_CONVERSATION = (alias: string) => `COALESCE(${alias}.request_id, (SELECT tm.thread_id FROM team_messages tm
-  WHERE ${alias}.event_name = 'team.message_sent' AND tm.organization_id = ${alias}.organization_id AND tm.id = json_extract(${alias}.payload_json, '$.entityId')))`
+  WHERE tm.organization_id = ${alias}.organization_id AND ${alias}.dedupe_key = 'team-message:' || tm.id))`
 
 /**
  * A member's alerts about one conversation, guest or team, are one email
