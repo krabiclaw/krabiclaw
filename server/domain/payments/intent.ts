@@ -25,15 +25,16 @@ interface OpenAttempt { id: string; payment_id: string; stripe_payment_intent_id
 type IntentWithSurcharge = Stripe.PaymentIntent & { amount_details?: { surcharge?: { status?: string; maximum_amount?: number; amount?: number } } }
 export type PaymentHandoffState = 'open' | 'paid' | 'failed' | 'expired'
 
-export async function requireOpenAttempt(db: DbClient, organizationId: string, paymentId: string, claim: string): Promise<{ payment: Payment; attempt: OpenAttempt; state: PaymentHandoffState }> {
+export async function requireOpenAttempt(db: DbClient, stripe: Stripe, organizationId: string, paymentId: string, claim: string): Promise<{ payment: Payment; attempt: OpenAttempt; intent: Stripe.PaymentIntent; state: PaymentHandoffState }> {
   if (!/^[a-f0-9-]{72}$/u.test(claim)) throw new HTTPError({ statusCode: 400, statusMessage: 'Purchase claim required' })
   const attempt = await queryFirst<OpenAttempt>(db, `SELECT a.id,a.payment_id,a.stripe_payment_intent_id,a.expires_at,c.expires_at AS claim_expires_at,a.status,a.review_json FROM payment_attempts a JOIN payment_claims c ON c.payment_id=a.payment_id JOIN payments p ON p.id=a.payment_id
     WHERE a.payment_id=? AND p.organization_id=? AND c.token_hash=? AND a.stripe_payment_intent_id IS NOT NULL ORDER BY a.created_at DESC LIMIT 1`, [paymentId, organizationId, await tokenHash(claim)])
   if (!attempt) throw new HTTPError({ statusCode: 404, statusMessage: 'Payment not found' })
   const payment = await requirePayment(db, organizationId, paymentId)
+  const intent = await stripe.paymentIntents.retrieve(attempt.stripe_payment_intent_id, { expand: ['latest_charge'] }, { stripeAccount: payment.stripe_account_id })
   const now = new Date().toISOString()
-  const state: PaymentHandoffState = payment.captured_amount > 0 ? 'paid' : payment.state === 'failed' ? 'failed' : attempt.expires_at <= now || attempt.claim_expires_at <= now ? 'expired' : 'open'
-  return { payment, attempt, state }
+  const state: PaymentHandoffState = payment.captured_amount > 0 ? 'paid' : intent.status === 'canceled' ? 'failed' : attempt.expires_at <= now || attempt.claim_expires_at <= now ? 'expired' : 'open'
+  return { payment, attempt, intent, state }
 }
 
 function parseReview(value: string | null): PaymentReview | null {
@@ -87,11 +88,10 @@ async function handoffSubject(db: DbClient, organizationId: string, payment: Pay
 
 /** What the pay page needs to mount Stripe's Payment Element on the connected account. */
 export async function paymentHandoff(db: DbClient, stripe: Stripe, publishableKey: string, organizationId: string, paymentId: string, claim: string) {
-  const { payment, attempt, state } = await requireOpenAttempt(db, organizationId, paymentId, claim)
+  const { payment, attempt, intent, state } = await requireOpenAttempt(db, stripe, organizationId, paymentId, claim)
   const snapshot = snapshotOf(payment)
   if (!publishableKey) throw new HTTPError({ statusCode: 503, statusMessage: 'Stripe is not configured' })
   // The methods Stripe resolved for this intent from the business's configuration, with nothing that redirects; the Element offers exactly these.
-  const intent = await stripe.paymentIntents.retrieve(attempt.stripe_payment_intent_id, {}, { stripeAccount: payment.stripe_account_id })
   if (intent.metadata.krabiclaw_payment_id !== payment.id) throw new Error('Stripe PaymentIntent does not match the purchase')
   // Stripe's own saved-card features for a signed-in buyer, scoped to this business's customer.
   let customerSession: string | null = null
@@ -113,10 +113,9 @@ export async function paymentHandoff(db: DbClient, stripe: Stripe, publishableKe
 
 /** The buyer goes back to change a stay only after Stripe cancels the purchase and its held nights are released. */
 export async function cancelStayPayment(db: DbClient, stripe: Stripe, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string): Promise<{ status: 'canceled' }> {
-  const { payment, attempt, state } = await requireOpenAttempt(db, organizationId, paymentId, claim)
+  const { payment, attempt, intent: current, state } = await requireOpenAttempt(db, stripe, organizationId, paymentId, claim)
   if (payment.subject_type !== 'stay') throw new HTTPError({ statusCode: 409, statusMessage: 'This payment does not hold a stay' })
   if (state === 'paid') throw new HTTPError({ statusCode: 409, statusMessage: 'This stay is already paid; open its booking to request a change', data: { code: 'payment_paid' } })
-  const current = await stripe.paymentIntents.retrieve(attempt.stripe_payment_intent_id, {}, { stripeAccount: payment.stripe_account_id })
   if (current.id !== attempt.stripe_payment_intent_id || (payment.stripe_payment_intent_id && payment.stripe_payment_intent_id !== current.id) || current.livemode !== Boolean(payment.livemode) || current.currency.toUpperCase() !== payment.currency || current.metadata.krabiclaw_payment_id !== payment.id) throw new Error('Stripe PaymentIntent does not match the purchase')
   if (state !== 'open' && current.status !== 'canceled') throw new HTTPError({ statusCode: 409, statusMessage: state === 'expired' ? 'This payment has expired; start the booking again' : 'This payment was not accepted; start the booking again', data: { code: `payment_${state}` } })
   if (current.status !== 'canceled' && !['requires_payment_method', 'requires_confirmation', 'requires_action'].includes(current.status)) {
@@ -141,7 +140,7 @@ export async function cancelStayPayment(db: DbClient, stripe: Stripe, env: Cloud
  * carries none. Stripe's answer missing is an error, never a free payment.
  */
 export async function reviewPayment(db: DbClient, stripe: Stripe, organizationId: string, paymentId: string, claim: string, paymentMethodId: string, buyerIp: string | null) {
-  const { payment, attempt, state } = await requireOpenAttempt(db, organizationId, paymentId, claim)
+  const { payment, attempt, state } = await requireOpenAttempt(db, stripe, organizationId, paymentId, claim)
   if (state !== 'open') throw new HTTPError({ statusCode: 409, statusMessage: state === 'paid' ? 'This payment is already complete' : state === 'expired' ? 'This payment has expired; start the booking again' : 'This payment was not accepted; start the booking again', data: { code: `payment_${state}` } })
   if (!/^pm_[A-Za-z0-9]+$/u.test(paymentMethodId)) throw new HTTPError({ statusCode: 400, statusMessage: 'Payment method required' })
   const snapshot = snapshotOf(payment)
@@ -197,11 +196,10 @@ async function calculateTax(stripe: Stripe, payment: Payment, snapshot: ReturnTy
  * settles here and again, idempotently, from the webhook.
  */
 export async function confirmPayment(db: DbClient, stripe: Stripe, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, input: { payment_method_id: string; total: number }, siteOrigin: string) {
-  const { payment, attempt, state } = await requireOpenAttempt(db, organizationId, paymentId, claim)
+  const { payment, attempt, intent: current, state } = await requireOpenAttempt(db, stripe, organizationId, paymentId, claim)
   if (state !== 'open') throw new HTTPError({ statusCode: 409, statusMessage: state === 'paid' ? 'This payment is already complete' : 'This payment can no longer be confirmed; start the booking again', data: { code: `payment_${state}` } })
   const review = parseReview(attempt.review_json)
   if (!review || review.payment_method_id !== input.payment_method_id || review.total !== input.total) throw new HTTPError({ statusCode: 409, statusMessage: 'Review the payment again before confirming', data: { code: 'review_required' } })
-  const current = await stripe.paymentIntents.retrieve(attempt.stripe_payment_intent_id, {}, { stripeAccount: payment.stripe_account_id })
   const attached = typeof current.payment_method === 'string' ? current.payment_method : current.payment_method?.id
   if (current.status !== 'requires_confirmation' || attached !== review.payment_method_id || current.amount !== review.subtotal + review.tax) throw new HTTPError({ statusCode: 409, statusMessage: 'The payment changed since it was reviewed; review it again', data: { code: 'review_required' } })
   const confirmed = await stripe.paymentIntents.confirm(attempt.stripe_payment_intent_id, {
@@ -210,9 +208,10 @@ export async function confirmPayment(db: DbClient, stripe: Stripe, env: Cloudfla
     // The surcharged total is what Stripe charges; the surcharge inside it is named so receipts and refunds carry it.
     ...(review.surcharge > 0 ? { amount_to_confirm: review.total, amount_details: { surcharge: { amount: review.surcharge, enforce_validation: 'enabled' } } } : {}),
   } as Stripe.PaymentIntentConfirmParams, { stripeAccount: payment.stripe_account_id, idempotencyKey: `krabiclaw-confirm:${payment.id}:${review.reviewed_at}` })
-  if (confirmed.status === 'processing') {
+  // A confirmation Stripe has accepted must find its hold when it completes: authentication gets an hour, bank clearing 14 days.
+  if (confirmed.status === 'processing' || confirmed.status === 'requires_action') {
     await execute(db, "UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND status='active'", [
-      new Date(Date.now() + 14 * 86400 * 1000).toISOString(),
+      new Date(Date.now() + (confirmed.status === 'processing' ? 14 * 86400 * 1000 : 60 * 60 * 1000)).toISOString(),
       payment.id,
     ])
   } else if (confirmed.status === 'succeeded') {
@@ -238,7 +237,7 @@ async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment
   const hold = await queryFirst<{ status: string; request_id: string | null; converted_stay_id: string | null }>(db, 'SELECT status,request_id,converted_stay_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id])
   if (!hold) throw new Error('Captured payment has no checkout hold')
   if (hold.status !== 'converted') {
-    if (payment.state === 'recovery' || payment.state === 'refunded') return { state: 'refunded' }
+    if (payment.refunded_amount > 0) return { state: 'refunded' }
     throw new Error('Captured payment has no booking it paid for')
   }
   if (payment.subject_type === 'stay') {
@@ -261,8 +260,7 @@ async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment
  * buyer and its receipt is named; a payment still clearing claims nothing.
  */
 export async function completePaymentReturn(db: DbClient, stripe: Stripe, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, buyer: () => Promise<string>): Promise<PaymentReturn> {
-  const { payment, attempt } = await requireOpenAttempt(db, organizationId, paymentId, claim)
-  const intent = await stripe.paymentIntents.retrieve(attempt.stripe_payment_intent_id, { expand: ['latest_charge'] }, { stripeAccount: payment.stripe_account_id })
+  const { payment, attempt, intent } = await requireOpenAttempt(db, stripe, organizationId, paymentId, claim)
   if (intent.livemode !== Boolean(payment.livemode) || intent.metadata.krabiclaw_payment_id !== payment.id || (intent.status !== 'succeeded' && intent.status !== 'processing')) throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe has not authenticated this purchase' })
   await reconcilePaymentIntent(db, stripe, payment, intent, env)
   if (intent.status === 'processing') return { state: 'processing' }

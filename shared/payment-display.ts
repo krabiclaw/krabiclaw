@@ -9,7 +9,6 @@ export interface PaymentDisplay {
  refunded_amount:number
  /** The credit-card surcharge Stripe charged inside `captured_amount`. */
  surcharge_amount:number
- state:string
  receipt_url:string|null
 }
 export interface PaymentRefundDisplay {id:string;amount:number|null;status:string;note:string|null}
@@ -17,9 +16,9 @@ export interface PaymentOrderDisplay {
  lines:Array<{id:string;title:string;quantity:number;unit_amount:number;currency:CurrencyCode}>
 }
 export function paymentDisplay(value:unknown):PaymentDisplay {
- if(!value||typeof value!=='object'||!('id' in value)||typeof value.id!=='string'||!('currency' in value)||!isCurrencyCode(value.currency)||!('captured_amount' in value)||typeof value.captured_amount!=='number'||!Number.isSafeInteger(value.captured_amount)||value.captured_amount<0||!('refunded_amount' in value)||typeof value.refunded_amount!=='number'||!Number.isSafeInteger(value.refunded_amount)||value.refunded_amount<0||!('surcharge_amount' in value)||typeof value.surcharge_amount!=='number'||!Number.isSafeInteger(value.surcharge_amount)||value.surcharge_amount<0||!('state' in value)||typeof value.state!=='string'||!('receipt_url' in value)||(value.receipt_url!==null&&typeof value.receipt_url!=='string'))throw new Error('Invalid payment detail')
- if(value.refunded_amount>value.captured_amount||value.surcharge_amount>value.captured_amount||!['pending','captured','failed','recovery','refunded'].includes(value.state))throw new Error('Invalid payment state')
- return {id:value.id,currency:value.currency,captured_amount:value.captured_amount,refunded_amount:value.refunded_amount,surcharge_amount:value.surcharge_amount,state:value.state,receipt_url:value.receipt_url}
+ if(!value||typeof value!=='object'||!('id' in value)||typeof value.id!=='string'||!('currency' in value)||!isCurrencyCode(value.currency)||!('captured_amount' in value)||typeof value.captured_amount!=='number'||!Number.isSafeInteger(value.captured_amount)||value.captured_amount<0||!('refunded_amount' in value)||typeof value.refunded_amount!=='number'||!Number.isSafeInteger(value.refunded_amount)||value.refunded_amount<0||!('surcharge_amount' in value)||typeof value.surcharge_amount!=='number'||!Number.isSafeInteger(value.surcharge_amount)||value.surcharge_amount<0||!('receipt_url' in value)||(value.receipt_url!==null&&typeof value.receipt_url!=='string'))throw new Error('Invalid payment detail')
+ if(value.refunded_amount>value.captured_amount||value.surcharge_amount>value.captured_amount)throw new Error('Invalid payment state')
+ return {id:value.id,currency:value.currency,captured_amount:value.captured_amount,refunded_amount:value.refunded_amount,surcharge_amount:value.surcharge_amount,receipt_url:value.receipt_url}
 }
 export function paymentRefundsDisplay(value:unknown):PaymentRefundDisplay[] {
  if(!Array.isArray(value))throw new Error('Invalid payment refunds')
@@ -46,11 +45,11 @@ export function paymentMoney(amount:unknown,currency:unknown):string {
  return `${value<0?'-':''}${formatMinorAmount(Math.abs(value),currency)}`
 }
 /** What a reader is told about a payment, in the words the booking screen uses; one place for both the business and the buyer. */
-export function paymentStateLabel(payment:Pick<PaymentDisplay,'captured_amount'|'refunded_amount'|'state'>):string {
+export function paymentStateLabel(payment:Pick<PaymentDisplay,'captured_amount'|'refunded_amount'>):string {
  if(payment.captured_amount>0){
   if(payment.refunded_amount===payment.captured_amount)return 'Refunded'
   if(payment.refunded_amount>0)return 'Partially refunded'
   return 'Paid'
  }
- return payment.state==='failed'?'Failed':payment.state==='recovery'?'Needs attention':'Pending'
+ return 'Not paid'
 }

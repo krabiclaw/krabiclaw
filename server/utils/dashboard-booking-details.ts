@@ -23,7 +23,7 @@ import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { readPaymentDetails } from '~/server/domain/payments'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
 import { canRetryGuestVisitRefund } from '~/server/domain/payments/visit-refund'
-import {paymentDisplay,paymentRefundsDisplay,paymentOrderDisplay,type PaymentDisplay,type PaymentRefundDisplay,type PaymentOrderDisplay} from '~/shared/payment-display'
+import {paymentStateLabel,paymentDisplay,paymentRefundsDisplay,paymentOrderDisplay,type PaymentDisplay,type PaymentRefundDisplay,type PaymentOrderDisplay} from '~/shared/payment-display'
 
 export type DashboardBookingType = 'reservation' | 'booking'
 /** What the record screen can show: a visit, or a purchase that stands on its own (an order, or a payment whose visit is gone). */
@@ -531,7 +531,7 @@ async function composePurchaseDetails(db: DbClient, scope: BookingScope, payment
     startsAt: null,
     endsAt: null,
     timeZone: 'UTC',
-    status: detail.payment.state,
+    status: paymentStateLabel(detail.payment),
     complete: true,
     requests: null,
     experienceId: null,

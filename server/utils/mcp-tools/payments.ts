@@ -15,7 +15,7 @@ const period = {
 const nullableString = { type: ['string', 'null'] }
 const integer = { type: 'integer' }
 const amount = { type: 'object', properties: { currency: string, amount: integer }, required: ['currency', 'amount'] }
-const payment = { type: 'object', properties: { id: string, created_at: string, currency: string, amount: integer, captured_amount: integer, refunded_amount: integer, state: string, title: string, image_url: nullableString, buyer_name: nullableString, starts_at: nullableString, ends_at: nullableString, timezone: nullableString, to: string }, required: ['id', 'currency', 'amount', 'captured_amount', 'refunded_amount', 'state', 'title', 'to'], additionalProperties: false }
+const payment = { type: 'object', properties: { id: string, created_at: string, currency: string, amount: integer, captured_amount: integer, refunded_amount: integer, title: string, image_url: nullableString, buyer_name: nullableString, starts_at: nullableString, ends_at: nullableString, timezone: nullableString, to: string }, required: ['id', 'currency', 'amount', 'captured_amount', 'refunded_amount', 'title', 'to'], additionalProperties: false }
 const readInfo = { organization_id: string, source: string, refreshed_at: nullableString, dashboard_url: string }
 const summaryResult = { type: 'object', properties: { ...readInfo, timezone: { const: 'UTC' }, from: string, to: string, usage_status: string,
   amounts: { type: 'array', items: { type: 'object', properties: { currency: string, captured_amount: integer, refunded_amount: integer, disputed_amount: integer }, required: ['currency', 'captured_amount', 'refunded_amount', 'disputed_amount'] } },

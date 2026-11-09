@@ -234,7 +234,6 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     }
     const attempt = await queryFirst(db,'SELECT id FROM payment_attempts WHERE id=?',[attemptId])
     if (!attempt) {
-      await execute(db,"UPDATE payments SET state='failed',updated_at=? WHERE id=?",[now,id])
       if (input.subjectType === 'stay') throw new HTTPError({ statusCode: 409, statusMessage: 'This place to stay is no longer open for these nights', data: { code: 'STAY_NIGHTS_UNAVAILABLE', field: 'check_in_date' } })
       throw new HTTPError({statusCode:409,statusMessage:'This time no longer has capacity for your party'})
     }
@@ -269,7 +268,6 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       {query:"UPDATE payment_attempts SET error=?,updated_at=?,status=CASE WHEN ? THEN 'failed' ELSE status END WHERE id=?",params:[error instanceof Error?error.message.slice(0,500):'Provider payment intent failed',failedAt,Number(rejected),attemptId]},
       ...(rejected?[
         {query:"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",params:[id]},
-        {query:"UPDATE payments SET state='failed',updated_at=? WHERE id=? AND captured_amount=0",params:[failedAt,id]},
       ]:[]),
     ],{operation:'Record rejected or uncertain payment intent creation'})
     throw error

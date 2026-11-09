@@ -61,10 +61,7 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   const deepLink = organization ? `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}${booking?.request_id?`/bookings/${visitKind}/${encodeURIComponent(booking.request_id)}`:stayThread?`/bookings/stay/${encodeURIComponent(payment.subject_id!)}`:`/earnings/transactions/${encodeURIComponent(payment.id)}`}` : null
   const details = {
     organizationName: organization?.name ?? null, amount: input.amount, currency: payment.currency, productTitle: snapshot.title, action: deepLink ? { url: deepLink, label: 'View details' } : null,
-    // A checkout whose booking was taken before the payment completed is refunded without being asked.
-    refundReason: payment.state !== 'recovery' ? null
-      : input.kind === 'refund_pending' ? 'What you paid for was taken before your payment completed, so your booking could not be made and your payment will be refunded in full.'
-        : input.kind === 'refund_succeeded' ? 'What you paid for was taken before your payment completed, so your booking could not be made and your payment has been refunded in full.' : null,
+    refundReason: null,
   }
   const event: PaymentNotificationEvent = input.kind === 'dispute_needs_response' ? { ...details, kind: input.kind, responseDueBy: input.responseDueBy } : { ...details, kind: input.kind }
   const ownerMessage = deepLink ? ownerPaymentMessage({ ...event, action: { url: deepLink, label: 'View details' } }) : undefined

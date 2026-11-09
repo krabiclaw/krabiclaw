@@ -87,7 +87,7 @@ async function paidReservation(db: D1Database, env: CloudflareEnv) {
  const opening = { id: 'deposit-request', kind: 'reservation' as const, organization_id: ORG, location_id: 'dining', user_id: 'verified', review_id: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com', phone: '+12025550123' }), cancellation: { token_hash: 'deposit-token-hash', expires_at: '2100-01-01T00:00:00.000Z', used_at: null } }, created_at: NOW, updated_at: NOW }
  await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
  const terms = { policy_type: 'reservation', free_cancellation_until_minutes: 1440, reschedule_allowed: true, reschedule_cutoff_minutes: 1440, deposit_required: true, deposit_amount: 10000, deposit_currency: 'USD', deposit_tax_behavior: 'exclusive' }
- await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,location_id,currency,amount,tax_amount,captured_amount,state,stripe_payment_intent_id,stripe_charge_id,price_snapshot_json,created_at,updated_at) VALUES('deposit',?,'verified','acct_seller',0,'reservation','dining','USD',10000,500,10500,'captured','pi_deposit','ch_deposit',?,?,?)").bind(ORG, JSON.stringify({ title: 'Dining reservation deposit', reservation: terms }), NOW, NOW).run()
+ await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,location_id,currency,amount,tax_amount,captured_amount,stripe_payment_intent_id,stripe_charge_id,price_snapshot_json,created_at,updated_at) VALUES('deposit',?,'verified','acct_seller',0,'reservation','dining','USD',10000,500,10500,'pi_deposit','ch_deposit',?,?,?)").bind(ORG, JSON.stringify({ title: 'Dining reservation deposit', reservation: terms }), NOW, NOW).run()
  await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,location_id,timezone,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at) VALUES('deposit-hold',?,'dining','UTC','verified','deposit-request','deposit',1,10000,'USD',?,?,'active','2100-01-01T00:00:00.000Z',?)").bind(ORG, startsAt, endsAt, NOW).run()
  await claimReservation(db, { organizationId: ORG, locationId: 'dining', reservationId: 'deposit-reservation', requestId: opening.id, userId: 'verified', timezone: 'UTC', startsAt, endsAt, date: '2099-10-01', timeSlot: '13:00', partySize: 1, capturedPaymentId: 'deposit', capturedAt: NOW })
  await db.prepare("UPDATE payments SET subject_id='deposit-reservation' WHERE id='deposit'").run()
@@ -126,7 +126,7 @@ test('guest table cancellation refunds until 24 hours before the start, through 
      assert.equal((await cancelBookingRequest(db, input))?.changed, true)
      assert.deepEqual(await db.prepare("SELECT status,cancellation_reason FROM reservations WHERE id='deposit-reservation'").first(), { status: 'cancelled', cancellation_reason: 'guest_cancelled' })
      assert.equal(await db.prepare("SELECT json_extract(payload_json,'$.cancellation.used_at') used_at FROM requests WHERE id='deposit-request'").first('used_at'), policy.now)
-     assert.deepEqual(await db.prepare("SELECT state,refunded_amount FROM payments WHERE id='deposit'").first(), { state: policy.refundable ? 'refunded' : 'captured', refunded_amount: policy.refundable ? 10500 : 0 })
+     assert.deepEqual(await db.prepare("SELECT refunded_amount FROM payments WHERE id='deposit'").first(), { refunded_amount: policy.refundable ? 10500 : 0 })
      assert.deepEqual((await db.prepare("SELECT amount,status,created_by FROM payment_refunds WHERE payment_id='deposit'").all()).results, policy.refundable ? [{ amount: 10500, status: 'succeeded', created_by: 'buyerUserId' in credentials ? 'verified' : null }] : [])
      assert.equal(creations, Number(policy.refundable))
      const after = await listReservationSlots(db, { organizationId: ORG, locationId: 'dining', date: '2099-10-01' })
@@ -160,7 +160,7 @@ test('guest class cancellation refunds through Stripe until 24 hours before the 
    await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
    const booking = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified', requestId: opening.id })
    await payable(db, 'class-payment')
-   await db.prepare("UPDATE payments SET buyer_user_id='verified',subject_id=?,captured_amount=10000,state='captured',stripe_payment_intent_id='pi_class',stripe_charge_id='ch_class' WHERE id='class-payment'").bind(booking.bookingId).run()
+   await db.prepare("UPDATE payments SET buyer_user_id='verified',subject_id=?,captured_amount=10000,stripe_payment_intent_id='pi_class',stripe_charge_id='ch_class' WHERE id='class-payment'").bind(booking.bookingId).run()
    await db.prepare("UPDATE payment_checkout_holds SET buyer_user_id='verified',request_id=?,status='converted',converted_booking_id=? WHERE payment_id='class-payment'").bind(opening.id, booking.bookingId).run()
    const startsAt = await db.prepare("SELECT starts_at FROM product_sessions WHERE id='session'").first<string>('starts_at')
    assert(startsAt)
@@ -183,7 +183,7 @@ test('guest class cancellation refunds through Stripe until 24 hours before the 
    try {
     assert.equal((await cancelBookingRequest(db, { id: opening.id, organizationId: ORG, kind: 'booking', now, env, buyerUserId: 'verified' }))?.changed, true)
     assert.deepEqual(await db.prepare('SELECT status,cancellation_reason FROM bookings WHERE id=?').bind(booking.bookingId).first(), { status: 'cancelled', cancellation_reason: 'guest_cancelled' })
-    assert.deepEqual(await db.prepare("SELECT state,refunded_amount FROM payments WHERE id='class-payment'").first(), { state: refundable ? 'refunded' : 'captured', refunded_amount: refundable ? 10000 : 0 })
+    assert.deepEqual(await db.prepare("SELECT refunded_amount FROM payments WHERE id='class-payment'").first(), { refunded_amount: refundable ? 10000 : 0 })
     assert.equal(await db.prepare("SELECT COUNT(*) n FROM payment_refunds WHERE payment_id='class-payment'").first('n'), Number(refundable))
     assert.equal(creations, Number(refundable))
    } finally { fetchMock.mock.restore() }
@@ -255,7 +255,7 @@ test('authorized guest cancellation replay recovers an interrupted Stripe refund
     assert.equal(creations, 2)
     assert.deepEqual([...keys], ['krabiclaw-refund:deposit:guest-cancelled-reservation:deposit-reservation'])
     assert.deepEqual((await db.prepare("SELECT id,idempotency_key,stripe_refund_id,amount,status,error FROM payment_refunds WHERE payment_id='deposit'").all()).results, [{ id: intent.id, idempotency_key: intent.idempotency_key, stripe_refund_id: 're_recovered', amount: 10500, status: 'succeeded', error: null }])
-    assert.deepEqual(await db.prepare("SELECT state,refunded_amount FROM payments WHERE id='deposit'").first(), { state: 'refunded', refunded_amount: 10500 })
+    assert.deepEqual(await db.prepare("SELECT refunded_amount FROM payments WHERE id='deposit'").first(), { refunded_amount: 10500 })
     const refundedDetails = await loadBuyerBookingDetails(db, 'verified', 'reservation', scope.id)
     assert.equal(refundedDetails.guestCanRetryCancellation, false)
     assert.equal(await canRetryGuestVisitRefund(db, tokenScope), false)
@@ -288,7 +288,7 @@ test('MCP paid booking cancellation and rejection hand off without preparing mon
    await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
    const booking = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'guest', requestId: opening.id })
    await payable(db, 'paid')
-   await db.prepare("UPDATE payments SET subject_id=?,captured_amount=10000,state='captured',stripe_payment_intent_id='pi_paid',stripe_charge_id='ch_paid' WHERE id='paid'").bind(booking.bookingId).run()
+   await db.prepare("UPDATE payments SET subject_id=?,captured_amount=10000,stripe_payment_intent_id='pi_paid',stripe_charge_id='ch_paid' WHERE id='paid'").bind(booking.bookingId).run()
    await db.prepare("UPDATE payment_checkout_holds SET request_id=?,status='converted',converted_booking_id=? WHERE payment_id='paid'").bind(opening.id,booking.bookingId).run()
    const input = { organizationId: ORG, threadId: opening.id, action, actorUserId: 'verified', idempotencyKey: 'same-request', env }
    const tables = ['bookings', 'requests', 'activity_entries', 'guest_thread_deliveries', 'payments', 'payment_attempts', 'payment_checkout_holds', 'payment_orders', 'payment_order_lines', 'payment_authorizations', 'payment_refunds', 'payment_usage_events']
@@ -384,7 +384,7 @@ test('MCP financial reads return bounded reports and authenticated detail links 
  try {
   await db.prepare("INSERT INTO member(id,organizationId,userId,role) VALUES('report-owner',?,'verified','owner')").bind(ORG).run()
   await payable(db,'report')
-  await db.prepare("UPDATE payments SET captured_amount=10000,refunded_amount=1000,state='captured',price_snapshot_json=? WHERE id='report'").bind(JSON.stringify({title:'Original consultation',quantity:1,price:{unit_amount:10000,currency:'USD',type:'one_time',tax_behavior:'exclusive',provider_secret:'private-provider-value'},buyer_email:'private-buyer@example.test'})).run()
+  await db.prepare("UPDATE payments SET captured_amount=10000,refunded_amount=1000,price_snapshot_json=? WHERE id='report'").bind(JSON.stringify({title:'Original consultation',quantity:1,price:{unit_amount:10000,currency:'USD',type:'one_time',tax_behavior:'exclusive',provider_secret:'private-provider-value'},buyer_email:'private-buyer@example.test'})).run()
   await db.prepare("INSERT INTO payment_refunds(id,payment_id,idempotency_key,amount,reason,note,status,error,created_by,created_at,updated_at) VALUES('report-refund','report','private-retry-key',1000,'requested_by_customer','private-guest-note','succeeded','private-refund-diagnostic','other',?,?)").bind(NOW,NOW).run()
   await db.prepare("INSERT INTO payment_usage_events(id,organization_id,payment_id,kind,currency,amount,source_id,provider_occurred_at,error,created_at) VALUES('report-usage',?,'report','stripe_cost','USD',100,'private-provider-source',?,'private-usage-diagnostic',?)").bind(ORG,NOW,NOW).run()
   await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('report-connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG,NOW,NOW).run()
@@ -451,7 +451,7 @@ test('Stripe cost report replay and correction bill attributable deltas while co
 test('Checkout proof attaches ownership without exposing merchant financial data or transferring an authenticated purchase', {timeout:120000},async()=>{
  const {db,runtime}=await boot();try{
   await payable(db,'claim')
-  await db.prepare("UPDATE payments SET captured_amount=10000,state='captured',stripe_payment_intent_id='pi:claim',stripe_charge_id='ch:claim',receipt_url='https://example.com/receipt' WHERE id='claim'").run()
+  await db.prepare("UPDATE payments SET captured_amount=10000,stripe_payment_intent_id='pi:claim',stripe_charge_id='ch:claim',receipt_url='https://example.com/receipt' WHERE id='claim'").run()
   await db.prepare("INSERT INTO payment_refunds(id,payment_id,idempotency_key,stripe_refund_id,amount,reason,status,error,created_by,created_at,updated_at) VALUES('refund:claim','claim','refund-retry:claim','re:claim',1000,'requested_by_customer','pending','operator-only diagnostic','other',?,?)").bind(NOW,NOW).run()
   const token=crypto.randomUUID()+crypto.randomUUID(),hash=await tokenHash(token)
   await db.prepare("INSERT INTO payment_claims(token_hash,payment_id,expires_at)VALUES(?,'claim','2099-01-01T00:00:00.000Z')").bind(hash).run()
@@ -480,7 +480,7 @@ test('Checkout proof attaches ownership without exposing merchant financial data
   assert.equal(owned.type,'payment')
   assert.equal(owned.resourceTitle,'Consultation')
   assert.equal(owned.threadId,null)
-  assert.deepEqual(owned.payments,[{payment:{id:'claim',currency:'USD',captured_amount:10000,refunded_amount:0,surcharge_amount:0,state:'captured',receipt_url:'https://example.com/receipt'},refunds:[{id:'refund:claim',amount:1000,status:'pending',note:null}],order:null}])
+  assert.deepEqual(owned.payments,[{payment:{id:'claim',currency:'USD',captured_amount:10000,refunded_amount:0,surcharge_amount:0,receipt_url:'https://example.com/receipt'},refunds:[{id:'refund:claim',amount:1000,status:'pending',note:null}],order:null}])
   for(const field of ['stripe_account_id','stripe_payment_intent_id','stripe_charge_id','livemode','buyer_user_id','price_snapshot_json'])assert.equal(Object.hasOwn(owned.payments![0]!.payment,field),false)
   for(const field of ['idempotency_key','stripe_refund_id','reason','error','attempted_at','created_by'])assert.equal(Object.hasOwn(owned.payments![0]!.refunds[0]!,field),false)
   assert.deepEqual(await db.prepare("SELECT stripe_account_id,stripe_payment_intent_id,stripe_charge_id,buyer_user_id FROM payments WHERE id='claim'").first(),{stripe_account_id:'acct_seller',stripe_payment_intent_id:'pi:claim',stripe_charge_id:'ch:claim',buyer_user_id:'verified'})
@@ -627,7 +627,7 @@ test('a payment back on the business’s site claims for that site’s buyer and
   assert.deepEqual(await db.prepare("SELECT claimed_user_id FROM payment_claims WHERE payment_id='deposit'").first(), { claimed_user_id: buyer })
   const reservationId = await db.prepare("SELECT converted_reservation_id FROM payment_checkout_holds WHERE id='deposit-hold' AND status='converted'").first<string>('converted_reservation_id')
   assert.equal(typeof reservationId, 'string')
-  assert.deepEqual(await db.prepare("SELECT buyer_user_id,state,amount,tax_amount,captured_amount,receipt_url,subject_id FROM payments WHERE id='deposit'").first(), { buyer_user_id: buyer, state: 'captured', amount: 10000, tax_amount: 800, captured_amount: 10800, receipt_url: 'https://pay.stripe.com/receipts/deposit', subject_id: reservationId })
+  assert.deepEqual(await db.prepare("SELECT buyer_user_id,amount,tax_amount,captured_amount,receipt_url,subject_id FROM payments WHERE id='deposit'").first(), { buyer_user_id: buyer, amount: 10000, tax_amount: 800, captured_amount: 10800, receipt_url: 'https://pay.stripe.com/receipts/deposit', subject_id: reservationId })
   assert.deepEqual(await db.prepare('SELECT request_id,user_id,status FROM reservations WHERE id=?').bind(reservationId).first(), { request_id: 'deposit-request', user_id: buyer, status: 'confirmed' })
   // The capture alert went to the buyer who proved the purchase, once.
   assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE request_id='deposit-request' AND event_name='payment.payment_captured'").first('n'), 1)
@@ -658,9 +658,9 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
   assert.notEqual(booking.bookingId,opening.id)
   assert.equal(await db.prepare('SELECT request_id FROM bookings WHERE id=?').bind(booking.bookingId).first('request_id'),opening.id)
   await payable(db,'visit-payment')
-  await db.prepare("UPDATE payments SET buyer_user_id='verified',subject_id=?,captured_amount=10000,state='captured' WHERE id='visit-payment'").bind(booking.bookingId).run()
+  await db.prepare("UPDATE payments SET buyer_user_id='verified',subject_id=?,captured_amount=10000 WHERE id='visit-payment'").bind(booking.bookingId).run()
   await db.prepare("UPDATE payment_checkout_holds SET buyer_user_id='verified',request_id=?,status='converted' WHERE payment_id='visit-payment'").bind(opening.id).run()
-  await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,currency,amount,captured_amount,state,price_snapshot_json,created_at,updated_at) VALUES('other-payment',?,'other','acct_seller',0,'booking',?,'USD',10000,10000,'captured',?,?,?)").bind(ORG,booking.bookingId,JSON.stringify({title:'Other private purchase'}),NOW,NOW).run()
+  await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,currency,amount,captured_amount,price_snapshot_json,created_at,updated_at) VALUES('other-payment',?,'other','acct_seller',0,'booking',?,'USD',10000,10000,?,?,?)").bind(ORG,booking.bookingId,JSON.stringify({title:'Other private purchase'}),NOW,NOW).run()
   const visits=(await buyerActivities(db,'verified')).activities
   assert.deepEqual(visits.map(({kind,id,requestId,operationalId})=>({kind,id,requestId,operationalId})),[{kind:'booking',id:opening.id,requestId:opening.id,operationalId:booking.bookingId}])
   assert.equal(await buyerPaymentActivityPath(db,'verified','visit-payment'),`/dashboard/account/activity/booking/${opening.id}`)
@@ -671,7 +671,7 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
   assert.equal(detail.assignedMemberName,null)
   await assert.rejects(()=>loadBuyerBookingDetails(db,'verified','booking',booking.bookingId),error=>error instanceof HTTPError&&error.statusCode===404)
   await assert.rejects(()=>loadBuyerBookingDetails(db,'other','booking',opening.id),error=>error instanceof HTTPError&&error.statusCode===404)
-  await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,currency,amount,captured_amount,state,price_snapshot_json,created_at,updated_at) VALUES('order-payment',?,'verified','acct_seller',0,'order','USD',2500,2500,'captured',?,?,?)").bind(ORG,JSON.stringify({title:'Immutable item'}),NOW,NOW).run()
+  await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,currency,amount,captured_amount,price_snapshot_json,created_at,updated_at) VALUES('order-payment',?,'verified','acct_seller',0,'order','USD',2500,2500,?,?,?)").bind(ORG,JSON.stringify({title:'Immutable item'}),NOW,NOW).run()
   await db.prepare("INSERT INTO payment_orders(id,organization_id,buyer_user_id,payment_id,currency,amount,created_at) VALUES('immutable-order',?,'verified','order-payment','USD',2500,?)").bind(ORG,NOW).run()
   await db.prepare("INSERT INTO payment_order_lines(id,order_id,product_id,variant_id,price_id,title,unit_amount,quantity,currency,tax_behavior) VALUES('immutable-line','immutable-order','product','variant','historic-price','Original item title',1250,2,'USD','exclusive')").run()
   const requestsBefore=(await db.prepare('SELECT * FROM requests ORDER BY id').all()).results
@@ -964,7 +964,7 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
     const canceled = await cancel(claims.get('changing')!)
     assert.equal(canceled.status, 200, await canceled.clone().text())
     assert.deepEqual(await canceled.json(), { status: 'canceled' })
-    assert.equal((await requirePayment(db, ORG, 'changing')).state, 'failed')
+    assert.equal((await requirePayment(db, ORG, 'changing')).captured_amount, 0)
     const failedHandoff = await app.request(Object.assign(new Request(`https://payments.proof.example/api/public/payments/changing?claim=${claims.get('changing')!}`), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     assert.equal(failedHandoff.status, 200, await failedHandoff.clone().text())
     assert.deepEqual(await failedHandoff.json(), { ...open, state: 'failed' })
@@ -994,6 +994,7 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
     await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
     await db.prepare("UPDATE payment_checkout_holds SET request_id=? WHERE payment_id='ach-payment'").bind(opening.id).run()
     const originalFetch = globalThis.fetch
+    let achIntentStatus = 'requires_confirmation'
 
     t.mock.method(globalThis, 'fetch', async (request, init) => {
       const url = new URL(request instanceof Request ? request.url : String(request))
@@ -1034,7 +1035,7 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
         return Response.json({
           id: 'pi_ach-payment',
           object: 'payment_intent',
-          status: 'requires_confirmation',
+          status: achIntentStatus,
           amount: 10000,
           currency: 'usd',
           livemode: false,
@@ -1072,8 +1073,8 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
     } as Stripe.PaymentIntent
     const originalHold = await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first()
     await reconcilePaymentIntent(db, stripe, await requirePayment(db, ORG, 'ach-payment'), declinedIntent, env)
-    assert.equal((await requirePayment(db, ORG, 'ach-payment')).state, 'pending')
-    assert.equal((await requireOpenAttempt(db, ORG, 'ach-payment', claim)).state, 'open')
+    assert.equal((await requirePayment(db, ORG, 'ach-payment')).captured_amount, 0)
+    assert.equal((await requireOpenAttempt(db, stripe, ORG, 'ach-payment', claim)).state, 'open')
     assert.deepEqual(await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first(), originalHold)
 
     const review = await reviewPayment(db, stripe, ORG, 'ach-payment', claim, 'pm_achproof123', null)
@@ -1107,14 +1108,15 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
     const payment = await requirePayment(db, ORG, 'ach-payment')
     await reconcilePaymentIntent(db, stripe, payment, failedIntent, env)
 
-    assert.equal((await requirePayment(db, ORG, 'ach-payment')).state, 'pending')
+    assert.equal((await requirePayment(db, ORG, 'ach-payment')).captured_amount, 0)
     assert.deepEqual(await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first(), hold)
     assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE request_id=? AND event_name='payment.payment_failed'").bind(opening.id).first('count(*)'), 1)
 
     // Cancellation is terminal and releases the active capacity hold.
+    achIntentStatus = 'canceled'
     await reconcilePaymentIntent(db, stripe, await requirePayment(db, ORG, 'ach-payment'), { ...failedIntent, status: 'canceled', last_payment_error: null }, env)
-    assert.equal((await requirePayment(db, ORG, 'ach-payment')).state, 'failed')
-    assert.equal((await requireOpenAttempt(db, ORG, 'ach-payment', claim)).state, 'failed')
+    assert.equal((await requirePayment(db, ORG, 'ach-payment')).captured_amount, 0)
+    assert.equal((await requireOpenAttempt(db, stripe, ORG, 'ach-payment', claim)).state, 'failed')
     const releasedHold = await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='ach-payment'").first<{ status: string }>()
     assert.equal(releasedHold?.status, 'released')
   } finally {
@@ -1218,7 +1220,7 @@ test('processing webhooks extend only active checkout holds and preserve capacit
       assert.equal(await processPaymentEvent(db, getStripe(env), event, env), true)
       const hold = await db.prepare('SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id=?').bind(id).first<{ status: string; expires_at: string }>()
       assert.equal(hold?.status, status)
-      assert.equal((await requirePayment(db, ORG, id)).state, 'pending')
+      assert.equal((await requirePayment(db, ORG, id)).captured_amount, 0)
       if (status === 'active') {
         assert.ok(Date.parse(hold!.expires_at) >= Date.now() + 13 * 86400_000)
         await assert.rejects(claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)

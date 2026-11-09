@@ -363,7 +363,7 @@ export async function reservationAllocationPredicate(db: DbClient, input: {
   const payment = input.capturedPaymentId ? `EXISTS (
     SELECT 1 FROM payment_checkout_holds h JOIN payments p ON p.id = h.payment_id
     WHERE h.payment_id = ? AND h.organization_id = c.organization_id AND h.location_id = c.location_id
-      AND p.organization_id = c.organization_id AND p.subject_type = 'reservation' AND p.state = 'captured'
+      AND p.organization_id = c.organization_id AND p.subject_type = 'reservation'
       AND p.captured_amount > 0 AND p.refunded_amount = 0 AND h.product_id IS NULL
       AND h.starts_at = ? AND h.ends_at = ? AND h.timezone = ? AND h.quantity = ?
       AND h.status IN ('active', 'released') AND ? <= h.expires_at

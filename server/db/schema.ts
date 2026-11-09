@@ -3238,7 +3238,6 @@ export const payments = sqliteTable("payments", {
  surcharge_amount: integer().default(0).notNull(),
  captured_amount: integer().default(0).notNull(),
  refunded_amount: integer().default(0).notNull(),
- state: text().$type<'pending' | 'captured' | 'failed' | 'recovery' | 'refunded'>().default("pending").notNull(),
  stripe_payment_intent_id: text(),
  stripe_charge_id: text(),
  receipt_url: text(),

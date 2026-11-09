@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b9c264a1-732a-456d-804f-f4f07317dcb3",
+  "id": "aaf96613-cd94-42fd-9782-e23c8d91a7be",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -10196,14 +10196,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": 0
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'pending'"
         },
         "stripe_payment_intent_id": {
           "name": "stripe_payment_intent_id",

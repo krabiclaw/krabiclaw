@@ -145,7 +145,6 @@ export interface StayPayment {
 /** The Stripe payment a guest made when booking the stay on the site. The payments row is its record; nothing is copied here. */
 export interface StayOnlinePayment {
   payment_id: string
-  state: 'pending' | 'captured' | 'failed' | 'recovery' | 'refunded'
   currency: string
   amount_minor: number
   captured_minor: number
@@ -1201,13 +1200,13 @@ export async function getStay<A extends StayAccess>(db: DbClient, access: A, sta
     queryAll<StayPayment>(db, `
       SELECT id, stay_id, amount_minor, currency, method, paid_on, reference, note, created_at, created_by
         FROM stay_payments WHERE organization_id = ? AND stay_id = ? ORDER BY paid_on, created_at`, [access.organizationId, stayId]),
-    queryAll<{ id: string; state: StayOnlinePayment['state']; currency: string; amount: number; captured_amount: number; refunded_amount: number; receipt_url: string | null; created_at: string }>(db, `
-      SELECT id, state, currency, amount, captured_amount, refunded_amount, receipt_url, created_at
+    queryAll<{ id: string; currency: string; amount: number; captured_amount: number; refunded_amount: number; receipt_url: string | null; created_at: string }>(db, `
+      SELECT id, currency, amount, captured_amount, refunded_amount, receipt_url, created_at
         FROM payments WHERE organization_id = ? AND subject_type = 'stay' AND subject_id = ?`, [access.organizationId, stayId]),
   ])
   if (online.length > 1) fail(500, 'STAY_PAYMENT_AMBIGUOUS', 'This stay has more than one online payment', 'online_payment')
   const onlinePayment: StayOnlinePayment | null = online[0] ? {
-    payment_id: online[0].id, state: online[0].state, currency: online[0].currency, amount_minor: online[0].amount,
+    payment_id: online[0].id, currency: online[0].currency, amount_minor: online[0].amount,
     captured_minor: online[0].captured_amount, refunded_minor: online[0].refunded_amount, receipt_url: online[0].receipt_url, created_at: online[0].created_at,
   } : null
   const paid = payments.reduce((sum, payment) => sum + payment.amount_minor, 0) + (onlinePayment ? onlinePayment.captured_minor - onlinePayment.refunded_minor : 0)
@@ -2692,7 +2691,7 @@ export function stayFromCheckoutQueries(input: { organizationId: string; locatio
       query: `INSERT INTO stays (id, organization_id, product_id, channel, owner, status, check_in_date, check_out_date, adults, children, infants,
                 guest_name, guest_email, guest_phone, user_id, total_minor, currency, notes, idempotency_key, booking_received_at, created_at, updated_at, cancellation_policy, answers)
               SELECT ?, ?, ?, 'direct', 'app', 'confirmed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-               WHERE EXISTS (SELECT 1 FROM payments WHERE id = ? AND organization_id = ? AND state = 'captured' AND refunded_amount = 0)`,
+               WHERE EXISTS (SELECT 1 FROM payments WHERE id = ? AND organization_id = ? AND captured_amount > 0 AND refunded_amount = 0)`,
       params: [input.stayId, input.organizationId, quote.product_id, quote.check_in_date, quote.check_out_date, quote.adults, quote.children, quote.infants,
         guest.name, guest.email, guest.phone, input.buyerUserId, quote.total_minor, quote.currency, guest.notes, `checkout:${input.paymentId}`, input.now, input.now, input.now, quote.cancellation_policy, JSON.stringify(guest.answers ?? []),
         input.paymentId, input.organizationId],

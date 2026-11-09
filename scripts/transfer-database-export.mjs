@@ -122,6 +122,7 @@ const RETIRED_COLUMNS = {
   products: ['tags'],
   product_booking_configs: ['online_timezone', 'calendar_group'],
   payment_checkout_holds: ['calendar_group'],
+  payments: ['state'],
   product_nights: ['min_stay_through'],
   // v24: whether a reply is owed is an open guest_reply task.
   requests: ['conversation_state', 'resolved_at'],

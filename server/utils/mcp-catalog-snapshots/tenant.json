@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:9301331ed99c545ca56beb78fbf548a637cb0f9d5b9505774e71b0169331857e",
-  "documentationFingerprint": "sha256:f3597c5f78b42308699f711fd1b7dbf5ecb2598e3bbc0ec555ef03e206acf9a2",
+  "fingerprint": "sha256:63d3eb18274759e7c1c227b4d7e6b7252e3c25460097b07e7cf758abc97b218d",
+  "documentationFingerprint": "sha256:f67d16b5d376d63c7c4bf8f0123e6977045a72b15f1b77060b340fe1246fb58b",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -51963,9 +51963,6 @@
                   "null"
                 ]
               },
-              "state": {
-                "type": "string"
-              },
               "timezone": {
                 "type": [
                   "string",
@@ -51985,7 +51982,6 @@
               "amount",
               "captured_amount",
               "refunded_amount",
-              "state",
               "title",
               "to"
             ],
@@ -70298,9 +70294,6 @@
                     "null"
                   ]
                 },
-                "state": {
-                  "type": "string"
-                },
                 "timezone": {
                   "type": [
                     "string",
@@ -70320,7 +70313,6 @@
                 "amount",
                 "captured_amount",
                 "refunded_amount",
-                "state",
                 "title",
                 "to"
               ],

@@ -92,8 +92,8 @@ test('a reservation opens with its own message and the guest note, written once,
     const held = threadPayloadForGuest({ name: 'Ana Ruiz', email: 'ana@example.test', phone: null, locale: 'en', notes: null, ipHash: null, partySizeIsMinimum: false, answers: [] })
     await db.batch([
       ...requestInsertQueries({ id: 'held', kind: 'reservation', organization_id: ORG, location_id: 'loc', user_id: null, review_id: null, payload: held, created_at: CREATED, updated_at: CREATED }),
-      { query: `INSERT INTO payments (id, organization_id, buyer_user_id, stripe_account_id, livemode, subject_type, subject_id, location_id, currency, amount, captured_amount, state, stripe_payment_intent_id, price_snapshot_json, created_at, updated_at)
-          VALUES ('held-pay', ?, NULL, 'acct', 0, 'reservation', NULL, 'loc', 'THB', 50000, 0, 'pending', 'pi_held', '{}', ?, ?)`, params: [ORG, CREATED, CREATED] },
+      { query: `INSERT INTO payments (id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,captured_amount,stripe_payment_intent_id,price_snapshot_json,created_at,updated_at)
+          VALUES ('held-pay', ?, NULL, 'acct', 0, 'reservation', NULL, 'loc', 'THB', 50000, 0, 'pi_held', '{}', ?, ?)`, params: [ORG, CREATED, CREATED] },
       { query: `INSERT INTO payment_checkout_holds (id, organization_id, location_id, timezone, request_id, payment_id, quantity, amount, currency, starts_at, ends_at, status, expires_at, created_at)
           VALUES ('hold', ?, 'loc', 'Asia/Bangkok', 'held', 'held-pay', 3, 50000, 'THB', '2026-11-06T11:00:00.000Z', '2026-11-06T13:00:00.000Z', 'released', ?, ?)`, params: [ORG, CREATED, CREATED] },
     ].map(query => db.prepare(query.query).bind(...(query.params ?? []))))

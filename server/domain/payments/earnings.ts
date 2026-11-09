@@ -183,7 +183,7 @@ export async function paymentTransactions(db: DbClient, principal: FinancialPrin
       const request = bookings.find(row => row.payment_id === payment.id)?.request_id
       const to = request ? `${base}/${payment.subject_type}/${encodeURIComponent(request)}` : `${base}/${orders.some(row => row.payment_id === payment.id) ? 'order' : 'payment'}/${encodeURIComponent(payment.id)}`
       return {
-        id: payment.id, created_at: payment.created_at, currency: payment.currency, amount: payment.amount, captured_amount: payment.captured_amount, refunded_amount: payment.refunded_amount, state: payment.state,
+        id: payment.id, created_at: payment.created_at, currency: payment.currency, amount: payment.amount, captured_amount: payment.captured_amount, refunded_amount: payment.refunded_amount,
         title: picture.title, image_url: picture.imageUrl, buyer_name: buyers.find(row => row.id === payment.id)?.name ?? null,
         starts_at: picture.startsAt, ends_at: picture.endsAt, timezone: picture.timeZone, to,
       }

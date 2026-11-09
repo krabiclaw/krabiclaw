@@ -1476,7 +1476,6 @@ CREATE TABLE `payments` (
 	`surcharge_amount` integer DEFAULT 0 NOT NULL,
 	`captured_amount` integer DEFAULT 0 NOT NULL,
 	`refunded_amount` integer DEFAULT 0 NOT NULL,
-	`state` text DEFAULT 'pending' NOT NULL,
 	`stripe_payment_intent_id` text,
 	`stripe_charge_id` text,
 	`receipt_url` text,
