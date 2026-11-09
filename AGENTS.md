@@ -159,6 +159,10 @@ Do not default, placeholder or fabricate state that could not be read. Missing
 or invalid required state fails visibly — a manufactured value is worse than an
 error because it is indistinguishable from a real one.
 
+Trust the provider. Do not add claims, leases, retry ledgers, re-drive jobs or
+"ambiguous outcome" handling around a configured provider's call: it owns its
+retries and idempotency, and a failed call fails visibly.
+
 A write that succeeded while the work that makes it visible failed has not
 succeeded. Cache purges, index refreshes, reconciliations, notifications and
 audit rows are part of the operation that asked for them.
