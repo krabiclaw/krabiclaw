@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:b05d3fcfafdfa9abd89af27fb766cb6d910fad510d36df7cd7a53db6318664d4",
-  "documentationFingerprint": "sha256:723ed43ae39cfac1e444bea84d6f95f538760c2ac6d8d837a57596e0f2980978",
+  "fingerprint": "sha256:744e30510d02a6dd0097307f5e3cd9d59b030a9aae8958af68688a51fb9772cc",
+  "documentationFingerprint": "sha256:565c454a4021cf46cf095c7d8206e505e42937a6123bc37724fecb090e3c3c7d",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -74597,7 +74597,7 @@
     {
       "name": "publish_post",
       "title": "Publish post",
-      "description": "Publish the post to the selected website or social destinations, returning one result per target with its status: published, already_published, failed with the provider error, or skipped. Publish again after a failure once its cause is fixed. A provider_unreachable failure may still have reached the destination: read it with reconcile_post_publication before publishing again.",
+      "description": "Publish the post to the selected website or social destinations, returning one result per target with its status: published, already_published, failed with the provider error, or skipped. Publish again after a failure once its cause is fixed. A provider_unreachable failure may still have reached the destination: find its post there and pass that provider_post_id to reconcile_post_publication before publishing again.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -129272,7 +129272,7 @@
       "toolContracts": {
         "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
         "get_social_connections": "sha256:ce06b442ff3f389bf517c54c51ff4fb762a7bde099820d26f260139f1e3d1686",
-        "publish_post": "sha256:30bd49fbd3076d31a70323301b5863948be69aa1b41faedf2a3f07a3f5c73a0c"
+        "publish_post": "sha256:fbfd1f5ff6cbdc02ecba0e29e88a7efc5bedb5e6b60ad98eca33b6e99016f1b2"
       }
     },
     {
@@ -129454,7 +129454,7 @@
         "list_guest_conversations": "sha256:9bae34357644916476bec0c0d9a07dc7dbf2beb726716b882a886a05097d1ee0",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
-        "publish_post": "sha256:30bd49fbd3076d31a70323301b5863948be69aa1b41faedf2a3f07a3f5c73a0c",
+        "publish_post": "sha256:fbfd1f5ff6cbdc02ecba0e29e88a7efc5bedb5e6b60ad98eca33b6e99016f1b2",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
         "update_product": "sha256:ffa1d299e527684eb92380cdbf51be23633f94a08b74eb8143ea5e06d78c03b3"
       }
