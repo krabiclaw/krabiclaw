@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:47b47ef253af7320bb8afa2d8d18747f3af33253cad869712e5ae91665b8db0c",
-  "documentationFingerprint": "sha256:cf03fb5a10f4fb551e3be5c52a0d9b9c6b7454dbc81f01acbd5996118be9ed7d",
+  "fingerprint": "sha256:589244af83add27c036a0349b3d8bde8d9df378ef4a9a75fb68c54612fe006e1",
+  "documentationFingerprint": "sha256:014bc5b925f906f9f58e24aa1c89528d4b5b5d030824bd4a89814913defe1b20",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -49617,13 +49617,6 @@
                       },
                       "type": "array"
                     },
-                    "calendar_error": {
-                      "description": "Why the selected Google calendars could not be read just now; null when they were.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
                     "calendar_ids": {
                       "items": {
                         "type": "string"
@@ -49634,7 +49627,6 @@
                       "enum": [
                         "internal",
                         "disconnected",
-                        "error",
                         "ready"
                       ],
                       "type": "string"
@@ -49712,7 +49704,6 @@
                     "calendar_account_id",
                     "calendar_ids",
                     "calendar_status",
-                    "calendar_error",
                     "calendar_conflict_count",
                     "calendar_conflicts"
                   ],
@@ -49775,13 +49766,6 @@
                 },
                 "type": "array"
               },
-              "calendar_error": {
-                "description": "Why the selected Google calendars could not be read just now; null when they were.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "calendar_ids": {
                 "items": {
                   "type": "string"
@@ -49792,7 +49776,6 @@
                 "enum": [
                   "internal",
                   "disconnected",
-                  "error",
                   "ready"
                 ],
                 "type": "string"
@@ -49870,7 +49853,6 @@
               "calendar_account_id",
               "calendar_ids",
               "calendar_status",
-              "calendar_error",
               "calendar_conflict_count",
               "calendar_conflicts"
             ],
@@ -102338,7 +102320,6 @@
                 "enum": [
                   "internal",
                   "disconnected",
-                  "error",
                   "ready"
                 ],
                 "type": "string"

@@ -9,10 +9,9 @@ const nullableString = { type: ['string', 'null'] }
 const scheduling = { type: 'object', properties: {
   member_id: { type: 'string' }, timezone: nullableString, updated_at: { type: 'string' },
   weekly: { type: ['array', 'null'], items: { type: 'object', properties: { weekday: { type: 'integer', minimum: 0, maximum: 6 }, start: { type: 'string' }, end: { type: 'string' } }, required: ['weekday', 'start', 'end'] } }, time_off: { type: ['array', 'null'], items: interval },
-  calendar_account_id: nullableString, calendar_ids: { type: 'array', items: { type: 'string' } }, calendar_status: { type: 'string', enum: ['internal', 'disconnected', 'error', 'ready'] },
-  calendar_error: { ...nullableString, description: 'Why the selected Google calendars could not be read just now; null when they were.' },
+  calendar_account_id: nullableString, calendar_ids: { type: 'array', items: { type: 'string' } }, calendar_status: { type: 'string', enum: ['internal', 'disconnected', 'ready'] },
   calendar_conflict_count: { type: 'integer' }, calendar_conflicts: { type: 'array', items: { type: 'object', properties: { session_id: { type: 'string' }, starts_at: { type: 'string' }, ends_at: { type: 'string' }, booking_count: { type: 'integer', minimum: 1 } }, required: ['session_id', 'starts_at', 'ends_at', 'booking_count'] } },
-}, required: ['member_id', 'timezone', 'updated_at', 'weekly', 'time_off', 'calendar_account_id', 'calendar_ids', 'calendar_status', 'calendar_error', 'calendar_conflict_count', 'calendar_conflicts'], additionalProperties: false }
+}, required: ['member_id', 'timezone', 'updated_at', 'weekly', 'time_off', 'calendar_account_id', 'calendar_ids', 'calendar_status', 'calendar_conflict_count', 'calendar_conflicts'], additionalProperties: false }
 const schedulingMutation = { type: 'object', properties: Object.fromEntries(Object.entries(scheduling.properties).filter(([key]) => ['member_id', 'updated_at', 'timezone', 'weekly', 'time_off'].includes(key))), required: ['member_id', 'updated_at', 'timezone', 'weekly', 'time_off'], additionalProperties: false }
 const schedulingMutationResult = { type: 'object', properties: { scheduling: schedulingMutation }, required: ['scheduling'], additionalProperties: false }
 const schedulingListResult = { type: 'object', properties: { scheduling: { ...scheduling, type: ['object', 'null'] }, members: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, image: nullableString, self: { type: 'boolean' }, scheduling: { ...scheduling, type: ['object', 'null'] } }, required: ['id', 'name', 'image', 'self', 'scheduling'] } } }, oneOf: [{ required: ['scheduling'] }, { required: ['members'] }], additionalProperties: false }
@@ -49,7 +48,6 @@ export async function handleProvidersTools(ctx:McpExecutorContext):Promise<unkno
  else if(toolName==='set_member_busy_calendars') {
   await selectBusyCalendars(actor,memberId,args as unknown as Parameters<typeof selectBusyCalendars>[2])
   saved=await readMemberScheduling(organization.db,actor.env,actor.organizationId,memberId)
-  if(saved?.calendar_error)throw new HTTPError({statusCode:502,message:`Calendar selection was saved, but its availability check failed: ${saved.calendar_error}`,data:{code:'MEMBER_CALENDAR_REFRESH_FAILED',committed:true}})
  } else return NOT_HANDLED
  if(!saved)throw new HTTPError({statusCode:404,message:'Member scheduling not found',data:{code:'MEMBER_SCHEDULING_NOT_FOUND'}})
  if(toolName==='update_member_public_profile')return {profile:profileRead(saved)}

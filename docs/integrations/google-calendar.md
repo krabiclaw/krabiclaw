@@ -309,8 +309,7 @@ Member free/busy reads returned that independent event's exact UTC interval.
 Google rejected the original single 94-day query as too long, so a read uses
 contiguous 30-day requests across the span it needs. Nothing Google answers is
 stored: availability asks Google for the span of the sessions being read, and a
-window Google refuses fails that read with Google's reason, which the member's
-calendar state reports as `calendar_error`. Deleting the test event and
+window Google refuses fails that read with Google's status. Deleting the test event and
 rechecking returned no busy intervals. Both
 domain connections were disconnected, test events removed, and the member's
 test hours cleared. The Google linked account and existing grants were retained.

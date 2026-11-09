@@ -119,7 +119,6 @@ test('member self-service uses Better Auth permissions, public approval is admin
   assert.equal((await readCalendarIntegration(db,'org'))?.status??null,outputSelection?'disabled':null)
   const accessToken=await symmetricEncrypt({key:env.BETTER_AUTH_SECRET!,data:'busy-test-token'})
   await db.prepare("UPDATE account SET accessToken=? WHERE id='busy-linked'").bind(accessToken).run()
-  await selectBusyCalendars(own,'member-one',{account_id:'busy-linked',calendar_ids:['busy-calendar']})
   const distant={start:new Date(Date.now()+40*86400000).toISOString(),end:new Date(Date.now()+40*86400000+3600000).toISOString()}
   const ranges:{timeMin:string;timeMax:string}[]=[]
   let rejectLast:false|'provider'|'invalid'=false
@@ -134,16 +133,18 @@ test('member self-service uses Better Auth permissions, public approval is admin
    if(rejectLast&&duration<30*86400000)return rejectLast==='invalid'?new Response('not JSON',{status:502}):Response.json({error:{message:'Provider rejected the final window'}},{status:400})
    return Response.json({calendars:{'busy-calendar':{busy:Date.parse(distant.start)>=Date.parse(body.timeMin)&&Date.parse(distant.start)<Date.parse(body.timeMax)?[distant]:[]}}})
   })
+  // Selecting the calendars reads them back through Google at once.
+  await selectBusyCalendars(own,'member-one',{account_id:'busy-linked',calendar_ids:['busy-calendar']})
+  ranges.length=0
   const ready=await readMemberScheduling(db,env,'org','member-one')
-  assert.deepEqual({status:ready?.calendar_status,error:ready?.calendar_error},{status:'ready',error:null},'a member read asks Google for the horizon ahead')
+  assert.equal(ready?.calendar_status,'ready','a member read asks Google for the horizon ahead')
   assert.equal(Date.parse(ranges.at(-1)!.timeMax)-Date.parse(ranges[0]!.timeMin),94*86400000)
   for(let i=1;i<ranges.length;i++)assert.equal(ranges[i]!.timeMin,ranges[i-1]!.timeMax,'busy coverage has no gaps')
   assert.deepEqual(await db.prepare("SELECT busy_json,busy_checked_at FROM member_scheduling WHERE member_id='member-one'").first(),{busy_json:'[]',busy_checked_at:null},'nothing Google said is stored')
   rejectLast='provider'
-  const failedRead=await readMemberScheduling(db,env,'org','member-one')
-  assert.deepEqual({status:failedRead?.calendar_status,error:failedRead?.calendar_error},{status:'error',error:'Google busy-calendar check failed (400): Provider rejected the final window'},'a read reports the calendar Google refused')
+  await assert.rejects(()=>readMemberScheduling(db,env,'org','member-one'),{statusCode:502,message:'Google busy-calendar check failed (400)'},'a window Google refuses fails the read')
   rejectLast='invalid'
-  assert.match((await readMemberScheduling(db,env,'org','member-one'))!.calendar_error!,/^Google busy-calendar check failed \(502\)/)
+  await assert.rejects(()=>readMemberScheduling(db,env,'org','member-one'),{statusCode:502,message:'Google busy-calendar check failed (502)'})
   rejectLast=false
   t.mock.restoreAll()
   await selectBusyCalendars(own,'member-one',{account_id:null,calendar_ids:[]})
@@ -189,7 +190,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   const unreadable=await readMemberScheduling(db,env,'org','member-one')
   assert.equal(unreadable?.calendar_status,'disconnected')
   // A calendar that cannot be read fails the claim visibly instead of guessing the member is free.
-  await assert.rejects(()=>claimSessionCapacity(db,{env,organizationId:'org',productId:'one',sessionId:'session-one',productVariantId:'variant-one',partySize:1}),{statusCode:404,message:'That account is not linked to you.'})
+  await assert.rejects(()=>claimSessionCapacity(db,{env,organizationId:'org',productId:'one',sessionId:'session-one',productVariantId:'variant-one',partySize:1}),{message:'The account this integration was connected through is no longer linked. Connect it again.'})
   assert.equal(await db.prepare("SELECT count(*) n FROM bookings WHERE product_session_id='session-one'").first('n'),0)
   // Cancelling an unbooked session asks no calendar, so an unreadable one does not stand in the way, nor does another scheduled session of the same offering at the same time.
   await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES('session-one-b','org','one','member-one','UTC',?,?,1,'owner','owner')").bind(`${day}T14:30:00.000Z`,`${day}T15:30:00.000Z`).run()
