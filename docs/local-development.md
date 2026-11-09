@@ -136,8 +136,9 @@ authorized account (`--email` selects it). Remote targets also require an explic
 `--base-url`.
 
 Social cards are rendered by the write that changes their inputs and only where
-Cloudflare Images is configured (production). Staging schedules only the Channex
-sync, ARI and revision queues.
+Cloudflare Images is configured (production); a local setup has no Images token,
+so `yarn local:cards` skips every card that would need generating. Staging
+schedules only the Channex sync, ARI and revision queues.
 
 An explicitly requested ordinary staging refresh uses `corepack yarn db:pull:staging`.
 It reads the deployed production Worker's `DB` source and preserves staging's `jwks` signing

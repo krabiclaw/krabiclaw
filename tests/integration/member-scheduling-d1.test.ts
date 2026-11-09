@@ -5,7 +5,7 @@ import { Miniflare } from 'miniflare'
 import { generateSQLiteDrizzleJson,generateSQLiteMigration } from 'drizzle-kit/api'
 import * as schema from '../../server/db/schema.ts'
 import { writeMemberScheduling, readMemberScheduling, memberSchedulingList, requireSchedulingAccess, workingWindows, selectBusyCalendars } from '../../server/domain/member-scheduling.ts'
-import { claimSessionCapacity, CapacityUnavailableError } from '../../server/utils/availability.ts'
+import { claimSessionCapacity } from '../../server/utils/availability.ts'
 import { publicProductHosts } from '../../server/utils/public-provider.ts'
 import { requestInsertQueries, threadPayloadForGuest, getGuestRequest } from '../../server/domain/requests.ts'
 import { formatTimestamp } from '../../utils/timezone.ts'
@@ -187,7 +187,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   const unreadable=await readMemberScheduling(db,env,'org','member-one')
   assert.equal(unreadable?.calendar_status,'disconnected')
   // A calendar that cannot be read fails the claim visibly instead of guessing the member is free.
-  await assert.rejects(()=>claimSessionCapacity(db,{env,organizationId:'org',productId:'one',sessionId:'session-one',productVariantId:'variant-one',partySize:1}),(error: unknown)=>!(error instanceof CapacityUnavailableError))
+  await assert.rejects(()=>claimSessionCapacity(db,{env,organizationId:'org',productId:'one',sessionId:'session-one',productVariantId:'variant-one',partySize:1}),{statusCode:404,message:'That account is not linked to you.'})
   assert.equal(await db.prepare("SELECT count(*) n FROM bookings WHERE product_session_id='session-one'").first('n'),0)
   const healthy=await claimSessionCapacity(db,{env,organizationId:'org',productId:'two',sessionId:'session-two',productVariantId:'variant-two',partySize:1})
   assert.equal(await db.prepare('SELECT assigned_member_id FROM bookings WHERE id=?').bind(healthy.bookingId).first('assigned_member_id'),'member-two')

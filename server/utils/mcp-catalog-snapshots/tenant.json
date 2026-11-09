@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:675dc182cd81749cd0e46663997055666e7c7e00c5ac73657eb9d2e3ee23a145",
-  "documentationFingerprint": "sha256:24bf269abf637b9551c0d60f840f1794093bb945e9ddd3e0b2236efe4be6b043",
+  "fingerprint": "sha256:47b47ef253af7320bb8afa2d8d18747f3af33253cad869712e5ae91665b8db0c",
+  "documentationFingerprint": "sha256:cf03fb5a10f4fb551e3be5c52a0d9b9c6b7454dbc81f01acbd5996118be9ed7d",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -8605,7 +8605,7 @@
     {
       "name": "batch_create_products",
       "title": "Batch create products",
-      "description": "Create several products in the selected site’s catalog when the user supplies a new catalog batch. Validates every entry before writing; any invalid entry rejects the complete request. A new place to stay is counted on the business's Stripe subscription as it is written. Publication and location offerings are assigned separately.",
+      "description": "Create several products in the selected site’s catalog when the user supplies a new catalog batch. Validates every entry before writing; any invalid entry rejects the complete request. Creating a place to stay reports the business's current live-home count to its Stripe subscription; an unpublished home adds nothing to it. Publication and location offerings are assigned separately.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

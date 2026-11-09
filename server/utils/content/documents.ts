@@ -731,6 +731,14 @@ export async function deleteContentBlock(
     throw new HTTPError({ statusCode: 409, statusMessage: 'Content block was updated by another writer' })
   }
   const now = new Date(Math.max(Date.now(), Date.parse(document.updated_at) + 1)).toISOString()
+  // The blocks that remain, in their current order, take dense positions; the
+  // document guard refuses the batch if that list changed since it was read.
+  const removed = new Set([blockId])
+  const blocks = await listBlocksForDocument(db, document.id)
+  for (let grew = true; grew;) {
+    grew = false
+    for (const block of blocks) if (!removed.has(block.id) && block.parent_block_id && removed.has(block.parent_block_id)) { removed.add(block.id); grew = true }
+  }
   const statements: BatchQuery[] = [
     {
       query: `DELETE FROM media_placements WHERE owner_type = 'content_block' AND owner_id IN (
@@ -740,13 +748,9 @@ export async function deleteContentBlock(
       params: [blockId],
     },
     { query: 'DELETE FROM content_blocks WHERE id = ? AND document_id = ?', params: [blockId, document.id] },
-    {
-      query: `UPDATE content_blocks SET position = (
-        SELECT COUNT(*) FROM content_blocks earlier WHERE earlier.document_id = content_blocks.document_id
-          AND (earlier.position < content_blocks.position OR (earlier.position = content_blocks.position AND earlier.created_at < content_blocks.created_at))
-      ) WHERE document_id = ?`,
-      params: [document.id],
-    },
+    ...blocks.filter(block => !removed.has(block.id)).flatMap((block, position) => block.position === position ? [] : [{
+      query: 'UPDATE content_blocks SET position = ? WHERE id = ? AND document_id = ?', params: [position, block.id, document.id],
+    }]),
   ]
   await runSingleBlockBatch(db, document, singleBlockBatch(document, { id: blockId, updated_at: input.expected_updated_at }, now, statements, { actorId: input.actorId }))
   return { updated_at: now }

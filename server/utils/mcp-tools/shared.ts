@@ -895,7 +895,7 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   append_content_block: { ...W, openWorldHint: true },
   attach_media: { ...W, openWorldHint: true, idempotentHint: true },
   update_menu: { ...D, openWorldHint: true, idempotentHint: true },
-  // A new home is counted on the business's Stripe subscription as it is written.
+  // Creating a home reports the live-home count to the business's Stripe subscription.
   batch_create_products: { ...W, openWorldHint: true, idempotentHint: true },
   create_blog_post: D,
   create_location: { ...W, openWorldHint: true, idempotentHint: true },

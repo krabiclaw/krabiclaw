@@ -437,11 +437,13 @@ async function publicProductWindow(db: DbClient, organizationId: string, product
   // Readiness needs the currency and the scheduled sessions; a catalog of N
   // products read both N times. They are read once here and handed down.
   const needsReadiness = products.filter(product => bookableOnly ? Boolean(product.booking || product.order_url) || product.kind === 'stay' : product.kind === 'experience' || product.kind === 'stay' || Boolean(product.booking))
+  // Only experiences and services read sessions; a stay's readiness and a linked offering's never do.
+  const sessionBacked = needsReadiness.filter(product => !product.order_url && product.kind !== 'stay')
   const { listSessions } = await import('~/server/utils/availability')
   const [activeLocationIds, currency, allSessions] = await Promise.all([
     bookableOnly ? queryAll<{ id: string }>(db, "SELECT id FROM business_locations WHERE organization_id = ? AND status = 'active'", [organizationId]).then(rows => new Set(rows.map(location => location.id))) : undefined,
     needsReadiness.some(product => !product.order_url) ? organizationDefaultCurrency(db, organizationId) : undefined,
-    needsReadiness.some(product => !product.order_url) ? listSessions(db, { env: requireEnv(), organizationId, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 400 * 86_400_000).toISOString() }) : [],
+    sessionBacked.length ? listSessions(db, { env: requireEnv(), organizationId, productIds: sessionBacked.map(product => product.id), fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 400 * 86_400_000).toISOString() }) : [],
   ])
   const sessionsByProduct = new Map<string, SessionAvailability[]>()
   for (const session of allSessions) {

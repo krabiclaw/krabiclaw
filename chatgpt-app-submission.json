@@ -77,7 +77,7 @@
       "justifications": {
         "read_only_justification": "Creates a new product batch with publication explicitly forced false; optional active fields do not override that publication choice.",
         "destructive_justification": "Adds new records and does not replace or deactivate existing products.",
-        "open_world_justification": "New catalog entries are withheld from the website, but a new place to stay is counted on the business's Stripe subscription as it is written."
+        "open_world_justification": "New catalog entries are withheld from the website; creating a place to stay reports the business's current live-home count to its Stripe subscription, and an unpublished home adds nothing to it."
       }
     },
     "block_dates": {
@@ -1251,7 +1251,7 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads bookable sessions and remaining places; a provider's Google free/busy is read for the window and nothing is stored.",
+        "read_only_justification": "Reads bookable sessions and remaining places; a provider's Google free/busy is read for the window and not cached, though Better Auth may refresh and store an expired Google token on the way.",
         "destructive_justification": "Does not create or edit sessions, allocate seats or change provider-authored hours.",
         "open_world_justification": "Reads the selected offering's sessions and its providers' Google free/busy; it changes nothing outside KrabiClaw."
       }

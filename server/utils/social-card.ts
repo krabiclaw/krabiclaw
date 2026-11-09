@@ -224,6 +224,12 @@ function socialTemplate(organization: OrganizationRecord): SocialTemplate {
   return resolvePublicSite({ themeId: organization.theme_id}).slug
 }
 
+/** A displaced card's image goes once nothing places it; a card another owner still shows stays. */
+async function deleteUnplacedCard(db: DbClient, env: SocialCardEnv, assetId: string, organizationId: string, actorId: string | null) {
+  if (await queryFirst(db, 'SELECT 1 FROM media_placements WHERE asset_id = ? LIMIT 1', [assetId])) return
+  await deleteMediaAsset(db, env, assetId, organizationId, actorId)
+}
+
 async function clearSocialCard(input: { db: DbClient; env: SocialCardEnv; owner: SocialCardOwner; actorId?: string | null }, reason: 'no_source' | 'owner_not_found' | 'missing_content' | 'private_location') {
   // Only production stores cards, so only production deletes one; elsewhere
   // the rows are a copy of production's and the card they name is production's.
@@ -233,7 +239,7 @@ async function clearSocialCard(input: { db: DbClient; env: SocialCardEnv; owner:
       { query: "DELETE FROM media_placements WHERE owner_type = ? AND owner_id = ? AND slot = 'social_card'", params: [input.owner.owner_type, input.owner.owner_id] },
       ...[...new Set(placed.map(row => row.organization_id))].map(organizationId => publicResourceCacheInvalidationQuery(organizationId, 'social-card-cleared')),
     ], { operation: 'clear social card placement' })
-    if (cloudflareImagesConfigured(input.env)) for (const row of placed) await deleteMediaAsset(input.db, input.env, row.asset_id, row.organization_id, input.actorId ?? null)
+    if (cloudflareImagesConfigured(input.env)) for (const row of placed) await deleteUnplacedCard(input.db, input.env, row.asset_id, row.organization_id, input.actorId ?? null)
   }
   const result = { kind: 'skipped' as const, owner: input.owner, reason }
   console.info('[social-card]', result)
@@ -338,7 +344,7 @@ export async function refreshSocialCard(input: {
   }
   // The card this replaces has no placement left; this is production (only it
   // stores cards), so the image goes with it.
-  if (current && current.asset_id !== uploaded.assetId) await deleteMediaAsset(db, env, current.asset_id, organization.id, input.actorId ?? null)
+  if (current && current.asset_id !== uploaded.assetId) await deleteUnplacedCard(db, env, current.asset_id, organization.id, input.actorId ?? null)
 
   return { kind: 'generated', owner, assetId: uploaded.assetId, publicUrl: uploaded.publicUrl, generationKey }
 }
