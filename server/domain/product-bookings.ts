@@ -144,12 +144,12 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
       const cancellation = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', threadId)
       const request = await getGuestRequest(db, threadId, organizationId, 'booking')
       if (!request || request.kind !== 'booking' || await hashReservationCancelToken(cancellation.token) !== request.payload.cancellation.token_hash) throw new Error('Booking receipt is missing its cancellation capability')
-      return creationResult({ success: true, booking_id: threadId, request_id: threadId, operational_booking_id: record.id, status: record.status, replayed: true,
+      return creationResult({ success: true, request_id: threadId, operational_booking_id: record.id, status: record.status, replayed: true,
         starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, cancellation_token: cancellation.token,
         message: record.status === 'pending' ? 'Your booking request is awaiting review.' : 'Your booking is confirmed.',
       }, { status: 200 })
     }
-    return creationResult({ success: true, booking_id: threadId, request_id: threadId, operational_booking_id: record.id, status: record.status, replayed: true,
+    return creationResult({ success: true, request_id: threadId, operational_booking_id: record.id, status: record.status, replayed: true,
       starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone,
     }, { status: 200 })
   }
@@ -386,7 +386,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   const quotedValueOf = (result: PromiseSettledResult<unknown>) => result.status === 'fulfilled' ? (result.value as { quotedValue: unknown }).quotedValue : null
 
   return creationResult({
-    success: true, booking_id: threadId, request_id: threadId, operational_booking_id: operationalBookingId, status: record.status, replayed: false, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, presentation, ...(operator ? {} : { cancellation_token: cancellation.token, quoted_value: quotedValueOf(followUps[1]!), measurement }),
+    success: true, request_id: threadId, operational_booking_id: operationalBookingId, status: record.status, replayed: false, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, presentation, ...(operator ? {} : { cancellation_token: cancellation.token, quoted_value: quotedValueOf(followUps[1]!), measurement }),
     message: record.status === 'cancelled' ? 'This booking was cancelled.' : record.status === 'pending' ? `Your request for ${record.product_name} on ${whenLabel} is awaiting review.` : `Your ${presentation.noun} for ${record.product_name} on ${whenLabel} is confirmed.`,
     policy_summary: renderBookingPolicySummary(visitPolicySummarySource('experience'), locale, full.kind),
   }, { status: 201 })

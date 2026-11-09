@@ -286,7 +286,7 @@ An existing appointment import must have a separately supported audited contract
 it must never be represented as a new payment or fabricated paid Stripe record.
 
 `operational_booking_id` means `bookings.id`. `request_id` means the guest inbox
-thread ID; the legacy public `booking_id` continues to mean that request ID.
+thread ID. No booking tool or public booking response returns a `booking_id`.
 Review confirmation/rejection and cancellation invoke the canonical guest-thread
 operation service with durable operation keys and guest status messages. Confirm
 approves a pending booking; reject declines a pending booking; cancel ends a

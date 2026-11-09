@@ -632,7 +632,8 @@ test('native online review uses canonical Products, holds capacity, and releases
     const results = await Promise.all([book(0), book(1)])
     expect(results.map(result => result.status()).sort()).toEqual([201, 409])
     const pending = await results.find(result => result.status() === 201)!.json()
-    expect(pending).toMatchObject({ status: 'pending', booking_id: pending.request_id })
+    expect(pending).toMatchObject({ status: 'pending', request_id: expect.any(String) })
+    expect(pending).not.toHaveProperty('booking_id')
     expect(pending.operational_booking_id).not.toBe(pending.request_id)
     const cancellationTerms = 'Cancel free up to 24 hours before the start time. After that, payments aren\'t refunded automatically.'
     expect(pending.policy_summary.items[0]).toEqual({ id: 'cancellation', text: cancellationTerms })

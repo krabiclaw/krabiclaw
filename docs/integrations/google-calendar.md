@@ -43,8 +43,7 @@ persisted intent rows without an in-memory cursor.
 mapping. Its subject is `(organization_id, integration_revision, booking_kind,
 operational_id)`; `operational_id` means `bookings.id` or `reservations.id`.
 A partial unique index permits one live intent per subject while retaining
-deleted provider identities as history. `request_id` is the thread identity, never the operational Booking ID (including
-legacy public responses named `booking_id`). Foundation reschedules keep the
+deleted provider identities as history. `request_id` is the thread identity, never the operational Booking ID. Foundation reschedules keep the
 operational ID and therefore update the same mapped Google event.
 
 The worker preallocates a Google-compatible event ID before provider I/O. A

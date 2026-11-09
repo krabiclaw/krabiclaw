@@ -19,8 +19,10 @@ operator, and historical booked assignments are not backfilled or rewritten.
 
 ## Shared interfaces across the four feature PRs
 
-- Operational identity: `bookings.id`. Public `booking_id` remains `requests.id`;
-  `operational_booking_id` and `request_id` make both identities explicit.
+- Identities: a booking is two records. `request_id` is `requests.id`, the guest
+  thread (conversation, guest snapshot, cancellation link); `operational_booking_id`
+  is `bookings.id`, the seat on a session. Every response names both; neither
+  is called `booking_id`.
 - Config: `ProductBookingConfig` in `server/utils/availability.ts` and
   `product_booking_configs` in `server/db/schema.ts`. `confirmation_mode` is
   instant/review, default instant. `online_timezone` explicitly configures online
@@ -95,8 +97,9 @@ provider retry. Foundation has no dependency on finance tables or provider state
 Lifecycle activity events include `booking.created`, `booking.confirm`,
 `booking.reject`, `booking.cancel` and accepted change operations. Payloads carry
 `operational_booking_id` and `request_id`; downstream consumers dedupe the durable
-entry identity and read the canonical Booking after commit. Dashboard detail
-retains its legacy request `id` and exposes `operationalBookingId` separately.
+entry identity and read the canonical Booking after commit. Dashboard detail is
+addressed by its thread `id` (the request ID in its route) and exposes
+`operationalBookingId` for operations on the Booking itself.
 
 ## Local proof and completed review
 
