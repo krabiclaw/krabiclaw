@@ -1,4 +1,5 @@
 import { HTTPError } from 'nitro'
+import { TASK_VIEW_SCHEMA } from '~/server/utils/mcp-tools/tasks'
 import { createTeamThread, listTeamMembers, listTeamMessages, listTeamThreads, markTeamThreadRead, operateTeamGroup, sendTeamMessage, teamAccessFor } from '~/server/domain/team-messages'
 import { memberAccessPrincipal, resolveMemberId } from '~/server/utils/member-access'
 import { paginateMcpCollection } from '~/server/utils/mcp-pagination'
@@ -10,17 +11,18 @@ const text = { type: 'string' }, nullableText = { type: ['string', 'null'] }
 const participant = { type: 'object', properties: { id: text, memberId: text, name: text, image: nullableText }, required: ['id', 'memberId', 'name', 'image'] }
 const conversation = { type: 'object', properties: {
   id: text, createdAt: text, lastMessageAt: text, stayId: nullableText, locationId: nullableText,
-  name: nullableText, isGroup: { type: 'boolean' }, createdByUserId: nullableText, canManage: { type: 'boolean' }, canLeave: { type: 'boolean' },
+  name: { ...nullableText, description: 'A group’s name; a stay conversation is titled by the home the guest sleeps in.' }, isGroup: { type: 'boolean' }, createdByUserId: nullableText, canManage: { type: 'boolean' }, canLeave: { type: 'boolean' },
   participants: { type: 'array', items: participant }, unread: { type: 'boolean' }, unreadCount: { type: 'integer' },
   stay: { type: ['object', 'null'], properties: { id: text, productId: text, homeName: text, checkInDate: text, checkOutDate: text, status: { type: 'string', enum: ['pending', 'confirmed', 'cancelled'] } }, required: ['id', 'productId', 'homeName', 'checkInDate', 'checkOutDate', 'status'] },
+  job: { ...TASK_VIEW_SCHEMA, type: ['object', 'null'], description: 'A stay conversation’s cleaning job (the turnover, or the job to get the home ready after a move) as list_tasks presents it; null when the stay has none the caller may see.' },
   location: { type: ['object', 'null'], properties: { id: text, title: text, slug: text, timezone: text }, required: ['id', 'title', 'slug', 'timezone'] },
   lastMessage: { type: ['object', 'null'], properties: { id: text, senderId: nullableText, body: text, attachmentCount: { type: 'integer' }, createdAt: text }, required: ['id', 'senderId', 'body', 'attachmentCount', 'createdAt'] },
-}, required: ['id', 'createdAt', 'lastMessageAt', 'stayId', 'locationId', 'name', 'isGroup', 'createdByUserId', 'canManage', 'canLeave', 'participants', 'unread', 'unreadCount', 'stay', 'location', 'lastMessage'] }
+}, required: ['id', 'createdAt', 'lastMessageAt', 'stayId', 'locationId', 'name', 'isGroup', 'createdByUserId', 'canManage', 'canLeave', 'participants', 'unread', 'unreadCount', 'stay', 'job', 'location', 'lastMessage'] }
 const message = { type: 'object', properties: {
-  id: text, threadId: text, senderId: nullableText, body: text, createdAt: text,
+  id: text, threadId: text, senderId: { ...nullableText, description: 'The sender; null for an automatic message, or once a person’s account was deleted.' }, automatic: { type: 'boolean', description: 'Written by KrabiClaw (a cleaning job, a reminder, a move), not by a member; never counted as unread.' }, body: text, createdAt: text,
   attachments: { type: 'array', items: { type: 'object', properties: { id: text, url: text, width: { type: ['number', 'null'] }, height: { type: ['number', 'null'] } }, required: ['id', 'url', 'width', 'height'] } },
   deliveries: { type: 'array', items: { type: 'object', properties: { id: text, channel: { type: 'string', enum: ['email', 'whatsapp', 'push'] }, status: text, error: nullableText, updatedAt: text }, required: ['id', 'channel', 'status', 'error', 'updatedAt'] } },
-}, required: ['id', 'threadId', 'senderId', 'body', 'createdAt', 'attachments', 'deliveries'] }
+}, required: ['id', 'threadId', 'senderId', 'automatic', 'body', 'createdAt', 'attachments', 'deliveries'] }
 const threadId = { type: 'string', minLength: 1, description: 'Team conversation ID from list_team_conversations or start_team_conversation; never a guest request or Better Auth Team ID.' }
 
 export const TEAM_MESSAGING_TOOLS: McpToolDefinition[] = [

@@ -10,13 +10,19 @@
       <div v-if="thread.stay || thread.location" class="pb-2 pt-3" :class="dashboardGutterClass">
         <span v-if="thread.stay" class="text-sm text-muted">{{ thread.stay.homeName }} · {{ thread.stay.checkInDate }} – {{ thread.stay.checkOutDate }}</span>
         <span v-else class="text-sm text-muted">{{ thread.location?.title }}</span>
+        <TaskCard v-if="thread.job" class="mt-3" :task="thread.job" data-testid="team-thread-job" @open="jobOpen = true" />
       </div>
       <div ref="scroller" class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <UChatMessages :auto-scroll="{ size: 'sm' }" :ui="{ root: ['gap-0 py-4', dashboardGutterClass] }">
           <UButton v-if="data?.hasMore" class="mx-auto mb-4" color="neutral" variant="ghost" :loading="loadingMore" @click="loadMore">Earlier messages</UButton>
           <template v-for="(message, index) in messages" :key="message.id">
             <p v-if="index === 0 || day(messages[index - 1]!.createdAt) !== day(message.createdAt)" class="pb-2 pt-6 text-center text-xs font-medium text-highlighted">{{ day(message.createdAt) }}</p>
-            <UChatMessage :id="message.id" :data-team-message="message.id" :role="message.senderId === userId ? 'user' : 'assistant'" :side="message.senderId === userId ? 'right' : 'left'" :parts="[]" :avatar="{ src: author(message)?.image ?? undefined, alt: senderName(message) }" :class="startsRun(message, index) ? 'pt-4' : 'pt-1'" :ui="{ header: message.senderId === userId ? 'mb-1 text-xs text-muted' : 'mb-1 ps-12 text-xs text-muted', container: 'items-end gap-2 pb-0', leading: 'mt-0 min-h-0', leadingAvatar: endsRun(message, index) ? undefined : 'invisible', body: 'min-w-0 max-w-[min(36rem,86%)]' }">
+            <div v-if="message.automatic" :id="message.id" :data-team-message="message.id" data-automatic class="mx-auto my-3 max-w-[min(36rem,86%)] rounded-2xl border border-default px-4 py-3 text-sm">
+              <p class="mb-1 text-xs text-muted">Sent automatically · {{ formatClockTime(message.createdAt) }}</p>
+              <p class="whitespace-pre-wrap break-words">{{ message.body }}</p>
+            </div>
+            <UChatMessage
+              v-else :id="message.id" :data-team-message="message.id" :role="message.senderId === userId ? 'user' : 'assistant'" :side="message.senderId === userId ? 'right' : 'left'" :parts="[]" :avatar="{ src: author(message)?.image ?? undefined, alt: senderName(message) }" :class="startsRun(message, index) ? 'pt-4' : 'pt-1'" :ui="{ header: message.senderId === userId ? 'mb-1 text-xs text-muted' : 'mb-1 ps-12 text-xs text-muted', container: 'items-end gap-2 pb-0', leading: 'mt-0 min-h-0', leadingAvatar: endsRun(message, index) ? undefined : 'invisible', body: 'min-w-0 max-w-[min(36rem,86%)]' }">
               <template v-if="startsRun(message, index)" #header><span class="font-medium text-highlighted">{{ senderName(message) }}</span><span class="ms-1.5">{{ formatClockTime(message.createdAt) }}</span></template>
               <template #body>
                 <div v-if="message.attachments.length" class="mb-1 grid max-w-sm gap-1" :class="message.attachments.length > 1 ? 'grid-cols-2' : 'grid-cols-1'">
@@ -44,6 +50,7 @@
         <UButton v-if="readError" class="mb-3" color="neutral" variant="ghost" @click="markRead">Retry read receipt</UButton>
         <MessageComposer v-model="draft" v-model:photos="photos" :disabled="Boolean(error || threadError)" :sending="sending" placeholder="Message your team" @send="send" />
         <MessagePhotoViewer v-model="viewer" />
+        <TodayTaskSheet v-if="thread.job && dashboard.organizationId.value" v-model:open="jobOpen" :task="thread.job" :organization-id="dashboard.organizationId.value" :assignees="[]" @changed="jobChanged" />
         <ReportDialog :open="reporting !== null" title="Report this message" :description="reporting ? `Tell KrabiClaw what is wrong with ${senderName(reporting)}'s message.` : ''" confirm-label="Report" :saving="reportSaving" :error="reportError" @submit="report" @close="reporting = null" />
       </div>
     </template>
@@ -59,6 +66,8 @@ import { isTeamMessagesResponse, isTeamMessageResponse, type TeamThread, type Te
 import MessageComposer, { messageReplyForm, sameMessagePhotos, useMessagePhotoDraft, type MessagePhotoDraft } from './MessageComposer.vue'
 import MessagePhotoViewer, { type MessagePhotoViewerState } from './MessagePhotoViewer.vue'
 import ReportDialog from './ReportDialog.vue'
+import TaskCard from '~/components/dashboard/TaskCard.vue'
+import TodayTaskSheet from '~/components/dashboard/TodayTaskSheet.vue'
 const props = defineProps<{ threadId: string; thread: TeamThread | null; threadError?: unknown }>()
 const api = useDashboardApi()
 const dashboard = useDashboardOrganization()
@@ -92,12 +101,18 @@ const sending = ref(false)
 const attempt = ref<{ key: string; body: string; photos: MessagePhotoDraft[] } | null>(null)
 const scroller = useTemplateRef<HTMLElement>('scroller')
 function author(message: TeamMessage) { return props.thread?.participants.find(member => member.id === message.senderId) }
-function senderName(message: TeamMessage) { return message.senderId === userId.value ? 'You' : author(message)?.name ?? (message.senderId === null ? 'Deleted account' : 'Former team member') }
+function senderName(message: TeamMessage) { return message.automatic ? 'Sent automatically' : message.senderId === userId.value ? 'You' : author(message)?.name ?? 'Former member' }
+// The job strip opens the task sheet; closing the job there posts the person's own message here.
+const jobOpen = ref(false)
+async function jobChanged() {
+  await refreshNuxtData(`team-threads:${dashboard.organizationId.value}`)
+  await refresh()
+}
 function failedDeliveries(message: TeamMessage) { return message.deliveries.filter(delivery => delivery.status === 'failed') }
 function day(at: string) { return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium' }).format(new Date(at)) }
 function formatClockTime(at: string) { return new Intl.DateTimeFormat(locale.value, { hour: 'numeric', minute: '2-digit' }).format(new Date(at)) }
-function startsRun(message: TeamMessage, index: number) { const before = messages.value[index - 1]; return !before || before.senderId !== message.senderId || day(before.createdAt) !== day(message.createdAt) }
-function endsRun(message: TeamMessage, index: number) { const after = messages.value[index + 1]; return !after || after.senderId !== message.senderId || day(after.createdAt) !== day(message.createdAt) }
+function startsRun(message: TeamMessage, index: number) { const before = messages.value[index - 1]; return !before || before.automatic || before.senderId !== message.senderId || day(before.createdAt) !== day(message.createdAt) }
+function endsRun(message: TeamMessage, index: number) { const after = messages.value[index + 1]; return !after || after.automatic || after.senderId !== message.senderId || day(after.createdAt) !== day(message.createdAt) }
 async function loadMore() {
   if (loadingMore.value || pending.value || !data.value?.hasMore) return
   loadingMore.value = true

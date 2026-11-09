@@ -9,6 +9,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import type { GuestThreadDeliveryStatus } from '~/server/domain/guest-threads/types'
 import type { NotificationChannel } from '~/shared/notification-categories'
 import { getStay, stayAccessFor } from '~/server/domain/stays'
+import { stayJobViews, taskViewer, type TaskView } from '~/server/domain/tasks'
 import {
   discardMessagePhotos,
   listMessagePhotos,
@@ -81,6 +82,7 @@ export interface TeamLocationSummary {
 
 export interface TeamThread {
   id: string
+  /** A group's name; a stay conversation is titled by the home the guest sleeps in. */
   name: string | null
   isGroup: boolean
   createdByUserId: string | null
@@ -91,6 +93,8 @@ export interface TeamThread {
   stayId: string | null
   locationId: string | null
   stay: TeamStaySummary | null
+  /** The stay's cleaning job (its turnover, or the job to get a home ready after a move), as the Today card draws it; null when the stay has none. */
+  job: TaskView | null
   location: TeamLocationSummary | null
   participants: TeamParticipant[]
   lastMessage: { id: string; senderId: string | null; body: string; attachmentCount: number; createdAt: string } | null
@@ -101,8 +105,10 @@ export interface TeamThread {
 export interface TeamMessage {
   id: string
   threadId: string
-  /** null only once the sender's account has been deleted. */
+  /** null for an automatic message, and for a person's message once their account has been deleted. */
   senderId: string | null
+  /** Written by KrabiClaw (a job, a reminder, a move), not by a member: shown as sent automatically, never counted as unread. */
+  automatic: boolean
   body: string
   attachments: Array<{ id: string; url: string; width: number | null; height: number | null }>
   /** Each push this message was sent as, with Apple's outcome. */
@@ -191,7 +197,7 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
   const threads = await queryAll<{ id: string; name: string | null; is_group: number; created_by_user_id: string | null; stay_id: string | null; location_id: string | null; last_message_at: string; created_at: string; unread_count: number }>(db, `
     SELECT t.id, t.name, t.is_group, t.created_by_user_id, t.stay_id, t.location_id, t.last_message_at, t.created_at,
            (SELECT COUNT(*) FROM team_messages m
-             WHERE m.organization_id = t.organization_id AND m.thread_id = t.id AND m.sender_user_id IS NOT ?
+             WHERE m.organization_id = t.organization_id AND m.thread_id = t.id AND m.sender_user_id IS NOT ? AND m.automatic = 0
                AND (s.last_read_at IS NULL OR m.created_at > s.last_read_at)) AS unread_count
       FROM team_threads t
       JOIN team_thread_members s ON s.organization_id = t.organization_id AND s.thread_id = t.id
@@ -221,6 +227,7 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
   ])
   const photos = await listMessagePhotos(db, 'team_message', lastMessages.map(message => message.id))
   const managesGroups = await canManageGroups(access)
+  const jobs = stayIds.length ? await stayJobViews(db, await taskViewer(db, access.principal), stayIds) : new Map<string, TaskView>()
   const currentSeats = await queryAll<{ thread_id: string }>(db, `SELECT thread_id FROM team_thread_members
     WHERE organization_id = ? AND member_id = ? AND thread_id IN (SELECT value FROM json_each(?))`, [access.organizationId, access.memberId, ids])
   const visibleIds = new Set(currentSeats.map(seat => seat.thread_id))
@@ -238,7 +245,7 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
     const unreadCount = Number(thread.unread_count)
     return {
       id: thread.id,
-      name: thread.name,
+      name: thread.name ?? stayRow?.home_name ?? null,
       isGroup: thread.is_group === 1,
       createdByUserId: thread.created_by_user_id,
       canManage: thread.is_group === 1 && !thread.stay_id && !thread.location_id && (thread.created_by_user_id === access.userId || managesGroups),
@@ -248,6 +255,7 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
       stayId: thread.stay_id,
       locationId: thread.location_id,
       stay: stayRow ? { id: stayRow.id, productId: stayRow.product_id, homeName: stayRow.home_name, checkInDate: stayRow.check_in_date, checkOutDate: stayRow.check_out_date, status: stayRow.status } : null,
+      job: stayRow ? jobs.get(stayRow.id) ?? null : null,
       location: locationRow ? { id: locationRow.id, title: locationRow.title, slug: locationRow.slug, timezone: locationRow.timezone } : null,
       participants,
       lastMessage: last ? { id: last.id, senderId: last.sender_user_id, body: last.body, attachmentCount: photos.get(last.id)?.length ?? 0, createdAt: last.created_at } : null,
@@ -490,7 +498,9 @@ export async function operateTeamGroup(env: TeamEnv, db: DbClient, access: TeamA
   return await publish()
 }
 
-async function readMessages(db: DbClient, organizationId: string, rows: Array<{ id: string; thread_id: string; sender_user_id: string | null; body: string; created_at: string }>): Promise<TeamMessage[]> {
+type MessageRow = { id: string; thread_id: string; sender_user_id: string | null; automatic: number; body: string; created_at: string }
+
+async function readMessages(db: DbClient, organizationId: string, rows: MessageRow[]): Promise<TeamMessage[]> {
   const [photos, deliveries] = await Promise.all([
     listMessagePhotos(db, 'team_message', rows.map(row => row.id)),
     rows.length ? queryAll<{ dedupe_key: string; id: string; channel: NotificationChannel; status: GuestThreadDeliveryStatus; error: string | null; updated_at: string }>(db, `
@@ -504,6 +514,7 @@ async function readMessages(db: DbClient, organizationId: string, rows: Array<{ 
     id: row.id,
     threadId: row.thread_id,
     senderId: row.sender_user_id,
+    automatic: row.automatic === 1,
     body: row.body,
     attachments: (photos.get(row.id) ?? []).map(photo => ({ id: photo.id, url: photo.url, width: photo.width, height: photo.height })),
     deliveries: deliveries.filter(delivery => delivery.dedupe_key === messageEventKey(row.id))
@@ -520,8 +531,8 @@ export async function listTeamMessages(db: DbClient, access: TeamAccess, threadI
   if ((query.before === undefined) !== (query.beforeId === undefined)) fail(422, 'INVALID_CURSOR', 'before and beforeId are sent together', query.before === undefined ? 'before' : 'beforeId')
   if (query.before !== undefined && (typeof query.before !== 'string' || !query.before || typeof query.beforeId !== 'string' || !query.beforeId)) fail(422, 'INVALID_CURSOR', 'before and beforeId must name a loaded message', 'before')
   const cursor = typeof query.before === 'string' ? 'AND (m.created_at < ? OR (m.created_at = ? AND m.id < ?))' : ''
-  const rows = await queryAll<{ id: string; thread_id: string; sender_user_id: string | null; body: string; created_at: string }>(db, `
-    SELECT m.id, m.thread_id, m.sender_user_id, m.body, m.created_at FROM team_messages m
+  const rows = await queryAll<MessageRow>(db, `
+    SELECT m.id, m.thread_id, m.sender_user_id, m.automatic, m.body, m.created_at FROM team_messages m
       JOIN team_thread_members s ON s.organization_id = m.organization_id AND s.thread_id = m.thread_id
      WHERE m.organization_id = ? AND m.thread_id = ? AND s.member_id = ? ${cursor}
      ORDER BY m.created_at DESC, m.id DESC LIMIT ?`,
@@ -562,10 +573,10 @@ export async function sendTeamMessage(
       ? await Promise.all(photoInput.map(async photo => [...new Uint8Array(await crypto.subtle.digest('SHA-256', photo.bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('')))
       : { sourceIds: photoInput.sourceIds },
   })
-  const findByKey = () => queryFirst<{ id: string; thread_id: string; sender_user_id: string | null; body: string; created_at: string; request_hash: string }>(db,
-    'SELECT id, thread_id, sender_user_id, body, created_at, request_hash FROM team_messages WHERE organization_id = ? AND thread_id = ? AND idempotency_key = ?',
+  const findByKey = () => queryFirst<MessageRow & { request_hash: string }>(db,
+    'SELECT id, thread_id, sender_user_id, automatic, body, created_at, request_hash FROM team_messages WHERE organization_id = ? AND thread_id = ? AND idempotency_key = ?',
     [access.organizationId, threadId, idempotencyKey])
-  const reused = (row: { sender_user_id: string | null; request_hash: string }) => row.sender_user_id !== access.userId || row.request_hash !== requestHash
+  const reused = (row: { sender_user_id: string | null; automatic: number; request_hash: string }) => row.automatic === 1 || row.sender_user_id !== access.userId || row.request_hash !== requestHash
   let row = await findByKey()
   let created = false
   if (row && reused(row)) fail(409, 'IDEMPOTENCY_KEY_REUSED', 'This idempotency key belongs to a different message', 'idempotencyKey')
@@ -631,6 +642,78 @@ export async function sendTeamMessage(
   await publishThreadChanged(env, access.organizationId, threadId, { message_id: row.id })
   const [message] = await readMessages(db, access.organizationId, [row])
   return { message: message!, created }
+}
+
+/** The identity of a stay conversation with exactly these seats: what `createTeamThread` gives the same roster. */
+export function stayThreadParticipantsKey(stayId: string, seatMemberIds: readonly string[]): Promise<string> {
+  return creationRequestHash({ stay_id: stayId, location_id: null, member_ids: [...new Set(seatMemberIds)].sort() })
+}
+
+/**
+ * KrabiClaw writes into a stay's team conversation: a cleaning job, a
+ * reminder, a move, a cancellation. The conversation with exactly these seats
+ * is the one a member starts for the same people (`createTeamThread`), opened
+ * here when nobody has yet. The message is sent once per key; it alerts only
+ * the users named, never counts as unread, and carries no sender. Owners and
+ * admins read it in the conversation.
+ */
+export async function postAutomaticTeamMessage(env: TeamEnv, db: DbClient, input: {
+  organizationId: string; stayId: string; seatMemberIds: readonly string[]; body: string; idempotencyKey: string
+  /** Who is told, by every channel they keep for team messages; the rest of the roster reads it in the conversation. */
+  alertUserIds: readonly string[]
+  /** How the alert names the writer: the business. */
+  senderName: string
+}): Promise<{ threadId: string; messageId: string; created: boolean }> {
+  const body = input.body.trim()
+  if (!body || body.length > MAX_BODY) throw new Error(`An automatic team message must be 1 to ${MAX_BODY} characters`)
+  if (input.idempotencyKey.length < 1 || input.idempotencyKey.length > 200) throw new Error('An automatic team message key must be 1 to 200 characters')
+  const seatIds = [...new Set(input.seatMemberIds)].sort()
+  if (!seatIds.length) throw new Error('An automatic team message needs a roster')
+  const participantsKey = await stayThreadParticipantsKey(input.stayId, seatIds)
+  const now = new Date().toISOString()
+  const threadId = crypto.randomUUID()
+  const messageId = crypto.randomUUID()
+  const requestHash = await creationRequestHash({ body, automatic: true })
+  const thread = `SELECT id FROM team_threads WHERE organization_id = ? AND participants_key = ?`
+  const threadParams = [input.organizationId, participantsKey]
+  await executeBatch(db, [
+    {
+      // Only while every seat is a current member; a roster that has lost someone is not opened.
+      query: `INSERT INTO team_threads (id, organization_id, stay_id, location_id, created_by_user_id, name, is_group, participants_key, last_message_at, created_at)
+              SELECT ?, ?, ?, NULL, NULL, NULL, 0, ?, ?, ? WHERE EXISTS (SELECT 1 FROM stays WHERE organization_id = ? AND id = ?)
+                AND (SELECT COUNT(*) FROM member WHERE organizationId = ? AND id IN (SELECT value FROM json_each(?))) = ?
+              ON CONFLICT (organization_id, participants_key) DO NOTHING`,
+      params: [threadId, input.organizationId, input.stayId, participantsKey, now, now, input.organizationId, input.stayId, input.organizationId, d1JsonStringSet(seatIds), seatIds.length],
+    },
+    ...seatIds.map(memberId => ({
+      query: `INSERT INTO team_thread_members (thread_id, organization_id, member_id, last_read_at, created_at) SELECT id, organization_id, ?, NULL, ? FROM team_threads WHERE id = ?`,
+      params: [memberId, now, threadId],
+    })),
+    {
+      query: `INSERT INTO team_messages (id, organization_id, thread_id, sender_user_id, automatic, body, idempotency_key, request_hash, created_at)
+              SELECT ?, organization_id, id, NULL, 1, ?, ?, ?, ? FROM team_threads WHERE organization_id = ? AND participants_key = ?
+              ON CONFLICT (thread_id, idempotency_key) DO NOTHING`,
+      params: [messageId, body, input.idempotencyKey, requestHash, now, ...threadParams],
+    },
+    organizationEventQuery({ organizationId: input.organizationId, actorId: null, eventType: 'team.message_sent', entityType: 'team_message', entityId: messageId,
+      metadata: { team_thread_id: threadId, automatic: true, key: input.idempotencyKey }, dedupeKey: messageEventKey(messageId), onlyIfPreviousChangedOneRow: true }),
+    { query: `UPDATE team_threads SET last_message_at = ? WHERE organization_id = ? AND id = (${thread}) AND last_message_at < ?
+        AND EXISTS (SELECT 1 FROM team_messages m WHERE m.id = ? AND m.thread_id = team_threads.id)`, params: [now, input.organizationId, ...threadParams, now, messageId] },
+  ], { operation: 'Post an automatic team message' })
+  const row = await queryFirst<MessageRow>(db, `SELECT m.id, m.thread_id, m.sender_user_id, m.automatic, m.body, m.created_at FROM team_messages m
+    WHERE m.organization_id = ? AND m.thread_id = (${thread}) AND m.idempotency_key = ?`, [input.organizationId, ...threadParams, input.idempotencyKey])
+  if (!row) throw new Error(`Automatic team message ${input.idempotencyKey} for stay ${input.stayId} was not written: a seat is no longer a member or the stay is gone`)
+  const created = row.id === messageId
+  if (created) {
+    const entry = await queryFirst<{ id: string }>(db, "SELECT id FROM activity_entries WHERE organization_id = ? AND scope_kind = 'organization' AND dedupe_key = ?", [input.organizationId, messageEventKey(row.id)])
+    if (!entry) throw new Error(`Team message ${row.id} has no organization receipt`)
+    const seated = await queryAll<{ user_id: string }>(db, `SELECT m.userId AS user_id FROM team_thread_members s
+      JOIN member m ON m.id = s.member_id AND m.organizationId = s.organization_id WHERE s.organization_id = ? AND s.thread_id = ?`, [input.organizationId, row.thread_id])
+    const recipients = seated.map(seat => seat.user_id).filter(userId => input.alertUserIds.includes(userId))
+    await notifyTeamMessage(env, db, { organizationId: input.organizationId, threadId: row.thread_id, entryId: entry.id, senderName: input.senderName, messagePreview: body, recipientUserIds: recipients })
+    await publishThreadChanged(env, input.organizationId, row.thread_id, { message_id: row.id })
+  }
+  return { threadId: row.thread_id, messageId: row.id, created }
 }
 
 /**

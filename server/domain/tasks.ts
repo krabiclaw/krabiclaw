@@ -1,8 +1,8 @@
 import { HTTPError } from 'nitro'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { assertRoleAllows, assignedGuestThreadScope, assignedResponsibilitySql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { assertRoleAllows, assignedGuestThreadScope, assignedResponsibilitySql, isOrganizationWideRole, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { creationDedupeKey, creationRequestHash, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
-import { publishBusinessInvalidation } from '~/server/cloudflare/guest-inbox-events'
+import { publishBusinessInvalidation, publishDashboardInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { discardMessagePhotos, listMessagePhotos, messagePhotoPlacements, uploadMessagePhotos, MessagePhotoRejection, type MessagePhoto } from '~/server/domain/guest-threads/attachments'
 import { firstName } from '~/server/domain/guest-threads/presentation'
 import { bookingEditorPath, guestConversationPath, productPaymentPath } from '~/server/utils/dashboard-links'
@@ -19,7 +19,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
   reopen them here, from the dashboard, MCP and the app alike.
 */
 
-export const TASK_KINDS = ['turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom'] as const
+export const TASK_KINDS = ['turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up'] as const
 export type TaskKind = typeof TASK_KINDS[number]
 export type TaskStatus = 'open' | 'done' | 'skipped' | 'cancelled'
 
@@ -36,6 +36,35 @@ export interface TaskRow {
 
 function fail(statusCode: number, code: string, message: string, field?: string): never {
   throw new HTTPError({ statusCode, message, data: { code, ...(field ? { field } : {}) } })
+}
+
+// ---------------------------------------------------------------------------
+// Cleaning jobs: a turnover, or the job to get a home ready for a guest who
+// was moved there. A job given to a member or a team is talked about in the
+// stay's team conversation (server/domain/cleaner-jobs.ts): the job, its
+// reminders and its changes are automatic messages there, and the person
+// closes it with their own message. A job an owner or admin gives themselves
+// keeps the task alert instead.
+// ---------------------------------------------------------------------------
+
+export const JOB_TASK_SQL = (alias: string) => `${alias}.kind IN ('turnover', 'stay_ready')`
+
+export function isJobTask(row: Pick<TaskRow, 'kind'>): boolean {
+  return row.kind === 'turnover' || row.kind === 'stay_ready'
+}
+
+/** The stay a job is about. */
+export function jobStayId(row: Pick<TaskRow, 'kind' | 'dedupe_key' | 'subject_id'>): string {
+  if (!row.subject_id) throw new Error(`Job task ${row.dedupe_key} names no stay`)
+  return row.subject_id
+}
+
+/** Whether a job's people hear about it in a team conversation: a member who is not an owner or admin, or a team. */
+export async function jobHasConversation(db: DbClient, organizationId: string, assigned: { member: string | null; team: string | null }): Promise<boolean> {
+  if (assigned.team) return true
+  if (!assigned.member) return false
+  const member = await queryFirst<{ role: string }>(db, 'SELECT role FROM member WHERE organizationId = ? AND id = ?', [organizationId, assigned.member])
+  return member !== null && !isOrganizationWideRole(member.role)
 }
 
 // ---------------------------------------------------------------------------
@@ -540,6 +569,22 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       sheet = { heading: 'Booking request', title, date: day(record.starts_at), checkout: null, checkin: null }
       break
     }
+    case 'consultation_prep':
+    case 'consultation_follow_up': {
+      const record = context.records.get(row.subject_id!)
+      const request = record?.request_id ? context.requests.get(record.request_id) : undefined
+      if (!record?.request_id || !request) throw new Error(`Consultation job ${row.id} has no booking conversation`)
+      const heading = row.kind === 'consultation_prep' ? 'Prepare for consultation' : 'Follow up with client'
+      requestId = record.request_id
+      face = 'compact'
+      title = request.guest_name ?? request.participant ?? 'Client'
+      avatar = { initial: initialOf(title), tone: 'warm' }
+      statusLine = [heading, place].filter(Boolean).join(' · ')
+      detail = `${day(record.starts_at)}, ${time(record.starts_at)}`
+      path = bookingEditorPath(context.slug, 'booking', record.request_id)
+      sheet = { heading, title, date: day(record.starts_at), checkout: null, checkin: null }
+      break
+    }
     case 'booking_change': {
       const entry = context.entries.get(row.dedupe_key.slice('booking_change:'.length))
       const stay = row.subject_type === 'stay' ? context.stays.get(row.subject_id!) : undefined
@@ -576,6 +621,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       sheet = { heading: 'Task', title, date: row.due_at ? day(row.due_at) : null, checkout: null, checkin: null }
       break
     case 'custom':
+    case 'stay_ready':
       face = 'compact'
       statusLine = ['Task', place].filter(Boolean).join(' · ')
       title = row.title!
@@ -595,7 +641,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     detail = null
   }
   const mine = assignee?.you ?? false
-  const reachable = viewer.manage || mine || row.assigned_team_id !== null || row.kind === 'turnover' || row.kind === 'custom' || row.kind === 'opportunity' || row.kind === 'booking_change'
+  const reachable = viewer.manage || mine || row.assigned_team_id !== null || row.kind === 'turnover' || row.kind === 'stay_ready' || row.kind === 'custom' || row.kind === 'opportunity' || row.kind === 'booking_change'
   const personClosed = (row.status === 'done' || row.status === 'skipped') && row.closed_by_user_id !== null
   const can = {
     complete: row.status === 'open' && action?.type === 'complete' && reachable,
@@ -640,8 +686,8 @@ export function parseTaskListQuery(query: Record<string, unknown>, defaults: Par
 
 /** Today's open work in the owner's order: failed deliveries, turnovers, replies, then everything else. */
 /** Work a person does and closes themselves: they Skip it, and say what they found when they finish. Everything else is Dismissed. */
-const PERSON_WORK: ReadonlySet<TaskKind> = new Set(['turnover', 'custom', 'opportunity'])
-const TODAY_ORDER: Record<TaskKind, number> = { message_delivery: 0, turnover: 1, guest_reply: 2, booking_review: 2, booking_change: 2, custom: 3, opportunity: 3 }
+const PERSON_WORK: ReadonlySet<TaskKind> = new Set(['turnover', 'custom', 'stay_ready', 'opportunity', 'consultation_prep', 'consultation_follow_up'])
+const TODAY_ORDER: Record<TaskKind, number> = { message_delivery: 0, turnover: 1, guest_reply: 2, booking_review: 2, booking_change: 2, consultation_prep: 2, custom: 3, stay_ready: 1, consultation_follow_up: 3, opportunity: 3 }
 
 /** Today: open work due or starting today or earlier, or with no date; then what was closed today. Upcoming: open work later than today, by day. */
 export async function listTasks(db: DbClient, viewer: TaskViewer, query: TaskListQuery, now = new Date()): Promise<{ sections: TaskSection[]; resolvedAt: string }> {
@@ -724,16 +770,42 @@ export async function listTaskAssignees(db: DbClient, viewer: TaskViewer): Promi
 
 /** A task as an alert to one of its people tells it: the member projection, with no guest's full name or contact. */
 export async function describeTaskForAlert(db: DbClient, organizationId: string, taskId: string, recipientUserId: string): Promise<{ eyebrow: string; title: string; detail: string | null; locationId: string | null }> {
+  const view = await taskViewForUser(db, organizationId, taskId, recipientUserId)
+  return { eyebrow: [view.tag ?? view.statusLine, view.when].filter(Boolean).join(' · '), title: view.title, detail: view.detail, locationId: view.locationId }
+}
+
+/** A task as one member sees it, from a server path with no caller: the member projection, with no guest's full name or contact. */
+export async function taskViewForUser(db: DbClient, organizationId: string, taskId: string, userId: string | null, now = new Date()): Promise<TaskView> {
   const row = await queryFirst<TaskRow>(db, 'SELECT * FROM tasks WHERE organization_id = ? AND id = ?', [organizationId, taskId])
   if (!row) throw new Error(`Task ${taskId} is not in organization ${organizationId}`)
-  const viewer = { principal: { organizationId, userId: recipientUserId } as MemberAccessPrincipal, manage: false, memberId: '' }
-  const view = present(row, viewer, await loadContext(db, viewer, [row]), new Date())
-  return { eyebrow: [view.tag ?? view.statusLine, view.when].filter(Boolean).join(' · '), title: view.title, detail: view.detail, locationId: row.location_id }
+  const viewer = { principal: { organizationId, userId: userId ?? '' } as MemberAccessPrincipal, manage: false, memberId: '' }
+  return present(row, viewer, await loadContext(db, viewer, [row]), now)
 }
 
 export async function getTask(db: DbClient, viewer: TaskViewer, taskId: string, now = new Date()): Promise<TaskView> {
   const row = await readTaskRow(db, viewer, taskId)
   return present(row, viewer, await loadContext(db, viewer, [row]), now)
+}
+
+/**
+ * The job of each stay the viewer may see, for the strip at the top of a stay's
+ * team conversation: the open one first (the home must be ready before the
+ * guest arrives, then turned over after), otherwise the one closed last.
+ */
+export async function stayJobViews(db: DbClient, viewer: TaskViewer, stayIds: readonly string[], now = new Date()): Promise<Map<string, TaskView>> {
+  if (!stayIds.length) return new Map()
+  const scope = scopeSql(viewer)
+  const rows = await queryAll<TaskRow>(db, `SELECT t.* FROM tasks t WHERE t.organization_id = ? AND ${JOB_TASK_SQL('t')} AND ${scope.sql}
+      AND t.subject_id IN (SELECT value FROM json_each(?))
+    ORDER BY CASE t.status WHEN 'open' THEN 0 ELSE 1 END, COALESCE(t.due_at, t.starts_at, t.created_at), t.updated_at DESC`,
+  [viewer.principal.organizationId, ...scope.params, d1JsonStringSet(stayIds)])
+  const chosen = new Map<string, TaskRow>()
+  for (const row of rows) {
+    const stayId = jobStayId(row)
+    if (!chosen.has(stayId)) chosen.set(stayId, row)
+  }
+  const context = await loadContext(db, viewer, [...chosen.values()])
+  return new Map([...chosen].map(([stayId, row]) => [stayId, present(row, viewer, context, now)]))
 }
 
 // ---------------------------------------------------------------------------
@@ -779,10 +851,55 @@ async function assigneeUsers(db: DbClient, organizationId: string, target: { mem
   return []
 }
 
+/** A job a guest's move creates: the home they moved to may have no earlier stay to clean after. */
+const stayReadyKey = (stayId: string, productId: string) => `stay-ready:${stayId}:${productId}`
+
+export function stayReadyTaskQueries(input: {
+  organizationId: string; stayId: string; now: string; previousProductId: string; guard: BatchQuery; guestName: string | null; checkInDate: string
+  /** The home to make ready; null when the guest moved back to the listing they booked. */
+  home: { product_id: string; location_id: string; timezone: string; check_in_time: string | null; internal_name: string; assigned_member_id: string | null; assigned_team_id: string | null } | null
+}): BatchQuery[] {
+  const { organizationId, stayId, now, previousProductId, guard, home } = input
+  const queries: BatchQuery[] = [{
+    query: `UPDATE tasks SET status = 'cancelled', closed_at = ?, closed_by_user_id = NULL, version = version + 1, updated_at = ? WHERE dedupe_key = ? AND status = 'open' AND ${guard.query}`,
+    params: [now, now, stayReadyKey(stayId, previousProductId), ...guard.params!],
+  }]
+  if (!home) return queries
+  const dueAt = home.check_in_time === null ? null : localDateTimeToInstant(input.checkInDate, home.check_in_time, home.timezone, 'compatible').toISOString()
+  queries.push({
+    query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, assigned_team_id, title, notes, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
+      SELECT ?, ?, 'stay_ready', 'stay', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, 1, ?, ? WHERE ${guard.query}
+      ON CONFLICT (dedupe_key) DO UPDATE SET status = 'open', closed_at = NULL, closed_by_user_id = NULL, outcome_note = NULL, due_at = excluded.due_at,
+        assigned_member_id = excluded.assigned_member_id, assigned_team_id = excluded.assigned_team_id, version = tasks.version + 1, updated_at = excluded.updated_at`,
+    params: [crypto.randomUUID(), organizationId, stayId, home.product_id, home.location_id, home.assigned_member_id, home.assigned_team_id, `Get ${home.internal_name} ready`.slice(0, 200),
+      `${input.guestName ?? 'A guest'} was moved here and arrives ${formatCalendarDate(input.checkInDate, 'en', { weekday: 'short', month: 'short', day: 'numeric' })}.`,
+      dueAt, home.timezone, stayReadyKey(stayId, home.product_id), now, now, ...guard.params!],
+  })
+  return queries
+}
+
+export async function notifyStayReady(env: CloudflareEnv, db: DbClient, input: { organizationId: string; stayId: string; productId: string; actorUserId: string | null }): Promise<void> {
+  const task = await queryFirst<{ id: string; assigned_member_id: string | null; assigned_team_id: string | null }>(db,
+    'SELECT id, assigned_member_id, assigned_team_id FROM tasks WHERE organization_id = ? AND dedupe_key = ?', [input.organizationId, stayReadyKey(input.stayId, input.productId)])
+  if (!task) throw new Error(`The move of stay ${input.stayId} left no job to make its home ready`)
+  const assigned = { member: task.assigned_member_id, team: task.assigned_team_id }
+  // A cleaner's job is posted in the stay's conversation when the business change below wakes the organization's jobs.
+  const recipients = await jobHasConversation(db, input.organizationId, assigned) ? [] : (await assigneeUsers(db, input.organizationId, assigned)).filter(userId => userId !== input.actorUserId)
+  if (recipients.length) {
+    const { notifyTaskAssigned } = await import('~/server/utils/notifications')
+    await notifyTaskAssigned(env, db, { organizationId: input.organizationId, taskId: task.id, actorUserId: input.actorUserId ?? recipients[0]!, recipientUserIds: recipients })
+  }
+  await publishBusinessInvalidation(env, input.organizationId)
+}
+
 async function afterWrite(db: DbClient, viewer: TaskViewer, taskId: string, assigned?: { member: string | null; team: string | null }): Promise<TaskView> {
   const env = viewer.principal.env as CloudflareEnv
   if (assigned) {
-    const recipients = (await assigneeUsers(db, viewer.principal.organizationId, assigned)).filter(userId => userId !== viewer.principal.userId)
+    // A job given to a cleaner is posted in the stay's conversation when the business change below wakes the organization's jobs.
+    const row = await queryFirst<Pick<TaskRow, 'kind' | 'dedupe_key'>>(db, 'SELECT kind, dedupe_key FROM tasks WHERE organization_id = ? AND id = ?', [viewer.principal.organizationId, taskId])
+    if (!row) throw new Error(`Task ${taskId} disappeared after its write`)
+    const recipients = isJobTask(row) && await jobHasConversation(db, viewer.principal.organizationId, assigned) ? []
+      : (await assigneeUsers(db, viewer.principal.organizationId, assigned)).filter(userId => userId !== viewer.principal.userId)
     if (recipients.length) {
       const { notifyTaskAssigned } = await import('~/server/utils/notifications')
       await notifyTaskAssigned(env, db, { organizationId: viewer.principal.organizationId, taskId, actorUserId: viewer.principal.userId, recipientUserIds: recipients })
@@ -882,24 +999,44 @@ export async function closeTask(db: DbClient, viewer: TaskViewer, taskId: string
   if (input.status === 'skipped' && !view.can.skip) fail(403, 'TASK_SCOPE_DENIED', 'You cannot skip this task', 'status')
   const note = text(input.note, 'note', 5000)
   const now = new Date().toISOString()
-  const assetIds = input.photos.length ? await uploadMessagePhotos(db, input.env, viewer.principal.organizationId, input.photos, { source: 'uploaded', userId: viewer.principal.userId })
+  const organizationId = viewer.principal.organizationId
+  // A job closes in its conversation too: the note and photos are the person's own message there, and nobody is alerted.
+  const thread = isJobTask(current) ? await queryFirst<{ id: string }>(db, `SELECT t.id FROM team_threads t
+      JOIN team_thread_members s ON s.organization_id = t.organization_id AND s.thread_id = t.id
+     WHERE t.organization_id = ? AND t.stay_id = ? AND s.member_id = ? ORDER BY t.last_message_at DESC, t.id LIMIT 1`, [organizationId, jobStayId(current), viewer.memberId]) : null
+  const assetIds = input.photos.length ? await uploadMessagePhotos(db, input.env, organizationId, input.photos, { source: 'uploaded', userId: viewer.principal.userId })
     .catch((error: unknown) => error instanceof MessagePhotoRejection ? fail(422, 'INVALID_PHOTO', error.message, 'photos') : Promise.reject(error)) : []
+  const closed = `EXISTS (SELECT 1 FROM tasks WHERE organization_id = ? AND id = ? AND version = ? AND status = ?)`
+  const closedParams = [organizationId, taskId, current.version + 1, input.status]
+  const messageId = crypto.randomUUID()
+  const messageExists = `EXISTS (SELECT 1 FROM team_messages WHERE id = ?)`
+  const messageQueries: BatchQuery[] = thread ? [{
+    query: `INSERT INTO team_messages (id, organization_id, thread_id, sender_user_id, automatic, body, idempotency_key, request_hash, created_at)
+      SELECT ?, ?, ?, ?, 0, ?, ?, ?, ? WHERE ${closed}`,
+    params: [messageId, organizationId, thread.id, viewer.principal.userId, note ?? (input.status === 'done' ? 'Done' : 'Skipped'), `task-closed:${taskId}:${current.version + 1}`,
+      await creationRequestHash({ note, photos: assetIds }), now, ...closedParams],
+  }, organizationEventQuery({ organizationId, actorId: viewer.principal.userId, eventType: 'team.message_sent', entityType: 'team_message', entityId: messageId,
+    metadata: { team_thread_id: thread.id, task_id: taskId }, dedupeKey: `team-message:${messageId}`, onlyIfPreviousChangedOneRow: true }),
+  ...messagePhotoPlacements(organizationId, 'team_message', messageId, assetIds, now),
+  { query: `UPDATE team_threads SET last_message_at = ? WHERE organization_id = ? AND id = ? AND last_message_at < ? AND ${messageExists}`, params: [now, organizationId, thread.id, now, messageId] },
+  { query: `UPDATE team_thread_members SET last_read_at = ? WHERE organization_id = ? AND thread_id = ? AND member_id = ? AND ${messageExists}`, params: [now, organizationId, thread.id, viewer.memberId, messageId] }] : []
   let results: Awaited<ReturnType<typeof executeBatch>>
   try {
     results = await executeBatch(db, [{
       query: `UPDATE tasks SET status = ?, outcome_note = ?, closed_at = ?, closed_by_user_id = ?, version = version + 1, updated_at = ?
         WHERE organization_id = ? AND id = ? AND version = ? AND status = 'open'`,
-      params: [input.status, note, now, viewer.principal.userId, now, viewer.principal.organizationId, taskId, current.version],
+      params: [input.status, note, now, viewer.principal.userId, now, organizationId, taskId, current.version],
     }, taskEventQuery(viewer, current, input.status === 'done' ? 'task.completed' : 'task.skipped', { after: { status: input.status, outcome_note: note, photos: assetIds.length } }),
-    ...messagePhotoPlacements(viewer.principal.organizationId, 'task', taskId, assetIds, now)], { operation: input.status === 'done' ? 'Complete task' : 'Skip task' })
+    ...messagePhotoPlacements(organizationId, 'task', taskId, assetIds, now), ...messageQueries], { operation: input.status === 'done' ? 'Complete task' : 'Skip task' })
   } catch (error) {
     await discardMessagePhotos(db, input.env, viewer.principal.organizationId, assetIds, viewer.principal.userId, error)
     throw error
   }
   if (results[0]?.meta.changes !== 1) {
-    await discardMessagePhotos(db, input.env, viewer.principal.organizationId, assetIds, viewer.principal.userId, new Error('The task changed before it was closed'))
+    await discardMessagePhotos(db, input.env, organizationId, assetIds, viewer.principal.userId, new Error('The task changed before it was closed'))
     fail(409, 'TASK_VERSION_CONFLICT', 'This task changed since you opened it; reload it and try again', 'task')
   }
+  if (thread) await publishDashboardInvalidation(input.env, { eventId: crypto.randomUUID(), type: 'team_thread.changed', organizationId, teamThreadId: thread.id, occurredAt: now })
   return afterWrite(db, viewer, taskId)
 }
 

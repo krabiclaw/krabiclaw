@@ -9,7 +9,7 @@ import { NOT_HANDLED, optionalString, requiredString, resolveUserUploadedMediaFi
 const text = { type: 'string' }, nullableText = { type: ['string', 'null'] }
 const instant = { type: 'string', format: 'date-time', description: 'An instant with Z or a numeric offset.' }
 const person = { type: 'object', properties: { type: { type: 'string', enum: ['member', 'team'] }, id: text, name: text, initial: text, you: { type: 'boolean' } }, required: ['type', 'id', 'name', 'initial', 'you'] }
-const task = { type: 'object', properties: {
+export const TASK_VIEW_SCHEMA = { type: 'object', properties: {
   id: text, kind: { type: 'string', enum: [...TASK_KINDS] }, status: { type: 'string', enum: ['open', 'done', 'skipped', 'cancelled'] }, version: { type: 'integer' },
   face: { type: 'string', enum: ['photo', 'compact'] }, tag: nullableText, imageUrl: nullableText, avatar: { type: ['object', 'null'] },
   reservation: {
@@ -30,6 +30,7 @@ const task = { type: 'object', properties: {
   productId: nullableText, locationId: nullableText, stayId: nullableText, requestId: nullableText,
   can: { type: 'object', properties: { complete: { type: 'boolean' }, skip: { type: 'boolean' }, reopen: { type: 'boolean' }, assign: { type: 'boolean' }, edit: { type: 'boolean' } }, required: ['complete', 'skip', 'reopen', 'assign', 'edit'] },
 }, required: ['id', 'kind', 'status', 'version', 'face', 'tag', 'imageUrl', 'avatar', 'statusLine', 'title', 'when', 'detail', 'error', 'note', 'person', 'assignee', 'sheet', 'startsAt', 'dueAt', 'timezone', 'notes', 'outcome', 'action', 'path', 'productId', 'locationId', 'stayId', 'requestId', 'can'] }
+const task = TASK_VIEW_SCHEMA
 const taskResult = { type: 'object', properties: { task }, required: ['task'] }
 const opportunity = { type: 'object', properties: { id: text, statusLine: text, title: text, detail: text, icon: text, path: text, productId: nullableText, locationId: nullableText }, required: ['id', 'statusLine', 'title', 'detail', 'icon', 'path', 'productId', 'locationId'] }
 const assignee = {

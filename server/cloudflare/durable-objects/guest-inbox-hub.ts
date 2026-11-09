@@ -4,8 +4,11 @@ import { isDashboardInvalidation, type DashboardInvalidation } from '../../../sh
 import { queryFirst } from '~/server/db'
 import { assertAssignedBookingAccess, assignedResponsibilitySql, memberAccessPrincipal, resolveOrganizationMembership, roleAllows, type ResolvedMembership } from '~/server/utils/member-access'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
+import { runOrganizationJobs } from '~/server/domain/cleaner-jobs'
 
 type GuestInboxHubEnv = CloudflareEnv
+
+const JOBS_ORGANIZATION = 'jobs:organization'
 
 interface InboxSocketAttachment {
   organizationId: string
@@ -128,6 +131,24 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     return new Response(null, { status: 101, webSocket: client })
   }
 
+  /**
+   * The organization's cleaning jobs. Every stay or business change wakes them
+   * at once (a job given, moved or cancelled is told in its conversation right
+   * away); each wake reads D1, posts what is due and re-arms to the next
+   * reminder. A wake that throws is retried by the alarm itself.
+   */
+  private async wakeJobs(organizationId: string): Promise<void> {
+    await this.ctx.storage.put(JOBS_ORGANIZATION, organizationId)
+    await this.ctx.storage.setAlarm(Date.now())
+  }
+
+  override async alarm(): Promise<void> {
+    const organizationId = await this.ctx.storage.get<string>(JOBS_ORGANIZATION)
+    if (!organizationId) throw new Error('The jobs alarm fired for a hub that holds no organization')
+    const next = await runOrganizationJobs(this.env, this.env.DB, organizationId)
+    if (next) await this.ctx.storage.setAlarm(next.getTime())
+  }
+
   override webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): void {
     if (message === 'ping' || (typeof message === 'string' && message === 'ping')) {
       socket.send('pong')
@@ -150,6 +171,8 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     if (!organizationId || !isDashboardInvalidation(event) || event.organizationId !== organizationId) {
       return failure(400, 'INVALID_DASHBOARD_INVALIDATION', 'Invalid dashboard invalidation', 'body')
     }
+    // A stay, booking or task write is announced this way; the organization's jobs follow it.
+    if (event.type === 'stay.changed' || event.type === 'business.changed' || event.type === 'thread.created' || event.type === 'thread.changed') await this.wakeJobs(organizationId)
 
     // Every eligible dashboard must receive the event. A socket whose send
     // throws is closed so its client reconnects and reconciles, and the
