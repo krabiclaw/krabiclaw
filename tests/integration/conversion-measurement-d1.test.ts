@@ -337,6 +337,7 @@ test('consent is enforced for GA delivery and withdrawal erases stored identifie
     assert.equal(await recordZarazPageviewReceipt(db, { ...handoff, status: 'dispatched' }), true)
     assert.equal((await readGa4Delivery(db, handoff.eventId))?.status, 'dispatched')
     assert.equal(await recordZarazPageviewReceipt(db, { ...handoff, status: 'failed' }), false)
+    assert.equal((await readGa4Delivery(db, handoff.eventId))?.status, 'dispatched')
     // A visitor who declined is not handed over, and the pageview says why.
     await recordTenantPageview(db, { eventId: 'declined-pageview', organizationId: 'org-platform', sessionId: SESSION, visitorId: VISITOR,
       pagePath: '/', locale: 'en', referrerHost: null, attribution: {}, internalHosts: ['platform.example'], userAgent: 'Desktop', ipHash: 'h',

@@ -582,6 +582,7 @@ test('publication: one result and one external post per target; a failure is the
     assert.deepEqual(replayedDraft.post?.publications, [receipt])
     const editedLost = await updatePost(db, cardless, 'org-a', fourth.post.id, { changes: { body: 'Edited' }, expectedUpdatedAt: pinned.updated_at }, 'owner')
     assert.equal(editedLost!.body, 'Edited')
+    assert.equal((await mcp('list_posts', {})).posts?.find(post => post.id === pinned.id)?.body, 'Edited')
     assert.equal((await publishPost(env, 'org-a', fourth.post.id, { expectedUpdatedAt: editedLost!.updated_at, targets: [targets.facebook()] }, 'owner')).outcomes[0]!.status, 'published')
     await publishedOnMeta(fourth.post.id, 'facebook')
 
@@ -1165,6 +1166,11 @@ test('Facebook video: a Reel is published by finishing its upload session, any o
     assert.deepEqual(meta.sent(request => request.path.endsWith(`${PAGE}/videos`)).map(request => [request.body.file_url, request.body.published, request.body.description]),
       [['https://imagedelivery.example.test/hash/wide/public', undefined, 'Kitchen tour']])
     assert.deepEqual(await publication(wide.post.id).then(row => [row!.state, row!.provider_post_id]), ['published', 'video-2'])
+    // That video id has no Page prefix; the receipt of its publication to this Page is what lets it be deleted.
+    await assert.rejects(deleteChannelPost(env, 'org-a', targets.facebook(), 'video-unrecorded', 'owner'), /selected Page/)
+    await deleteChannelPost(env, 'org-a', targets.facebook(), 'video-2', 'owner')
+    assert.equal((await publication(wide.post.id))!.state, 'removed')
+    assert.equal(meta.sent(request => request.method === 'DELETE' && request.path.endsWith('video-2')).length, 1)
 
     // A Reel upload Facebook does not answer is a failure that says so; the next call runs its own session, and the abandoned one was never public.
     const retried = await create('key-fb-reel-retry', { body: 'Second reel', media: [{ asset_id: 'reel', slot: 'cover' }] })

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:a8e9404b351b3d28abb0775c8477eb9e3dc4ca4131b24c1781b515609cc18c3d",
-  "documentationFingerprint": "sha256:0a32eecbcc70be7ca943397b196253382f750fb1c1aed6cfea05c697abbd2f18",
+  "fingerprint": "sha256:737ba839bc04262498f504cfbe6cd3dd0e2fc07013a0a52d415da44628bf8f28",
+  "documentationFingerprint": "sha256:a84445d3d7b543b00f693b695d6400bc4039d25f647245932c2fcd10e864db12",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -42646,7 +42646,7 @@
     {
       "name": "delete_post",
       "title": "Delete post",
-      "description": "Delete a post from the website. Its Facebook, Instagram and Discord posts are not deleted; use delete_channel_post for an explicit supported channel deletion. Refused while a publication of it is in progress or unresolved.",
+      "description": "Delete a post from the website. Its Facebook, Instagram and Discord posts are not deleted; use delete_channel_post for an explicit supported channel deletion.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -74597,7 +74597,7 @@
     {
       "name": "publish_post",
       "title": "Publish post",
-      "description": "Publish the post to the selected website or social destinations, returning one result per target: the provider post on success, the provider error on failure. Publish again after a failure once its cause is fixed.",
+      "description": "Publish the post to the selected website or social destinations, returning one result per target with its status: published, already_published, failed with the provider error, or skipped. Publish again after a failure once its cause is fixed.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -114768,7 +114768,7 @@
     {
       "name": "update_post",
       "title": "Update post",
-      "description": "Change at least one supplied website post field. First call get_post for its updated_at and use that as expected_updated_at. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged; unresolved publication prevents content edits.",
+      "description": "Change at least one supplied website post field. First call get_post for its updated_at and use that as expected_updated_at. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -129272,7 +129272,7 @@
       "toolContracts": {
         "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
         "get_social_connections": "sha256:ce06b442ff3f389bf517c54c51ff4fb762a7bde099820d26f260139f1e3d1686",
-        "publish_post": "sha256:06b9665a84616f79868c2da57c709ccb370110bcdf87564c47107c1144d76625"
+        "publish_post": "sha256:ff1d3f005b7fe8753830357d51439f9f8f24ba7a1243284b7bd637759c29f91e"
       }
     },
     {
@@ -129454,7 +129454,7 @@
         "list_guest_conversations": "sha256:9bae34357644916476bec0c0d9a07dc7dbf2beb726716b882a886a05097d1ee0",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
-        "publish_post": "sha256:06b9665a84616f79868c2da57c709ccb370110bcdf87564c47107c1144d76625",
+        "publish_post": "sha256:ff1d3f005b7fe8753830357d51439f9f8f24ba7a1243284b7bd637759c29f91e",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
         "update_product": "sha256:ffa1d299e527684eb92380cdbf51be23633f94a08b74eb8143ea5e06d78c03b3"
       }

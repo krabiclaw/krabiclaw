@@ -416,12 +416,16 @@ async function publishVideoToFacebook(context: ChannelContext, target: FacebookP
 }
 
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+// Meta's publishing guide: check a container's status for no more than five minutes.
+const CONTAINER_WAIT_MS = 5 * 60_000
 
 /** Waits until Instagram finishes processing a container (docs: poll status_code until it leaves IN_PROGRESS). */
 async function containerReady(target: InstagramTarget, containerId: string): Promise<'FINISHED' | 'EXPIRED' | 'ERROR' | 'PUBLISHED'> {
+  const until = Date.now() + CONTAINER_WAIT_MS
   for (;;) {
     const { status } = await readContainerStatus(target, containerId)
     if (status !== 'IN_PROGRESS') return status
+    if (Date.now() >= until) throw new PublicationFailure('provider_processing_failed', 'Instagram was still processing the media after five minutes')
     await pause(3_000)
   }
 }
@@ -458,9 +462,10 @@ async function publishToInstagram(context: ChannelContext, target: InstagramTarg
   // Meta can answer media_publish with 9007/2207027, "media not ready", after the container
   // reads FINISHED; that is the same readiness wait, so it waits on the container again.
   let mediaId: string
+  const until = Date.now() + CONTAINER_WAIT_MS
   for (;;) {
     try { mediaId = await publishContainer(target, containerId); break } catch (error) {
-      if (!(error instanceof MetaGraphError) || error.details.code !== 9007 || error.details.subcode !== 2207027) throw error
+      if (!(error instanceof MetaGraphError) || error.details.code !== 9007 || error.details.subcode !== 2207027 || Date.now() >= until) throw error
       await pause(3_000)
       const { status } = await readContainerStatus(target, containerId)
       if (status !== 'FINISHED' && status !== 'IN_PROGRESS') throw error
@@ -537,7 +542,8 @@ async function publishExternal(
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT DO UPDATE SET provider_app_id = excluded.provider_app_id, provider_subject_id = excluded.provider_subject_id, provider_target_id = excluded.provider_target_id,
       state = excluded.state, provider_post_id = excluded.provider_post_id, provider_permalink = excluded.provider_permalink, payload_hash = excluded.payload_hash,
-      initiating_activity_id = excluded.initiating_activity_id, error_code = excluded.error_code, error_message = excluded.error_message, published_at = excluded.published_at, updated_at = excluded.updated_at`,
+      initiating_activity_id = excluded.initiating_activity_id, error_code = excluded.error_code, error_message = excluded.error_message, published_at = excluded.published_at, updated_at = excluded.updated_at
+      WHERE post_publications.state <> 'published' OR excluded.state = 'published'`,
   [id, organizationId, post.id, target.channel, appId, account.accountId, target.target_id, published ? 'published' : 'failed',
     published?.providerPostId ?? null, validPermalink(published?.permalink ?? null), payloadHash, activityId,
     failure?.code ?? null, failure ? failure.message.slice(0, 1000) : null, published?.publishedAt ?? null, at, at])

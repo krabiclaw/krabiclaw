@@ -94,14 +94,15 @@ export async function deleteChannelPost(env: CloudflareEnv, organizationId: stri
   if (input.channel === 'instagram') throw new HTTPError({ statusCode: 400, statusMessage: 'Meta media deletion requires Facebook Login. This connection uses Instagram Login; delete the post in Instagram.' })
   const connection = await connectedSocialTarget(env, organizationId, input)
   if (connection.channel === 'instagram') throw new Error('The selected channel changed')
-  if (connection.channel === 'facebook' && !providerPostId.startsWith(`${input.target_id}_`)) throw new HTTPError({ statusCode: 400, statusMessage: 'provider_post_id must belong to the explicitly selected Page.' })
   const receiptQuery = `SELECT id, state FROM post_publications WHERE organization_id = ? AND channel = ? AND provider_target_id = ? AND provider_post_id = ?`
   const receiptParams = [organizationId, input.channel, input.target_id, providerPostId]
   const previous = await queryFirst<{ id: string; state: string }>(env.DB, receiptQuery, receiptParams)
   if (previous?.state === 'removed') return { channel: input.channel, target_id: input.target_id, provider_post_id: providerPostId, deleted: true, publication: previous }
   if (previous && previous.state !== 'published') throw new HTTPError({ statusCode: 409, statusMessage: 'Resolve the existing publication before deleting its provider post.' })
   if (connection.channel === 'facebook') {
-    facebookPost(await readPagePostRecord(connection.target, providerPostId), input.target_id)
+    // A video id carries no Page prefix, so only the receipt of a publication to this Page vouches for it.
+    if (providerPostId.startsWith(`${input.target_id}_`)) facebookPost(await readPagePostRecord(connection.target, providerPostId), input.target_id)
+    else if (!previous) throw new HTTPError({ statusCode: 400, statusMessage: 'provider_post_id must belong to the explicitly selected Page.' })
     await deletePageObject(connection.target, providerPostId)
   } else {
     // Only the bot's own message in the connected channel is read, and only that one is deleted.

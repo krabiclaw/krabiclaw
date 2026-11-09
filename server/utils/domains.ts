@@ -480,6 +480,7 @@ async function persistCloudflareState(
           SELECT 1
           FROM organization_domains expected
           WHERE expected.id = ? AND expected.role = 'canonical'
+            AND expected.desired_state = 'active' AND expected.status NOT IN ('disabled', 'deleted')
         )
     `,
       params: [now, before.organization_id, domainId, domainId],

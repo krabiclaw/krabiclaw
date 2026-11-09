@@ -23,8 +23,10 @@ through it with the same tools.
 - Posts: `create_post` makes a draft (pass a new `idempotency_key`); `publish_post` publishes to
   exactly the `targets` named — `{"channel":"organization"}` and the `target_id` and
   `connection_revision` from `get_social_connections` — and returns one outcome per target.
-  Each outcome is the provider's answer: `published` with its post, or `failed` with its
-  reason; `publish_post` again once the cause is fixed. `reconcile_post_publication` reads a
+  Each outcome has a `status`: `published` (with `public_url` when the destination gives one),
+  `already_published` for a target this post already reached, `failed` with the provider's
+  reason, or `skipped` when the destination is not connected or not on the plan;
+  `publish_post` again once the cause is fixed. `reconcile_post_publication` reads a
   publication's post on its destination and refreshes the receipt. Nothing is scheduled: a
   client that wants a post out later calls `publish_post` then.
 

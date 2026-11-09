@@ -155,7 +155,7 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'update_post',
-    description: 'Change at least one supplied website post field. First call get_post for its updated_at and use that as expected_updated_at. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged; unresolved publication prevents content edits.',
+    description: 'Change at least one supplied website post field. First call get_post for its updated_at and use that as expected_updated_at. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged.',
     domain: 'posts',
     minimumRole: 'admin',
     inputSchema: {
@@ -170,7 +170,7 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'publish_post',
-    description: 'Publish the post to the selected website or social destinations, returning one result per target: the provider post on success, the provider error on failure. Publish again after a failure once its cause is fixed.',
+    description: 'Publish the post to the selected website or social destinations, returning one result per target with its status: published, already_published, failed with the provider error, or skipped. Publish again after a failure once its cause is fixed.',
     domain: 'posts',
     minimumRole: 'admin',
     inputSchema: {
@@ -200,7 +200,7 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'delete_post',
-    description: 'Delete a post from the website. Its Facebook, Instagram and Discord posts are not deleted; use delete_channel_post for an explicit supported channel deletion. Refused while a publication of it is in progress or unresolved.',
+    description: 'Delete a post from the website. Its Facebook, Instagram and Discord posts are not deleted; use delete_channel_post for an explicit supported channel deletion.',
     domain: 'posts',
     minimumRole: 'admin',
     inputSchema: { post_id: { type: 'string' } },
