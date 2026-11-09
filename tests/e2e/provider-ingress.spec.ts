@@ -307,11 +307,11 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   expect(ownerAlerts.every(email => email.message.text.includes('Reply to this email or from the dashboard.'))).toBe(true)
   const memberReplyTo = ownerAlerts[0]!.message.replyTo!
   const ownerBody = `Owner email reply ${randomUUID()}`
-  const ownerReply = (phase: string, from: string, messageId: string) => fetchPhase(phase, '/cdn-cgi/local/email', {
+  const ownerReply = (phase: string, from: string, messageId: string, headers: string[] = []) => fetchPhase(phase, '/cdn-cgi/local/email', {
     method: 'POST',
     params: { from, to: memberReplyTo },
     data: [
-      `From: Owner <${from}>`, `To: ${memberReplyTo}`, `Subject: Re: ${ownerAlerts[0]!.message.subject}`, `Message-ID: ${messageId}`,
+      `From: Owner <${from}>`, `To: ${memberReplyTo}`, `Subject: Re: ${ownerAlerts[0]!.message.subject}`, `Message-ID: ${messageId}`, ...headers,
       `Date: ${new Date().toUTCString()}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8', '',
       ownerBody, '', `On ${new Date().toUTCString()} KrabiClaw <hello@krabiclaw.com> wrote:`, `> ${body}`, '',
     ].join('\r\n'),
@@ -322,6 +322,9 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
     expect(accepted.status(), await accepted.text()).toBe(200)
     expect(await accepted.text()).toBe('Worker successfully processed email')
   }
+  // An out-of-office is accepted and reaches nobody; the count of emails to the guest below proves it.
+  const outOfOffice = await ownerReply('drop an automatic reply', ownerAddress, `<${randomUUID()}@e2e.example.test>`, ['Auto-Submitted: auto-replied'])
+  expect(outOfOffice.status(), await outOfOffice.text()).toBe(200)
   const strangerReply = await ownerReply('reject a reply from another sender', 'someone-else@e2e.example.test', `<${randomUUID()}@e2e.example.test>`)
   expect(strangerReply.status()).toBe(400)
   expect(await strangerReply.text()).toBe('Worker rejected email with the following reason: This reply address is not valid for the address you replied from. Reply from the address the alert was sent to, or answer from the dashboard.')

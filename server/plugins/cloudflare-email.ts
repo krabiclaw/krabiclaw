@@ -66,6 +66,9 @@ async function processEmail(message: ForwardableEmailMessage, env: unknown, repo
   })
   const from = message.from.trim().toLowerCase()
   if (reply.kind === 'member') {
+    // An out-of-office or mail rule is not the member's reply: accepted, so it neither reaches the guest nor bounces.
+    const autoSubmitted = parsed.headers.find(header => header.key === 'auto-submitted')?.value.trim().toLowerCase()
+    if (autoSubmitted && autoSubmitted !== 'no') return
     await receiveMemberEmail(env, { entryId: reply.entryId, token: reply.token, from, body: guestReplyText(parsed), files, messageId }, report)
     return
   }

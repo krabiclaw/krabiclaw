@@ -256,7 +256,8 @@ export async function recordWhatsAppInbound(db: DbClient, input: { userId: strin
   await execute(db, `
     INSERT INTO user_workspace_state (user_id, whatsapp_last_inbound_id, whatsapp_updated_at)
     VALUES (?, ?, ?)
-    ON CONFLICT(user_id) DO UPDATE SET whatsapp_last_inbound_id = excluded.whatsapp_last_inbound_id, whatsapp_updated_at = excluded.whatsapp_updated_at
+    ON CONFLICT(user_id) DO UPDATE SET whatsapp_last_inbound_id = excluded.whatsapp_last_inbound_id,
+      whatsapp_updated_at = MAX(COALESCE(user_workspace_state.whatsapp_updated_at, excluded.whatsapp_updated_at), excluded.whatsapp_updated_at)
   `, [input.userId, input.messageId, input.sentAt])
 }
 

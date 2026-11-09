@@ -116,12 +116,16 @@ async function replyToTeamAsMember(env: ExecuteOperationInput['env'], input: { o
   if (!membership) return { sent: false, notice: replyNotSent('You are no longer a member of this business.'), report: null }
   const user = await queryFirst<{ name: string }>(env.DB, 'SELECT name FROM user WHERE id = ?', [input.userId])
   if (!user) throw new Error(`Member ${input.userId} has no user record`)
+  const idempotencyKey = await creationRequestHash(input.idempotencyKey)
   return teamAccessFor(memberAccessPrincipal(membership, { env }), membership.memberId, 'send').then(async access => {
-    await sendTeamMessage(env, env.DB, access, input.threadId, { body: input.body, photos: input.files, idempotencyKey: await creationRequestHash(input.idempotencyKey), senderName: user.name })
+    await sendTeamMessage(env, env.DB, access, input.threadId, { body: input.body, photos: input.files, idempotencyKey, senderName: user.name })
     return { sent: true, notice: REPLY_SENT, report: null }
-  }).catch((error: unknown) => error instanceof HTTPError && error.status >= 400 && error.status < 500
-    ? { sent: false, notice: replyNotSent(error.message), report: null }
-    : { sent: false, notice: REPLY_FAILED_ALERTED, report: error })
+  }).catch(async (error: unknown) => {
+    if (error instanceof HTTPError && error.status >= 400 && error.status < 500) return { sent: false, notice: replyNotSent(error.message), report: null }
+    // A message that saved is in the conversation whatever failed after it, so sending it again would repeat it.
+    const saved = await queryFirst(env.DB, 'SELECT 1 FROM team_messages WHERE organization_id = ? AND thread_id = ? AND idempotency_key = ?', [input.organizationId, input.threadId, idempotencyKey])
+    return saved ? { sent: true, notice: REPLY_SENT, report: error } : { sent: false, notice: REPLY_FAILED_ALERTED, report: error }
+  })
 }
 
 /** Answers the conversation an alert's entry belongs to, a guest's or the team's, as the member. */

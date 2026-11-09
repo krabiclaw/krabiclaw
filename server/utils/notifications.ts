@@ -1150,6 +1150,7 @@ export async function notifyReservationCancelled(
     sendEmailNotification(env, db, {
       ...opts,
       to: opts.email,
+      replyAs: { kind: 'guest' },
       template: 'reservation_customer_cancelled',
       title: guestMessage.title,
       payload,
@@ -1786,6 +1787,7 @@ export async function notifyBookingCancelled(
     sendEmailNotification(env, db, {
       ...opts,
       to: opts.email,
+      replyAs: { kind: 'guest' },
       template: 'booking_customer_cancelled',
       title: guestMessage.title,
       payload,
@@ -2006,10 +2008,12 @@ async function alertedMessage(db: DbClient, thread: GuestRequest, entry: GuestTh
     || (item.attachments.length ? messagePreview(null, item.attachments.length) : fileCount(item.payload) === 1 ? 'Sent an attachment' : `Sent ${fileCount(item.payload)} attachments`)
   return {
     guestName: guestFullName,
-    body: alerted.body?.trim() ?? '',
+    // A file with no words is still what the guest sent; photos show themselves.
+    body: alerted.body?.trim() || (alerted.attachments.length ? '' : said(alerted)),
     photos: alerted.attachments.map(photo => ({ imageUrl: photo.url, alt: photo.alt ?? `Photo from ${guest}` })),
     preview: said(alerted),
-    history: messages.slice(Math.max(0, position - ALERT_HISTORY), position).map(item => ({ author: author(item), text: said(item) })),
+    history: messages.slice(0, position).filter(item => item.body?.trim() || item.attachments.length || fileCount(item.payload)).slice(-ALERT_HISTORY)
+      .map(item => ({ author: author(item), text: said(item) })),
   }
 }
 
