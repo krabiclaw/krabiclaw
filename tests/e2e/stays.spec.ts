@@ -494,7 +494,7 @@ test('a responsible home team reads its stays as turnovers on every surface unti
     const strip = memberPage.getByTestId('team-thread-job')
     await expect(strip).toContainText('Cliff Cabin')
     await strip.getByRole('button', { name: 'Cliff Cabin', exact: true }).click()
-    const sheet = memberPage.getByTestId('today-task-sheet')
+    const sheet = memberPage.getByRole('dialog', { name: 'Turnover', exact: true })
     await expect(sheet.getByRole('heading', { name: 'Turnover', exact: true })).toBeVisible()
     await expect(sheet.getByText(`${guestName} out`, { exact: false })).toBeVisible()
     await memberPage.keyboard.press('Escape')
