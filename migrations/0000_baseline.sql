@@ -1635,6 +1635,7 @@ CREATE TABLE `product_booking_configs` (
 	CONSTRAINT "product_booking_configs_duration_check" CHECK(duration_minutes IS NULL OR duration_minutes > 0),
 	CONSTRAINT "product_booking_configs_capacity_check" CHECK(default_capacity IS NULL OR default_capacity >= 0),
 	CONSTRAINT "product_booking_configs_confirmation_check" CHECK(confirmation_mode IN ('instant', 'review')),
+	CONSTRAINT "product_booking_configs_scheduling_mode_check" CHECK(scheduling_mode IN ('business', 'provider')),
 	CONSTRAINT "product_booking_configs_payment_check" CHECK(online_payment_required IN (0, 1)),
 	CONSTRAINT "product_booking_configs_held_online_check" CHECK(held_online IN (0, 1) AND (held_online = 0 OR scheduling_mode = 'provider'))
 );

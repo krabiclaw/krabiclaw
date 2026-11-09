@@ -794,6 +794,7 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	check("product_booking_configs_duration_check", sql`duration_minutes IS NULL OR duration_minutes > 0`),
 	check("product_booking_configs_capacity_check", sql`default_capacity IS NULL OR default_capacity >= 0`),
 	check("product_booking_configs_confirmation_check", sql`confirmation_mode IN ('instant', 'review')`),
+	check("product_booking_configs_scheduling_mode_check", sql`scheduling_mode IN ('business', 'provider')`),
 	check("product_booking_configs_payment_check", sql`online_payment_required IN (0, 1)`),
 	// A provider's departure may clear responsibility without changing online delivery.
 	check("product_booking_configs_held_online_check", sql`held_online IN (0, 1) AND (held_online = 0 OR scheduling_mode = 'provider')`),

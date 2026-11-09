@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:281857030080b45aba454189e3d78eb9c8e40d5c473b46184abfd0310c292a91",
-  "documentationFingerprint": "sha256:0b797b944b18df0a2710d73bcc9768b60952a4e108fc67087dfeac615cde55c6",
+  "fingerprint": "sha256:9301331ed99c545ca56beb78fbf548a637cb0f9d5b9505774e71b0169331857e",
+  "documentationFingerprint": "sha256:f3597c5f78b42308699f711fd1b7dbf5ecb2598e3bbc0ec555ef03e206acf9a2",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -10086,7 +10086,7 @@
                       "type": "string"
                     },
                     "scheduling_mode": {
-                      "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions without one named provider; experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                      "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                       "enum": [
                         "business",
                         "provider"
@@ -23443,7 +23443,7 @@
                 "type": "boolean"
               },
               "scheduling_mode": {
-                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions without one named provider; experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                 "enum": [
                   "business",
                   "provider"
@@ -26968,7 +26968,7 @@
                     "type": "string"
                   },
                   "scheduling_mode": {
-                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions without one named provider; experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                     "enum": [
                       "business",
                       "provider"
@@ -52977,7 +52977,7 @@
                     "type": "string"
                   },
                   "scheduling_mode": {
-                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions without one named provider; experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                     "enum": [
                       "business",
                       "provider"
@@ -87179,7 +87179,7 @@
                       "type": "string"
                     },
                     "scheduling_mode": {
-                      "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions without one named provider; experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                      "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                       "enum": [
                         "business",
                         "provider"
@@ -102737,7 +102737,7 @@
             "type": "array"
           },
           "scheduling_mode": {
-            "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions without one named provider; experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+            "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
             "enum": [
               "business",
               "provider"
@@ -102888,7 +102888,7 @@
                 "type": "string"
               },
               "scheduling_mode": {
-                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions without one named provider; experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                 "enum": [
                   "business",
                   "provider"
@@ -115359,7 +115359,7 @@
                 "type": "boolean"
               },
               "scheduling_mode": {
-                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions without one named provider; experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                 "enum": [
                   "business",
                   "provider"
@@ -117355,7 +117355,7 @@
                     "type": "string"
                   },
                   "scheduling_mode": {
-                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions without one named provider; experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                     "enum": [
                       "business",
                       "provider"
@@ -129259,18 +129259,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:bc3e508ca60bacb9e98625471a6bf982076505e6bf489b9a4c12b21a1100f352",
-        "get_product": "sha256:ca5b41cddcf879c53dd6d9a72516370caaccc48250265b5f33dc17294498b17f",
+        "create_product": "sha256:cc9a0443c9d867bbdeb6ebdc38348e744611e34a0b87160f899d9c2391a5d0ba",
+        "get_product": "sha256:c7de79b898642a58f86d4e1611e5ee1565801058c4c942c5b4bb55c7e7afa19a",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
         "list_location_products": "sha256:2015626d39e62ce848fe36e9f0b99ac1e50b9afb915d67d7ce067553afb700b6",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
-        "reconcile_products": "sha256:aa2589424a002e139936d0c12ff2e01854ee27d184805ee39e0e0ea10b8ac258",
+        "reconcile_products": "sha256:31a7995ab9c82d529a1f291c8b186938caabc9fb629b139e5785b3c9fe907173",
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
         "set_collection_products": "sha256:124140d2c1f17f41c466ca886c7fcabdfa4d9f34d9b6f0da8a1299548ae49289",
         "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
-        "update_product": "sha256:98db272f9b6ef1649b47caa53484a65c9cba089a7e6211c909030e185919dcee"
+        "update_product": "sha256:2c157a511f451614b32894c34a750df08944e9b1d5f339ee5351f699ec7038db"
       }
     },
     {
@@ -129315,8 +129315,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:bc3e508ca60bacb9e98625471a6bf982076505e6bf489b9a4c12b21a1100f352",
-        "get_product": "sha256:ca5b41cddcf879c53dd6d9a72516370caaccc48250265b5f33dc17294498b17f",
+        "create_product": "sha256:cc9a0443c9d867bbdeb6ebdc38348e744611e34a0b87160f899d9c2391a5d0ba",
+        "get_product": "sha256:c7de79b898642a58f86d4e1611e5ee1565801058c4c942c5b4bb55c7e7afa19a",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
@@ -129387,7 +129387,7 @@
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
         "get_post": "sha256:084fd73ea9efe150fe8e7812e02a80394a52477719bdab8ed3c33beae8225df8",
-        "get_product": "sha256:ca5b41cddcf879c53dd6d9a72516370caaccc48250265b5f33dc17294498b17f",
+        "get_product": "sha256:c7de79b898642a58f86d4e1611e5ee1565801058c4c942c5b4bb55c7e7afa19a",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
@@ -129403,7 +129403,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:bc3e508ca60bacb9e98625471a6bf982076505e6bf489b9a4c12b21a1100f352",
+        "create_product": "sha256:cc9a0443c9d867bbdeb6ebdc38348e744611e34a0b87160f899d9c2391a5d0ba",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
@@ -129429,15 +129429,15 @@
       },
       "toolContracts": {
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
-        "get_product": "sha256:ca5b41cddcf879c53dd6d9a72516370caaccc48250265b5f33dc17294498b17f",
+        "get_product": "sha256:c7de79b898642a58f86d4e1611e5ee1565801058c4c942c5b4bb55c7e7afa19a",
         "get_reservation_policy": "sha256:1e70aca37a43c0512b2249b7c26e37844b0c04959bd40d3fbb5a73d711238943",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "replace_product_weekly_schedule": "sha256:cc5f48fb054661e70ce26d988fc12a29f4325c7fc59b5b20852fb98d0e0e2451",
-        "set_product_booking_config": "sha256:9babf48bf4fc84a73e25a4f3ad638a9bf1054433792394949f3a518e28c7838f",
-        "update_product": "sha256:98db272f9b6ef1649b47caa53484a65c9cba089a7e6211c909030e185919dcee",
+        "set_product_booking_config": "sha256:8c67bc22b63c56cfb20a31a29157a677470e584182a6739d0a0e91e85cc8b082",
+        "update_product": "sha256:2c157a511f451614b32894c34a750df08944e9b1d5f339ee5351f699ec7038db",
         "update_reservation_policy": "sha256:33b8ea1a819ab514a06e8bec979fc44a57260e2eb53d39d35be97b74fe092f66"
       }
     },
@@ -129457,7 +129457,7 @@
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_product": "sha256:98db272f9b6ef1649b47caa53484a65c9cba089a7e6211c909030e185919dcee",
+        "update_product": "sha256:2c157a511f451614b32894c34a750df08944e9b1d5f339ee5351f699ec7038db",
         "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
       }
     },
@@ -129473,14 +129473,14 @@
         "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
         "get_guest_conversation": "sha256:bbc45bf9bdc9097c8aad98e871de2e959a34fbfaf24635f8d2490185732bab59",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
-        "get_product": "sha256:ca5b41cddcf879c53dd6d9a72516370caaccc48250265b5f33dc17294498b17f",
+        "get_product": "sha256:c7de79b898642a58f86d4e1611e5ee1565801058c4c942c5b4bb55c7e7afa19a",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:9bae34357644916476bec0c0d9a07dc7dbf2beb726716b882a886a05097d1ee0",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
-        "update_product": "sha256:98db272f9b6ef1649b47caa53484a65c9cba089a7e6211c909030e185919dcee"
+        "update_product": "sha256:2c157a511f451614b32894c34a750df08944e9b1d5f339ee5351f699ec7038db"
       }
     }
   ]

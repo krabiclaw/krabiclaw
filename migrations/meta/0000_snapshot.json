@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0dbface4-9bbb-4b76-a4b0-5db7cfab409a",
+  "id": "4d828792-cba4-4a99-8336-074edf20ebc9",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -11347,6 +11347,10 @@
         "product_booking_configs_confirmation_check": {
           "name": "product_booking_configs_confirmation_check",
           "value": "confirmation_mode IN ('instant', 'review')"
+        },
+        "product_booking_configs_scheduling_mode_check": {
+          "name": "product_booking_configs_scheduling_mode_check",
+          "value": "scheduling_mode IN ('business', 'provider')"
         },
         "product_booking_configs_payment_check": {
           "name": "product_booking_configs_payment_check",
