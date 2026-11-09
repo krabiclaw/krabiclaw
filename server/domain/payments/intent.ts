@@ -31,7 +31,7 @@ export async function requireClaimedPayment(db: DbClient, stripe: Stripe, organi
   if (!payment?.stripe_payment_intent_id || !payment.checkout_expires_at || !payment.return_expires_at) throw new HTTPError({ statusCode: 404, statusMessage: 'Payment not found' })
   const intent = await stripe.paymentIntents.retrieve(payment.stripe_payment_intent_id, { expand: ['latest_charge'] }, { stripeAccount: payment.stripe_account_id })
   const now = new Date().toISOString()
-  const state: PaymentHandoffState = payment.captured_amount > 0 || intent.status === 'requires_capture' || intent.status === 'succeeded' ? 'paid' : intent.status === 'canceled' ? 'failed' : payment.checkout_expires_at <= now || payment.return_expires_at <= now ? 'expired' : 'open'
+  const state: PaymentHandoffState = payment.captured_amount > 0 || intent.status === 'requires_capture' || intent.status === 'succeeded' || intent.status === 'processing' ? 'paid' : intent.status === 'canceled' ? 'failed' : payment.checkout_expires_at <= now || payment.return_expires_at <= now ? 'expired' : 'open'
   return { payment, intent, state }
 }
 
@@ -113,6 +113,7 @@ export async function paymentHandoff(db: DbClient, stripe: Stripe, publishableKe
 export async function cancelStayPayment(db: DbClient, stripe: Stripe, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string): Promise<{ status: 'canceled' }> {
   const { payment, intent: current, state } = await requireClaimedPayment(db, stripe, organizationId, paymentId, claim)
   if (payment.subject_type !== 'stay') throw new HTTPError({ statusCode: 409, statusMessage: 'This payment does not hold a stay' })
+  if (current.status === 'processing') throw new HTTPError({ statusCode: 409, statusMessage: 'This payment has started processing and cannot be changed here', data: { code: 'payment_in_progress' } })
   if (state === 'paid') throw new HTTPError({ statusCode: 409, statusMessage: 'This stay is already paid; open its booking to request a change', data: { code: 'payment_paid' } })
   if (current.livemode !== Boolean(payment.livemode) || current.currency.toUpperCase() !== payment.currency || current.metadata.krabiclaw_payment_id !== payment.id) throw new Error('Stripe PaymentIntent does not match the purchase')
   if (state !== 'open' && current.status !== 'canceled') throw new HTTPError({ statusCode: 409, statusMessage: state === 'expired' ? 'This payment has expired; start the booking again' : 'This payment was not accepted; start the booking again', data: { code: `payment_${state}` } })
