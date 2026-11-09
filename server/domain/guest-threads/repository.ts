@@ -655,11 +655,11 @@ function consultationJobQueries(requestId: string, now: string): BatchQuery[] {
       SELECT ?, b.organization_id, '${job.kind}', 'booking', b.id, b.product_id, ps.location_id, b.assigned_member_id, ${job.at}, ${job.at}, ps.timezone, 'open', '${job.kind}:' || b.id, 1, ?, ?
         FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id AND ps.organization_id = b.organization_id
         JOIN organization o ON o.id = b.organization_id AND o.vertical = 'service'
-       WHERE b.request_id = ? AND b.status = 'confirmed'
+       WHERE b.request_id = ? AND b.status = 'confirmed' AND ${job.at} > ?
       ON CONFLICT (dedupe_key) DO UPDATE SET status = CASE WHEN tasks.status = 'cancelled' THEN 'open' ELSE tasks.status END, closed_at = CASE WHEN tasks.status = 'cancelled' THEN NULL ELSE tasks.closed_at END,
         starts_at = excluded.starts_at, due_at = excluded.due_at, assigned_member_id = excluded.assigned_member_id, assigned_team_id = NULL, version = tasks.version + 1, updated_at = excluded.updated_at
         WHERE tasks.status = 'cancelled' OR tasks.starts_at IS NOT excluded.starts_at OR tasks.assigned_member_id IS NOT excluded.assigned_member_id OR tasks.assigned_team_id IS NOT NULL`,
-    params: [crypto.randomUUID(), now, now, requestId],
+    params: [crypto.randomUUID(), now, now, requestId, now],
   }))]
 }
 

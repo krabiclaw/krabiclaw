@@ -883,6 +883,23 @@ export function stayReadyTaskQueries(input: {
   return queries
 }
 
+/** A stay's revision reaches its open make-ready job: a cancellation calls it off, new dates move its due time and note. */
+export function stayReadyRevisionQueries(input: { organizationId: string; stayId: string; now: string; guard: BatchQuery; cancelled: boolean; dueAt?: string | null; checkInDate?: string; guestName?: string | null }): BatchQuery[] {
+  const { organizationId, stayId, now, guard } = input
+  if (input.cancelled) return [{
+    query: `UPDATE tasks SET status = 'cancelled', closed_at = ?, closed_by_user_id = NULL, version = version + 1, updated_at = ?
+      WHERE organization_id = ? AND kind = 'stay_ready' AND subject_type = 'stay' AND subject_id = ? AND status = 'open' AND ${guard.query}`,
+    params: [now, now, organizationId, stayId, ...guard.params!],
+  }]
+  if (input.dueAt === undefined || !input.checkInDate) return []
+  return [{
+    query: `UPDATE tasks SET due_at = ?, notes = ?, version = version + 1, updated_at = ?
+      WHERE organization_id = ? AND kind = 'stay_ready' AND subject_type = 'stay' AND subject_id = ? AND status = 'open' AND due_at IS NOT ? AND ${guard.query}`,
+    params: [input.dueAt, `${input.guestName ?? 'A guest'} was moved here and arrives ${formatCalendarDate(input.checkInDate, 'en', { weekday: 'short', month: 'short', day: 'numeric' })}.`, now,
+      organizationId, stayId, input.dueAt, ...guard.params!],
+  }]
+}
+
 export async function notifyStayReady(env: CloudflareEnv, db: DbClient, input: { organizationId: string; stayId: string; productId: string; actorUserId: string | null }): Promise<void> {
   const task = await queryFirst<{ id: string; assigned_member_id: string | null; assigned_team_id: string | null }>(db,
     'SELECT id, assigned_member_id, assigned_team_id FROM tasks WHERE organization_id = ? AND dedupe_key = ?', [input.organizationId, stayReadyKey(input.stayId, input.productId)])
@@ -1013,35 +1030,32 @@ export async function closeTask(db: DbClient, viewer: TaskViewer, taskId: string
      WHERE t.organization_id = ? AND s.member_id = ? ORDER BY m.created_at DESC, t.id LIMIT 1`, [`job:${current.id}:${current.product_id}`, organizationId, viewer.memberId]) : null
   const assetIds = input.photos.length ? await uploadMessagePhotos(db, input.env, organizationId, input.photos, { source: 'uploaded', userId: viewer.principal.userId })
     .catch((error: unknown) => error instanceof MessagePhotoRejection ? fail(422, 'INVALID_PHOTO', error.message, 'photos') : Promise.reject(error)) : []
-  const closed = `EXISTS (SELECT 1 FROM tasks WHERE organization_id = ? AND id = ? AND version = ? AND status = ?)`
-  const closedParams = [organizationId, taskId, current.version + 1, input.status]
   const messageId = crypto.randomUUID()
   const messageExists = `EXISTS (SELECT 1 FROM team_messages WHERE id = ?)`
   const messageQueries: BatchQuery[] = thread ? [{
     query: `INSERT INTO team_messages (id, organization_id, thread_id, sender_user_id, automatic, body, idempotency_key, request_hash, created_at)
-      SELECT ?, ?, ?, ?, 0, ?, ?, ?, ? WHERE ${closed}`,
+      VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)`,
     params: [messageId, organizationId, thread.id, viewer.principal.userId, note ?? (input.status === 'done' ? 'Done' : 'Skipped'), `task-closed:${taskId}:${current.version + 1}`,
-      await creationRequestHash({ note, photos: assetIds }), now, ...closedParams],
+      await creationRequestHash({ note, photos: assetIds }), now],
   }, organizationEventQuery({ organizationId, actorId: viewer.principal.userId, eventType: 'team.message_sent', entityType: 'team_message', entityId: messageId,
     metadata: { team_thread_id: thread.id, task_id: taskId }, dedupeKey: `team-message:${messageId}`, onlyIfPreviousChangedOneRow: true }),
   ...messagePhotoPlacements(organizationId, 'team_message', messageId, assetIds, now),
   { query: `UPDATE team_threads SET last_message_at = ? WHERE organization_id = ? AND id = ? AND last_message_at < ? AND ${messageExists}`, params: [now, organizationId, thread.id, now, messageId] },
   { query: `UPDATE team_thread_members SET last_read_at = ? WHERE organization_id = ? AND thread_id = ? AND member_id = ? AND ${messageExists}`, params: [now, organizationId, thread.id, viewer.memberId, messageId] }] : []
-  let results: Awaited<ReturnType<typeof executeBatch>>
   try {
-    results = await executeBatch(db, [{
+    await executeBatch(db, [{
       query: `UPDATE tasks SET status = ?, outcome_note = ?, closed_at = ?, closed_by_user_id = ?, version = version + 1, updated_at = ?
         WHERE organization_id = ? AND id = ? AND version = ? AND status = 'open'`,
       params: [input.status, note, now, viewer.principal.userId, now, organizationId, taskId, current.version],
-    }, taskEventQuery(viewer, current, input.status === 'done' ? 'task.completed' : 'task.skipped', { after: { status: input.status, outcome_note: note, photos: assetIds.length } }),
+    },
+    // Everything after this is this request's own close: a close that lost to another one fails the batch here.
+    { query: "SELECT CASE WHEN changes() = 1 THEN NULL ELSE json('TASK_VERSION_CONFLICT') END" },
+    taskEventQuery(viewer, current, input.status === 'done' ? 'task.completed' : 'task.skipped', { after: { status: input.status, outcome_note: note, photos: assetIds.length } }),
     ...messagePhotoPlacements(organizationId, 'task', taskId, assetIds, now), ...messageQueries], { operation: input.status === 'done' ? 'Complete task' : 'Skip task' })
   } catch (error) {
     await discardMessagePhotos(db, input.env, viewer.principal.organizationId, assetIds, viewer.principal.userId, error)
+    if (/malformed JSON/.test(error instanceof Error ? error.message : String(error))) fail(409, 'TASK_VERSION_CONFLICT', 'This task changed since you opened it; reload it and try again', 'task')
     throw error
-  }
-  if (results[0]?.meta.changes !== 1) {
-    await discardMessagePhotos(db, input.env, organizationId, assetIds, viewer.principal.userId, new Error('The task changed before it was closed'))
-    fail(409, 'TASK_VERSION_CONFLICT', 'This task changed since you opened it; reload it and try again', 'task')
   }
   if (thread) await publishDashboardInvalidation(input.env, { eventId: crypto.randomUUID(), type: 'team_thread.changed', organizationId, teamThreadId: thread.id, occurredAt: now })
   return afterWrite(db, viewer, taskId)

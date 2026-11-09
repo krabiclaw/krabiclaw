@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { notifyStayReady, stayReadyTaskQueries, turnoverTaskQueries } from '~/server/domain/tasks'
+import { notifyStayReady, stayReadyRevisionQueries, stayReadyTaskQueries, turnoverTaskQueries } from '~/server/domain/tasks'
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
 import { formAnswersFingerprint, formAnswerSnapshotsSchema, formQuestionsRevision, parseStoredFormQuestions, type FormAnswerSnapshot, type FormQuestion } from '~/shared/form-questions'
 import { acceptFormAnswers } from '~/server/domain/form-questions'
@@ -1904,6 +1904,7 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
   if (input.product_id === current.product_id) fail(422, 'STAY_MOVE_SAME_HOME', 'The guest is already staying in this home', 'product_id')
   const [from, to] = await Promise.all([readStayHome(db, access, current.product_id), readStayHome(db, access, input.product_id)])
   if (current.check_out_date < localDateAt(new Date(), to.timezone)) fail(409, 'STAY_MOVE_ENDED', 'This stay has already ended', 'product_id')
+  if (current.adults + current.children > to.max_guests) fail(422, 'STAY_MOVE_TOO_SMALL', `${to.internal_name} sleeps ${to.max_guests}; this party is ${current.adults + current.children}`, 'product_id')
   const config = await queryFirst<{ check_in_instructions: string | null; assigned_member_id: string | null; assigned_team_id: string | null }>(db,
     'SELECT check_in_instructions, assigned_member_id, assigned_team_id FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [access.organizationId, to.product_id])
   if (!config?.check_in_instructions?.trim()) fail(422, 'STAY_MOVE_NEEDS_INSTRUCTIONS', `Add check-in instructions to ${to.internal_name} before moving a guest there, so they can be told how to get in`, 'product_id')
@@ -2009,6 +2010,8 @@ export async function cancelStay(db: DbClient, env: StayMutationEnv, access: Sta
     ...reconcileNightsQueries(access.organizationId, stayId),
     ...refund.queries,
     ...turnovers,
+    ...stayReadyRevisionQueries({ organizationId: access.organizationId, stayId, now, cancelled: true,
+      guard: { query: "EXISTS (SELECT 1 FROM stays WHERE organization_id = ? AND id = ? AND status = 'cancelled' AND version = ?)", params: [access.organizationId, stayId, next] } }),
   ], { operation: 'Cancel stay' })
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
   return complete(next)
@@ -2525,6 +2528,14 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   const now = new Date().toISOString()
   const turnovers = await turnoverTaskQueries(db, { organizationId, now, before: previous,
     after: { id, product_id: landing, status: booking.cancelled ? 'cancelled' : 'confirmed', check_in_date: booking.check_in_date, check_out_date: booking.check_out_date } })
+  // A moved guest's make-ready job follows the reservation's revisions: its home is where they sleep, not the listing the revision names.
+  const landingHome = existing?.booked_product_id === productId && !booking.cancelled ? await queryFirst<{ check_in_time: string | null; timezone: string }>(db,
+    'SELECT c.check_in_time, l.timezone FROM product_stay_configs c JOIN business_locations l ON l.id = c.location_id AND l.organization_id = c.organization_id WHERE c.organization_id = ? AND c.product_id = ?',
+    [organizationId, landing]) : null
+  const readyJob = existing?.booked_product_id === productId ? stayReadyRevisionQueries({ organizationId, stayId: id, now, cancelled: booking.cancelled,
+    guard: { query: 'EXISTS (SELECT 1 FROM stays WHERE organization_id = ? AND id = ? AND revision_id = ?)', params: [organizationId, id, booking.revision_id] },
+    dueAt: landingHome ? (landingHome.check_in_time === null ? null : localDateTimeToInstant(booking.check_in_date, landingHome.check_in_time, landingHome.timezone, 'compatible').toISOString()) : undefined,
+    checkInDate: booking.check_in_date, guestName: stayGuestFirstName(booking.guest_name) }) : []
   const write = (overbooked: 0 | 1): BatchQuery[] => [...(existing?.external_booking_id === null ? [{
     // An imported OTA confirmation becomes channel-owned when its real revision arrives; keep its one stay and night claims.
     query: `UPDATE stays SET owner = 'channel', provider = ?, external_booking_id = ? WHERE organization_id = ? AND id = ?
@@ -2582,6 +2593,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   },
   ...stayThreadQueries({ organizationId, stayId: id, now, openedBy: 'channel' }),
   ...turnovers,
+  ...readyJob,
   ]
   let writes: Awaited<ReturnType<typeof executeBatch>>
   try {
