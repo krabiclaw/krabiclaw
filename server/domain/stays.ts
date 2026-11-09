@@ -2574,6 +2574,8 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
       // A booking received as it happened starts the new-reservation messages; the import's history never does. An update keeps the first answer.
       booking.provider_updated_at, booking.cancelled ? now : null, booking.imported || booking.cancelled ? null : now, now, now, 'channex', 'channex', landing === productId ? null : productId, existing?.id ?? null, previous?.product_id ?? null, previous?.version ?? null],
   },
+  // A listing whose guest was moved elsewhere still holds its nights: a second reservation landing on them is an overbooking, like one landing on claimed nights.
+  ...(overbooked === 0 && !booking.cancelled ? [bookedListingGuardQuery(organizationId, landing, id, booking.check_in_date, booking.check_out_date)] : []),
   organizationEventQuery({ organizationId, locationId: home.location_id, actorId: null, eventType: existing ? 'stay.updated' : 'stay.created', entityType: 'stay', entityId: id,
     dedupeKey: revisionKey, onlyIfPreviousChangedOneRow: true, metadata: { channel: booking.channel, overbooked: overbooked === 1,
       provider: booking.provider, external_booking_id: booking.external_booking_id, revision_id: booking.revision_id, provider_updated_at: booking.provider_updated_at,
@@ -2599,7 +2601,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   try {
     writes = await executeBatch(db, write(0), { operation: 'Apply channel booking' })
   } catch (error) {
-    if (!isStayNightConflict(error)) throw error
+    if (!isStayNightConflict(error) && !isBookedListingHeld(error)) throw error
     // Rule 1: another stay holds one of these nights. The channel stay still lands, flagged and holding none.
     writes = await executeBatch(db, write(1), { operation: 'Apply overbooked channel booking' })
   }
