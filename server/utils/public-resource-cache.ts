@@ -20,8 +20,6 @@ import { publishBusinessInvalidation, type GuestInboxPublicationEnv } from '~/se
 // gap closed alongside this change — see those call sites for purgePublicResourceCacheNow).
 export const PUBLIC_RESOURCE_CACHE_TTL_SECONDS = 300
 
-const CACHE_INVALIDATION_RETRY_AFTER_MS = 5 * 60 * 1000
-const CACHE_INVALIDATION_MAX_ATTEMPTS = 5
 const SEARCH_SYNC_CONTINUE = 'search-sync-continue'
 const CACHE_INVALIDATION_TERMINAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -38,8 +36,8 @@ export function publicResourceCacheInvalidationQuery(
   const values = [crypto.randomUUID(), organizationId, reason, new Date().toISOString()]
   return {
     query: `INSERT INTO public_resource_cache_invalidations
-      (id, organization_id, reason, status, attempt_count, created_at)
-      VALUES (?, ?, ?, 'pending', 0, ?)`,
+      (id, organization_id, reason, status, created_at)
+      VALUES (?, ?, ?, 'pending', ?)`,
     params: values,
   }
 }
@@ -49,7 +47,8 @@ export type OrganizationChangeDrainEnv = Pick<CloudflareEnv, 'AI_SEARCH' | 'AI_S
 /**
  * The scheduled drainer. A write purges its site's caches itself and records
  * the change; this brings each changed site's slice of the search index up to
- * date afterwards, so no write waits on AI Search.
+ * date afterwards, so no write waits on AI Search. A row is processed, or it
+ * failed with its reason, and the failure is reported by the task.
  */
 export async function drainPublicResourceCacheInvalidations(
   db: DbClient,
@@ -64,7 +63,6 @@ export async function drainPublicResourceCacheInvalidations(
   if (productionSearch && !env.AI_SEARCH_INSTANCE_ID?.trim()) throw new Error('AI_SEARCH_INSTANCE_ID is required to drain site changes')
   const now = options.now ?? new Date()
   const nowIso = now.toISOString()
-  const staleClaimCutoff = new Date(now.getTime() - CACHE_INVALIDATION_RETRY_AFTER_MS).toISOString()
   const terminalRetentionCutoff = new Date(now.getTime() - CACHE_INVALIDATION_TERMINAL_RETENTION_MS).toISOString()
   // A row is processed after it is created, so the created_at bound removes
   // nothing the processed_at one keeps; it lets the status index range-scan
@@ -73,93 +71,48 @@ export async function drainPublicResourceCacheInvalidations(
     DELETE FROM public_resource_cache_invalidations
      WHERE status IN ('processed', 'failed') AND created_at < ? AND processed_at < ?
   `, [terminalRetentionCutoff, terminalRetentionCutoff])
-  await execute(db, `
-    UPDATE public_resource_cache_invalidations
-       SET status = 'failed', claimed_at = NULL, processed_at = ?,
-           last_error = COALESCE(last_error, 'Retry limit reached')
-     WHERE attempt_count >= ?
-       AND (status = 'pending' OR (status = 'processing' AND (claimed_at IS NULL OR claimed_at < ?)))
-  `, [nowIso, CACHE_INVALIDATION_MAX_ATTEMPTS, staleClaimCutoff])
-  const rows = await queryAll<{ id: string; organization_id: string; attempt_count: number }>(db, `
-    SELECT id, organization_id, attempt_count
-      FROM public_resource_cache_invalidations
-     WHERE attempt_count < ?
-       AND (status = 'pending' OR (status = 'processing' AND (claimed_at IS NULL OR claimed_at < ?)))
-     ORDER BY created_at ASC
-     LIMIT ?
-  `, [CACHE_INVALIDATION_MAX_ATTEMPTS, staleClaimCutoff, options.limit ?? 50])
+  const rows = await queryAll<{ id: string; organization_id: string }>(db, `
+    SELECT id, organization_id FROM public_resource_cache_invalidations
+     WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?
+  `, [options.limit ?? 50])
   let processed = 0
   const failures: Error[] = []
-  const failedOrganizations = new Set<string>()
+  const failedOrganizations = new Map<string, string>()
   // Several rows for one site in one drain are one change to converge on: the
   // site's slice is listed and diffed once, and the rest of its rows ride along.
   const drainedOrganizations = new Set<string>()
+  const finish = async (id: string, status: 'processed' | 'failed', error: string | null) => {
+    const finalized = await execute(db, `
+      UPDATE public_resource_cache_invalidations SET status = ?, processed_at = ?, last_error = ?
+       WHERE id = ? AND status = 'pending'
+    `, [status, nowIso, error, id])
+    if (status === 'processed' && Number(finalized.meta?.changes ?? 0) === 1) processed += 1
+  }
   for (const row of rows) {
-    if (failedOrganizations.has(row.organization_id)) continue
-    // An overlapping drain holding this site's claim keeps it; the next run
-    // picks up whatever that one leaves.
-    const claim = await execute(db, `
-      UPDATE public_resource_cache_invalidations AS current
-         SET status = 'processing', claimed_at = ?, attempt_count = attempt_count + 1
-       WHERE id = ? AND attempt_count = ? AND attempt_count < ?
-         AND (status = 'pending' OR (status = 'processing' AND (claimed_at IS NULL OR claimed_at < ?)))
-         AND NOT EXISTS (
-           SELECT 1 FROM public_resource_cache_invalidations AS other
-            WHERE other.organization_id = current.organization_id AND other.id <> current.id
-              AND other.status = 'processing' AND other.claimed_at >= ?
-         )
-    `, [nowIso, row.id, row.attempt_count, CACHE_INVALIDATION_MAX_ATTEMPTS, staleClaimCutoff, staleClaimCutoff])
-    if (Number(claim.meta?.changes ?? 0) !== 1) continue
-    const claimedAttemptCount = row.attempt_count + 1
+    const earlier = failedOrganizations.get(row.organization_id)
+    if (earlier !== undefined) {
+      // The same site's change failed a moment ago in this drain; this row is that change.
+      await finish(row.id, 'failed', earlier)
+      continue
+    }
     try {
       const firstForOrganization = !drainedOrganizations.has(row.organization_id)
       if (firstForOrganization) await purgeOrganizationCaches(db, kv, row.organization_id, freeOrganizationDomain)
-      let converged = !productionSearch
       if (productionSearch && firstForOrganization) {
         const synced = await syncOrganizationSearchIndex(env as CloudflareEnv, db, row.organization_id)
-        // A bounded run that left uploads behind is not a failure to retry; it
-        // is more of the same change, so it goes back on the queue as a new row.
+        // A bounded run that left uploads behind is more of the same change, so it goes back on the queue as a new row.
         if (synced.pending > 0) {
           const more = publicResourceCacheInvalidationQuery(row.organization_id, SEARCH_SYNC_CONTINUE)
           await execute(db, more.query, more.params ?? [])
-          // The new continuation carries on what an earlier, failed one could
-          // not finish, so that failure is superseded rather than outstanding.
-          await execute(db, `
-            UPDATE public_resource_cache_invalidations
-               SET status = 'processed', processed_at = ?, last_error = NULL
-             WHERE organization_id = ? AND status = 'failed' AND reason = ? AND created_at < ?
-          `, [nowIso, row.organization_id, SEARCH_SYNC_CONTINUE, nowIso])
-        } else {
-          converged = true
         }
       }
       drainedOrganizations.add(row.organization_id)
-      if (converged) {
-        // A converged site has done the work behind older terminal rows, which
-        // the retry selector can no longer claim. Do not clear a failure created
-        // after this drain began or one belonging to another site.
-        await execute(db, `
-          UPDATE public_resource_cache_invalidations
-             SET status = 'processed', processed_at = ?, last_error = NULL
-           WHERE organization_id = ? AND status = 'failed' AND created_at < ?
-        `, [nowIso, row.organization_id, nowIso])
-      }
-      const finalized = await execute(db, `
-        UPDATE public_resource_cache_invalidations
-           SET status = 'processed', processed_at = ?, last_error = NULL
-         WHERE id = ? AND status = 'processing' AND claimed_at = ? AND attempt_count = ?
-      `, [nowIso, row.id, nowIso, claimedAttemptCount])
-      if (Number(finalized.meta?.changes ?? 0) === 1) processed += 1
+      await finish(row.id, 'processed', null)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      const failed = claimedAttemptCount >= CACHE_INVALIDATION_MAX_ATTEMPTS
-      await execute(db, `
-        UPDATE public_resource_cache_invalidations
-           SET status = ?, claimed_at = NULL, processed_at = ?, last_error = ?
-         WHERE id = ? AND status = 'processing' AND claimed_at = ? AND attempt_count = ?
-      `, [failed ? 'failed' : 'pending', failed ? nowIso : null, message.slice(0, 2000), row.id, nowIso, claimedAttemptCount])
+      const message = (error instanceof Error ? error.message : String(error)).slice(0, 2000)
+      await finish(row.id, 'failed', message)
       failures.push(error instanceof Error ? error : new Error(String(error)))
-      failedOrganizations.add(row.organization_id)
+      failedOrganizations.set(row.organization_id, message)
     }
   }
   if (failures.length > 0) {

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:589244af83add27c036a0349b3d8bde8d9df378ef4a9a75fb68c54612fe006e1",
-  "documentationFingerprint": "sha256:014bc5b925f906f9f58e24aa1c89528d4b5b5d030824bd4a89814913defe1b20",
+  "fingerprint": "sha256:744e30510d02a6dd0097307f5e3cd9d59b030a9aae8958af68688a51fb9772cc",
+  "documentationFingerprint": "sha256:565c454a4021cf46cf095c7d8206e505e42937a6123bc37724fecb090e3c3c7d",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -42646,7 +42646,7 @@
     {
       "name": "delete_post",
       "title": "Delete post",
-      "description": "Delete a post from the website. Its Facebook, Instagram and Discord posts are not deleted; use delete_channel_post for an explicit supported channel deletion. Refused while a publication of it is in progress or unresolved.",
+      "description": "Delete a post from the website. Its Facebook, Instagram and Discord posts are not deleted; use delete_channel_post for an explicit supported channel deletion.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -74597,7 +74597,7 @@
     {
       "name": "publish_post",
       "title": "Publish post",
-      "description": "Publish the post to the selected website or social destinations, returning one result per target. Retry processing with the same post; reconcile an unknown result before publishing again.",
+      "description": "Publish the post to the selected website or social destinations, returning one result per target with its status: published, already_published, failed with the provider error, or skipped. Publish again after a failure once its cause is fixed. A provider_unreachable failure may still have reached the destination: find its post there and pass that provider_post_id to reconcile_post_publication before publishing again.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -74714,9 +74714,7 @@
                   "enum": [
                     "published",
                     "already_published",
-                    "processing",
                     "failed",
-                    "unknown",
                     "skipped"
                   ],
                   "type": "string"
@@ -85563,7 +85561,7 @@
     {
       "name": "reconcile_post_publication",
       "title": "Reconcile post publication",
-      "description": "Read an existing social publication and refresh its receipt without publishing. Supply provider_post_id only for the exact post on the connected destination; unproven outcomes remain unknown.",
+      "description": "Read an existing social publication on its destination and refresh its receipt without publishing. Supply provider_post_id only for the exact post on the connected destination.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -85623,9 +85621,7 @@
                 "enum": [
                   "published",
                   "already_published",
-                  "processing",
                   "failed",
-                  "unknown",
                   "skipped"
                 ],
                 "type": "string"
@@ -114772,7 +114768,7 @@
     {
       "name": "update_post",
       "title": "Update post",
-      "description": "Change at least one supplied website post field. First call get_post for its updated_at and use that as expected_updated_at. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged; unresolved publication prevents content edits.",
+      "description": "Change at least one supplied website post field. First call get_post for its updated_at and use that as expected_updated_at. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -129271,13 +129267,12 @@
       ],
       "rendered": {
         "description": "Create and publish a post",
-        "text": "Call create_post with a new idempotency_key and this body: <body> If the user supplied or approved media, pass it as create_post media in the order they want it shown: the cover first, then the gallery. Publish only to: <destinations>. For Facebook, Instagram or Discord, call get_social_connections and use the exact target_id and connection_revision it returns; if the destination is not connected or has a problem, say so instead of publishing elsewhere. Show the user the draft's preview_url, then call publish_post with the post's updated_at as expected_updated_at and one target per named destination. Report each outcome exactly as returned. processing means call publish_post again later to finish the same post; unknown means use reconcile_post_publication, never publish again."
+        "text": "Call create_post with a new idempotency_key and this body: <body> If the user supplied or approved media, pass it as create_post media in the order they want it shown: the cover first, then the gallery. Publish only to: <destinations>. For Facebook, Instagram or Discord, call get_social_connections and use the exact target_id and connection_revision it returns; if the destination is not connected or has a problem, say so instead of publishing elsewhere. Show the user the draft's preview_url, then call publish_post with the post's updated_at as expected_updated_at and one target per named destination. Report each outcome exactly as returned: published, with its public_url when the destination gives one; already_published; failed with the provider's reason; or skipped."
       },
       "toolContracts": {
         "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
         "get_social_connections": "sha256:ce06b442ff3f389bf517c54c51ff4fb762a7bde099820d26f260139f1e3d1686",
-        "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
-        "reconcile_post_publication": "sha256:00cccb196535fe18cb6304fbe3ee58fa254a10a02ff44e5039300d3be42f9d38"
+        "publish_post": "sha256:fbfd1f5ff6cbdc02ecba0e29e88a7efc5bedb5e6b60ad98eca33b6e99016f1b2"
       }
     },
     {
@@ -129459,7 +129454,7 @@
         "list_guest_conversations": "sha256:9bae34357644916476bec0c0d9a07dc7dbf2beb726716b882a886a05097d1ee0",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
-        "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
+        "publish_post": "sha256:fbfd1f5ff6cbdc02ecba0e29e88a7efc5bedb5e6b60ad98eca33b6e99016f1b2",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
         "update_product": "sha256:ffa1d299e527684eb92380cdbf51be23633f94a08b74eb8143ea5e06d78c03b3"
       }

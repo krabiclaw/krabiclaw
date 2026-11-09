@@ -1,23 +1,20 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { HTTPError } from 'nitro'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct, createProductsBatch, getProduct, reconcileProducts, updateProduct } from '../../server/utils/product-management.ts'
 import { cancelStay, createStay, deliverPendingChannelNights, readStayCalendar, releaseLapsedStayHolds, setStayNights, updateStayHome, verifyStayCalendarOccupancy, type StayAccess } from '../../server/domain/stays.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
-import { withDeliveryLease } from '../../server/integrations/channex/ari.ts'
-import { errorChainForTelemetry } from '../../shared/error-telemetry.ts'
 
 // A connected home's night changes reach Channex: closed nights, prices and
 // stay rules as restrictions, held and booked nights as availability, each
 // night carrying only what differs from what Channex last confirmed, and
 // contiguous nights with the same change as one date range. What Channex took
 // is recorded on each night; a partial rejection reads needs_review with the
-// reason. A 429 or an outcome Channex never confirmed stays pending with its
-// retry time, a minute doubling per attempt, and the delivery task sends it
-// once due. Past nights are not sent.
+// reason. A call Channex never confirmed (a 429, a 5xx, an unreadable answer)
+// leaves its nights pending with Channex's answer, and the delivery task sends
+// them. Past nights are not sent.
 
 const ORG = 'org'
 const OWNER = 'owner-user'
@@ -145,90 +142,6 @@ async function boot() {
     throw error
   }
 }
-
-test('an ARI request keeps its delivery lease alive beyond its original expiry and a competing save stays queued', { timeout: 60_000 }, async (context) => {
-  const { runtime, db, env, connected } = await boot()
-  const channex = new FakeChannex()
-  const realFetch = globalThis.fetch
-  globalThis.fetch = channex.fetch as typeof fetch
-  const savedDate = day(50), queuedDate = day(51), untilDate = day(52)
-  context.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.now() })
-  try {
-    channex.during = async () => {
-      if (channex.sent.at(-1)!.path !== '/availability') return
-      channex.during = undefined
-      const original = await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first<{ delivery_lease: string; delivery_lease_until: string }>()
-      assert.ok(original!.delivery_lease)
-      for (let minute = 0; minute < 3; minute++) {
-        context.mock.timers.tick(60_000)
-        await context.waitFor(async () => {
-          const renewed = await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first<{ delivery_lease: string; delivery_lease_until: string }>()
-          assert.equal(renewed!.delivery_lease, original!.delivery_lease)
-          assert(Date.parse(renewed!.delivery_lease_until) > Date.now())
-        }, { timeout: 10_000 })
-      }
-      assert(Date.now() > Date.parse(original!.delivery_lease_until))
-      const queued = await setStayNights(db, env, manager, { product_id: connected, from: queuedDate, to: untilDate, price_minor: 195_00 })
-      assert.equal(queued.channel_push?.state, 'pending')
-      assert.deepEqual((await readStayCalendar(db, manager, { productId: connected, from: queuedDate, to: untilDate })).nights.map(night => [night.date, night.price_minor, night.channel?.state]),
-        [[queuedDate, 195_00, 'pending']])
-      assert.deepEqual(channex.sent.map(request => request.path), ['/restrictions', '/availability'])
-    }
-    assert.deepEqual((await setStayNights(db, env, manager, { product_id: connected, from: savedDate, to: queuedDate, price_minor: 185_00 })).channel_push, { state: 'pushed', detail: null })
-    assert.deepEqual(channex.sent.map(request => [request.path, [...byNight(request.values).keys()]]), [
-      ['/restrictions', [savedDate]], ['/availability', [savedDate]], ['/restrictions', [queuedDate]], ['/availability', [queuedDate]],
-    ])
-    assert.deepEqual((await readStayCalendar(db, manager, { productId: connected, from: savedDate, to: untilDate })).nights.map(night => [night.date, night.price_minor, night.channel?.state]),
-      [[savedDate, 185_00, 'pushed'], [queuedDate, 195_00, 'pushed']])
-    const confirmed = await db.prepare("SELECT date, state, json_extract(sent_json, '$.rate') AS rate FROM channel_night_pushes WHERE product_id = ? AND provider = 'channex' AND date IN (?, ?) ORDER BY date").bind(connected, savedDate, queuedDate).all()
-    assert.deepEqual(confirmed.results, [{ date: savedDate, state: 'pushed', rate: '185.00' }, { date: queuedDate, state: 'pushed', rate: '195.00' }])
-    assert.deepEqual(await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first(), { delivery_lease: null, delivery_lease_until: null })
-    context.mock.timers.tick(60_000)
-    assert.deepEqual(await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first(), { delivery_lease: null, delivery_lease_until: null })
-  } finally {
-    context.mock.timers.reset()
-    globalThis.fetch = realFetch
-    await runtime.dispose()
-  }
-})
-
-test('a failed delivery lease renewal remains owned until its action finishes and reports the recorded reason', { timeout: 120_000 }, async (context) => {
-  const { runtime, db, connected } = await boot()
-  try {
-    await db.prepare(`CREATE TRIGGER refuse_lease_renewal BEFORE UPDATE OF delivery_lease_until ON product_channel_mappings
-      WHEN OLD.delivery_lease IS NOT NULL AND NEW.delivery_lease_until IS NOT NULL
-      BEGIN SELECT RAISE(ABORT, 'Lease renewal refused'); END`).run()
-    context.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.now() })
-    const refused = (error: unknown) => {
-      assert(error instanceof HTTPError)
-      assert.equal(error.status, 503)
-      assert.deepEqual(error.data, { code: 'CHANNEL_DELIVERY_RENEWAL_FAILED', product_id: connected })
-      assert(errorChainForTelemetry(error).some(entry => entry.message.includes('Lease renewal refused')))
-      return true
-    }
-    await assert.rejects(withDeliveryLease(db, connected, async (lease) => {
-      const originalUntil = await db.prepare('SELECT delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first<string>('delivery_lease_until')
-      context.mock.timers.tick(60_000)
-      await context.waitFor(() => assert.rejects(lease.check(), refused), { timeout: 10_000 })
-      await db.prepare('DROP TRIGGER refuse_lease_renewal').run()
-      context.mock.timers.tick(60_000)
-      await context.waitFor(async () => {
-        const until = await db.prepare('SELECT delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first<string>('delivery_lease_until')
-        assert(Date.parse(until!) > Date.now())
-      }, { timeout: 10_000 })
-      context.mock.timers.tick(60_000)
-      assert(Date.now() > Date.parse(originalUntil!))
-      assert.equal(await db.prepare('SELECT delivery_lease FROM product_channel_mappings WHERE product_id = ?').bind(connected).first('delivery_lease'), lease.token)
-      assert.equal(await withDeliveryLease(db, connected, async () => true), null)
-      await assert.rejects(lease.check(), refused)
-      return true
-    }), refused)
-    assert.deepEqual(await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first(), { delivery_lease: null, delivery_lease_until: null })
-  } finally {
-    context.mock.timers.reset()
-    await runtime.dispose()
-  }
-})
 
 test('lapsed hold failures retain their claims and report every failure after independent holds release', async () => {
   const { runtime, db, env, connected, local } = await boot()
@@ -369,55 +282,38 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.deepEqual(channex.take().map(request => request.path), ['/restrictions', '/availability'])
     assert.deepEqual(rejectedCalendar.nights.map(night => night.channel), [rejected!.channel_push])
 
-    // A write Channex never confirmed stays pending with its retry time; the
-    // delivery task sends it once due, and only the part Channex has not confirmed.
+    // A write Channex never confirmed stays pending with Channex's answer; the
+    // delivery task sends it, and only the part Channex has not confirmed.
     channex.answer['/restrictions'] = undefined
     channex.answer['/availability'] = () => new Response('upstream', { status: 503 })
     const unconfirmed = await setStayNights(db, env, manager, { product_id: connected, from: day(30), to: day(31), closed: true })
     assert.equal(unconfirmed.channel_push?.state, 'pending')
-    assert.match(String(unconfirmed.channel_push?.detail), /did not confirm the availability update for .*Attempt 1; sending again at \d\d:\d\d UTC/)
+    assert.match(String(unconfirmed.channel_push?.detail), /^Channex did not confirm the availability update for .*: Channex/)
     assert.deepEqual(channex.take().map(request => request.path), ['/restrictions', '/availability'])
     assert.deepEqual((await states(connected, day(30), day(31)))[0], unconfirmed.channel_push)
     // A rejection that created no task, and a call Channex never confirmed, keep none.
     assert.deepEqual((await log()).slice(-4).map(row => [(row as { kind: string }).kind, (row as { status: string }).status, (row as { task_id: string | null }).task_id !== null]),
       [['restrictions', 'needs_review', false], ['availability', 'pushed', true], ['restrictions', 'pushed', true], ['availability', 'failed', false]])
-    // Not due yet: the task leaves it.
     channex.answer['/availability'] = undefined
-    assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 0 })
-    assert.deepEqual(channex.take(), [])
-    await db.prepare("UPDATE channel_night_pushes SET retry_at = '2000-01-01T00:00:00.000Z' WHERE product_id = ? AND date = ?").bind(connected, day(30)).run()
     assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 1 })
     assert.deepEqual(channex.take(), [{ path: '/availability', values: [{ property_id: 'prop-1', room_type_id: 'room-1', date_from: day(30), date_to: day(30), availability: 1 }] }])
     assert.deepEqual((await states(connected, day(30), day(31)))[0], { state: 'pushed', detail: null })
 
-    // A 429 pauses the property, availability included: a minute, then twice that for the next 429.
+    // A 429 is a call Channex did not confirm: its nights stay pending with Channex's answer; the other call still goes.
     channex.answer['/restrictions'] = () => Response.json({ errors: { code: 'http_too_many_requests', title: 'Too Many Requests' } }, { status: 429 })
     const limited = await setStayNights(db, env, manager, { product_id: connected, from: day(32), to: day(33), price_minor: 140_00 })
     assert.equal(limited.channel_push?.state, 'pending')
-    assert.match(String(limited.channel_push?.detail), /slow down for this home .*Attempt 1; sending again at \d\d:\d\d UTC/)
-    const retry = async () => await db.prepare('SELECT attempts, retry_at FROM channel_night_pushes WHERE product_id = ? AND date = ?').bind(connected, day(32)).first<{ attempts: number; retry_at: string }>()
-    const first = await retry()
-    assert.equal(first!.attempts, 1)
-    assert(Date.parse(first!.retry_at) - Date.now() > 50_000 && Date.parse(first!.retry_at) - Date.now() <= 60_000)
-    assert.deepEqual(channex.take().map(request => request.path), ['/restrictions'])
+    assert.match(String(limited.channel_push?.detail), /^Channex did not confirm the restrictions update for .*: .*429/)
+    assert.deepEqual(channex.take().map(request => request.path), ['/restrictions', '/availability'])
     const deferred = await setStayNights(db, env, manager, { product_id: connected, from: day(33), to: day(34), price_minor: 14300 })
-    assert.deepEqual(deferred.channel_push, limited.channel_push)
-    assert.deepEqual(channex.take(), [])
-    assert.deepEqual(await db.prepare('SELECT attempts, retry_at FROM channel_night_pushes WHERE product_id = ? AND date = ?').bind(connected, day(33)).first(), { attempts: 0, retry_at: first!.retry_at })
-    await db.prepare("UPDATE channel_night_pushes SET retry_at = '2000-01-01T00:00:00.000Z' WHERE product_id = ? AND date IN (?, ?)").bind(connected, day(32), day(33)).run()
-    assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 1 })
-    const second = await retry()
-    assert.equal(second!.attempts, 2)
-    assert(Date.parse(second!.retry_at) - Date.now() > 110_000 && Date.parse(second!.retry_at) - Date.now() <= 120_000)
-    assert.deepEqual(channex.take().map(request => request.path), ['/restrictions'])
-    assert.deepEqual(await db.prepare('SELECT attempts, retry_at FROM channel_night_pushes WHERE product_id = ? AND date = ?').bind(connected, day(33)).first(), { attempts: 1, retry_at: second!.retry_at })
+    assert.equal(deferred.channel_push?.state, 'pending')
+    assert.deepEqual(channex.take().map(request => [request.path, request.values.map(value => value.date_from)]), [['/restrictions', [day(32), day(33)]], ['/availability', [day(33)]]])
     channex.answer['/restrictions'] = undefined
-    await db.prepare("UPDATE channel_night_pushes SET retry_at = '2000-01-01T00:00:00.000Z' WHERE product_id = ? AND date IN (?, ?)").bind(connected, day(32), day(33)).run()
     assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 1 })
     assert.deepEqual(channex.take().map(request => [request.path, request.values.map(value => [value.date_from, value.rate])]), [
-      ['/restrictions', [[day(32), '140.00'], [day(33), '143.00']]], ['/availability', [[day(32), undefined]]],
+      ['/restrictions', [[day(32), '140.00'], [day(33), '143.00']]],
     ])
-    assert.deepEqual(await retry(), { attempts: 0, retry_at: null })
+    assert.deepEqual((await states(connected, day(32), day(34))), [{ state: 'pushed', detail: null }, { state: 'pushed', detail: null }])
 
     // Ten calls of a kind in the last minute is Channex's limit for the property: the next change waits for the window.
     for (let call = 0; call < 10; call++) {
@@ -426,7 +322,7 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     // Availability has its own ten, so the night's availability still goes.
     const windowed = await setStayNights(db, env, manager, { product_id: connected, from: day(34), to: day(35), price_minor: 141_00 })
     assert.equal(windowed.channel_push?.state, 'pending')
-    assert.match(String(windowed.channel_push?.detail), /Channex takes 10 restrictions updates a minute for this home; this one goes at/)
+    assert.match(String(windowed.channel_push?.detail), /Channex takes 10 restrictions updates a minute for this home; this one goes after/)
     assert.deepEqual(channex.take().map(request => [request.path, request.values.map(value => value.date_from)]), [['/availability', [day(34)]]])
     await db.prepare("DELETE FROM channel_sync_log WHERE detail = 'window'").run()
 
@@ -438,35 +334,18 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     }), { status: 200 })
     const interrupted = await setStayNights(db, env, manager, { product_id: connected, from: day(35), to: day(36), closed: true })
     assert.equal(interrupted.channel_push?.state, 'pending')
-    assert.match(String(interrupted.channel_push?.detail), new RegExp(`did not confirm the restrictions update for ${day(35)}\\.\\.${day(35)}\\. Channex could not be reached for POST /restrictions: ${interruptedReason} Attempt 1`))
+    assert.match(String(interrupted.channel_push?.detail), new RegExp(`^Channex did not confirm the restrictions update for .*${day(35)}: Channex could not be reached for POST /restrictions: ${interruptedReason}`))
     assert.deepEqual(interrupted.nights.map(night => [night.date, night.closed, night.available]), [[day(35), true, false]])
-    assert.deepEqual(channex.take().map(request => request.path), ['/restrictions'])
-    // An unconfirmed night is never given up on: it stays pending, its wait doubling up to an hour.
-    await db.prepare("UPDATE channel_night_pushes SET attempts = 4, retry_at = '2000-01-01T00:00:00.000Z' WHERE product_id = ? AND date IN (?, ?)").bind(connected, day(34), day(35)).run()
-    assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 1 })
-    const waiting = (await db.prepare('SELECT date, state, attempts, retry_at FROM channel_night_pushes WHERE product_id = ? AND date IN (?, ?) ORDER BY date').bind(connected, day(34), day(35)).all<{ date: string; state: string; attempts: number; retry_at: string }>()).results
-    assert.deepEqual(waiting.map(row => [row.date, row.state, row.attempts]), [[day(34), 'pending', 5], [day(35), 'pending', 5]])
-    assert(waiting.every(row => Date.parse(row.retry_at) - Date.now() > 15 * 60_000 && Date.parse(row.retry_at) - Date.now() <= 16 * 60_000))
-    assert.match(String((await states(connected, day(35), day(36)))[0]?.detail), /Attempt 5; sending again at/)
-    // Contiguous nights with different changes are separate ranges: one has a new price, the other is closed.
-    assert.deepEqual(channex.take().map(request => request.values.map(value => [value.date_from, value.date_to])), [[[day(34), day(34)], [day(35), day(35)]]])
-    await db.prepare("UPDATE channel_night_pushes SET attempts = 9, retry_at = '2000-01-01T00:00:00.000Z' WHERE product_id = ? AND date = ?").bind(connected, day(35)).run()
-    assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 1 })
-    const capped = await db.prepare('SELECT attempts, retry_at FROM channel_night_pushes WHERE product_id = ? AND date = ?').bind(connected, day(35)).first<{ attempts: number; retry_at: string }>()
-    assert.equal(capped!.attempts, 10)
-    assert(Date.parse(capped!.retry_at) - Date.now() <= 3_600_000 && Date.parse(capped!.retry_at) - Date.now() > 3_500_000)
-    channex.take()
-    // A change to a waiting night keeps the property's pause: the change goes with the retry, not now.
+    assert.deepEqual(channex.take().map(request => request.path), ['/restrictions', '/availability'])
+    // The pending nights go with the next delivery. Contiguous nights with different changes are separate ranges: one has a new price, the other is closed.
     channex.answer['/restrictions'] = undefined
-    channex.answer['/availability'] = undefined
-    const paused = await setStayNights(db, env, manager, { product_id: connected, from: day(35), to: day(36), price_minor: 155_00 })
-    assert.deepEqual([paused.channel_push?.state, channex.take()], ['pending', []])
-    assert.deepEqual(await db.prepare('SELECT attempts FROM channel_night_pushes WHERE product_id = ? AND date = ?').bind(connected, day(35)).first(), { attempts: 10 })
+    assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 1 })
+    assert.deepEqual(channex.take().map(request => request.values.map(value => [value.date_from, value.date_to])), [[[day(34), day(34)], [day(35), day(35)]]])
+    assert.deepEqual(await states(connected, day(34), day(36)), [{ state: 'pushed', detail: null }, { state: 'pushed', detail: null }])
 
     // A new base price on a connected home reaches every night ahead that has no price of its own.
-    // A minute has passed since the calls above, as far as Channex's limit is concerned, and the pause is over.
+    // A minute has passed since the calls above, as far as Channex's limit is concerned.
     await db.prepare("UPDATE channel_sync_log SET created_at = '2000-01-01T00:00:00.000Z' WHERE direction = 'outbound'").run()
-    await db.prepare("UPDATE channel_night_pushes SET retry_at = '2000-01-01T00:00:00.000Z' WHERE product_id = ? AND state = 'pending'").bind(connected).run()
     const repriced = await updateStayHome(env, db, manager, connected, { base_price_minor: 160_00 })
     assert.deepEqual([repriced.home.base_price_minor, repriced.channel_push], [160_00, { state: 'pushed', detail: null }])
     assert.deepEqual(channex.ratePlans.get('rate-1')!.options, [{ occupancy: 4, is_primary: true, rate: '160.00' }])
@@ -487,32 +366,19 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.equal((await updateStayHome(env, db, manager, connected, { name: 'Cabin by the cliff' })).channel_push, null)
     assert.deepEqual(channex.take(), [])
 
-    // One delivery per property at a time: while another holds the lease, a change waits for it.
-    const lease = (until: string) => db.prepare("UPDATE product_channel_mappings SET delivery_lease = 'other-delivery', delivery_lease_until = ? WHERE product_id = ?").bind(until, connected).run()
-    await lease(new Date(Date.now() + 60_000).toISOString())
-    const queued = await setStayNights(db, env, manager, { product_id: connected, from: day(40), to: day(41), price_minor: 142_00 })
-    assert.deepEqual(queued.channel_push, { state: 'pending', detail: 'Another delivery to Channex for this home is under way; this change goes with it or right after' })
+    // A night changed while a delivery of the home had it in flight was sent its old value by that delivery:
+    // it stays pending with the reason, and the next delivery sends what Channex has not got.
+    channex.during = async () => {
+      if (channex.sent.at(-1)!.path !== '/restrictions') return
+      channex.during = undefined
+      assert.deepEqual((await setStayNights(db, env, manager, { product_id: connected, from: day(40), to: day(41), price_minor: 150_00 })).channel_push, { state: 'pushed', detail: null })
+    }
+    const changedDuring = await setStayNights(db, env, manager, { product_id: connected, from: day(40), to: day(41), price_minor: 142_00 })
+    assert.deepEqual(changedDuring.channel_push, { state: 'pending', detail: 'This change was saved while a delivery was under way; the next delivery sends it' })
+    assert.deepEqual(channex.take().map(request => [request.path, request.values.map(value => value.rate)]), [['/restrictions', ['142.00']], ['/restrictions', ['150.00']]])
     assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 1 })
-    assert.deepEqual(channex.take(), [])
-    // A lease whose delivery died lapses, and the next delivery takes it.
-    await lease('2000-01-01T00:00:00.000Z')
-    assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 1 })
-    assert.deepEqual(channex.take().map(request => [request.path, request.values.map(value => [value.date_from, value.rate])]), [['/restrictions', [[day(40), '142.00']]]])
-    assert.deepEqual(await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first(), { delivery_lease: null, delivery_lease_until: null })
-    assert.deepEqual((await states(connected, day(40), day(41)))[0], { state: 'pushed', detail: null })
-    // A delivery that outlives its lease records nothing: the delivery that took the property over owns the nights.
-    const sentBefore = await db.prepare('SELECT sent_json FROM channel_night_pushes WHERE product_id = ? AND date = ?').bind(connected, day(41)).first('sent_json')
-    channex.during = async () => { await lease(new Date(Date.now() + 60_000).toISOString()) }
-    const outlived = await setStayNights(db, env, manager, { product_id: connected, from: day(41), to: day(42), price_minor: 143_00 })
-    channex.during = undefined
-    assert.equal(outlived.channel_push?.state, 'pending')
-    assert.deepEqual(channex.take().map(request => request.path), ['/restrictions'])
-    assert.deepEqual(await db.prepare('SELECT state, sent_json FROM channel_night_pushes WHERE product_id = ? AND date = ?').bind(connected, day(41)).first(), { state: 'pending', sent_json: sentBefore })
-    assert.equal(await db.prepare('SELECT delivery_lease FROM product_channel_mappings WHERE product_id = ?').bind(connected).first('delivery_lease'), 'other-delivery')
-    await lease('2000-01-01T00:00:00.000Z')
-    assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 1 })
-    assert.deepEqual(channex.take().map(request => [request.path, request.values.map(value => [value.date_from, value.rate])]), [['/restrictions', [[day(41), '143.00']]]])
-    assert.deepEqual((await states(connected, day(41), day(42)))[0], { state: 'pushed', detail: null })
+    assert.deepEqual(channex.take().map(request => [request.path, request.values.map(value => [value.date_from, value.rate])]), [['/restrictions', [[day(40), '150.00']]]])
+    assert.deepEqual((await readStayCalendar(db, manager, { productId: connected, from: day(40), to: day(41) })).nights.map(night => [night.price_minor, night.channel]), [[150_00, { state: 'pushed', detail: null }]])
 
     // A connected home with no nightly price still sends its availability and rules; the missing price needs review.
     channex.answer['/availability'] = undefined

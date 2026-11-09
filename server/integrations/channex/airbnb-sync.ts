@@ -1,5 +1,4 @@
 import { HTTPError } from 'nitro'
-import Stripe from 'stripe'
 import { execute, executeBatch, MAX_D1_BATCH_STATEMENTS, queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { countActiveHomes, homeAllowance, homesQuote, homeLimit, liveHomeSql, reportBillingUsage } from '~/server/utils/billing'
@@ -12,10 +11,11 @@ import { assertRoleAllows, resolveOrganizationMembership } from '~/server/utils/
  * app posts the change once: listings to sync (imported as homes if they are
  * not yet, then made live) and homes to stop syncing (back to free drafts).
  * The plan is checked for the whole change before anything is queued. Each
- * listing is then one row of airbnb_sync_jobs, leased, retried and advanced by
- * the airbnb-sync cron task the way google_calendar_cleanup_jobs are, through
- * the same AirbnbConnection steps an import has always taken, so a run that is
- * interrupted carries on from the stage it reached.
+ * listing is then one row of airbnb_sync_jobs, advanced by the airbnb-sync
+ * cron task through the same AirbnbConnection steps an import has always
+ * taken; the mapping's import_stage is where a job carries on from. A job is
+ * done, or it failed with its error recorded until a new request names the
+ * listing.
  */
 
 export interface AirbnbSyncListing {
@@ -25,9 +25,6 @@ export interface AirbnbSyncListing {
   status: 'queued' | 'running' | 'done' | 'failed'
   stage: ImportStage | null
   error: { code: string; message: string } | null
-  /** Attempts so far, and when the next retry of a transient failure runs; null when none is due. */
-  attempts: number
-  next_attempt_at: string | null
   updated_at: string
 }
 
@@ -38,37 +35,17 @@ interface JobRow {
   product_id: string | null
   action: 'sync' | 'stop'
   details: string | null
-  state: 'pending' | 'error' | 'done' | 'failed'
+  state: 'pending' | 'done' | 'failed'
   requested_by: string | null
-  attempts: number
   last_error_code: string | null
   last_error: string | null
-  lease_until: string | null
-  next_attempt_at: string | null
   updated_at: string
 }
 
-/** How long a claimed job is held by its run; each step renews it. */
-const LEASE_MS = 120_000
 /** A cron run stops starting steps after this, so runs two minutes apart never overlap. */
 export const CRON_SLICE_MS = 100_000
 /** Scheduling headroom for cron steps; the deadline still guards stalled I/O. */
 const CRON_START_RESERVE_MS = 30_000
-/** Transient failures are retried this many times in all before the job fails. */
-const MAX_ATTEMPTS = 8
-
-/**
- * Whether a failure is transient, so the job retries it on its own: the
- * network, or a provider answering 5xx or 429. Anything else is the same on
- * every retry (a refusal, a missing detail, a verification that did not hold)
- * and fails the job until a new request names the listing.
- */
-function transient(error: unknown): boolean {
-  if (error instanceof ChannexError) return !error.uncertain && (error.providerStatus === 429 || error.providerStatus >= 500 || error.data.code === 'AIRBNB_UNAVAILABLE')
-  if (error instanceof Stripe.errors.StripeError) return error instanceof Stripe.errors.StripeConnectionError || error.statusCode === 429 || (error.statusCode !== undefined && error.statusCode >= 500)
-  if (error instanceof HTTPError) return (error.status === 429 || error.status >= 500) && (error.data as { code?: unknown } | undefined)?.code !== 'PROVIDER_VERIFICATION_FAILED'
-  return error instanceof TypeError
-}
 
 const now = () => new Date().toISOString()
 
@@ -160,16 +137,16 @@ export async function requestAirbnbSync(env: CloudflareEnv, db: DbClient, organi
 
 /**
  * Queue each listing's change, replacing any earlier request for it. A request
- * clears any run's lease, so a run still on the old request writes nothing
+ * gives the row a new id, so a run still on the old request writes nothing
  * over this one. `requestedBy` is null only for a stop KrabiClaw asks for itself.
  */
 async function queueJobs(db: DbClient, organizationId: string, requestedBy: string | null, jobs: Array<{ listing: string; product: string | null; action: 'sync' | 'stop'; details: string | null }>): Promise<void> {
   const at = now()
-  await executeBatch(db, jobs.map(job => ({ query: `INSERT INTO airbnb_sync_jobs (id, organization_id, listing_id, product_id, action, details, state, requested_by, attempts, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?)
+  await executeBatch(db, jobs.map(job => ({ query: `INSERT INTO airbnb_sync_jobs (id, organization_id, listing_id, product_id, action, details, state, requested_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
       ON CONFLICT (organization_id, listing_id) DO UPDATE SET id = excluded.id, action = excluded.action, details = excluded.details, state = 'pending', requested_by = excluded.requested_by,
-        product_id = COALESCE(excluded.product_id, airbnb_sync_jobs.product_id), attempts = 0, last_error_code = NULL, last_error = NULL,
-        next_attempt_at = NULL, completed_at = NULL, lease_token = NULL, lease_until = NULL, updated_at = excluded.updated_at`,
+        product_id = COALESCE(excluded.product_id, airbnb_sync_jobs.product_id), last_error_code = NULL, last_error = NULL,
+        completed_at = NULL, updated_at = excluded.updated_at`,
     params: [crypto.randomUUID(), organizationId, job.listing, job.product, job.action, job.details, requestedBy, at, at] })), { operation: 'Queue an Airbnb sync change' })
 }
 
@@ -196,17 +173,14 @@ export async function readAirbnbSync(db: DbClient, organizationId: string): Prom
   const rows = await queryAll<JobRow & { stage: ImportStage | null }>(db, `SELECT j.*, m.import_stage AS stage FROM airbnb_sync_jobs j
     LEFT JOIN product_channel_mappings m ON m.organization_id = j.organization_id AND m.provider = 'channex' AND m.listing_id = j.listing_id
     WHERE j.organization_id = ? ORDER BY j.created_at, j.listing_id`, [organizationId])
-  const at = now()
   return rows.map(row => ({
     listing_id: row.listing_id,
     product_id: row.product_id,
     action: row.action,
     status: row.state === 'done' ? 'done' : row.state === 'failed' ? 'failed'
-      : (row.lease_until !== null && row.lease_until > at) || (row.stage !== null && row.stage !== 'draft' && row.stage !== 'complete') ? 'running' : 'queued',
+      : row.stage !== null && row.stage !== 'draft' && row.stage !== 'complete' ? 'running' : 'queued',
     stage: row.stage,
     error: row.last_error_code && row.last_error ? { code: row.last_error_code, message: row.last_error } : null,
-    attempts: row.attempts,
-    next_attempt_at: row.state === 'error' ? row.next_attempt_at : null,
     updated_at: row.updated_at,
   }))
 }
@@ -214,7 +188,7 @@ export async function readAirbnbSync(db: DbClient, organizationId: string): Prom
 type Step = 'done' | 'continue' | 'later'
 
 /** One step of a job: what the listing needs next to reach what was asked, as one AirbnbConnection call. */
-async function step(env: CloudflareEnv, db: DbClient, job: JobRow, lease: string, signal: AbortSignal): Promise<Step> {
+async function step(env: CloudflareEnv, db: DbClient, job: JobRow, signal: AbortSignal): Promise<Step> {
   // A sync acts for the person who asked; a stop writes nothing of theirs, so one KrabiClaw asked for, or whose requester left, still runs.
   if (job.action === 'sync') {
     if (!job.requested_by) fail(409, 'REQUESTER_REMOVED', 'The person who asked for this sync is no longer a member; ask again')
@@ -228,14 +202,14 @@ async function step(env: CloudflareEnv, db: DbClient, job: JobRow, lease: string
       LEFT JOIN channex_connections c ON c.organization_id = m.organization_id
       WHERE m.organization_id = ? AND m.provider = 'channex' AND m.listing_id = ?`, [job.organization_id, job.listing_id])
   if (mapping && mapping.product_id !== job.product_id) {
-    await execute(db, 'UPDATE airbnb_sync_jobs SET product_id = ? WHERE id = ? AND lease_token = ?', [mapping.product_id, job.id, lease])
+    await execute(db, 'UPDATE airbnb_sync_jobs SET product_id = ? WHERE id = ?', [mapping.product_id, job.id])
     job.product_id = mapping.product_id
   }
   if (job.action === 'sync') {
     if (!mapping || mapping.channel_id !== mapping.connected_channel_id) {
       // The fields Airbnb leaves out come from the request's details, contact details from the organization; anything still missing fails this listing with its field.
       const prepared = await connection.prepare(job.listing_id, { missingDetails: job.details ? JSON.parse(job.details) as Record<string, string> : {} })
-      await execute(db, 'UPDATE airbnb_sync_jobs SET product_id = ? WHERE id = ? AND lease_token = ?', [prepared.product_id, job.id, lease])
+      await execute(db, 'UPDATE airbnb_sync_jobs SET product_id = ? WHERE id = ?', [prepared.product_id, job.id])
       job.product_id = prepared.product_id
       return 'continue'
     }
@@ -270,66 +244,51 @@ function advanced(result: { stage: ImportStage; waiting: boolean }): Step {
 }
 
 /**
- * Advance due jobs with a lease. New steps stop at the cron's launch cutoff;
- * an already-started step keeps its stall guard until
- * `until`. A job that is done, waiting, or out of its start window is released. A
- * transient failure (the network, a provider's 5xx or 429) is retried with the
- * calendar outbox's backoff up to MAX_ATTEMPTS; any other fails the job. A job whose connection is busy is left for
- * the next run.
+ * Advance pending jobs. New steps stop at the cron's launch cutoff; an
+ * already-started step keeps its stall guard until `until`. A job that is
+ * waiting on Channex or out of its start window stays pending and the next
+ * run carries on from the stage its mapping reached. A step that throws fails
+ * the job with its error until a new request names the listing. A job whose
+ * connection is busy is left for the next run.
  */
 export async function runAirbnbSyncJobs(env: CloudflareEnv, until: number, options: { startReserveMs?: number } = {}): Promise<{ stepped: number; done: number; failed: number }> {
   const db = env.DB
   const totals = { stepped: 0, done: 0, failed: 0 }
   const startBy = until - (options.startReserveMs ?? CRON_START_RESERVE_MS)
-  const due = await queryAll<JobRow>(db, `SELECT * FROM airbnb_sync_jobs WHERE state IN ('pending', 'error')
-    AND (next_attempt_at IS NULL OR next_attempt_at <= ?) AND (lease_until IS NULL OR lease_until <= ?)
-    ORDER BY CASE action WHEN 'stop' THEN 0 ELSE 1 END, COALESCE(next_attempt_at, created_at), id`, [now(), now()])
+  // Stops first: the plan admitted this whole change after subtracting its stopped homes, and
+  // until they are stopped, activating a replacement would spend their allowance twice.
+  const due = await queryAll<JobRow>(db, `SELECT * FROM airbnb_sync_jobs WHERE state = 'pending'
+    ORDER BY CASE action WHEN 'stop' THEN 0 ELSE 1 END, created_at, id`)
   for (const job of due) {
     if (Date.now() >= startBy) break
-    // The plan admitted this whole change after subtracting its stopped homes.
-    // Until they are stopped, activating a replacement would spend their allowance twice.
-    const lease = crypto.randomUUID()
-    const claimed = await execute(db, `UPDATE airbnb_sync_jobs SET lease_token = ?, lease_until = ? WHERE id = ? AND state IN ('pending', 'error') AND (lease_until IS NULL OR lease_until <= ?)
-      AND (action = 'stop' OR NOT EXISTS (SELECT 1 FROM airbnb_sync_jobs pending_stop WHERE pending_stop.organization_id = airbnb_sync_jobs.organization_id AND pending_stop.action = 'stop' AND pending_stop.state IN ('pending', 'error')))`,
-      [lease, new Date(Date.now() + LEASE_MS).toISOString(), job.id, now()])
-    if (claimed.meta.changes !== 1) continue
+    if (job.action === 'sync' && await queryFirst(db, "SELECT 1 FROM airbnb_sync_jobs WHERE organization_id = ? AND action = 'stop' AND state = 'pending'", [job.organization_id])) continue
     const signal = AbortSignal.timeout(Math.max(0, until - Date.now()))
     const operationEnv = { ...env, requestSignal: signal }
     let outcome: Step = 'continue'
     try {
       while (outcome === 'continue' && Date.now() < startBy) {
         // A newer request replaces this job's id; this run must not complete it.
-        const current = await queryFirst<JobRow>(db, 'SELECT * FROM airbnb_sync_jobs WHERE id = ? AND lease_token = ? AND lease_until > ?', [job.id, lease, now()])
+        const current = await queryFirst<JobRow>(db, "SELECT * FROM airbnb_sync_jobs WHERE id = ? AND state = 'pending'", [job.id])
         if (!current || Date.now() >= startBy) break
-        outcome = await step(operationEnv, db, current, lease, signal)
+        outcome = await step(operationEnv, db, current, signal)
         totals.stepped++
-        await execute(db, 'UPDATE airbnb_sync_jobs SET lease_until = ?, updated_at = ? WHERE id = ? AND lease_token = ? AND lease_until > ?', [new Date(Date.now() + LEASE_MS).toISOString(), now(), job.id, lease, now()])
+        await execute(db, 'UPDATE airbnb_sync_jobs SET updated_at = ? WHERE id = ?', [now(), job.id])
       }
       if (outcome === 'done') {
-        const completed = await execute(db, `UPDATE airbnb_sync_jobs SET state = 'done', last_error_code = NULL, last_error = NULL, next_attempt_at = NULL, lease_token = NULL, lease_until = NULL,
-          completed_at = ?, updated_at = ? WHERE id = ? AND lease_token = ? AND lease_until > ?`, [now(), now(), job.id, lease, now()])
+        const completed = await execute(db, `UPDATE airbnb_sync_jobs SET state = 'done', last_error_code = NULL, last_error = NULL, completed_at = ?, updated_at = ?
+          WHERE id = ? AND state = 'pending'`, [now(), now(), job.id])
         totals.done += completed.meta.changes
-      } else {
-        // Waiting on Channex, or out of time: the next run carries on from the same stage.
-        await execute(db, `UPDATE airbnb_sync_jobs SET next_attempt_at = ?, lease_token = NULL, lease_until = NULL, updated_at = ? WHERE id = ? AND lease_token = ?`,
-          [outcome === 'later' ? new Date(Date.now() + 30_000).toISOString() : null, now(), job.id, lease])
       }
     } catch (error) {
       // H3 retains constructor details in cause, including the original provider cause.
       const failure = error instanceof HTTPError && error.data?.code === 'POST_WRITE_COMPLETION_FAILED' && error.data?.field === 'billing_usage' && error.data?.committed === true ? (error.cause as { cause: unknown }).cause : error
       const data = failure instanceof HTTPError || failure instanceof ChannexError ? failure.data as { code?: unknown } | undefined : undefined
       const code = typeof data?.code === 'string' ? data.code : signal.aborted ? 'SYNC_SLICE_ENDED' : 'SYNC_STEP_FAILED'
+      // Another step of this organization holds the connection: not a failure of this listing.
+      if (code === 'CONNECTION_BUSY') continue
       const message = error instanceof Error ? error.message : String(error)
-      if (code === 'CONNECTION_BUSY') {
-        // Another step of this organization holds the connection: not a failure of this listing.
-        await execute(db, `UPDATE airbnb_sync_jobs SET next_attempt_at = ?, lease_token = NULL, lease_until = NULL, updated_at = ? WHERE id = ? AND lease_token = ?`,
-          [new Date(Date.now() + 30_000).toISOString(), now(), job.id, lease])
-        continue
-      }
-      const final = !transient(failure) || job.attempts + 1 >= MAX_ATTEMPTS
-      const failed = await execute(db, `UPDATE airbnb_sync_jobs SET state = ?, last_error_code = ?, last_error = ?, attempts = attempts + 1, next_attempt_at = ?,
-        lease_token = NULL, lease_until = NULL, updated_at = ? WHERE id = ? AND lease_token = ? AND lease_until > ?`,
-      [final ? 'failed' : 'error', code, message, final ? null : new Date(Date.now() + Math.min(3_600_000, 30_000 * 2 ** Math.min(job.attempts, 7))).toISOString(), now(), job.id, lease, now()])
+      const failed = await execute(db, "UPDATE airbnb_sync_jobs SET state = 'failed', last_error_code = ?, last_error = ?, updated_at = ? WHERE id = ? AND state = 'pending'",
+        [code, message, now(), job.id])
       totals.failed += failed.meta.changes
     }
   }

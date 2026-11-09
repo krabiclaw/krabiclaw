@@ -22,7 +22,7 @@ are published there by the KrabiClaw bot, from the dashboard or MCP
   publication reports. `<@user-id>` in a post's text pings that member.
 - A receipt's link opens only for members of that channel, so the public site
   does not list Discord.
-- `reconcile_post_publication` resolves an unknown outcome from the bot's
+- `reconcile_post_publication` refreshes a publication's receipt from the bot's
   message id, which `list_channel_posts` shows.
 
 ## Configuration

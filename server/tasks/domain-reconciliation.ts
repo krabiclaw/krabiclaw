@@ -4,7 +4,7 @@ import { defineScheduledTask } from '~/server/utils/scheduled-task'
 export default defineScheduledTask({
   meta: {
     name: 'domains:reconcile',
-    description: 'Reconcile due Cloudflare SaaS custom domains'
+    description: 'Read Cloudflare for custom domains still being set up'
   },
   async run({ payload, context }) {
     const taskContext = context as { cloudflare?: { env?: ApiRecord } } | undefined

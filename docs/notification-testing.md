@@ -190,10 +190,9 @@ guest entry, and rejection of an invalid reply token. This endpoint is supplied
 by [Wrangler's local email runtime](https://developers.cloudflare.com/email-service/local-development/routing/),
 not by an application forwarding route.
 
-`yarn test:d1` exercises the committed baseline and delivery claim functions
-against real local D1. It proves one concurrent claim, no ambiguous Meta retry,
-bounded Resend retry, and protection from stale completion writes. It does not
-contact either provider or prove their live webhook configuration.
+`yarn test:d1` exercises the committed baseline and delivery functions against
+real local D1. It does not contact either provider or prove their live webhook
+configuration.
 
 ## Production canary
 
