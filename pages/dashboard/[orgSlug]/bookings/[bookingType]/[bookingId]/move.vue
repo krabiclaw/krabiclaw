@@ -7,6 +7,7 @@
 </template>
 
 <script setup lang="ts">
+import { GUEST_NOT_MESSAGED_WARNING, isMovedStayResponse } from '~/shared/stay-move'
 import { getErrorMessage } from '~/utils/errors'
 
 definePageMeta({ layout: 'dashboard' })
@@ -53,9 +54,9 @@ async function save() {
   try {
     const moved = await api(`/api/dashboard/stays/${encodeURIComponent(stayId)}/move`, {
       method: 'POST', body: { expected_version: stay.version, product_id: selected.value },
-      validate: (value: unknown): value is { stay: { guest_notified: boolean } } => isRecord(value) && isRecord(value.stay) && typeof value.stay.guest_notified === 'boolean',
+      validate: isMovedStayResponse,
     })
-    if (!moved.stay.guest_notified) toast.add({ color: 'warning', title: 'Guest not messaged', description: 'This stay has no conversation here yet. Send the new address and entry details on the booking site.' })
+    if (!moved.stay.guest_notified) toast.add(GUEST_NOT_MESSAGED_WARNING)
     await refreshNuxtData(`${String(route.params.orgSlug)}-stay:${stayId}`)
     await navigateTo(level.to.value ?? `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/bookings/stay/${encodeURIComponent(stayId)}`)
   } catch (cause) {

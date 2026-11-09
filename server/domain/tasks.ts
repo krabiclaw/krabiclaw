@@ -579,7 +579,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       const heading = row.kind === 'consultation_prep' ? 'Prepare for consultation' : 'Follow up'
       requestId = record.request_id
       face = 'compact'
-      title = request.guest_name ?? request.participant ?? 'Client'
+      title = request.guest_name ? firstName(request.guest_name) : request.participant ?? 'Client'
       avatar = { initial: initialOf(title), tone: 'warm' }
       statusLine = [heading, place].filter(Boolean).join(' · ')
       detail = `${day(record.starts_at)}, ${time(record.starts_at)}`
@@ -799,7 +799,7 @@ export async function subjectJobViews(db: DbClient, viewer: TaskViewer, subjectI
   const scope = scopeSql(viewer)
   const rows = await queryAll<TaskRow>(db, `SELECT t.* FROM tasks t WHERE t.organization_id = ? AND ${JOB_TASK_SQL('t')} AND ${scope.sql}
       AND t.subject_id IN (SELECT value FROM json_each(?))
-    ORDER BY CASE t.status WHEN 'open' THEN 0 ELSE 1 END, COALESCE(t.due_at, t.starts_at, t.created_at), t.updated_at DESC`,
+    ORDER BY CASE t.status WHEN 'open' THEN 0 ELSE 1 END, CASE WHEN t.status = 'open' THEN COALESCE(t.due_at, t.starts_at, t.created_at) END, t.closed_at DESC, t.updated_at DESC`,
   [viewer.principal.organizationId, ...scope.params, d1JsonStringSet(subjectIds)])
   const chosen = new Map<string, TaskRow>()
   for (const row of rows) {
@@ -870,7 +870,7 @@ export function stayReadyTaskQueries(input: {
   queries.push({
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, assigned_team_id, title, notes, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
       SELECT ?, ?, 'stay_ready', 'stay', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, 1, ?, ? WHERE ${guard.query}
-      ON CONFLICT (dedupe_key) DO UPDATE SET status = 'open', closed_at = NULL, closed_by_user_id = NULL, outcome_note = NULL, due_at = excluded.due_at,
+      ON CONFLICT (dedupe_key) DO UPDATE SET status = 'open', closed_at = NULL, closed_by_user_id = NULL, outcome_note = NULL, due_at = excluded.due_at, title = excluded.title, notes = excluded.notes,
         assigned_member_id = excluded.assigned_member_id, assigned_team_id = excluded.assigned_team_id, version = tasks.version + 1, updated_at = excluded.updated_at`,
     params: [crypto.randomUUID(), organizationId, stayId, home.product_id, home.location_id, home.assigned_member_id, home.assigned_team_id, `Get ${home.internal_name} ready`.slice(0, 200),
       `${input.guestName ?? 'A guest'} was moved here and arrives ${formatCalendarDate(input.checkInDate, 'en', { weekday: 'short', month: 'short', day: 'numeric' })}.`,

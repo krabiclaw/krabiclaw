@@ -91,7 +91,7 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
     queryAll<Member>(db, 'SELECT id, userId, role FROM member WHERE organizationId = ?', [organizationId]),
     queryAll<{ team_id: string; user_id: string }>(db, 'SELECT t.id AS team_id, tm.userId AS user_id FROM team t JOIN teamMember tm ON tm.teamId = t.id WHERE t.organizationId = ?', [organizationId]),
     queryAll<TaskRow>(db, `SELECT t.* FROM tasks t WHERE t.organization_id = ? AND (${JOB_TASK_SQL('t')} OR t.starts_at IS NOT NULL) AND (t.status = 'open' OR t.updated_at >= ?)
-      AND (t.assigned_member_id IS NOT NULL OR t.assigned_team_id IS NOT NULL) ORDER BY COALESCE(t.starts_at, t.due_at, t.created_at), t.id`,
+      AND (t.assigned_member_id IS NOT NULL OR t.assigned_team_id IS NOT NULL OR ${JOB_TASK_SQL('t')}) ORDER BY COALESCE(t.starts_at, t.due_at, t.created_at), t.id`,
     [organizationId, new Date(now.getTime() - RECENT_MS).toISOString()]),
   ])
   const teams = new Map<string, string[]>()
@@ -148,29 +148,27 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
       const targetKey = roster ? await jobThreadParticipantsKey(subject, roster.seats) : null
       for (const [threadId, thread] of elsewhere) {
         if (thread.participants_key === targetKey && task.status === 'open') continue
-        const keys = keysByThread.get(threadId)!
         const closedKey = task.status === 'open' ? `released:${task.id}` : `${task.status === 'cancelled' ? 'cancelled' : 'closed'}:${task.id}`
-        if (keys.has(closedKey) || (task.status !== 'open' && task.status !== 'cancelled' && task.closed_by_user_id !== null)) continue
+        if (task.status !== 'open' && task.status !== 'cancelled' && task.closed_by_user_id !== null) continue
         const seated = seatUsers.get(threadId) ?? []
         const body = task.status === 'open' ? `No longer yours: ${view!.sheet.heading.toLowerCase()} ${about} ${view!.sheet.title}${view!.sheet.date ? `, ${view!.sheet.date}` : ''}.`
           : `Cancelled: ${view ? `${view.sheet.heading.toLowerCase()} ${about} ${view.sheet.title}${view.sheet.date ? `, ${view.sheet.date}` : ''}` : 'this job'}.`
         await post(subject, seated.map(userId => members.find(member => member.userId === userId)?.id).filter((id): id is string => Boolean(id)), closedKey, body, seated.filter(userId => !hostUsers.includes(userId)))
       }
       if (task.status !== 'open' || !view) continue
+      // A job nobody holds has been told to whoever held it; there is nobody to remind.
+      if (task.assigned_member_id === null && task.assigned_team_id === null) continue
       if (!roster) {
         // An owner's or admin's own job.
         await alertOnTheDay(task, members.filter(member => member.id === task.assigned_member_id).map(member => member.userId))
         continue
       }
       const key = jobKey(task)
-      const thread = [...threads].find(([, thread]) => thread.participants_key === targetKey)
-      const keys = thread ? keysByThread.get(thread[0]) ?? new Set<string>() : new Set<string>()
-      if (!keys.has(key)) {
-        const result = await post(subject, roster.seats, key, lines(view), roster.cleaners)
-        threads.set(result.threadId, { subject_id: subject.id, participants_key: targetKey! })
-      }
+      // Posting is idempotent by key, and the alert and the open inboxes' refresh ride on every post through
+      // their own receipts, so a message whose alert failed last time is told this time.
+      const result = await post(subject, roster.seats, key, lines(view), roster.cleaners)
+      threads.set(result.threadId, { subject_id: subject.id, participants_key: targetKey! })
       for (const reminder of reminders(task)) {
-        if (keys.has(reminder.key) || keysByThread.get(thread?.[0] ?? '')?.has(reminder.key)) continue
         if (reminder.at > now) { pending.push(reminder.at); continue }
         if (now >= reminder.until) continue
         const when = view.when ? `, ${view.when}` : ''

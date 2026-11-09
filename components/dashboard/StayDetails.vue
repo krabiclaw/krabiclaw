@@ -245,6 +245,7 @@ import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialo
 import type { GuestStay, StayDetail, StayHome, StayTurnover } from '~/server/domain/stays'
 import { isChannelManagedStay, STAY_CHANNEL_LABELS, STAY_PAYMENT_METHOD_LABELS, type StayPaymentMethod } from '~/shared/bookings'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
+import { GUEST_NOT_MESSAGED_WARNING, isMovedStayResponse } from '~/shared/stay-move'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
 import { formatCalendarDate, formatTime, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
@@ -264,6 +265,7 @@ const dashboardApi = useDashboardApi()
 const { t } = useI18n()
 const route = useRoute()
 const realtime = useDashboardInvalidations()
+const toast = useToast()
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 const dashboardOrganization = useDashboardOrganization()
 const manageOpen = ref(false)
@@ -436,7 +438,10 @@ async function undoMove() {
   const value = detail.value
   if (!value?.booked_product_id) return
   if (!await confirmDialog.open({ title: 'Undo this move', description: `The guest goes back to ${value.booked_home_name} and is messaged its address and entry details.`, confirmLabel: 'Undo move', cancelLabel: 'Keep the move' })) return
-  await run('undo_move', () => dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/move`, { method: 'POST', validate: (response: unknown): response is { stay: Record<string, unknown> } => isRecord(response) && isRecord(response.stay), body: { expected_version: value.version, product_id: value.booked_product_id } }), 'The move could not be undone.')
+  await run('undo_move', async () => {
+    const moved = await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/move`, { method: 'POST', validate: isMovedStayResponse, body: { expected_version: value.version, product_id: value.booked_product_id } })
+    if (!moved.stay.guest_notified) toast.add(GUEST_NOT_MESSAGED_WARNING)
+  }, 'The move could not be undone.')
 }
 
 async function markNoShow() {

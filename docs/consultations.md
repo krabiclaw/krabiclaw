@@ -21,8 +21,9 @@ operator, and historical booked assignments are not backfilled or rewritten.
 
 - Identities: a booking is two records. `request_id` is `requests.id`, the guest
   thread (conversation, guest snapshot, cancellation link); `operational_booking_id`
-  is `bookings.id`, the seat on a session. Every response names both; neither
-  is called `booking_id`.
+  is `bookings.id`, the seat on a session. Every created-booking response names
+  both; a booking that requires payment answers with its checkout instead, and
+  the two ids exist once the payment captures. Neither is called `booking_id`.
 - Config: `ProductBookingConfig` in `server/utils/availability.ts` and
   `product_booking_configs` in `server/db/schema.ts`. `confirmation_mode` is
   instant/review, default instant. `online_timezone` explicitly configures online

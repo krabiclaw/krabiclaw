@@ -733,15 +733,15 @@ export async function postAutomaticTeamMessage(env: TeamEnv, db: DbClient, input
     WHERE m.organization_id = ? AND m.thread_id = (${thread}) AND m.idempotency_key = ?`, [input.organizationId, ...threadParams, input.idempotencyKey])
   if (!row) throw new Error(`Automatic team message ${input.idempotencyKey} for ${input.subject.kind} ${input.subject.id} was not written: a seat is no longer a member or the stay is gone`)
   const created = row.id === messageId
-  if (created) {
-    const entry = await queryFirst<{ id: string }>(db, "SELECT id FROM activity_entries WHERE organization_id = ? AND scope_kind = 'organization' AND dedupe_key = ?", [input.organizationId, messageEventKey(row.id)])
-    if (!entry) throw new Error(`Team message ${row.id} has no organization receipt`)
-    const seated = await queryAll<{ user_id: string }>(db, `SELECT m.userId AS user_id FROM team_thread_members s
-      JOIN member m ON m.id = s.member_id AND m.organizationId = s.organization_id WHERE s.organization_id = ? AND s.thread_id = ?`, [input.organizationId, row.thread_id])
-    const recipients = seated.map(seat => seat.user_id).filter(userId => input.alertUserIds.includes(userId))
-    await notifyTeamMessage(env, db, { organizationId: input.organizationId, threadId: row.thread_id, entryId: entry.id, senderName: input.senderName, messagePreview: body, recipientUserIds: recipients })
-    await publishThreadChanged(env, input.organizationId, row.thread_id, { message_id: row.id })
-  }
+  // The alert and the refresh belong to the message, not to the call that first wrote it: each delivery is
+  // recorded under the message's receipt, so a repeated post tells only who was not told.
+  const entry = await queryFirst<{ id: string }>(db, "SELECT id FROM activity_entries WHERE organization_id = ? AND scope_kind = 'organization' AND dedupe_key = ?", [input.organizationId, messageEventKey(row.id)])
+  if (!entry) throw new Error(`Team message ${row.id} has no organization receipt`)
+  const seated = await queryAll<{ user_id: string }>(db, `SELECT m.userId AS user_id FROM team_thread_members s
+    JOIN member m ON m.id = s.member_id AND m.organizationId = s.organization_id WHERE s.organization_id = ? AND s.thread_id = ?`, [input.organizationId, row.thread_id])
+  const recipients = seated.map(seat => seat.user_id).filter(userId => input.alertUserIds.includes(userId))
+  await notifyTeamMessage(env, db, { organizationId: input.organizationId, threadId: row.thread_id, entryId: entry.id, senderName: input.senderName, messagePreview: body, recipientUserIds: recipients })
+  if (created) await publishThreadChanged(env, input.organizationId, row.thread_id, { message_id: row.id })
   return { threadId: row.thread_id, messageId: row.id, created }
 }
 
