@@ -93,10 +93,6 @@ async function conversationEmailParent(db: DbClient, delivery: GuestThreadDelive
   }
 }
 
-/** The conversation an entry belongs to: its guest conversation, or a team message's team conversation. */
-const ENTRY_CONVERSATION = (alias: string) => `COALESCE(${alias}.request_id, (SELECT tm.thread_id FROM team_messages tm
-  WHERE tm.organization_id = ${alias}.organization_id AND ${alias}.dedupe_key = 'team-message:' || tm.id))`
-
 /**
  * A member's alerts about one conversation, guest or team, are one email
  * thread: each keeps the subject of the first alert sent to that recipient and
@@ -105,15 +101,20 @@ const ENTRY_CONVERSATION = (alias: string) => `COALESCE(${alias}.request_id, (SE
  * never its ancestry. An alert about no conversation starts no thread.
  */
 async function alertEmailParent(db: DbClient, delivery: GuestThreadDeliveryRow, recipient: string) {
+  // The alert's conversation: its guest conversation, or its team message's team conversation (the key the reply path reads).
+  const anchor = await queryFirst<{ request_id: string | null; team_thread_id: string | null }>(db, `
+    SELECT a.request_id, tm.thread_id AS team_thread_id FROM activity_entries a
+    LEFT JOIN team_messages tm ON tm.organization_id = a.organization_id AND a.dedupe_key = 'team-message:' || tm.id
+    WHERE a.id = ?`, [delivery.entry_id])
+  if (!anchor) throw new Error(`Alert delivery ${delivery.id} has no ledger entry`)
+  if (!anchor.request_id && !anchor.team_thread_id) return {}
+  const entries = anchor.request_id ? 'activity_entries e'
+    : "team_messages tm JOIN activity_entries e ON e.dedupe_key = 'team-message:' || tm.id AND e.organization_id = tm.organization_id"
   const earlier = await queryAll<{ email_json: string; email_message_id: string | null; provider: string }>(db, `
-    SELECT d.email_json, d.email_message_id, d.provider
-    FROM activity_entries alerted
-    JOIN activity_entries e ON ${ENTRY_CONVERSATION('e')} = ${ENTRY_CONVERSATION('alerted')}
-    JOIN guest_thread_deliveries d ON d.entry_id = e.id
-    WHERE alerted.id = ? AND d.id <> ? AND d.channel = 'email' AND d.purpose = 'owner_alert' AND d.email_json IS NOT NULL
-      AND d.status IN ('accepted', 'sent', 'delivered', 'read')
-    ORDER BY d.created_at, d.id
-  `, [delivery.entry_id, delivery.id])
+    SELECT d.email_json, d.email_message_id, d.provider FROM ${entries} JOIN guest_thread_deliveries d ON d.entry_id = e.id
+    WHERE ${anchor.request_id ? 'e.request_id' : 'tm.thread_id'} = ? AND d.id <> ? AND d.channel = 'email' AND d.purpose = 'owner_alert'
+      AND d.email_json IS NOT NULL AND d.status IN ('accepted', 'sent', 'delivered', 'read')
+    ORDER BY d.created_at, d.id`, [anchor.request_id ?? anchor.team_thread_id, delivery.id])
   const alerts = earlier.map(row => ({ ...row, snapshot: readEmailSnapshot(row.email_json) }))
     .filter(row => row.snapshot.message.to.trim().toLowerCase() === recipient)
   // The first alert to this recipient starts the thread with its own subject.
