@@ -9,20 +9,14 @@ import { updateThreadProjectionIfLatestEntry } from '~/server/domain/guest-threa
 import type { GuestThreadEntryRow } from '~/server/domain/guest-threads/types'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { notifyGuestThreadReply } from '~/server/utils/notifications'
-import { getSubmissionOrganization, verifyMemberReplyToken, verifyReplyToken, type SubmissionType } from '~/server/utils/submission-messages'
+import type { SubmissionType } from '~/server/utils/submission-messages'
 import { queryFirst } from '~/server/db'
-import { REPLY_FAILED_ALERTED, replyAsMember } from './member-reply'
-
-/**
- * An inbound email that delivering again cannot make acceptable. The message is
- * the bounce the sender reads, so it names the problem and nothing internal.
- * Any other error from receiving an email is one a later delivery may not hit.
- */
-export class InboundEmailRejection extends Error {}
+import { REPLY_FAILED_ALERTED, replyToAlertEntry } from './member-reply'
+import { InboundEmailRejection, verifyReplyToken } from '~/server/utils/reply-address'
 
 export interface InboundGuestEmail {
-  submissionType: SubmissionType
-  submissionId: string
+  /** The conversation entry the email the guest replied to was about. */
+  entryId: string
   token: string
   body: string
   /** Every file the email carried, in order. */
@@ -65,21 +59,17 @@ export function guestReplyText(mime: { text?: string, html?: string }): string {
   return new EmailReplyParser().read(text).getVisibleText().trim()
 }
 
-export async function receiveGuestEmail(env: CloudflareEnv, email: InboundGuestEmail): Promise<void> {
-  const tokenIsValid = await verifyReplyToken(
-    env,
-    email.submissionType,
-    email.submissionId,
-    email.token,
-  )
-  if (!tokenIsValid) throw new InboundEmailRejection('This reply address is not valid.')
-
-  const db = env.DB
-  const organization = await getSubmissionOrganization(db, email.submissionType, email.submissionId)
-  if (!organization) throw new InboundEmailRejection('This conversation no longer exists.')
-
-  const thread = await getGuestRequest(db, email.submissionId, undefined, email.submissionType)
+/** The conversation a signed reply address's entry belongs to. */
+async function addressedConversation(env: CloudflareEnv, entryId: string) {
+  const entry = await queryFirst<{ request_id: string | null }>(env.DB, 'SELECT request_id FROM activity_entries WHERE id = ?', [entryId])
+  const thread = entry?.request_id ? await getGuestRequest(env.DB, entry.request_id) : null
   if (!thread) throw new InboundEmailRejection('This conversation no longer exists.')
+  return thread
+}
+
+export async function receiveGuestEmail(env: CloudflareEnv, email: InboundGuestEmail): Promise<void> {
+  if (!await verifyReplyToken(env, email.entryId, { kind: 'guest' }, email.token)) throw new InboundEmailRejection('This reply address is not valid.')
+  const thread = await addressedConversation(env, email.entryId)
 
   // A reply with nothing newly written (only the quoted thread or a signature)
   // is accepted and records nothing.
@@ -87,8 +77,8 @@ export async function receiveGuestEmail(env: CloudflareEnv, email: InboundGuestE
   if (!email.body && !photos.length && !unshown.length) return
 
   await receiveGuestReply(env, {
-    threadId:thread.id, organizationId:organization.organizationId,
-    submissionType:email.submissionType, body:email.body, photos, unshown,
+    threadId:thread.id, organizationId:thread.organization_id,
+    submissionType:thread.kind, body:email.body, photos, unshown,
     channel:'email', userId:null, dedupeKey:`email:${email.messageId}`, headers:email.headers,
   })
 }
@@ -106,19 +96,17 @@ export interface InboundMemberEmail {
 }
 
 /**
- * A member replying to their alert about a conversation. The sender's address
- * names the member and the address's signature proves the alert went to them
- * about this thread; the reply is then the inbox's own, as that member. Anything
+ * A member replying to their alert about a guest or team conversation. The
+ * sender's address names the member and the address's signature proves the alert
+ * went to them about this entry; the reply is then the dashboard's own, as them. Anything
  * that stops it bounces with the reason.
  */
 export async function receiveMemberEmail(env: CloudflareEnv, email: InboundMemberEmail, report: (error: unknown) => Promise<void>): Promise<void> {
   const user = await queryFirst<{ id: string }>(env.DB, 'SELECT id FROM user WHERE lower(email) = ? AND "emailVerified" = 1', [email.from.trim().toLowerCase()])
-  if (!user || !await verifyMemberReplyToken(env, email.entryId, user.id, email.token)) {
+  if (!user || !await verifyReplyToken(env, email.entryId, { kind: 'member', userId: user.id }, email.token)) {
     throw new InboundEmailRejection('This reply address is not valid for the address you replied from. Reply from the address the alert was sent to, or answer from the dashboard.')
   }
-  const entry = await queryFirst<{ request_id: string | null }>(env.DB, 'SELECT request_id FROM activity_entries WHERE id = ?', [email.entryId])
-  if (!entry?.request_id) throw new InboundEmailRejection('This conversation no longer exists.')
-  const outcome = await replyAsMember(env, { threadId: entry.request_id, userId: user.id, body: email.body, files: email.files, idempotencyKey: `email:${email.messageId}` })
+  const outcome = await replyToAlertEntry(env, { entryId: email.entryId, userId: user.id, body: email.body, files: email.files, idempotencyKey: `email:${email.messageId}` })
   // A failure the member cannot act on fails the delivery. Any other failure is
   // reported while the member still reads the outcome: that the reply went, or
   // that it may have reached the guest, so they do not send it again.

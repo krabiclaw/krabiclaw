@@ -19,6 +19,8 @@ import { createProduct } from '../../server/utils/product-management.ts'
 import { createStay } from '../../server/domain/stays.ts'
 import { whatsAppServiceWindowOpen } from '../../server/utils/mcp-context.ts'
 import { useNitroHooks } from 'nitro/app'
+import { createTeamThread, listTeamMessages, sendTeamMessage, teamAccessFor } from '../../server/domain/team-messages.ts'
+import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 
 // Real D1 billing, membership, preferences and notification persistence. Only
 // the external Meta HTTP boundary is intercepted; no live messages are sent.
@@ -216,7 +218,8 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
     const refuse = new Set<string>()
     globalThis.fetch = async (input, init) => {
       if (!String(input).startsWith('https://graph.facebook.com/')) return originalFetch(input, init)
-      const text = JSON.parse(String(init?.body)).text.body as string
+      // An alert goes as an approved template, which has no text body.
+      const text = (JSON.parse(String(init?.body)).text?.body ?? '') as string
       sent.push(text)
       if ([...refuse].some(start => text.startsWith(start))) return Response.json({ error: { message: 'Meta refused the message' } }, { status: 400 })
       return Response.json({ messages: [{ id: `meta-out-${sent.length}` }] })
@@ -240,7 +243,7 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
       .bind(stay.request_id).all<{ body: string }>()).results.map(row => row.body)
 
     // A message that quotes no alert is answered with one line, and nothing is sent to anyone.
-    assert.deepEqual(await write('Can I reply?'), ['To answer a guest, reply to their message.'])
+    assert.deepEqual(await write('Can I reply?'), ['To answer a message, reply to it.'])
     assert.deepEqual([...await replies(ana), ...await replies(bo), ...await replies(dee)], [])
     assert.equal(await whatsAppServiceWindowOpen(db, 'owner'), true, 'the owner\'s own message opens their service window')
 
@@ -269,6 +272,20 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
     refuse.delete('Reply sent.')
     assert.equal(reported.length - reportedBefore, 1, 'the refused notice is reported')
     assert.deepEqual(await replies(bo), ['The gate code is 4512'])
+
+    // Quoting a teammate's alert posts to the team conversation as this member, once.
+    await db.prepare("INSERT INTO user (id, name, email, \"emailVerified\", createdAt, updatedAt) VALUES ('teammate', 'Teammate', 'teammate@example.test', 1, 0, 0)").run()
+    await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('member-mate', 'paid', 'teammate', 'member', 0)").run()
+    const teamAccess = (userId: string, role: string, memberId: string) => teamAccessFor(memberAccessPrincipal({ userId, role, organizationId: 'paid' } as never, { env }), memberId, 'send')
+    const [mate, ownerSeat] = await Promise.all([teamAccess('teammate', 'member', 'member-mate'), teamAccess('owner', 'owner', 'member-paid')])
+    const teamThread = await createTeamThread(env, db, mate, { memberIds: ['owner'] })
+    const teamAlerted = await sendTeamMessage(env, db, mate, teamThread.id, { body: 'Towels are out', photos: [], idempotencyKey: 'team-alert', senderName: 'Teammate' })
+    const teamAlert = await db.prepare(`SELECT d.provider_message_id FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
+      WHERE e.dedupe_key = ? AND d.channel = 'whatsapp' AND d.provider = 'meta'`).bind(`team-message:${teamAlerted.message.id}`).first<string>('provider_message_id')
+    assert.ok(teamAlert)
+    assert.deepEqual(await write('Thanks', teamAlert, 'wamid-team'), ['Reply sent.'])
+    assert.deepEqual(await write('Thanks', teamAlert, 'wamid-team'), [])
+    assert.deepEqual((await listTeamMessages(db, ownerSeat, teamThread.id, {})).messages.filter(message => message.body === 'Thanks').map(message => message.senderId), ['owner'])
 
     // A member removed from the business is told so, and nothing reaches the guest.
     await db.prepare("DELETE FROM member WHERE id = 'member-paid'").run()

@@ -1,7 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { createHmac, randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
-import { buildReplyToAddress } from '../../server/utils/submission-messages'
 import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import type { InboxRow, InboxStreamItem, InboxThread } from '../../server/domain/guest-threads/types'
@@ -171,12 +170,11 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   expect(originalEmail.message.references).toBeUndefined()
   // Delivered through the local runtime's email event, so the Worker's own
   // email handler parses, verifies and records the reply, and its accept or
-  // reject is what Email Routing would receive.
-  const replyTo = await buildReplyToAddress({
-    EMAIL_REPLY_SECRET: process.env.EMAIL_REPLY_SECRET,
-    NUXT_PUBLIC_PLATFORM_DOMAIN: baseURL,
-  }, 'contact', initial.id)
-  expect(replyTo).toMatch(/^rc[0-9a-f]{56}@/)
+  // reject is what Email Routing would receive. The guest answers the address
+  // the email actually carried.
+  const guestReplyAddress = /^rg[0-9a-f]{56}@/
+  const replyTo = originalEmail.message.replyTo
+  expect(replyTo).toMatch(guestReplyAddress)
   const body = `Signed guest reply ${randomUUID()}`
   const subject = `Re: ${originalEmail.message.subject}`
   const emailDate = new Date().toUTCString()
@@ -259,9 +257,10 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   expect(firstStaffReceipt.email_json).toEqual(expect.any(String))
   const firstStaffEmail = JSON.parse(firstStaffReceipt.email_json!) as FrozenEmail
   expect(firstStaffEmail.message).toMatchObject({
-    to: guestEmail, subject, emailPurpose: 'transactional', replyTo,
+    to: guestEmail, subject, emailPurpose: 'transactional',
     inReplyTo: secondMessageId, references: [messageId, secondMessageId],
   })
+  expect(firstStaffEmail.message.replyTo).toMatch(guestReplyAddress)
   expect(firstStaffEmail.message.html).toContain(staffBody)
   expect(firstStaffEmail.message.text).toContain(staffBody)
   expect(firstStaffEmail.message.html).toContain('You received this email because')
@@ -282,9 +281,12 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   expect(nextReceipt.email_message_id).toBeNull()
   const nextEmail = JSON.parse(nextReceipt.email_json!) as FrozenEmail
   expect(nextEmail.message).toMatchObject({
-    to: guestEmail, subject, emailPurpose: 'transactional', replyTo,
+    to: guestEmail, subject, emailPurpose: 'transactional',
     inReplyTo: secondMessageId, references: [messageId, secondMessageId],
   })
+  expect(nextEmail.message.replyTo).toMatch(guestReplyAddress)
+  // Each email's address names its own conversation entry.
+  expect(new Set([replyTo, firstStaffEmail.message.replyTo, nextEmail.message.replyTo]).size).toBe(3)
   expect(nextEmail.message.html).toContain(nextStaffBody)
   const repliedResponse = await fetchPhase('verify repeated staff entries', detailUrl, {})
   expect(repliedResponse.status(), await repliedResponse.text()).toBe(200)

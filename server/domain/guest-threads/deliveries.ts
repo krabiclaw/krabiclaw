@@ -1,7 +1,8 @@
 import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { WebhookEventPayload } from 'resend'
 import { notifyBuyerThread } from '~/server/utils/notification-center'
-import { buildReplyToAddress, type ReplyEmailEnv } from '~/server/utils/submission-messages'
+import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
+import { buildReplyToAddress } from '~/server/utils/reply-address'
 import { emailSender, getEmailDeliveryMode, isEmailMessageId, sendEmail, type EmailInput } from '~/server/utils/email-delivery'
 import { getResendClient, resendData } from '~/server/utils/resend'
 import { isRecord } from '~/server/utils/type-guards'
@@ -12,7 +13,6 @@ import type {
   GuestThreadDeliveryProvider,
   GuestThreadDeliveryRow,
   GuestThreadDeliveryStatus,
-  GuestThreadSubmissionType,
 } from './types'
 
 /** Email delivery also retains the provider's RFC ID before a later reply or alert can depend on it. */
@@ -113,11 +113,13 @@ async function conversationEmailParent(db: DbClient, delivery: GuestThreadDelive
     parent ??= { subject, messageId }
     references.push(messageId)
   }
-  const subject = parent?.subject ?? knownSubject
-  return parent ? {
+  // No earlier email to answer: the email starts the conversation's thread with its own subject.
+  if (!parent) return {}
+  const subject = parent.subject ?? knownSubject
+  return {
     ...(subject === null ? {} : { subject: `Re: ${subject.replace(/^(?:re:\s*)+/iu, '').replace(/[\r\n]+/gu, ' ').trim()}`.trim() }),
     inReplyTo: parent.messageId, references: [...new Set(references.reverse())],
-  } : null
+  }
 }
 
 /**
@@ -136,7 +138,8 @@ async function alertEmailParent(db: DbClient, delivery: GuestThreadDeliveryRow, 
   `, [threadId, delivery.id])
   const alerts = earlier.map(row => ({ ...row, snapshot: readEmailSnapshot(row.email_json) }))
     .filter(row => row.snapshot.message.to.trim().toLowerCase() === recipient)
-  if (!alerts.length) return null
+  // The first alert to this recipient starts the thread with its own subject.
+  if (!alerts.length) return {}
   // A log-only alert was never mailed, so it has no RFC identity to answer.
   const references = alerts.flatMap(row => row.provider === 'resend' && row.email_message_id !== null ? [row.email_message_id] : [])
   if (!references.every(isEmailMessageId)) throw new Error('Prior alert email has an invalid RFC Message-ID')
@@ -164,13 +167,13 @@ export async function deliverReceiptEmail(db: DbClient, input: {
           throw new Error('This email has no recorded provider identity and is past Resend\'s 24-hour idempotency window. Review its provider delivery before sending again.')
         }
         const recipient = input.email.to.trim().toLowerCase()
-        const parent = !threaded ? null
+        const ancestry = !threaded ? {}
           : delivery.purpose === 'owner_alert' ? await alertEmailParent(db, delivery, input.threadId!, recipient)
             : await conversationEmailParent(db, delivery, input.threadId!, entry.sequence!, recipient)
         const snapshot: EmailSnapshot = {
           preparedAt: new Date().toISOString(),
           sender: delivery.provider === 'resend' || input.env.EMAIL_FROM?.trim() ? emailSender(input.env, input.email.fromName) : null,
-          message: { ...input.email, ...(parent ?? {}) },
+          message: { ...input.email, ...ancestry },
         }
         // The first contender freezes the complete request. A retry never
         // changes ancestry, subject, recipient, sender, body or attachments.
@@ -419,7 +422,6 @@ export async function deliverGuestThreadEmail(
     fromName: string
     subject: string
     email: { html: string; text: string }
-    submissionType: GuestThreadSubmissionType
     submissionId: string
   },
 ): Promise<GuestThreadDeliveryRow> {
@@ -435,7 +437,7 @@ export async function deliverGuestThreadEmail(
     email: {
       to: input.to, fromName: input.fromName, subject: input.subject,
       ...input.email, emailPurpose: 'transactional',
-      replyTo: await buildReplyToAddress(input.env, input.submissionType, input.submissionId),
+      replyTo: await buildReplyToAddress(input.env, input.delivery.entry_id, { kind: 'guest' }),
     },
   })
 }

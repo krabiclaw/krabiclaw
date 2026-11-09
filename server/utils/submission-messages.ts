@@ -1,90 +1,14 @@
 import { queryFirst, type DbClient } from '~/server/db'
-import {
-  buildMemberReplyLocalPart,
-  buildMemberReplyToken,
-  buildReplyLocalPart,
-  buildReplyToken,
-  parseReplyLocalPart,
-  verifyMemberReplyTokenValue,
-  verifyReplyTokenValue,
-  type ParsedReplyLocalPart,
-  type ReplySubmissionType,
-} from '~/server/utils/reply-address'
-import { getReplyDomain } from '~/server/utils/reply-domain'
+import type { GuestThreadSubmissionType } from '~/server/domain/guest-threads/types'
 
-export type SubmissionType = ReplySubmissionType
+export type SubmissionType = GuestThreadSubmissionType
 
-interface ReplyAddressEnv {
+export interface ReplyEmailEnv {
   EMAIL_REPLY_SECRET?: string
   NUXT_PUBLIC_PLATFORM_DOMAIN?: string
-}
-
-export interface ReplyEmailEnv extends ReplyAddressEnv {
   RESEND_API_KEY?: string
   EMAIL_FROM?: string
   EMAIL_DELIVERY_MODE?: string
-}
- 
-// Builds a compact reply-to like r<type><uuid><hmac>@reply.krabiclaw.com so inbound replies stay
-// under the 64-character local-part limit while still encoding the submission identity.
-export async function buildReplyToAddress(
-  env: ReplyAddressEnv,
-  submissionType: SubmissionType,
-  submissionId: string,
-): Promise<string | null> {
-  if (!env.EMAIL_REPLY_SECRET) return null
-  const token = await buildReplyToken(env.EMAIL_REPLY_SECRET, submissionType, submissionId)
-  const localPart = buildReplyLocalPart(submissionType, submissionId, token)
-  if (!localPart) return null
-  return `${localPart}@${getReplyDomain(env)}`
-}
-
-export async function verifyReplyToken(
-  env: ReplyAddressEnv,
-  submissionType: string,
-  submissionId: string,
-  token: string,
-): Promise<boolean> {
-  if (!env.EMAIL_REPLY_SECRET) return false
-  return verifyReplyTokenValue(env.EMAIL_REPLY_SECRET, submissionType, submissionId, token)
-}
-
-/** The reply-to on a member's alert about a conversation event: replying to it answers the guest as that member. */
-export async function buildMemberReplyToAddress(env: ReplyAddressEnv, entryId: string, userId: string): Promise<string> {
-  if (!env.EMAIL_REPLY_SECRET) throw new Error('EMAIL_REPLY_SECRET is required to sign a member reply address')
-  const localPart = buildMemberReplyLocalPart(entryId, await buildMemberReplyToken(env.EMAIL_REPLY_SECRET, entryId, userId))
-  if (!localPart) throw new Error(`Conversation entry ${entryId} has no addressable id`)
-  return `${localPart}@${getReplyDomain(env)}`
-}
-
-export async function verifyMemberReplyToken(env: ReplyAddressEnv, entryId: string, userId: string, token: string): Promise<boolean> {
-  if (!env.EMAIL_REPLY_SECRET) return false
-  return verifyMemberReplyTokenValue(env.EMAIL_REPLY_SECRET, entryId, userId, token)
-}
-
-export function parseReplyToAddress(env: ReplyAddressEnv, address: string): ParsedReplyLocalPart | null {
-  const parts = address.split('@')
-  if (parts.length !== 2 || parts[1]?.toLowerCase() !== getReplyDomain(env).toLowerCase()) return null
-  return parseReplyLocalPart(parts[0] ?? '')
-}
-
-export function isSubmissionType(value: string): value is SubmissionType {
-  return value === 'contact' || value === 'reservation' || value === 'booking'
-}
-
-export async function getSubmissionOrganization(db: DbClient, submissionType: SubmissionType, submissionId: string): Promise<{ organizationId: string } | null> {
-  const row = await queryFirst<{ organization_id: string }>(db, 'SELECT organization_id FROM requests WHERE kind = ? AND id = ?', [submissionType, submissionId])
-  return row ? { organizationId: row.organization_id } : null
-}
-
-export interface SubmissionContact {
-  email: string | null
-  phone: string | null
-  organizationId: string
-}
-
-export async function getSubmissionContact(db: DbClient, organizationId: string, submissionType: SubmissionType, submissionId: string): Promise<SubmissionContact | null> {
-  return queryFirst<SubmissionContact>(db, `SELECT organization_id AS organizationId, json_extract(payload_json, '$.guest.email') AS email, json_extract(payload_json, '$.guest.phone') AS phone FROM requests WHERE id = ? AND organization_id = ? AND kind = ?`, [submissionId, organizationId, submissionType])
 }
 
 export interface SubmissionMatch {

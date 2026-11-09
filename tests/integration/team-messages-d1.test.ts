@@ -10,6 +10,8 @@ import { createProduct } from '../../server/utils/product-management.ts'
 import { getLocation, updateLocation } from '../../server/utils/location-management.ts'
 import { assertAssignedBookingAccess, listOrganizationNotificationMembers, memberAccessPrincipal, reconcileResponsibilities } from '../../server/utils/member-access.ts'
 import { createStay, listStayHomes, stayAccessFor, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
+import { receiveMemberEmail } from '../../server/domain/guest-threads/inbound-email.ts'
+import { InboundEmailRejection, parseReplyToAddress } from '../../server/utils/reply-address.ts'
 import { createTeamThread, listTeamMembers, listTeamMessages, listTeamThreads, markTeamThreadRead, operateTeamGroup, sendTeamMessage, teamAccessFor } from '../../server/domain/team-messages.ts'
 import { setNotificationPreference } from '../../server/domain/notification-preferences.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
@@ -44,7 +46,7 @@ test('members talk in team conversations, see unread state and receive recorded 
   try {
     const db = await runtime.getD1Database('DB')
     const env = { ...await runtime.getBindings<CloudflareEnv>(), MEDIA_BASE_URL: 'https://media.example.test', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
-      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', EMAIL_REPLY_SECRET: 'team-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     for (const [id, slug] of [[ORG, 'org'], [OTHER, 'other']]) {
       await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
@@ -307,6 +309,20 @@ test('members talk in team conversations, see unread state and receive recorded 
     await assert.rejects(operateTeamGroup(env, db, cleaner, group.id, { action: 'rename', name: ' ', idempotencyKey: 'blank-name' }), refused(422, 'INVALID_GROUP_NAME', 'name'))
     const groupMessage = await sendTeamMessage(env, db, cook, group.id, { body: 'The three of us can see this', photos: [], idempotencyKey: 'group-message', senderName: 'cook' })
     assert.equal((await listTeamMessages(db, cleaner, group.id, {})).messages[0]?.id, groupMessage.message.id)
+    // A team alert's email answers the team conversation as the member who replied, once.
+    const alerted = await sendTeamMessage(env, db, cook, contextualGroup.id, { body: 'Is the cabin ready?', photos: [], idempotencyKey: 'email-reply-alert', senderName: 'cook' })
+    const alertEmail = await db.prepare(`SELECT d.email_json FROM guest_thread_deliveries d JOIN activity_entries a ON a.id = d.entry_id WHERE a.dedupe_key = ? AND d.channel = 'email' AND d.email_json LIKE '%cleaner@example.test%'`)
+      .bind(`team-message:${alerted.message.id}`).first<string>('email_json')
+    const address = parseReplyToAddress(env, (JSON.parse(alertEmail!).message as { replyTo: string }).replyTo)
+    assert.equal(address.kind, 'member')
+    const emailedReply = { entryId: address.entryId, token: address.token, from: 'Cleaner@example.test', body: 'On my way', files: [], messageId: '<team-reply@mail.example.test>' }
+    const unexpectedReport = async (error: unknown) => { throw error }
+    await receiveMemberEmail(env, emailedReply, unexpectedReport)
+    await receiveMemberEmail(env, emailedReply, unexpectedReport)
+    assert.deepEqual((await listTeamMessages(db, owner, contextualGroup.id, {})).messages.filter(message => message.body === 'On my way').map(message => message.senderId), ['cleaner'])
+    // The signature is the cleaner's: another member replying from their own address is refused.
+    await assert.rejects(receiveMemberEmail(env, { ...emailedReply, from: 'owner@example.test', messageId: '<team-forged@mail.example.test>' }, unexpectedReport), InboundEmailRejection)
+    assert.equal((await listTeamMessages(db, owner, contextualGroup.id, {})).messages.filter(message => message.body === 'On my way').length, 1)
     const readingDb = createDb(db)
     await context.test('revocation between a seat check and its transcript read exposes no later message', async () => {
       let interleaved = false

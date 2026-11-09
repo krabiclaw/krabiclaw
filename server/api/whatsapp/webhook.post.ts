@@ -3,11 +3,11 @@ import { fetchWhatsAppMedia, sendWhatsAppText } from '~/server/utils/whatsapp'
 import { attachGuestPhotos, sortGuestFiles, type MessagePhoto } from '~/server/domain/guest-threads/attachments'
 import { advanceDeliveryStatus } from '~/server/domain/guest-threads/deliveries'
 import { parseMetaMsisdn } from '~/utils/phone'
-import { lastWhatsAppInboundId, recordWhatsAppInbound } from '~/server/utils/mcp-context'
+import { isLastWhatsAppInbound, recordWhatsAppInbound } from '~/server/utils/mcp-context'
 import { execute, queryFirst } from '~/server/db'
 import { updateThreadProjectionIfLatestEntry } from '~/server/domain/guest-threads/repository'
 import { getGuestRequest, requestSummary } from '~/server/domain/requests'
-import { REPLY_BY_QUOTING, replyAsMember } from '~/server/domain/guest-threads/member-reply'
+import { REPLY_BY_QUOTING, replyToAlertEntry } from '~/server/domain/guest-threads/member-reply'
 import { appendEntry, findEntryByDedupeKey } from '~/server/domain/guest-threads/entries'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { notifyGuestThreadReply } from '~/server/utils/notifications'
@@ -106,17 +106,18 @@ async function resolveUser(env: ApiRecord, from: string): Promise<UserRow | null
 }
 
 /**
- * A member's own WhatsApp message. Quoting their alert about a guest's message
- * answers that guest: it is the inbox's reply, sent as the member the phone was
- * verified for, and the member is told the outcome. Anything else gets one line
+ * A member's own WhatsApp message. Quoting their alert about a guest's or
+ * teammate's message answers that conversation: it is the dashboard's own send,
+ * as the member the phone was verified for, and the member is told the outcome. Anything else gets one line
  * saying how to answer. The reply's key is the WhatsApp message's id, so Meta
  * redelivering it sends nothing twice.
  */
 async function answerMember(db: D1Database, env: ApiRecord, message: WhatsAppMessage, toPhone: string, userId: string, report: (error: unknown) => Promise<void>): Promise<void> {
   const quoted = message.context?.id
-    ? await queryFirst<{ request_id: string }>(db, `
-        SELECT e.request_id FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
-         WHERE d.provider = 'meta' AND d.channel = 'whatsapp' AND d.purpose = 'owner_alert' AND d.provider_message_id = ? AND e.request_id IS NOT NULL
+    ? await queryFirst<{ entry_id: string }>(db, `
+        SELECT d.entry_id FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
+         WHERE d.provider = 'meta' AND d.channel = 'whatsapp' AND d.purpose = 'owner_alert' AND d.provider_message_id = ?
+           AND (e.request_id IS NOT NULL OR e.dedupe_key LIKE 'team-message:%')
          LIMIT 1`, [message.context.id])
     : null
   if (!quoted) {
@@ -124,8 +125,8 @@ async function answerMember(db: D1Database, env: ApiRecord, message: WhatsAppMes
     if (!sent.success) throw new Error(sent.error || 'Failed to send the WhatsApp reply hint')
     return
   }
-  const outcome = await replyAsMember(env as CloudflareEnv, {
-    threadId: quoted.request_id, userId, body: messageText(message), files: await messageFiles(env, message), idempotencyKey: `whatsapp:${message.id}`,
+  const outcome = await replyToAlertEntry(env as CloudflareEnv, {
+    entryId: quoted.entry_id, userId, body: messageText(message), files: await messageFiles(env, message), idempotencyKey: `whatsapp:${message.id}`,
   })
   // The outcome is the member's to read whatever else failed; a notice Meta refuses is reported beside it.
   const told = await sendWhatsAppText(env, toPhone, outcome.notice).then(
@@ -199,12 +200,13 @@ async function handleMessage(db: D1Database, env: ApiRecord, message: WhatsAppMe
   }
 
   // Meta redelivering a message already answered runs nothing again.
-  if (await lastWhatsAppInboundId(db, user.id) === message.id) return
+  if (await isLastWhatsAppInbound(db, user.id, message.id)) return
+  const sentAt = metaMessageTime(message)
   await answerMember(db, env, message, toPhone, user.id,
     // Through the same error hook a thrown error reaches (server/plugins/error-logger.ts).
     async (error) => { await useNitroHooks().callHook('error', error instanceof Error ? error : new Error(String(error), { cause: error }), { event, tags: ['whatsapp'] }) })
   // Meta's own time for the message opens the member's service window.
-  await recordWhatsAppInbound(db, { userId: user.id, messageId: message.id, sentAt: metaMessageTime(message) })
+  await recordWhatsAppInbound(db, { userId: user.id, messageId: message.id, sentAt })
 }
 
 function formatStatusError(errors: WhatsAppStatusError[] | undefined): string | null {

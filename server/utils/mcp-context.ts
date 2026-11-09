@@ -247,9 +247,9 @@ export async function upsertMcpWorkspacePreference(
  * it is answered once, and Meta's own time for it, which opens the 24-hour
  * service window in which a photo can follow an alert.
  */
-export async function lastWhatsAppInboundId(db: DbClient, userId: string): Promise<string | null> {
-  const row = await queryFirst<{ id: string | null }>(db, 'SELECT whatsapp_last_inbound_id AS id FROM user_workspace_state WHERE user_id = ?', [userId])
-  return row?.id ?? null
+/** Whether this WhatsApp message is the member's last one already answered, which Meta is redelivering. */
+export async function isLastWhatsAppInbound(db: DbClient, userId: string, messageId: string): Promise<boolean> {
+  return Boolean(await queryFirst(db, 'SELECT 1 FROM user_workspace_state WHERE user_id = ? AND whatsapp_last_inbound_id = ?', [userId, messageId]))
 }
 
 export async function recordWhatsAppInbound(db: DbClient, input: { userId: string; messageId: string; sentAt: string }): Promise<void> {
@@ -261,6 +261,6 @@ export async function recordWhatsAppInbound(db: DbClient, input: { userId: strin
 }
 
 export async function whatsAppServiceWindowOpen(db: DbClient, userId: string, now = new Date()): Promise<boolean> {
-  const row = await queryFirst<{ at: string | null }>(db, 'SELECT whatsapp_updated_at AS at FROM user_workspace_state WHERE user_id = ?', [userId])
-  return row?.at != null && now.getTime() - Date.parse(row.at) < 24 * 60 * 60 * 1000
+  return Boolean(await queryFirst(db, 'SELECT 1 FROM user_workspace_state WHERE user_id = ? AND whatsapp_updated_at > ?',
+    [userId, new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()]))
 }

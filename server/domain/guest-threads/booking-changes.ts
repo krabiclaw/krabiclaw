@@ -366,7 +366,6 @@ async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow
       actionUrl: actionUrl?.href ?? null,
       actionLabel: actionUrl ? guest.labels['booking.change_review']! : null,
     }), { platformDomain: getPlatformDomain(env) }),
-    submissionType: thread.kind,
     submissionId: thread.id,
   })
   if (!isDeliverySent(sent)) throw new HTTPError({ statusCode: 502, message: sent.error || 'Guest email delivery has not been confirmed. Review the recorded delivery outcome.', data: { code: 'DELIVERY_INCOMPLETE', field: 'delivery', delivery_id: sent.id, delivery_status: sent.status } })

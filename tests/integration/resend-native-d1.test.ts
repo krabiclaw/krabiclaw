@@ -9,10 +9,9 @@ import { sendEmail } from '../../server/utils/email-delivery.ts'
 import { applyResendEmailEvent, compareDeliveryStatus, createDeliveryReceipt, deliverReceiptEmail, getDeliveryById, isDeliverySent } from '../../server/domain/guest-threads/deliveries.ts'
 import { renderNotificationEmail } from '../../server/emails/render.ts'
 import { guestContactReceivedMessage, guestThreadReplyMessage } from '../../server/notifications/guest-events.ts'
-import { InboundEmailRejection, receiveGuestEmail, receiveMemberEmail } from '../../server/domain/guest-threads/inbound-email.ts'
-import { buildMemberReplyToken, buildReplyToken } from '../../server/utils/reply-address.ts'
+import { receiveGuestEmail, receiveMemberEmail } from '../../server/domain/guest-threads/inbound-email.ts'
+import { buildReplyToken, InboundEmailRejection, parseReplyToAddress } from '../../server/utils/reply-address.ts'
 import { notifyGuestThreadReply } from '../../server/utils/notifications.ts'
-import { parseReplyToAddress } from '../../server/utils/submission-messages.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { reconcileProductNewsContacts, reconcileProductNewsFromProvider, syncProductNewsContact } from '../../server/domain/product-news-contacts.ts'
 import { disableCategoryEmail, getNotificationPreferences, setNotificationPreference } from '../../server/domain/notification-preferences.ts'
@@ -337,7 +336,7 @@ test('conversation email uses provider-assigned ancestry and freezes each delive
     const inboundEnv = { ...PROVIDER_ENV, DB: db, GUEST_INBOX_HUBS: hubs, BETTER_AUTH_SECRET: 'threading-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       STRIPE_SECRET_KEY: 'sk_test_threading_no_stripe_requests', EMAIL_REPLY_SECRET: 'threading-proof' } as unknown as CloudflareEnv
     const incoming = { from: guestEmail, subject: `Re: ${rootEmail.subject}`, messageId: guestMessageId, inReplyTo: root.email_message_id, references: root.email_message_id }
-    await receiveGuestEmail(inboundEnv, { submissionType: 'contact', submissionId: 'conversation', token: await buildReplyToken(inboundEnv.EMAIL_REPLY_SECRET!, 'contact', 'conversation'),
+    await receiveGuestEmail(inboundEnv, { entryId: opening.id, token: await buildReplyToken(inboundEnv.EMAIL_REPLY_SECRET!, opening.id, { kind: 'guest' }),
       body: 'Thanks. Is parking free?', files: [], messageId: guestMessageId, headers: incoming })
     const ingested = await db.prepare("SELECT payload_json FROM activity_entries WHERE request_id='conversation' AND actor_kind='guest' AND channel='email'").first<string>('payload_json')
     assert.deepEqual(JSON.parse(ingested!).email, incoming, 'the actual inbound pipeline retains the parsed RFC identity and subject')
@@ -413,8 +412,8 @@ test('conversation email uses provider-assigned ancestry and freezes each delive
     // A missing Subject is valid mail. The genuine inbound identity remains
     // the parent, while the prior confirmation supplies the known subject.
     const subjectlessMessageId = '<guest-without-subject@provider-proof.com>'
-    await receiveGuestEmail(inboundEnv, { submissionType: 'contact', submissionId: 'other-conversation',
-      token: await buildReplyToken(inboundEnv.EMAIL_REPLY_SECRET!, 'contact', 'other-conversation'),
+    await receiveGuestEmail(inboundEnv, { entryId: foreignEntry.id,
+      token: await buildReplyToken(inboundEnv.EMAIL_REPLY_SECRET!, foreignEntry.id, { kind: 'guest' }),
       body: 'I have one more question.', files: [], messageId: subjectlessMessageId,
       headers: { from: guestEmail, subject: null, messageId: subjectlessMessageId, inReplyTo: foreign.email_message_id, references: foreign.email_message_id } })
     const subjectlessEntry = await appendEntry(db, { threadId: 'other-conversation', kind: 'message', actorKind: 'member', channel: 'email', body: 'Please ask.' })
@@ -429,8 +428,8 @@ test('conversation email uses provider-assigned ancestry and freezes each delive
     // and no genuine RFC ID. The hash identifies ingestion, never ancestry.
     const hashIdentity = `content-sha256:${'b7'.repeat(32)}`
     const withoutRfcId = {
-      submissionType: 'contact' as const, submissionId: 'other-conversation',
-      token: await buildReplyToken(inboundEnv.EMAIL_REPLY_SECRET!, 'contact', 'other-conversation'),
+      entryId: foreignEntry.id,
+      token: await buildReplyToken(inboundEnv.EMAIL_REPLY_SECRET!, foreignEntry.id, { kind: 'guest' }),
       body: 'This message has no RFC Message-ID.', files: [], messageId: hashIdentity,
       headers: { from: guestEmail, subject: 'Re: Other business confirmation', messageId: null,
         inReplyTo: subjectlessReply.email_message_id, references: subjectlessReply.email_message_id },
@@ -507,7 +506,6 @@ test('message alerts thread per recipient and replying to one answers the guest 
     await db.prepare("INSERT INTO user (id,name,email,emailVerified) VALUES ('owner','Owner','owner@provider-proof.com',1)").run()
     await db.prepare("INSERT INTO member (id,organizationId,userId,role) VALUES ('owner-member','inn','owner','owner')").run()
     const now = new Date().toISOString()
-    // Conversations are addressed by their UUID, as every request id is.
     const asked = crypto.randomUUID()
     await db.batch(requestInsertQueries({ id: asked, kind: 'contact', organization_id: 'inn', location_id: null, user_id: null, review_id: null,
       payload: { guest: { name: 'Jamie Rivera', email: 'guest@provider-proof.com', phone: null }, subject: 'Parking', message: 'Is there parking?', consent_at: null, ip_hash: null },
@@ -533,7 +531,7 @@ test('message alerts thread per recipient and replying to one answers the guest 
     assert.equal(new Set(alerts.map(email => [email.reply_to].flat()[0])).size, 3)
 
     // The owner answers from their mail client: the guest is emailed as the dashboard would, by the owner.
-    assert.ok(address?.kind === 'member')
+    assert.ok(address.kind === 'member')
     await receiveMemberEmail(env, { entryId: address.entryId, token: address.token, from: 'Owner@provider-proof.com', body: 'Yes, parking is free.', files: [], messageId: '<owner-1@provider-proof.com>' }, unexpectedReport)
     const toGuest = [...resend.emails.values()].filter(email => (email.to as string[])[0] === 'guest@provider-proof.com')
     assert.equal(toGuest.length, 1)
@@ -541,7 +539,7 @@ test('message alerts thread per recipient and replying to one answers the guest 
     assert.deepEqual((await db.prepare("SELECT actor_user_id, body FROM activity_entries WHERE request_id = ? AND event_name = 'thread.member_reply'").bind(asked).all()).results,
       [{ actor_user_id: 'owner', body: 'Yes, parking is free.' }])
     // A forged signature bounces, and nothing more reaches the guest.
-    await assert.rejects(receiveMemberEmail(env, { entryId: address.entryId, token: await buildMemberReplyToken('another-secret', address.entryId, 'owner'), from: 'owner@provider-proof.com',
+    await assert.rejects(receiveMemberEmail(env, { entryId: address.entryId, token: await buildReplyToken('another-secret', address.entryId, { kind: 'member', userId: 'owner' }), from: 'owner@provider-proof.com',
       body: 'Hello', files: [], messageId: '<owner-2@provider-proof.com>' }, unexpectedReport), InboundEmailRejection)
     assert.equal([...resend.emails.values()].filter(email => (email.to as string[])[0] === 'guest@provider-proof.com').length, 1)
   } finally {

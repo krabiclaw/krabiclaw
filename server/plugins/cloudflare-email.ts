@@ -1,9 +1,9 @@
 import type { ForwardableEmailMessage } from '@cloudflare/workers-types'
 import { definePlugin } from 'nitro'
 import PostalMime from 'postal-mime'
-import { guestReplyText, InboundEmailRejection, receiveGuestEmail, receiveMemberEmail } from '~/server/domain/guest-threads/inbound-email'
+import { guestReplyText, receiveGuestEmail, receiveMemberEmail } from '~/server/domain/guest-threads/inbound-email'
+import { InboundEmailRejection, parseReplyToAddress } from '~/server/utils/reply-address'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { parseReplyToAddress } from '~/server/utils/submission-messages'
 import { isEmailMessageId } from '~/server/utils/email-delivery'
 
 // Checks what receiving a reply reads: the D1 binding and the secret that signs
@@ -53,7 +53,6 @@ async function processEmail(message: ForwardableEmailMessage, env: unknown, repo
   if (!isCloudflareEnvironment(env)) throw new Error('Inbound email needs the DB binding and EMAIL_REPLY_SECRET')
 
   const reply = parseReplyToAddress(env, message.to)
-  if (!reply) throw new InboundEmailRejection('This address does not accept email.')
 
   const rawEmail = await readEmailBytes(message.raw)
   const parsed = await PostalMime.parse(rawEmail, { attachmentEncoding: 'arraybuffer' })
@@ -71,8 +70,7 @@ async function processEmail(message: ForwardableEmailMessage, env: unknown, repo
     return
   }
   await receiveGuestEmail(env, {
-    submissionType: reply.submissionType,
-    submissionId: reply.submissionId,
+    entryId: reply.entryId,
     token: reply.token,
     body: guestReplyText(parsed),
     files,

@@ -11,7 +11,7 @@ import { buildWhatsAppTemplatePayload, sendWhatsAppImage, sendWhatsAppNotificati
 import { whatsAppServiceWindowOpen } from '~/server/utils/mcp-context'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { getWhatsAppDeliveryMode } from '~/server/utils/whatsapp-delivery'
-import { buildMemberReplyToAddress, buildReplyToAddress } from '~/server/utils/submission-messages'
+import { buildReplyToAddress, type ReplyAs } from '~/server/utils/reply-address'
 import { assignedResponsibilitySql, listOrganizationNotificationMembers } from '~/server/utils/member-access'
 import { wantsNotification } from '~/server/domain/notification-preferences'
 import { listUserDevices, retireDevice, type UserDevice } from '~/server/domain/devices'
@@ -397,13 +397,20 @@ async function publishAssignedConversationAlert(
 }
 
 
+/** The conversation entry an email's reply address names: the delivery it is recorded on. */
+function requireDeliveryEntry(delivery: ThreadDeliveryContext | null | undefined): string {
+  if (!delivery) throw new Error('A reply address names a conversation entry, and this email has no conversation delivery')
+  return delivery.entryId
+}
+
 async function sendEmailNotification(
   env: NotificationEnv,
   db: DbClient,
   opts: Omit<OrganizationContext, 'organizationId'> & { organizationId: string | null } & {
     locationId?: string | null
     to: string
-    replyTo?: string | null
+    /** Who a reply to this email speaks as; the address names the delivery's conversation entry. */
+    replyAs?: ReplyAs
     template: string
     title: string
     payload: Record<string, string>
@@ -435,7 +442,8 @@ async function sendEmailNotification(
   // mail. Replays still complete metadata, error clearing and publication.
 
   const email = {
-    to: opts.to, replyTo: opts.replyTo, subject: opts.email.subject,
+    to: opts.to, subject: opts.email.subject,
+    ...(opts.replyAs ? { replyTo: await buildReplyToAddress(env, requireDeliveryEntry(deliveryContext), opts.replyAs) } : {}),
     html: opts.email.html, text: opts.email.text, emailPurpose: opts.email.emailPurpose,
     unsubscribeOneClickUrl: opts.unsubscribeOneClickUrl ?? null,
   }
@@ -601,10 +609,10 @@ function memberNotificationSends(
         preferencesUrl: `https://${getPlatformDomain(env)}/dashboard/account/profile/notifications`,
         unsubscribeUrl: recipient.unsubscribeUrl,
       })
-      // An alert about a conversation answers it: replying sends to the guest as this member.
-      const replyTo = input.context.guestThreadId ? await buildMemberReplyToAddress(env, input.context.sourceEntryId, recipient.userId) : null
+      // An alert about a conversation answers it: replying sends to that conversation as this member.
       await sendEmailNotification(env, db, {
-        ...input, to, title: input.message.title, replyTo,
+        ...input, to, title: input.message.title,
+        ...(input.context.guestThreadId || input.target.kind === 'team' ? { replyAs: { kind: 'member' as const, userId: recipient.userId } } : {}),
         email: { subject: sanitizeEmailHeaderValue(input.message.title), ...rendered },
         unsubscribeOneClickUrl: recipient.unsubscribeOneClickUrl,
         delivery: threadDelivery(input.context, 'owner_alert', 'email', input.template, to, input.eventKey),
@@ -988,17 +996,14 @@ export async function notifyReservationCreated(
   const prettyDate = formatCalendarDate(opts.date, 'en')
   const prettyTime = formatTime(opts.time, 'en')
   const platformDomain = getPlatformDomain(env)
-  const [replyTo, inboxUrl] = await Promise.all([
-    buildReplyToAddress(env, 'reservation', opts.reservationId),
-    opts.ownerInboxUrl !== undefined
-      ? opts.ownerInboxUrl
-      : buildOwnerInboxUrl(env, db, {
-          organizationId: opts.organizationId,
-          locationId: opts.locationId,
-          tab: 'reservations',
-          submissionId: opts.reservationId,
-        }),
-  ])
+  const inboxUrl = opts.ownerInboxUrl !== undefined
+    ? opts.ownerInboxUrl
+    : await buildOwnerInboxUrl(env, db, {
+        organizationId: opts.organizationId,
+        locationId: opts.locationId,
+        tab: 'reservations',
+        submissionId: opts.reservationId,
+      })
   const threadContext = await getOpeningThreadContext(db, 'reservation', opts.reservationId)
 
   const payload = {
@@ -1054,7 +1059,7 @@ export async function notifyReservationCreated(
     ...(opts.guestAcknowledgement === false ? [] : [sendEmailNotification(env, db, {
       ...opts,
       to: opts.email,
-      replyTo,
+      replyAs: { kind: 'guest' },
       template: 'reservation_customer_received',
       title: guestMessage.title,
       payload,
@@ -1164,7 +1169,6 @@ export async function notifyContactSubmitted(
 ) {
   const restaurant = organizationName(opts)
   const platformDomain = getPlatformDomain(env)
-  const replyTo = await buildReplyToAddress(env, 'contact', opts.contactId)
   const inboxUrl = await buildOwnerInboxUrl(env, db, {
     organizationId: opts.organizationId,
     locationId: opts.locationId,
@@ -1218,7 +1222,7 @@ export async function notifyContactSubmitted(
     sendEmailNotification(env, db, {
       ...opts,
       to: opts.email,
-      replyTo,
+      replyAs: { kind: 'guest' },
       template: 'contact_customer_received',
       title: guestMessage.title,
       payload,
@@ -1308,7 +1312,7 @@ export async function notifyReviewRequest(
   await sendEmailNotification(env, db, {
     ...opts,
     to: opts.email,
-    replyTo: await buildReplyToAddress(env, opts.bookingType, opts.bookingId),
+    replyAs: { kind: 'guest' },
     template: 'booking_thank_you_review_request',
     title: `How was your visit to ${restaurant}?`,
     delivery: { threadId: opts.delivery.guestThreadId, entryId: opts.delivery.sourceEntryId, purpose: 'status_update', idempotencyKey: recorded?.id ?? `review-request:${opts.requestId}` },
@@ -1341,17 +1345,14 @@ export async function notifyBookingCreated(
   const prettyDate = new Intl.DateTimeFormat('en-US', { timeZone: opts.timezone, dateStyle: 'medium' }).format(new Date(opts.startsAt))
   const prettyTime = formatTimestamp(opts.startsAt, 'en', opts.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
   const platformDomain = getPlatformDomain(env)
-  const [replyTo, inboxUrl] = await Promise.all([
-    buildReplyToAddress(env, 'booking', opts.bookingId),
-    opts.ownerInboxUrl !== undefined
-      ? opts.ownerInboxUrl
-      : buildOwnerInboxUrl(env, db, {
-          organizationId: opts.organizationId,
-          locationId: opts.locationId,
-          tab: 'bookings',
-          submissionId: opts.bookingId,
-        }),
-  ])
+  const inboxUrl = opts.ownerInboxUrl !== undefined
+    ? opts.ownerInboxUrl
+    : await buildOwnerInboxUrl(env, db, {
+        organizationId: opts.organizationId,
+        locationId: opts.locationId,
+        tab: 'bookings',
+        submissionId: opts.bookingId,
+      })
   const threadContext = await getOpeningThreadContext(db, 'booking', opts.bookingId)
 
   const payload = {
@@ -1416,7 +1417,7 @@ export async function notifyBookingCreated(
     ...(opts.guestAcknowledgement === false ? [] : [sendEmailNotification(env, db, {
       ...opts,
       to: opts.email,
-      replyTo,
+      replyAs: { kind: 'guest' },
       template: 'booking_customer_received',
       title: guestTitle,
       payload,
@@ -1557,8 +1558,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
   const home = stay.home
   const studio = organizationName({ organizationId, organizationName: organization.name })
   const threadContext = await getOpeningThreadContext(db, 'stay', stay.request_id)
-  const [replyTo, inboxUrl, hero, logoUrl, guest, contact, audience] = await Promise.all([
-    buildReplyToAddress(env, 'stay', stay.request_id),
+  const [inboxUrl, hero, logoUrl, guest, contact, audience] = await Promise.all([
     buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: home.location_id, threadId: stay.request_id }),
     messageHero(db, organizationId, { type: 'product', id: home.product_id }),
     organizationLogo(db, organizationId),
@@ -1602,7 +1602,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
       memberIds: audience.memberIds, memberAlert: { message: stayBookedMessage(stayTurnoverAlert(ownerInput, audience.stayUrl, memberGuestName({ name: stay.guest_name }))), stayId: stay.id },
     }),
     sendEmailNotification(env, db, {
-      organizationId, organizationName: studio, locationId: home.location_id, to: stay.guest_email, replyTo,
+      organizationId, organizationName: studio, locationId: home.location_id, to: stay.guest_email, replyAs: { kind: 'guest' },
       template: 'stay_customer_confirmed', title: guestTitle, payload,
       email: { subject: guestTitle, ...guestEmail },
       buyerAlert: true,
@@ -1630,8 +1630,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
     const organization = await queryFirst<{ name: string | null }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId])
     if (!organization || !stay.guest_email || !stay.guest_name) throw new Error('A stay paid on the site needs its organization, guest name and email')
     const studio = organizationName({ organizationId, organizationName: organization.name })
-    const [replyTo, inboxUrl, hero, logoUrl, guest, contact] = await Promise.all([
-      buildReplyToAddress(env, 'stay', stay.request_id),
+    const [inboxUrl, hero, logoUrl, guest, contact] = await Promise.all([
       buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: home.location_id, threadId: stay.request_id }),
       messageHero(db, organizationId, { type: 'product', id: home.product_id }),
       organizationLogo(db, organizationId),
@@ -1652,7 +1651,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
       threadId: stay.request_id, kind: 'operation', actorKind: by === 'guest' ? 'guest' : 'member', channel: 'web', body: guestEmail.text,
       eventName: `stay.${by}_cancelled`, dedupeKey,
       payloadJson: { subject: guestTitle, refund_minor: refundMinor, location_id: home.location_id,
-        email: { to: stay.guest_email, fromName: studio, replyTo, html: guestEmail.html, text: guestEmail.text },
+        email: { to: stay.guest_email, fromName: studio, html: guestEmail.html, text: guestEmail.text },
         owner: {
           guestName: stay.guest_name, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name,
           checkIn: [day(stay.check_in_date, 'en-US'), home.check_in_time ? formatTime(home.check_in_time, 'en-US') : null].filter(Boolean).join(' · '), checkOut: [day(stay.check_out_date, 'en-US'), home.check_out_time ? formatTime(home.check_out_time, 'en-US') : null].filter(Boolean).join(' · '),
@@ -1674,7 +1673,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
   if (!isRecord(stored?.email)) throw new Error('Stay cancellation notification has no recorded email content to retry')
   const recorded = z.object({
     subject: z.string().min(1), refund_minor: z.number().int().nonnegative(), location_id: z.string().min(1),
-    email: z.object({ to: z.string().min(1), fromName: z.string().min(1), replyTo: z.string().nullable(), html: z.string().min(1), text: z.string().min(1) }),
+    email: z.object({ to: z.string().min(1), fromName: z.string().min(1), html: z.string().min(1), text: z.string().min(1) }),
     owner: z.object({
       guestName: z.string(), guestEmail: z.string(), guestPhone: z.string().nullable(), homeName: z.string(), checkIn: z.string(), checkOut: z.string(),
       nights: z.string(), guests: z.string(), refund: z.string(), organizationName: z.string(), heroImageUrl: z.string().nullable(), replyUrl: z.string().min(1),
@@ -1694,7 +1693,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
       memberIds: audience.memberIds, memberAlert: { message: stayCancelledMessage(stayTurnoverAlert(ownerInput, audience.stayUrl, memberGuestName({ name: recorded.owner.guestName }))), stayId: stay.id },
     })] : []),
     sendEmailNotification(env, db, {
-      organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, to: recorded.email.to, replyTo: recorded.email.replyTo,
+      organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, to: recorded.email.to, replyAs: { kind: 'guest' },
       template: 'stay_customer_cancelled', title: recorded.subject, payload,
       email: { subject: recorded.subject, html: recorded.email.html, text: recorded.email.text, emailPurpose: 'transactional' },
       buyerAlert: true,

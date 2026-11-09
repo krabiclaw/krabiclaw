@@ -28,8 +28,8 @@ import { listBusinessOutcomes } from '../../server/utils/business-outcomes.ts'
 import whatsappWebhook from '../../server/api/whatsapp/webhook.post.ts'
 import { useNitroHooks } from 'nitro/app'
 import { ChannexError } from '../../server/integrations/channex/client.ts'
-import { InboundEmailRejection, receiveMemberEmail } from '../../server/domain/guest-threads/inbound-email.ts'
-import { parseReplyToAddress } from '../../server/utils/submission-messages.ts'
+import { receiveMemberEmail } from '../../server/domain/guest-threads/inbound-email.ts'
+import { InboundEmailRejection, parseReplyToAddress } from '../../server/utils/reply-address.ts'
 
 const ORG = 'org', OWNER = 'owner'
 const NOW = '2026-10-16T00:00:00.000Z'
@@ -1148,10 +1148,10 @@ test('an Airbnb photo is in the owner alert, and replying to the alert answers t
     // The reply address names the guest's message the alert was about.
     const guestEntry = await db.prepare("SELECT id FROM activity_entries WHERE dedupe_key = 'channex-message:guest-photo'").first<string>('id')
     const address = parseReplyToAddress(env, sent.replyTo)
-    assert.deepEqual(address && { kind: address.kind, entryId: 'entryId' in address ? address.entryId : null }, { kind: 'member', entryId: guestEntry })
+    assert.deepEqual({ kind: address.kind, entryId: address.entryId }, { kind: 'member', entryId: guestEntry })
 
     // The owner replies to that email: the words reach the Airbnb conversation as the host's, once.
-    const reply = { entryId: guestEntry!, token: address!.token, from: 'owner@example.test', body: 'Lift the handle as you turn the key.', files: [], messageId: '<owner-reply-1@mail.example.test>' }
+    const reply = { entryId: guestEntry!, token: address.token, from: 'owner@example.test', body: 'Lift the handle as you turn the key.', files: [], messageId: '<owner-reply-1@mail.example.test>' }
     await receiveMemberEmail(env, reply, unexpectedReport)
     assert.equal(provider.sends, 1)
     assert.equal(provider.messages.at(-1)!.attributes.message, 'Lift the handle as you turn the key.')

@@ -40,41 +40,37 @@ This note exists so future sessions do not collapse three different systems into
 - Reuse the shared conversation shell where it helps the UX, but never back guest threads with assistant/tool-call history.
 - Signed-in buyers use the same ledger through their authorized account messages. Provider threads are addressed through their mapped channel rather than attached to a local buyer by provider user ID.
 
-## Member reply address
+## Reply addresses
 
-A member's alert about a conversation carries the reply-to
-`rm<32-hex entry UUID><24-hex-HMAC>@reply.<platform-domain>`. The entry is the
-conversation event the alert is about, so it names one conversation. Booking and
-reservation conversation ids are 64-character hashes, which cannot fit the
-64-character local part. The HMAC uses the guest address's secret and signs
-`member:<entry id>:<user id>`. The user id is not in the address. Inbound email names the member by the envelope sender,
-which must be a verified account email, and the signature must match that
-member and conversation. The reply is the inbox's quoted-history and signature
-stripped text, with the email's files as the reply's photos. A wrong sender, a
-forged or foreign signature, a member who left or lost access, and any reply the
-operation refuses bounce with the reason. A reply that may have reached the guest
-bounces saying so, and its failure is reported. A failure the member cannot act
-on fails the delivery and is reported. The email's Message-ID keys the reply, so a
-redelivered email sends nothing twice. No table records these addresses.
+Every email that can be answered carries one reply-to format:
+`r<g|m><32-hex entry UUID><24-hex-HMAC>@reply.<platform-domain>`. `g` is a guest
+and `m` is a member. The entry is the conversation event the email is about, the
+one its delivery is recorded on, so it names one conversation and each email has
+its own address. Booking and reservation conversation ids are 64-character
+hashes, which cannot fit the 64-character local part; entries are UUIDs. No table
+records these addresses.
 
-## Epoch 5 reply-address contract
+The HMAC signs `guest:<entry id>` or `member:<entry id>:<user id>` with
+`EMAIL_REPLY_SECRET`. Building, parsing and verifying an address throw on a bad
+address or a missing secret. An address on another domain, or one KrabiClaw never
+issued, is refused at the email handler and stored data is untouched.
 
-The current supported address is
-`r<type-code><32-hex-UUID><24-hex-HMAC>@reply.<platform-domain>`. Inbound email
-and the development ingress both validate this address and pass its signature
-through the canonical guest-thread receiver. The 32-hex token and
-`reply+<type>-<id>-<token>` address are retired with Epoch 5. Existing compact
-addresses retain their exact signature algorithm and continue to work; stored
-submissions, messages and delivery evidence are preserved.
+A guest's reply is appended to the conversation as the guest. Its Message-ID keys
+the entry, so a redelivered email records nothing twice.
 
-This implements the owner's explicit requirement that no backward compatibility
-is required. Retirement applies to the staging build now and to production only
-when the owner performs the later production cutover. Previously sent emails
-cannot be rewritten. Fresh production evidence includes four pre-compact
-reservations and one contact still marked new; their reservation service dates
-are past, but there is no evidence that every conversation was resolved. The
-retirement decision does not mark them complete or discard them. Retained Resend
-history contained seven delivered compact reply addresses and no old-format
-address; the provider's retention window does not prove that older addresses
-were never issued. After production cutover, replies to the retired format are
-rejected instead of appended to guest threads.
+Team-message alerts carry the same `m` address, on the team message's entry, and a reply posts to that team conversation as the member through the dashboard's send. Quoting a guest or team alert on WhatsApp does the same.
+
+A member's reply names the member by the envelope sender, which must be a verified
+account email, and the signature must match that member and entry. The user id is
+not in the address. The reply is the inbox's quoted-history and signature stripped
+text, with the email's files as the reply's photos. A wrong sender, a forged or
+foreign signature, a member who left or lost access, and any reply the operation
+refuses bounce with the reason. A reply that may have reached the guest bounces
+saying so, and its failure is reported. A failure the member cannot act on fails
+the delivery and is reported. The email's Message-ID keys the reply, so a
+redelivered email sends nothing twice.
+
+Every earlier format is retired, by the owner's decision that no backward
+compatibility is required: `reply+<type>-<id>-<token>` and the compact
+`r<c|r|e|s><id><token>` guest addresses. Emails already delivered cannot be
+rewritten, so a reply to one bounces with "This address does not accept email."
