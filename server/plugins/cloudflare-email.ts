@@ -65,10 +65,11 @@ async function processEmail(message: ForwardableEmailMessage, env: unknown, repo
     return { bytes: new Uint8Array(attachment.content), filename: attachment.filename || 'attachment' }
   })
   const from = message.from.trim().toLowerCase()
+  // An out-of-office or mail rule is nobody's reply, a guest's or a member's: it is
+  // accepted, so it neither bounces nor enters the conversation or alerts anyone.
+  const autoSubmitted = parsed.headers.find(header => header.key === 'auto-submitted')?.value.trim().toLowerCase()
+  if (autoSubmitted && autoSubmitted !== 'no') return
   if (reply.kind === 'member') {
-    // An out-of-office or mail rule is not the member's reply: accepted, so it neither reaches the guest nor bounces.
-    const autoSubmitted = parsed.headers.find(header => header.key === 'auto-submitted')?.value.trim().toLowerCase()
-    if (autoSubmitted && autoSubmitted !== 'no') return
     await receiveMemberEmail(env, { entryId: reply.entryId, token: reply.token, from, body: guestReplyText(parsed), files, messageId }, report)
     return
   }
