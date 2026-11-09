@@ -74,7 +74,6 @@
               </component>
             </UCard>
             <UAlert v-if="booking.providerConflict" color="warning" :description="`This ${noun} overlaps a busy time. Contact your ${recordCopy?.guestLabel} to change it.`" />
-            <UAlert v-if="booking.providerCalendarStatus" color="warning" :description="booking.providerCalendarStatus" />
           </template>
 
           <UCard v-if="!personalScope && !purchase" variant="record">
