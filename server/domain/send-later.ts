@@ -130,11 +130,7 @@ function failure(outcome: Exclude<OperationOutcome, { ok: true }>): Outcome {
     case 'missing_idempotency_key': return { status: 'failed', reason: 'The send had no idempotency key.', error_code: 'MISSING_IDEMPOTENCY_KEY', error_field: 'idempotencyKey' }
     case 'invalid_photo': return { status: 'failed', reason: outcome.message, error_code: 'INVALID_PHOTO', error_field: 'photos' }
     case 'invalid_transition': return { status: 'needs_review', reason: outcome.message, error_code: 'IDEMPOTENCY_CONFLICT', error_field: 'idempotencyKey' }
-    case 'delivery_failed': return {
-      // Only a refused delivery is a definite failure; an uncertain attempt is never resent.
-      status: outcome.code === 'DELIVERY_FAILED' || outcome.code === 'CHANNEL_REPLY_FAILED' ? 'failed' : 'needs_review',
-      reason: outcome.message, error_code: outcome.code, error_field: outcome.field,
-    }
+    case 'delivery_failed': return { status: 'failed', reason: outcome.message, error_code: outcome.code, error_field: outcome.field }
   }
 }
 
@@ -179,9 +175,10 @@ async function sendOne(db: DbClient, env: SendEnv, row: SendLaterMessageRow, now
     // the sent outcome; the thrown error still fails the run for the caller.
     const current = await queryFirst<SendLaterMessageRow>(db, 'SELECT * FROM send_later_messages WHERE id = ?', [row.id])
     if (current?.status === 'sent' && current.entry_id === entry?.id) throw error
-    const status = typed ? 'failed' : 'needs_review'
-    await finish(db, env, row, { status, reason: error instanceof Error ? error.message : String(error), error_code: typed?.code ?? 'SEND_LATER_DELIVERY_UNCONFIRMED', error_field: typed?.field ?? 'delivery', entry_id: entry?.id ?? null, sent_at: null })
-    return status
+    // A send that threw did not send: it fails with its cause, and the run reports the error.
+    await finish(db, env, row, { status: 'failed', reason: error instanceof Error ? error.message : String(error), error_code: typed?.code ?? 'SEND_LATER_DELIVERY_FAILED', error_field: typed?.field ?? 'delivery', entry_id: entry?.id ?? null, sent_at: null })
+    if (!typed) throw error
+    return 'failed'
   }
   if (sent.outcome.ok) {
     if (sent.entryId === null) messagingError(500, 'SEND_LATER_ENTRY_REQUIRED', 'The message was sent but its conversation entry could not be read', 'entryId')

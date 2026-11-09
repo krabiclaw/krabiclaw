@@ -1,29 +1,33 @@
-export type ReplySubmissionType = 'contact' | 'reservation' | 'booking' | 'stay'
+import { getReplyDomain } from '~/server/utils/reply-domain'
+
+/**
+ * An inbound email that delivering again cannot make acceptable. The message is
+ * the bounce the sender reads, so it names the problem and nothing internal.
+ */
+export class InboundEmailRejection extends Error {}
+
+interface ReplyAddressEnv {
+  EMAIL_REPLY_SECRET?: string
+  NUXT_PUBLIC_PLATFORM_DOMAIN?: string
+}
 
 const TOKEN_BYTES = 12
 
-const TYPE_TO_CODE: Record<ReplySubmissionType, 'c' | 'r' | 'e' | 's'> = {
-  contact: 'c',
-  reservation: 'r',
-  booking: 'e',
-  stay: 's',
+/**
+ * Who a reply to an email speaks as: the guest the email went to, or the member
+ * whose alert it was. The member's user id is signed but not written in the
+ * address; the sender's address names them.
+ */
+export type ReplyAs = { kind: 'guest' } | { kind: 'member'; userId: string }
+
+/** What a reply address carries: who replies, and the conversation entry the email was about. */
+export interface ReplyAddress {
+  kind: ReplyAs['kind']
+  entryId: string
+  token: string
 }
 
-const CODE_TO_TYPE: Record<'c' | 'r' | 'e' | 's', ReplySubmissionType> = {
-  c: 'contact',
-  r: 'reservation',
-  e: 'booking',
-  s: 'stay',
-}
-
-function compactUuid(value: string): string | null {
-  const compact = value.toLowerCase().replace(/-/g, '')
-  return /^[0-9a-f]{32}$/.test(compact) ? compact : null
-}
-
-function expandUuid(value: string): string {
-  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`
-}
+const KIND_CODE = { guest: 'g', member: 'm' } as const
 
 export async function hmacHex(secret: string, message: string, bytes: number): Promise<string> {
   const key = await crypto.subtle.importKey(
@@ -50,35 +54,47 @@ export function timingSafeEqual(leftValue: string, rightValue: string): boolean 
   return diff === 0
 }
 
-export async function buildReplyToken(secret: string, submissionType: ReplySubmissionType, submissionId: string): Promise<string> {
-  return hmacHex(secret, `${submissionType}:${submissionId.toLowerCase()}`, TOKEN_BYTES)
+function replySecret(env: ReplyAddressEnv): string {
+  if (!env.EMAIL_REPLY_SECRET) throw new Error('EMAIL_REPLY_SECRET is required to sign and verify reply addresses')
+  return env.EMAIL_REPLY_SECRET
 }
 
-export async function verifyReplyTokenValue(secret: string, submissionType: string, submissionId: string, token: string): Promise<boolean> {
-  const message = `${submissionType}:${submissionId.toLowerCase()}`
-  const expected = await hmacHex(secret, message, TOKEN_BYTES)
-  return timingSafeEqual(expected, token)
+function signedFact(entryId: string, as: ReplyAs): string {
+  return as.kind === 'guest' ? `guest:${entryId.toLowerCase()}` : `member:${entryId.toLowerCase()}:${as.userId}`
 }
 
-// Compact format keeps the local part under the 64-character SMTP limit:
-// r<type><uuid-without-hyphens><24-char-hmac>@reply.<domain>
-export function buildReplyLocalPart(submissionType: ReplySubmissionType, submissionId: string, token: string): string | null {
-  const typeCode = TYPE_TO_CODE[submissionType]
-  const compactId = compactUuid(submissionId)
-  if (!compactId || !/^[0-9a-f]{24}$/i.test(token)) return null
-  return `r${typeCode}${compactId}${token}`
+export async function buildReplyToken(secret: string, entryId: string, as: ReplyAs): Promise<string> {
+  return hmacHex(secret, signedFact(entryId, as), TOKEN_BYTES)
 }
 
-export function parseReplyLocalPart(local: string): { submissionType: ReplySubmissionType; submissionId: string; token: string } | null {
-  const compactMatch = /^r([cres])([0-9a-f]{32})([0-9a-f]{24})$/i.exec(local)
-  if (compactMatch) {
-    const code = compactMatch[1]!.toLowerCase() as 'c' | 'r' | 'e' | 's'
-    return {
-      submissionType: CODE_TO_TYPE[code],
-      submissionId: expandUuid(compactMatch[2]!.toLowerCase()),
-      token: compactMatch[3]!.toLowerCase(),
-    }
+/**
+ * The reply-to of an email about a conversation entry:
+ * r<g|m><entry uuid without hyphens><24-hex-hmac>@reply.<domain>, 58 characters
+ * before the @. The entry, not the conversation, is addressed because a
+ * booking's or reservation's conversation id is a 64-character hash, which does
+ * not fit SMTP's 64-character local part. Entries are UUIDs.
+ */
+export async function buildReplyToAddress(env: ReplyAddressEnv, entryId: string, as: ReplyAs): Promise<string> {
+  const compact = entryId.toLowerCase().replace(/-/g, '')
+  if (!/^[0-9a-f]{32}$/.test(compact)) throw new Error(`Conversation entry ${entryId} is not a UUID a reply address can carry`)
+  return `r${KIND_CODE[as.kind]}${compact}${await buildReplyToken(replySecret(env), entryId, as)}@${getReplyDomain(env)}`
+}
+
+/** The identity of a reply address; an address on another domain, or one KrabiClaw never issued, is refused. */
+export function parseReplyToAddress(env: ReplyAddressEnv, address: string): ReplyAddress {
+  const parts = address.split('@')
+  const match = parts.length === 2 && parts[1]!.toLowerCase() === getReplyDomain(env).toLowerCase()
+    ? /^r([gm])([0-9a-f]{32})([0-9a-f]{24})$/i.exec(parts[0]!) : null
+  if (!match) throw new InboundEmailRejection('This address does not accept email.')
+  const id = match[2]!.toLowerCase()
+  return {
+    kind: match[1]!.toLowerCase() === 'g' ? 'guest' : 'member',
+    entryId: `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`,
+    token: match[3]!.toLowerCase(),
   }
+}
 
-  return null
+/** Whether `token` signs this entry for this guest or member. */
+export async function verifyReplyToken(env: ReplyAddressEnv, entryId: string, as: ReplyAs, token: string): Promise<boolean> {
+  return timingSafeEqual(await buildReplyToken(replySecret(env), entryId, as), token)
 }

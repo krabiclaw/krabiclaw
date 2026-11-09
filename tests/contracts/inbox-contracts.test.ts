@@ -120,7 +120,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
       VALUES ('location', ?, 'sky', '74 D · Sky', 'active', 'America/Denver', ?, ?)`).bind(ORG, NOW, NOW).run()
     const env = { ...await runtime.getBindings<CloudflareEnv>(), MEDIA_BASE_URL: 'https://media.example.test', CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k',
       BETTER_AUTH_SECRET: 'inbox-contract-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example',
-      STRIPE_SECRET_KEY: 'sk_test_no_provider_requests', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
+      STRIPE_SECRET_KEY: 'sk_test_no_provider_requests', EMAIL_REPLY_SECRET: 'contract-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
       AI: { run: async () => ({ response: ['Yes, check-in is from 4 PM.', 'Check-in starts at 4 PM; the code arrives that morning.'], usage: { prompt_tokens: 120, completion_tokens: 24 } }) },
     } as unknown as CloudflareEnv
     const home = await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {

@@ -11,7 +11,7 @@ export type GuestThreadSubmissionType = 'contact' | 'reservation' | 'booking' | 
 export type GuestThreadDeliveryChannel = 'email' | 'whatsapp' | 'airbnb' | 'push'
 export type GuestThreadDeliveryProvider = 'resend' | 'meta' | 'channex' | 'apns' | 'web_push' | 'log_only'
 export type GuestThreadDeliveryPurpose = 'owner_alert' | 'guest_acknowledgement' | 'member_reply' | 'scheduled_message' | 'status_update'
-export type GuestThreadDeliveryStatus = 'pending' | 'sending' | 'uncertain' | 'accepted' | 'sent' | 'delivered' | 'read' | 'failed' | 'skipped'
+export type GuestThreadDeliveryStatus = 'pending' | 'sending' | 'accepted' | 'sent' | 'delivered' | 'read' | 'failed' | 'skipped'
 
 export type GuestThreadRow = GuestRequest
 
@@ -42,8 +42,6 @@ export interface GuestThreadDeliveryRow {
   email_json: string | null
   email_message_id: string | null
   error: string | null
-  /** Internal dispatch proof: null for unclassified/old-writer receipts. Only 1 permits a failed retry. */
-  non_delivery_confirmed: 0 | 1 | null
   created_at: string
   updated_at: string
 }

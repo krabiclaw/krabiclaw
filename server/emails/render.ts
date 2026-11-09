@@ -33,6 +33,22 @@ const bodyMarkdownStyles: Record<string, CSSProperties> = {
   td: { padding: '6px 12px 6px 0', borderBottom: `1px solid ${light.border}` },
 }
 
+function actions(message: NotificationMessage) {
+  return [
+    h(EmailActions, { primary: message.primaryAction ?? null, secondary: message.secondaryAction ?? null }),
+    message.finePrint
+      ? h(ESection, { class: 'email-gutter', style: `padding:12px ${layout.gutter} 0` }, () => [
+          h(EText, { class: 'email-footer', style: `margin:0;font-size:14px;line-height:20px;color:${light.textMuted};white-space:pre-line` }, () => message.finePrint),
+        ])
+      : null,
+  ]
+}
+
+function sections(message: NotificationMessage) {
+  return (message.sections ?? []).map(section =>
+    h(EmailSection, { title: section.title, body: section.body ?? null, facts: section.facts ?? [], image: section.image ?? null }))
+}
+
 /**
  * The one email component. Every notification is this layout with different
  * content, which is why a new one is a data entry rather than 55 lines of
@@ -73,17 +89,19 @@ export const NotificationEmail = defineComponent({
         ]),
 
         message.quote ? h(EmailQuote, { quote: message.quote }) : h(EmailFactGrid, { facts: message.facts, columns: 2 }),
-        h(EmailActions, { primary: message.primaryAction ?? null, secondary: message.secondaryAction ?? null }),
 
-        message.finePrint
-          ? h(ESection, { class: 'email-gutter', style: `padding:12px ${layout.gutter} 0` }, () => [
-              h(EText, { class: 'email-footer', style: `margin:0;font-size:14px;line-height:20px;color:${light.textMuted};white-space:pre-line` }, () => message.finePrint),
+        // Earlier messages, quietly, so the new one reads in its conversation.
+        message.history?.length
+          ? h(ESection, { class: 'email-gutter', style: `padding:20px ${layout.gutter} 0` }, () => [
+              h(EText, { style: `margin:0;font-size:13px;line-height:18px;color:${light.textMuted}` }, () => 'Earlier in this conversation'),
+              ...message.history!.map(line => h(EText, { style: `margin:8px 0 0;font-size:14px;line-height:20px;color:${light.textMuted};white-space:pre-wrap` }, () => [
+                h('strong', { style: `color:${light.textMuted}` }, line.author), `: ${line.text}`,
+              ])),
             ])
           : null,
 
-        ...(message.sections ?? []).map(section =>
-          h(EmailSection, { title: section.title, body: section.body ?? null, facts: section.facts ?? [], image: section.image ?? null }),
-        ),
+        // A message closes on its reply, under what the conversation is about; any other email acts first.
+        ...(message.quote ? [...sections(message), ...actions(message)] : [...actions(message), ...sections(message)]),
       ])
     }
   },

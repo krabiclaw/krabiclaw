@@ -91,9 +91,9 @@ MCP_DIAGNOSTICS_ENABLED = "true"
 # secret; CI's E2E job gives its local Worker the PREVIEW_SECRET_PREVIEW repo
 # secret (see .github/workflows/ci.yml):
 #   yarn wrangler secret put PREVIEW_SECRET
-# EMAIL_REPLY_SECRET signs reply+<type>-<id>-<token>@reply.<platform-domain> addresses
-# (server/utils/submission-messages.ts) so a customer's inbound reply can be matched back to the
-# right reservation/contact/experience-booking thread without a DB lookup by address alone.
+# EMAIL_REPLY_SECRET signs r<g|m><entry><token>@reply.<platform-domain> addresses
+# (server/utils/reply-address.ts) so an inbound reply can be matched back to the conversation
+# entry its email was about.
 # It must stay stable across deploys because rotating it invalidates reply-to addresses already
 # sent out in guest emails. Staging syncs it from the fixed EMAIL_REPLY_SECRET_STAGING repo
 # secret on every run (see .github/workflows/ci.yml); production is set once manually and not

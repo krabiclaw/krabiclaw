@@ -424,8 +424,7 @@ test.describe('dashboard pane hierarchy', () => {
         ...originalProfile,
       } : { member_id: actor.id, organization_id: organizationId, timezone: null, weekly: null, time_off: null,
         public_name: null, public_photo_url: null, public_bio: null, public_approved: 0,
-        calendar_account_id: null, calendar_ids: [], calendar_status: 'internal', calendar_conflict_count: 0, calendar_conflicts: [],
-        calendar_error: null }
+        calendar_account_id: null, calendar_ids: [], calendar_status: 'internal', calendar_conflict_count: 0, calendar_conflicts: [] }
       const mediaRead = await page.request.get(`/api/editor/organizations/${organizationId}/media`, { params: { kind: 'image', limit: 100 } })
       expect(mediaRead.status(), await mediaRead.text()).toBe(200)
       const media = (await mediaRead.json() as { media: Array<{ id: string; kind: string; public_url?: string; alt_text?: string; file_name?: string }> }).media
@@ -2648,8 +2647,7 @@ test.describe('dashboard pane hierarchy', () => {
     } else {
       originalSettings = { member_id: memberId, organization_id: organizationId, timezone: null, weekly: null, time_off: null,
         public_name: null, public_photo_url: null, public_bio: null, public_approved: 0,
-        calendar_account_id: null, calendar_ids: [], calendar_status: 'internal', calendar_conflict_count: 0, calendar_conflicts: [],
-        calendar_error: null }
+        calendar_account_id: null, calendar_ids: [], calendar_status: 'internal', calendar_conflict_count: 0, calendar_conflicts: [] }
     }
     const initialProfile = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: memberId } })
     expect(initialProfile.status(), await initialProfile.text()).toBe(200)

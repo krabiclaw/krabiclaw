@@ -117,12 +117,11 @@ Production moved to the v12 replacement on 2026-10-06 at 02:03 UTC (PR 1272,
 destination checkpoint carried the owner's Terms and Privacy edits of 01:27 to
 01:29 UTC as four guarded full-row compare-and-swap updates, read back equal to
 v11, and then the insert-only delta wrote the rows the checkpoint lacked. The
-remaining source changes were `updatedAt` bumps, rate-limit leases and expired
+remaining source changes were `updatedAt` bumps, rate-limit counters and expired
 cache invalidations. After the deploy switched the binding, a second checkpoint
-and delta found a gap of five NCLS pageviews, one session summary and one
-rate-limit lease: the pageviews were inserted and read back, the session summary
-was left to v12's own later row for the same session, and the lease expires
-within the hour. Foreign keys are clean after every write. Production answers
+and delta found a gap of five NCLS pageviews and one session summary: the
+pageviews were inserted and read back, and the session summary was left to
+v12's own later row for the same session. Foreign keys are clean after every write. Production answers
 200 for the platform, docs, pricing and policies pages, both verified tenant
 sites, the dashboard Payments, Plan, Payouts and Earnings surfaces and the MCP
 workspace read. NCLS was not upgraded.
@@ -180,8 +179,8 @@ Stripe's settlement timing and payout schedule are separate. KrabiClaw does not
 apply Airbnb check-in payout-release rules. Bank changes use Stripe Express;
 sent payouts cannot be redirected. Merchant refunds require authenticated browser
 approval. A paid visit's rejection or cancellation, a guest's own cancellation of
-a deposit-paid reservation inside its terms, and the refund of a capture
-nothing could be fulfilled for are each Stripe's full-remaining refund: the
+a deposit-paid reservation inside its terms, and the refund of a bank debit that
+cleared after its capacity went are each Stripe's full-remaining refund: the
 request names no amount, Stripe returns whatever it still holds for the
 payment, and the recorded amount is the one Stripe reports. The approval screen
 shows that remainder read from the charge. Each refund is one request under a
@@ -272,8 +271,7 @@ notification and durable per-recipient email receipts. Email receipts remain on
 the merchant's financial activity when a personal account is deleted. Existing
 Better Auth anonymous linking transfers purchases, notification targets and read
 acknowledgements; current purchase ownership authorizes a return-proof replay.
-Booking conversion completes before notification delivery. Delivery and realtime
-publication failures remain visible and retryable through the canonical path.
+Booking conversion completes before notification delivery.
 
 Better Auth Stripe still owns subscriptions, and the fees are invoiced on them;
 Stripe's own invoice emails carry their status. There is no scheduled
@@ -483,9 +481,9 @@ handoff creates no financial records. MCP exposes only payment, summary, payout
 history and operating-usage reads, plus `get_payments_dashboard_link` for a setup
 URL lookup. Refund preparation/execution and Checkout creation are dashboard/public
 booking operations. After authenticated browser approval, paid rejection commits
-cancellation, allocation release and full refund intent in one guarded D1 batch;
-provider retry and interrupted-refund recovery remain durable. Ordinary cancellation
-is distinct.
+cancellation, allocation release and full refund intent in one guarded D1 batch,
+then asks Stripe for the refund, repeating the same idempotent request only if its
+response is lost. Ordinary cancellation is distinct.
 
 Every reservation, class and consultation has one cancellation rule, Airbnb's
 1-day policy, and it is not a setting. A guest who cancels at least 24 hours

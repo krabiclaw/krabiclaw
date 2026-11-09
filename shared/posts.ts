@@ -16,16 +16,6 @@ export const POST_TITLE_MAX = 200
 export const POST_BODY_MAX = 5000
 export const POST_CALL_TO_ACTION_LABEL_MAX = 60
 
-/** A publication claim older than this belongs to an invocation that is gone. */
-export const CLAIM_STALE_MS = 60_000
-type PublicationClaim = { state: string; attempt_id: string | null; updated_at: string }
-export function isPublicationPreparationResumable(publication: PublicationClaim, now = Date.now()): boolean {
-  return publication.state === 'preparing' && (publication.attempt_id === null || Date.parse(publication.updated_at) < now - CLAIM_STALE_MS)
-}
-export function isPublicationOutcomeUncertain(publication: Pick<PublicationClaim, 'state' | 'updated_at'>, now = Date.now()): boolean {
-  return publication.state === 'unknown' || publication.state === 'publishing' && Date.parse(publication.updated_at) < now - CLAIM_STALE_MS
-}
-
 const absent = { type: 'null' } as const
 
 export const postCallToActionJsonSchema = {

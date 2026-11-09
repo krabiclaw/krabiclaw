@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:0e68f128032ffae4e4800c707fc53f35baf0bfbf294fc0a5cae50275a502d918",
-  "documentationFingerprint": "sha256:3d9ddf6e24de25d9452c06e8066462c1f9ed6f5d1c9089517dc3b202879a3a1f",
+  "fingerprint": "sha256:a495aa5cce0da55419cbb1b1a39bda9fdadb62551fcc2b087154a8dd32a8d423",
+  "documentationFingerprint": "sha256:f378e358ce1c6e011f5c674067f3e3f6e810694e302cca478fe8d166124ad23e",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -42646,7 +42646,7 @@
     {
       "name": "delete_post",
       "title": "Delete post",
-      "description": "Delete a post from the website. Its Facebook, Instagram and Discord posts are not deleted; use delete_channel_post for an explicit supported channel deletion. Refused while a publication of it is in progress or unresolved.",
+      "description": "Delete a post from the website. Its Facebook, Instagram and Discord posts are not deleted; use delete_channel_post for an explicit supported channel deletion.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -49617,13 +49617,6 @@
                       },
                       "type": "array"
                     },
-                    "calendar_error": {
-                      "description": "Why the selected Google calendars could not be read just now; null when they were.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
                     "calendar_ids": {
                       "items": {
                         "type": "string"
@@ -49634,7 +49627,6 @@
                       "enum": [
                         "internal",
                         "disconnected",
-                        "error",
                         "ready"
                       ],
                       "type": "string"
@@ -49712,7 +49704,6 @@
                     "calendar_account_id",
                     "calendar_ids",
                     "calendar_status",
-                    "calendar_error",
                     "calendar_conflict_count",
                     "calendar_conflicts"
                   ],
@@ -49775,13 +49766,6 @@
                 },
                 "type": "array"
               },
-              "calendar_error": {
-                "description": "Why the selected Google calendars could not be read just now; null when they were.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "calendar_ids": {
                 "items": {
                   "type": "string"
@@ -49792,7 +49776,6 @@
                 "enum": [
                   "internal",
                   "disconnected",
-                  "error",
                   "ready"
                 ],
                 "type": "string"
@@ -49870,7 +49853,6 @@
               "calendar_account_id",
               "calendar_ids",
               "calendar_status",
-              "calendar_error",
               "calendar_conflict_count",
               "calendar_conflicts"
             ],
@@ -74596,7 +74578,7 @@
     {
       "name": "publish_post",
       "title": "Publish post",
-      "description": "Publish the post to the selected website or social destinations, returning one result per target. Retry processing with the same post; reconcile an unknown result before publishing again.",
+      "description": "Publish the post to the selected website or social destinations, returning one result per target with its status: published, already_published, failed with the provider error, or skipped. Publish again after a failure once its cause is fixed. A provider_unreachable failure may still have reached the destination: find its post there and pass that provider_post_id to reconcile_post_publication before publishing again.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -74713,9 +74695,7 @@
                   "enum": [
                     "published",
                     "already_published",
-                    "processing",
                     "failed",
-                    "unknown",
                     "skipped"
                   ],
                   "type": "string"
@@ -85562,7 +85542,7 @@
     {
       "name": "reconcile_post_publication",
       "title": "Reconcile post publication",
-      "description": "Read an existing social publication and refresh its receipt without publishing. Supply provider_post_id only for the exact post on the connected destination; unproven outcomes remain unknown.",
+      "description": "Read an existing social publication on its destination and refresh its receipt without publishing. Supply provider_post_id only for the exact post on the connected destination.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -85622,9 +85602,7 @@
                 "enum": [
                   "published",
                   "already_published",
-                  "processing",
                   "failed",
-                  "unknown",
                   "skipped"
                 ],
                 "type": "string"
@@ -102319,7 +102297,6 @@
                 "enum": [
                   "internal",
                   "disconnected",
-                  "error",
                   "ready"
                 ],
                 "type": "string"
@@ -114772,7 +114749,7 @@
     {
       "name": "update_post",
       "title": "Update post",
-      "description": "Change at least one supplied website post field. First call get_post for its updated_at and use that as expected_updated_at. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged; unresolved publication prevents content edits.",
+      "description": "Change at least one supplied website post field. First call get_post for its updated_at and use that as expected_updated_at. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -129271,13 +129248,12 @@
       ],
       "rendered": {
         "description": "Create and publish a post",
-        "text": "Call create_post with a new idempotency_key and this body: <body> If the user supplied or approved media, pass it as create_post media in the order they want it shown: the cover first, then the gallery. Publish only to: <destinations>. For Facebook, Instagram or Discord, call get_social_connections and use the exact target_id and connection_revision it returns; if the destination is not connected or has a problem, say so instead of publishing elsewhere. Show the user the draft's preview_url, then call publish_post with the post's updated_at as expected_updated_at and one target per named destination. Report each outcome exactly as returned. processing means call publish_post again later to finish the same post; unknown means use reconcile_post_publication, never publish again."
+        "text": "Call create_post with a new idempotency_key and this body: <body> If the user supplied or approved media, pass it as create_post media in the order they want it shown: the cover first, then the gallery. Publish only to: <destinations>. For Facebook, Instagram or Discord, call get_social_connections and use the exact target_id and connection_revision it returns; if the destination is not connected or has a problem, say so instead of publishing elsewhere. Show the user the draft's preview_url, then call publish_post with the post's updated_at as expected_updated_at and one target per named destination. Report each outcome exactly as returned: published, with its public_url when the destination gives one; already_published; failed with the provider's reason; or skipped."
       },
       "toolContracts": {
         "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
         "get_social_connections": "sha256:ce06b442ff3f389bf517c54c51ff4fb762a7bde099820d26f260139f1e3d1686",
-        "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
-        "reconcile_post_publication": "sha256:00cccb196535fe18cb6304fbe3ee58fa254a10a02ff44e5039300d3be42f9d38"
+        "publish_post": "sha256:fbfd1f5ff6cbdc02ecba0e29e88a7efc5bedb5e6b60ad98eca33b6e99016f1b2"
       }
     },
     {
@@ -129459,7 +129435,7 @@
         "list_guest_conversations": "sha256:9bae34357644916476bec0c0d9a07dc7dbf2beb726716b882a886a05097d1ee0",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
-        "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
+        "publish_post": "sha256:fbfd1f5ff6cbdc02ecba0e29e88a7efc5bedb5e6b60ad98eca33b6e99016f1b2",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
         "update_product": "sha256:2c157a511f451614b32894c34a750df08944e9b1d5f339ee5351f699ec7038db"
       }

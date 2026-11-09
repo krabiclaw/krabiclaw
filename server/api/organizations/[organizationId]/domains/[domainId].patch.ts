@@ -70,7 +70,7 @@ export default defineHandler(async (event) => {
       try {
         await execute(db, `
           UPDATE organization_domains
-          SET status = 'disabled', role = 'secondary', updated_at = ?, next_check_at = NULL, reconciliation_token = NULL, reconciliation_expires_at = NULL
+          SET status = 'disabled', role = 'secondary', updated_at = ?
           WHERE id = ? AND organization_id = ? AND type = 'custom'
         `, [now, domainId, organizationId])
 

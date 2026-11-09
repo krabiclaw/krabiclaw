@@ -376,7 +376,6 @@ async function sendStatusUpdate(
         fromName,
         subject,
         email: { html, text },
-        submissionType: context.thread.kind,
         submissionId: context.thread.id,
       })
     }
@@ -620,7 +619,6 @@ async function executeReply(
     fromName,
     subject: replySubject(context.thread.kind, fromName),
     email: await renderMemberReply(input.env, db, context.thread.organization_id, fromName, entry, context.thread.payload.guest.locale),
-    submissionType: context.thread.kind,
     submissionId: context.thread.id,
   })
 

@@ -28,7 +28,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { currencyFractionDigits, isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
-import { completeChannelPush, configureStayCalendar, deliverStayNights, pushAirbnbListingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type AirbnbListingSettings, type ChannelPushCompletion, type ChannexMapping, type DeliveryLease } from '~/server/integrations/channex/ari'
+import { completeChannelPush, configureStayCalendar, deliverStayNights, pushAirbnbListingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type AirbnbListingSettings, type ChannelPushCompletion, type ChannexMapping } from '~/server/integrations/channex/ari'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 import { stayThreadQueries } from '~/server/domain/requests'
 import { openingMessageQueries, openingSentence } from '~/server/domain/guest-threads/opening'
@@ -1349,9 +1349,9 @@ async function pushNights(db: DbClient, env: ChannexEnv, access: StayAccess, pro
  * enabled or not: an import's inventory, or a home syncing again. Fails the
  * way a save's push fails; the caller decides what its import does with it.
  */
-export async function syncStayCalendar(db: DbClient, env: ChannexEnv, access: StayAccess, productId: string, mapping: ChannexMapping, lease?: DeliveryLease): Promise<ChannelPush> {
+export async function syncStayCalendar(db: DbClient, env: ChannexEnv, access: StayAccess, productId: string, mapping: ChannexMapping): Promise<ChannelPush> {
   const home = await readStayHome(db, access, productId)
-  return pushStayCalendar(db, env, access.organizationId, home, mapping, (from, to) => homeNights(db, access.organizationId, home, from, to), lease)
+  return pushStayCalendar(db, env, access.organizationId, home, mapping, (from, to) => homeNights(db, access.organizationId, home, from, to))
 }
 
 /** Verify occupied/closed dates against Airbnb itself, rather than trusting an outbound delivery receipt. */
@@ -1387,19 +1387,19 @@ export async function verifyStayCalendarOccupancy(db: DbClient, env: ChannexEnv,
 }
 
 /**
- * Deliver due nights and extend dated delivery as the booking window rolls.
+ * Deliver pending nights and extend dated delivery as the booking window rolls.
  * Native rate-plan defaults cover weekday minimums and base prices.
  * Only a differing weekend price needs dated delivery as new dates open.
  */
 export async function deliverPendingChannelNights(db: DbClient, env: StayMutationEnv): Promise<{ homes: number }> {
   const homes = await queryAll<{ organization_id: string; product_id: string; due: number }>(db, `SELECT organization_id, product_id, MAX(due) AS due FROM (
       SELECT organization_id, product_id, 1 AS due FROM channel_night_pushes
-       WHERE provider = 'channex' AND state = 'pending' AND (retry_at IS NULL OR retry_at <= ?)
+       WHERE provider = 'channex' AND state = 'pending'
       UNION ALL
       SELECT m.organization_id, m.product_id, 0 AS due FROM product_channel_mappings m
         JOIN product_stay_configs c ON c.organization_id = m.organization_id AND c.product_id = m.product_id
        WHERE m.provider = 'channex' AND m.enabled = 1 AND json_extract(c.calendar_rules, '$.weekend_price_minor') IS NOT NULL
-    ) GROUP BY organization_id, product_id`, [new Date().toISOString()])
+    ) GROUP BY organization_id, product_id`)
   const failures: string[] = []
   let delivered = 0
   for (const row of homes) {

@@ -155,7 +155,7 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'update_post',
-    description: 'Change at least one supplied website post field. First call get_post for its updated_at and use that as expected_updated_at. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged; unresolved publication prevents content edits.',
+    description: 'Change at least one supplied website post field. First call get_post for its updated_at and use that as expected_updated_at. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged.',
     domain: 'posts',
     minimumRole: 'admin',
     inputSchema: {
@@ -170,7 +170,7 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'publish_post',
-    description: 'Publish the post to the selected website or social destinations, returning one result per target. Retry processing with the same post; reconcile an unknown result before publishing again.',
+    description: 'Publish the post to the selected website or social destinations, returning one result per target with its status: published, already_published, failed with the provider error, or skipped. Publish again after a failure once its cause is fixed. A provider_unreachable failure may still have reached the destination: find its post there and pass that provider_post_id to reconcile_post_publication before publishing again.',
     domain: 'posts',
     minimumRole: 'admin',
     inputSchema: {
@@ -183,7 +183,7 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'reconcile_post_publication',
-    description: 'Read an existing social publication and refresh its receipt without publishing. Supply provider_post_id only for the exact post on the connected destination; unproven outcomes remain unknown.',
+    description: 'Read an existing social publication on its destination and refresh its receipt without publishing. Supply provider_post_id only for the exact post on the connected destination.',
     domain: 'posts',
     minimumRole: 'admin',
     inputSchema: {
@@ -200,7 +200,7 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'delete_post',
-    description: 'Delete a post from the website. Its Facebook, Instagram and Discord posts are not deleted; use delete_channel_post for an explicit supported channel deletion. Refused while a publication of it is in progress or unresolved.',
+    description: 'Delete a post from the website. Its Facebook, Instagram and Discord posts are not deleted; use delete_channel_post for an explicit supported channel deletion.',
     domain: 'posts',
     minimumRole: 'admin',
     inputSchema: { post_id: { type: 'string' } },
@@ -235,7 +235,7 @@ function forMcp(post: Post, organization: McpExecutorContext['organization']) {
     ...attachViewUrlToRecord(post, organization, { publicPath: post.status === 'published' ? post.public_path : null }),
     public_path: post.public_path,
     preview_url: absolutizeOrganizationUrl(organization, post.preview_url),
-    publications: post.publications.map(({ can_reconcile, ...receipt }) => receipt),
+    publications: post.publications,
   } as Record<string, unknown>
   return Object.fromEntries(Object.keys(postObject.properties).filter(field => Object.hasOwn(record, field)).map(field => [field, record[field]]))
 }

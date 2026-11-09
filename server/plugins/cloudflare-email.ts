@@ -1,9 +1,9 @@
 import type { ForwardableEmailMessage } from '@cloudflare/workers-types'
 import { definePlugin } from 'nitro'
 import PostalMime from 'postal-mime'
-import { guestReplyText, InboundEmailRejection, receiveGuestEmail } from '~/server/domain/guest-threads/inbound-email'
+import { guestReplyText, receiveGuestEmail, receiveMemberEmail } from '~/server/domain/guest-threads/inbound-email'
+import { InboundEmailRejection, parseReplyToAddress } from '~/server/utils/reply-address'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { parseReplyToAddress } from '~/server/utils/submission-messages'
 import { isEmailMessageId } from '~/server/utils/email-delivery'
 
 // Checks what receiving a reply reads: the D1 binding and the secret that signs
@@ -49,11 +49,10 @@ async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-async function processEmail(message: ForwardableEmailMessage, env: unknown): Promise<void> {
+async function processEmail(message: ForwardableEmailMessage, env: unknown, report: (error: unknown) => Promise<void>): Promise<void> {
   if (!isCloudflareEnvironment(env)) throw new Error('Inbound email needs the DB binding and EMAIL_REPLY_SECRET')
 
   const reply = parseReplyToAddress(env, message.to)
-  if (!reply) throw new InboundEmailRejection('This address does not accept email.')
 
   const rawEmail = await readEmailBytes(message.raw)
   const parsed = await PostalMime.parse(rawEmail, { attachmentEncoding: 'arraybuffer' })
@@ -61,18 +60,27 @@ async function processEmail(message: ForwardableEmailMessage, env: unknown): Pro
   if (rfcMessageId !== null && !isEmailMessageId(rfcMessageId)) throw new InboundEmailRejection('This email has an invalid Message-ID.')
   const messageId = rfcMessageId ?? `content-sha256:${await sha256Hex(rawEmail)}`
 
+  const files = parsed.attachments.map((attachment) => {
+    if (!(attachment.content instanceof ArrayBuffer)) throw new Error('postal-mime returned an attachment that is not an ArrayBuffer')
+    return { bytes: new Uint8Array(attachment.content), filename: attachment.filename || 'attachment' }
+  })
+  const from = message.from.trim().toLowerCase()
+  // An out-of-office or mail rule is nobody's reply, a guest's or a member's: it is
+  // accepted, so it neither bounces nor enters the conversation or alerts anyone.
+  const autoSubmitted = parsed.headers.find(header => header.key === 'auto-submitted')?.value.trim().toLowerCase()
+  if (autoSubmitted && autoSubmitted !== 'no') return
+  if (reply.kind === 'member') {
+    await receiveMemberEmail(env, { entryId: reply.entryId, token: reply.token, from, body: guestReplyText(parsed), files, messageId }, report)
+    return
+  }
   await receiveGuestEmail(env, {
-    submissionType: reply.submissionType,
-    submissionId: reply.submissionId,
+    entryId: reply.entryId,
     token: reply.token,
     body: guestReplyText(parsed),
-    files: parsed.attachments.map((attachment) => {
-      if (!(attachment.content instanceof ArrayBuffer)) throw new Error('postal-mime returned an attachment that is not an ArrayBuffer')
-      return { bytes: new Uint8Array(attachment.content), filename: attachment.filename || 'attachment' }
-    }),
+    files,
     messageId,
     headers: {
-      from: message.from.trim().toLowerCase(),
+      from,
       subject: parsed.subject ?? null,
       messageId: rfcMessageId,
       inReplyTo: parsed.inReplyTo ?? null,
@@ -87,7 +95,10 @@ export default definePlugin((nitroApp) => {
   // the Message-ID dedupe keeps a redelivery from recording it twice.
   nitroApp.hooks.hook('cloudflare:email', async ({ message, env }) => {
     try {
-      await processEmail(message, env)
+      // A failure reported while the sender is still answered goes where a thrown error does (server/plugins/error-logger.ts).
+      await processEmail(message, env, async (error) => {
+        await nitroApp.hooks.callHook('error', error instanceof Error ? error : new Error(String(error), { cause: error }), { tags: ['email'] })
+      })
     } catch (error) {
       const rejected = error instanceof InboundEmailRejection
       console.error(rejected ? 'email_inbound_rejected' : 'email_inbound_processing_failed', {

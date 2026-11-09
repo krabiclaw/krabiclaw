@@ -330,18 +330,41 @@ export async function sendWhatsAppText(
   toPhone: string,
   body: string
 ): Promise<SendWhatsAppResult> {
+  return sendWhatsAppMessage(env, toPhone, 'text', { type: 'text', text: { preview_url: true, body } })
+}
+
+/**
+ * A photo by its public URL, which Meta fetches. Outside a template Meta
+ * delivers it only inside the recipient's 24-hour service window.
+ */
+export async function sendWhatsAppImage(
+  env: CloudflareEnv & WhatsAppEnv,
+  opts: { organizationId: string; toPhone: string; imageUrl: string },
+): Promise<SendWhatsAppResult> {
+  if (!await hasOrganizationEntitlement(env, opts.organizationId, 'messaging')) {
+    return { success: true, status: 'skipped', reason: 'messaging_not_enabled' }
+  }
+  return sendWhatsAppMessage(env, opts.toPhone, 'image', { type: 'image', image: { link: opts.imageUrl } })
+}
+
+async function sendWhatsAppMessage(
+  env: WhatsAppEnv,
+  toPhone: string,
+  kind: 'text' | 'image',
+  content: Record<string, unknown>,
+): Promise<SendWhatsAppResult> {
   const phoneNumberId = env.WHATSAPP_PHONE_NUMBER_ID
   const accessToken = env.WHATSAPP_ACCESS_TOKEN
 
   if (!shouldSendRealWhatsApp(env)) {
-    const messageId = logOnlyWhatsAppMessageId('text')
+    const messageId = logOnlyWhatsAppMessageId(kind)
     let normalized: string
     try {
       normalized = parsePhoneOrThrow(toPhone)
     } catch (err) {
       return { success: false, status: 'failed', error: err instanceof Error ? err.message : String(err) }
     }
-    console.log('whatsapp_delivery_log_only', { kind: 'text', to: maskPhone(normalized) })
+    console.log('whatsapp_delivery_log_only', { kind, to: maskPhone(normalized) })
     return { success: true, status: 'sent', messageId }
   }
 
@@ -357,12 +380,7 @@ export async function sendWhatsAppText(
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        to: normalized,
-        type: 'text',
-        text: { preview_url: true, body },
-      }),
+      body: JSON.stringify({ messaging_product: 'whatsapp', to: normalized, ...content }),
     })
 
     const data = await response.json() as MetaGraphResponse

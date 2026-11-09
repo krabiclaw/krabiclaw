@@ -133,7 +133,7 @@ async function threadFacts(db: DbClient, raw: GuestThreadDetailViewModel, organi
   }
 }
 
-const RECEIPT_RANK = ['pending', 'sending', 'uncertain', 'accepted', 'sent', 'delivered', 'read'] as const
+const RECEIPT_RANK = ['pending', 'sending', 'accepted', 'sent', 'delivered', 'read'] as const
 
 /** What became of a reply, said once under the newest one as Airbnb says it. */
 function receipt(entry: GuestThreadEntryViewModel, guestName: string): string | null {

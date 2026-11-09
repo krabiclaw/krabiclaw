@@ -3,7 +3,7 @@ import { getSourceLocale } from '~/server/utils/organization-locales'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { HTTPError } from 'nitro'
 import { createContentDocumentWithBlocks, documentOfRootSql, prepareContentDocumentDeletion, updateContentDocument, type ContentDocumentChanges } from '~/server/utils/content/documents'
-import { isPublicationOutcomeUncertain, parsePostInput, PostValidationError, type PostCallToAction, type PostMediaRef, type PostMutation } from '~/shared/posts'
+import { parsePostInput, PostValidationError, type PostCallToAction, type PostMediaRef, type PostMutation } from '~/shared/posts'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { normalizePostSlug, postPublicPath } from '~/utils/post-slugs'
@@ -53,7 +53,7 @@ export interface PostPublicationSummary {
   id: string
   channel: 'facebook' | 'instagram' | 'discord'
   target_id: string
-  state: 'preparing' | 'publishing' | 'published' | 'failed' | 'unknown' | 'removed'
+  state: 'published' | 'failed' | 'removed'
   provider_post_id: string | null
   /** The provider's link: a public permalink for Meta, the message's place in Discord for people who can open that channel. */
   public_url: string | null
@@ -62,7 +62,6 @@ export interface PostPublicationSummary {
   published_at: string | null
   /** The website copy has changed since what was sent. The external post was not edited. */
   local_content_changed: boolean
-  can_reconcile: boolean
 }
 
 export interface Post {
@@ -240,7 +239,6 @@ async function attachPostFields(db: DbClient, env: CloudflareEnv, rows: PostRow[
         id: publication.id, channel: publication.channel, target_id: publication.provider_target_id,
         state: publication.state, provider_post_id: publication.provider_post_id, public_url: publication.provider_permalink,
         code: publication.error_code, message: publication.error_message, published_at: publication.published_at,
-        can_reconcile: isPublicationOutcomeUncertain(publication),
         local_content_changed: publication.payload_hash !== await postPayloadFingerprint(post, { channel: publication.channel, target_id: publication.provider_target_id }),
       }))),
     }
@@ -281,33 +279,6 @@ export async function listPosts(
 }
 
 /**
- * Refuses a content change while a publication of this post is in flight or
- * unresolved: what Meta receives, or may already have received, must be what
- * the fingerprint says. As a batch statement, so the refusal and the write are
- * one decision.
- */
-export function postPublicationIdleQuery(organizationId: string, postId: string): BatchQuery {
-  const now = new Date().toISOString()
-  return {
-    query: `INSERT INTO content_blocks (id, document_id, parent_block_id, type, position, level, data_json, created_at, updated_at)
-      SELECT NULL, ?, NULL, 'markdown', 0, NULL, '{}', ?, ?
-       WHERE EXISTS (SELECT 1 FROM post_publications WHERE organization_id = ? AND post_id = ? AND state IN ('preparing', 'publishing', 'unknown'))`,
-    params: [postId, now, now, organizationId, postId],
-  }
-}
-
-async function assertPublicationIdle(db: DbClient, organizationId: string, postId: string) {
-  const active = await queryFirst<{ id: string; channel: string; state: string }>(db,
-    "SELECT id, channel, state FROM post_publications WHERE organization_id = ? AND post_id = ? AND state IN ('preparing', 'publishing', 'unknown') LIMIT 1",
-    [organizationId, postId])
-  if (active) {
-    throw new HTTPError({ statusCode: 409, statusMessage: active.state === 'unknown'
-      ? `The ${active.channel} publication ${active.id} is unresolved; reconcile it before changing what it sent`
-      : `The ${active.channel} publication ${active.id} is in progress; wait for it before changing what it sends` })
-  }
-}
-
-/**
  * The statements a media placement change on a post's cover or gallery adds
  * to its own batch: the same active-publication refusal as a text edit, the
  * post's content revision, and the ownership change a local media edit is.
@@ -317,10 +288,8 @@ export async function postMediaMutationQueries(db: DbClient, input: { organizati
   const post = await queryFirst<{ updated_at: string }>(db,
     "SELECT updated_at FROM content_documents WHERE id = ? AND organization_id = ? AND kind = 'social_post' AND row_role = 'root'", [input.ownerId, input.organizationId])
   if (!post) return []
-  await assertPublicationIdle(db, input.organizationId, input.ownerId)
   const updatedAt = new Date(Math.max(Date.now(), Date.parse(post.updated_at) + 1)).toISOString()
   return [
-    postPublicationIdleQuery(input.organizationId, input.ownerId),
     { query: `UPDATE content_documents SET updated_at = ? WHERE id = ? AND organization_id = ? AND kind = 'social_post' AND row_role = 'root'`,
       params: [updatedAt, input.ownerId, input.organizationId] },
   ]
@@ -452,9 +421,6 @@ export async function updatePost(
     return await getPost(db, env, organizationId, postId)
   }
   if (data.location_id !== undefined) await validatePostLocation(db, organizationId, data.location_id)
-  const payloadChanged = data.body !== undefined || data.call_to_action !== undefined
-  if (payloadChanged) await assertPublicationIdle(db, organizationId, postId)
-
   const changes: ContentDocumentChanges = { updated_by: updatedBy }
   if (data.title !== undefined) changes.title = data.title
   if (data.body !== undefined) changes.summary = data.body
@@ -463,7 +429,6 @@ export async function updatePost(
   if (data.call_to_action) changes.metadata = { call_to_action: data.call_to_action }
   await updateContentDocument(db, postId, {
     expected_updated_at: input.expectedUpdatedAt, changes,
-    additionalQueriesBefore: payloadChanged ? [postPublicationIdleQuery(organizationId, postId)] : [],
     additionalQueriesAfter: [
       // Removing the call to action removes the key; json_set would store a JSON null.
       ...(data.call_to_action === null ? [{ query: "UPDATE content_documents SET metadata_json = json_remove(metadata_json, '$.call_to_action') WHERE id = ? AND organization_id = ?", params: [postId, organizationId] }] : []),
@@ -484,9 +449,7 @@ export async function updatePost(
 export async function deletePost(db: DbClient, organizationId: string, postId: string, actorId: string | null): Promise<boolean> {
   const existing = await readPostRow(db, organizationId, postId)
   if (!existing) return false
-  await assertPublicationIdle(db, organizationId, postId)
   const results = await executeBatch(db, [
-    postPublicationIdleQuery(organizationId, postId),
     { query: 'UPDATE post_publications SET post_id = NULL, updated_at = ? WHERE organization_id = ? AND post_id = ?', params: [new Date().toISOString(), organizationId, postId] },
     organizationEventQuery({ organizationId, locationId: existing.location_id, actorId, eventType: 'post.deleted', entityType: 'post', entityId: postId }),
     ...prepareContentDocumentDeletion({ documentId: postId, organizationId }),

@@ -6,7 +6,7 @@ import * as schema from '../../server/db/schema.ts'
 import { createSystemSubdomain, isSystemSubdomainSpent, ensureDomainAvailable, reconcileDueDomains, syncDomainWithCloudflare, deleteCustomDomain } from '../../server/utils/domains.ts'
 import { listDashboardEvents } from '../../server/utils/dashboard-events.ts'
 
-test('domain claims fence stale results and permanent subdomain reservations survive organization deletion', async (t) => {
+test('a stale domain result changes nothing and permanent subdomain reservations survive organization deletion', async (t) => {
   const miniflare = new Miniflare({ workers: [{ config: { name: 'owner-domain-test', compatibilityDate: '2024-11-01', manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } }, env: { DB: { type: 'd1' } } } }] })
   try {
     const db = await miniflare.getD1Database('DB')
@@ -27,13 +27,12 @@ test('domain claims fence stale results and permanent subdomain reservations sur
     t.mock.method(globalThis, 'fetch', async (url, init) => {
       assert.ok(String(url).startsWith('https://api.cloudflare.com/'))
       requestsMade += 1
-      if (providerMode === 'stale') await db.prepare("UPDATE organization_domains SET status='disabled', reconciliation_token=NULL, reconciliation_expires_at=NULL WHERE id='custom'").run()
+      if (providerMode === 'stale') await db.prepare("UPDATE organization_domains SET status='disabled' WHERE id='custom'").run()
       if (providerMode === 'delete-failed') return Response.json({ success: false, errors: [{ message: 'provider unavailable' }] }, { status: 503 })
       if (providerMode === 'delete-success') { assert.equal(init?.method, 'DELETE'); return Response.json({ success: true, result: {} }) }
       return Response.json({ success: true, result: { id: 'provider-id', hostname: 'custom.example.test', status: 'pending', ssl: { status: 'pending_validation' } } })
     })
-    const results = await Promise.all([reconcileDueDomains(env, db), reconcileDueDomains(env, db)])
-    assert.equal(results.reduce((total, result) => total + result.checked, 0), 1)
+    assert.deepEqual(await reconcileDueDomains(env, db), { checked: 1, failed: 0 })
     assert.equal(requestsMade, 1)
     assert.equal((await db.prepare("SELECT status FROM organization_domains WHERE id='custom'").first())?.status, 'verifying')
     const auditCount = async (eventName: string) => (await db.prepare("SELECT count(*) AS n FROM activity_entries WHERE organization_id='audit' AND event_name=?").bind(eventName).first())?.n
@@ -47,15 +46,16 @@ test('domain claims fence stale results and permanent subdomain reservations sur
     await db.prepare("UPDATE organization_domains SET status='verifying',cloudflare_hostname_id='provider-id' WHERE id='custom'").run()
     providerMode = 'delete-failed'
     await assert.rejects(deleteCustomDomain(env, db, 'custom', 'system'))
-    const failedDelete = await db.prepare("SELECT desired_state,next_check_at,reconciliation_token FROM organization_domains WHERE id='custom'").first()
+    const failedDelete = await db.prepare("SELECT desired_state,status,error_message FROM organization_domains WHERE id='custom'").first()
     assert.equal(failedDelete?.desired_state, 'deleted')
-    assert.equal(failedDelete?.reconciliation_token, null)
-    assert.ok(failedDelete?.next_check_at)
+    assert.equal(failedDelete?.status, 'verifying', 'a hostname Cloudflare still routes is not marked deleted here')
+    assert.match(String(failedDelete?.error_message), /provider unavailable/)
     assert.equal(await auditCount('cloudflare_delete_failed'), 1)
     assert.equal(await auditCount('domain_deleted'), 0)
+    // The scheduled check leaves a domain the owner asked to delete alone; deleting again asks Cloudflare again.
+    assert.deepEqual(await reconcileDueDomains(env, db), { checked: 0, failed: 0 })
     providerMode = 'delete-success'
-    await db.prepare("UPDATE organization_domains SET next_check_at=NULL WHERE id='custom'").run()
-    assert.equal((await reconcileDueDomains(env, db)).checked, 1)
+    await deleteCustomDomain(env, db, 'custom', 'system')
     assert.equal((await db.prepare("SELECT status FROM organization_domains WHERE id='custom'").first())?.status, 'deleted')
     // The deletion and its audit row commit together.
     assert.ok((await listDashboardEvents(db, 'audit', {})).events.some(event => event.event_type === 'domain_deleted'))

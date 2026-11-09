@@ -68,21 +68,15 @@ function validIntervals(value: unknown): SchedulingInterval[] {
 }
 /**
  * The member's settings and, when they check a Google calendar, the upcoming
- * bookings that calendar now says they are busy for. A calendar that cannot be
- * read is reported here as `calendar_error`: this read exists to tell the
- * member the state of their calendar, so the reason is the answer.
+ * bookings that calendar now says they are busy for.
  */
 export async function readMemberScheduling(db: DbClient, env: CloudflareEnv, organizationId: string, memberId: string) {
  const row=await queryFirst<MemberScheduling>(db,'SELECT * FROM member_scheduling WHERE organization_id=? AND member_id=?',[organizationId,memberId])
  if (!row) return null
  const linked = row.calendar_account_id ? await queryFirst(db,"SELECT a.id FROM account a JOIN member m ON m.userId=a.userId WHERE a.id=? AND a.providerId='google' AND m.id=? AND m.organizationId=?",[row.calendar_account_id,memberId,organizationId]) : null
  const checking = Boolean(row.calendar_account_id) && (JSON.parse(row.calendar_ids_json) as string[]).length>0 && Boolean(linked)
- let busy: SchedulingInterval[] = [], calendarError: string | null = null
- if (checking) {
-  try { busy = await memberBusy(db, env, row, { from: new Date().toISOString(), until: new Date(Date.now()+BUSY_HORIZON_MS).toISOString() }) }
-  catch (error) { calendarError = error instanceof HTTPError ? error.message : error instanceof Error ? error.message : String(error) }
- }
- const conflicts = checking && !calendarError ? await queryAll<{ session_id: string; starts_at: string; ends_at: string; booking_count: number; total: number }>(db, `
+ const busy = checking ? await memberBusy(env, row, { from: new Date().toISOString(), until: new Date(Date.now()+BUSY_HORIZON_MS).toISOString() }) : []
+ const conflicts = checking ? await queryAll<{ session_id: string; starts_at: string; ends_at: string; booking_count: number; total: number }>(db, `
   SELECT s.id session_id,s.starts_at,s.ends_at,count(b.id) booking_count,count(*) OVER() total
   FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id
   WHERE b.organization_id=? AND b.assigned_member_id=? AND b.status IN ('pending','confirmed') AND s.ends_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
@@ -95,9 +89,8 @@ export async function readMemberScheduling(db: DbClient, env: CloudflareEnv, org
   weekly:row.weekly_json===null?null:JSON.parse(row.weekly_json) as WorkingHours[],time_off:row.time_off_json===null?null:JSON.parse(row.time_off_json) as SchedulingInterval[],
   public_name:row.public_name,public_photo_url:row.public_photo_url,public_bio:row.public_bio,public_approved:row.public_approved,
   calendar_account_id:row.calendar_account_id,calendar_ids:JSON.parse(row.calendar_ids_json) as string[],
-  calendar_error:calendarError,
   updated_at:row.updated_at,updated_by:row.updated_by,
-  calendar_status:!row.calendar_account_id || !JSON.parse(row.calendar_ids_json).length?'internal':!linked?'disconnected':calendarError?'error':'ready',
+  calendar_status:!row.calendar_account_id || !JSON.parse(row.calendar_ids_json).length?'internal':!linked?'disconnected':'ready',
  }
 }
 export async function writeMemberScheduling(actor: SchedulingActor, memberId: string, input: {timezone?: string; weekly?: WorkingHours[]; time_off?: SchedulingInterval[]; expected_updated_at: string | null; public_name?: string | null; public_photo_url?: string | null; public_bio?: string | null; public_approved?: boolean}) {
@@ -169,41 +162,29 @@ const BUSY_HORIZON_MS = 94 * 86400000
 
 /**
  * What a member's selected Google calendars say they are busy for in a span,
- * read from Google when asked. Nothing is cached: a time Google has not
- * answered for is not known to be free.
+ * read from Google when asked. The account, its scopes and the calendars were
+ * established when they were selected; here the token is used and Google is
+ * asked. Nothing is cached.
  */
-async function memberBusy(db: DbClient, env: CloudflareEnv, row: MemberScheduling, span: { from: string; until: string }): Promise<SchedulingInterval[]> {
+async function memberBusy(env: CloudflareEnv, row: MemberScheduling, span: { from: string; until: string }): Promise<SchedulingInterval[]> {
  const ids = JSON.parse(row.calendar_ids_json) as string[]
  if (!row.calendar_account_id || !ids.length) return []
- // A selection kept after the plan lapsed fails closed, visibly: availability waits until the sync is back on or turned off.
+ // Google Calendar sync is Business; a selection kept past the plan is not read.
  if (!await hasOrganizationEntitlement(env, row.organization_id, 'calendar_sync')) throw new HTTPError({ statusCode: 409, message: 'Google Calendar sync requires the Business plan; disconnect this busy calendar to stop checking it' })
- const member = await queryFirst<{ userId: string }>(db, 'SELECT userId FROM member WHERE id=? AND organizationId=?', [row.member_id, row.organization_id])
- if (!member) throw new HTTPError({ statusCode: 409, message: 'Member is no longer connected' })
- await requireIntegrationAccount(env, row.calendar_account_id, { userId: member.userId, currentAccountId: null, providerId: 'google', scopes: MEMBER_BUSY_SCOPES })
- const output = await queryFirst<{ calendar: string | null }>(db, "SELECT target_id calendar FROM organization_integrations WHERE organization_id=? AND provider='google_calendar' AND status<>'disabled'", [row.organization_id])
- if (output?.calendar && ids.includes(output.calendar)) throw new HTTPError({ statusCode: 409, message: 'Busy input overlaps booking output calendar; change the selection' })
  const token = await linkedAccountAccessToken(env, row.calendar_account_id)
  // Google rejects the full scheduling horizon in one freeBusy request.
  const starts: number[] = []
  for (let from = Date.parse(span.from); from < Date.parse(span.until); from += 30 * 86400000) starts.push(from)
  const chunks = await Promise.all(starts.map(async from => {
-  const busy: SchedulingInterval[] = []
   const timeMax = new Date(Math.min(from + 30 * 86400000, Date.parse(span.until))).toISOString()
   const response = await fetch('https://www.googleapis.com/calendar/v3/freeBusy', { method: 'POST', headers: { Authorization: `Bearer ${token.accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ timeMin: new Date(from).toISOString(), timeMax, items: ids.map(id => ({ id })) }) })
-  if (!response.ok) {
-   const failure = await response.json().catch(() => null) as { error?: { message?: string } } | null
-   throw new HTTPError({ statusCode: 502, message: `Google busy-calendar check failed (${response.status})${typeof failure?.error?.message === 'string' ? `: ${failure.error.message}` : ''}` })
-  }
-  const data = await response.json() as { calendars?: Record<string, { errors?: unknown[]; busy?: SchedulingInterval[] }> }
-  for (const id of ids) {
-   const calendar = data.calendars?.[id]
-   if (!calendar || calendar.errors?.length || !Array.isArray(calendar.busy)) throw new HTTPError({ statusCode: 502, message: 'A selected Google calendar could not be checked' })
-   for (const interval of calendar.busy) {
-    if (!Number.isFinite(Date.parse(interval.start)) || !Number.isFinite(Date.parse(interval.end)) || Date.parse(interval.end) <= Date.parse(interval.start)) throw new HTTPError({ statusCode: 502, message: 'Google returned an invalid busy interval' })
-    busy.push({ start: new Date(interval.start).toISOString(), end: new Date(interval.end).toISOString() })
-   }
-  }
-  return busy
+  if (!response.ok) throw new HTTPError({ statusCode: 502, message: `Google busy-calendar check failed (${response.status})` })
+  const data = await response.json() as { calendars: Record<string, { errors?: { reason: string }[]; busy: SchedulingInterval[] }> }
+  return ids.flatMap((id) => {
+   const calendar = data.calendars[id]!
+   if (calendar.errors?.length) throw new HTTPError({ statusCode: 502, message: `Google could not read calendar ${id}: ${calendar.errors.map(error => error.reason).join(', ')}` })
+   return calendar.busy.map(interval => ({ start: new Date(interval.start).toISOString(), end: new Date(interval.end).toISOString() }))
+  })
  }))
  return chunks.flat()
 }
@@ -211,7 +192,7 @@ async function memberBusy(db: DbClient, env: CloudflareEnv, row: MemberSchedulin
 /** The busy times one member's selected Google calendars report for a span; none when they check no calendar. */
 export async function memberBusyIntervals(db: DbClient, env: CloudflareEnv, organizationId: string, memberId: string, span: { from: string; until: string }): Promise<SchedulingInterval[]> {
  const row = await queryFirst<MemberScheduling>(db, 'SELECT * FROM member_scheduling WHERE organization_id=? AND member_id=?', [organizationId, memberId])
- return row ? await memberBusy(db, env, row, span) : []
+ return row ? await memberBusy(env, row, span) : []
 }
 
 /**
@@ -226,7 +207,7 @@ export async function memberAvailabilityJson(db: DbClient, env: CloudflareEnv, o
  const rows = await queryAll<MemberScheduling>(db, `SELECT * FROM member_scheduling WHERE organization_id=? AND timezone IS NOT NULL${memberIds ? ' AND member_id IN (SELECT value FROM json_each(?))' : ''}`, memberIds ? [organizationId, JSON.stringify(memberIds)] : [organizationId])
  const entries = await Promise.all(rows.map(async row => [row.member_id, {
   windows: workingWindows(row.timezone!, JSON.parse(row.weekly_json!) as WorkingHours[], { from: new Date(span.from), until: new Date(span.until) }),
-  busy: await memberBusy(db, env, row, span),
+  busy: await memberBusy(env, row, span),
  }] as const))
  return JSON.stringify(Object.fromEntries(entries))
 }
