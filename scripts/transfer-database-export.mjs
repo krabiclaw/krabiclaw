@@ -367,7 +367,9 @@ export async function auditTargetInvariants(target) {
       const response = await fetch(String(row.public_url), { method: 'HEAD', signal: AbortSignal.timeout(20_000) })
       if (response.status !== 200) unserved.push(`${row.id} ${row.public_url}: HTTP ${response.status}`)
     } catch (error) {
-      unserved.push(`${row.id} ${row.public_url}: ${error instanceof Error ? error.message : String(error)}`)
+      // undici's "fetch failed" says nothing; the reason is its cause.
+      const cause = error instanceof Error && error.cause instanceof Error ? error.cause : null
+      unserved.push(`${row.id} ${row.public_url}: ${error instanceof Error ? error.message : String(error)}${cause ? ` (${[Reflect.get(cause, 'code'), Reflect.get(cause, 'syscall'), Reflect.get(cause, 'hostname'), cause.message].filter(Boolean).join(' ')})` : ''}`)
     }
   }
   results.push({ name: 'media_objects_are_served', violations: unserved.length, unserved })
