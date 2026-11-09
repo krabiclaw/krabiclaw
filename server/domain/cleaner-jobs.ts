@@ -1,0 +1,178 @@
+import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { isOrganizationWideRole } from '~/server/utils/member-access'
+import { postAutomaticTeamMessage, stayThreadParticipantsKey } from '~/server/domain/team-messages'
+import { JOB_TASK_SQL, jobStayId, taskViewForUser, type TaskRow, type TaskView } from '~/server/domain/tasks'
+import { notifyTaskStarting } from '~/server/utils/notifications'
+import { addLocalDays, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
+import type { CloudflareEnv } from '~/server/utils/auth'
+
+/*
+  A cleaner's jobs live in team conversations. Each job given to a member or a
+  team is posted into the stay's conversation with that person (or team) and
+  every owner and admin, the same conversation the app's "Message host" opens.
+  Reminders follow in it: the evening before, the morning of, and a warning to
+  the hosts when the home is not done two hours before the guests arrive. A
+  move or a cancellation is told there at once. Every post has its own key, so
+  a wake that runs twice sends nothing twice.
+
+  The organization's hub Durable Object wakes this on every stay or business
+  change and at the next reminder it reports, and re-arms itself to that time.
+  A job an owner or admin gives themselves has no conversation; its morning-of
+  reminder is the task alert.
+*/
+
+const EVENING_BEFORE = '18:00'
+const MORNING_OF = '08:00'
+const WARNING_BEFORE_ARRIVAL_MS = 2 * 3_600_000
+/** How long a closed or cancelled job is still told about in its conversation. */
+const RECENT_MS = 7 * 86_400_000
+
+interface Member { id: string; userId: string; role: string }
+
+interface Roster {
+  /** Every seat: the cleaner (or team) and every owner and admin. */
+  seats: string[]
+  /** The people the job is for, as users: told by every channel they keep. */
+  cleaners: string[]
+  /** The owners and admins, as users: told when a job runs late. */
+  hosts: string[]
+}
+
+export const jobKey = (task: Pick<TaskRow, 'id' | 'product_id'>) => `job:${task.id}:${task.product_id}`
+
+function rosterFor(task: TaskRow, members: Member[], teams: Map<string, string[]>): Roster | null {
+  const hosts = members.filter(member => isOrganizationWideRole(member.role))
+  let cleaners: Member[]
+  if (task.assigned_team_id) cleaners = members.filter(member => (teams.get(task.assigned_team_id!) ?? []).includes(member.userId))
+  else {
+    const member = members.find(member => member.id === task.assigned_member_id)
+    if (!member || isOrganizationWideRole(member.role)) return null
+    cleaners = [member]
+  }
+  if (!cleaners.length) return null
+  return {
+    seats: [...new Set([...cleaners, ...hosts].map(member => member.id))].sort(),
+    cleaners: [...new Set(cleaners.map(member => member.userId))],
+    hosts: [...new Set(hosts.map(member => member.userId))],
+  }
+}
+
+function lines(view: TaskView): string {
+  const side = (part: TaskView['sheet']['checkout']) => part ? `${part.label} ${part.time}${part.guest ? ` · ${part.guest}` : ''}` : null
+  return [`${view.sheet.heading}: ${view.sheet.title}`, view.sheet.date, side(view.sheet.checkout), side(view.sheet.checkin),
+    view.sheet.checkout ? null : view.detail, view.notes].filter((line): line is string => Boolean(line)).join('\n')
+}
+
+/** The reminders a job gets, each at its instant, as [key suffix, instant, valid until]. */
+function reminders(task: TaskRow): Array<{ key: string; at: Date; until: Date; kind: 'evening' | 'morning' | 'warning' }> {
+  const anchor = task.starts_at ?? task.due_at
+  if (anchor === null) return []
+  const day = localDateAt(new Date(anchor), task.timezone)
+  const at = (date: string, time: string) => localDateTimeToInstant(date, time, task.timezone, 'compatible')
+  const windowEnd = task.due_at !== null ? new Date(task.due_at) : new Date(Date.parse(anchor) + 12 * 3_600_000)
+  const out: ReturnType<typeof reminders> = [
+    { kind: 'evening', key: `reminder:${task.id}:evening:${day}`, at: at(addLocalDays(day, -1), EVENING_BEFORE), until: new Date(anchor) },
+    { kind: 'morning', key: `reminder:${task.id}:morning:${day}`, at: at(day, MORNING_OF), until: windowEnd },
+  ]
+  if (task.due_at !== null) out.push({ kind: 'warning', key: `warning:${task.id}:${task.due_at}`, at: new Date(Date.parse(task.due_at) - WARNING_BEFORE_ARRIVAL_MS), until: new Date(task.due_at) })
+  return out
+}
+
+/**
+ * Posts what the organization's cleaners need to hear now and returns when the
+ * next reminder is due, or null when nothing is pending.
+ */
+export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, organizationId: string, now = new Date()): Promise<Date | null> {
+  const organization = await queryFirst<{ name: string }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId])
+  if (!organization) throw new Error(`Organization ${organizationId} is missing`)
+  const [members, teamRows, tasks] = await Promise.all([
+    queryAll<Member>(db, 'SELECT id, userId, role FROM member WHERE organizationId = ?', [organizationId]),
+    queryAll<{ team_id: string; user_id: string }>(db, 'SELECT t.id AS team_id, tm.userId AS user_id FROM team t JOIN teamMember tm ON tm.teamId = t.id WHERE t.organizationId = ?', [organizationId]),
+    queryAll<TaskRow>(db, `SELECT t.* FROM tasks t WHERE t.organization_id = ? AND ${JOB_TASK_SQL('t')} AND (t.status = 'open' OR t.updated_at >= ?)
+      AND (t.assigned_member_id IS NOT NULL OR t.assigned_team_id IS NOT NULL) ORDER BY COALESCE(t.starts_at, t.due_at, t.created_at), t.id`,
+    [organizationId, new Date(now.getTime() - RECENT_MS).toISOString()]),
+  ])
+  const teams = new Map<string, string[]>()
+  for (const row of teamRows) teams.set(row.team_id, [...teams.get(row.team_id) ?? [], row.user_id])
+  const stayIds = [...new Set(tasks.map(jobStayId))]
+  const posted = stayIds.length ? await queryAll<{ thread_id: string; stay_id: string; participants_key: string; idempotency_key: string }>(db, `
+    SELECT m.thread_id, t.stay_id, t.participants_key, m.idempotency_key FROM team_messages m
+      JOIN team_threads t ON t.organization_id = m.organization_id AND t.id = m.thread_id
+     WHERE t.organization_id = ? AND t.stay_id IN (SELECT value FROM json_each(?)) AND m.automatic = 1`, [organizationId, d1JsonStringSet(stayIds)]) : []
+  const keysByThread = new Map<string, Set<string>>()
+  const threads = new Map<string, { stay_id: string; participants_key: string }>()
+  for (const row of posted) {
+    keysByThread.set(row.thread_id, (keysByThread.get(row.thread_id) ?? new Set()).add(row.idempotency_key))
+    threads.set(row.thread_id, { stay_id: row.stay_id, participants_key: row.participants_key })
+  }
+  const seatUsers = new Map<string, string[]>()
+  if (threads.size) {
+    for (const seat of await queryAll<{ thread_id: string; user_id: string }>(db, `SELECT s.thread_id, m.userId AS user_id FROM team_thread_members s
+        JOIN member m ON m.id = s.member_id AND m.organizationId = s.organization_id WHERE s.organization_id = ? AND s.thread_id IN (SELECT value FROM json_each(?))`,
+    [organizationId, d1JsonStringSet([...threads.keys()])])) seatUsers.set(seat.thread_id, [...seatUsers.get(seat.thread_id) ?? [], seat.user_id])
+  }
+  const hostUsers = members.filter(member => isOrganizationWideRole(member.role)).map(member => member.userId)
+  const post = async (stayId: string, seats: readonly string[], key: string, body: string, alertUserIds: readonly string[]) => {
+    const result = await postAutomaticTeamMessage(env, db, { organizationId, stayId, seatMemberIds: seats, body, idempotencyKey: key, alertUserIds, senderName: organization.name })
+    keysByThread.set(result.threadId, (keysByThread.get(result.threadId) ?? new Set()).add(key))
+    return result
+  }
+  const pending: Date[] = []
+  const failures: unknown[] = []
+  for (const task of tasks) {
+    try {
+      const stayId = jobStayId(task)
+      const roster = rosterFor(task, members, teams)
+      const view = roster || task.status === 'open' ? await taskViewForUser(db, organizationId, task.id, roster?.cleaners[0] ?? hostUsers[0] ?? null, now) : null
+      // Conversations of this stay that once carried this job for other people: they are told it is no longer theirs.
+      const elsewhere = [...threads].filter(([threadId, thread]) => thread.stay_id === stayId && [...keysByThread.get(threadId) ?? []].some(key => key.startsWith(`job:${task.id}:`)))
+      const targetKey = roster ? await stayThreadParticipantsKey(stayId, roster.seats) : null
+      for (const [threadId, thread] of elsewhere) {
+        if (thread.participants_key === targetKey && task.status === 'open') continue
+        const keys = keysByThread.get(threadId)!
+        const closedKey = task.status === 'open' ? `released:${task.id}` : `${task.status === 'cancelled' ? 'cancelled' : 'closed'}:${task.id}`
+        if (keys.has(closedKey) || (task.status !== 'open' && task.status !== 'cancelled' && task.closed_by_user_id !== null)) continue
+        const seated = seatUsers.get(threadId) ?? []
+        const body = task.status === 'open' ? `No longer yours: ${view!.sheet.heading.toLowerCase()} at ${view!.sheet.title}${view!.sheet.date ? `, ${view!.sheet.date}` : ''}.`
+          : `Cancelled: ${view ? `${view.sheet.heading.toLowerCase()} at ${view.sheet.title}${view.sheet.date ? `, ${view.sheet.date}` : ''}` : 'this job'}.`
+        await post(stayId, seated.map(userId => members.find(member => member.userId === userId)?.id).filter((id): id is string => Boolean(id)), closedKey, body, seated.filter(userId => !hostUsers.includes(userId)))
+      }
+      if (task.status !== 'open' || !view) continue
+      if (!roster) {
+        // An owner's or admin's own job: the task alert, once, on the morning of.
+        const morning = reminders(task).find(reminder => reminder.kind === 'morning')
+        if (!morning) continue
+        if (morning.at > now) { pending.push(morning.at); continue }
+        if (now >= morning.until) continue
+        const day = localDateAt(new Date(task.starts_at ?? task.due_at!), task.timezone)
+        const recipients = task.assigned_member_id ? members.filter(member => member.id === task.assigned_member_id).map(member => member.userId) : []
+        const sent = recipients.length ? await queryAll<{ dedupe_key: string }>(db, "SELECT dedupe_key FROM activity_entries WHERE organization_id = ? AND kind = 'notification' AND dedupe_key IN (SELECT value FROM json_each(?))",
+          [organizationId, d1JsonStringSet(recipients.map(userId => `notification:task-starting:${task.id}:${day}:${userId}`))]) : []
+        const unsent = recipients.filter(userId => !sent.some(row => row.dedupe_key === `notification:task-starting:${task.id}:${day}:${userId}`))
+        if (unsent.length) await notifyTaskStarting(env, db, { organizationId, taskId: task.id, day, recipientUserIds: unsent })
+        continue
+      }
+      const key = jobKey(task)
+      const thread = [...threads].find(([, thread]) => thread.participants_key === targetKey)
+      const keys = thread ? keysByThread.get(thread[0]) ?? new Set<string>() : new Set<string>()
+      if (!keys.has(key)) {
+        const result = await post(stayId, roster.seats, key, lines(view), roster.cleaners)
+        threads.set(result.threadId, { stay_id: stayId, participants_key: targetKey! })
+      }
+      for (const reminder of reminders(task)) {
+        if (keys.has(reminder.key) || keysByThread.get(thread?.[0] ?? '')?.has(reminder.key)) continue
+        if (reminder.at > now) { pending.push(reminder.at); continue }
+        if (now >= reminder.until) continue
+        const when = view.when ? `, ${view.when}` : ''
+        const body = reminder.kind === 'evening' ? `Tomorrow: ${view.sheet.heading.toLowerCase()} at ${view.sheet.title}${when}.`
+          : reminder.kind === 'morning' ? `Today: ${view.sheet.heading.toLowerCase()} at ${view.sheet.title}${when}.`
+            : `${view.sheet.title} is not marked done and the next guests arrive${view.sheet.checkin ? ` at ${view.sheet.checkin.time}` : ' in two hours'}.`
+        await post(stayId, roster.seats, reminder.key, body, reminder.kind === 'warning' ? roster.hosts : roster.cleaners)
+      }
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length) throw new AggregateError(failures, `${failures.length} of ${tasks.length} cleaning jobs could not be told about: ${failures.map(error => error instanceof Error ? error.message : String(error)).join('; ')}`)
+  return pending.length ? new Date(Math.min(...pending.map(date => date.getTime()))) : null
+}

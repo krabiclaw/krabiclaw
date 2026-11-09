@@ -16,6 +16,7 @@ export function isTeamThreadsResponse(value: unknown): value is { threads: TeamT
     && typeof thread.isGroup === 'boolean' && typeof thread.canManage === 'boolean' && typeof thread.canLeave === 'boolean'
     && nullableString(thread.stayId) && nullableString(thread.locationId)
     && (thread.stay === null || isRecord(thread.stay) && typeof thread.stay.id === 'string' && typeof thread.stay.homeName === 'string' && typeof thread.stay.checkInDate === 'string' && typeof thread.stay.checkOutDate === 'string')
+    && (thread.job === null || isRecord(thread.job) && typeof thread.job.id === 'string' && typeof thread.job.version === 'number' && isRecord(thread.job.sheet) && isRecord(thread.job.can))
     && (thread.location === null || isRecord(thread.location) && typeof thread.location.id === 'string' && typeof thread.location.title === 'string')
     && Array.isArray(thread.participants) && thread.participants.every(identity)
     && (thread.lastMessage === null || isRecord(thread.lastMessage) && typeof thread.lastMessage.id === 'string' && typeof thread.lastMessage.body === 'string' && typeof thread.lastMessage.attachmentCount === 'number')
@@ -23,7 +24,7 @@ export function isTeamThreadsResponse(value: unknown): value is { threads: TeamT
 }
 
 function isTeamMessage(value: unknown): value is TeamMessage {
-  return isRecord(value) && typeof value.id === 'string' && typeof value.threadId === 'string' && nullableString(value.senderId)
+  return isRecord(value) && typeof value.id === 'string' && typeof value.threadId === 'string' && nullableString(value.senderId) && typeof value.automatic === 'boolean'
     && typeof value.body === 'string' && typeof value.createdAt === 'string'
     && Array.isArray(value.attachments) && value.attachments.every(photo => isRecord(photo) && typeof photo.id === 'string' && typeof photo.url === 'string' && (photo.width === null || typeof photo.width === 'number') && (photo.height === null || typeof photo.height === 'number'))
     && Array.isArray(value.deliveries) && value.deliveries.every(delivery => isRecord(delivery) && typeof delivery.id === 'string' && (delivery.channel === 'email' || delivery.channel === 'whatsapp' || delivery.channel === 'push') && typeof delivery.status === 'string' && nullableString(delivery.error) && typeof delivery.updatedAt === 'string')

@@ -20,6 +20,7 @@ import { loadOrganizationSite } from '~/server/utils/content/publishing'
 import { publishAccessInvalidation, publishBusinessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
 import type { AirbnbSettingSections, pushStayHomeChannel } from '~/server/domain/stays'
+import { JOB_TASK_SQL } from '~/server/domain/tasks'
 import { executeWithinCapacity, liveHomeSql, reportBillingUsage } from '~/server/utils/billing'
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -1111,6 +1112,14 @@ function productWrites(
         JSON.stringify(planned.stay.amenity_answers), planned.stay.cancellation_policy, planned.stay.long_term_cancellation_policy,
         planned.stay.assigned_member_id, planned.stay.assigned_team_id, JSON.stringify(planned.stay.questions), now, now, actor.actorId, actor.actorId],
     })
+    if (upsert && (options.stayFields === undefined || options.stayFields.includes('assigned_member_id') || options.stayFields.includes('assigned_team_id'))) {
+      // The home's open cleaning jobs are its assignee's: a new assignee takes them over.
+      writes.push({
+        query: `UPDATE tasks SET assigned_member_id = ?, assigned_team_id = ?, version = version + 1, updated_at = ?
+          WHERE organization_id = ? AND product_id = ? AND status = 'open' AND ${JOB_TASK_SQL('tasks')} AND (assigned_member_id IS NOT ? OR assigned_team_id IS NOT ?)`,
+        params: [planned.stay.assigned_member_id, planned.stay.assigned_team_id, now, organizationId, planned.id, planned.stay.assigned_member_id, planned.stay.assigned_team_id],
+      })
+    }
     if (upsert && (options.stayFields === undefined || options.stayFields.includes('amenities') || options.stayFields.includes('amenity_answers'))) {
       // A removed listing fact cannot retain room references. Invalidate every
       // affected room draft before deleting the references in this same batch.

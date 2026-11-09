@@ -2312,43 +2312,8 @@ export async function notifyTaskAssigned(env: NotificationEnv, db: DbClient, inp
   await notifyTaskPeople(env, db, { ...input, kind: 'assigned', eventKey: `task-assigned:${input.taskId}:${version.version}` })
 }
 
-/**
- * Turnovers whose window starts today, told to their people once, at the start
- * of the home's working day (its location's opening hours that day), or at the
- * window's own start when the location keeps no hours. Run by the scheduler
- * that sends automatic guest messages.
- */
-export async function notifyStartingTurnovers(env: NotificationEnv, db: DbClient, now = new Date()): Promise<{ alerted: number }> {
-  const { getDateIntervals, parseOpeningHours, parseSpecialHours } = await import('~/shared/reservation-hours')
-  const { localDateAt, localDateTimeToInstant } = await import('~/utils/timezone')
-  const soon = new Date(now.getTime() + 36 * 3_600_000).toISOString()
-  const rows = await queryAll<{ id: string; organization_id: string; starts_at: string; timezone: string; assigned_member_id: string | null; assigned_team_id: string | null; opening_hours: string | null; special_hours: string | null }>(db, `
-    SELECT t.id, t.organization_id, t.starts_at, t.timezone, t.assigned_member_id, t.assigned_team_id, l.opening_hours, l.special_hours
-      FROM tasks t LEFT JOIN business_locations l ON l.organization_id = t.organization_id AND l.id = t.location_id
-     WHERE t.kind = 'turnover' AND t.status = 'open' AND t.starts_at IS NOT NULL AND t.starts_at <= ?
-       AND (t.assigned_member_id IS NOT NULL OR t.assigned_team_id IS NOT NULL)`, [soon])
-  let alerted = 0
-  const failures: unknown[] = []
-  for (const row of rows) {
-    const day = localDateAt(now, row.timezone)
-    if (localDateAt(new Date(row.starts_at), row.timezone) !== day) continue
-    const intervals = getDateIntervals(parseOpeningHours(row.opening_hours ? JSON.parse(row.opening_hours) : null), parseSpecialHours(row.special_hours ? JSON.parse(row.special_hours) : null), day)
-    const opens = intervals?.find(interval => interval.start >= 0)
-    const workday = opens ? localDateTimeToInstant(day, `${String(Math.floor(opens.start / 60)).padStart(2, '0')}:${String(opens.start % 60).padStart(2, '0')}`, row.timezone, 'compatible').toISOString() : row.starts_at
-    if (now.toISOString() < (workday < row.starts_at ? workday : row.starts_at)) continue
-    const eventKey = `task-starting:${row.id}:${day}`
-    if (await queryFirst(db, "SELECT id FROM activity_entries WHERE kind = 'notification' AND dedupe_key LIKE ? LIMIT 1", [`notification:${eventKey}:%`])) continue
-    const recipients = row.assigned_member_id
-      ? await queryAll<{ userId: string }>(db, 'SELECT userId FROM member WHERE organizationId = ? AND id = ?', [row.organization_id, row.assigned_member_id])
-      : await queryAll<{ userId: string }>(db, 'SELECT tm.userId FROM teamMember tm JOIN team t ON t.id = tm.teamId WHERE t.organizationId = ? AND t.id = ?', [row.organization_id, row.assigned_team_id])
-    try {
-      await notifyTaskPeople(env, db, { organizationId: row.organization_id, taskId: row.id, recipientUserIds: recipients.map(recipient => recipient.userId), kind: 'starting', actorUserId: null, eventKey })
-      alerted += 1
-    } catch (error) {
-      failures.push(error)
-    }
-  }
-  if (failures.length) throw new AggregateError(failures, `${failures.length} turnover start alerts failed`)
-  return { alerted }
+/** A job an owner or admin keeps for themselves starts today: the task alert, once per day. The organization's jobs wake sends it. */
+export async function notifyTaskStarting(env: NotificationEnv, db: DbClient, input: { organizationId: string; taskId: string; day: string; recipientUserIds: string[] }): Promise<void> {
+  await notifyTaskPeople(env, db, { organizationId: input.organizationId, taskId: input.taskId, recipientUserIds: input.recipientUserIds, kind: 'starting', actorUserId: null, eventKey: `task-starting:${input.taskId}:${input.day}` })
 }
 

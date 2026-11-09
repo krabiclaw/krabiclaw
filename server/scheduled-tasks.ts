@@ -67,6 +67,19 @@ const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
   'marketing-ad-spend-daily': async () => import('./tasks/marketing-ad-spend-daily'),
 }
 
+/**
+ * The failure with every cause and member it carries. The wrapper message alone
+ * said "Scheduled guest messages or turnover alerts failed" for months while
+ * the D1 error underneath was the one that named the broken query.
+ */
+export function describeFailure(error: unknown, depth = 0): string {
+  if (!(error instanceof Error)) return String(error)
+  const parts = [`${error.name}: ${error.message}`]
+  if (error instanceof AggregateError) parts.push(`[${error.errors.map(member => describeFailure(member, depth + 1)).join('; ')}]`)
+  if (error.cause !== undefined && depth < 6) parts.push(`caused by ${describeFailure(error.cause, depth + 1)}`)
+  return parts.join(' ')
+}
+
 export function getScheduledTaskNames(cron: string): readonly ScheduledTaskName[] {
   return SCHEDULED_TASKS[cron] ?? []
 }
@@ -113,7 +126,7 @@ export async function runScheduledTasks(
       }
       return []
     }
-    return [new Error(`Scheduled task "${names[index]}" failed: ${outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)}`, { cause: outcome.reason })]
+    return [new Error(`Scheduled task "${names[index]}" failed: ${describeFailure(outcome.reason)}`, { cause: outcome.reason })]
   })
   if (failures.length) throw new AggregateError(failures, `${failures.length} of ${names.length} scheduled tasks failed for "${cron}": ${failures.map(error => error.message).join('; ')}`)
 }
