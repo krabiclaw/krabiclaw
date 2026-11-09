@@ -315,6 +315,13 @@ test('members talk in team conversations, see unread state and receive recorded 
       .bind(`team-message:${alerted.message.id}`).first<string>('email_json')
     const address = parseReplyToAddress(env, (JSON.parse(alertEmail!).message as { replyTo: string }).replyTo)
     assert.equal(address.kind, 'member')
+    // Another member writing in the same conversation is the same email thread for the cleaner: the first alert's subject, not a new one.
+    const followUp = await sendTeamMessage(env, db, owner, contextualGroup.id, { body: 'Checking in too', photos: [], idempotencyKey: 'email-thread-follow-up', senderName: 'owner' })
+    const cleanerAlert = async (messageId: string) => JSON.parse((await db.prepare(`SELECT d.email_json FROM guest_thread_deliveries d JOIN activity_entries a ON a.id = d.entry_id
+      WHERE a.dedupe_key = ? AND d.channel = 'email' AND d.email_json LIKE '%cleaner@example.test%'`).bind(`team-message:${messageId}`).first<string>('email_json'))!).message as { subject: string }
+    const firstSubject = (await cleanerAlert(alerted.message.id)).subject
+    assert.match(firstSubject, /cook/iu)
+    assert.equal((await cleanerAlert(followUp.message.id)).subject, firstSubject)
     const emailedReply = { entryId: address.entryId, token: address.token, from: 'Cleaner@example.test', body: 'On my way', files: [], messageId: '<team-reply@mail.example.test>' }
     const unexpectedReport = async (error: unknown) => { throw error }
     await receiveMemberEmail(env, emailedReply, unexpectedReport)

@@ -122,20 +122,27 @@ async function conversationEmailParent(db: DbClient, delivery: GuestThreadDelive
   }
 }
 
+/** The conversation an entry belongs to: its guest conversation, or a team message's team conversation. */
+const ENTRY_CONVERSATION = (alias: string) => `COALESCE(${alias}.request_id, (SELECT tm.thread_id FROM team_messages tm
+  WHERE ${alias}.event_name = 'team.message_sent' AND tm.organization_id = ${alias}.organization_id AND tm.id = json_extract(${alias}.payload_json, '$.entityId')))`
+
 /**
- * A member's alerts about one conversation are one email thread: each keeps the
- * subject of the first alert sent to that recipient and answers the alert before
- * it, so every mail client threads them, not only Gmail by subject. Alerts to
- * other recipients, and the guest's own emails, are never its ancestry.
+ * A member's alerts about one conversation, guest or team, are one email
+ * thread: each keeps the subject of the first alert sent to that recipient and
+ * answers the alert before it, so every mail client threads them, not only
+ * Gmail by subject. Alerts to other recipients, and the guest's own emails, are
+ * never its ancestry. An alert about no conversation starts no thread.
  */
-async function alertEmailParent(db: DbClient, delivery: GuestThreadDeliveryRow, threadId: string, recipient: string) {
+async function alertEmailParent(db: DbClient, delivery: GuestThreadDeliveryRow, recipient: string) {
   const earlier = await queryAll<{ email_json: string; email_message_id: string | null; provider: string }>(db, `
     SELECT d.email_json, d.email_message_id, d.provider
-    FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
-    WHERE e.request_id = ? AND d.id <> ? AND d.channel = 'email' AND d.purpose = 'owner_alert' AND d.email_json IS NOT NULL
+    FROM activity_entries alerted
+    JOIN activity_entries e ON ${ENTRY_CONVERSATION('e')} = ${ENTRY_CONVERSATION('alerted')}
+    JOIN guest_thread_deliveries d ON d.entry_id = e.id
+    WHERE alerted.id = ? AND d.id <> ? AND d.channel = 'email' AND d.purpose = 'owner_alert' AND d.email_json IS NOT NULL
       AND d.status IN ('accepted', 'sent', 'delivered', 'read')
     ORDER BY d.created_at, d.id
-  `, [threadId, delivery.id])
+  `, [delivery.entry_id, delivery.id])
   const alerts = earlier.map(row => ({ ...row, snapshot: readEmailSnapshot(row.email_json) }))
     .filter(row => row.snapshot.message.to.trim().toLowerCase() === recipient)
   // The first alert to this recipient starts the thread with its own subject.
@@ -167,9 +174,8 @@ export async function deliverReceiptEmail(db: DbClient, input: {
           throw new Error('This email has no recorded provider identity and is past Resend\'s 24-hour idempotency window. Review its provider delivery before sending again.')
         }
         const recipient = input.email.to.trim().toLowerCase()
-        const ancestry = !threaded ? {}
-          : delivery.purpose === 'owner_alert' ? await alertEmailParent(db, delivery, input.threadId!, recipient)
-            : await conversationEmailParent(db, delivery, input.threadId!, entry.sequence!, recipient)
+        const ancestry = delivery.purpose === 'owner_alert' ? await alertEmailParent(db, delivery, recipient)
+          : threaded ? await conversationEmailParent(db, delivery, input.threadId!, entry.sequence!, recipient) : {}
         const snapshot: EmailSnapshot = {
           preparedAt: new Date().toISOString(),
           sender: delivery.provider === 'resend' || input.env.EMAIL_FROM?.trim() ? emailSender(input.env, input.email.fromName) : null,
