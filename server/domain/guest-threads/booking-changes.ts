@@ -374,8 +374,7 @@ async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow
 }
 
 /** A proposal is an immutable fact in the existing conversation, not a second booking record. */
-export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thread: GuestThreadRow, actor: string | { source: 'google_calendar'; userId: string }, body: unknown, idempotencyKey: string) {
-  const actorUserId = typeof actor === 'string' ? actor : actor.userId
+export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thread: GuestThreadRow, actorUserId: string, body: unknown, idempotencyKey: string) {
   const parsed = requestSchema.safeParse(body)
   if (!parsed.success) throw new HTTPError({ statusCode: 400, message: 'Valid change details and the latest booking timestamp are required' })
   const [afterInput, meta] = [parsed.data as Fields & { expectedUpdatedAt: string }, parsed.data as { expectedUpdatedAt: string }]
@@ -418,7 +417,7 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
     linkToken(env, thread.id, 'configuration-check')
     if (!summary.guestEmail || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) throw new HTTPError({ statusCode: 503, message: 'Guest email delivery is not configured' })
     const unchanged = sourceGuard(thread, before)
-    entry = await appendEntry(db, { writeGuard: unchanged, threadId: thread.id, kind: 'operation', actorKind: typeof actor === 'string' ? 'member' : 'system', actorUserId,
+    entry = await appendEntry(db, { writeGuard: unchanged, threadId: thread.id, kind: 'operation', actorKind: 'member', actorUserId,
       eventName: 'booking_change.requested', dedupeKey: externalId,
       body: `Requested ${destination.label} for ${after.partySize} guests${destination.title ? ` at ${destination.title}` : ''}.`,
       payloadJson: { before: sourceSchema.parse(before), after, updatedAt: before.updatedAt,

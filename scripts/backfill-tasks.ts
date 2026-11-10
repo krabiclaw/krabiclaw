@@ -41,11 +41,11 @@ async function backfill(db: DbClient) {
      WHERE r.archived_at IS NULL AND r.blocked_at IS NULL AND ${GUEST_QUESTION_SQL}
        AND NOT ${businessReplyAfterSql('guest_entry')} AND NOT ${CANCELLED_AFTER_SQL}
        ${absent("SELECT 1 FROM tasks t WHERE t.kind = 'guest_reply' AND t.subject_type = 'request' AND t.subject_id = r.id AND t.status = 'open'")}`)
-  // A booking awaiting approval, or a change or refused calendar move: conversationTaskQueries decides what is still work.
+  // A booking awaiting approval, or a change: conversationTaskQueries decides what is still work.
   const decisions = await queryAll<{ id: string }>(db, `
     SELECT b.request_id AS id FROM bookings b WHERE b.status = 'pending'
     UNION
-    SELECT e.request_id AS id FROM activity_entries e WHERE e.event_name IN ('booking_change.requested', 'calendar_sync.move_refused')`)
+    SELECT e.request_id AS id FROM activity_entries e WHERE e.event_name = 'booking_change.requested'`)
   const messages = await queryAll<{ id: string }>(db, `SELECT id FROM scheduled_guest_messages m WHERE m.status IN ('failed', 'needs_review')
     ${absent("SELECT 1 FROM tasks t WHERE t.dedupe_key = 'message_delivery:' || m.id")}`)
   const report = {

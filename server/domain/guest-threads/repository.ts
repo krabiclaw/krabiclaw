@@ -736,8 +736,8 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
         AND p.request_id = ? AND p.event_name = 'booking_change.requested' AND ${CHANGE_ANSWERED_SQL}`,
     params: [now, now, requestId],
   }, {
-    // A change that needs the business: one the guest asked for (now), a business proposal on a booking
-    // (from when it expires unanswered), or a Google Calendar move the booking refused.
+    // A change that needs the business: one the guest asked for (now), or a business proposal on a booking
+    // (from when it expires unanswered).
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, starts_at, timezone, status, dedupe_key, version, created_at, updated_at)
       SELECT lower(hex(randomblob(16))), r.organization_id, 'booking_change', 'booking', record.id, record.product_id, r.location_id,
           CASE WHEN p.event_name = 'booking_change.requested' AND p.actor_kind <> 'guest'
@@ -746,10 +746,9 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
         FROM requests r
         JOIN bookings record ON record.request_id = r.id AND record.organization_id = r.organization_id
         JOIN activity_entries p ON p.request_id = r.id
-       WHERE r.id = ? AND ((p.event_name = 'booking_change.requested' AND NOT ${CHANGE_ANSWERED_SQL}
+       WHERE r.id = ? AND p.event_name = 'booking_change.requested' AND NOT ${CHANGE_ANSWERED_SQL}
            -- A stay's change proposed by the business waits on the guest's channel, not on the business.
-           AND (p.actor_kind = 'guest' OR record.product_session_id IS NOT NULL))
-         OR p.event_name = 'calendar_sync.move_refused')
+           AND (p.actor_kind = 'guest' OR record.product_session_id IS NOT NULL)
       ON CONFLICT (dedupe_key) DO NOTHING`,
     params: [now, now, requestId],
   }]

@@ -636,13 +636,12 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
       face = 'compact'
       title = request.guest_name ? firstName(request.guest_name) : request.participant ?? 'Guest'
       avatar = { initial: initialOf(title), tone: 'cool' }
-      const refused = entry.event_name === 'calendar_sync.move_refused'
-      const waiting = !refused && entry.actor_kind !== 'guest' && row.starts_at !== null && row.starts_at > now.toISOString()
-      statusLine = [refused ? 'Google Calendar move refused' : entry.actor_kind === 'guest' ? 'Change requested' : waiting ? 'Change proposal waiting on the guest' : 'Change proposal expired', place].filter(Boolean).join(' · ')
-      detail = refused ? entry.body : record ? `${day(record.starts_at)}, ${time(record.starts_at)}` : null
+      const waiting = entry.actor_kind !== 'guest' && row.starts_at !== null && row.starts_at > now.toISOString()
+      statusLine = [entry.actor_kind === 'guest' ? 'Change requested' : waiting ? 'Change proposal waiting on the guest' : 'Change proposal expired', place].filter(Boolean).join(' · ')
+      detail = record ? `${day(record.starts_at)}, ${time(record.starts_at)}` : null
       path = conversation(requestId)
-      // A refused move needs only acknowledgement; a change closes when it is answered or proposed again.
-      action = refused ? { type: 'complete', label: 'Done' } : { type: 'open', label: 'Review', path: path! }
+      // A change closes when it is answered or proposed again.
+      action = { type: 'open', label: 'Review', path: path! }
       sheet = { heading: 'Change', title, date: null, checkout: null, checkin: null }
       break
     }

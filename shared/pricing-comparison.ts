@@ -47,7 +47,7 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
   { title: 'Guests and bookings', rows: [
     { id: 'bookings.requests', label: 'Bookings and consultation requests', detail: 'Availability depends on your business type and configured offerings.', included: 'Included' },
     { id: 'bookings.member-availability', label: 'Team availability', detail: 'Set working hours and time off, and assign a team member to a service.', included: 'Included' },
-    { id: 'bookings.calendar-sync', label: 'Google Calendar sync', detail: 'Busy times on a team member’s Google Calendar cannot be booked, and every booking lands on the business’s KrabiClaw calendar. Moving an event there moves the booking.', entitlement: 'calendar_sync' },
+    { id: 'bookings.calendar-sync', label: 'Google Calendar sync', detail: 'Busy times on a team member’s Google Calendar cannot be booked, and every booking lands on the business’s KrabiClaw calendar.', entitlement: 'calendar_sync' },
     { id: 'catalog.products', label: 'Ticketed experiences', detail: 'For configured experience products. Payment processing terms apply.', included: 'Included' },
     { id: 'payments.acceptance', label: 'Online payments', detail: `${PAYMENTS_FEE}, billed on your subscription at the end of each month. Set up your Stripe account to accept payments.`, entitlement: 'payments' },
     { id: 'notifications.email-dashboard', label: 'Booking email notifications', detail: 'Automatic booking email is separate from an explicit review request.', included: 'Included' },

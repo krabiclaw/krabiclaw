@@ -4,11 +4,13 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { DISCORD_BOT_PERMISSIONS } from '~/server/utils/discord-bot'
 import { loginMethodForPath } from '~/shared/auth/login-method'
 import { admin, anonymous, bearer, emailOTP, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, organization, phoneNumber, type UserWithAnonymous } from 'better-auth/plugins'
-import { stripe as betterAuthStripe } from '@better-auth/stripe'
+import { stripe as betterAuthStripe, type Subscription as StripeSubscription } from '@better-auth/stripe'
 import { oauthProvider } from '@better-auth/oauth-provider'
 import { cimd } from '@better-auth/cimd'
 import { fetchCimdMetadataResource } from '~/server/utils/cimd-metadata-fetch'
 import type { GenericEndpointContext } from '@better-auth/core'
+import type Stripe from 'stripe'
+import type { notifySubscriptionPlan } from '~/server/domain/payments/notifications'
 import { getCurrentAuthEndpointContext } from '@better-auth/core/context'
 import { HTTPError, type H3Event } from 'nitro';
 import { createDb, execute, executeBatch, queryAll, queryFirst, schema, type BatchQuery } from '~/server/db'
@@ -429,6 +431,14 @@ function buildAuth(env: CloudflareEnv) {
   if (!env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY is required')
   const stripeClient = createStripeClient(env.STRIPE_SECRET_KEY)
   const loadStripePlans = createStripePlanLoader(stripeClient, env)
+  // Loaded when a subscription webhook arrives, as the onEvent work below is.
+  const notifyPlan = async (input: Parameters<typeof notifySubscriptionPlan>[2]) => {
+    const notifications = await import('~/server/domain/payments/notifications')
+    await notifications.notifySubscriptionPlan(env, db, input)
+  }
+  const planStarted = async ({ event, subscription }: { event: Stripe.Event; subscription: StripeSubscription }) => {
+    await notifyPlan({ kind: 'started', eventId: event.id, organizationId: subscription.referenceId, plan: subscription.plan, date: subscription.status === 'trialing' ? subscription.trialEnd : null })
+  }
 
   const instance = betterAuth({
     baseURL: authBaseUrl,
@@ -768,6 +778,24 @@ function buildAuth(env: CloudflareEnv) {
               options: configuredOrganizationOptions,
               permissions: { billing: ['update'] },
             }, ctx)
+          },
+          // The business is told its new plan, a change of plan, and a plan
+          // that will not renew. Stripe emails everything else it bills for
+          // (docs/payments/payments.md).
+          // Through Checkout, or a subscription made in Stripe.
+          onSubscriptionComplete: planStarted,
+          onSubscriptionCreated: planStarted,
+          onSubscriptionUpdate: async ({ event, subscription }) => {
+            // Stripe names the items the subscription had before this event when they changed.
+            const before = (event.data.previous_attributes as Partial<Stripe.Subscription> | undefined)?.items?.data
+            if (!before) return
+            const previous = (await loadStripePlans()).find(plan => before.some(item => item.price.id === plan.priceId))
+            if (!previous) throw new Error(`Stripe subscription event ${event.id} names no configured plan before the change`)
+            if (previous.name === subscription.plan) return
+            await notifyPlan({ kind: 'changed', eventId: event.id, organizationId: subscription.referenceId, plan: subscription.plan, previousPlan: previous.name })
+          },
+          onSubscriptionCancel: async ({ event, subscription }) => {
+            await notifyPlan({ kind: 'ending', eventId: event.id, organizationId: subscription.referenceId, plan: subscription.plan, date: subscription.cancelAt ?? subscription.periodEnd })
           },
         },
         // The plugin's own /api/auth/stripe/webhook handlers own the

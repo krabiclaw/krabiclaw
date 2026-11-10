@@ -8,15 +8,9 @@ included automatically. Calendar-group allocation rules govern booking
 availability, not which bookings appear in Google. Cancelled records and
 payment holds are excluded.
 
-The sync runs both ways. A time or supported assigned-attorney change in Google
-requests client approval through `requestBookingChange` in
-`server/domain/guest-threads/booking-changes.ts`, shared with dashboard and
-ChatGPT consultation changes. The conversation shows the before/after details
-and Accept/Decline actions, and the canonical delivery path emails a signed
-review link. The appointment stays unchanged until the client accepts. An event deleted
-in Google never cancels or refunds a booking: the event is written back, the
-booking's conversation needs attention on Today and the owners are emailed.
-See [Inbound sync](#inbound-sync).
+The sync runs one way. Bookings change in KrabiClaw and their events follow;
+editing or deleting an event in Google does not change its booking. Each event
+carries a **Manage** link where the booking has one (see [Privacy](#privacy)).
 
 Personal conflict checking is separate: each member connects their own Google
 account and turns **Check my calendar for conflicts** on under **Google
@@ -61,79 +55,6 @@ current booking and integration state, and an event written after its booking
 was cancelled or its calendar disconnected is deleted again. A Google call that
 fails leaves its link in `error` with `last_error` and the integration in
 error; the next pass writes it again.
-
-## Inbound sync
-
-Modelled on the Channex booking feed: a change arrives, its current state is
-read, it is applied through the canonical domain operation, and every outcome
-is recorded in `channel_sync_log` (`provider='google_calendar'`,
-`kind='calendar_event'`, `external_id` = the Google event id).
-
-- **Feed.** Google's change list (`events.list` with `syncToken`,
-  `showDeleted=true`) is the feed. `google_calendar_sync` holds one row per
-  connection revision: the push channel and the position in the list. The
-  position is read on every push notification and on the five-minute
-  `google-calendar-sync` task alike, so a notification that never arrived
-  loses nothing. A `410 Gone` position reads the whole calendar again and
-  keeps the new position.
-- **Push.** `events.watch` on the KrabiClaw calendar, under the already
-  verified `calendar.app.created` scope (Google's reference lists it for both
-  `events.watch` and `events.list`), delivers to
-  `/api/integrations/google-calendar/webhook`. A notification carries no event
-  data; it names its channel and echoes the random token stored with it, which
-  the route checks before reading the feed. Channels are renewed by the task
-  within a day of expiry; the replaced channel is stopped. Google delivers only
-  to HTTPS, so a local Worker runs on the task alone.
-- **Only managed events.** An item is matched to `google_calendar_event_links`
-  by organization, calendar and event id; anything else on the calendar is the business's
-  own and is never read. An item is compared with the canonical booking's
-  instants; an unchanged one does nothing.
-- **Change requests.** With **Reschedules** on (the default), a moved event's new start
-  names the same product's session that starts then (sessions are
-  materialized for provider-held consultations, so every bookable time is
-  one), or a reservation's new date and time in its own timezone. Its current
-  location is retained; ambiguous destinations are refused. The canonical
-  proposal operation validates availability and the connected account owner's
-  Better Auth membership/access, records a system-originated proposal, and
-  notifies the client. Google does not expose the last editor: neither the
-  organizer nor the creator is treated as that person. A move the booking cannot
-  follow — no session starts then, the session is full, the time is outside
-  working hours, a paid reservation outside its policy — is refused: the
-  event is written back, the conversation gets a
-  `calendar_sync.move_refused` entry and needs attention, and the owners are
-  emailed the reason. With Reschedules off, the event is written back and the
-  row is logged `applied`.
-- **Assigned attorney.** The consultation model assigns one canonical Better
-  Auth member per booking. Replacing exactly that attorney's email in Google
-  while retaining the client can propose a replacement, including at the same
-  time. The new email must identify exactly one verified member of this
-  business and an available session for that attorney, same practice area,
-  time and location. Additional attendees, removals, external members, calendar
-  organizer changes and RSVP changes never become staff assignment or client
-  consent. RSVP-only edits are left alone; unsupported attendee edits are
-  reported and the canonical participants restored. Changes from an event with
-  guest editing/invitations or guest-list visibility enabled are refused and
-  those permissions restored; the API cannot identify its last editor safely.
-- **Deletions.** A cancelled event is never a cancellation. The event is
-  written back from the committed status, the
-  conversation gets a `calendar_sync.event_deleted` entry and needs attention,
-  and the owners are emailed that the booking is still booked and how to
-  cancel it properly. One Google change raises one entry and one email: the
-  dedupe key includes the event id and Google's revision.
-- **Writing back.** Inbound durably requests restoration before delivering a
-  proposal and invokes the existing outbound operation for that event, even if
-  proposal delivery fails. The Google event shows the committed time and
-  attorney while pending or declined. Only accepting the proposal changes the
-  booking and subsequent projection. Expired, stale, superseded and unavailable
-  proposals cannot change the booking. Current events are read before update;
-  `If-Match` protects Google's ETag. A newer concurrent edit leaves a visible
-  integration error and returns through the feed instead of being overwritten.
-  The scheduled task reads inbound changes before outbound reconciliation.
-  Staff can send Google's own update emails while editing in Google, before a
-  webhook reaches KrabiClaw. Google provides no appointment-consent interceptor.
-  Reconciliation sends the corrective committed appointment to participants;
-  a Google email or RSVP never changes the canonical booking or accepts the
-  proposal. Cross-provider visibility and notification timing are not atomic.
 
 ## Settings and cleanup
 

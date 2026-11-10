@@ -37,7 +37,6 @@ import type { BookingChangeAssignment, BookingChangeEventInput, ConversationReco
 import type { MemberAlertMessage, NotificationMessage } from '~/server/notifications/messages'
 import {
   bookingCancelledMessage,
-  calendarSyncMessage,
   bookingChangeMessage,
   bookingChangeWithoutMoney,
   bookingCreatedMessage,
@@ -1687,40 +1686,6 @@ export async function notifyBookingChangeOwner(
         : submissionType === 'booking' ? [] : undefined,
     memberAlert: audience && opts.stay ? { message: bookingChangeMessage(bookingChangeWithoutMoney(input, audience.stayUrl, memberGuestName({ name: change.guestName }))), stayId: opts.stay.id } : undefined,
     whatsappTemplate: 'booking_change_update',
-  })
-}
-
-/** The business calendar disagreed with a booking and the booking won: the owners decide what happens next. */
-export async function notifyCalendarSyncOwner(
-  env: NotificationEnv,
-  db: DbClient,
-  opts: OrganizationContext & {
-    kind: 'event_deleted' | 'move_refused'
-    threadId: string
-    submissionType: 'booking'
-    sourceEntryId: string
-    locationId: string | null
-    guestName: string
-    noun: string
-    whenLabel: string
-    /** The booked day as the subject names it, "Jul 20". */
-    day: string
-    reason: string | null
-  },
-) {
-  const replyUrl = await buildOwnerThreadInboxUrl(env, db, opts)
-  const ownerMessage = calendarSyncMessage({
-    kind: opts.kind, recordKind: opts.noun, guestName: opts.guestName, whenLabel: opts.whenLabel, day: opts.day, reason: opts.reason,
-    replyUrl, organizationName: organizationName(opts),
-  })
-  await notifyOwner(env, db, {
-    ...opts,
-    template: `calendar_sync.${opts.kind}`,
-    title: ownerMessage.title,
-    payload: { request_id: opts.threadId, submission_type: opts.submissionType, submission_id: opts.threadId, kind: opts.kind, deep_link: replyUrl ?? '' },
-    submissionId: opts.threadId,
-    notificationSource: { threadId: opts.threadId, entryId: opts.sourceEntryId },
-    message: ownerMessage,
   })
 }
 
