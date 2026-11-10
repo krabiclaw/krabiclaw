@@ -1073,11 +1073,11 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       const configs = target.prepare('SELECT * FROM product_booking_configs WHERE held_online = 1 ORDER BY product_id').all()
       const previousSourceRows = new Map()
       if (deltaFrom) {
-        const { sessionMemberSql } = await import('../server/utils/provider-allocation.ts')
+        const { providerMemberSql } = await import('../server/utils/provider-allocation.ts')
         const currentProvider = target.prepare(`WITH candidate AS (SELECT ? AS id, ? AS organization_id, ? AS product_id, ? AS assigned_member_id)
           SELECT 1 FROM candidate JOIN member_scheduling ms ON ms.member_id=candidate.assigned_member_id AND ms.organization_id=candidate.organization_id
             JOIN member m ON m.id=ms.member_id AND m.organizationId=ms.organization_id
-          WHERE ${sessionMemberSql('candidate')} IS candidate.assigned_member_id`)
+          WHERE ${providerMemberSql('candidate')} IS candidate.assigned_member_id`)
         // These rows were derived on the replacement, never held by the old
         // source. Seed their canonical occurrences before regeneration so the
         // native unique index retains their identities across a final delta.

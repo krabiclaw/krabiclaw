@@ -48,12 +48,15 @@ export interface Collection {
   updated_by: string
 }
 
-/** What generating this product's occurrences starts from. Sessions keep their own. */
+/** What generating a session offering's occurrences starts from (unit `slot`). Sessions keep their own. */
 export type ProductBookingConfig = Pick<import('~/server/utils/availability').ProductBookingConfigRecord, 'duration_minutes' | 'default_capacity' | 'confirmation_mode' | 'online_payment_required' | 'held_online' | 'scheduling_mode' | 'assigned_member_id' | 'advance_notice_minutes' | 'questions' | 'questions_revision'>
 
 /**
  * A place to stay: the one location it is at and its stay settings. Times are
- * local HH:MM in that location's timezone.
+ * local HH:MM in that location's timezone. How the home is booked (times,
+ * guests, minimum nights, cancellation, who looks after it and its questions)
+ * is stored as its booking configuration, unit `nights`, and presented here;
+ * `Product.booking` is a session offering's.
  */
 export interface ProductStayConfig {
   /** Short operator-only home identity; never published or sent as the Airbnb title. */

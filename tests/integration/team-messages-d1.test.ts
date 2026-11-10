@@ -66,7 +66,7 @@ test('members talk in team conversations, see unread state and receive recorded 
       VALUES ('cabin-site', ?, 'cabin', 'Pine Cabin', 'active', 'America/Denver', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`).bind(ORG).run()
     const cabin = await createProduct(db, { env, organizationId: ORG, actor: { actorId: 'owner' }, product: {
       kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
-      stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null },
+      stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: 'm-owner' },
     } })
     const manager: StayAccess = { organizationId: ORG, actorId: 'owner', manage: true }
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(3), check_out_date: day(5), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 30_000 })
@@ -443,7 +443,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     // The home's one canonical assignment write retains its other details.
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cook', check_in_time: '17:00', check_out_time: '11:00' })
     assert.equal((await listStayHomes(db, manager)).find(home => home.product_id === cabin.id)?.assigned_member_id, 'm-cook')
-    assert.deepEqual(await db.prepare('SELECT assigned_member_id, check_in_time, check_out_time FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first(), {
+    assert.deepEqual(await db.prepare('SELECT assigned_member_id, check_in_time, check_out_time FROM product_booking_configs WHERE product_id = ?').bind(cabin.id).first(), {
       assigned_member_id: 'm-cook', check_in_time: '17:00', check_out_time: '11:00',
     })
 
@@ -482,14 +482,13 @@ test('members talk in team conversations, see unread state and receive recorded 
     // An edit that leaves responsibility alone saves while the departed assignee is still recorded, and keeps it for reconciliation to release.
     await updateStayHome(env, db, manager, cabin.id, { max_guests: 4 })
     assert.equal(await assignee(), 'm-cook')
-    await Promise.all([
-      reconcileResponsibilities(env, db, { organizationId: ORG }),
-      updateStayHome(env, db, manager, cabin.id, { max_guests: 3 }),
-    ])
+    await reconcileResponsibilities(env, db, { organizationId: ORG })
     assert.equal(await assignee(), null)
+    // A home nobody looks after takes no booking-setting edit until someone is given it.
+    await assert.rejects(updateStayHome(env, db, manager, cabin.id, { max_guests: 3 }), { status: 422 })
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('m-cook', ?, 'cook', 'member', 0)").bind(ORG).run()
-    assert.deepEqual(await db.prepare('SELECT assigned_member_id, max_guests, check_in_time, check_out_time FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first(), {
-      assigned_member_id: null, max_guests: 3, check_in_time: '17:00', check_out_time: '11:00',
+    assert.deepEqual(await db.prepare('SELECT assigned_member_id, default_capacity, check_in_time, check_out_time FROM product_booking_configs WHERE product_id = ?').bind(cabin.id).first(), {
+      assigned_member_id: null, default_capacity: 4, check_in_time: '17:00', check_out_time: '11:00',
     })
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cook' })
     const promotedMember = await auth.api.updateMemberRole({ headers, body: { organizationId: ORG, memberId: 'm-cook', role: 'admin' } })
@@ -497,7 +496,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.equal(await assignee(), 'm-cook')
     // Each departure releases the home, the open turnover that followed the home's assignee, and the site the cook looked after.
     assert.deepEqual((await db.prepare("SELECT json_extract(payload_json, '$.entityType') AS entity, COUNT(*) AS n FROM activity_entries WHERE event_name = 'member.access_scope_revoked' AND actor_kind = 'system' AND organization_id = ? GROUP BY entity ORDER BY entity").bind(ORG).all()).results,
-      [{ entity: 'business_locations', n: 1 }, { entity: 'product_stay_configs', n: 2 }, { entity: 'tasks', n: 2 }])
+      [{ entity: 'business_locations', n: 1 }, { entity: 'product_booking_configs', n: 2 }, { entity: 'tasks', n: 2 }])
   } finally {
     await runtime.dispose()
   }

@@ -79,7 +79,8 @@ export async function readMemberScheduling(db: DbClient, env: CloudflareEnv, org
  const conflicts = checking ? await queryAll<{ session_id: string; starts_at: string; ends_at: string; booking_count: number; total: number }>(db, `
   SELECT s.id session_id,s.starts_at,s.ends_at,count(b.id) booking_count,count(*) OVER() total
   FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id
-  WHERE b.organization_id=? AND b.assigned_member_id=? AND b.status IN ('pending','confirmed') AND s.ends_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
+   JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id
+  WHERE b.organization_id=? AND c.assigned_member_id=? AND b.status IN ('pending','confirmed') AND s.ends_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')
    AND EXISTS(SELECT 1 FROM json_each(?) busy WHERE json_extract(busy.value,'$.start')<s.ends_at AND json_extract(busy.value,'$.end')>s.starts_at)
   GROUP BY s.id,s.starts_at,s.ends_at ORDER BY s.starts_at,s.id LIMIT 25`, [organizationId,memberId,JSON.stringify(busy)]) : []
  return {

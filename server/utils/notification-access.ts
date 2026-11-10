@@ -36,7 +36,7 @@ export function buildNotificationVisibilityFilter(principal: NotificationVisibil
       const thread = assignedGuestThreadScope('r', principal.userId)
       visibilityClauses.push(`(n.scope_kind = 'organization' AND n.organization_id = ?
         AND ((n.target_user_id = ? AND (n.event_name IN ('task_assigned', 'task_starting')
-          OR EXISTS (SELECT 1 FROM stays s JOIN product_stay_configs c
+          OR EXISTS (SELECT 1 FROM stays s JOIN product_booking_configs c
             ON c.product_id = s.product_id AND c.organization_id = s.organization_id
             WHERE s.id = json_extract(n.payload_json, '$.stay_id') AND s.organization_id = n.organization_id
               AND ${assignedMemberSql('c')})))

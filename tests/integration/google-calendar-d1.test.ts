@@ -25,8 +25,8 @@ test('committed consultation projection is tenant scoped, private, idempotent an
     await db.prepare("INSERT OR IGNORE INTO user(id,name,email,emailVerified) VALUES('host','Host','host@example.test',1)").run()
     await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES(?,?,'host','member',1)").bind('host-org', 'org').run()
     await db.prepare(`INSERT INTO member_scheduling(member_id, organization_id, public_name, public_approved, timezone, weekly_json, time_off_json, updated_at, updated_by) VALUES(?,?,'Host',1,'UTC','[{"weekday":0,"start":"00:00","end":"23:59"},{"weekday":1,"start":"00:00","end":"23:59"},{"weekday":2,"start":"00:00","end":"23:59"},{"weekday":3,"start":"00:00","end":"23:59"},{"weekday":4,"start":"00:00","end":"23:59"},{"weekday":5,"start":"00:00","end":"23:59"},{"weekday":6,"start":"00:00","end":"23:59"}]','[]','2099-01-01T00:00:00.000Z','host')`).bind('host-org', 'org').run()
-    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,held_online,scheduling_mode,assigned_member_id,confirmation_mode,created_by,updated_by) VALUES('p','org',30,1,'provider','host-org','review','actor','actor'),('class','org',30,1,'provider','host-org','instant','actor','actor')").run()
-    await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES('s','org','p','host-org','America/New_York','2099-11-01T14:00:00.000Z','2099-11-01T14:30:00.000Z',1,'actor','actor')").run()
+    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,duration_minutes,held_online,scheduling_mode,assigned_member_id,confirmation_mode,created_by,updated_by) VALUES('p','org','slot',30,1,'provider','host-org','review','actor','actor'),('class','org','slot',30,1,'provider','host-org','instant','actor','actor')").run()
+    await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES('s','org','p','America/New_York','2099-11-01T14:00:00.000Z','2099-11-01T14:30:00.000Z',1,'actor','actor')").run()
     await db.prepare(`INSERT INTO requests(id,kind,organization_id,payload_json) VALUES('thread','booking','org','{"guest":{"name":"Jane Doe","email":"private@example.test","phone":null},"notes":"PRIVATE MATTER"}')`).run()
     const env = { DB: db, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test' } as CloudflareEnv
     const { bookingId } = await claimSessionCapacity(db, { env, organizationId: 'org', productId: 'p', sessionId: 's', productVariantId: 'v', partySize: 1, requestId: 'thread' })
@@ -85,15 +85,15 @@ test('committed consultation projection is tenant scoped, private, idempotent an
     await syncCalendarOrganization(env, 'org', 25, provider)
     assert.equal(events.size, 1)
     assert.equal(events.get(String(link?.event_id))?.summary, 'Consultation')
-    // A booking moved to a team member updates the same event to name them.
+    // A consultation given to another team member updates the same event to name them.
     await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES('member-owner','org','owner','owner',?)").bind(Date.now()).run()
-    await db.prepare("UPDATE bookings SET assigned_member_id='member-owner',updated_at=? WHERE id=?").bind(new Date().toISOString(), bookingId).run()
+    await db.prepare("UPDATE product_booking_configs SET assigned_member_id='member-owner' WHERE product_id='p'").run()
     await syncCalendarOrganization(env, 'org', 25, provider)
     assert.equal(events.size, 1)
     assert.equal(events.get(String(link?.event_id))?.description, 'Status: confirmed\nAttorney: Owner')
-    await db.prepare("UPDATE bookings SET assigned_member_id=NULL,updated_at=? WHERE id=?").bind(new Date().toISOString(), bookingId).run()
+    await db.prepare("UPDATE product_booking_configs SET assigned_member_id=NULL WHERE product_id='p'").run()
     assert.equal((await syncCalendarOrganization(env, 'org', 25, provider)).failed, 1, 'missing attorney identity is a visible failure, never a fabricated invitation')
-    await db.prepare("UPDATE bookings SET assigned_member_id='host-org',updated_at=? WHERE id=?").bind(new Date().toISOString(), bookingId).run()
+    await db.prepare("UPDATE product_booking_configs SET assigned_member_id='host-org' WHERE product_id='p'").run()
     cancelDuringPut = true
     await syncCalendarOrganization(env, 'org', 25, provider)
     assert.equal(events.size, 0, 'late update is compensated after committed cancellation')
@@ -175,13 +175,13 @@ test('bounded Calendar backfill resumes and cancelled historical Sessions are cl
     await db.prepare("INSERT OR IGNORE INTO user(id,name,email,emailVerified) VALUES('host','Host','host@example.test',1)").run()
     await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES(?,?,'host','member',1)").bind('host-org', 'org').run()
     await db.prepare(`INSERT INTO member_scheduling(member_id, organization_id, public_name, public_approved, timezone, weekly_json, time_off_json, updated_at, updated_by) VALUES(?,?,'Host',1,'UTC','[{"weekday":0,"start":"00:00","end":"23:59"},{"weekday":1,"start":"00:00","end":"23:59"},{"weekday":2,"start":"00:00","end":"23:59"},{"weekday":3,"start":"00:00","end":"23:59"},{"weekday":4,"start":"00:00","end":"23:59"},{"weekday":5,"start":"00:00","end":"23:59"},{"weekday":6,"start":"00:00","end":"23:59"}]','[]','2099-01-01T00:00:00.000Z','host')`).bind('host-org', 'org').run()
-    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,held_online,scheduling_mode,assigned_member_id,confirmation_mode,created_by,updated_by) VALUES('p','org',30,1,'provider','host-org','review','actor','actor')").run()
+    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,duration_minutes,held_online,scheduling_mode,assigned_member_id,confirmation_mode,created_by,updated_by) VALUES('p','org','slot',30,1,'provider','host-org','review','actor','actor')").run()
     await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('v','org','p','Consultation','actor','actor')").run()
     const env = { DB: db, NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test' } as CloudflareEnv
     const bookings: string[] = []
     for (let i = 0; i < 55; i++) {
       const start = Date.parse('2099-11-01T00:00:00.000Z') + i * 3600_000
-      await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES(?,'org','p','host-org','UTC',?,?,1,'actor','actor')").bind(`s${i.toString().padStart(2, '0')}`, new Date(start).toISOString(), new Date(start + 1800_000).toISOString()).run()
+      await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES(?,'org','p','UTC',?,?,1,'actor','actor')").bind(`s${i.toString().padStart(2, '0')}`, new Date(start).toISOString(), new Date(start + 1800_000).toISOString()).run()
       bookings.push((await claimSessionCapacity(db, { env, organizationId: 'org', productId: 'p', sessionId: `s${i.toString().padStart(2, '0')}`, productVariantId: 'v', partySize: 1 })).bookingId)
     }
     await storeCalendarSelection(db, 'org', { account_id: 'linked-account', calendar_id: 'chosen', calendar_name: 'Calendar' })
@@ -244,9 +244,9 @@ test('scheduled Calendar sync reports thrown and event failures while projecting
       await db.prepare("INSERT OR IGNORE INTO user(id,name,email,emailVerified) VALUES('host','Host','host@example.test',1)").run()
       await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES(?,?,'host','member',1)").bind(`host-${org}`, org).run()
       await db.prepare(`INSERT INTO member_scheduling(member_id, organization_id, public_name, public_approved, timezone, weekly_json, time_off_json, updated_at, updated_by) VALUES(?,?,'Host',1,'UTC','[{"weekday":0,"start":"00:00","end":"23:59"},{"weekday":1,"start":"00:00","end":"23:59"},{"weekday":2,"start":"00:00","end":"23:59"},{"weekday":3,"start":"00:00","end":"23:59"},{"weekday":4,"start":"00:00","end":"23:59"},{"weekday":5,"start":"00:00","end":"23:59"},{"weekday":6,"start":"00:00","end":"23:59"}]','[]','2099-01-01T00:00:00.000Z','host')`).bind(`host-${org}`, org).run()
-      await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,held_online,scheduling_mode,assigned_member_id,confirmation_mode,created_by,updated_by) VALUES(?,?,30,1,'provider',?,'review','actor','actor')").bind(org, org, `host-${org}`).run()
+      await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,duration_minutes,held_online,scheduling_mode,assigned_member_id,confirmation_mode,created_by,updated_by) VALUES(?,?,'slot',30,1,'provider',?,'review','actor','actor')").bind(org, org, `host-${org}`).run()
       await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES(?,?,?,'Consultation','actor','actor')").bind(org, org, org).run()
-      await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES(?,?,?,?,'UTC','2099-11-01T10:00:00.000Z','2099-11-01T10:30:00.000Z',1,'actor','actor')").bind(org, org, org, `host-${org}`).run()
+      await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES(?,?,?,'UTC','2099-11-01T10:00:00.000Z','2099-11-01T10:30:00.000Z',1,'actor','actor')").bind(org, org, org).run()
       await claimSessionCapacity(db, { env, organizationId: org, productId: org, sessionId: org, productVariantId: org, partySize: 1 })
       await storeCalendarSelection(db, org, { account_id: 'linked', calendar_id: org, calendar_name: org })
     }
@@ -334,7 +334,7 @@ test('experience and dining Calendar management links follow canonical buyer own
     await db.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('buyer','Buyer','buyer@example.test',1),('other-buyer','Other','other@example.test',1)").run()
     await db.prepare("INSERT INTO business_locations(id,organization_id,slug,title,timezone,status,opening_hours) VALUES('dining','org','dining','Dining','UTC','active','{\"periods\":[{\"open\":{\"day\":0,\"hour\":0,\"minute\":0}}]}')").run()
     await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('experience','experience','org','Pottery class','pottery','actor','actor')").run()
-    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,held_online,scheduling_mode,confirmation_mode,created_by,updated_by) VALUES('experience','org',30,0,'business','instant','actor','actor')").run()
+    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,duration_minutes,held_online,scheduling_mode,confirmation_mode,created_by,updated_by) VALUES('experience','org','slot',30,0,'business','instant','actor','actor')").run()
     await db.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES('org','experience','dining',1,1,'actor','actor')").run()
     await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('variant','org','experience','Seat','actor','actor')").run()
     await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES('session','org','experience','dining','UTC','2099-11-01T14:00:00.000Z','2099-11-01T14:30:00.000Z',8,'actor','actor')").run()

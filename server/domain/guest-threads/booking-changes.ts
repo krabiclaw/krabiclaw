@@ -4,7 +4,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { HTTPError } from 'nitro'
 import { z } from 'zod'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { listSessions, sessionMoveQuery, sessionAssignmentQuery, sessionAllocationPredicate } from '~/server/utils/availability'
+import { listSessions, sessionMoveQuery, sessionAllocationPredicate } from '~/server/utils/availability'
 import { formatTimestamp, localDateTimeToInstant } from '~/utils/timezone'
 import { assertResourceAccess, assertAssignedBookingAccess, resolveOrganizationMembership, memberAccessPrincipal } from '~/server/utils/member-access'
 import { resolveBookingPresentation, type BookingKind } from '~/utils/booking-presentation'
@@ -24,7 +24,6 @@ import { getPlatformDomain, buildBuyerRequestActivityUrl } from '~/server/utils/
 import { bookingChangeStates, type BookingChangeStatus } from './booking-change-state'
 import { isStayChangeRequest, stayChangeView } from './stay-change-requests'
 import { updateThreadProjectionIfLatestEntry } from './repository'
-import { publishAccessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { getGuestRequest, getThreadOperationalRecord, requestSummary, REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import type { GuestThreadRow, GuestThreadEntryRow } from './types'
 
@@ -49,7 +48,7 @@ async function bookingNoun(db: DbClient, thread: Pick<GuestThreadRow, 'organizat
  * the proposal names it. A reservation has no occurrence row, so it moves to a
  * location, date and time.
  */
-const bookingFieldsSchema = z.object({ kind: z.literal('booking'), sessionId: z.string().min(1), partySize: z.number().int().min(1).max(99), assignedMemberId: z.string().min(1).optional() })
+const bookingFieldsSchema = z.object({ kind: z.literal('booking'), sessionId: z.string().min(1), partySize: z.number().int().min(1).max(99) })
 const reservationFieldsSchema = z.object({
   kind: z.literal('reservation'),
   locationId: z.string().min(1),
@@ -152,15 +151,15 @@ function sourceGuard(thread: GuestThreadRow, before: Source): BatchQuery {
     AND EXISTS (SELECT 1 FROM ${booking ? 'bookings operational JOIN product_sessions occurrence ON occurrence.id=operational.product_session_id AND occurrence.organization_id=operational.organization_id' : 'reservations operational'}
       WHERE operational.id=? AND operational.organization_id=r.organization_id AND operational.status=? AND operational.party_size=?
       ${booking ? 'AND operational.updated_at=?' : ''}
-      ${booking ? 'AND operational.assigned_member_id IS ? AND operational.product_session_id=? AND occurrence.starts_at=? AND occurrence.ends_at=? AND occurrence.timezone=? AND occurrence.location_id IS ?' : 'AND operational.starts_at=? AND operational.ends_at=? AND operational.timezone=? AND operational.location_id IS ?'}))`,
-    params: [thread.id, thread.organization_id, before.updatedAt, before.recordId, before.status, before.partySize, ...(booking ? [before.operationalUpdatedAt!, before.assignedMemberId, before.sessionId] : []), before.startsAt, before.endsAt, before.timezone, before.locationId] }
+      ${booking ? 'AND operational.product_session_id=? AND occurrence.starts_at=? AND occurrence.ends_at=? AND occurrence.timezone=? AND occurrence.location_id IS ?' : 'AND operational.starts_at=? AND operational.ends_at=? AND operational.timezone=? AND operational.location_id IS ?'}))`,
+    params: [thread.id, thread.organization_id, before.updatedAt, before.recordId, before.status, before.partySize, ...(booking ? [before.operationalUpdatedAt!, before.sessionId] : []), before.startsAt, before.endsAt, before.timezone, before.locationId] }
 }
 
 function attorneyEligibility(organizationId: string, memberId: string | null): BatchQuery {
   return { query: "EXISTS (SELECT 1 FROM member m JOIN user u ON u.id=m.userId JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE m.id=? AND m.organizationId=? AND u.emailVerified=1 AND ms.public_approved=1 AND length(trim(ms.public_name))>0)", params: [memberId, organizationId] }
 }
 
-interface Destination { assignedMemberId?: string | null; locationId: string | null; title: string; label: string; date: string; time: string; startsAt: string; timezone: string; endsAt?: string; claim?: (bookingId: string, now: string, writeGuard?: BatchQuery) => BatchQuery | Promise<BatchQuery>; sessionId?: string }
+interface Destination { /** Who handles the booking there: its product's member, the same wherever it moves. */ assignedMemberId?: string | null; locationId: string | null; title: string; label: string; date: string; time: string; startsAt: string; timezone: string; endsAt?: string; claim?: (bookingId: string, now: string, writeGuard?: BatchQuery) => BatchQuery | Promise<BatchQuery>; sessionId?: string }
 
 /**
  * Check that the proposed target can actually take this party, and return the
@@ -182,12 +181,11 @@ async function validateDestination(db: DbClient, env: CloudflareEnv, thread: Gue
       .then(sessions => sessions.filter(session => session.id === after.sessionId))
     if (!target) throw new HTTPError({ statusCode: 409, message: 'That session is not open for booking' })
     const service = await queryFirst(db, "SELECT 1 FROM products WHERE id=? AND organization_id=? AND kind='service'", [before.productId, thread.organization_id])
-    const eligibility = attorneyEligibility(thread.organization_id, target.assigned_member_id)
-    if (service && !await queryFirst(db, `SELECT 1 WHERE ${eligibility.query}`, eligibility.params)) throw new HTTPError({ statusCode: 409, message: 'The proposed attorney needs a verified account and an approved public profile' })
-    if (after.assignedMemberId !== undefined && target.assigned_member_id !== after.assignedMemberId) throw new HTTPError({ statusCode: 409, message: 'That attorney is no longer assigned to the proposed consultation time' })
-    const commitment = await queryFirst<{ member: string | null; configMember: string | null; mode: string }>(db,
-      'SELECT s.assigned_member_id member,c.assigned_member_id configMember,c.scheduling_mode mode FROM product_sessions s JOIN product_booking_configs c ON c.organization_id=s.organization_id AND c.product_id=s.product_id WHERE s.id=? AND s.organization_id=?', [target.id, thread.organization_id])
+    const commitment = await queryFirst<{ configMember: string | null; mode: string }>(db,
+      'SELECT c.assigned_member_id configMember,c.scheduling_mode mode FROM product_sessions s JOIN product_booking_configs c ON c.organization_id=s.organization_id AND c.product_id=s.product_id WHERE s.id=? AND s.organization_id=?', [target.id, thread.organization_id])
     if (!commitment) throw new HTTPError({ statusCode: 409, message: 'The proposed consultation settings are missing' })
+    const eligibility = attorneyEligibility(thread.organization_id, commitment.configMember)
+    if (service && !await queryFirst(db, `SELECT 1 WHERE ${eligibility.query}`, eligibility.params)) throw new HTTPError({ statusCode: 409, message: 'The attorney needs a verified account and an approved public profile' })
     const allocation = await sessionAllocationPredicate(db, { env, organizationId: thread.organization_id, productId: before.productId, sessionId: target.id, partySize: after.partySize, replacingBookingId: before.recordId, now: new Date().toISOString() })
     if (!await queryFirst(db, `SELECT 1 WHERE ${allocation.query}`, allocation.params)) throw new HTTPError({ statusCode: 409, message: service ? 'The proposed consultation time or attorney is no longer available' : 'That session filled up or is no longer available' })
     const booking = await queryFirst<{ product_variant_id: string; user_id: string | null }>(db,
@@ -201,17 +199,17 @@ async function validateDestination(db: DbClient, env: CloudflareEnv, thread: Gue
       ? await queryFirst<{ title: string }>(db, 'SELECT title FROM business_locations WHERE id = ? AND organization_id = ?', [target.location_id, thread.organization_id])
       : null
     return {
-      assignedMemberId: target.assigned_member_id, locationId: target.location_id, title: location?.title ?? '', sessionId: target.id,
+      assignedMemberId: commitment.configMember, locationId: target.location_id, title: location?.title ?? '', sessionId: target.id,
       startsAt: target.starts_at, endsAt: target.ends_at, timezone: target.timezone, ...localParts(target.starts_at, target.timezone),
       // The same Booking moves under the shared allocation predicate. Exclude
       // its existing allocation; a full destination leaves the record unchanged.
       claim: async (bookingId, now, writeGuard) => {
-        const guarded: BatchQuery = { query: `assigned_member_id IS ? AND product_session_id = ? AND party_size = ? AND status = ? AND updated_at = ?
+        const guarded: BatchQuery = { query: `product_session_id = ? AND party_size = ? AND status = ? AND updated_at = ?
           AND EXISTS (SELECT 1 FROM product_sessions original WHERE original.id=bookings.product_session_id AND original.starts_at=? AND original.ends_at=? AND original.timezone=? AND original.location_id IS ?)
-          AND EXISTS (SELECT 1 FROM product_sessions target WHERE target.id=? AND target.organization_id=? AND target.starts_at=? AND target.ends_at=? AND target.timezone=? AND target.location_id IS ? AND target.assigned_member_id IS ?)
+          AND EXISTS (SELECT 1 FROM product_sessions target WHERE target.id=? AND target.organization_id=? AND target.starts_at=? AND target.ends_at=? AND target.timezone=? AND target.location_id IS ?)
           AND EXISTS (SELECT 1 FROM product_booking_configs target_config WHERE target_config.organization_id=bookings.organization_id AND target_config.product_id=bookings.product_id AND target_config.assigned_member_id IS ? AND target_config.scheduling_mode=?)
           AND (${service ? eligibility.query : '1'}) AND (${writeGuard?.query ?? '1'})`,
-          params: [before.assignedMemberId, before.sessionId, before.partySize, before.status, before.operationalUpdatedAt!, before.startsAt, before.endsAt, before.timezone, before.locationId, target.id, thread.organization_id, target.starts_at, target.ends_at, target.timezone, target.location_id, commitment.member, commitment.configMember, commitment.mode, ...(service ? eligibility.params! : []), ...(writeGuard?.params ?? [])] }
+          params: [before.sessionId, before.partySize, before.status, before.operationalUpdatedAt!, before.startsAt, before.endsAt, before.timezone, before.locationId, target.id, thread.organization_id, target.starts_at, target.ends_at, target.timezone, target.location_id, commitment.configMember, commitment.mode, ...(service ? eligibility.params! : []), ...(writeGuard?.params ?? [])] }
         return sessionMoveQuery(db, {
           env, bookingId, organizationId: thread.organization_id, productId: before.productId!,
           sessionId: target.id, partySize: after.partySize, replacingBookingId: before.recordId, writeGuard: guarded,
@@ -300,7 +298,7 @@ async function changePresentation(db: DbClient, thread: GuestThreadRow, proposal
     : await guestPresentation(db, { organizationId: thread.organization_id, organizationName: organization.name, locale: guest.locale,
         locationId: proposal.before.locationId, locationName: proposal.originalLocationTitle })
   const beforeAssignedMemberName = proposal.beforeAssignedMemberName !== undefined ? proposal.beforeAssignedMemberName : await assignedMemberName(db, thread.organization_id, proposal.before.assignedMemberId)
-  const afterAssignedMemberId = proposal.afterAssignedMemberId !== undefined ? proposal.afterAssignedMemberId : proposal.after.kind === 'booking' && proposal.after.assignedMemberId !== undefined ? proposal.after.assignedMemberId : null
+  const afterAssignedMemberId = proposal.afterAssignedMemberId !== undefined ? proposal.afterAssignedMemberId : null
   const afterAssignedMemberName = proposal.afterAssignedMemberName !== undefined ? proposal.afterAssignedMemberName : await assignedMemberName(db, thread.organization_id, afterAssignedMemberId)
   const labels = platformLocale(guest.locale)!.messages
   const copy = getVerticalCopy(organization.vertical, guest.locale)
@@ -408,7 +406,7 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
   const summary = await sourceSummary(db, thread)
   const membership = await resolveOrganizationMembership(env, { organizationId: thread.organization_id, userId: actorUserId })
   if (!membership) throw new HTTPError({ statusCode: 403, message: 'Organization access required' })
-  if (before.recordKind === 'booking') await assertAssignedBookingAccess(db, { ...memberAccessPrincipal(membership, { env }), bookingId: before.recordId, sessionId: after.kind === 'booking' ? after.sessionId : undefined })
+  if (before.recordKind === 'booking') await assertAssignedBookingAccess(db, { ...memberAccessPrincipal(membership, { env }), bookingId: before.recordId })
   // Both the current and the proposed location must be within reach, so a
   // branch editor cannot move a guest into a branch they do not manage.
   const locations = new Set([before.locationId, after.kind === 'reservation' ? after.locationId : null].filter((value): value is string => Boolean(value)))
@@ -436,7 +434,7 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
     // party is a change; comparing only the label and the party size rejected it.
     if (destination.startsAt === before.startsAt && destination.endsAt === before.endsAt && destination.timezone === before.timezone
       && after.partySize === before.partySize
-      && destination.locationId === before.locationId && (destination.assignedMemberId ?? null) === before.assignedMemberId) {
+      && destination.locationId === before.locationId) {
       throw new HTTPError({ statusCode: 400, message: 'Choose at least one change' })
     }
     const original = before.locationId
@@ -449,7 +447,7 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
     const unchanged = sourceGuard(thread, before)
     entry = await appendEntry(db, { writeGuard: { query: `${unchanged.query} AND NOT EXISTS (SELECT 1 FROM activity_entries WHERE request_id=? AND sequence>?)`, params: [...unchanged.params!, thread.id, latest!.sequence] }, threadId: thread.id, kind: 'operation', actorKind: typeof actor === 'string' ? 'member' : 'system', actorUserId,
       eventName: 'booking_change.requested', dedupeKey: externalId,
-      body: `Requested ${destination.label} for ${after.partySize} guests${destination.title ? ` at ${destination.title}` : ''}${destination.assignedMemberId ? ` with ${await assignedMemberName(db, thread.organization_id, destination.assignedMemberId)}` : ''}.`,
+      body: `Requested ${destination.label} for ${after.partySize} guests${destination.title ? ` at ${destination.title}` : ''}.`,
       payloadJson: { before: sourceSchema.parse(before), after, updatedAt: before.updatedAt,
         beforeAssignedMemberName: await assignedMemberName(db, thread.organization_id, before.assignedMemberId), afterAssignedMemberId: destination.assignedMemberId ?? null, afterAssignedMemberName: await assignedMemberName(db, thread.organization_id, destination.assignedMemberId),
         locationTitle: destination.title, originalLocationTitle: original?.title ?? '', afterLabel: destination.label,
@@ -536,7 +534,6 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
                WHERE id = ? AND organization_id = ? AND EXISTS (SELECT 1 FROM activity_entries WHERE id = ?)`,
       params: [now, thread.id, thread.organization_id, id],
     }]
-    if (before.recordKind === 'booking' && destination.sessionId) queries.push(sessionAssignmentQuery(destination.sessionId, thread.organization_id, before.recordId))
     await executeBatch(db, queries, { operation: 'move booking' })
     entry = await findEntryByDedupeKey(db, dedupeKey)
     if (!entry) throw new HTTPError({ statusCode: 409, message: before.recordKind === 'booking' ? 'That session filled up or the booking changed; it has not moved' : 'This reservation changed or that time is no longer available' })
@@ -611,7 +608,7 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
   if (!result && input.decision) {
     if (!['pending', 'confirmed'].includes(current.status)) throw new HTTPError({ statusCode: 409, message: 'This reservation or booking can no longer be changed' })
     const destination = input.decision === 'accept' ? await validateDestination(db, env, thread as GuestThreadRow, current, proposal.after, resultId) : null
-    if (destination && (destination.label !== proposal.afterLabel || (proposal.afterStartsAt && destination.startsAt !== proposal.afterStartsAt) || (proposal.afterEndsAt && destination.endsAt !== proposal.afterEndsAt) || (proposal.afterTimezone && destination.timezone !== proposal.afterTimezone) || (proposal.afterLocationId !== undefined && destination.locationId !== proposal.afterLocationId) || (proposal.afterAssignedMemberId !== undefined && (destination.assignedMemberId ?? null) !== proposal.afterAssignedMemberId))) throw new HTTPError({ statusCode: 409, message: 'The proposed time has changed. Ask the business for a new change request.' })
+    if (destination && (destination.label !== proposal.afterLabel || (proposal.afterStartsAt && destination.startsAt !== proposal.afterStartsAt) || (proposal.afterEndsAt && destination.endsAt !== proposal.afterEndsAt) || (proposal.afterTimezone && destination.timezone !== proposal.afterTimezone) || (proposal.afterLocationId !== undefined && destination.locationId !== proposal.afterLocationId))) throw new HTTPError({ statusCode: 409, message: 'The proposed time has changed. Ask the business for a new change request.' })
     const id = crypto.randomUUID()
     const now = new Date().toISOString()
 
@@ -634,12 +631,11 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
         ON CONFLICT DO NOTHING`,
       params: [id, thread.id, `booking_change.${input.decision === 'accept' ? 'accepted' : 'declined'}`,
         `Guest ${input.decision === 'accept' ? 'accepted' : 'declined'} the requested changes.`,
-        JSON.stringify({ requestId: entry.id, request_id: thread.id, operational_booking_id: current.recordId, beforeStatus: current.status, before: { assigned_member_id:current.assignedMemberId, starts_at: current.startsAt, ends_at: current.endsAt, party_size: current.partySize }, after: destination ? { starts_at: destination.startsAt, ends_at: destination.endsAt ?? new Date(Date.parse(destination.startsAt) + Date.parse(current.endsAt) - Date.parse(current.startsAt)).toISOString(), party_size: proposal.after.partySize } : null }), resultId, thread.id, now, now,
+        JSON.stringify({ requestId: entry.id, request_id: thread.id, operational_booking_id: current.recordId, beforeStatus: current.status, before: { starts_at: current.startsAt, ends_at: current.endsAt, party_size: current.partySize }, after: destination ? { starts_at: destination.startsAt, ends_at: destination.endsAt ?? new Date(Date.parse(destination.startsAt) + Date.parse(current.endsAt) - Date.parse(current.startsAt)).toISOString(), party_size: proposal.after.partySize } : null }), resultId, thread.id, now, now,
         thread.id, thread.organization_id, ...(destination ? [] : [current.updatedAt, entry.sequence, entry.id, current.endsAt, ...currentGuard.params!, ...ownership.params!])],
     }
 
     const guard = `EXISTS (SELECT 1 FROM activity_entries WHERE id = ?)`
-    const movedBookingId = destination?.claim && current.recordKind === 'booking' ? current.recordId : null
 
     const queries: BatchQuery[] = []
     if (destination?.claim) {
@@ -647,14 +643,8 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
       // failed allocation changes no row, so changes() cannot record acceptance.
       const decisionGuard: BatchQuery = { query: `NOT EXISTS (SELECT 1 FROM activity_entries newer WHERE newer.request_id=? AND newer.event_name='booking_change.requested' AND newer.sequence>?) AND EXISTS (SELECT 1 FROM activity_entries proposal WHERE proposal.id=? AND proposal.occurred_at>strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 days')) AND (${ownership.query})`, params: [thread.id, entry.sequence, entry.id, ...ownership.params!] }
       queries.push(await destination.claim(current.recordId, now, decisionGuard))
-      queries.push(current.recordKind === 'booking' ? {
-        ...entryInsert,
-        query: entryInsert.query.replace("'guest', ?, ?, ?, ?,", "'guest', ?, ?, json_set(?, '$.after.assigned_member_id', (SELECT assigned_member_id FROM bookings WHERE id=?)), ?,"),
-        params: [...entryInsert.params!.slice(0,5), current.recordId, ...entryInsert.params!.slice(5)],
-      } : entryInsert)
-    } else {
-      queries.push(entryInsert)
     }
+    queries.push(entryInsert)
     if (destination) {
       queries.push({
         query: `UPDATE requests SET updated_at = ?, payload_json = json_set(payload_json, '$.party_size_is_minimum', json('false'))
@@ -663,7 +653,6 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
       })
     }
 
-    if(destination && movedBookingId && destination.sessionId) queries.push(sessionAssignmentQuery(destination.sessionId,thread.organization_id,movedBookingId))
     await executeBatch(db, queries, { operation: 'respond to booking change' })
     result = await findEntryByDedupeKey(db, resultId)
     if (!result) {
@@ -680,15 +669,11 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
     if (accepted) await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, thread.organization_id, { kind: current.recordKind, id: current.recordId })
     await updateThreadProjectionIfLatestEntry(db, thread.id, result.id)
     if (!result.payload_json) throw new Error('A booking change answer has no recorded payload')
-    const answered = JSON.parse(result.payload_json) as { operational_booking_id?: unknown; before?: { assigned_member_id?: string | null }; after?: { assigned_member_id?: string | null } | null }
+    const answered = JSON.parse(result.payload_json) as { operational_booking_id?: unknown }
     if (thread.kind === 'booking' && typeof answered.operational_booking_id === 'string') {
       await recordBookingChangeAnswer(db, { organizationId: thread.organization_id, bookingId: answered.operational_booking_id, changeRequestId: entry.id, accepted })
     }
-    // Only an accepted move hands the client to another attorney; a pending or declined proposal changes nobody's access.
-    if (accepted && answered.after && (answered.before?.assigned_member_id ?? null) !== (answered.after.assigned_member_id ?? null)) {
-      await publishAccessInvalidation(env, { organizationId: thread.organization_id })
-    }
-    // Told once the answer, its analytics and any access change are recorded, so a send that fails cannot skip them.
+    // Told once the answer and its analytics are recorded, so a send that fails cannot skip them.
     await deliverEmail(db, env, thread as GuestThreadRow, result.id, entry.id, accepted ? 'accepted' : 'declined', proposal, noun)
   }
   const finalState = (await bookingChangeStates(db, [entry.id])).get(entry.id)

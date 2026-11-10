@@ -392,7 +392,10 @@ function channelOwned(stay: Stay, state: 'belongs to' | 'is paid through'): neve
 
 /** The SQL that limits rows to homes this caller may see, and its parameters. */
 function visibleHomes(access: StayAccess, alias = 'c'): { sql: string; params: string[] } {
-  return access.manage ? { sql: '1 = 1', params: [] } : { sql: assignedMemberSql(alias), params: [access.userId] }
+  return access.manage ? { sql: '1 = 1', params: [] } : {
+    sql: `EXISTS (SELECT 1 FROM product_booking_configs looked_after WHERE looked_after.organization_id = ${alias}.organization_id AND looked_after.product_id = ${alias}.product_id AND ${assignedMemberSql('looked_after')})`,
+    params: [access.userId],
+  }
 }
 
 function requireManager(access: StayAccess): asserts access is StayAccess & { manage: true } {
@@ -407,14 +410,15 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
 async function stayHomesWhere(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHome[]> {
   const rows = await queryAll<Record<string, unknown>>(db, `
     SELECT p.id AS product_id, p.updated_at AS product_updated_at, p.name, c.internal_name, p.description, p.details_json, c.location_id, l.timezone, l.address, l.latitude, l.longitude, l.stay_map_sharing, o.default_currency,
-           c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, c.calendar_rules, c.property_type_group, c.property_type,
+           b.check_in_time, b.check_in_end_time, b.check_out_time, b.default_capacity AS max_guests, b.min_nights, b.calendar_rules, c.property_type_group, c.property_type,
            c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
-           c.cancellation_policy, c.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
-           c.directions, c.house_manual, c.checkout_instructions, c.assigned_member_id, c.questions,
+           b.cancellation_policy, b.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
+           c.directions, c.house_manual, c.checkout_instructions, b.assigned_member_id, b.questions,
            COALESCE((SELECT pp.published FROM product_publications pp WHERE pp.organization_id = c.organization_id AND pp.product_id = c.product_id), 0) AS published,
            ${liveHomeSql('p')} AS live, m.enabled AS channel_enabled, m.import_stage AS channel_stage, m.listing_id AS airbnb_listing_id
       FROM product_stay_configs c
       JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
+      JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
       JOIN organization o ON o.id = c.organization_id
       LEFT JOIN product_channel_mappings m ON m.organization_id = c.organization_id AND m.product_id = c.product_id AND m.provider = 'channex'
@@ -557,6 +561,8 @@ export interface NewStayHome {
   /** Left out, a new home starts on Airbnb's own: NEW_HOME_CANCELLATION_POLICIES. */
   cancellation_policy?: StayCancellationPolicy | null
   long_term_cancellation_policy?: StayLongTermCancellationPolicy | null
+  /** The member (member.id) who looks after the home and handles its stays. */
+  assigned_member_id: string
 }
 
 /** A home's details read from a request body; each problem names its field. */
@@ -621,6 +627,7 @@ export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
     // Left out, the product writer gives a new home Airbnb's own; an empty one is refused before the location is made.
     ...policy('cancellation_policy', STAY_CANCELLATION_POLICIES),
     ...policy('long_term_cancellation_policy', STAY_LONG_TERM_CANCELLATION_POLICIES),
+    assigned_member_id: text('assigned_member_id', 200, true)!,
   }
   if (home.email !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(home.email)) fail(422, 'INVALID_DETAIL', 'Enter a valid contact email', 'email')
   return home
@@ -852,7 +859,7 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
     product: {
       kind: 'stay', name: home.name,
       ...(home.base_price_minor === null ? {} : { variants: [{ name: home.name, prices: [{ unit_amount: home.base_price_minor, location_id: locationId }] }] }),
-      stay: { ...(home.internal_name === undefined ? {} : { internal_name: home.internal_name }), location_id: locationId, check_in_time: home.check_in_time, check_in_end_time: home.check_in_end_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, calendar_rules: home.calendar_rules, assigned_member_id: null,
+      stay: { ...(home.internal_name === undefined ? {} : { internal_name: home.internal_name }), location_id: locationId, check_in_time: home.check_in_time, check_in_end_time: home.check_in_end_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, calendar_rules: home.calendar_rules, assigned_member_id: home.assigned_member_id,
         ...(home.cancellation_policy === undefined ? {} : { cancellation_policy: home.cancellation_policy }),
         ...(home.long_term_cancellation_policy === undefined ? {} : { long_term_cancellation_policy: home.long_term_cancellation_policy }) },
     },
@@ -1406,7 +1413,7 @@ export async function deliverPendingChannelNights(db: DbClient, env: StayMutatio
        WHERE provider = 'channex' AND state = 'pending'
       UNION ALL
       SELECT m.organization_id, m.product_id, 0 AS due FROM product_channel_mappings m
-        JOIN product_stay_configs c ON c.organization_id = m.organization_id AND c.product_id = m.product_id
+        JOIN product_booking_configs c ON c.organization_id = m.organization_id AND c.product_id = m.product_id
        WHERE m.provider = 'channex' AND m.enabled = 1 AND json_extract(c.calendar_rules, '$.weekend_price_minor') IS NOT NULL
     ) GROUP BY organization_id, product_id`)
   const failures: string[] = []
@@ -1736,7 +1743,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
   const earlier = await replay()
   if (earlier) return pushed(earlier)
   // A stay the host takes asks the home's questions as its direct booking does; the host's words are in the site's own language.
-  const answers = imported ? [] : await acceptFormAnswers(db, { kind: 'stay', organizationId: access.organizationId, productId: home.product_id }, {
+  const answers = imported ? [] : await acceptFormAnswers(db, { kind: 'booking', organizationId: access.organizationId, productId: home.product_id }, {
     locale: null, answers: input.answers, questionsRevision: input.questions_revision, revisionRequired: false })
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
@@ -1916,7 +1923,8 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
   if (current.check_out_date < localDateAt(new Date(), to.timezone)) fail(409, 'STAY_MOVE_ENDED', 'This stay has already ended', 'product_id')
   if (current.adults + current.children > to.max_guests) fail(422, 'STAY_MOVE_TOO_SMALL', `${to.internal_name} sleeps ${to.max_guests}; this party is ${current.adults + current.children}`, 'product_id')
   const config = await queryFirst<{ check_in_instructions: string | null; assigned_member_id: string | null }>(db,
-    'SELECT check_in_instructions, assigned_member_id FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [access.organizationId, to.product_id])
+    `SELECT c.check_in_instructions, b.assigned_member_id FROM product_stay_configs c JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id
+      WHERE c.organization_id = ? AND c.product_id = ?`, [access.organizationId, to.product_id])
   if (!config?.check_in_instructions?.trim()) fail(422, 'STAY_MOVE_NEEDS_INSTRUCTIONS', `Add check-in instructions to ${to.internal_name} before moving a guest there, so they can be told how to get in`, 'product_id')
   if (nightsTaken(await homeNights(db, access.organizationId, to, current.check_in_date, current.check_out_date), stayId).length) fail(409, 'STAY_MOVE_NIGHTS_TAKEN', `${to.internal_name} is not free for every night of this stay`, 'product_id')
   await Promise.all([requireChannelPush(db, env, access.organizationId, from.product_id), requireChannelPush(db, env, access.organizationId, to.product_id)])
@@ -2042,7 +2050,7 @@ async function guestStayCancellation(db: DbClient, organizationId: string, stayI
   const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
   const purchase = isRecord(snapshot) ? snapshot.stay : undefined
   if (!isRecord(purchase) || !Array.isArray(purchase.nightly)) throw new Error(`Stay ${stayId} payment has no nightly prices`)
-  const home = await queryFirst<{ check_in_time: string | null }>(db, 'SELECT check_in_time FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, stay.product_id])
+  const home = await queryFirst<{ check_in_time: string | null }>(db, 'SELECT check_in_time FROM product_booking_configs WHERE organization_id = ? AND product_id = ?', [organizationId, stay.product_id])
   if (!home) throw new Error(`Stay ${stayId} has no home`)
   if (home.check_in_time === null) fail(409, 'STAY_CANCELLATION_TIME_REQUIRED', 'The home has no check-in time for calculating the cancellation refund. Contact the host to cancel.', 'check_in_time')
   const held = payment.captured_amount - payment.refunded_amount
@@ -2064,10 +2072,11 @@ export interface GuestStay {
 /** The account's stay by its activity ID: its conversation's ID, or the stay's own when it has none. */
 export async function readGuestStay(db: DbClient, buyerUserId: string, activityId: string): Promise<GuestStay> {
   const owned = await queryFirst<{ id: string; request_id: string | null; organization_id: string; product_id: string; status: string; name: string; organization_name: string; check_in_time: string | null; check_out_time: string | null; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; paid_online: number }>(db, `
-    SELECT s.id, s.request_id, s.organization_id, s.product_id, s.status, p.name, o.name AS organization_name, c.check_in_time, c.check_out_time, l.address, l.latitude, l.longitude, l.maps_url,
+    SELECT s.id, s.request_id, s.organization_id, s.product_id, s.status, p.name, o.name AS organization_name, b.check_in_time, b.check_out_time, l.address, l.latitude, l.longitude, l.maps_url,
            EXISTS (SELECT 1 FROM payments WHERE organization_id = s.organization_id AND subject_type = 'stay' AND subject_id = s.id AND captured_amount > 0) AS paid_online
       FROM stays s JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
       JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
+      JOIN product_booking_configs b ON b.organization_id = s.organization_id AND b.product_id = s.product_id
       JOIN organization o ON o.id = s.organization_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
      WHERE COALESCE(s.request_id, s.id) = ? AND s.user_id = ? AND s.owner = 'app'`, [activityId, buyerUserId])
@@ -2540,7 +2549,8 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
     after: { id, product_id: landing, status: booking.cancelled ? 'cancelled' : 'confirmed', check_in_date: booking.check_in_date, check_out_date: booking.check_out_date } })
   // A moved guest's make-ready job follows the reservation's revisions: its home is where they sleep, not the listing the revision names.
   const landingHome = existing?.booked_product_id === productId && !booking.cancelled ? await queryFirst<{ check_in_time: string | null; timezone: string }>(db,
-    'SELECT c.check_in_time, l.timezone FROM product_stay_configs c JOIN business_locations l ON l.id = c.location_id AND l.organization_id = c.organization_id WHERE c.organization_id = ? AND c.product_id = ?',
+    `SELECT b.check_in_time, l.timezone FROM product_stay_configs c JOIN business_locations l ON l.id = c.location_id AND l.organization_id = c.organization_id
+      JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id WHERE c.organization_id = ? AND c.product_id = ?`,
     [organizationId, landing]) : null
   const readyJob = existing?.booked_product_id === productId ? stayReadyRevisionQueries({ organizationId, stayId: id, now, cancelled: booking.cancelled,
     guard: { query: 'EXISTS (SELECT 1 FROM stays WHERE organization_id = ? AND id = ? AND revision_id = ?)', params: [organizationId, id, booking.revision_id] },

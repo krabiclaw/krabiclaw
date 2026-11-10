@@ -362,7 +362,7 @@ export async function getInboxThreadDetails(db: DbClient, threadId: string, orga
     SELECT m.userId AS user_id, u.name, m.role FROM member m JOIN user u ON u.id = m.userId
      WHERE m.organizationId = ? AND (m.role = 'owner'
        OR m.userId IN (SELECT value FROM json_each(?))
-       OR m.id = (SELECT c.assigned_member_id FROM stays s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id WHERE s.request_id = ?))
+       OR m.id = (SELECT c.assigned_member_id FROM stays s JOIN product_booking_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id WHERE s.request_id = ?))
      ORDER BY m.role = 'owner' DESC, m.createdAt, m.id`,
   [organizationId, d1JsonStringSet(raw.entries.flatMap(entry => entry.actorKind === 'member' && entry.actorUserId ? [entry.actorUserId] : [])), raw.id])
   const photos = raw.entries.filter(entry => entry.kind === 'message')

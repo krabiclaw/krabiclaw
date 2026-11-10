@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:1613f895a67dfa7d589ff7e932c81af5e71d9a015666be16670831943627b584",
-  "documentationFingerprint": "sha256:14ebe3ad0fd5d2a08351253a9cf7091d46cd60032476e5b516aeefd8b231fa5f",
+  "fingerprint": "sha256:11e4418e8c5ac2de62373c3a0def4b12969cb7009044e1c22bbadcc398e56e24",
+  "documentationFingerprint": "sha256:4843bc53a39b4e947ce124a28600cf2ca40001b506851290d53eaa65b25f98d8",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -9477,11 +9477,8 @@
                       "type": "array"
                     },
                     "assigned_member_id": {
-                      "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. This assignment grants the member access to the home’s stays and shows their approved public profile to guests. Publication requires an approved profile with a nonblank public_name; read get_member_public_profile.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. Every home has one: it handles the home's stays and turnovers and shows their approved public profile to guests. Publication requires an approved profile with a nonblank public_name; read get_member_public_profile.",
+                      "type": "string"
                     },
                     "bathrooms": {
                       "description": "Whole and half baths, such as 1.5.",
@@ -9757,7 +9754,8 @@
                     "check_in_time",
                     "check_out_time",
                     "max_guests",
-                    "min_nights"
+                    "min_nights",
+                    "assigned_member_id"
                   ],
                   "type": "object"
                 },
@@ -9950,7 +9948,7 @@
                       ]
                     },
                     "assigned_member_id": {
-                      "description": "Better Auth organization membership ID of the assigned host; null when no individual host is selected.",
+                      "description": "Better Auth organization membership ID of the host who handles every booking; null only after that member left the business.",
                       "type": [
                         "string",
                         "null"
@@ -10074,7 +10072,7 @@
                       "type": "string"
                     },
                     "scheduling_mode": {
-                      "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; an assigned member is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                      "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; the assigned member hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                       "enum": [
                         "business",
                         "provider"
@@ -11285,7 +11283,7 @@
                       "type": "array"
                     },
                     "assigned_member_id": {
-                      "description": "Better Auth organization membership ID of the home’s assigned host; null when no individual host is selected.",
+                      "description": "Better Auth organization membership ID of the home’s assigned host; null only after that member left the business.",
                       "type": [
                         "string",
                         "null"
@@ -23527,11 +23525,8 @@
             "description": "Complete booking setup for a published offering. Legal consultations require provider scheduling and an explicitly selected attorney. At a location, provide weekly_slots or dated sessions; an update can retain its saved weekly times. location_id null holds it online: it needs scheduling_mode provider with an assigned member, takes no weekly_slots or sessions, and is booked in that provider's working hours. Runtime validation requires actual future availability before publication.",
             "properties": {
               "assigned_member_id": {
-                "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. Guests see this member’s approved public profile. Read get_member_public_profile; publication requires an approved profile with a nonblank public_name.",
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. Every bookable offering has one: it handles all its bookings. Guests see this member’s approved public profile. Read get_member_public_profile; publication requires an approved profile with a nonblank public_name.",
+                "type": "string"
               },
               "confirmation_mode": {
                 "default": "instant",
@@ -23567,7 +23562,7 @@
                 "type": "boolean"
               },
               "scheduling_mode": {
-                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; an assigned member is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; the assigned member hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                 "enum": [
                   "business",
                   "provider"
@@ -26500,11 +26495,8 @@
                 "type": "array"
               },
               "assigned_member_id": {
-                "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. This assignment grants the member access to the home’s stays and shows their approved public profile to guests. Publication requires an approved profile with a nonblank public_name; read get_member_public_profile.",
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. Every home has one: it handles the home's stays and turnovers and shows their approved public profile to guests. Publication requires an approved profile with a nonblank public_name; read get_member_public_profile.",
+                "type": "string"
               },
               "bathrooms": {
                 "description": "Whole and half baths, such as 1.5.",
@@ -26780,7 +26772,8 @@
               "check_in_time",
               "check_out_time",
               "max_guests",
-              "min_nights"
+              "min_nights",
+              "assigned_member_id"
             ],
             "type": "object"
           },
@@ -26962,7 +26955,7 @@
                     ]
                   },
                   "assigned_member_id": {
-                    "description": "Better Auth organization membership ID of the assigned host; null when no individual host is selected.",
+                    "description": "Better Auth organization membership ID of the host who handles every booking; null only after that member left the business.",
                     "type": [
                       "string",
                       "null"
@@ -27086,7 +27079,7 @@
                     "type": "string"
                   },
                   "scheduling_mode": {
-                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; an assigned member is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; the assigned member hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                     "enum": [
                       "business",
                       "provider"
@@ -28297,7 +28290,7 @@
                     "type": "array"
                   },
                   "assigned_member_id": {
-                    "description": "Better Auth organization membership ID of the home’s assigned host; null when no individual host is selected.",
+                    "description": "Better Auth organization membership ID of the home’s assigned host; null only after that member left the business.",
                     "type": [
                       "string",
                       "null"
@@ -29482,12 +29475,6 @@
           "sessions": {
             "items": {
               "properties": {
-                "assigned_member_id": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
                 "capacity": {
                   "type": [
                     "integer",
@@ -52877,7 +52864,7 @@
                     ]
                   },
                   "assigned_member_id": {
-                    "description": "Better Auth organization membership ID of the assigned host; null when no individual host is selected.",
+                    "description": "Better Auth organization membership ID of the host who handles every booking; null only after that member left the business.",
                     "type": [
                       "string",
                       "null"
@@ -53001,7 +52988,7 @@
                     "type": "string"
                   },
                   "scheduling_mode": {
-                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; an assigned member is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; the assigned member hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                     "enum": [
                       "business",
                       "provider"
@@ -54212,7 +54199,7 @@
                     "type": "array"
                   },
                   "assigned_member_id": {
-                    "description": "Better Auth organization membership ID of the home’s assigned host; null when no individual host is selected.",
+                    "description": "Better Auth organization membership ID of the home’s assigned host; null only after that member left the business.",
                     "type": [
                       "string",
                       "null"
@@ -55159,7 +55146,7 @@
     {
       "name": "get_product_booking",
       "title": "Get product booking",
-      "description": "Read one product booking or consultation when the user wants its guest details, answers to the offering's questions, status or current session. Use updated_at when proposing a change and operational_updated_at when reassigning its provider.",
+      "description": "Read one product booking or consultation when the user wants its guest details, answers to the offering's questions, status or current session. Use updated_at when proposing a change.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -70974,12 +70961,6 @@
           "sessions": {
             "items": {
               "properties": {
-                "assigned_member_id": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
                 "capacity": {
                   "type": [
                     "integer",
@@ -86298,102 +86279,6 @@
       "uiResourceUri": null
     },
     {
-      "name": "reassign_product_booking",
-      "title": "Reassign product booking",
-      "description": "Propose a same-time attorney replacement for one consultation. The current appointment and other clients remain unchanged until this client accepts in their conversation. Requires a published available session for that attorney outside the consultation’s minimum notice. Read get_product_booking and supply operational_updated_at.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "expected_updated_at": {
-            "description": "operational_updated_at from get_product_booking.",
-            "type": "string"
-          },
-          "idempotency_key": {
-            "description": "Caller-supplied durable idempotency key. Reuse only for the identical operation.",
-            "maxLength": 120,
-            "minLength": 1,
-            "type": "string"
-          },
-          "member_id": {
-            "description": "Better Auth organization member ID from get_member_scheduling.",
-            "type": "string"
-          },
-          "operational_booking_id": {
-            "description": "Booking ID returned by list_product_bookings or create_product_booking. Distinct from request_id, which identifies the inbox conversation.",
-            "type": "string"
-          },
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          }
-        },
-        "required": [
-          "operational_booking_id",
-          "member_id",
-          "expected_updated_at",
-          "idempotency_key"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "assigned_member_id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "change_status": {
-            "enum": [
-              "awaiting_guest_acceptance",
-              "accepted",
-              "declined"
-            ],
-            "type": "string"
-          },
-          "request_id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "session_id": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "session_id",
-          "assigned_member_id",
-          "request_id",
-          "change_status"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false,
-        "title": "Reassign product booking"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "bookings",
-      "minimumRole": "admin",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
       "name": "reconcile_post_publication",
       "title": "Reconcile post publication",
       "description": "Read an existing social publication on its destination and refresh its receipt without publishing. Supply provider_post_id only for the exact post on the connected destination.",
@@ -87390,11 +87275,8 @@
                       "type": "array"
                     },
                     "assigned_member_id": {
-                      "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. This assignment grants the member access to the home’s stays and shows their approved public profile to guests. Publication requires an approved profile with a nonblank public_name; read get_member_public_profile.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. Every home has one: it handles the home's stays and turnovers and shows their approved public profile to guests. Publication requires an approved profile with a nonblank public_name; read get_member_public_profile.",
+                      "type": "string"
                     },
                     "bathrooms": {
                       "description": "Whole and half baths, such as 1.5.",
@@ -87670,7 +87552,8 @@
                     "check_in_time",
                     "check_out_time",
                     "max_guests",
-                    "min_nights"
+                    "min_nights",
+                    "assigned_member_id"
                   ],
                   "type": "object"
                 },
@@ -87862,7 +87745,7 @@
                       ]
                     },
                     "assigned_member_id": {
-                      "description": "Better Auth organization membership ID of the assigned host; null when no individual host is selected.",
+                      "description": "Better Auth organization membership ID of the host who handles every booking; null only after that member left the business.",
                       "type": [
                         "string",
                         "null"
@@ -87986,7 +87869,7 @@
                       "type": "string"
                     },
                     "scheduling_mode": {
-                      "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; an assigned member is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                      "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; the assigned member hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                       "enum": [
                         "business",
                         "provider"
@@ -89239,7 +89122,7 @@
                       "type": "array"
                     },
                     "assigned_member_id": {
-                      "description": "Better Auth organization membership ID of the home’s assigned host; null when no individual host is selected.",
+                      "description": "Better Auth organization membership ID of the home’s assigned host; null only after that member left the business.",
                       "type": [
                         "string",
                         "null"
@@ -100025,17 +99908,13 @@
     {
       "name": "request_product_booking_change",
       "title": "Request product booking change",
-      "description": "Email the guest a proposal to change a booking’s session or party size. The current booking and places remain unchanged until guest acceptance, which requires availability and preserves its review status. Consultation time and attorney changes always require client acceptance. For other booking kinds, apply moves the booking now and emails the guest; a paid quantity or location change is refused.",
+      "description": "Email the guest a proposal to change a booking’s session or party size. The current booking and places remain unchanged until guest acceptance, which requires availability and preserves its review status. Consultation time changes always require client acceptance. For other booking kinds, apply moves the booking now and emails the guest; a paid quantity or location change is refused.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "apply": {
             "description": "For bookings other than consultations, move immediately and email the guest. Consultations always require client acceptance.",
             "type": "boolean"
-          },
-          "assigned_member_id": {
-            "description": "Optional explicit target attorney member ID; must match the selected session.",
-            "type": "string"
           },
           "expected_updated_at": {
             "description": "Thread updated_at from get_product_booking.",
@@ -103476,11 +103355,8 @@
             ]
           },
           "assigned_member_id": {
-            "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. Guests see this member’s approved public profile. Read get_member_public_profile; publication requires an approved profile with a nonblank public_name.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. Every bookable offering has one: it handles all its bookings. Guests see this member’s approved public profile. Read get_member_public_profile; publication requires an approved profile with a nonblank public_name.",
+            "type": "string"
           },
           "confirmation_mode": {
             "default": "instant",
@@ -103601,7 +103477,7 @@
             "type": "array"
           },
           "scheduling_mode": {
-            "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; an assigned member is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+            "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; the assigned member hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
             "enum": [
               "business",
               "provider"
@@ -103629,7 +103505,7 @@
                 ]
               },
               "assigned_member_id": {
-                "description": "Better Auth organization membership ID of the assigned host; null when no individual host is selected.",
+                "description": "Better Auth organization membership ID of the host who handles every booking; null only after that member left the business.",
                 "type": [
                   "string",
                   "null"
@@ -103753,7 +103629,7 @@
                 "type": "string"
               },
               "scheduling_mode": {
-                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; an assigned member is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; the assigned member hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                 "enum": [
                   "business",
                   "provider"
@@ -116254,11 +116130,8 @@
             "description": "Complete booking setup for a published offering. Legal consultations require provider scheduling and an explicitly selected attorney. At a location, provide weekly_slots or dated sessions; an update can retain its saved weekly times. location_id null holds it online: it needs scheduling_mode provider with an assigned member, takes no weekly_slots or sessions, and is booked in that provider's working hours. Runtime validation requires actual future availability before publication.",
             "properties": {
               "assigned_member_id": {
-                "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. Guests see this member’s approved public profile. Read get_member_public_profile; publication requires an approved profile with a nonblank public_name.",
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. Every bookable offering has one: it handles all its bookings. Guests see this member’s approved public profile. Read get_member_public_profile; publication requires an approved profile with a nonblank public_name.",
+                "type": "string"
               },
               "confirmation_mode": {
                 "default": "instant",
@@ -116294,7 +116167,7 @@
                 "type": "boolean"
               },
               "scheduling_mode": {
-                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; an assigned member is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; the assigned member hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                 "enum": [
                   "business",
                   "provider"
@@ -117620,11 +117493,8 @@
                 "type": "array"
               },
               "assigned_member_id": {
-                "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. This assignment grants the member access to the home’s stays and shows their approved public profile to guests. Publication requires an approved profile with a nonblank public_name; read get_member_public_profile.",
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. Every home has one: it handles the home's stays and turnovers and shows their approved public profile to guests. Publication requires an approved profile with a nonblank public_name; read get_member_public_profile.",
+                "type": "string"
               },
               "bathrooms": {
                 "description": "Whole and half baths, such as 1.5.",
@@ -118160,7 +118030,7 @@
                     ]
                   },
                   "assigned_member_id": {
-                    "description": "Better Auth organization membership ID of the assigned host; null when no individual host is selected.",
+                    "description": "Better Auth organization membership ID of the host who handles every booking; null only after that member left the business.",
                     "type": [
                       "string",
                       "null"
@@ -118284,7 +118154,7 @@
                     "type": "string"
                   },
                   "scheduling_mode": {
-                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; an assigned member is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
+                    "description": "Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; the assigned member hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.",
                     "enum": [
                       "business",
                       "provider"
@@ -119537,7 +119407,7 @@
                     "type": "array"
                   },
                   "assigned_member_id": {
-                    "description": "Better Auth organization membership ID of the home’s assigned host; null when no individual host is selected.",
+                    "description": "Better Auth organization membership ID of the home’s assigned host; null only after that member left the business.",
                     "type": [
                       "string",
                       "null"
@@ -120565,12 +120435,6 @@
         "properties": {
           "session": {
             "properties": {
-              "assigned_member_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "capacity": {
                 "type": [
                   "integer",
@@ -130101,18 +129965,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:03d73b41379f9d3ab5067761d3b11212ff63ef4f73185165df8450fcdd18aad7",
-        "get_product": "sha256:51f4f649ed0ccdf4ecff7b5cf5250152f29876982db855c99d1bd2c6c1c05ec3",
+        "create_product": "sha256:20982c9950d16a9f00c1b6205672d2a4902ab42ba397a85d6980b6afc60e370b",
+        "get_product": "sha256:1851f02b03ea33aae46ecd57db939e180639dced6c1004e3219443dba38c4f0e",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
         "list_location_products": "sha256:2015626d39e62ce848fe36e9f0b99ac1e50b9afb915d67d7ce067553afb700b6",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
-        "reconcile_products": "sha256:f2be9bbfbb0d95494e3a1946f52822a42902e4b132b655809e2158924cf67733",
+        "reconcile_products": "sha256:df009848c8e8be81c68a5308b412ed3377f90553def0ef82efafa4d710b91116",
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
         "set_collection_products": "sha256:124140d2c1f17f41c466ca886c7fcabdfa4d9f34d9b6f0da8a1299548ae49289",
         "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
-        "update_product": "sha256:96528d4b06f23d728e31bf64aa18cc9eee447bd70781bd4556785c72bfcbe9c6"
+        "update_product": "sha256:36595ad15590850ba8b47a495e6cf49f5790c5d46009837f9a780e3095b67b5f"
       }
     },
     {
@@ -130156,11 +130020,11 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:03d73b41379f9d3ab5067761d3b11212ff63ef4f73185165df8450fcdd18aad7",
-        "get_product": "sha256:51f4f649ed0ccdf4ecff7b5cf5250152f29876982db855c99d1bd2c6c1c05ec3",
+        "create_product": "sha256:20982c9950d16a9f00c1b6205672d2a4902ab42ba397a85d6980b6afc60e370b",
+        "get_product": "sha256:1851f02b03ea33aae46ecd57db939e180639dced6c1004e3219443dba38c4f0e",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
-        "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
+        "list_product_booking_sessions": "sha256:c3feed62de11467bd12a6fd7885907eba84c469608e6bc20735c686887df971f",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93"
       }
@@ -130178,7 +130042,7 @@
         "cancel_table_reservation": "sha256:9f69a68d495da67c14718dff9208b98d7c28e5a4b8eba2849ded151ad293312a",
         "confirm_product_booking": "sha256:373f9f84360e37716dc1476d28b8f6b47c14001642ebaff8d713d74a7d3a8eaa",
         "get_guest_conversation": "sha256:bbc45bf9bdc9097c8aad98e871de2e959a34fbfaf24635f8d2490185732bab59",
-        "get_product_booking": "sha256:1f0d7f20d207a6fb1aecb169e86483ae515c5b6209fbf9fe948a2be26860968d",
+        "get_product_booking": "sha256:d99e0c935e9aa1fa0a9e16e00a3c406ba2c6cd7092a44aad426e66b75d2fbb4f",
         "get_team_conversation": "sha256:c1a1ddcd761b6cefc0e9395feced48cc3c7710936c7ffe918e3c816cf4fe6afd",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:2094e77b9c0524ea5996a63d5feff72271e44d4d38e6dab9ac469766844cf693",
@@ -130189,7 +130053,7 @@
         "mark_team_conversation_read": "sha256:0860e470941b83825d36099843eb4a8218b6894fc02b13f26d96c734d40537c2",
         "reject_product_booking": "sha256:91a5bee34d02b729a3dacb01885157ce63b443594116d8710ca90313fb76e357",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
-        "request_product_booking_change": "sha256:d09a9c88466237aff04465bbcffa219f28e197cfad0cb4fdd99f41484343d400",
+        "request_product_booking_change": "sha256:6468bdd6e44a875f7ea9b01728b6cb4ff504d2396e4bfff74aae3fe68b25b58e",
         "request_table_reservation_change": "sha256:f9a5a6f7a2da6dca328fa041f90cda5ece2f777db64e70a9f3568da1046a6795",
         "send_team_message": "sha256:ca932c062c753f93a740b7124f6aa5546273697a19b233e55dbb807c98c84dae",
         "start_team_conversation": "sha256:57e5de3d26585e9aa2b94df9fbe7c341672638dd0d6eafab12118fcd734cda06",
@@ -130228,7 +130092,7 @@
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
         "get_location": "sha256:bae756970ad92d73d440a9d7a99f85f9c59550786008a5203d79c24c87b64c6a",
         "get_post": "sha256:084fd73ea9efe150fe8e7812e02a80394a52477719bdab8ed3c33beae8225df8",
-        "get_product": "sha256:51f4f649ed0ccdf4ecff7b5cf5250152f29876982db855c99d1bd2c6c1c05ec3",
+        "get_product": "sha256:1851f02b03ea33aae46ecd57db939e180639dced6c1004e3219443dba38c4f0e",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
@@ -130244,7 +130108,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:03d73b41379f9d3ab5067761d3b11212ff63ef4f73185165df8450fcdd18aad7",
+        "create_product": "sha256:20982c9950d16a9f00c1b6205672d2a4902ab42ba397a85d6980b6afc60e370b",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
@@ -130270,15 +130134,15 @@
       },
       "toolContracts": {
         "get_location": "sha256:bae756970ad92d73d440a9d7a99f85f9c59550786008a5203d79c24c87b64c6a",
-        "get_product": "sha256:51f4f649ed0ccdf4ecff7b5cf5250152f29876982db855c99d1bd2c6c1c05ec3",
+        "get_product": "sha256:1851f02b03ea33aae46ecd57db939e180639dced6c1004e3219443dba38c4f0e",
         "get_reservation_policy": "sha256:1e70aca37a43c0512b2249b7c26e37844b0c04959bd40d3fbb5a73d711238943",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
-        "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
+        "list_product_booking_sessions": "sha256:c3feed62de11467bd12a6fd7885907eba84c469608e6bc20735c686887df971f",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "replace_product_weekly_schedule": "sha256:cc5f48fb054661e70ce26d988fc12a29f4325c7fc59b5b20852fb98d0e0e2451",
-        "set_product_booking_config": "sha256:8a324f4c429049e72c95c95a2804870a5a8c88c3d8c734da1244431e2e0c758c",
-        "update_product": "sha256:96528d4b06f23d728e31bf64aa18cc9eee447bd70781bd4556785c72bfcbe9c6",
+        "set_product_booking_config": "sha256:3a44508013c743bb8db52ea87844bf1e72cf232c016841557988c78f4264c3cb",
+        "update_product": "sha256:36595ad15590850ba8b47a495e6cf49f5790c5d46009837f9a780e3095b67b5f",
         "update_reservation_policy": "sha256:bba55ab3d0be1e0ea20d68f78438e4ad6b30cfa6a991ad2ba2d723c9e99a843a"
       }
     },
@@ -130298,7 +130162,7 @@
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_product": "sha256:96528d4b06f23d728e31bf64aa18cc9eee447bd70781bd4556785c72bfcbe9c6",
+        "update_product": "sha256:36595ad15590850ba8b47a495e6cf49f5790c5d46009837f9a780e3095b67b5f",
         "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
       }
     },
@@ -130314,14 +130178,14 @@
         "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
         "get_guest_conversation": "sha256:bbc45bf9bdc9097c8aad98e871de2e959a34fbfaf24635f8d2490185732bab59",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
-        "get_product": "sha256:51f4f649ed0ccdf4ecff7b5cf5250152f29876982db855c99d1bd2c6c1c05ec3",
+        "get_product": "sha256:1851f02b03ea33aae46ecd57db939e180639dced6c1004e3219443dba38c4f0e",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:2094e77b9c0524ea5996a63d5feff72271e44d4d38e6dab9ac469766844cf693",
-        "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
+        "list_product_booking_sessions": "sha256:c3feed62de11467bd12a6fd7885907eba84c469608e6bc20735c686887df971f",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "publish_post": "sha256:fbfd1f5ff6cbdc02ecba0e29e88a7efc5bedb5e6b60ad98eca33b6e99016f1b2",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
-        "update_product": "sha256:96528d4b06f23d728e31bf64aa18cc9eee447bd70781bd4556785c72bfcbe9c6"
+        "update_product": "sha256:36595ad15590850ba8b47a495e6cf49f5790c5d46009837f9a780e3095b67b5f"
       }
     }
   ]

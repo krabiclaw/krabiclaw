@@ -480,7 +480,8 @@ export async function readBusinessProgressReference(
     }
     if (product.kind !== 'stay') throw missing()
     const configuration = await queryFirst<{ updated_at: string } & Record<string, unknown>>(db,
-      'SELECT product_id, location_id, min_nights, calendar_rules, updated_at FROM product_stay_configs WHERE product_id = ? AND organization_id = ?', [product.id, principal.organizationId])
+      `SELECT c.product_id, c.location_id, b.min_nights, b.calendar_rules, b.updated_at FROM product_stay_configs c
+        JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id WHERE c.product_id = ? AND c.organization_id = ?`, [product.id, principal.organizationId])
     if (!configuration) throw missing()
     const from = addLocalDays(interval![1], -1), to = addLocalDays(interval![2], 1)
     if (!isValidCalendarDate(from) || !isValidCalendarDate(to)) throw missing()

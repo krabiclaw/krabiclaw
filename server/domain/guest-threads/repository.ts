@@ -108,16 +108,18 @@ async function assignedThreadScope(principal?: MemberAccessPrincipal | null) {
  * booking rather than printing a fabricated slot.
  */
 const OPERATIONAL_RECORDS_SQL = `(
-    SELECT b.request_id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone, NULL AS check_in_date, NULL AS check_out_date, b.assigned_member_id, b.product_id, NULL AS stay_channel
+    SELECT b.request_id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone, NULL AS check_in_date, NULL AS check_out_date, bc.assigned_member_id, b.product_id, NULL AS stay_channel
       FROM bookings b JOIN product_sessions s ON s.id = b.product_session_id
+      JOIN product_booking_configs bc ON bc.organization_id = b.organization_id AND bc.product_id = b.product_id
      WHERE b.request_id IS NOT NULL
     UNION ALL
     SELECT r.request_id, r.status, r.party_size, r.starts_at, r.ends_at, r.timezone, NULL, NULL, NULL, NULL, NULL
       FROM reservations r WHERE r.request_id IS NOT NULL
     UNION ALL
-    SELECT st.request_id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone, st.check_in_date, st.check_out_date, c.assigned_member_id, st.product_id, st.channel
+    SELECT st.request_id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone, st.check_in_date, st.check_out_date, bc.assigned_member_id, st.product_id, st.channel
       FROM stays st
       JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
+      JOIN product_booking_configs bc ON bc.organization_id = st.organization_id AND bc.product_id = st.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
      WHERE st.request_id IS NOT NULL
   )`
@@ -716,8 +718,9 @@ export function conversationTaskQueries(requestId: string, now: string): BatchQu
     params: [now, now, requestId],
   }, {
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
-      SELECT ?, b.organization_id, 'booking_review', 'booking', b.id, b.product_id, ps.location_id, b.assigned_member_id, ps.starts_at, ps.timezone, 'open', 'booking_review:' || b.id, 1, ?, ?
+      SELECT ?, b.organization_id, 'booking_review', 'booking', b.id, b.product_id, ps.location_id, bc.assigned_member_id, ps.starts_at, ps.timezone, 'open', 'booking_review:' || b.id, 1, ?, ?
         FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id AND ps.organization_id = b.organization_id
+        JOIN product_booking_configs bc ON bc.organization_id = b.organization_id AND bc.product_id = b.product_id
        WHERE b.request_id = ? AND b.status = 'pending'
       ON CONFLICT (dedupe_key) DO NOTHING`,
     params: [crypto.randomUUID(), now, now, requestId],

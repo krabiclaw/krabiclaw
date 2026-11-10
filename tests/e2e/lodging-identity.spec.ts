@@ -606,7 +606,11 @@ test.describe('lodging identity boundary', () => {
       const madeProduct = await api.post(`${editor}/products`, { headers: ownerBearer, data: { kind: 'experience', name: 'Team-led local experience', active: true, variants: [{ name: 'One guest', prices: [{ unit_amount: 0, currency: 'THB' }] }] } })
       expect(madeProduct.status, await madeProduct.text()).toBe(201)
       const { product } = await madeProduct.json() as { product: Product }
-      const configured = await api.put(`${editor}/products/${product.id}/booking`, { headers: ownerBearer, data: { duration_minutes: 60, default_capacity: 4, scheduling_mode: 'business', confirmation_mode: 'review', online_payment_required: false } })
+      const listedMembers = await api.get(`/api/auth/organization/list-members?organizationId=${encodeURIComponent(organization.id)}`, { headers: ownerBearer })
+      expect(listedMembers.status, await listedMembers.text()).toBe(200)
+      const ownerMemberId = (await listedMembers.json() as { members: Array<{ id: string; role: string }> }).members.find(member => member.role === 'owner')!.id
+      // Every bookable offering has the member who handles its bookings: the owner, until the guide takes it.
+      const configured = await api.put(`${editor}/products/${product.id}/booking`, { headers: ownerBearer, data: { duration_minutes: 60, default_capacity: 4, scheduling_mode: 'business', assigned_member_id: ownerMemberId, confirmation_mode: 'review', online_payment_required: false } })
       expect(configured.status, await configured.text()).toBe(200)
       await loginAs(page.request, baseURL!, fixture.id)
       await page.goto(`/dashboard/${slug}/products/${product.id}/booking/assignment`)
@@ -640,7 +644,7 @@ test.describe('lodging identity boundary', () => {
       const inboxPath = `/api/dashboard/organizations/${organization.id}/guest-threads/${requestId}`
       const memberBooking = await api.get(bookingPath, { headers: memberBearer })
       expect(memberBooking.status, await memberBooking.text()).toBe(200)
-      expect(await memberBooking.json()).toMatchObject({ booking: { id: requestId, assignedMemberId: null, experienceId: product.id, guestName } })
+      expect(await memberBooking.json()).toMatchObject({ booking: { id: requestId, assignedMemberId: memberId, experienceId: product.id, guestName } })
       await loginAs(memberContext.request, baseURL!, invitee.id)
       const memberPage = await memberContext.newPage()
       let socket: WebSocket | undefined
@@ -656,7 +660,7 @@ test.describe('lodging identity boundary', () => {
         const event: unknown = JSON.parse(String(frame.payload))
         return isDashboardInvalidation(event) && event.type === 'access.changed' && event.organizationId === organization.id
       } })
-      const removed = await api.put(`${editor}/products/${product.id}/booking`, { headers: ownerBearer, data: { assigned_member_id: null } })
+      const removed = await api.put(`${editor}/products/${product.id}/booking`, { headers: ownerBearer, data: { assigned_member_id: ownerMemberId } })
       expect(removed.status, await removed.text()).toBe(200)
       await revoked
       await expect(memberPage.getByText(guestName, { exact: true })).toHaveCount(0)
@@ -665,7 +669,7 @@ test.describe('lodging identity boundary', () => {
       expect((await api.get(inboxPath, { headers: memberBearer })).status).toBe(404)
       const retained = await api.get(bookingPath, { headers: ownerBearer })
       expect(retained.status, await retained.text()).toBe(200)
-      expect(await retained.json()).toMatchObject({ booking: { id: requestId, assignedMemberId: null, experienceId: product.id, guestName } })
+      expect(await retained.json()).toMatchObject({ booking: { id: requestId, assignedMemberId: ownerMemberId, experienceId: product.id, guestName } })
     } finally {
       try {
         const deleted = await api.post('/api/auth/organization/delete', { headers: ownerBearer, data: { organizationId: organization.id } })

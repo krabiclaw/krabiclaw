@@ -204,7 +204,8 @@ export async function listAgenda(
     { query: `SELECT l.id, l.organization_id, l.title FROM business_locations l WHERE l.organization_id = ? AND l.organization_id ${scopeSql}
         ${staff ? `AND (EXISTS (SELECT 1 FROM requests rq
           WHERE rq.organization_id = l.organization_id AND rq.location_id = l.id AND ${assignedRequests!.sql})
-          OR EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = l.organization_id AND c.location_id = l.id AND ${assignedMemberSql('c')})
+          OR EXISTS (SELECT 1 FROM product_stay_configs c JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id
+            WHERE c.organization_id = l.organization_id AND c.location_id = l.id AND ${assignedMemberSql('b')})
           OR (${assignedMemberSql('l')}))` : ''}
         ORDER BY l.title, l.id`, params: [scope.organizationId ?? '', scopeParam, ...(staff ? [...assignedRequests!.params, staff.userId, staff.userId] : [])] },
     { query: `SELECT 1 AS present FROM product_stay_configs WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam] },
@@ -278,19 +279,20 @@ export async function listAgenda(
     owner: 'app' | 'channel'; channel: Stay['channel']; guest_name: string | null; guest_surname: string | null; guest_image_url: string | null; party_size: number; location_id: string; location_title: string; timezone: string; check_in_time: string | null; check_out_time: string | null; same_day_arrival: number
   }>(db, `SELECT st.id, st.request_id, st.organization_id, o.name AS organization_name, o.vertical, st.product_id, ${scope.buyerUserId ? 'p.name' : 'c.internal_name'} AS product_name, st.status, st.overbooked, st.check_in_date, st.check_out_date, st.owner, st.channel, st.guest_name, ${staff ? 'NULL' : 'st.guest_surname'} AS guest_surname,
         ${staff || scope.buyerUserId ? 'NULL' : '(SELECT u.image FROM user u WHERE u.id = st.user_id)'} AS guest_image_url,
-        st.adults + st.children AS party_size, c.location_id, l.title AS location_title, l.timezone, c.check_in_time, c.check_out_time,
+        st.adults + st.children AS party_size, c.location_id, l.title AS location_title, l.timezone, b.check_in_time, b.check_out_time,
         EXISTS (SELECT 1 FROM stays next_stay WHERE next_stay.organization_id = st.organization_id AND next_stay.product_id = st.product_id
           AND next_stay.id <> st.id AND next_stay.status <> 'cancelled' AND next_stay.check_in_date = st.check_out_date) AS same_day_arrival
       FROM stays st
       JOIN organization o ON o.id = st.organization_id
       JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
+      JOIN product_booking_configs b ON b.organization_id = st.organization_id AND b.product_id = st.product_id
       JOIN products p ON p.organization_id = st.organization_id AND p.id = st.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
      WHERE ${scope.buyerUserId ? `st.user_id = ? AND st.owner = 'app' AND (st.request_id IS NULL OR EXISTS (
        SELECT 1 FROM requests r WHERE r.id = st.request_id AND r.organization_id = st.organization_id AND r.kind = 'stay' AND r.user_id = st.user_id AND ${REQUEST_CURRENT_BUYER_SQL}))`
        : 'st.organization_id = ?'} AND st.status <> 'cancelled'
        AND ${scope.buyerUserId || query.currentStaysAt && !staff ? 'st.check_in_date <= ? AND st.check_out_date >= ?' : '(st.check_in_date BETWEEN ? AND ? OR st.check_out_date BETWEEN ? AND ?)'}
-       ${query.organizationId ? 'AND st.organization_id = ?' : ''} ${query.locationId ? 'AND c.location_id = ?' : ''} ${staff ? `AND ${assignedMemberSql('c')}` : ''}`,
+       ${query.organizationId ? 'AND st.organization_id = ?' : ''} ${query.locationId ? 'AND c.location_id = ?' : ''} ${staff ? `AND ${assignedMemberSql('b')}` : ''}`,
     [scopeParam, ...(scope.buyerUserId || query.currentStaysAt && !staff ? [query.to, query.from] : [query.from, query.to, query.from, query.to]), ...(query.organizationId ? [query.organizationId] : []), ...(query.locationId ? [query.locationId] : []), ...(staff ? [staff.userId] : [])])
     : Promise.resolve([])
 

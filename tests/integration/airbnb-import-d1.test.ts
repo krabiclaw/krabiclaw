@@ -345,8 +345,8 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
     assert.deepEqual((await connection.details(LISTING)).missingFields, [])
     const productId = started.product_id
 
-    const home = await db.prepare(`SELECT p.kind, p.name, c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, l.title AS location, l.timezone, l.email, pr.unit_amount, pr.currency
-      FROM products p JOIN product_stay_configs c ON c.product_id = p.id JOIN business_locations l ON l.id = c.location_id
+    const home = await db.prepare(`SELECT p.kind, p.name, b.check_in_time, b.check_in_end_time, b.check_out_time, b.default_capacity AS max_guests, b.min_nights, l.title AS location, l.timezone, l.email, pr.unit_amount, pr.currency
+      FROM products p JOIN product_stay_configs c ON c.product_id = p.id JOIN product_booking_configs b ON b.product_id = p.id JOIN business_locations l ON l.id = c.location_id
       JOIN product_variants v ON v.product_id = p.id JOIN prices pr ON pr.product_variant_id = v.id WHERE p.id = ?`).bind(productId).first()
     // Check-in and checkout are Airbnb's window, not anything the client sent.
     assert.deepEqual(home, { kind: 'stay', name: 'Cliff Cabin', check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 4, min_nights: 5, location: 'Cliff Cabin', timezone: TZ, email: 'Stay@Example.test', unit_amount: 18_950, currency: 'USD' })
@@ -1035,8 +1035,7 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     await db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, public_name, public_bio, public_approved, updated_at, updated_by)
       VALUES ('m-owner', ?, ?, '[]', '[]', 'Owner Host', NULL, 1, '2026-10-15T00:00:00.000Z', ?)`).bind(ORG, TZ, OWNER).run()
     for (const name of ['Dune Hut', 'Reef Hut']) {
-      const made = await createStayHome(env, db, manager, stayHomeInput({ name, timezone: TZ, address: `1 ${name} Rd`, city: 'Moab', country: 'US', check_in_time: '15:00', check_out_time: '11:00', max_guests: 2, min_nights: 1, base_price_minor: 100_00 }), name)
-      await updateStayHome(env, db, manager, made.product_id, { assigned_member_id: 'm-owner' })
+      const made = await createStayHome(env, db, manager, stayHomeInput({ name, timezone: TZ, address: `1 ${name} Rd`, city: 'Moab', country: 'US', check_in_time: '15:00', check_out_time: '11:00', max_guests: 2, min_nights: 1, base_price_minor: 100_00, assigned_member_id: 'm-owner' }), name)
       assert.equal((await updateStayHome(env, db, manager, made.product_id, { published: true })).home.live, true)
     }
 
@@ -1813,7 +1812,7 @@ test('the import asks only for required contact details and preserves provider b
     assert.equal((await readStayHome(db, manager, started.product_id)).min_nights, 9)
     assert.equal(Object.hasOwn(JSON.parse(String(await db.prepare('SELECT import_written FROM product_channel_mappings WHERE product_id = ?').bind(started.product_id).first('import_written'))) as Record<string, unknown>, 'min_nights'), false)
     // It books under the listing's own policies: Firm, and Strict Long Term.
-    assert.deepEqual(await db.prepare('SELECT check_in_time, check_in_end_time, check_out_time, cancellation_policy, long_term_cancellation_policy FROM product_stay_configs WHERE product_id = ?').bind(started.product_id).first(),
+    assert.deepEqual(await db.prepare('SELECT check_in_time, check_in_end_time, check_out_time, cancellation_policy, long_term_cancellation_policy FROM product_booking_configs WHERE product_id = ?').bind(started.product_id).first(),
       { check_in_time: '16:00', check_in_end_time: '01:00', check_out_time: '10:00', cancellation_policy: 'firm', long_term_cancellation_policy: 'strict' })
     assert.deepEqual(channex.roomTypes, [])
     const property = JSON.parse(String(await db.prepare('SELECT import_property FROM product_channel_mappings WHERE product_id = ?').bind(started.product_id).first('import_property'))) as Record<string, unknown>

@@ -194,7 +194,7 @@ function operationEntryQuery(
         -- not both write an entry for the same transition.
         AND EXISTS (SELECT 1 FROM ${plan.kind === 'reservation' ? 'reservations src' : 'bookings src JOIN product_sessions occurrence ON occurrence.id=src.product_session_id AND occurrence.organization_id=src.organization_id AND occurrence.product_id=src.product_id'}
                      WHERE src.request_id = gt.id AND src.organization_id=gt.organization_id AND src.status = ? AND ${sourceStillRunningSql(plan, 'src')}
-                       AND json_array(src.id,src.party_size,${plan.kind === 'reservation' ? 'NULL,NULL,src.starts_at,src.ends_at,src.timezone,src.location_id' : 'src.assigned_member_id,src.product_id,occurrence.starts_at,occurrence.ends_at,occurrence.timezone,occurrence.location_id'},json_extract(gt.payload_json,'$.party_size_is_minimum'))=json_array(?,CAST(? AS INTEGER),?,?,?,?,?,?,CAST(? AS INTEGER)))
+                       AND json_array(src.id,src.party_size,${plan.kind === 'reservation' ? 'NULL,src.starts_at,src.ends_at,src.timezone,src.location_id' : 'src.product_id,occurrence.starts_at,occurrence.ends_at,occurrence.timezone,occurrence.location_id'},json_extract(gt.payload_json,'$.party_size_is_minimum'))=json_array(?,CAST(? AS INTEGER),?,?,?,?,?,CAST(? AS INTEGER)))
         AND (${financialGuard?.query ?? '1=1'})
       ON CONFLICT(dedupe_key) DO NOTHING
     `,
@@ -224,7 +224,7 @@ function operationEntryQuery(
       plan.kind,
       context.thread.updated_at,
       plan.beforeStatus,
-      context.record!.id, context.record!.party_size, context.record!.assigned_member_id, context.record!.product_id, context.record!.starts_at, context.record!.ends_at, context.record!.timezone, context.record!.location_id, Number(partySizeIsMinimum(context.thread)),
+      context.record!.id, context.record!.party_size, context.record!.product_id, context.record!.starts_at, context.record!.ends_at, context.record!.timezone, context.record!.location_id, Number(partySizeIsMinimum(context.thread)),
       ...(financialGuard?.params ?? []),
     ],
   }

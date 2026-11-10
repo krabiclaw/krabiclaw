@@ -6,7 +6,7 @@ import { localNow } from '~/utils/timezone'
 import { notifyProductBookingCreated } from '~/server/domain/product-bookings'
 import { execute, executeBatch, queryAll, queryFirst, type DbClient, type BatchQuery } from '~/server/db'
 import { isRecord } from '~/server/utils/type-guards'
-import { sessionClaimQuery, sessionAssignmentQuery } from '~/server/utils/availability'
+import { sessionClaimQuery } from '~/server/utils/availability'
 import { processStripeWebhookEvent } from '~/server/utils/stripe-webhook-events'
 import { platformLivemode } from '~/server/utils/stripe-connect'
 import { executeRefund, reconcileRefundState, requirePayment, assertMinorAmount, type Payment } from './index'
@@ -22,7 +22,7 @@ import { completeStayFromCheckout, isStayNightConflict, releaseLapsedStayHolds, 
 
 interface Hold {
   id:string; organization_id:string; product_id:string|null; variant_id:string|null; session_id:string|null; location_id:string|null; timezone:string|null
-  buyer_user_id:string|null; request_id:string|null; quantity:number; status:string; expires_at:string; converted_booking_id:string|null; assigned_member_id:string|null; starts_at:string; ends_at:string
+  buyer_user_id:string|null; request_id:string|null; quantity:number; status:string; expires_at:string; converted_booking_id:string|null; starts_at:string; ends_at:string
 }
 /** Provider retrieval, account/mode and frozen money checks precede every conversion; the paid analytics event and usage billing follow it. */
 export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,intent:Stripe.PaymentIntent, env:CloudflareEnv):Promise<Stripe.PaymentIntent> {
@@ -131,14 +131,12 @@ async function commitVisit(db:DbClient,env:CloudflareEnv,payment:Payment,hold:Ho
  const now=new Date().toISOString()
  const subjectId = crypto.randomUUID()
  let claim: BatchQuery
- const assignment: BatchQuery[] = []
  const kind = payment.subject_type === 'booking' ? 'booking' : 'reservation'
  const table = kind === 'booking' ? 'bookings' : 'reservations'
  const convertedColumn = kind === 'booking' ? 'converted_booking_id' : 'converted_reservation_id'
  if (kind === 'booking') {
    if (!hold.product_id || !hold.variant_id || !hold.session_id) throw new Error('Booking hold has no offering or session')
    claim = await sessionClaimQuery(db, {env,bookingId:subjectId,organizationId:hold.organization_id,productId:hold.product_id,sessionId:hold.session_id,productVariantId:hold.variant_id,partySize:hold.quantity,userId:hold.buyer_user_id,requestId:hold.request_id,now,chargedPaymentId:payment.id,chargedAt:chargedAt})
-   assignment.push(sessionAssignmentQuery(hold.session_id, hold.organization_id, subjectId))
  } else {
    if (hold.product_id || !hold.location_id || !hold.timezone) throw new Error('Reservation hold has invalid location facts')
    const local = localNow(hold.timezone, new Date(hold.starts_at))
@@ -146,7 +144,7 @@ async function commitVisit(db:DbClient,env:CloudflareEnv,payment:Payment,hold:Ho
  }
  let created: boolean
  try {
-   const results = await executeBatch(db,[claim, ...assignment,
+   const results = await executeBatch(db,[claim,
      {query:`UPDATE payment_checkout_holds SET status='converted',${convertedColumn}=? WHERE id=? AND status IN ('active','released') AND EXISTS(SELECT 1 FROM ${table} WHERE id=?)`,params:[subjectId,hold.id,subjectId]},
      {query:`INSERT INTO activity_entries(id,request_id,kind,scope_kind,actor_kind,event_name,payload_json,dedupe_key,sequence,occurred_at,created_at) SELECT ?,v.request_id,'operation','request','system',?,json_object(?,v.id,'request_id',v.request_id,'afterStatus',v.status,'payment_id',?,'intent',?),?,COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id=v.request_id),0)+1,?,? FROM ${table} v WHERE v.id=? AND v.request_id IS NOT NULL ON CONFLICT(dedupe_key) DO NOTHING`,params:[crypto.randomUUID(),`${kind}.created`,`operational_${kind}_id`,payment.id,`${kind}.created`,`${kind}:${subjectId}:created`,now,now,subjectId]},
      {query:`UPDATE payments SET subject_id=?,updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM ${table} WHERE id=?)`,params:[subjectId,now,payment.id,subjectId]},

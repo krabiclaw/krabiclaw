@@ -98,8 +98,9 @@ export async function turnoverTaskQueries(db: DbClient, input: { organizationId:
   const { organizationId, after, before, now } = input
   const guard = stayIs(organizationId, after)
   const homes = [...new Set([after.product_id, ...(before ? [before.product_id] : [])])]
-  const clocks = await queryAll<HomeClock>(db, `SELECT c.product_id, c.location_id, l.timezone, c.check_in_time, c.check_out_time, c.assigned_member_id
+  const clocks = await queryAll<HomeClock>(db, `SELECT c.product_id, c.location_id, l.timezone, b.check_in_time, b.check_out_time, b.assigned_member_id
     FROM product_stay_configs c JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
+    JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id
     WHERE c.organization_id = ? AND c.product_id IN (SELECT value FROM json_each(?))`, [organizationId, d1JsonStringSet(homes)])
   const queries: BatchQuery[] = []
   const windows = new Map<string, { stay: StayWindow; home: HomeClock; next: string | null }>()
@@ -215,11 +216,10 @@ function scopeSql(viewer: TaskViewer, alias = 't'): { sql: string; params: unkno
   const conversation = assignedGuestThreadScope('r', viewer.principal.userId)
   return {
     sql: `(${alias}.assigned_member_id = ?
-      OR EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = ${alias}.organization_id AND c.product_id = ${alias}.product_id AND ${assignedMemberSql('c')})
       OR EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.organization_id = ${alias}.organization_id AND c.product_id = ${alias}.product_id AND ${assignedMemberSql('c')})
       OR (${alias}.product_id IS NULL AND EXISTS (SELECT 1 FROM business_locations bl WHERE bl.organization_id = ${alias}.organization_id AND bl.id = ${alias}.location_id AND ${assignedMemberSql('bl')}))
       OR (${alias}.kind = 'guest_reply' AND EXISTS (SELECT 1 FROM requests r WHERE r.id = ${alias}.subject_id AND r.organization_id = ${alias}.organization_id AND ${conversation.sql})))`,
-    params: [viewer.memberId, ...Array(3).fill(viewer.principal.userId), ...conversation.params],
+    params: [viewer.memberId, ...Array(2).fill(viewer.principal.userId), ...conversation.params],
   }
 }
 
@@ -378,12 +378,13 @@ async function loadContext(db: DbClient, viewer: TaskViewer, rows: TaskRow[]): P
   const stays = await queryAll<StayContextFacts>(db, `
     SELECT s.id, s.product_id, s.guest_name, s.guest_surname, s.adults, s.children, s.check_in_date, s.check_out_date,
       s.request_id, s.status, s.no_show_at, s.channel, s.overbooked, u.image AS guest_image_url, l.timezone AS home_timezone,
-      s.arrival_time, c.check_in_time, c.check_out_time, EXISTS (
+      s.arrival_time, b.check_in_time, b.check_out_time, EXISTS (
         SELECT 1 FROM stays next WHERE next.organization_id = s.organization_id AND next.product_id = s.product_id
           AND next.status = 'confirmed' AND next.id <> s.id AND next.check_in_date = s.check_out_date
       ) AS same_day_arrival
     FROM stays s
     LEFT JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
+    LEFT JOIN product_booking_configs b ON b.organization_id = s.organization_id AND b.product_id = s.product_id
     LEFT JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
     LEFT JOIN user u ON u.id = s.user_id
     WHERE s.organization_id = ? AND (s.id IN (SELECT value FROM json_each(?)) OR s.request_id IN (SELECT value FROM json_each(?)))`,

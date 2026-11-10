@@ -136,8 +136,9 @@ export async function getReviewBookingContext(
       UNION ALL
       SELECT res.request_id, res.status, res.no_show_at, res.timezone, res.starts_at, res.ends_at, NULL, NULL, res.party_size, NULL, NULL FROM reservations res
       UNION ALL
-      SELECT st.request_id, st.status, st.no_show_at, l.timezone, st.check_in_date || CASE WHEN c.check_in_time IS NULL THEN '' ELSE 'T' || c.check_in_time END, NULL, st.check_out_date, c.check_out_time, st.adults + st.children, st.product_id, st.guest_email
+      SELECT st.request_id, st.status, st.no_show_at, l.timezone, st.check_in_date || CASE WHEN bc.check_in_time IS NULL THEN '' ELSE 'T' || bc.check_in_time END, NULL, st.check_out_date, bc.check_out_time, st.adults + st.children, st.product_id, st.guest_email
         FROM stays st JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
+        JOIN product_booking_configs bc ON bc.organization_id = st.organization_id AND bc.product_id = st.product_id
         JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
        WHERE st.channel = 'direct'
     ) record ON record.request_id = r.id

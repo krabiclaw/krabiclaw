@@ -72,10 +72,11 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
       "INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES ('class', 'org', 'experience', 'Pasta Class', 'class', 'owner', 'owner')",
       "INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES ('home', 'org', 'stay', 'Garden Cottage', 'home', 'owner', 'owner')",
       ...['consult', 'class'].map(id => `INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES ('${id}-v', 'org', '${id}', 'Standard', 'owner', 'owner')`),
-      "INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES ('class', 'org', 120, 8, 'business', 'owner', 'owner')",
-      "INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES ('consult', 'org', 30, 1, 'business', 'owner', 'owner')",
+      "INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES ('class', 'org', 'slot', 120, 8, 'business', 'owner', 'owner')",
+      "INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES ('consult', 'org', 'slot', 30, 1, 'business', 'owner', 'owner')",
       "INSERT INTO product_locations (organization_id, product_id, location_id, created_by, updated_by) VALUES ('org', 'home', 'room', 'owner', 'owner')",
-      "INSERT INTO product_stay_configs (organization_id, product_id, location_id, check_in_time, check_out_time, max_guests, min_nights, created_by, updated_by) VALUES ('org', 'home', 'room', '15:00', '11:00', 4, 1, 'owner', 'owner')",
+      "INSERT INTO product_stay_configs (organization_id, product_id, location_id, created_by, updated_by) VALUES ('org', 'home', 'room', 'owner', 'owner')",
+      "INSERT INTO product_booking_configs (organization_id, product_id, unit, scheduling_mode, online_payment_required, check_in_time, check_out_time, default_capacity, min_nights, created_by, updated_by) VALUES ('org', 'home', 'nights', 'business', 1, '15:00', '11:00', 4, 1, 'owner', 'owner')",
       ...['g-dinner', 'g-early', 'g-cancelled', 'g-old', 'g-absent', 'g-consult', 'g-class', 'g-stay'].map(id => `INSERT INTO user (id, name, email, isAnonymous) VALUES ('${id}', 'Anonymous', 'anon-${id}@customers.krabiclaw.local', 1)`),
     ]) await db.prepare(statement).run().catch((error: unknown) => { throw new Error(`${statement}: ${String(error)}`) })
 
@@ -98,11 +99,11 @@ test('guest reviews: invitations for every kind of visit, no-show, consent and w
     const booking = async (id: string, guest: string, product: 'consult' | 'class', endsAt: string) => {
       await thread(id, 'booking', guest, null, `Guest ${id}`)
       // The class meets on the patio; the consultation is held online with the owner.
-      const [locationId, provider] = product === 'class' ? ['patio', null] : [null, 'member-owner']
-      await db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, assigned_member_id, timezone, starts_at, ends_at, capacity, created_by, updated_by)
-        VALUES (?, 'org', ?, ?, ?, 'Asia/Bangkok', ?, ?, 8, 'owner', 'owner')`).bind(`${id}-session`, product, locationId, provider, at(Date.parse(endsAt) - Date.now() - HOUR), endsAt).run()
-      await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, assigned_member_id, user_id, request_id, party_size, status)
-        VALUES (?, 'org', ?, ?, ?, ?, ?, ?, 1, 'confirmed')`).bind(`${id}-record`, product, `${id}-session`, `${product}-v`, provider, guest, T[id]).run()
+      const locationId = product === 'class' ? 'patio' : null
+      await db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, timezone, starts_at, ends_at, capacity, created_by, updated_by)
+        VALUES (?, 'org', ?, ?, 'Asia/Bangkok', ?, ?, 8, 'owner', 'owner')`).bind(`${id}-session`, product, locationId, at(Date.parse(endsAt) - Date.now() - HOUR), endsAt).run()
+      await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, user_id, request_id, party_size, status)
+        VALUES (?, 'org', ?, ?, ?, ?, ?, 1, 'confirmed')`).bind(`${id}-record`, product, `${id}-session`, `${product}-v`, guest, T[id]).run()
     }
 
     await reservation('dinner', 'g-dinner', 'room', at(-25 * HOUR))

@@ -188,7 +188,7 @@ export async function getGuestRequest(db: DbClient, id: string, organizationId?:
  */
 export const BOOKED_RECORDS_SQL = `(
     SELECT 'booking' AS kind, b.id, b.request_id, b.organization_id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone,
-           s.location_id, b.product_id, b.product_id AS offering_id, p.name AS product_name, NULL AS product_internal_name, b.assigned_member_id, b.user_id,
+           s.location_id, b.product_id, b.product_id AS offering_id, p.name AS product_name, NULL AS product_internal_name, c.assigned_member_id, b.user_id,
            NULL AS check_in_date, NULL AS check_out_date, NULL AS check_in_time, NULL AS check_out_time, b.no_show_at, b.created_at, b.created_at AS received_at, b.updated_at,
            NULL AS location_updated_at, c.advance_notice_minutes, json_array(b.status, b.request_id, b.product_session_id, s.starts_at, s.ends_at, s.timezone, b.updated_at) AS fingerprint
       FROM bookings b
@@ -202,11 +202,12 @@ export const BOOKED_RECORDS_SQL = `(
       FROM reservations r
     UNION ALL
     SELECT 'stay', st.id, st.request_id, st.organization_id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone,
-           c.location_id, st.product_id, st.product_id, p.name, c.internal_name, c.assigned_member_id, st.user_id, st.check_in_date, st.check_out_date,
-           c.check_in_time, c.check_out_time, st.no_show_at, st.created_at, st.booking_received_at, st.updated_at,
-           l.updated_at, NULL, json_array(st.version, st.request_id, l.timezone, c.check_in_time, c.check_out_time)
+           c.location_id, st.product_id, st.product_id, p.name, c.internal_name, bc.assigned_member_id, st.user_id, st.check_in_date, st.check_out_date,
+           bc.check_in_time, bc.check_out_time, st.no_show_at, st.created_at, st.booking_received_at, st.updated_at,
+           l.updated_at, NULL, json_array(st.version, st.request_id, l.timezone, bc.check_in_time, bc.check_out_time)
       FROM stays st
       JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
+      JOIN product_booking_configs bc ON bc.organization_id = st.organization_id AND bc.product_id = st.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
       JOIN products p ON p.organization_id = st.organization_id AND p.id = st.product_id
   )`

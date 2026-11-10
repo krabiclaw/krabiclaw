@@ -26,7 +26,7 @@ const PASSWORD = 'StayHomeProof123!'
 
 const cabin = {
   idempotency_key: 'cabin', name: 'Cliff Cabin', timezone: 'America/Denver', address: '1 Cliff Rd', city: 'Moab', state: 'UT', country: 'US', zip_code: '84532',
-  phone: '+14355550100', email: 'host@example.test', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, base_price_minor: 189_50,
+  phone: '+14355550100', email: 'host@example.test', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, base_price_minor: 189_50, assigned_member_id: 'm-owner',
 }
 
 test('a home added by hand is a new location and an unpublished stay, checked, replayable, and billed once live', async () => {
@@ -99,7 +99,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
 
     const unspecifiedPropertyDetails = { listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null }
     const home = {
-      name: 'Cliff Cabin', internal_name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, base_price_tax_behavior: 'unspecified', check_in_time: '15:00', check_in_end_time: null, check_out_time: '11:00', max_guests: 4, min_nights: 2, calendar_rules: null, check_in_instructions: null, assigned_member_id: null, channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
+      name: 'Cliff Cabin', internal_name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, base_price_tax_behavior: 'unspecified', check_in_time: '15:00', check_in_end_time: null, check_out_time: '11:00', max_guests: 4, min_nights: 2, calendar_rules: null, check_in_instructions: null, assigned_member_id: 'm-owner', channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
       accessibility: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(feature => ({ feature, available: null, photo_ids: [] })),
       address: { address: '1 Cliff Rd', city: 'Moab', state: 'UT', country: 'US', zip_code: '84532' }, latitude: null, longitude: null,
       questions: [], questions_revision: formQuestionsRevision([]),
@@ -175,8 +175,10 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.deepEqual(((await call(await cookieFor('helper'), 'GET')).body.homes as Array<{ product_id: string }>).map(home => home.product_id), [made.product_id])
     // The price is the one it had, changed in place; null removes it. Fields left out keep their value.
     assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM prices WHERE organization_id = ?').bind(ORG).first('n'), 1)
-    const unpriced = await edit(owner, { base_price_minor: null, assigned_member_id: null })
-    assert.deepEqual(unpriced.body, { home: { ...changed, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, base_price_minor: null, base_price_tax_behavior: null, assigned_member_id: null }, channel_push: null, airbnb_unsynced: [] })
+    // A home is always looked after by someone: clearing who looks after it is refused.
+    assert.deepEqual(refusal(await edit(owner, { assigned_member_id: null })), { status: 422, code: 'ASSIGNEE_REQUIRED', field: 'assigned_member_id' })
+    const unpriced = await edit(owner, { base_price_minor: null })
+    assert.deepEqual(unpriced.body, { home: { ...changed, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, base_price_minor: null, base_price_tax_behavior: null }, channel_push: null, airbnb_unsynced: [] })
 
     // What the home is and offers, and its private arrival guide: each refused value names its field and changes nothing.
     assert.deepEqual(refusal(await edit(owner, { property_type_group: 'apartments', property_type: 'castle' })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.property_type' })
@@ -219,7 +221,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
       address: { address: '3 Rim Rd', city: 'Moab', state: 'UT', country: 'US', zip_code: '84532' }, latitude: 38.57, longitude: -109.55,
     })
     const listed = {
-      ...changed, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, base_price_minor: null, base_price_tax_behavior: null, assigned_member_id: null,
+      ...changed, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, base_price_minor: null, base_price_tax_behavior: null,
       description: 'A cabin above the canyon.', property_type_group: 'houses', property_type: 'cabin', ...propertyDetails, bedrooms: 2, beds: 3, bathrooms: 1.5,
       // Amenities read in catalog order, whatever order they were sent in.
       amenities: ['ac', 'kitchen', 'wireless_internet'], amenity_answers: [{ code: 'ac', available: true }, { code: 'kitchen', available: true }, { code: 'wireless_internet', available: true }], cancellation_policy: 'firm', long_term_cancellation_policy: 'strict',

@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto'
 import { HTTPError } from 'nitro'
-import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { execute, queryFirst, type DbClient } from '~/server/db'
 import { readLinkedAccount, type CloudflareEnv } from '~/server/utils/auth'
 import type { GoogleCalendarIntegration } from '~/shared/organization-settings'
 import { CalendarError, calendarEvent, calendarSubjects, defaultProvider, google, readCalendarIntegration, syncCalendarOrganization, type GoogleEvent, type CalendarProvider, type CalendarSubject, type EventLink } from './google-calendar'
@@ -157,42 +157,37 @@ export async function pullCalendarChanges(env: CloudflareEnv, organizationId: st
   }
 }
 /** The destination a Google event's new interval names: the same product's session that starts then, or the reservation's new date and time. */
-async function moveFieldsFor(db: DbClient, env: CloudflareEnv, organizationId: string, subject: CalendarSubject, startsAt: string, endsAt: string, assignedMemberId: string | null) {
-  const record = await queryFirst<{ party_size: number; product_id: string | null; location_id: string | null; timezone: string; assigned_member_id: string | null }>(db, subject.booking_kind === 'booking'
-    ? 'SELECT b.party_size, b.product_id, s.location_id, s.timezone, b.assigned_member_id FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id WHERE b.id=? AND b.organization_id=?'
-    : 'SELECT party_size, NULL AS product_id, location_id, timezone, NULL AS assigned_member_id FROM reservations WHERE id=? AND organization_id=?', [subject.operational_id, organizationId])
+async function moveFieldsFor(db: DbClient, env: CloudflareEnv, organizationId: string, subject: CalendarSubject, startsAt: string, endsAt: string) {
+  const record = await queryFirst<{ party_size: number; product_id: string | null; location_id: string | null; timezone: string }>(db, subject.booking_kind === 'booking'
+    ? 'SELECT b.party_size, b.product_id, s.location_id, s.timezone FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id WHERE b.id=? AND b.organization_id=?'
+    : 'SELECT party_size, NULL AS product_id, location_id, timezone FROM reservations WHERE id=? AND organization_id=?', [subject.operational_id, organizationId])
   if (!record) throw new HTTPError({ statusCode: 409, message: 'The booking behind this event is gone' })
   const when = new Intl.DateTimeFormat('en-US', { timeZone: record.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(startsAt))
   if (subject.booking_kind === 'booking') {
     const sessions = await listSessions(db, { env, organizationId, productId: record.product_id!, fromInstant: new Date(Date.parse(startsAt) - 60_000).toISOString(), toInstant: new Date(Date.parse(startsAt) + 60_000).toISOString() })
-    const exact = sessions.filter(session => Date.parse(session.starts_at) === Date.parse(startsAt) && session.assigned_member_id === assignedMemberId && session.location_id === record.location_id)
+    const exact = sessions.filter(session => Date.parse(session.starts_at) === Date.parse(startsAt) && session.location_id === record.location_id)
     if (exact.length > 1) throw new HTTPError({ statusCode: 409, message: 'More than one consultation matches this change. Choose the exact consultation in KrabiClaw.' })
     const target = exact[0]
-    if (!target) throw new HTTPError({ statusCode: 409, message: `Nothing can be booked at ${when}${assignedMemberId ? ' with the selected attorney' : ''}; the website offers the times that can` })
+    if (!target) throw new HTTPError({ statusCode: 409, message: `Nothing can be booked at ${when}; the website offers the times that can` })
     if (Date.parse(target.ends_at) !== Date.parse(endsAt)) throw new HTTPError({ statusCode: 409, message: 'Only the start can move; the booking keeps its length' })
-    return { kind: 'booking' as const, sessionId: target.id, partySize: record.party_size, ...(assignedMemberId ? { assignedMemberId } : {}) }
+    return { kind: 'booking' as const, sessionId: target.id, partySize: record.party_size }
   }
   if (!record.location_id) throw new HTTPError({ statusCode: 409, message: 'The reservation has no location to move within' })
   const parts = localPartsAt(new Date(startsAt), record.timezone)
   const pad = (value: number) => String(value).padStart(2, '0')
   return { kind: 'reservation' as const, locationId: record.location_id, bookingDate: `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`, bookingTime: `${pad(parts.hour)}:${pad(parts.minute)}`, partySize: record.party_size }
 }
-/** Only replacing the assigned attorney while retaining the client names an assignment. */
-async function attendeeAssignment(db: DbClient, organizationId: string, subject: CalendarSubject, item: GoogleEvent): Promise<{ memberId: string | null; changed: boolean }> {
-  if (!subject.is_consultation || !subject.request_id) return { memberId: subject.assigned_member_id, changed: false }
+/** A consultation's invitation is its client and its assigned attorney; who handles it changes in KrabiClaw, never from its event. */
+function assertConsultationAttendees(subject: CalendarSubject, item: GoogleEvent): void {
+  if (!subject.is_consultation || !subject.request_id) return
   if (item.guestsCanModify || item.guestsCanInviteOthers || item.guestsCanSeeOtherGuests) throw new HTTPError({ statusCode: 409, message: 'The managed consultation must keep guest editing, guest invitations and guest-list visibility off. Guest-enabled edits cannot be treated as staff-originated changes.' })
-  if (item.attendeesOmitted) throw new HTTPError({ statusCode: 409, message: 'Google omitted attendees; no attorney change can be determined from an incomplete event.' })
-  if (item.attendees?.some(attendee => attendee.resource || attendee.additionalGuests || attendee.optional)) throw new HTTPError({ statusCode: 409, message: 'Consultation invitations require the client and assigned attorney, without resources, optional or additional guests.' })
+  if (item.attendeesOmitted) throw new HTTPError({ statusCode: 409, message: 'Google omitted attendees; the consultation\'s invitation cannot be checked from an incomplete event.' })
   if (!subject.guest_email || !subject.member_email || !subject.assigned_member_id) throw new HTTPError({ statusCode: 409, message: 'The consultation is missing its client or verified assigned attorney email.' })
-  const client = subject.guest_email.toLowerCase(); const attorney = subject.member_email.toLowerCase()
   const emails = [...new Set((item.attendees ?? []).map(attendee => attendee.email?.toLowerCase()))]
-  const expected = [...new Set([client, attorney])]
-  if (emails.length === expected.length && expected.every(email => emails.includes(email))) return { memberId: subject.assigned_member_id, changed: false }
-  if (client === attorney || emails.length !== 2 || !emails.includes(client) || emails.includes(attorney) || emails.includes(undefined)) throw new HTTPError({ statusCode: 409, message: 'Calendar attendees must remain the client and one assigned attorney. Additions, removals and RSVP changes do not reassign a consultation.' })
-  const replacement = emails.find(email => email !== client)!
-  const members = await queryAll<{ id: string }>(db, 'SELECT m.id FROM member m JOIN user u ON u.id=m.userId WHERE m.organizationId=? AND lower(u.email)=? AND u.emailVerified=1', [organizationId, replacement])
-  if (members.length !== 1) throw new HTTPError({ statusCode: 409, message: 'The replacement attendee is not one verified attorney identity in this business. Choose an available attorney in KrabiClaw.' })
-  return { memberId: members[0]!.id, changed: true }
+  const expected = [...new Set([subject.guest_email.toLowerCase(), subject.member_email.toLowerCase()])]
+  if (item.attendees?.some(attendee => attendee.resource || attendee.additionalGuests || attendee.optional) || emails.length !== expected.length || !expected.every(email => emails.includes(email))) {
+    throw new HTTPError({ statusCode: 409, message: 'Calendar attendees must remain the client and the assigned attorney. Change who handles this consultation in KrabiClaw.' })
+  }
 }
 /** The booking won over its event: its conversation needs attention on Today, and the owners are told once per Google change. */
 async function flagForReview(env: CloudflareEnv, organizationId: string, link: EventLink, subject: CalendarSubject, kind: 'event_deleted' | 'move_refused', reason: string | null, change: string) {
@@ -253,8 +248,8 @@ async function applyCalendarEvent(env: CloudflareEnv, organizationId: string, in
       return 'needs_review'
     }
     try {
-      const assignment = await attendeeAssignment(db, organizationId, subject, item)
-      if (start === Date.parse(subject.starts_at) && end === Date.parse(subject.ends_at) && !assignment.changed) {
+      assertConsultationAttendees(subject, item)
+      if (start === Date.parse(subject.starts_at) && end === Date.parse(subject.ends_at)) {
         if (link.state === 'error' || item.status !== calendarEvent(subject, null).status) { restoring = true; await restore() }
         // Google's sync feed returns current resources, not edit history. The
         // restoration has a new ETag, so a failed client delivery resumes from
@@ -280,7 +275,7 @@ async function applyCalendarEvent(env: CloudflareEnv, organizationId: string, in
       if (!Number.isFinite(start) || !Number.isFinite(end)) throw new HTTPError({ statusCode: 409, message: 'The event lost its start or end time' })
       if (!thread) throw new HTTPError({ statusCode: 409, message: 'The booking has no guest conversation to move it through' })
       if (!item.etag || !item.updated) throw new HTTPError({ statusCode: 409, message: 'Google returned no event revision; the change cannot be proposed safely.' })
-      const fields = await moveFieldsFor(db, env, organizationId, subject, new Date(start).toISOString(), new Date(end).toISOString(), assignment.memberId)
+      const fields = await moveFieldsFor(db, env, organizationId, subject, new Date(start).toISOString(), new Date(end).toISOString())
       const account = await readLinkedAccount(env, integration.account_id)
       if (!account || account.providerId !== 'google') throw new HTTPError({ statusCode: 409, message: 'The Calendar integration account is no longer linked.' })
       const connection = await readCalendarIntegration(db, organizationId)
@@ -289,7 +284,7 @@ async function applyCalendarEvent(env: CloudflareEnv, organizationId: string, in
       const previous = await findEntryByDedupeKey(db, `booking-change-request:${thread.id}:${idempotencyKey}`)
       const expectedUpdatedAt = previous ? JSON.parse(previous.payload_json!).updatedAt as string : thread.updated_at
       await requestBookingChange(db, env, thread as GuestThreadRow, { source: 'google_calendar', userId: account.userId }, { ...fields, expectedUpdatedAt }, idempotencyKey)
-      await logInbound(db, { organizationId, externalId: item.id, status: 'applied', detail: `client approval requested for ${new Date(start).toISOString()}${assignment.changed ? ' and an attorney replacement' : ''}; the original appointment is retained` })
+      await logInbound(db, { organizationId, externalId: item.id, status: 'applied', detail: `client approval requested for ${new Date(start).toISOString()}; the original appointment is retained` })
       return 'applied'
     } catch (error) {
       // A refusal names its reason; a provider, configuration or database failure is not one and stops the pull.

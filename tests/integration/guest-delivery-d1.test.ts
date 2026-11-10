@@ -502,7 +502,7 @@ test('a failed stay cancellation email retries its recorded content after displa
     const access = { organizationId: 'org-stay-cancel', actorId: 'owner-stay-cancel', manage: true }
     const home = await createProduct(db, { env, organizationId: access.organizationId, actor: { actorId: access.actorId }, publication: { published: true }, product: {
       kind: 'stay', name: 'Original Cabin', variants: [{ name: 'Original Cabin', prices: [{ unit_amount: 15000, currency: 'USD' }] }],
-      stay: { location_id: 'location-stay-cancel', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: null },
+      stay: { location_id: 'location-stay-cancel', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: 'member-stay-cancel' },
     } })
     const walkIn = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'stay-walk-in', check_in_date: '2098-11-01', check_out_date: '2098-11-03',
       adults: 2, guest_name: 'Bo', guest_email: 'walkin@provider-proof.com', total_minor: 30000 })
@@ -688,7 +688,7 @@ test('a booking move into a full session leaves the original booking exactly as 
       "INSERT INTO business_locations (id,organization_id,slug,title,timezone) VALUES ('loc-move','org-move','move','Move','Asia/Bangkok')",
       "INSERT INTO products (kind, id, organization_id, name, slug, created_by, updated_by) VALUES ('experience', 'prod-move','org-move','Class','class','user-move','user-move')",
       "INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES ('var-move','org-move','prod-move','Adult','user-move','user-move')",
-      "INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES ('prod-move','org-move',60,4,'business','user-move','user-move')",
+      "INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES ('prod-move','org-move', 'slot',60,4,'business','user-move','user-move')",
       // The branch offers it: a session at a location only takes seats while
       // that location is still selling the product.
       "INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_by, updated_by) VALUES ('org-move','prod-move','loc-move',1,1,'user-move','user-move')",

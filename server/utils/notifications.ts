@@ -850,7 +850,7 @@ export async function notifyOwner(
 
   // Owners and admins hear about every booking; the member it is assigned to hears about theirs.
   const assigned = opts.memberIds === undefined && opts.submissionType === 'booking' && opts.submissionId
-    ? await queryFirst<{ assigned_member_id: string | null }>(db, 'SELECT assigned_member_id FROM bookings WHERE organization_id = ? AND (request_id = ? OR id = ?) LIMIT 1', [opts.organizationId, opts.submissionId, opts.submissionId])
+    ? await queryFirst<{ assigned_member_id: string | null }>(db, 'SELECT c.assigned_member_id FROM bookings b JOIN product_booking_configs c ON c.organization_id = b.organization_id AND c.product_id = b.product_id WHERE b.organization_id = ? AND (b.request_id = ? OR b.id = ?) LIMIT 1', [opts.organizationId, opts.submissionId, opts.submissionId])
     : null
   const recipients = await resolveOwnerRecipients(env, db, {
     organizationId: opts.organizationId,
@@ -1449,7 +1449,7 @@ export async function notifyBookingCreated(
  * the stay rather than its guest conversation.
  */
 async function stayTurnoverAudience(env: NotificationEnv, db: DbClient, organizationId: string, stay: { id: string; product_id: string; arrival_time: string | null }) {
-  const responsible = await queryAll<{ id: string }>(db, `SELECT m.id FROM member m JOIN product_stay_configs c ON c.organization_id = m.organizationId
+  const responsible = await queryAll<{ id: string }>(db, `SELECT m.id FROM member m JOIN product_booking_configs c ON c.organization_id = m.organizationId
     WHERE c.organization_id = ? AND c.product_id = ? AND ${assignedMemberSql('c', 'm.userId')}`, [organizationId, stay.product_id])
   return {
     memberIds: responsible.map(member => member.id),
@@ -1492,8 +1492,9 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
   const named = [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ').trim()
   const guestName = named || `${channel} reservation ${stay.channel_booking_id ?? stay.external_booking_id}`
   const guest: { name: string } | { label: string } = named ? { name: named } : { label: guestName }
-  const homes = await queryAll<{ product_id: string; name: string; location_id: string; check_in_time: string | null; check_out_time: string | null }>(db, `SELECT p.id AS product_id, p.name, c.location_id, c.check_in_time, c.check_out_time
-    FROM products p JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id WHERE p.organization_id = ? AND p.id IN (?, ?)`,
+  const homes = await queryAll<{ product_id: string; name: string; location_id: string; check_in_time: string | null; check_out_time: string | null }>(db, `SELECT p.id AS product_id, p.name, c.location_id, b.check_in_time, b.check_out_time
+    FROM products p JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
+    JOIN product_booking_configs b ON b.organization_id = p.organization_id AND b.product_id = p.id WHERE p.organization_id = ? AND p.id IN (?, ?)`,
   [organizationId, terms.product_id, previous?.product_id ?? terms.product_id])
   const homeOf = (productId: string) => {
     const found = homes.find(home => home.product_id === productId)

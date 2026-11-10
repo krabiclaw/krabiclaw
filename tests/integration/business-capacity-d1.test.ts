@@ -97,7 +97,7 @@ test('live homes are reported to their Stripe meter, drafts and locations are fr
     }
     const manager = (organizationId: string) => ({ organizationId, actorId: OWNER, manage: true as const })
     const home = (organizationId: string, key: string) => createStayHome(env, db, manager(organizationId), stayHomeInput({
-      name: `Home ${key}`, timezone: 'America/Denver', address: `${key} Shore Rd`, city: 'Moab', country: 'US', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1, base_price_minor: 150_00,
+      name: `Home ${key}`, timezone: 'America/Denver', address: `${key} Shore Rd`, city: 'Moab', country: 'US', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1, base_price_minor: 150_00, assigned_member_id: `m-${organizationId}`,
     }), key)
     // Published as the dashboard publishes a home: hosted by the owner, then listed.
     const publish = async (organizationId: string, productId: string) => {
@@ -108,7 +108,7 @@ test('live homes are reported to their Stripe meter, drafts and locations are fr
     const place = (organizationId: string, title: string) => createLocation(env, db, organizationId, { title, timezone: 'America/Denver' }, OWNER)
     const homeAt = (organizationId: string, locationId: string, name: string, published = false) => createProduct(db, { env, organizationId, actor, ...(published ? { publication: { published: true } } : {}), product: {
       kind: 'stay', name, variants: [{ name, prices: [{ unit_amount: 150_00, currency: 'USD' }] }],
-      stay: { location_id: locationId, check_in_time: '15:00', check_out_time: '11:00', max_guests: 2, min_nights: 1, assigned_member_id: null },
+      stay: { location_id: locationId, check_in_time: '15:00', check_out_time: '11:00', max_guests: 2, min_nights: 1, assigned_member_id: `m-${organizationId}` },
     } })
     const reportsFor = (customer: string) => reported.filter(row => row.customer === customer).length
     const activationBoundaryTables = ['products', 'product_publications', 'business_locations', 'activity_entries', 'public_resource_cache_invalidations']

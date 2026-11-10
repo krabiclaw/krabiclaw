@@ -252,11 +252,9 @@ are managed with `list_product_booking_sessions`, `list_product_bookings`,
 authorized members can read and manage their assigned bookings through the shared
 assignment and permission checks. Select a real Session ID from the canonical
 session listing; it includes pending capacity
-and tenant-scoped cross-Product online calendar exclusion. `reassign_product_booking`
-changes a whole session's assigned member after atomic availability checks and
-requires admin/owner access, the current operational timestamp and a caller
-idempotency key. Booking list results
-include `assigned_member_id` and accept that explicit member filter.
+and tenant-scoped cross-Product online calendar exclusion. A booking is handled by
+its product's assigned member (`set_product_booking_config`); booking list results
+include that `assigned_member_id` and accept it as a filter.
 
 Booking list results expose parsed `guest` and `provenance` objects (or null), matching booking detail
 readback.

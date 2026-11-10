@@ -182,7 +182,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   const product = await queryFirst<{ id: string; name: string; order_url: string | null }>(db, `
     SELECT p.id, p.name, p.order_url FROM products p
       JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
-      JOIN product_booking_configs cfg ON cfg.product_id = p.id
+      JOIN product_booking_configs cfg ON cfg.product_id = p.id AND cfg.unit = 'slot'
      WHERE pub.organization_id = ? AND pub.published = 1 AND p.slug = ? AND p.active = 1 LIMIT 1
   `, [organizationId, slug])
   if (!product) return creationResult({ error: 'Product not found' }, { status: 404 })
@@ -435,7 +435,7 @@ export async function createStayBooking(event: H3Event, context: { organizationI
   // A new checkout checks and freezes the answers with the purchase; a retry is
   // held to the purchase it froze, answers included, and does not read the
   // questions again (createPaymentCheckout reads `guest` only for a new checkout).
-  const answers = retrying ? [] : await acceptFormAnswers(db, { kind: 'stay', organizationId, productId: home.product_id }, { locale: typeof body.locale === 'string' ? body.locale : null, answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })
+  const answers = retrying ? [] : await acceptFormAnswers(db, { kind: 'booking', organizationId, productId: home.product_id }, { locale: typeof body.locale === 'string' ? body.locale : null, answers: body.answers, questionsRevision: body.questions_revision, revisionRequired: false })
   const guest = { name: guestName, email: guestEmail, phone, notes, answers }
   // The quote's refusals name the rule a guest's choice breaks; they come before rate limits and payment setup.
   const quoted: StayQuote | null = retrying ? null : await quoteStay(db, organizationId, home, request)

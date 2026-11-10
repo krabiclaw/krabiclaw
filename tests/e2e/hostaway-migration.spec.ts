@@ -25,15 +25,18 @@ test('a host moves unpaid occupancy in batches, reviews manual-only homes and re
   await status(provisioned, 200)
   const active = await page.request.post('/api/auth/organization/set-active', { headers, data: { organizationId } })
   await status(active, 200)
+  const listedMembers = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
+  await status(listedMembers, 200)
+  const ownerMemberId = (await listedMembers.json() as { members: Array<{ id: string; role: string }> }).members.find(member => member.role === 'owner')!.id
   const home = await page.request.post(`/api/dashboard/stay-homes?org=${slug}`, { headers, data: {
     idempotency_key: `migration-home-${slug}`, name: 'Migration 0C', timezone: 'Etc/UTC', address: '12 Example Street', city: 'Denver', state: 'Colorado', country: 'US', zip_code: '80201',
-    check_in_time: '16:00', check_out_time: '11:00', max_guests: 4, min_nights: 1, base_price_minor: 10000,
+    check_in_time: '16:00', check_out_time: '11:00', max_guests: 4, min_nights: 1, base_price_minor: 10000, assigned_member_id: ownerMemberId,
   } })
   await status(home, 201)
   const productId = (await home.json() as { home: { product_id: string } }).home.product_id
   const manualHome = await page.request.post(`/api/dashboard/stay-homes?org=${slug}`, { headers, data: {
     idempotency_key: `migration-manual-home-${slug}`, name: 'Manual closures only', timezone: 'Etc/UTC', address: '14 Example Street', city: 'Denver', state: 'Colorado', country: 'US', zip_code: '80201',
-    check_in_time: '16:00', check_out_time: '11:00', max_guests: 4, min_nights: 1, base_price_minor: 10000,
+    check_in_time: '16:00', check_out_time: '11:00', max_guests: 4, min_nights: 1, base_price_minor: 10000, assigned_member_id: ownerMemberId,
   } })
   await status(manualHome, 201)
   const manualProductId = (await manualHome.json() as { home: { product_id: string } }).home.product_id

@@ -7,7 +7,7 @@ import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
-import { assertResourceAccess, assertAssignedBookingAccess, isOrganizationWideRole, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
+import { assertResourceAccess, assertAssignedBookingAccess, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
 import { renderBookingPolicySummary, visitPolicySummarySource, type RenderedBookingPolicySummary } from '~/server/utils/reservations'
 import type { BookingPolicySummarySource } from '~/server/utils/booking-policy-summary'
 import { freeCancellationUntil, outsideNotice } from '~/shared/availability-settings'
@@ -85,7 +85,6 @@ export interface DashboardBookingDetails {
   assignedMemberName: string | null
   providerConflict: boolean
   /** A future provider occurrence the caller may reassign through Better Auth. */
-  canReassignProvider: boolean
   operationalUpdatedAt: string
   operationalBookingId: string
   type: DashboardRecordType
@@ -196,7 +195,7 @@ async function loadBookingRow(
     FROM requests r
     JOIN organization s ON s.id = r.organization_id
     JOIN (
-      SELECT b.id, b.request_id, b.status, b.party_size, ps.starts_at, ps.ends_at, ps.timezone, ps.location_id, b.product_id, p.name AS product_name, ps.id AS product_session_id, b.assigned_member_id, b.updated_at AS operational_updated_at, NULL AS policy_json, p.kind AS product_kind, p.details_json AS product_details_json, cfg.scheduling_mode, cfg.advance_notice_minutes, ps.status AS session_status, b.no_show_at
+      SELECT b.id, b.request_id, b.status, b.party_size, ps.starts_at, ps.ends_at, ps.timezone, ps.location_id, b.product_id, p.name AS product_name, ps.id AS product_session_id, cfg.assigned_member_id, b.updated_at AS operational_updated_at, NULL AS policy_json, p.kind AS product_kind, p.details_json AS product_details_json, cfg.scheduling_mode, cfg.advance_notice_minutes, ps.status AS session_status, b.no_show_at
         FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id JOIN products p ON p.id = b.product_id
         LEFT JOIN product_booking_configs cfg ON cfg.product_id = b.product_id AND cfg.organization_id = b.organization_id
       UNION ALL
@@ -263,10 +262,7 @@ export async function loadDashboardBookingDetails(
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   await assertBookingAccess(context, row)
   const canReadPayments=await roleAllows({organizationId:context.organization.id,role:context.organization.role,permissions:{payments:['read']}})
-  const canReassignProvider = input.type === 'booking' && row.scheduling_mode === 'provider' && row.session_status === 'scheduled'
-    && ['pending', 'confirmed'].includes(row.status) && row.starts_at > new Date().toISOString() && isOrganizationWideRole(context.organization.role)
-    && await roleAllows({ organizationId: context.organization.id, role: context.organization.role, permissions: { members: ['update'] } })
-  return composeBookingDetails(context.db, row, input.type, { env: context.env, canReadPayments, canReassignProvider })
+  return composeBookingDetails(context.db, row, input.type, { env: context.env, canReadPayments })
 }
 
 /**
@@ -300,7 +296,7 @@ async function composeBookingDetails(
   db: DbClient,
   row: BookingRow,
   type: DashboardBookingType,
-  reader: { env: CloudflareEnv; canReadPayments: boolean; canReassignProvider: boolean; buyerUserId?: undefined } | { buyerUserId: string; env: CloudflareEnv; canReadPayments?: undefined; canReassignProvider?: undefined },
+  reader: { env: CloudflareEnv; canReadPayments: boolean; buyerUserId?: undefined } | { buyerUserId: string; env: CloudflareEnv; canReadPayments?: undefined },
 ): Promise<DashboardBookingDetails> {
   if (row.location_id !== null && !row.location_title) throw new HTTPError({ statusCode: 500, message: 'The booking location is missing its title' })
 
@@ -341,7 +337,6 @@ async function composeBookingDetails(
     && await canRetryGuestVisitRefund(db, { organizationId: row.organization_id, subjectType: type, subjectId: row.operational_id, requestId: row.id, buyerUserId: reader.buyerUserId }))
   return {
     assignedMemberId: row.assigned_member_id, assignedMemberName:provider?.name??null,providerConflict,operationalUpdatedAt:row.operational_updated_at,
-    canReassignProvider: reader.canReassignProvider === true,
     id: row.id,
     operationalBookingId: row.operational_id,
     type,
@@ -419,7 +414,7 @@ export async function requestDashboardBookingChange(
   const threadId = row.id
   const thread = await getGuestRequest(context.db, row.id, row.organization_id, input.type)
   if (!thread) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
-  if (input.type === 'booking') await assertAssignedBookingAccess(context.db, { ...memberAccessPrincipal(context.organization, { env: context.env }), bookingId: row.operational_id, sessionId: 'sessionId' in input.body && typeof input.body.sessionId === 'string' ? input.body.sessionId : undefined })
+  if (input.type === 'booking') await assertAssignedBookingAccess(context.db, { ...memberAccessPrincipal(context.organization, { env: context.env }), bookingId: row.operational_id })
   // `apply` moves it now and tells the guest; otherwise the guest is asked first.
   if ('apply' in input.body && input.body.apply === true) await moveBooking(context.db, context.env, thread, { userId: context.userId }, input.body, input.body.idempotencyKey)
   else await requestBookingChange(context.db, context.env, thread, context.userId, input.body, input.body.idempotencyKey)
@@ -523,7 +518,6 @@ async function composePurchaseDetails(db: DbClient, env: CloudflareEnv, scope: B
   const contact = payment.location_id ? await resolveLocationContact(db, payment.organization_id, payment.location_id) : { contactPhone: payment.contact_phone }
   return {
     assignedMemberId: null, assignedMemberName: null, providerConflict: false, operationalUpdatedAt: payment.updated_at,
-    canReassignProvider: false,
     // A purchase asks no questions.
     answers: [],
     id: paymentId,

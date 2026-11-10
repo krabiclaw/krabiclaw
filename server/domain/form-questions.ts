@@ -17,13 +17,12 @@ import {
 /**
  * Which configuration owns a question collection. Each is an existing
  * configuration record: the organization's inquiry settings, a location's
- * reservation policy, a product's booking setup and a home's stay settings.
+ * reservation policy, and a product's booking setup (a home's included).
  */
 export type FormQuestionOwner =
   | { kind: 'inquiry'; organizationId: string }
   | { kind: 'reservation'; organizationId: string; locationId: string }
   | { kind: 'booking'; organizationId: string; productId: string }
-  | { kind: 'stay'; organizationId: string; productId: string }
 
 /** Where an owner's translated wording lives in its resource localization. */
 export function formQuestionLocalizationField(owner: FormQuestionOwner): { resourceType: 'organization' | 'business_location' | 'product'; resourceId: string; field: string } {
@@ -35,7 +34,6 @@ export function formQuestionLocalizationField(owner: FormQuestionOwner): { resou
 const OWNER_QUERIES: Record<Exclude<FormQuestionOwner['kind'], 'inquiry'>, string> = {
   reservation: 'SELECT questions FROM location_reservation_configs WHERE organization_id = ? AND location_id = ?',
   booking: 'SELECT questions FROM product_booking_configs WHERE organization_id = ? AND product_id = ?',
-  stay: 'SELECT questions FROM product_stay_configs WHERE organization_id = ? AND product_id = ?',
 }
 
 /** The saved collection of one explicitly named owner. An owner that does not exist is not an empty form. */
@@ -47,7 +45,7 @@ export async function readFormQuestions(db: DbClient, owner: FormQuestionOwner):
     return row.questions === null ? [] : parseStoredFormQuestions(row.questions)
   }
   const row = await queryFirst<{ questions: string }>(db, OWNER_QUERIES[owner.kind], [owner.organizationId, owner.kind === 'reservation' ? owner.locationId : owner.productId])
-  if (!row) throw new HTTPError({ statusCode: 404, statusMessage: owner.kind === 'reservation' ? 'Reservation policy not found' : owner.kind === 'booking' ? 'This product does not take bookings' : 'Place to stay not found', data: { code: 'FORM_QUESTIONS_OWNER_NOT_FOUND', field: owner.kind } })
+  if (!row) throw new HTTPError({ statusCode: 404, statusMessage: owner.kind === 'reservation' ? 'Reservation policy not found' : 'This product does not take bookings', data: { code: 'FORM_QUESTIONS_OWNER_NOT_FOUND', field: owner.kind } })
   return parseStoredFormQuestions(row.questions)
 }
 

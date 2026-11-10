@@ -42,7 +42,7 @@ async function boot() {
       await db.prepare('INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, ?, 0)').bind(`m-${id}`, ORG, id, role).run()
     }
     await db.prepare("INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at) VALUES ('cabin', ?, 'cabin', 'Cabin', 'active', 'America/Denver', ?, ?)").bind(ORG, NOW, NOW).run()
-    const home = await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: { kind: 'stay', name: '0C', variants: [{ name: '0C', prices: [{ unit_amount: 15_000, currency: 'USD' }] }], stay: { location_id: 'cabin', check_in_time: '16:00', check_out_time: '11:00', max_guests: 4, min_nights: 2 } } })
+    const home = await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: { kind: 'stay', name: '0C', variants: [{ name: '0C', prices: [{ unit_amount: 15_000, currency: 'USD' }] }], stay: { location_id: 'cabin', check_in_time: '16:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, assigned_member_id: `m-${OWNER}` } } })
     return { runtime, db, env, home }
   } catch (error) { await runtime.dispose(); throw error }
 }

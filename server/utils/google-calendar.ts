@@ -149,16 +149,16 @@ export async function calendarSubjects(db: DbClient, organizationId: string, int
     SELECT 'booking' booking_kind, b.id operational_id, b.request_id,
       CASE WHEN r.kind='booking' AND (${REQUEST_CURRENT_BUYER_SQL}) THEN r.user_id END buyer_user_id, b.status,
       s.starts_at, s.ends_at, s.timezone, json_extract(r.payload_json, '$.guest.name') guest_name, member.name member_name,
-      json_extract(r.payload_json,'$.guest.email') guest_email, member.email member_email, b.assigned_member_id,
+      json_extract(r.payload_json,'$.guest.email') guest_email, member.email member_email, c.assigned_member_id,
       EXISTS(SELECT 1 FROM products p WHERE p.id=b.product_id AND p.organization_id=b.organization_id AND p.kind='service') is_consultation,
       json_array(b.status, s.starts_at, s.ends_at, s.timezone, json_extract(r.payload_json,'$.guest.name'), member.name,
-        json_extract(r.payload_json,'$.guest.email'), member.email, b.assigned_member_id, b.request_id,
+        json_extract(r.payload_json,'$.guest.email'), member.email, c.assigned_member_id, b.request_id,
         CASE WHEN r.kind='booking' AND (${REQUEST_CURRENT_BUYER_SQL}) THEN r.user_id END) revision
     FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id
       JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id
       LEFT JOIN requests r ON r.id=b.request_id AND r.organization_id=b.organization_id
       LEFT JOIN (SELECT m.id, m.organizationId, ${MEMBER_NAME_SQL} name, CASE WHEN u.emailVerified=1 THEN u.email END email FROM member m JOIN user u ON u.id=m.userId
-        LEFT JOIN member_scheduling ms ON ms.member_id=m.id) member ON member.id=b.assigned_member_id AND member.organizationId=b.organization_id
+        LEFT JOIN member_scheduling ms ON ms.member_id=m.id) member ON member.id=c.assigned_member_id AND member.organizationId=b.organization_id
     WHERE b.organization_id=? AND b.status IN ('pending','confirmed')
       AND s.status='scheduled' AND s.ends_at>? AND (? IS NULL OR (?='booking' AND b.id=?))
     UNION ALL

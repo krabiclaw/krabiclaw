@@ -41,7 +41,6 @@ import { assertProductKind, patchProductDetails, validateProductDetails, validat
 import { presentationForProduct, type CatalogCounts } from '~/utils/product-presentation'
 import { resolvePublicTenantOrigin } from '~/server/utils/public-base'
 import { FormQuestionDefinitionError, formQuestionsRevision, normalizeFormQuestionsInput, parseStoredFormQuestions } from '~/shared/form-questions'
-import { prepareFormQuestionsWrite } from '~/server/domain/form-questions'
 
 /** A stored question collection and the revision a form built from it carries. */
 function storedQuestions(value: unknown) {
@@ -265,15 +264,18 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY location_id`, params: [organizationId, ids] },
     { query: `SELECT product_id, collection_id, sort_order FROM collection_products
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY collection_id`, params: [organizationId, ids] },
+    // A session offering's booking; a home's is presented with its stay settings below.
     { query: `SELECT product_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, advance_notice_minutes, questions FROM product_booking_configs
-      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
+      WHERE organization_id = ? AND unit = 'slot' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
       WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
-    { query: `SELECT c.product_id, c.internal_name, c.location_id, c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, c.calendar_rules, c.property_type_group, c.property_type,
+    // How a home is booked is its booking configuration, presented here with what the home is.
+    { query: `SELECT c.product_id, c.internal_name, c.location_id, b.check_in_time, b.check_in_end_time, b.check_out_time, b.default_capacity AS max_guests, b.min_nights, b.calendar_rules, c.property_type_group, c.property_type,
         c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
-        c.cancellation_policy, c.long_term_cancellation_policy, c.assigned_member_id, c.questions, ${liveHomeSql('p')} AS live
+        b.cancellation_policy, b.long_term_cancellation_policy, b.assigned_member_id, b.questions, ${liveHomeSql('p')} AS live
       FROM product_stay_configs c JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
+      JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id AND b.unit = 'nights'
       WHERE c.organization_id = ? AND c.product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
   ], { operation: 'Hydrate products' }), readStayPhotoRooms(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id)), readStayHomeAccessibility(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id))])
   const rowsAt = (index: number): Row[] => (batched[index] as { results?: Row[] })?.results ?? []
@@ -1039,6 +1041,33 @@ async function planProduct(
   }
 }
 
+/** A home's stay settings that are how it is booked: its booking configuration's, unit nights. */
+const STAY_BOOKING_FIELDS = ['check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'cancellation_policy', 'long_term_cancellation_policy', 'assigned_member_id', 'questions'] as const
+
+/**
+ * A home's booking settings, through the one booking-configuration writer, in
+ * its product's own batch: all of them when the home is created, the ones an
+ * edit names otherwise.
+ */
+async function stayBookingWrites(db: DbClient, input: {
+  organizationId: string; planned: PlannedProduct; actorId: string; env?: CloudflareEnv
+  /** Absent on creation; an edit's named stay fields, with the questions as sent and the revision they replace. */
+  edit?: { fields: readonly string[]; questions?: unknown; expectedQuestionsRevision?: unknown }
+}): Promise<BatchQuery[]> {
+  const stay = input.planned.stay
+  if (!stay) return []
+  const named = (field: typeof STAY_BOOKING_FIELDS[number]) => !input.edit || input.edit.fields.includes(field)
+  if (input.edit && !STAY_BOOKING_FIELDS.some(named)) return []
+  const { NIGHTS_BOOKING_FIELDS, prepareProductBookingConfig } = await import('~/server/utils/availability')
+  const patch: Parameters<typeof prepareProductBookingConfig>[1]['patch'] = {}
+  for (const field of NIGHTS_BOOKING_FIELDS) if (named(field)) Object.assign(patch, { [field]: stay[field] })
+  if (named('max_guests')) patch.default_capacity = stay.max_guests
+  if (named('assigned_member_id')) patch.assigned_member_id = stay.assigned_member_id
+  if (input.edit?.fields.includes('questions')) Object.assign(patch, { questions: input.edit.questions, expected_questions_revision: input.edit.expectedQuestionsRevision })
+  else if (!input.edit && stay.questions.length) Object.assign(patch, { questions: stay.questions, expected_questions_revision: formQuestionsRevision([]) })
+  return (await prepareProductBookingConfig(db, { organizationId: input.organizationId, productId: input.planned.id, actorId: input.actorId, env: input.env, productInSameBatch: !input.edit, productKind: 'stay', patch })).queries
+}
+
 /**
  * Build the writes for one product's rows.
  *
@@ -1079,11 +1108,11 @@ function productWrites(
 
   // Stay settings are written when created or when an edit names them, so an
   // unrelated save never restates settings someone else changed.
-  if (planned.stay && (options.stayFields === undefined || options.stayFields.length)) {
+  if (planned.stay && (options.stayFields === undefined || options.stayFields.some(field => !(STAY_BOOKING_FIELDS as readonly string[]).includes(field)))) {
     const columns = [
-      'internal_name', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'property_type_group', 'property_type',
+      'internal_name', 'property_type_group', 'property_type',
       'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit',
-      'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy', 'assigned_member_id', 'questions',
+      'bedrooms', 'beds', 'bathrooms', 'amenities',
     ] as const satisfies readonly (keyof ProductStayConfig)[]
     const assignments = columns.filter(column => options.stayFields === undefined || options.stayFields.includes(column) || (column === 'amenities' && options.stayFields.includes('amenity_answers')))
       .map(column => `${column} = excluded.${column}`)
@@ -1096,30 +1125,17 @@ function productWrites(
                VALUES (?, ?, ?, 1, 1, ?, ?, ?, ?) ON CONFLICT (product_id, location_id) DO NOTHING`,
       params: [organizationId, planned.id, planned.stay.location_id, now, now, actor.actorId, actor.actorId],
     }, {
-      query: `INSERT INTO product_stay_configs (product_id, organization_id, internal_name, location_id, check_in_time, check_in_end_time, check_out_time, max_guests, min_nights, calendar_rules,
+      query: `INSERT INTO product_stay_configs (product_id, organization_id, internal_name, location_id,
                  property_type_group, property_type, listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit,
-                 bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, questions, created_at, updated_at, created_by, updated_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 bedrooms, beds, bathrooms, amenities, created_at, updated_at, created_by, updated_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (product_id) DO UPDATE SET ${[...assignments, 'updated_at = excluded.updated_at', 'updated_by = excluded.updated_by'].join(', ')}
                WHERE product_stay_configs.organization_id = excluded.organization_id AND product_stay_configs.location_id = excluded.location_id`,
-      params: [planned.id, organizationId, planned.stay.internal_name, planned.stay.location_id, planned.stay.check_in_time, planned.stay.check_in_end_time, planned.stay.check_out_time,
-        planned.stay.max_guests, planned.stay.min_nights, planned.stay.calendar_rules === null ? null : JSON.stringify(planned.stay.calendar_rules), planned.stay.property_type_group, planned.stay.property_type,
+      params: [planned.id, organizationId, planned.stay.internal_name, planned.stay.location_id, planned.stay.property_type_group, planned.stay.property_type,
         planned.stay.listing_type, planned.stay.total_floors, planned.stay.listing_floor, planned.stay.year_built, planned.stay.property_size, planned.stay.property_size_unit,
         planned.stay.bedrooms, planned.stay.beds, planned.stay.bathrooms,
-        JSON.stringify(planned.stay.amenity_answers), planned.stay.cancellation_policy, planned.stay.long_term_cancellation_policy,
-        planned.stay.assigned_member_id, JSON.stringify(planned.stay.questions), now, now, actor.actorId, actor.actorId],
+        JSON.stringify(planned.stay.amenity_answers), now, now, actor.actorId, actor.actorId],
     })
-    if (upsert && (options.stayFields === undefined || options.stayFields.includes('assigned_member_id'))) {
-      // The home's open cleaning jobs are its assignee's: a new assignee takes them over. A save that
-      // restates the same assignee leaves a job's own assignment alone, so this runs before the home is written.
-      writes.splice(writes.length - 1, 0, {
-        query: `UPDATE tasks SET assigned_member_id = ?, version = version + 1, updated_at = ?
-          WHERE organization_id = ? AND product_id = ? AND status = 'open' AND kind IN ('turnover', 'stay_ready') AND assigned_member_id IS NOT ?
-            AND EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = ? AND c.product_id = ? AND c.assigned_member_id IS NOT ?)`,
-        params: [planned.stay.assigned_member_id, now, organizationId, planned.id, planned.stay.assigned_member_id,
-          organizationId, planned.id, planned.stay.assigned_member_id],
-      })
-    }
     if (upsert && (options.stayFields === undefined || options.stayFields.includes('amenities') || options.stayFields.includes('amenity_answers'))) {
       // A removed listing fact cannot retain room references. Invalidate every
       // affected room draft before deleting the references in this same batch.
@@ -1300,7 +1316,7 @@ export async function createProduct(db: DbClient, input: {
     const planned = await planProduct(db, input.organizationId, product, { organizationId: input.organizationId })
     assertVariantPricesConsistent(planned)
     const now = new Date().toISOString()
-    const writes = productWrites(input.organizationId, planned, input.actor, now, 'insert')
+    const writes = [...productWrites(input.organizationId, planned, input.actor, now, 'insert'), ...await stayBookingWrites(db, { organizationId: input.organizationId, planned, actorId: input.actor.actorId, env })]
     if (input.booking) {
       await assertBookableOffering(db, input.organizationId, planned, input.booking.data.location_id)
       const { prepareProductBookingSetup } = await import('~/server/utils/availability')
@@ -1447,7 +1463,7 @@ export async function planProductCreateWrites(db: DbClient, input: {
     const planned = await planProduct(db, input.organizationId, product, { organizationId: input.organizationId, defaultCurrency, takenSlugs: taken, knownSlugs, idOwners })
     assertVariantPricesConsistent(planned)
     if (input.publication?.published && planned.kind === 'experience' && !planned.order_url) invalid('Create experiences with booking details before publishing them')
-    queries.push(...productWrites(input.organizationId, planned, input.actor, input.now, 'insert'))
+    queries.push(...productWrites(input.organizationId, planned, input.actor, input.now, 'insert'), ...await stayBookingWrites(db, { organizationId: input.organizationId, planned, actorId: input.actor.actorId, env: input.env }))
     const page = await prepareProductPageCreate(db, { ...input, product: planned, takenPaths })
     if (page) {
       queries.push(...page.queries)
@@ -1556,7 +1572,7 @@ async function planProductUpdate(db: DbClient, input: {
   cacheInvalidations: BatchQuery[]
 }): Promise<{ writes: BatchQuery[]; keptVariants: string; product: PlannedProduct; airbnbSettings: AirbnbSettingSections | null; changedFields: string[]; updatedAt: string }> {
   const { current, organizationId } = input
-  let { patch } = input
+  const { patch } = input
   if ('slug' in patch && patch.slug !== undefined && patch.slug !== current.slug) invalid('A product keeps its saved slug')
   if (patch.expected_updated_at !== undefined) {
     if (typeof patch.expected_updated_at !== 'string' || !Number.isFinite(Date.parse(patch.expected_updated_at))) invalid('expected_updated_at must be the Product updated_at value from the latest read')
@@ -1564,12 +1580,7 @@ async function planProductUpdate(db: DbClient, input: {
   }
   if (patch.stay && Object.hasOwn(patch.stay, 'accessibility')) invalid('Use the home accessibility operation to author accessibility information')
   if (patch.stay?.expected_questions_revision !== undefined && patch.stay.questions === undefined) invalidStayField('expected_questions_revision', 'stay.expected_questions_revision is only sent with stay.questions')
-  // A home's questions are replaced whole, against the revision the caller read.
-  if (patch.stay?.questions !== undefined) {
-    if (!current.stay) invalid('Only a place to stay takes stay settings')
-    const { expected_questions_revision: expectedRevision, ...stayPatch } = patch.stay
-    patch = { ...patch, stay: { ...stayPatch, questions: prepareFormQuestionsWrite(current.stay.questions, { questions: patch.stay.questions, expectedRevision }) } }
-  }
+  if (patch.stay?.questions !== undefined && !current.stay) invalid('Only a place to stay takes stay settings')
   const previousUpdate = Date.parse(current.updated_at)
   const requestedUpdate = Date.parse(input.now)
   if (!Number.isFinite(previousUpdate) || !Number.isFinite(requestedUpdate)) throw new Error('The Product update timestamp is invalid')
@@ -1682,6 +1693,9 @@ async function planProductUpdate(db: DbClient, input: {
       // A narrow edit still restates the Product it read, including its details.
       expectedUpdatedAt: current.updated_at,
     }),
+    // A home's questions are replaced whole by the booking writer, against the revision the caller read.
+    ...await stayBookingWrites(db, { organizationId, planned, actorId: input.actor.actorId, env: input.env,
+      edit: { fields: Object.keys(patch.stay ?? {}), questions: patch.stay?.questions, expectedQuestionsRevision: patch.stay?.expected_questions_revision } }),
   ] : [{
     // An unchanged save still names the Product it read, but must not
     // replace its revision, editor or child rows merely to check that fact.
@@ -2561,7 +2575,7 @@ async function planProductReconciliation(db: DbClient, input: {
     })
     assertVariantPricesConsistent(planned)
     plannedProducts.push(planned)
-    const creates = productWrites(input.organizationId, planned, input.actor, now, 'insert')
+    const creates = [...productWrites(input.organizationId, planned, input.actor, now, 'insert'), ...await stayBookingWrites(db, { organizationId: input.organizationId, planned, actorId: input.actor.actorId, env: input.env })]
     // The site that reconciles its catalog carries what the reconcile creates,
     // withheld until someone publishes it — the same rule batch creation
     // follows, and what makes "missing from this site's import" answerable.

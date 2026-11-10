@@ -841,7 +841,6 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   set_member_busy_calendars: D,
   get_member_public_profile: R,
   update_member_public_profile: { ...D, openWorldHint: true },
-  reassign_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
   get_payment_summary: R,
   list_payments: R,
   get_payment: R,

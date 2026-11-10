@@ -38,7 +38,7 @@ export default defineScheduledTask({
     const after = await env.ORGANIZATION_CACHE.get(CURSOR_KEY)
     const products = await queryAll<BookableProduct>(env.DB, `
       SELECT product_id, organization_id FROM product_booking_configs
-       WHERE product_id > ? ORDER BY product_id LIMIT ?
+       WHERE unit = 'slot' AND product_id > ? ORDER BY product_id LIMIT ?
     `, [after ?? '', PRODUCTS_PER_RUN + 1])
 
     // The window the public page asks for, in UTC calendar days: each rule

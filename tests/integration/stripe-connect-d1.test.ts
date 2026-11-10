@@ -157,7 +157,7 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
     const free = await createProduct(db, { organizationId: 'org', actor: { actorId: 'owner' }, env,
       product: { kind: 'experience', name: 'Free Studio Tour', variants: [{ name: 'Default', prices: [{ currency: 'USD', unit_amount: 0 }] }] } })
     for (const product of [paid, free]) await setProductBookingConfig(db, { organizationId: 'org', productId: product.id, actorId: 'owner', env,
-      patch: { duration_minutes: 120, default_capacity: 8, confirmation_mode: 'instant', online_payment_required: false } })
+      patch: { duration_minutes: 120, default_capacity: 8, confirmation_mode: 'instant', online_payment_required: false, assigned_member_id: 'm-owner' } })
     const membership = await resolveMembership(env, { organizationId: 'org', userId: 'owner' })
     assert.ok(membership)
     const principal = memberAccessPrincipal(membership, { env })
@@ -276,8 +276,7 @@ test('Stripe onboarding recommendations follow real account readiness and clear 
 
       const catalogCards = async () => (await listOpportunities(db, principal)).opportunities
         .filter(item => item.productId === paid.id && item.statusLine === 'Catalog').map(item => item.path)
-      assert.deepEqual(await catalogCards(), [`${editor}/booking/assignment`])
-      await setProductBookingConfig(db, { organizationId: 'org', productId: paid.id, actorId: 'owner', env, patch: { assigned_member_id: 'm-owner' } })
+      // Every offering has its host; the card asks for the host's public profile.
       assert.deepEqual(await catalogCards(), ['/dashboard/cliff/team/m-owner/profile'])
       await writeMemberScheduling({ env, organizationId: 'org', userId: 'owner' }, 'm-owner', { expected_updated_at: null, public_name: 'Wheel class host', public_approved: true })
       assert.deepEqual(await catalogCards(), [`${editor}/locations`])

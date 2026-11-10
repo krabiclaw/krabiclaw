@@ -30,8 +30,9 @@ async function buyerActivityRows(db:DbClient,userId:string) {
  ])
  // A stay runs from check-in to checkout at the home's own times, where the home is.
  const stays=(await queryAll<Omit<ActivityRow,'kind'|'starts_at'|'ends_at'>&{check_in_date:string;check_out_date:string;check_in_time:string|null;check_out_time:string|null}>(db,`SELECT COALESCE(r.id,s.id) id,r.id request_id,s.id operational_id,s.organization_id,o.name organization_name,o.slug organization_slug,p.name title,s.status,
-   s.check_in_date,s.check_out_date,c.check_in_time,c.check_out_time,l.timezone,s.created_at,c.location_id,l.title location_title,s.product_id,s.adults+s.children party_size
+   s.check_in_date,s.check_out_date,b.check_in_time,b.check_out_time,l.timezone,s.created_at,c.location_id,l.title location_title,s.product_id,s.adults+s.children party_size
   FROM stays s JOIN organization o ON o.id=s.organization_id JOIN product_stay_configs c ON c.organization_id=s.organization_id AND c.product_id=s.product_id
+  JOIN product_booking_configs b ON b.organization_id=s.organization_id AND b.product_id=s.product_id
   JOIN products p ON p.organization_id=s.organization_id AND p.id=s.product_id JOIN business_locations l ON l.organization_id=c.organization_id AND l.id=c.location_id
   LEFT JOIN requests r ON r.id=s.request_id AND r.organization_id=s.organization_id AND r.kind='stay' AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL}
   WHERE s.user_id=? AND s.owner='app'`,[userId,userId])).map(({check_in_date,check_out_date,check_in_time,check_out_time,...row}):ActivityRow=>({...row,kind:'stay',

@@ -5,15 +5,15 @@ export interface BookingChangeState { status: BookingChangeStatus; decisionId: s
 
 /** Compare the immutable source shown to the client with its current canonical record. */
 function sourceMatchesSql(proposal: string, owner: string): string {
-  const recorded = ['recordKind', 'assignedMemberId', 'sessionId', 'operationalUpdatedAt', 'recordId', 'status', 'partySize', 'startsAt', 'endsAt', 'timezone', 'locationId', 'productId', 'partySizeIsMinimum', 'notes', 'guest.name', 'guest.email', 'guest.phone']
+  const recorded = ['recordKind', 'sessionId', 'operationalUpdatedAt', 'recordId', 'status', 'partySize', 'startsAt', 'endsAt', 'timezone', 'locationId', 'productId', 'partySizeIsMinimum', 'notes', 'guest.name', 'guest.email', 'guest.phone']
     .map(field => `json_extract(${proposal}.payload_json,'$.before.${field}')`).join(',')
   const guest = ['party_size_is_minimum', 'notes', 'guest.name', 'guest.email', 'guest.phone'].map(field => `json_extract(${owner}.payload_json,'$.${field}')`).join(',')
   return `(EXISTS (SELECT 1 FROM bookings b
       JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id AND s.product_id=b.product_id
       WHERE b.request_id=${owner}.id AND b.organization_id=${owner}.organization_id AND ${owner}.kind='booking'
-        AND json_array('booking',b.assigned_member_id,b.product_session_id,b.updated_at,b.id,b.status,b.party_size,s.starts_at,s.ends_at,s.timezone,s.location_id,b.product_id,${guest})=json_array(${recorded}))
+        AND json_array('booking',b.product_session_id,b.updated_at,b.id,b.status,b.party_size,s.starts_at,s.ends_at,s.timezone,s.location_id,b.product_id,${guest})=json_array(${recorded}))
     OR EXISTS (SELECT 1 FROM reservations v WHERE v.request_id=${owner}.id AND v.organization_id=${owner}.organization_id AND ${owner}.kind='reservation'
-        AND json_array('reservation',NULL,NULL,NULL,v.id,v.status,v.party_size,v.starts_at,v.ends_at,v.timezone,v.location_id,NULL,${guest})=json_array(${recorded})))`
+        AND json_array('reservation',NULL,NULL,v.id,v.status,v.party_size,v.starts_at,v.ends_at,v.timezone,v.location_id,NULL,${guest})=json_array(${recorded})))`
 }
 
 /**

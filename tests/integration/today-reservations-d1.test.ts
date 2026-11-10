@@ -86,7 +86,7 @@ async function offering(db: D1Database, env: CloudflareEnv, org: Org, input: { k
   if (input.kind === 'service') await db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, public_name, public_approved, timezone, weekly_json, time_off_json, updated_at, updated_by)
     VALUES (?, ?, 'Attorney Owner', 1, ?, ?, '[]', ?, ?) ON CONFLICT DO NOTHING`).bind(`${org}-owner`, org, ZONE, JSON.stringify([0, 1, 2, 3, 4, 5, 6].map(weekday => ({ weekday, start: '00:00', end: '23:59' }))), new Date().toISOString(), OWNER).run()
   await setProductBookingConfig(db, { organizationId: org, productId: product.id, actorId: OWNER, env, patch: { duration_minutes: 60, default_capacity: 6, confirmation_mode: 'instant',
-    ...(input.kind === 'service' ? { scheduling_mode: 'provider', assigned_member_id: `${org}-owner` } : { scheduling_mode: 'business' }) } })
+    ...(input.kind === 'service' ? { scheduling_mode: 'provider', assigned_member_id: `${org}-owner` } : { scheduling_mode: 'business', assigned_member_id: `${org}-owner` }) } })
   await db.prepare('INSERT INTO product_publications (organization_id, product_id, published, created_by, updated_by) VALUES (?, ?, 1, ?, ?)').bind(org, product.id, OWNER, OWNER).run()
   const startsAt = localDateTimeToInstant(input.day, '10:00', ZONE, 'compatible').toISOString()
   const [session] = await createSession(db, { env, organizationId: org, productId: product.id, locationId: `${org}-site`, startsAt, endsAt: new Date(Date.parse(startsAt) + 3_600_000).toISOString(), actorId: OWNER, idempotencyKey: `${product.id}-session` })
@@ -123,7 +123,7 @@ test('Today shows every booking type as a reservation card for its own business,
     const manager: StayAccess = { organizationId: 'inn', actorId: OWNER, manage: true }
     const home = await createProduct(db, { env, organizationId: 'inn', actor: { actorId: OWNER }, product: {
       kind: 'stay', name: 'Seaview Cottage', variants: [{ name: 'Night', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
-      stay: { location_id: 'inn-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: null },
+      stay: { location_id: 'inn-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: 'inn-owner' },
     } })
     const directions = 'Take the coast road past the lighthouse; the cottage is the blue door.'
     await updateStayHome(env, db, manager, home.id, { directions, wifi_network: 'Seaview', wifi_password: 'saltwater' })

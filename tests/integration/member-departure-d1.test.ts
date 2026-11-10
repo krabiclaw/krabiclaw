@@ -91,7 +91,7 @@ test('every way a member leaves clears their homes and locations and publishes a
         VALUES (?, ?, ?, ?, 'active', 'America/Denver', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`).bind(`site-${person}`, ORG, `site-${person}`, `Site ${person}`).run()
       const home = await createProduct(db, { env, organizationId: ORG, actor: { actorId: 'owner' }, product: {
         kind: 'stay', name: `Home ${person}`, variants: [{ name: `Home ${person}`, prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
-        stay: { location_id: `site-${person}`, check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null },
+        stay: { location_id: `site-${person}`, check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: 'm-owner' },
       } })
       homes[person] = home.id
       await updateStayHome(env, db, manager, home.id, { assigned_member_id: `m-${person}` })

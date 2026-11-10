@@ -34,6 +34,10 @@
             <p v-if="locationsError" role="alert" class="text-error">{{ getErrorMessage(locationsError, 'Locations could not be loaded') }}</p>
             <USelect v-else v-model="form.stay_location_id" :items="creationLocations" placeholder="Choose a location" class="w-full" />
           </UFormField>
+          <UFormField label="Looked after by" required>
+            <p v-if="schedulingMembersError" role="alert" class="text-error">{{ getErrorMessage(schedulingMembersError, 'Team members could not be loaded') }}</p>
+            <USelect v-else v-model="stayMemberChoice" :items="creationMembers" placeholder="Choose a team member" class="w-full" />
+          </UFormField>
           <div class="grid gap-6 sm:grid-cols-2">
             <UFormField label="Check-in from"><UInput v-model="form.check_in_time" type="time" class="w-full" /></UFormField>
             <UFormField label="Check-in until"><StayCheckInEndSelect v-model="form.check_in_end_time" /></UFormField>
@@ -886,6 +890,8 @@ onUnmounted(() => {
 const creationKind = computed({ get: () => form.kind || undefined, set: value => { form.kind = value ?? '' } })
 const creationKinds = PRODUCT_KINDS.map(value => ({ value, label: PRODUCT_KIND_LABELS[value], icon: PRODUCT_KIND_ICONS[value] }))
 const creationLocations = computed(() => organizationLocations.value.map(entry => ({ label: entry.title, value: entry.id })))
+const creationMembers = computed(() => (schedulingMembers.value?.members ?? []).map(member => ({ label: member.name, value: member.id })))
+const stayMemberChoice = computed({ get: () => form.stay_member_id ?? undefined, set: (value: string | undefined) => { form.stay_member_id = value ?? null } })
 const creationDescriptionLabel = computed(() => form.kind === 'experience' ? 'What you’ll do' : form.kind === 'service' ? 'Short description' : 'Description')
 const creationPriceError = computed(() => {
   if (!creationPrice.value.trim()) return null
@@ -1047,15 +1053,16 @@ const sectionValid = computed(() => {
     const invalidBaths = ba !== null && (ba < 0 || ba > 50 || (ba * 2) % 1 !== 0)
     return !invalidBedrooms && !invalidBeds && !invalidBaths
   }
-  if (editorKey.value === 'team') return true
+  // Every home has the member who looks after it.
+  if (editorKey.value === 'team') return Boolean(form.stay_member_id)
   return true
 })
 
-/** A place to stay is created at a location, with arrival and departure times and how many it sleeps. */
+/** A place to stay is created at a location, with arrival and departure times, how many it sleeps and who looks after it. */
 function stayIncomplete(): boolean {
   const guests = Number(form.max_guests)
   const nights = Number(form.min_nights)
-  return !form.internal_name.trim() || !form.stay_location_id || !checkInWindowValid()
+  return !form.internal_name.trim() || !form.stay_location_id || !form.stay_member_id || !checkInWindowValid()
     || !Number.isInteger(guests) || guests < 1 || guests > 99 || !Number.isInteger(nights) || nights < 1 || nights > MAX_STAY_NIGHTS
 }
 /** Start and checkout are times; the end is a time other than the start, or empty for a flexible end. */
@@ -1631,7 +1638,7 @@ async function commit(concern?: ProductConcern) {
   const id = locationId.value
   const removesOnlineScope = locationScope.value === 'online' && (concern === 'location' && !form.held_online || concern === 'enabled' && !form.bookable)
   let ordinaryDraft: { version: string | null; values: ProductForm } | null = null
-  const bookingDraft: Partial<ProductForm> | null = concern === 'enabled' ? { bookable: form.bookable, ...(legalEditor.value && form.bookable ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id } : {}) }
+  const bookingDraft: Partial<ProductForm> | null = concern === 'enabled' ? { bookable: form.bookable, ...(form.bookable ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id } : {}) }
     : concern === 'duration' ? { booking_duration: form.booking_duration }
     : concern === 'capacity' ? { booking_capacity: form.booking_capacity }
     : concern === 'confirmation' ? { confirmation_mode: form.confirmation_mode }
@@ -1851,7 +1858,8 @@ async function saveBooking(concern: BookingConcern) {
     return
   }
   const body = concern === 'duration' ? { duration_minutes: Number(form.booking_duration) }
-    : concern === 'enabled' && legalEditor.value ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id }
+    // Turning bookings on names who handles them.
+    : concern === 'enabled' ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id }
     : concern === 'capacity' ? { default_capacity: form.booking_capacity.trim() ? Number(form.booking_capacity) : null }
     : concern === 'confirmation' ? { confirmation_mode: form.confirmation_mode }
     : concern === 'notice' ? { advance_notice_minutes: form.advance_notice_minutes }

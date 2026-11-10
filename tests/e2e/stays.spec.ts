@@ -63,6 +63,12 @@ async function createStayHome(page: Page, baseURL: string, selectDifferentLocati
   await expectStatus(provisioned, 200)
   expect((await request.post(`${baseURL}/api/auth/organization/set-active`, { headers, data: { organizationId } })).status()).toBe(200)
   const call = <T>(name: string, args: Record<string, unknown>) => tool<T>(request, baseURL, organizationId, name, args)
+  // The host who creates the home looks after it until they give it to someone else.
+  const listedMembers = await request.get(`${baseURL}/api/auth/organization/list-members`, { params: { organizationId } })
+  await expectStatus(listedMembers, 200)
+  const owner = (await listedMembers.json() as { members: Array<{ id: string; role: string; user: { name: string } }> }).members.find(member => member.role === 'owner')!
+  const ownerMemberId = owner.id
+  const ownerName = owner.user.name
   const locations = await call<{ locations: Array<{ id: string; title: string }> }>('list_locations', {})
   const entryLocation = locations.data!.locations[0]!
   expect(entryLocation).toBeTruthy()
@@ -90,6 +96,8 @@ async function createStayHome(page: Page, baseURL: string, selectDifferentLocati
   await page.getByRole('textbox', { name: 'Listing title', exact: true }).fill('Cliff Cabin')
   await page.getByRole('textbox', { name: 'Sleeps' }).fill('4')
   await page.getByRole('textbox', { name: 'Minimum nights' }).fill('2')
+  await page.getByRole('combobox', { name: 'Looked after by*', exact: true }).click()
+  await page.getByRole('option', { name: ownerName, exact: true }).click()
   const creation = page.waitForResponse(response => response.request().method() === 'POST'
     && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products`)
   await page.locator('#dashboard-panel-product').getByRole('button', { name: 'Create place to stay', exact: true }).click()
@@ -106,7 +114,7 @@ async function createStayHome(page: Page, baseURL: string, selectDifferentLocati
   expect(home.error).toBeNull()
   expect(home.data!.product).toMatchObject({ kind: 'stay', unit_label: 'night', stay: { internal_name: internalName, location_id: location.id, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, ...unknownPropertyFacts } })
   const api = (path: string) => `${baseURL}/api/dashboard/${path}${path.includes('?') ? '&' : '?'}org=${encodeURIComponent(slug)}`
-  return { request, headers, slug, organizationId, location, homeAddress, call, api, productId, unknownPropertyFacts, home }
+  return { request, headers, slug, organizationId, location, homeAddress, call, api, productId, unknownPropertyFacts, home, ownerMemberId, ownerName }
 }
 
 // The editor's View mode wraps the real guest page in one iframe.
@@ -357,7 +365,7 @@ test('a home keeps its operator name independent from its public title across CM
 test('a responsible home member reads its stays as turnovers on every surface until the host unassigns them', async ({ page, browser, baseURL }) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Home responsibility uses disposable local data only')
-  const { headers, slug, organizationId, call, api, productId } = await createStayHome(page, baseURL!)
+  const { headers, slug, organizationId, call, api, productId, ownerMemberId, ownerName } = await createStayHome(page, baseURL!)
   const memberContext = await browser.newContext({ baseURL })
   try {
     await loginAs(memberContext.request, baseURL!, 'user-e2e-lodging-native')
@@ -372,7 +380,8 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const memberName = (await memberSession.json() as { user: { name: string } }).user.name
     await page.goto(`/dashboard/${slug}/products/${productId}/team`)
     const responsibility = page.locator('#dashboard-panel-product-team')
-    await expect(responsibility.getByRole('radio', { name: 'Unassigned No person is assigned.', exact: true })).toBeChecked()
+    await expect(responsibility.getByRole('radio', { name: ownerName, exact: true })).toBeChecked()
+    await expect(responsibility.getByRole('radio', { name: 'Unassigned No person is assigned.', exact: true })).toBeDisabled()
     await responsibility.getByRole('radio', { name: memberName, exact: true }).check()
     const assigned = page.waitForResponse(response => response.request().method() === 'PATCH'
       && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${productId}`)
@@ -515,7 +524,8 @@ test('a responsible home member reads its stays as turnovers on every surface un
     await expect(page.locator('#dashboard-panel-stay-move').getByText('You have no other homes to move this guest to.', { exact: true })).toBeVisible()
     await expect(page.locator('#dashboard-panel-stay-move').getByRole('button', { name: 'Move guest', exact: true })).toBeDisabled()
 
-    const removed = await page.request.patch(`/api/editor/organizations/${organizationId}/products/${productId}`, { data: { stay: { assigned_member_id: null } } })
+    // Handing the home back to its owner takes it away from the member.
+    const removed = await page.request.patch(`/api/editor/organizations/${organizationId}/products/${productId}`, { data: { stay: { assigned_member_id: ownerMemberId } } })
     await expectStatus(removed, 200)
     await expectStatus(await memberContext.request.get(stayPath), 404)
     const homes = await memberContext.request.get(api('stay-homes'))
@@ -1155,7 +1165,7 @@ test('a host edits each description section through its own leaf and resolves a 
 test('a host saves cancellation policies, guests, minimum nights and arrival times as separate concerns', async ({ page, baseURL }) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
-  const { request, slug, organizationId, location, homeAddress, call, api, productId } = await describedStayHome(page, baseURL!)
+  const { request, slug, organizationId, location, homeAddress, call, api, productId, ownerMemberId } = await describedStayHome(page, baseURL!)
   expect((await call('update_product', { product_id: productId, description: listingDescription })).error).toBeNull()
   await page.goto(`/dashboard/${slug}/products/${productId}`)
   await test.step('the two cancellation periods keep their own policy', async () => {
@@ -1255,7 +1265,7 @@ test('a host saves cancellation policies, guests, minimum nights and arrival tim
     expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
       product_id: productId, product_updated_at: settingsRead.data!.product.updated_at, name: 'Cliff Cabin', internal_name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
       // A home the editor creates has a flexible check-in end until the host chooses one.
-      check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 6, min_nights: 1, calendar_rules: null, assigned_member_id: null, channel: null,
+      check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 6, min_nights: 1, calendar_rules: null, assigned_member_id: ownerMemberId, channel: null,
       check_in_instructions: null, photos: [], photo_rooms: [],
       // The editor's listing choices persist through the native home projection too.
       description: listingDescription, published: false, live: false, airbnb_listing_id: null, airbnb_editor_url: null, address: homeAddress, latitude: null, longitude: null, stay_map_sharing: 'general',
@@ -3229,7 +3239,7 @@ test('native MCP room tools author the same room identities and selected-photo c
 test('a host lists, pauses and unlists a priced place to stay', async ({ page, browser, baseURL }) => {
   test.setTimeout(240_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
-  const { request, headers, slug, organizationId, location, call, productId } = await createStayHome(page, baseURL!)
+  const { request, headers, slug, organizationId, location, call, productId, ownerMemberId } = await createStayHome(page, baseURL!)
   const sitePages = await call<{ built_in_pages: Array<{ path: string }>; pages: Array<{ id: string; path: string }> }>('list_site_pages', {})
   expect(sitePages.error).toBeNull()
   expect(sitePages.data!.built_in_pages.map(item => item.path)).toContain('/stays')
@@ -3283,7 +3293,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   expect(JSON.parse(userIdAssignment.error!)).toMatchObject({ status: 422, code: 'INVALID_RESPONSIBILITY', message: 'The responsible member must belong to this organization' })
   const unchangedAssignment = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${productId}`)
   await expectStatus(unchangedAssignment, 200)
-  expect((await unchangedAssignment.json()).product.stay).toMatchObject({ assigned_member_id: null })
+  expect((await unchangedAssignment.json()).product.stay).toMatchObject({ assigned_member_id: ownerMemberId })
   const hosted = await call<{ product: Product }>('update_product', { product_id: productId, stay: { assigned_member_id: host.memberId } })
   expect(hosted.error).toBeNull()
   expect(hosted.data!.product.stay).toMatchObject({ assigned_member_id: host.memberId })
@@ -3815,17 +3825,21 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
     const accepted = await cleaner.request.post(`/api/invite-links/${encodeURIComponent(token)}/accept`, { data: {} })
     await expectStatus(accepted, 200)
     const memberId = (await accepted.json() as { memberId: string }).memberId
+    const listedMembers = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
+    await expectStatus(listedMembers, 200)
+    const ownerMemberId = (await listedMembers.json() as { members: Array<{ id: string; role: string }> }).members.find(member => member.role === 'owner')!.id
     const locations = await call<{ locations: Array<{ id: string }> }>('list_locations', {})
     expect(locations.error).toBeNull()
     expect(locations.data!.locations).toHaveLength(1)
+    // Every home is looked after by someone: both start with the host, and the first is given to the member below.
     const madeHome = await page.request.post(api('stay-homes'), { data: { name: 'Assigned Cabin', timezone: TIME_ZONE, address: '1 Test Road', city: 'Krabi', country: 'TH',
       state: null, zip_code: null, phone: null, email: null, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1,
-      base_price_minor: 320_000, idempotency_key: crypto.randomUUID() } })
+      base_price_minor: 320_000, assigned_member_id: ownerMemberId, idempotency_key: crypto.randomUUID() } })
     await expectStatus(madeHome, 201)
     const assignedHome = (await madeHome.json() as { home: { product_id: string; location_id: string } }).home
     const otherHomeInput = { kind: 'stay', name: 'Other Cabin', stay: {
       location_id: locations.data!.locations[0]!.id, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1,
-      assigned_member_id: null,
+      assigned_member_id: ownerMemberId,
     } }
     const otherHomeRequest = { idempotency_key: crypto.randomUUID(), products: [otherHomeInput] }
     const discovery = await mcpRequest(page.request, baseURL!, { method: 'tools/list' })
@@ -4744,12 +4758,15 @@ test('a stay socket in a service organization closes when Better Auth removes it
     const accepted = await cleaner.request.post(`/api/invite-links/${encodeURIComponent((await offered.json() as { token: string }).token)}/accept`, { data: {} })
     await expectStatus(accepted, 200)
     const memberId = (await accepted.json() as { memberId: string }).memberId
+    const listedMembers = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
+    await expectStatus(listedMembers, 200)
+    const ownerMemberId = (await listedMembers.json() as { members: Array<{ id: string; role: string }> }).members.find(member => member.role === 'owner')!.id
 
     // The actual canonical home API decides whether this vertical supports a
     // home; there is no SQL fixture or environment bypass supplying one.
     const madeHome = await page.request.post(api('stay-homes'), { data: { name: 'Retreat Cabin', timezone: TIME_ZONE, address: '1 Retreat Road', city: 'Krabi', country: 'TH',
       state: null, zip_code: null, phone: null, email: null, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1,
-      base_price_minor: null, idempotency_key: crypto.randomUUID() } })
+      base_price_minor: null, assigned_member_id: ownerMemberId, idempotency_key: crypto.randomUUID() } })
     await expectStatus(madeHome, 201)
     const home = (await madeHome.json() as { home: { product_id: string } }).home
     const assigned = await page.request.patch(api(`stay-homes/${home.product_id}`), { data: { assigned_member_id: memberId } })

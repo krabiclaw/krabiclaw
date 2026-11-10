@@ -1544,18 +1544,6 @@
         "open_world_justification": "Queries search performance only for the Search Console property already selected by the business."
       }
     },
-    "reassign_product_booking": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Persists an attorney-replacement proposal for the selected consultation.",
-        "destructive_justification": "Sends the client a proposal that cannot be recalled after delivery.",
-        "open_world_justification": "Sends to the selected booking’s client through their conversation channel."
-      }
-    },
     "reconcile_post_publication": {
       "annotations": {
         "readOnlyHint": false,

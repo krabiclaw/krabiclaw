@@ -85,7 +85,7 @@ async function boot() {
       VALUES ('cabin-site', ?, 'cabin', 'Cabin', 'active', 'America/Denver', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`).bind(ORG).run()
     const home = await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
       kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
-      stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null },
+      stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: 'm-owner' },
     } })
     await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
       VALUES (?, ?, 'channex', 'listing-1', 'chan-1', 'prop-1', 'room-1', 'rate-1', 'complete', 1)`).bind(ORG, home.id).run()
@@ -238,7 +238,7 @@ test('a moved guest takes the nights, turnover and messages to the new home whil
       VALUES ('annex-site', ?, 'annex', 'Annex', 'active', 'America/Denver', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`).bind(ORG).run()
     const annex = (await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
       kind: 'stay', name: 'Annex', variants: [{ name: 'Annex', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
-      stay: { location_id: 'annex-site', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1, assigned_member_id: null },
+      stay: { location_id: 'annex-site', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1, assigned_member_id: 'm-owner' },
     } })).id
     const booking: Booking = { id: 'bk-move', property_id: 'prop-1', status: 'new', arrival: '2027-03-10', departure: '2027-03-13', amount: '300.00', revision: '' }
     // Channex delivered the guest's conversation for this booking on its listing.

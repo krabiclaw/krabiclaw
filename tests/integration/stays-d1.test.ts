@@ -89,7 +89,7 @@ async function home(db: D1Database, env: CloudflareEnv, input: { name: string; l
   return createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
     kind: 'stay', name: input.name,
     variants: [{ name: input.name, prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
-    stay: { location_id: input.location, check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: input.member ?? null },
+    stay: { location_id: input.location, check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: input.member ?? `m-${OWNER}` },
   } })
 }
 
@@ -317,7 +317,7 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { order_url: 'https://www.airbnb.com/rooms/1' } }), /takes no external booking link/)
     const edited = await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { max_guests: 6 } } })
     // A save that does not name stay settings leaves them as stored, even if they changed meanwhile.
-    await db.prepare('UPDATE product_stay_configs SET min_nights = 5 WHERE product_id = ?').bind(cabin.id).run()
+    await db.prepare('UPDATE product_booking_configs SET min_nights = 5 WHERE product_id = ?').bind(cabin.id).run()
     await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { name: 'Cliff Cabin' } })
     assert.equal((await getProduct(db, ORG, cabin.id)).stay?.min_nights, 5)
     assert.equal(edited.stay?.max_guests, 6)
@@ -362,7 +362,7 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     assert.equal(afterConcurrentEdits.stay?.check_in_time, '17:00')
     assert.equal(afterConcurrentEdits.stay?.check_out_time, '11:00')
     assert.deepEqual(JSON.parse((await db.prepare('SELECT details_json FROM products WHERE id = ?').bind(cabin.id).first<string>('details_json'))!), combinedRules)
-    assert.deepEqual(await db.prepare('SELECT check_in_time, check_out_time FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first(), {
+    assert.deepEqual(await db.prepare('SELECT check_in_time, check_out_time FROM product_booking_configs WHERE product_id = ?').bind(cabin.id).first(), {
       check_in_time: '17:00', check_out_time: '11:00',
     })
 

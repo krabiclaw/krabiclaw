@@ -23,12 +23,12 @@
       <UFormField v-else-if="concern === 'confirmation'" name="confirmation_mode">
         <URadioGroup v-model="p.form.confirmation_mode" :items="[{ value: 'instant', label: 'Confirm automatically' }, { value: 'review', label: 'Review each request' }]" variant="card" />
       </UFormField>
-      <div v-if="concern === 'assignment' || concern === 'enabled' && legal && p.form.bookable" class="space-y-6">
+      <div v-if="concern === 'assignment' || concern === 'enabled' && p.form.bookable" class="space-y-6">
         <UFormField name="assigned_member_id" :label="p.bookingCopy.value.assigneeLabel">
           <ResponsibilityPicker v-model:member-id="p.form.assigned_member_id" :organization-id="p.organizationId" :disabled="p.saving.value" :people-label="peopleLabel" required profiles />
           <UButton v-if="unpublishedHost" class="mt-4" color="neutral" variant="outline" :to="`/dashboard/${route.params.orgSlug}/team/${unpublishedHost.id}/profile`">Edit {{ unpublishedHost.name }}'s profile</UButton>
         </UFormField>
-        <SettingRow v-model="hostHours" :disabled="!p.form.assigned_member_id || p.form.held_online || legal && hostHours" :label="workingHoursLabel" :description="legal ? 'Each new consultation is booked in the attorney’s working hours. Existing consultations keep their booked attorney.' : `${peopleLabel} choose from the ${p.bookingCopy.value.assigneeNoun}’s own hours instead of the weekly schedule.`" />
+        <SettingRow v-model="hostHours" :disabled="!p.form.assigned_member_id || p.form.held_online || legal && hostHours" :label="workingHoursLabel" :description="legal ? 'Each consultation is booked in the attorney’s working hours, and every consultation of this practice area is theirs.' : `${peopleLabel} choose from the ${p.bookingCopy.value.assigneeNoun}’s own hours instead of the weekly schedule.`" />
       </div>
       <UFormField v-else-if="concern === 'payment'" name="online_payment_required">
         <SettingRow v-model="p.form.online_payment_required" :disabled="!paymentEntitled && !p.form.online_payment_required" :label="`Require online payment for paid ${occurrence}s`" />
@@ -115,7 +115,7 @@ watch(capacityChoice, choice => {
   else if (Number(p.form.booking_capacity) < 2) p.form.booking_capacity = ''
 })
 const valid = computed(() => {
-  if (concern.value === 'assignment' || concern.value === 'enabled' && legal.value && p.form.bookable) return membersStatus.value === 'success' && Boolean(p.form.assigned_member_id) && (!legal.value || p.form.scheduling_mode === 'provider')
+  if (concern.value === 'assignment' || concern.value === 'enabled' && p.form.bookable) return membersStatus.value === 'success' && Boolean(p.form.assigned_member_id) && (!legal.value || p.form.scheduling_mode === 'provider')
   if (concern.value === 'duration') return Number.isSafeInteger(Number(p.form.booking_duration)) && Number(p.form.booking_duration) > 0
   if (concern.value === 'capacity') return capacityChoice.value !== 'group' || (Number.isSafeInteger(Number(p.form.booking_capacity)) && Number(p.form.booking_capacity) >= 2)
   if (concern.value === 'location') return !p.form.held_online || p.form.scheduling_mode === 'provider'

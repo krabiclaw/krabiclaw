@@ -66,12 +66,12 @@ test('consultations, classes and table reservations are sent their automatic mes
         db.prepare("INSERT INTO prices (id, organization_id, product_variant_id, currency, unit_amount, created_by, updated_by) VALUES (?, ?, ?, 'USD', 5000, ?, ?)").bind(`${id}-price`, organizationId, `${id}-variant`, OWNER, OWNER),
         db.prepare('INSERT INTO product_publications (organization_id, product_id, published, created_by, updated_by) VALUES (?, ?, 1, ?, ?)').bind(organizationId, id, OWNER, OWNER),
         db.prepare('INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_by, updated_by) VALUES (?, ?, ?, 1, 1, ?, ?)').bind(organizationId, id, `${organizationId}-place`, OWNER, OWNER),
-        db.prepare("INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, assigned_member_id, held_online, created_by, updated_by) VALUES (?, ?, 60, 4, ?, ?, ?, ?, ?)")
+        db.prepare("INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, default_capacity, scheduling_mode, assigned_member_id, held_online, created_by, updated_by) VALUES (?, ?, 'slot', 60, 4, ?, ?, ?, ?, ?)")
           .bind(id, organizationId, attorney ? 'provider' : 'business', attorney, attorney ? 1 : 0, OWNER, OWNER),
         ...(attorney ? [db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, public_name, public_approved, timezone, weekly_json, time_off_json, updated_at, updated_by) VALUES (?, ?, 'Attorney Owner', 1, ?, ?, '[]', ?, ?)`)
           .bind(attorney, organizationId, timezone, JSON.stringify([0, 1, 2, 3, 4, 5, 6].map(weekday => ({ weekday, start: '00:00', end: '23:59' }))), NOW, OWNER)] : []),
-        ...sessions.map(([sessionId, startsAt]) => db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, assigned_member_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 4, 'scheduled', ?, ?)`).bind(sessionId, organizationId, id, attorney ? null : `${organizationId}-place`, attorney, timezone, startsAt, plus(startsAt, 60), OWNER, OWNER)),
+        ...sessions.map(([sessionId, startsAt]) => db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 4, 'scheduled', ?, ?)`).bind(sessionId, organizationId, id, attorney ? null : `${organizationId}-place`, timezone, startsAt, plus(startsAt, 60), OWNER, OWNER)),
       ])
       return id
     }
@@ -136,7 +136,7 @@ test('consultations, classes and table reservations are sent their automatic mes
 
     // A visit a person holds is their work to prepare and follow up; one nobody holds (a table here) is a Calendar commitment, not a task.
     const jobs = (kind: 'booking' | 'reservation', id: string) => db.prepare("SELECT kind, starts_at, status, assigned_member_id FROM tasks WHERE subject_type = ? AND subject_id = ? AND kind IN ('consultation_prep', 'consultation_follow_up') ORDER BY kind").bind(kind, id).all().then(result => result.results)
-    const held = await db.prepare('SELECT b.assigned_member_id, ps.starts_at, ps.ends_at FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id WHERE b.id = ?').bind(ana.bookingId).first<{ assigned_member_id: string; starts_at: string; ends_at: string }>()
+    const held = await db.prepare('SELECT c.assigned_member_id, ps.starts_at, ps.ends_at FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id WHERE b.id = ?').bind(ana.bookingId).first<{ assigned_member_id: string; starts_at: string; ends_at: string }>()
     assert.ok(held?.assigned_member_id)
     assert.deepEqual(await jobs('booking', ana.bookingId), [
       { kind: 'consultation_follow_up', starts_at: new Date(Date.parse(held.ends_at) + 86_400_000).toISOString(), status: 'open', assigned_member_id: held.assigned_member_id },

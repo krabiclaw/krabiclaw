@@ -66,7 +66,7 @@ async function canReceive(env: GuestInboxHubEnv, attachment: InboxSocketAttachme
   if (await roleAllows({ ...membership, permissions: { operations: ['read'] } })) return true
   if ('targetUserId' in event) return event.targetUserId === attachment.userId
   if ('productId' in event) {
-    return Boolean(await queryFirst(env.DB, `SELECT c.product_id FROM product_stay_configs c
+    return Boolean(await queryFirst(env.DB, `SELECT c.product_id FROM product_stay_configs s JOIN product_booking_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
       WHERE c.organization_id = ? AND c.product_id = ? AND (${assignedMemberSql('c')})`,
     [attachment.organizationId, event.productId, attachment.userId]))
   }

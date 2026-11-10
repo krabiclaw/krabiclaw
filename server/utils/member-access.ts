@@ -4,7 +4,6 @@ import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { getOrgAdapter, hasPermission } from 'better-auth/plugins'
 import { parsePhoneOrThrow } from '~/utils/phone'
 import { oncePerRequest } from '~/server/utils/request-scope'
-import { sessionMemberSql } from '~/server/utils/provider-allocation'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { publishAccessInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import type { H3Event } from 'nitro'
@@ -381,7 +380,7 @@ export async function assertResponsibleMember(db: DbClient, organizationId: stri
 export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, db: DbClient, input: { organizationId: string }): Promise<void> {
   const now = new Date().toISOString()
   let changed = false
-  for (const [table, key] of [['business_locations', 'id'], ['product_booking_configs', 'product_id'], ['product_stay_configs', 'product_id'], ['tasks', 'id']] as const) {
+  for (const [table, key] of [['business_locations', 'id'], ['product_booking_configs', 'product_id'], ['tasks', 'id']] as const) {
     // A closed task keeps who did it; only open work is reassigned away from a departed member.
     const open = table === 'tasks' ? " AND status = 'open'" : ''
     const memberMissing = `${table}.assigned_member_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM member m WHERE m.id = ${table}.assigned_member_id AND m.organizationId = ${table}.organization_id)`
@@ -405,7 +404,7 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, d
   if (changed) await publishAccessInvalidation(env, { organizationId: input.organizationId })
 }
 
-/** One predicate for a resource's assigned member, current responsibility or booked provider alike; user is bound once. */
+/** One predicate for a resource's assigned member; user is bound once. */
 export function assignedMemberSql(alias: string, userSql = '?'): string {
   return `EXISTS (SELECT 1 FROM member m
     WHERE m.id = ${alias}.assigned_member_id AND m.organizationId = ${alias}.organization_id AND m.userId = ${userSql})`
@@ -440,8 +439,7 @@ export async function assertProductAccess(db: DbClient, input: MemberAccessPrinc
  */
 export function assignedGuestThreadScope(alias: string, user: string | { /** Trusted query column, never request input. */ column: string }): { sql: string; params: string[] } {
   const userSql = typeof user === 'string' ? '?' : user.column
-  const sql = `((${alias}.kind = 'booking' AND EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = ${alias}.id AND b.organization_id = ${alias}.organization_id AND ${assignedMemberSql('b', userSql)}))
-      OR (${alias}.kind = 'booking' AND EXISTS (SELECT 1 FROM bookings b JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
+  const sql = `((${alias}.kind = 'booking' AND EXISTS (SELECT 1 FROM bookings b JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
         WHERE b.request_id = ${alias}.id AND b.organization_id = ${alias}.organization_id AND ${assignedMemberSql('c', userSql)}))
       OR (${alias}.kind = 'contact' AND ${alias}.location_id IS NOT NULL AND EXISTS (SELECT 1 FROM business_locations bl
         WHERE bl.id = ${alias}.location_id AND bl.organization_id = ${alias}.organization_id AND ${assignedMemberSql('bl', userSql)}))
@@ -450,8 +448,8 @@ export function assignedGuestThreadScope(alias: string, user: string | { /** Tru
   return { sql, params: typeof user === 'string' ? Array(sql.match(/\?/g)?.length ?? 0).fill(user) : [] }
 }
 
-/** Appointments retain their own member even after the service is reassigned. */
-export async function assertAssignedBookingAccess(db: DbClient, input: MemberAccessPrincipal & { bookingId?: string; requestId?: string; sessionId?: string }): Promise<void> {
+/** A booking is its product's assigned member's. */
+export async function assertAssignedBookingAccess(db: DbClient, input: MemberAccessPrincipal & { bookingId?: string; requestId?: string }): Promise<void> {
   if (await roleAllows({ ...input, permissions: { operations: ['update'] } })) return
   await assertRoleAllows({ ...input, permissions: { operations: ['assigned'] } })
   const threadScope = assignedGuestThreadScope('r', input.userId)
@@ -459,14 +457,9 @@ export async function assertAssignedBookingAccess(db: DbClient, input: MemberAcc
     ? await queryFirst(db, `SELECT r.id FROM requests r WHERE r.organization_id = ? AND r.id = ? AND ${threadScope.sql}`, [input.organizationId, input.requestId, ...threadScope.params])
     : await queryFirst(db, `SELECT b.id FROM bookings b LEFT JOIN requests r ON r.id = b.request_id AND r.organization_id = b.organization_id
       LEFT JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
-      WHERE b.organization_id = ? AND b.id = ? AND (${assignedMemberSql('b')} OR ${assignedMemberSql('c')} OR (r.id IS NOT NULL AND ${threadScope.sql}))`,
-    [input.organizationId, input.bookingId, input.userId, input.userId, ...threadScope.params])
+      WHERE b.organization_id = ? AND b.id = ? AND (${assignedMemberSql('c')} OR (r.id IS NOT NULL AND ${threadScope.sql}))`,
+    [input.organizationId, input.bookingId, input.userId, ...threadScope.params])
   if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Conversation not found or access denied', data: { code: 'THREAD_NOT_FOUND', field: input.requestId ? 'threadId' : 'bookingId' } })
-  if (input.sessionId) {
-    const destination = await queryFirst(db, `SELECT s.id FROM product_sessions s JOIN bookings b ON b.product_id = s.product_id AND b.organization_id = s.organization_id
-      WHERE b.organization_id = ? AND ${input.bookingId ? 'b.id' : 'b.request_id'} = ? AND s.id = ? AND ${sessionMemberSql('s')} = b.assigned_member_id`, [input.organizationId, input.bookingId ?? input.requestId, input.sessionId])
-    if (!destination) throw new HTTPError({ statusCode: 403, message: 'Changing the assigned provider requires admin access', data: { code: 'PROVIDER_ASSIGNMENT_FORBIDDEN', field: 'sessionId' } })
-  }
 }
 
 /** The location must belong to the tenant the caller authorized against; reaching it is an org-wide role or location assignment. */

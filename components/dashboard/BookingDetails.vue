@@ -68,10 +68,9 @@
 
           <template v-if="booking.type === 'booking' && !personalScope">
             <UCard variant="record">
-              <component :is="canReassignBooking ? NuxtLink : 'div'" :to="canReassignBooking ? { path: `${editorPath}/team-member`, query: route.query } : undefined" class="flex items-center gap-4">
+              <div class="flex items-center gap-4">
                 <span class="min-w-0 flex-1"><span class="block text-base font-semibold text-highlighted">{{ recordCopy?.assigneeLabel }}</span><span class="mt-1 block text-sm text-muted">{{ booking.assignedMemberName || (booking.assignedMemberId ? 'Previously assigned member' : booking.organizationName) }}</span></span>
-                <UIcon v-if="canReassignBooking" name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
-              </component>
+              </div>
             </UCard>
             <UAlert v-if="booking.providerConflict" color="warning" :description="`This ${noun} overlaps a busy time. Contact your ${recordCopy?.guestLabel} to change it.`" />
           </template>
@@ -234,7 +233,6 @@ export interface BookingEditor {
   bookingType: DashboardRecordType
   refresh: () => Promise<void>
   booking: Ref<DashboardBookingDetails | null>
-  canReassignBooking: ComputedRef<boolean>
   noun: ComputedRef<string>
   messageTo: ComputedRef<string | null>
   callTo: ComputedRef<string | null>
@@ -332,7 +330,6 @@ const messageTo = computed(() => {
   return `/dashboard/${orgSlug.value}/messages/${encodeURIComponent(booking.value.threadId)}`
 })
 const canChangeBooking = computed(() => Boolean(booking.value && !booking.value.complete && ['pending', 'confirmed'].includes(booking.value.status)))
-const canReassignBooking = computed(() => !props.personalScope && props.bookingType === 'booking' && canChangeBooking.value && booking.value?.canReassignProvider === true)
 const callTo = computed(() => booking.value?.guestPhone ? `tel:${booking.value.guestPhone}` : null)
 const contactCallTo = computed(() => props.personalScope ? booking.value?.contactPhone ? `tel:${booking.value.contactPhone}` : null : callTo.value)
 
@@ -543,7 +540,6 @@ provide(bookingEditorKey, {
   bookingType: props.bookingType,
   refresh: async () => { await refreshDetails() },
   booking,
-  canReassignBooking,
   noun,
   messageTo,
   callTo,

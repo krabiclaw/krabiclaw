@@ -78,16 +78,14 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     const bookingPath = `${DASHBOARD}/bookings/booking/${requestId}`
     const read = await body<{ booking: DashboardBookingDetails }>(
       await page.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
-    expect(read.booking).toMatchObject({ status: 'pending', assignedMemberId: actor.id, locationTitle: 'Online', canReassignProvider: true })
+    expect(read.booking).toMatchObject({ status: 'pending', assignedMemberId: actor.id, locationTitle: 'Online' })
     await body(await page.request.post('/api/auth/organization/update-member-role', {
       headers: authRequestHeaders(baseURL!), data: { organizationId: ORGANIZATION, memberId: actor.id, role: 'member' },
     }), 200)
     roleChanged = true
     const assignedRead = await body<{ booking: DashboardBookingDetails }>(
       await memberContext.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
-    expect(assignedRead.booking).toMatchObject({ id: requestId, assignedMemberId: actor.id, canReassignProvider: false })
-    const providerPath = `/api/dashboard/bookings/booking/${assignedRead.booking.operationalBookingId}/provider`
-    await body(await memberContext.request.get(providerPath, { params: { org: SLUG } }), 404)
+    expect(assignedRead.booking).toMatchObject({ id: requestId, assignedMemberId: actor.id })
 
     // A member's Today is their own work: no opportunities, nobody to assign to,
     // and only tasks given to them or replies in conversations they handle.
@@ -168,17 +166,10 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     await dismissPreviewToolbar(page)
     await page.setViewportSize({ width: 390, height: 844 })
     expect((await page.goto(new URL(bookingPath, baseURL!).toString()))?.status()).toBe(200)
+    // The attorney is the practice area's: the owner reads who handles it and changes it on the practice area.
     const ownerDetail = page.locator('#dashboard-panel-booking-details')
-    const providerRead = page.waitForResponse(response => new URL(response.url()).pathname === providerPath)
-    await ownerDetail.getByRole('link').filter({ hasText: /^\s*Attorney\b/ }).click()
-    const providers = await body<{ members: Array<{ id: string; current: boolean }> }>(await providerRead, 200)
-    expect(providers.members.find(member => member.id === actor.id)?.current).toBe(true)
-    const assignment = page.locator('#dashboard-panel-booking-team-member')
-    await expect(assignment.getByRole('heading', { name: 'Attorney', exact: true })).toBeVisible()
-    await expect(assignment).toContainText('The time stays the same. Your client must accept before the assigned attorney changes.')
-    await expect(assignment.getByRole('radio', { checked: true })).toHaveAccessibleName('Assigned attorney Current')
-    await assignment.getByRole('button', { name: 'Cancel', exact: true }).click()
-    await expect(page).toHaveURL(new URL(bookingPath, baseURL!).toString())
+    await expect(ownerDetail.getByText('Attorney', { exact: true })).toBeVisible()
+    await expect(ownerDetail.getByRole('link').filter({ hasText: /^\s*Attorney\b/ })).toHaveCount(0)
     await detail.getByRole('button', { name: 'Manage consultation', exact: true }).click()
     await memberPage.getByRole('dialog', { name: 'Manage consultation', exact: true }).getByRole('link', { name: 'Change consultation', exact: true }).click()
     const change = memberPage.locator('#dashboard-panel-booking-change')
@@ -205,9 +196,6 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     await memberPage.clock.setFixedTime(new Date(`${day}T13:00:00.000Z`))
     await memberPage.reload()
     await expect(detail.getByRole('heading', { name: 'Today', exact: true })).toBeVisible()
-    expect((await memberPage.goto(new URL(`${bookingPath}/team-member`, baseURL!).toString()))?.status()).toBe(200)
-    await expect(memberPage.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
-    await expect(memberPage.locator('#dashboard-panel-booking-team-member')).toHaveCount(0)
     const missingId = crypto.randomUUID()
     const missingRead = memberPage.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/bookings/booking/${missingId}`)
     await memberPage.goto(`${DASHBOARD}/bookings/booking/${missingId}/change`)

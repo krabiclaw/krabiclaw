@@ -90,7 +90,7 @@ test('a home authors room details and manages its product photos through authent
 
     const created = await call(owner, 'POST', '', {
       idempotency_key: 'cabin', name: 'Cliff Cabin', timezone: 'America/Denver', address: '1 Cliff Rd', city: 'Moab', state: 'UT', country: 'US', zip_code: '84532',
-      phone: '+14355550100', email: 'host@example.test', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2,
+      phone: '+14355550100', email: 'host@example.test', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, assigned_member_id: 'm-owner',
     })
     assert.equal(created.status, 201)
     const productId = (created.body.home as { product_id: string }).product_id

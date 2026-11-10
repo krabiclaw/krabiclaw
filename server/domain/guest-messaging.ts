@@ -94,14 +94,13 @@ export async function getMessageTemplate(db: DbClient, organizationId: string, t
  */
 export async function listMessageOfferings(db: DbClient, access: StayAccess) {
   const offerings = await queryAll<{ kind: 'stay' | 'experience' | 'service' | 'reservation'; id: string; name: string; timezone: string | null }>(db, `
-    SELECT 'stay' AS kind, p.id, c.internal_name AS name, l.timezone FROM product_stay_configs c
+    SELECT p.kind, p.id, COALESCE(home.internal_name, p.name) AS name, l.timezone FROM product_booking_configs c
       JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
-      JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id WHERE c.organization_id = ?
-    UNION ALL SELECT p.kind, p.id, p.name, NULL FROM product_booking_configs c
-      JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id WHERE c.organization_id = ?
+      LEFT JOIN product_stay_configs home ON home.organization_id = c.organization_id AND home.product_id = c.product_id
+      LEFT JOIN business_locations l ON l.organization_id = home.organization_id AND l.id = home.location_id WHERE c.organization_id = ?
     UNION ALL SELECT 'reservation', l.id, l.title, l.timezone FROM location_reservation_configs c
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id WHERE c.organization_id = ?
-    ORDER BY name, id`, [access.organizationId, access.organizationId, access.organizationId])
+    ORDER BY name, id`, [access.organizationId, access.organizationId])
   for (const offering of offerings) {
     if (!offering.name?.trim()) messagingError(500, 'INVALID_MESSAGE_OFFERING', `Offering ${offering.id} has no name`, 'offerings')
     if (!['stay', 'experience', 'service', 'reservation'].includes(offering.kind)) messagingError(500, 'INVALID_MESSAGE_OFFERING', `Offering ${offering.id} is a ${offering.kind}, which takes no bookings`, 'offerings')
@@ -126,10 +125,9 @@ export async function saveMessageTemplate(db: DbClient, env: GuestInboxPublicati
   // Every named offering is bookable in this workspace (listMessageOfferings):
   // a home, a product with booking settings, or a location that takes table
   // reservations. The write repeats the check.
-  const offerings = `? = (SELECT count(*) FROM json_each(?) named WHERE EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = ? AND c.product_id = named.value)
-      OR EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.organization_id = ? AND c.product_id = named.value)
+  const offerings = `? = (SELECT count(*) FROM json_each(?) named WHERE EXISTS (SELECT 1 FROM product_booking_configs c WHERE c.organization_id = ? AND c.product_id = named.value)
       OR EXISTS (SELECT 1 FROM location_reservation_configs c WHERE c.organization_id = ? AND c.location_id = named.value))`
-  const offeringGuard = [schedule.productIds.length, JSON.stringify(schedule.productIds), access.organizationId, access.organizationId, access.organizationId]
+  const offeringGuard = [schedule.productIds.length, JSON.stringify(schedule.productIds), access.organizationId, access.organizationId]
   if (!await queryFirst(db, `SELECT 1 WHERE ${offerings}`, offeringGuard)) {
     messagingError(404, 'MESSAGE_OFFERING_NOT_FOUND', 'Every scheduled home, experience, consultation or reservation location must be bookable in this workspace', 'schedule.productIds')
   }

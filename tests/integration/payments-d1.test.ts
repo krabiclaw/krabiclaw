@@ -70,8 +70,8 @@ async function boot(){
  await db.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('host','Host','host@example.com',1)").run()
  await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES('host-member',?,'host','member',1)").bind(ORG).run()
  await db.prepare(`INSERT INTO member_scheduling(member_id, organization_id, public_name, public_approved, timezone, weekly_json, time_off_json, updated_at, updated_by) VALUES('host-member',?,'Attorney Host',1,'America/New_York','[{"weekday":0,"start":"00:00","end":"23:59"},{"weekday":1,"start":"00:00","end":"23:59"},{"weekday":2,"start":"00:00","end":"23:59"},{"weekday":3,"start":"00:00","end":"23:59"},{"weekday":4,"start":"00:00","end":"23:59"},{"weekday":5,"start":"00:00","end":"23:59"},{"weekday":6,"start":"00:00","end":"23:59"}]','[]',?,'host')`).bind(ORG,NOW).run()
- await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,default_capacity,confirmation_mode,held_online,scheduling_mode,assigned_member_id,online_payment_required,created_by,updated_by) VALUES('product',?,60,1,'review',1,'provider','host-member',1,'guest','guest')").bind(ORG).run()
- await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by) VALUES('session',?,'product','host-member','America/New_York','2099-10-01T13:00:00.000Z','2099-10-01T14:00:00.000Z',1,'scheduled','guest','guest')").bind(ORG).run()
+ await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,duration_minutes,default_capacity,confirmation_mode,held_online,scheduling_mode,assigned_member_id,online_payment_required,created_by,updated_by) VALUES('product',?,'slot',60,1,'review',1,'provider','host-member',1,'guest','guest')").bind(ORG).run()
+ await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,status,created_by,updated_by) VALUES('session',?,'product','America/New_York','2099-10-01T13:00:00.000Z','2099-10-01T14:00:00.000Z',1,'scheduled','guest','guest')").bind(ORG).run()
  const env={...await runtime.getBindings<CloudflareEnv>(),BETTER_AUTH_URL:'https://proof.example',BETTER_AUTH_SECRET:'local-proof-secret-long-enough-for-auth',NUXT_PUBLIC_PLATFORM_DOMAIN:'https://proof.example'} as CloudflareEnv
  return {db,runtime,env}
  }catch(error){await runtime.dispose();throw error}
@@ -79,7 +79,7 @@ async function boot(){
 async function payable(db:D1Database,id:string,expires='2099-09-30T00:00:00.000Z'){
  await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,currency,amount,price_snapshot_json,created_at,updated_at) VALUES(?,?,'guest','acct_seller',0,'booking','USD',10000,?,?,?)").bind(id,ORG,JSON.stringify({title:'Consultation',tax_code:null,price:{unit_amount:10000,currency:'USD',tax_behavior:'exclusive'},quantity:1,automatic_tax:false,method_configuration_id:'pmc_seller'}),NOW,NOW).run()
  await db.prepare("UPDATE payments SET stripe_payment_intent_id=?,idempotency_key=?,return_token='test-return-proof',checkout_expires_at=? WHERE id=?").bind(`pi_${id}`,`checkout:${id}`,expires,id).run()
- await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,buyer_user_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at,assigned_member_id) VALUES(?,?,'product','variant','price','session','guest',?,1,10000,'USD','2099-10-01T13:00:00.000Z','2099-10-01T14:00:00.000Z','active',?,?,'host-member')").bind(`h:${id}`,ORG,id,expires,NOW).run()
+ await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,buyer_user_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at) VALUES(?,?,'product','variant','price','session','guest',?,1,10000,'USD','2099-10-01T13:00:00.000Z','2099-10-01T14:00:00.000Z','active',?,?)").bind(`h:${id}`,ORG,id,expires,NOW).run()
 }
 
 async function paidReservation(db: D1Database, env: CloudflareEnv) {
@@ -941,12 +941,13 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
     await db.prepare("INSERT INTO business_locations(id,organization_id,slug,title,timezone) VALUES('cabin-site',?,'cabin-site','Cabin','UTC')").bind(ORG).run()
     await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('stay','cabin',?,'Cabin','cabin','host','host')").bind(ORG).run()
     await db.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,created_by,updated_by) VALUES(?,'cabin','cabin-site','host','host')").bind(ORG).run()
-    await db.prepare("INSERT INTO product_stay_configs(product_id,organization_id,internal_name,location_id,check_in_time,check_out_time,max_guests,min_nights,created_by,updated_by) VALUES('cabin',?,'Cabin','cabin-site','15:00','11:00',4,1,'host','host')").bind(ORG).run()
+    await db.prepare("INSERT INTO product_stay_configs(product_id,organization_id,internal_name,location_id,created_by,updated_by) VALUES('cabin',?,'Cabin','cabin-site','host','host')").bind(ORG).run()
+    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,scheduling_mode,online_payment_required,check_in_time,check_out_time,default_capacity,min_nights,created_by,updated_by) VALUES('cabin',?,'nights','business',1,'15:00','11:00',4,1,'host','host')").bind(ORG).run()
     const claims = new Map<string, string>()
     for (const [id, from, to] of [['changing', '2099-10-01', '2099-10-03'], ['other-stay', '2099-10-03', '2099-10-04']]) {
       await payable(db, id!)
       await db.prepare("UPDATE payments SET subject_type='stay',location_id='cabin-site' WHERE id=?").bind(id).run()
-      await db.prepare("UPDATE payment_checkout_holds SET product_id='cabin',variant_id=NULL,price_id=NULL,session_id=NULL,assigned_member_id=NULL,location_id='cabin-site',timezone='UTC',starts_at=?,ends_at=? WHERE payment_id=?").bind(from, to, id).run()
+      await db.prepare("UPDATE payment_checkout_holds SET product_id='cabin',variant_id=NULL,price_id=NULL,session_id=NULL,location_id='cabin-site',timezone='UTC',starts_at=?,ends_at=? WHERE payment_id=?").bind(from, to, id).run()
       const claim = crypto.randomUUID() + crypto.randomUUID()
       claims.set(id!, claim)
       await db.prepare("UPDATE payments SET return_token_hash=?,return_expires_at='2099-01-01T00:00:00.000Z' WHERE id=?").bind(await tokenHash(claim), id).run()

@@ -742,7 +742,14 @@ export const collection_products = sqliteTable("collection_products", {
 export const product_booking_configs = sqliteTable("product_booking_configs", {
 	product_id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	// What a booking claims: 'slot' (a session's seats, an experience or a
+	// consultation) or 'nights' (a home's whole nights). Validated by its one
+	// writer, server/utils/availability.ts, not a CHECK: rules and sessions
+	// reference this table, so a closed value set here could only grow by a
+	// table rebuild D1 cannot run under its foreign keys.
+	unit: text().notNull(),
 	duration_minutes: integer(),
+	// Seats per session; for nights, the most guests the home sleeps.
 	default_capacity: integer(),
 	confirmation_mode: text().default("instant").notNull(),
 	online_payment_required: integer({ mode: "boolean" }).default(false).notNull(),
@@ -752,6 +759,9 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	// business: the business publishes its own sessions. provider: an assigned
 	// member's working hours. Every writer names it; there is no default.
 	scheduling_mode: text().notNull(),
+	// The member who handles every booking of this product: a provider-mode
+	// offering's sessions are their hours, and a home's turnovers are theirs.
+	// Its writer refuses a bookable product without one.
 	assigned_member_id: text(),
 	// How long before a session's start booking, changing and cancelling close
 	// (shared/availability-settings.ts NOTICE_OPTIONS). NULL is no notice.
@@ -759,6 +769,18 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	// The tenant's own questions asked with each booking (shared/form-questions.ts):
 	// a JSON array validated by its one writer. Question-only edits leave sessions alone.
 	questions: text().default("[]").notNull(),
+	// Nights only. Local wall-clock HH:MM in the home's location timezone.
+	check_in_time: text(),
+	// The end of the check-in window, local HH:MM; null is a flexible end. Earlier than check_in_time means after midnight.
+	check_in_end_time: text(),
+	check_out_time: text(),
+	// Nights only: the listing's default minimum stay, imported or supplied by its host.
+	min_nights: integer(),
+	// Nights only: actual optional weekday minimums and weekend price; the default stays in min_nights/the primary Price.
+	calendar_rules: text({ mode: "json" }).$type<import("../../shared/bookings").StayCalendarRules>(),
+	// Nights only: for stays shorter than 28 nights, and for 28 or more.
+	cancellation_policy: text(),
+	long_term_cancellation_policy: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	created_by: text().notNull(),
@@ -776,6 +798,15 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	check("product_booking_configs_payment_check", sql`online_payment_required IN (0, 1)`),
 	// A provider's departure may clear responsibility without changing online delivery.
 	check("product_booking_configs_held_online_check", sql`held_online IN (0, 1) AND (held_online = 0 OR scheduling_mode = 'provider')`),
+	// A home is booked by the night: it sleeps someone, has a minimum stay, no
+	// session length, and its own business's calendar. Every other unit has no night settings.
+	check("product_booking_configs_nights_check", sql`CASE WHEN unit = 'nights' THEN default_capacity >= 1 AND min_nights >= 1 AND duration_minutes IS NULL AND held_online = 0 AND scheduling_mode = 'business' AND advance_notice_minutes IS NULL
+		ELSE check_in_time IS NULL AND check_in_end_time IS NULL AND check_out_time IS NULL AND min_nights IS NULL AND calendar_rules IS NULL AND cancellation_policy IS NULL AND long_term_cancellation_policy IS NULL END`),
+	check("product_booking_configs_times_check", sql`(check_in_time IS NULL OR (check_in_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_time < '24:00')) AND (check_out_time IS NULL OR (check_out_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_out_time < '24:00'))`),
+	check("product_booking_configs_check_in_end_check", sql`check_in_end_time IS NULL OR (check_in_end_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_end_time < '24:00')`),
+	check("product_booking_configs_calendar_rules_check", sql`calendar_rules IS NULL OR (json_valid(calendar_rules) AND json_type(calendar_rules) = 'object')`),
+	check("product_booking_configs_cancellation_check", sql`cancellation_policy IS NULL OR cancellation_policy IN ('flexible', 'moderate', 'limited', 'firm', 'strict')`),
+	check("product_booking_configs_long_term_cancellation_check", sql`long_term_cancellation_policy IS NULL OR long_term_cancellation_policy IN ('firm', 'strict')`),
 ]);
 
 // Typed weekly recurrence, one row per rule; recurrence is never a JSON map.
@@ -851,7 +882,7 @@ export const product_availability_rules = sqliteTable("product_availability_rule
 // rule that generated one is provenance, not authority.
 // Row meaning: this Product runs at this instant, seating this many.
 // Null semantics: availability_rule_id NULL is a legitimate one-off session,
-//   not an orphan. location_id NULL means it is held online, by its assigned member.
+//   not an orphan. location_id NULL means it is held online, by its product's assigned member.
 //   capacity NULL means unlimited; capacity = 0 means no seats. These are
 //   different and both are tested.
 // `source_occurrence_key` is the stable generation identity (rule + intended
@@ -868,7 +899,6 @@ export const product_sessions = sqliteTable("product_sessions", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	product_id: text().notNull(),
-	assigned_member_id: text(),
 	location_id: text(),
 	availability_rule_id: text(),
 	source_occurrence_key: text(),
@@ -903,17 +933,14 @@ export const product_sessions = sqliteTable("product_sessions", {
 	// One session per product, location and instant. Ticket tiers are variants
 	// sharing this session, never a session each. Partial indexes again, because
 	// location_id is nullable and NULLs are distinct under UNIQUE.
-	uniqueIndex("product_sessions_location_instant_unique").on(table.product_id, table.location_id, table.starts_at).where(sql`location_id IS NOT NULL AND assigned_member_id IS NULL`),
-	uniqueIndex("product_sessions_provider_location_instant_unique").on(table.product_id, table.location_id, table.starts_at, table.assigned_member_id).where(sql`location_id IS NOT NULL AND assigned_member_id IS NOT NULL`),
-	uniqueIndex("product_sessions_provider_neutral_instant_unique").on(table.product_id, table.starts_at, table.assigned_member_id).where(sql`location_id IS NULL AND assigned_member_id IS NOT NULL`),
+	uniqueIndex("product_sessions_location_instant_unique").on(table.product_id, table.location_id, table.starts_at).where(sql`location_id IS NOT NULL`),
+	uniqueIndex("product_sessions_online_instant_unique").on(table.product_id, table.starts_at).where(sql`location_id IS NULL`),
 	index("product_sessions_product_start_idx").on(table.product_id, table.starts_at, table.status),
 	index("product_sessions_location_start_idx").on(table.location_id, table.starts_at, table.status),
 	check("product_sessions_interval_check", sql`ends_at > starts_at`),
 	check("product_sessions_status_check", sql`status IN ('scheduled', 'cancelled')`),
 	check("product_sessions_capacity_check", sql`capacity IS NULL OR capacity >= 0`),
 	check("product_sessions_timezone_check", sql`timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'`),
-	// An online session is a provider's: it is held in their hours and their timezone.
-	check("product_sessions_online_provider_check", sql`location_id IS NOT NULL OR assigned_member_id IS NOT NULL`),
 ]);
 
 // A claim on seats of one session.
@@ -942,7 +969,6 @@ export const bookings = sqliteTable("bookings", {
 	product_id: text().notNull(),
 	product_session_id: text().notNull(),
 	product_variant_id: text().notNull(),
-	assigned_member_id: text(),
 	user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
 	request_id: text(),
 	party_size: integer().notNull(),
@@ -1102,14 +1128,13 @@ export const reservations = sqliteTable("reservations", {
 // Read/write: server/domain/stays.ts, and nothing else.
 // ---------------------------------------------------------------------------
 
-// Row meaning: this Product is a home at this location, with these stay settings.
+// Row meaning: this Product is a home at this location, described this way,
+//   with this arrival guide. How it is booked (check-in and checkout times,
+//   guests, minimum nights, cancellation, questions, who looks after it) is its
+//   product_booking_configs row, unit 'nights'.
 // The composite key to product_locations is what makes "exactly one location"
 //   true in SQL: the config names the one relationship, and the relationship
 //   cannot be removed while the config names it.
-// Times are local wall-clock HH:MM in the location's timezone.
-// Assignment: the member who looks after the home (cleaning,
-//   turnovers). Members with assigned-operations access read this home's stays
-//   and nothing else; NULL means only organization-wide roles do.
 // Deletion: cascades from Product; refused while stays exist (see stays).
 export const product_stay_configs = sqliteTable("product_stay_configs", {
 	// Operator-only identity; initialized from the listing title on creation, then independently editable.
@@ -1117,15 +1142,6 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	product_id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	location_id: text().notNull(),
-	check_in_time: text(),
-	// The end of the check-in window, local HH:MM; null is a flexible end. Earlier than check_in_time means after midnight.
-	check_in_end_time: text(),
-	check_out_time: text(),
-	max_guests: integer().notNull(),
-	// Imported from the listing’s actual default or explicitly supplied by its host.
-	min_nights: integer().notNull(),
-	// Only actual optional weekday minimums and weekend price; the default stays in min_nights/the primary Price.
-	calendar_rules: text({ mode: "json" }).$type<import("../../shared/bookings").StayCalendarRules>(),
 	check_in_instructions: text(),
 	// What the home is, as guests and search engines read it: Airbnb's property
 	// group and a type it offers, both or neither. Codes come from
@@ -1144,8 +1160,6 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	bathrooms: real(),
 	// Explicit catalog reports; missing codes are unknown. The positive list is a read projection.
 	amenities: text().default("[]").notNull(),
-	cancellation_policy: text(),
-	long_term_cancellation_policy: text(),
 	// Private arrival information: managers and the home's assigned members read
 	// it through server/domain/stays.ts; no public payload carries it.
 	check_in_method: text(),
@@ -1155,9 +1169,6 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	house_manual: text(),
 	// [{ task, details }] in the order guests read them; each task once.
 	checkout_instructions: text().default("[]").notNull(),
-	// The host's own questions asked with each direct stay (shared/form-questions.ts).
-	questions: text().default("[]").notNull(),
-	assigned_member_id: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	created_by: text().notNull(),
@@ -1167,11 +1178,6 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [products.organization_id, products.id], name: "product_stay_configs_product_scope_fk" }).onDelete("cascade"),
 	foreignKey({ columns: [table.organization_id, table.product_id, table.location_id], foreignColumns: [product_locations.organization_id, product_locations.product_id, product_locations.location_id], name: "product_stay_configs_location_scope_fk" }).onDelete("no action"),
 	unique("product_stay_configs_org_product_unique").on(table.organization_id, table.product_id),
-	check("product_stay_configs_times_check", sql`check_in_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_time < '24:00' AND check_out_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_out_time < '24:00'`),
-	check("product_stay_configs_check_in_end_check", sql`check_in_end_time IS NULL OR (check_in_end_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_end_time < '24:00')`),
-	check("product_stay_configs_guests_check", sql`max_guests >= 1`),
-	check("product_stay_configs_min_nights_check", sql`min_nights >= 1`),
-	check("product_stay_configs_calendar_rules_check", sql`calendar_rules IS NULL OR (json_valid(calendar_rules) AND json_type(calendar_rules) = 'object')`),
 	check("product_stay_configs_instructions_check", sql`check_in_instructions IS NULL OR (length(trim(check_in_instructions)) BETWEEN 1 AND 5000)`),
 	check("product_stay_configs_property_type_group_check", sql`property_type_group IS NULL OR property_type_group IN ('apartments', 'houses', 'secondary_units', 'unique_homes', 'bnb', 'boutique_hotels_and_more')`),
 	check("product_stay_configs_property_type_check", sql`(property_type IS NULL AND property_type_group IS NULL) OR (property_type IS NOT NULL AND property_type_group IS NOT NULL AND property_type_group || ':' || property_type IN ('apartments:apartment', 'apartments:condominium', 'apartments:serviced_apartment', 'apartments:loft', 'houses:house', 'houses:townhouse', 'houses:bungalow', 'houses:cabin', 'houses:chalet', 'houses:earthhouse', 'houses:hut', 'houses:lighthouse', 'houses:villa', 'houses:dome', 'houses:cottage', 'houses:farmstay', 'houses:houseboat', 'houses:tiny_house', 'secondary_units:guesthouse', 'secondary_units:private_suite', 'secondary_units:farmstay', 'unique_homes:boat', 'unique_homes:castle', 'unique_homes:cave', 'unique_homes:earthhouse', 'unique_homes:hut', 'unique_homes:igloo', 'unique_homes:island', 'unique_homes:lighthouse', 'unique_homes:plane', 'unique_homes:rv', 'unique_homes:tent', 'unique_homes:tipi', 'unique_homes:train', 'unique_homes:treehouse', 'unique_homes:yurt', 'unique_homes:other', 'unique_homes:dome', 'unique_homes:barn', 'unique_homes:campsite', 'unique_homes:farmstay', 'unique_homes:houseboat', 'unique_homes:tiny_house', 'unique_homes:windmill', 'unique_homes:bus', 'unique_homes:holiday_park', 'unique_homes:ranch', 'unique_homes:religious_building', 'unique_homes:riad', 'unique_homes:shipping_container', 'unique_homes:tower', 'bnb:bnb', 'bnb:nature_eco_lodge', 'bnb:farmstay', 'boutique_hotels_and_more:boutique_hotel', 'boutique_hotels_and_more:nature_eco_lodge', 'boutique_hotels_and_more:hostel', 'boutique_hotels_and_more:serviced_apartment', 'boutique_hotels_and_more:aparthotel', 'boutique_hotels_and_more:hotel', 'boutique_hotels_and_more:resort'))`),
@@ -1185,8 +1191,6 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	check("product_stay_configs_beds_check", sql`beds IS NULL OR beds >= 0`),
 	check("product_stay_configs_bathrooms_check", sql`bathrooms IS NULL OR (bathrooms BETWEEN 0 AND 50 AND bathrooms * 2 = CAST(bathrooms * 2 AS INTEGER))`),
 	check("product_stay_configs_amenities_check", sql`json_valid(amenities) AND json_type(amenities) = 'array'`),
-	check("product_stay_configs_cancellation_check", sql`cancellation_policy IS NULL OR cancellation_policy IN ('flexible', 'moderate', 'limited', 'firm', 'strict')`),
-	check("product_stay_configs_long_term_cancellation_check", sql`long_term_cancellation_policy IS NULL OR long_term_cancellation_policy IN ('firm', 'strict')`),
 	check("product_stay_configs_check_in_method_check", sql`check_in_method IS NULL OR check_in_method IN ('smart_lock', 'keypad', 'lockbox', 'building_staff', 'in_person', 'other')`),
 	check("product_stay_configs_wifi_network_check", sql`wifi_network IS NULL OR length(trim(wifi_network)) BETWEEN 1 AND 100`),
 	check("product_stay_configs_wifi_password_check", sql`wifi_password IS NULL OR length(wifi_password) BETWEEN 1 AND 100`),
@@ -3224,7 +3228,6 @@ export const payment_checkout_holds = sqliteTable("payment_checkout_holds", {
  session_id: text(),
  location_id: text(),
  timezone: text(),
- assigned_member_id: text(),
  buyer_user_id: text().references(() => user.id, { onDelete: "set null" }),
  request_id: text(),
  payment_id: text().notNull().unique().references(() => payments.id, { onDelete: "restrict" }),
@@ -3246,7 +3249,7 @@ export const payment_checkout_holds = sqliteTable("payment_checkout_holds", {
  // A session booking; a table reservation; a stay, whose starts_at and ends_at
  // are its check-in and check-out dates at the home (product_id) and whose
  // nights are claimed in stay_nights.
- check("payment_holds_subject_check", sql`(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_reservation_id IS NULL AND converted_stay_id IS NULL) OR (product_id IS NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL AND converted_stay_id IS NULL) OR (product_id IS NOT NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL AND converted_reservation_id IS NULL AND date(starts_at, '+0 days') IS starts_at AND date(ends_at, '+0 days') IS ends_at AND ends_at > starts_at)`),
+ check("payment_holds_subject_check", sql`(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_reservation_id IS NULL AND converted_stay_id IS NULL) OR (product_id IS NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND converted_booking_id IS NULL AND converted_stay_id IS NULL) OR (product_id IS NOT NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND converted_booking_id IS NULL AND converted_reservation_id IS NULL AND date(starts_at, '+0 days') IS starts_at AND date(ends_at, '+0 days') IS ends_at AND ends_at > starts_at)`),
 ]);
 
 export const payment_orders = sqliteTable("payment_orders", {

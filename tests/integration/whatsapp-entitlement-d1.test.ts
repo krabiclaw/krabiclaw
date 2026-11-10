@@ -199,7 +199,7 @@ test('an owner answers a guest by quoting their WhatsApp alert, with nothing ask
     const manager = { organizationId: 'paid', actorId: 'owner', manage: true }
     const cabin = await createProduct(db, { env, organizationId: 'paid', actor: { actorId: 'owner' }, product: {
       kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
-      stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null },
+      stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: 'member-paid' },
     } })
     const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
     // Ana and Bo can be emailed; Dee left only a phone and has no KrabiClaw account, so the inbox shows her no composer.

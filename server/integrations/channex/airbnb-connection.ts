@@ -567,11 +567,14 @@ export class AirbnbConnection {
       // Resume that home even if Airbnb's details have changed since the first attempt.
       const creationKey = `airbnb-listing:${listingId}`
       const created = await readCreationRecord(this.db, creationDedupeKey('product', this.organizationId, creationKey))
+      // The admin who imports a listing looks after the home it becomes until they assign it to someone else.
+      const importer = created ? null : await queryFirst<{ id: string }>(this.db, 'SELECT id FROM member WHERE organizationId = ? AND userId = ?', [this.organizationId, this.userId])
+      if (!created && !importer) fail(403, 'MEMBERSHIP_REQUIRED', 'Only a member of this organization can import its listings')
       const home = created ? await readStayHome(this.db, this.manager(), created.entityId) : await createStayHome(this.env, this.db, this.manager(), stayHomeInput({
         name: details.title, timezone: values.timezone, address: values.address, city: values.city, state: values.state, country: values.country,
         zip_code: values.zipCode, phone: values.phone, email: values.email, check_in_time: details.checkInTime, check_in_end_time: details.checkInEndTime, check_out_time: details.checkOutTime,
         max_guests: details.maxGuests, min_nights: details.minimumNights, calendar_rules: details.calendarRules, base_price_minor: provided(() => minorUnits(details.nightlyRate, organization.default_currency)),
-        cancellation_policy: details.cancellationPolicy, long_term_cancellation_policy: details.longTermCancellationPolicy,
+        cancellation_policy: details.cancellationPolicy, long_term_cancellation_policy: details.longTermCancellationPolicy, assigned_member_id: importer!.id,
       }), creationKey)
       // The nights land before the mapping: until the mapping exists a retry
       // runs this whole step again (the location and product replay by their

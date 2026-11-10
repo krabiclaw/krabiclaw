@@ -10,7 +10,7 @@
     @cancel="p.revert"
     @save="p.save"
   >
-    <ResponsibilityPicker v-if="p.isNew.value || p.product.value" v-model:member-id="p.form.stay_member_id" :organization-id="p.organizationId" :disabled="p.saving.value" />
+    <ResponsibilityPicker v-if="p.isNew.value || p.product.value" v-model:member-id="p.form.stay_member_id" :organization-id="p.organizationId" :disabled="p.saving.value" required />
   </DashboardLeafPanel>
 </template>
 

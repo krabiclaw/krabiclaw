@@ -23,7 +23,8 @@ extend that model. Never add a second one beside it.
 | Onboarding draft | `onboarding_drafts` | server/utils/onboarding-drafts.ts | KrabiClaw |
 | Place (a branch or a home's address and clock) | `business_locations` | server/utils/location-management.ts | KrabiClaw |
 | Catalog | `products` `product_variants` `prices` `product_publications` `product_locations` `collections` `collection_products` | server/utils/product-management.ts | KrabiClaw (Stripe-shaped) |
-| How a product is booked, and who handles it | `product_booking_configs` | server/utils/availability.ts | KrabiClaw |
+| How a product is booked, and who handles it (a session's seats or a home's nights) | `product_booking_configs` | server/utils/availability.ts | KrabiClaw |
+| Home description and arrival guide | `product_stay_configs` | server/domain/stays.ts | KrabiClaw |
 | When a product can be booked | `product_availability_rules` | server/utils/availability.ts | KrabiClaw |
 | Timed inventory | `product_sessions` | server/utils/availability.ts | KrabiClaw |
 | Night inventory | `product_nights` | server/domain/stays.ts | KrabiClaw |
@@ -66,10 +67,16 @@ Each of these tables is a second model of a concept above. The check fails until
 | `stays` | Booked record |
 | `reservations` | Booked record |
 | `stay_nights` | Night inventory |
-| `product_stay_configs` | How a product is booked, and who handles it |
 | `location_reservation_configs` | How a product is booked, and who handles it |
 | `stay_payments` | Payments |
 | `send_later_messages` | Future guest message |
+
+Two single-owner columns below still name a retiring owner, until it goes:
+
+- `stays.cancellation_policy` is the policy frozen on a booked stay when it was
+  taken; it goes with `stays` into the booked record.
+- `business_locations.assigned_member_id` is who handles a location's table
+  reservations; it goes with `location_reservation_configs`.
 
 ## Single-owner columns
 
@@ -77,13 +84,17 @@ Each of these columns exists on its owner table only.
 
 | Column | Owner |
 |---|---|
-| `assigned_member_id` | `product_booking_configs` `tasks` |
+| `assigned_member_id` | `product_booking_configs` `tasks` `business_locations` |
 | `party_size` | `bookings` |
 | `no_show_at` | `bookings` |
 | `cancellation_reason` | `bookings` |
 | `duration_minutes` | `product_booking_configs` |
 | `advance_notice_minutes` | `product_booking_configs` |
 | `questions` | `product_booking_configs` |
+| `check_in_time` | `product_booking_configs` |
+| `check_out_time` | `product_booking_configs` |
+| `min_nights` | `product_booking_configs` |
+| `cancellation_policy` | `product_booking_configs` `stays` |
 | `guest_name` | (none) |
 | `guest_email` | (none) |
 | `guest_phone` | (none) |

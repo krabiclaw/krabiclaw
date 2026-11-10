@@ -60,20 +60,20 @@ async function boot() {
       await db.prepare("INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES (?, ?, ?, 'Seat', ?, ?)").bind(`${id}-seat`, ORG, id, OWNER, OWNER).run()
     }
     await db.prepare("INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_by, updated_by) VALUES (?, 'class', 'brooklyn', 1, 1, ?, ?)").bind(ORG, OWNER, OWNER).run()
-    await db.prepare("INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES ('class', ?, 120, 12, 'business', ?, ?)").bind(ORG, OWNER, OWNER).run()
+    await db.prepare("INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, default_capacity, scheduling_mode, created_by, updated_by) VALUES ('class', ?, 'slot', 120, 12, 'business', ?, ?)").bind(ORG, OWNER, OWNER).run()
     await db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, public_name, public_approved, updated_at, updated_by)
       VALUES (?, ?, ?, '[]', '[]', 'Dana Brooks, Esq.', 1, ?, ?)`).bind(`m-${OWNER}`, ORG, ZONE, NOW, OWNER).run()
-    await db.prepare("INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, scheduling_mode, assigned_member_id, held_online, created_by, updated_by) VALUES ('family', ?, 60, 1, 'provider', ?, 1, ?, ?)").bind(ORG, `m-${OWNER}`, OWNER, OWNER).run()
+    await db.prepare("INSERT INTO product_booking_configs (product_id, organization_id, unit, duration_minutes, default_capacity, scheduling_mode, assigned_member_id, held_online, created_by, updated_by) VALUES ('family', ?, 'slot', 60, 1, 'provider', ?, 1, ?, ?)").bind(ORG, `m-${OWNER}`, OWNER, OWNER).run()
     // New York is five hours behind UTC in November.
-    const session = (id: string, product: string, day: string, hour: number, member: string | null = null) => {
+    const session = (id: string, product: string, day: string, hour: number) => {
       const starts = Date.parse(`${day}T00:00:00.000Z`) + (hour + 5) * 3_600_000
-      return db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, assigned_member_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 4, 'scheduled', ?, ?)`).bind(id, ORG, product, product === 'class' ? 'brooklyn' : null, member, ZONE, new Date(starts).toISOString(), new Date(starts + 7_200_000).toISOString(), OWNER, OWNER).run()
+      return db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 4, 'scheduled', ?, ?)`).bind(id, ORG, product, product === 'class' ? 'brooklyn' : null, ZONE, new Date(starts).toISOString(), new Date(starts + 7_200_000).toISOString(), OWNER, OWNER).run()
     }
     for (const [offset, day] of ['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13'].entries()) {
       await session(`class-${offset}`, 'class', day, 18)
-      await session(`family-${offset}-a`, 'family', day, 10, `m-${OWNER}`)
-      await session(`family-${offset}-b`, 'family', day, 14, `m-${OWNER}`)
+      await session(`family-${offset}-a`, 'family', day, 10)
+      await session(`family-${offset}-b`, 'family', day, 14)
     }
     await db.prepare("INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, status) VALUES ('b1', ?, 'class', 'class-2', 'class-seat', 3, 'confirmed')").bind(ORG).run()
     await db.prepare("INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, status) VALUES ('b2', ?, 'family', 'family-1-a', 'family-seat', 1, 'pending')").bind(ORG).run()

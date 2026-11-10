@@ -9,14 +9,6 @@ import { claimSessionCapacity } from '../../server/utils/availability.ts'
 import { handleBookingsTools } from '../../server/utils/mcp-tools/bookings.ts'
 import type { McpExecutorContext } from '../../server/utils/mcp-tools/execution.ts'
 import { publicProductHosts } from '../../server/utils/public-provider.ts'
-import { requestInsertQueries, threadPayloadForGuest, getGuestRequest } from '../../server/domain/requests.ts'
-import { formatTimestamp } from '../../utils/timezone.ts'
-import { listOrganizationGuestThreads } from '../../server/domain/guest-threads/repository.ts'
-import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
-import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
-import { memberAccessPrincipal, resolveOrganizationMembership } from '../../server/utils/member-access.ts'
-import { respondToBookingChange, bookingChangeViews } from '../../server/domain/guest-threads/booking-changes.ts'
-import { reassignBookingProvider } from '../../server/domain/provider-reassignment.ts'
 import { storeCalendarSelection, readCalendarIntegration, disconnectCalendar, syncCalendarOrganization } from '../../server/utils/google-calendar.ts'
 import { MEMBER_BUSY_SCOPES } from '../../shared/member-scheduling.ts'
 import { roleSatisfies } from '../../server/utils/mcp-auth.ts'
@@ -62,7 +54,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   await assert.rejects(()=>writeMemberScheduling(own,'member-one',{expected_updated_at:profile.updated_at,weekly:[]}),/together the first time/)
   await assert.rejects(()=>writeMemberScheduling(own,'member-one',{expected_updated_at:profile.updated_at,timezone:null} as unknown as Parameters<typeof writeMemberScheduling>[2]),/IANA timezone/)
   await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by)VALUES('experience','profile-host','org','Authored host','profile-host','owner','owner')").run()
-  await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,scheduling_mode,assigned_member_id,created_by,updated_by)VALUES('profile-host','org','business','member-one','owner','owner')").run()
+  await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,scheduling_mode,assigned_member_id,created_by,updated_by)VALUES('profile-host','org','slot','business','member-one','owner','owner')").run()
   assert.deepEqual(await publicProductHosts(db,'org','profile-host'),[],'draft content is withheld from the public host read')
   for(const public_name of [null,'','   ']) {
    await assert.rejects(()=>writeMemberScheduling(owner,'member-one',{expected_updated_at:profile.updated_at,public_name,public_approved:true}),{statusCode:400,message:'Set a nonblank public name before publishing the member profile'})
@@ -153,8 +145,8 @@ test('member self-service uses Better Auth permissions, public approval is admin
   for(const [id,member]of [['one','member-one'],['two','member-two']]) {
    await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by)VALUES('experience',?,'org',?,?,'owner','owner')").bind(id,id,id).run()
    await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by)VALUES(?,'org',?,'Standard','owner','owner')").bind(`variant-${id}`,id).run()
-   await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,scheduling_mode,assigned_member_id,duration_minutes,default_capacity,held_online,created_by,updated_by)VALUES(?,'org','provider',?,60,1,1,'owner','owner')").bind(id,member).run()
-   await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES(?,'org',?,?,'UTC',?,?,1,'owner','owner')").bind(`session-${id}`,id,member,start,end).run()
+   await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,unit,scheduling_mode,assigned_member_id,duration_minutes,default_capacity,held_online,created_by,updated_by)VALUES(?,'org','slot','provider',?,60,1,1,'owner','owner')").bind(id,member).run()
+   await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES(?,'org',?,'UTC',?,?,1,'owner','owner')").bind(`session-${id}`,id,start,end).run()
   }
   const stable=()=>db.prepare("SELECT timezone,weekly_json,time_off_json,calendar_account_id,calendar_ids_json FROM member_scheduling WHERE member_id='member-one'").first()
   const stableBefore=await stable()
@@ -180,8 +172,8 @@ test('member self-service uses Better Auth permissions, public approval is admin
   } finally {await db.prepare('DROP TRIGGER refuse_member_sessions').run()}
   assert(afterFailedProfile)
   const completed=await writeMemberScheduling(own,'member-one',{expected_updated_at:afterFailedProfile.updated_at,weekly:shorterHours})
-  const completedSlot=await db.prepare("SELECT assigned_member_id,status FROM product_sessions WHERE product_id='one' AND starts_at=?").bind(completionStart).first()
-  assert.deepEqual(completedSlot,{assigned_member_id:'member-one',status:'scheduled'},'an explicit unchanged Hours retry finishes canonical session materialization')
+  const completedSlot=await db.prepare("SELECT status FROM product_sessions WHERE product_id='one' AND starts_at=?").bind(completionStart).first()
+  assert.deepEqual(completedSlot,{status:'scheduled'},'an explicit unchanged Hours retry finishes canonical session materialization')
   const completedBytes=await stable()
   const completedSessions=(await db.prepare('SELECT * FROM product_sessions ORDER BY id').all()).results
   await writeMemberScheduling(own,'member-one',{expected_updated_at:completed.updated_at,timezone:completed.timezone!,weekly:completed.weekly!,time_off:completed.time_off!})
@@ -194,7 +186,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   await assert.rejects(()=>claimSessionCapacity(db,{env,organizationId:'org',productId:'one',sessionId:'session-one',productVariantId:'variant-one',partySize:1}),{message:'The account this integration was connected through is no longer linked. Connect it again.'})
   assert.equal(await db.prepare("SELECT count(*) n FROM bookings WHERE product_session_id='session-one'").first('n'),0)
   // Cancelling an unbooked session asks no calendar, so an unreadable one does not stand in the way, nor does another scheduled session of the same offering at the same time.
-  await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES('session-one-b','org','one','member-one','UTC',?,?,1,'owner','owner')").bind(`${day}T14:30:00.000Z`,`${day}T15:30:00.000Z`).run()
+  await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES('session-one-b','org','one','UTC',?,?,1,'owner','owner')").bind(`${day}T14:30:00.000Z`,`${day}T15:30:00.000Z`).run()
   const sessionOne=await db.prepare("SELECT updated_at FROM product_sessions WHERE id='session-one'").first<string>('updated_at')
   const mcpOrganization={db,env,organizationId:'org',userId:'owner',role:'owner',isPlatformAdmin:false,scopes:['tenant'],membership:{id:'member-owner',organizationId:'org',userId:'owner',role:'owner'}} as McpExecutorContext['organization']
   const cancelled=await handleBookingsTools({toolName:'update_product_session',args:{product_id:'one',session_id:'session-one',expected_updated_at:sessionOne,status:'cancelled'},organization:mcpOrganization} as McpExecutorContext) as {session:{status:string}}
@@ -203,7 +195,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   await db.prepare("DELETE FROM product_sessions WHERE id='session-one-b'").run()
   await db.prepare("UPDATE product_sessions SET status='scheduled' WHERE id='session-one'").run()
   const healthy=await claimSessionCapacity(db,{env,organizationId:'org',productId:'two',sessionId:'session-two',productVariantId:'variant-two',partySize:1})
-  assert.equal(await db.prepare('SELECT assigned_member_id FROM bookings WHERE id=?').bind(healthy.bookingId).first('assigned_member_id'),'member-two')
+  assert.equal(await db.prepare('SELECT c.assigned_member_id FROM bookings b JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id WHERE b.id=?').bind(healthy.bookingId).first('assigned_member_id'),'member-two','a booking is its offering\'s member\'s')
   await db.prepare("UPDATE member_scheduling SET calendar_account_id=NULL WHERE member_id='member-one'").run()
   assert((await claimSessionCapacity(db,{env,organizationId:'org',productId:'one',sessionId:'session-one',productVariantId:'variant-one',partySize:1})).bookingId)
   await db.prepare("UPDATE member_scheduling SET calendar_account_id='busy-linked' WHERE member_id='member-one'").run()
@@ -215,142 +207,6 @@ test('member self-service uses Better Auth permissions, public approval is admin
   await selectBusyCalendars(own,'member-one',{account_id:null,calendar_ids:[]})
   t.mock.restoreAll()
   assert.equal((await readMemberScheduling(db,env,'org','member-one'))?.calendar_conflict_count,0)
-  const following=new Date(Date.parse(start)+14*86400000).toISOString(),followingEnd=new Date(Date.parse(end)+14*86400000).toISOString()
-  await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES('group','org','two','member-two','UTC',?,?,3,'owner','owner')").bind(following,followingEnd).run()
-  await db.prepare("INSERT INTO organization_locales(id,organization_id,locale,is_source,status)VALUES('org-en','org','en',1,'published')").run()
-  await db.prepare("UPDATE products SET kind='service' WHERE id='two'").run()
-  await db.prepare("UPDATE product_booking_configs SET default_capacity=3 WHERE product_id='two'").run()
-  await db.prepare("UPDATE member_scheduling SET public_name=member_id,public_approved=1 WHERE member_id IN ('member-one','member-two')").run()
-  const group=[]
-  for (const index of [0,1]) {
-   const requestId=`client-${index}`,now=new Date().toISOString()
-   const queries=requestInsertQueries({id:requestId,kind:'booking',organization_id:'org',location_id:null,user_id:'outsider',review_id:null,payload:threadPayloadForGuest({name:'Client',email:'outsider@example.test',phone:null}),created_at:now,updated_at:now})
-   await db.batch(queries.map(query=>db.prepare(query.query).bind(...query.params!)))
-   group.push(await claimSessionCapacity(db,{env,organizationId:'org',productId:'two',sessionId:'group',productVariantId:'variant-two',partySize:1,requestId,userId:'outsider'}))
-  }
-  const read=()=>db.prepare('SELECT id,product_session_id,assigned_member_id,updated_at FROM bookings WHERE id=?').bind(group[0]!.bookingId).first<{id:string;product_session_id:string;assigned_member_id:string;updated_at:string}>()
-  const original=await read()
-  // The consultation is now Attorney One's; its booked clients keep Attorney Two until they accept a change.
-  await db.prepare("UPDATE product_booking_configs SET assigned_member_id='member-one' WHERE product_id='two'").run()
-  const move={booking_id:group[0]!.bookingId,member_id:'member-one',expected_updated_at:original!.updated_at,idempotency_key:'client-attorney-change'}
-  await assert.rejects(()=>reassignBookingProvider(own,move),{statusCode:403})
-  const pending=await reassignBookingProvider(owner,move)
-  assert.equal(pending.change_status,'awaiting_guest_acceptance')
-  assert.deepEqual(await read(),original,'a proposed same-time attorney replacement preserves the actual appointment')
-  assert.deepEqual(await reassignBookingProvider(owner,move),pending,'replaying a pending request retains one proposal')
-  const proposal=await db.prepare("SELECT * FROM activity_entries WHERE request_id='client-0' AND event_name='booking_change.requested'").first<import('../../server/domain/guest-threads/types.ts').GuestThreadEntryRow>()
-  assert(proposal)
-  const view=(await bookingChangeViews(db,(await getGuestRequest(db,'client-0'))!,[proposal])).get(proposal.id)!
-  const immutable=JSON.parse(proposal.payload_json!)
-  assert.equal(immutable.before.startsAt,immutable.afterStartsAt,'same-time attorney replacement preserves the instant across attorney timezones')
-  assert.equal(immutable.before.endsAt,immutable.afterEndsAt)
-  const label=(instant:string,timezone:string)=>formatTimestamp(instant,'en',timezone,{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'})
-  assert.equal(view.before.whenLabel,label(following,'UTC'))
-  assert.equal(view.after.whenLabel,label(following,'America/New_York'))
-  assert.equal(view.before.assignedMemberId,'member-two')
-  assert.equal(view.after.assignedMemberId,'member-one')
-  assert.equal(view.status,'pending')
-  const consultationMail=await db.prepare("SELECT email_json FROM guest_thread_deliveries WHERE entry_id=? AND purpose='status_update'").bind(proposal.id).first<string>('email_json')
-  assert(consultationMail)
-  assert.match(JSON.parse(consultationMail).message.html,/href="https:\/\/krabiclaw\.test\/dashboard\/account\/activity\/booking\/client-0"/,'consultation approval mail opens its actual buyer-owned activity')
-  const refusedDeliveryEnv={...env,EMAIL_DELIVERY_MODE:'provider',EMAIL_FROM:'KrabiClaw <hello@krabiclaw.com>',RESEND_API_KEY:'controlled-refusal-only'}
-  await assert.rejects(()=>respondToBookingChange(db,refusedDeliveryEnv,{threadId:'client-0',requestId:proposal.id,buyerUserId:'outsider',decision:'decline'}),(error:unknown)=>{
-   assert(error instanceof Error && 'statusCode' in error && error.statusCode===502)
-   assert.match(error.message,/RESERVED_TEST_EMAIL_DOMAIN/)
-   return true
-  })
-  assert.deepEqual(await read(),original,'declining leaves assignment and operational revision untouched even when its email is refused')
-  const declinedDetail=await getGuestThreadDetail(db,'client-0','org')
-  assert.equal(declinedDetail?.needsReply,false,'the recorded decline leaves no reply owed before delivery can fail')
-  assert.equal(declinedDetail?.entries.find(entry=>entry.id===proposal.id)?.bookingChange?.status,'declined')
-  assert.equal((await respondToBookingChange(db,env,{threadId:'client-0',requestId:proposal.id,buyerUserId:'outsider'})).status,'declined')
-  const declinedReceipt=await db.prepare("SELECT d.status,d.error FROM guest_thread_deliveries d JOIN activity_entries decision ON decision.id=d.entry_id WHERE decision.event_name='booking_change.declined' AND json_extract(decision.payload_json,'$.requestId')=? AND d.purpose='status_update'").bind(proposal.id).first<{status:string;error:string}>()
-  assert.equal(declinedReceipt?.status,'failed')
-  assert.match(declinedReceipt!.error,/RESERVED_TEST_EMAIL_DOMAIN/)
-  const membership=await resolveOrganizationMembership(env,{organizationId:'org',userId:'owner'})
-  assert(membership)
-  const principal=memberAccessPrincipal(membership,{env})
-  const owed=()=>listOrganizationGuestThreads(db,{organizationId:'org',userId:'owner',principal,needsReply:true}).then(threads=>threads.map(thread=>thread.id))
-  assert.deepEqual(await owed(),[],'the inbox list agrees: no conversation is owed a reply')
-  const requestAgain=await reassignBookingProvider(owner,{...move,idempotency_key:'client-attorney-change-accept'})
-  assert.equal(requestAgain.change_status,'awaiting_guest_acceptance')
-  const acceptedId=await db.prepare("SELECT id FROM activity_entries WHERE request_id='client-0' AND event_name='booking_change.requested' ORDER BY sequence DESC LIMIT 1").first<string>('id')
-  assert(acceptedId)
-  const accepted=await respondToBookingChange(db,env,{threadId:'client-0',requestId:acceptedId,buyerUserId:'outsider',decision:'accept'})
-  assert.equal(accepted.status,'accepted')
-  const moved=await read()
-  assert.equal(moved!.id,original!.id,'acceptance preserves the consultation identity')
-  assert.equal(moved!.assigned_member_id,'member-one')
-  assert.notEqual(moved!.product_session_id,'group')
-  assert.equal(await db.prepare('SELECT assigned_member_id FROM bookings WHERE id=?').bind(group[1]!.bookingId).first('assigned_member_id'),'member-two','one client cannot consent to another client’s attorney change')
-  assert.equal(await db.prepare("SELECT assigned_member_id FROM product_sessions WHERE id='group'").first('assigned_member_id'),'member-two')
-  const decision=await db.prepare("SELECT id FROM activity_entries WHERE request_id='client-0' AND event_name='booking_change.accepted' AND json_extract(payload_json,'$.requestId')=?").bind(acceptedId).first<{id:string}>()
-  assert(decision)
-  const assignmentAlert=await db.prepare("SELECT id,event_name,body FROM activity_entries WHERE parent_id=? AND kind='notification' AND scope_kind='organization'").bind(decision.id).all<{id:string;event_name:string;body:string}>()
-  assert.equal(assignmentAlert.results.length,1,'one accepted decision has one canonical staff notification')
-  assert.equal(assignmentAlert.results[0]!.event_name,'booking.change_accepted')
-  assert.match(assignmentAlert.results[0]!.body,/member-two → member-one/,'the accepted notification contains the immutable before and after attorney names')
-  const staffReceipts=()=>db.prepare("SELECT id,status,email_json FROM guest_thread_deliveries WHERE entry_id=? AND purpose='owner_alert' AND channel='email' ORDER BY id").bind(decision.id).all<{id:string;status:string;email_json:string}>().then(result=>result.results)
-  const notified=await staffReceipts()
-  assert.equal(notified.length,3,'the owner and exactly the previous and accepted attorneys are notified')
-  assert(notified.every(receipt=>receipt.status==='sent'))
-  const recipients=notified.map(receipt=>JSON.parse(receipt.email_json).message.to).sort()
-  assert.deepEqual(recipients,['one@example.test','owner@example.test','two@example.test'])
-  for (const receipt of notified) assert.match(JSON.parse(receipt.email_json).message.text.replace(/\s+/gu,' '),/member-two → member-one/)
-
-  const after=await respondToBookingChange(db,env,{threadId:'client-0',requestId:acceptedId,buyerUserId:'outsider',decision:'accept'})
-  assert.equal(after.status,'accepted')
-  assert.deepEqual(await read(),moved,'replayed acceptance does not claim or move again')
-  assert.deepEqual(await staffReceipts(),notified,'replaying acceptance retains exactly the original per-recipient receipts')
-  assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE parent_id=? AND kind='notification' AND scope_kind='organization'").bind(decision.id).first('n'),1)
-  assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE request_id='client-0' AND event_name='booking_change.accepted'").first('n'),1)
-  await assert.rejects(()=>reassignBookingProvider(owner,{...move,idempotency_key:'stale-attorney-change'}),{statusCode:409})
-  // The proposal is sent normally. Only elapsed time changes; no expiry writer manufactures state.
-  await reassignBookingProvider(owner,{booking_id:moved!.id,member_id:'member-two',expected_updated_at:moved!.updated_at,idempotency_key:'expires-in-conversation'})
-  const expiringId=await db.prepare("SELECT id FROM activity_entries WHERE request_id='client-0' AND event_name='booking_change.requested' ORDER BY sequence DESC LIMIT 1").first<string>('id')
-  assert(expiringId)
-  t.mock.timers.enable({apis:['Date'],now:new Date(Date.now()+8*86400000)})
-  try {
-   const expired=await respondToBookingChange(db,env,{threadId:'client-0',requestId:expiringId,buyerUserId:'outsider'})
-   assert.equal(expired.status,'expired')
-   await assert.rejects(()=>respondToBookingChange(db,env,{threadId:'client-0',requestId:expiringId,buyerUserId:'outsider',decision:'accept'}),{statusCode:410})
-   const detail=await getGuestThreadDetail(db,'client-0','org')
-   assert.equal(detail?.entries.find(entry=>entry.id===expiringId)?.bookingChange?.status,'expired','conversation card and response share the canonical expiry state')
-   const reply=await executeGuestThreadOperation(db,{threadId:'client-0',organizationId:'org',action:'reply',actorUserId:'owner',idempotencyKey:'after-expired-proposal',env,body:'Please reply with a suitable consultation time.'})
-   assert.equal(reply.ok,true)
-   assert.equal((await getGuestThreadDetail(db,'client-0','org'))?.needsReply,false,'an expired proposal cannot override a later real staff reply')
-   assert.deepEqual(await owed(),[])
-   const cancelled=await executeGuestThreadOperation(db,{threadId:'client-0',organizationId:'org',action:'cancel',actorUserId:'owner',idempotencyKey:'cancel-after-expired-proposal',env})
-   assert.equal(cancelled.ok,true)
-   assert.equal((await getGuestThreadDetail(db,'client-0','org'))?.needsReply,false,'an expired proposal cannot reopen a cancelled appointment')
-  } finally {t.mock.timers.reset()}
-  const second=await db.prepare('SELECT updated_at FROM bookings WHERE id=?').bind(group[1]!.bookingId).first<string>('updated_at')
-  await reassignBookingProvider(owner,{booking_id:group[1]!.bookingId,member_id:'member-one',expected_updated_at:second!,idempotency_key:'stale-proposal-attention'})
-  const staleId=await db.prepare("SELECT id FROM activity_entries WHERE request_id='client-1' AND event_name='booking_change.requested' ORDER BY sequence DESC LIMIT 1").first<string>('id')
-  assert(staleId)
-  await db.prepare('UPDATE bookings SET party_size=2 WHERE id=?').bind(group[1]!.bookingId).run()
-  assert.equal((await respondToBookingChange(db,env,{threadId:'client-1',requestId:staleId,buyerUserId:'outsider'})).status,'stale')
-  await assert.rejects(()=>respondToBookingChange(db,env,{threadId:'client-1',requestId:staleId,buyerUserId:'outsider',decision:'decline'}),{statusCode:409})
-  const currentSecond=await db.prepare('SELECT updated_at FROM bookings WHERE id=?').bind(group[1]!.bookingId).first<string>('updated_at')
-  await reassignBookingProvider(owner,{booking_id:group[1]!.bookingId,member_id:'member-one',expected_updated_at:currentSecond!,idempotency_key:'accepted-before-delivery-failure'})
-  const failureProposalId=await db.prepare("SELECT id FROM activity_entries WHERE request_id='client-1' AND event_name='booking_change.requested' ORDER BY sequence DESC LIMIT 1").first<string>('id')
-  assert(failureProposalId)
-  await assert.rejects(()=>respondToBookingChange(db,refusedDeliveryEnv,{threadId:'client-1',requestId:failureProposalId,buyerUserId:'outsider',decision:'accept'}),(error:unknown)=>{
-   assert(error instanceof Error && 'statusCode' in error && error.statusCode===502)
-   assert.match(error.message,/RESERVED_TEST_EMAIL_DOMAIN/)
-   return true
-  })
-  assert.deepEqual(await db.prepare('SELECT id,status,party_size,assigned_member_id FROM bookings WHERE id=?').bind(group[1]!.bookingId).first(),{id:group[1]!.bookingId,status:'confirmed',party_size:2,assigned_member_id:'member-one'},'a failed decision email does not conceal or reverse the committed acceptance')
-  assert.equal((await respondToBookingChange(db,env,{threadId:'client-1',requestId:failureProposalId,buyerUserId:'outsider'})).status,'accepted')
-  const acceptedFailureDetail=await getGuestThreadDetail(db,'client-1','org')
-  assert.equal(acceptedFailureDetail?.needsReply,false)
-  assert.equal(acceptedFailureDetail?.entries.find(entry=>entry.id===failureProposalId)?.bookingChange?.status,'accepted')
-  assert(acceptedFailureDetail?.deliveryFailures.some(delivery=>delivery.status==='failed'&&delivery.error?.includes('RESERVED_TEST_EMAIL_DOMAIN')),'the same conversation retains the delivery failure for review')
-  assert.deepEqual(await owed(),[],'canonical merchant queries owe nothing once consent is recorded')
-
-
-
-
  }finally{await runtime.dispose()}
 })
 

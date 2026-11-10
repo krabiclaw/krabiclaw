@@ -14,8 +14,8 @@ interface PaymentSubject { productId: string | null; variantId: string | null; m
 
 async function paymentSubject(db: DbClient, payment: Payment): Promise<PaymentSubject> {
   const snapshot = JSON.parse(payment.price_snapshot_json) as { product_id?: unknown; variant_id?: unknown; stay?: { product_id?: unknown } }
-  const held = await queryFirst<{ member_id: string | null }>(db, `SELECT COALESCE(b.assigned_member_id, h.assigned_member_id) member_id
-    FROM payment_checkout_holds h LEFT JOIN bookings b ON b.id=h.converted_booking_id WHERE h.payment_id=?`, [payment.id])
+  const held = await queryFirst<{ member_id: string | null }>(db, `SELECT c.assigned_member_id member_id
+    FROM payment_checkout_holds h JOIN product_booking_configs c ON c.product_id=h.product_id AND c.organization_id=h.organization_id WHERE h.payment_id=?`, [payment.id])
   return {
     productId: typeof snapshot.product_id === 'string' ? snapshot.product_id : typeof snapshot.stay?.product_id === 'string' ? snapshot.stay.product_id : null,
     variantId: typeof snapshot.variant_id === 'string' ? snapshot.variant_id : null,
@@ -96,8 +96,9 @@ export async function recordPaymentRefunded(db: DbClient, payment: Payment, refu
 interface BookingSubject { product_id: string; product_variant_id: string | null; assigned_member_id: string | null; location_id: string | null; created_at: string }
 
 async function bookingSubject(db: DbClient, organizationId: string, bookingId: string): Promise<BookingSubject> {
-  const booking = await queryFirst<BookingSubject>(db, `SELECT b.product_id, b.product_variant_id, b.assigned_member_id, s.location_id, b.created_at
-    FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id WHERE b.id=? AND b.organization_id=?`, [bookingId, organizationId])
+  const booking = await queryFirst<BookingSubject>(db, `SELECT b.product_id, b.product_variant_id, c.assigned_member_id, s.location_id, b.created_at
+    FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id
+    JOIN product_booking_configs c ON c.product_id=b.product_id AND c.organization_id=b.organization_id WHERE b.id=? AND b.organization_id=?`, [bookingId, organizationId])
   if (!booking) throw new Error(`Booking ${bookingId} is not in organization ${organizationId}`)
   return booking
 }
