@@ -9,61 +9,37 @@ export interface StripeWebhookEventInput {
   processor: StripeWebhookProcessor
 }
 
-const WEBHOOK_LEASE_MS = 5 * 60 * 1000
-
 /**
- * Deduplicate concurrent handlers; Stripe owns failed-delivery retries.
- * Automatic retries stop after three days in live mode, or three retries over a few hours in Sandbox.
- * attempt_count records deliveries; manual redelivery remains available after a repair.
+ * Process a Stripe event unless its processor already has. Each event keeps
+ * its id across deliveries, and Stripe retries a delivery that failed, so a
+ * failure is recorded with its error and thrown; the redelivery runs it again.
  * https://docs.stripe.com/webhooks#automatic-retries
  */
 export async function processStripeWebhookEvent(
   db: DbClient,
   event: StripeWebhookEventInput,
   work: () => Promise<void>,
-): Promise<boolean> {
-  const now = new Date()
-  const nowIso = now.toISOString()
+): Promise<void> {
   await execute(db, `
-    INSERT OR IGNORE INTO stripe_webhook_events
-      (id, stripe_event_id, event_type, processor, status, payload, attempt_count, created_at)
-    VALUES (?, ?, ?, ?, 'pending', ?, 0, ?)
-  `, [crypto.randomUUID(), event.id, event.type, event.processor, event.payload, nowIso])
-  const claimToken = crypto.randomUUID()
-  const claimed = await execute(db, `
-    UPDATE stripe_webhook_events
-    SET status = 'pending', claimed_at = ?, lease_expires_at = ?, claim_token = ?,
-        attempt_count = attempt_count + 1, error = NULL
-    WHERE stripe_event_id = ? AND processor = ?
-      AND status <> 'processed'
-      AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
-  `, [nowIso, new Date(now.getTime() + WEBHOOK_LEASE_MS).toISOString(), claimToken, event.id, event.processor, nowIso])
-  if (Number(claimed.meta.changes) !== 1) {
-    const existing = await queryFirst<{ status: string }>(db, `
-      SELECT status FROM stripe_webhook_events WHERE stripe_event_id = ? AND processor = ?
-    `, [event.id, event.processor])
-    return existing?.status === 'processed'
-  }
-
+    INSERT OR IGNORE INTO stripe_webhook_events (id, stripe_event_id, event_type, processor, status, payload, created_at)
+    VALUES (?, ?, ?, ?, 'pending', ?, ?)
+  `, [crypto.randomUUID(), event.id, event.type, event.processor, event.payload, new Date().toISOString()])
+  const receipt = await queryFirst<{ status: string }>(db, `
+    SELECT status FROM stripe_webhook_events WHERE stripe_event_id = ? AND processor = ?
+  `, [event.id, event.processor])
+  if (!receipt) throw new Error(`Stripe event ${event.id} is recorded for another processor than ${event.processor}`)
+  if (receipt.status === 'processed') return
   try {
     await work()
-    const completed = await execute(db, `
-      UPDATE stripe_webhook_events
-      SET status = 'processed', error = NULL, claimed_at = NULL,
-          lease_expires_at = NULL, claim_token = NULL,
-          payload = NULL
-      WHERE stripe_event_id = ? AND processor = ? AND status = 'pending' AND claim_token = ?
-    `, [event.id, event.processor, claimToken])
-    if (Number(completed.meta.changes) !== 1) throw new Error(`Lost Stripe webhook lease for ${event.id}`)
-    return true
   } catch (error) {
-    const failed = await execute(db, `
-      UPDATE stripe_webhook_events
-      SET status = 'failed', error = ?, claimed_at = NULL, lease_expires_at = NULL,
-          claim_token = NULL
-      WHERE stripe_event_id = ? AND processor = ? AND status = 'pending' AND claim_token = ?
-    `, [error instanceof Error ? error.message : String(error), event.id, event.processor, claimToken])
-    if (Number(failed.meta.changes) !== 1) throw new Error(`Lost Stripe webhook failure lease for ${event.id}`, { cause: error })
+    await execute(db, `
+      UPDATE stripe_webhook_events SET status = 'failed', error = ?
+      WHERE stripe_event_id = ? AND processor = ? AND status <> 'processed'
+    `, [error instanceof Error ? error.message : String(error), event.id, event.processor])
     throw error
   }
+  await execute(db, `
+    UPDATE stripe_webhook_events SET status = 'processed', error = NULL, payload = NULL
+    WHERE stripe_event_id = ? AND processor = ?
+  `, [event.id, event.processor])
 }

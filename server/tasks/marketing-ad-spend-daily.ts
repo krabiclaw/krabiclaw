@@ -15,14 +15,14 @@ export default defineScheduledTask<{ billed: number; skipped: number }>({
     const env = (context as { cloudflare?: { env?: CloudflareEnv } } | undefined)?.cloudflare?.env
     if (!env?.DB) throw new Error('DB is required')
     const now = new Date()
-    const organizations = await queryAll<{ organization_id: string }>(env.DB, "SELECT organization_id FROM organization_integrations WHERE provider='google_ads' UNION SELECT organization_id FROM payment_usage_events WHERE kind='ad_spend' AND delivery_at IS NULL AND dead_letter_at IS NULL ORDER BY organization_id")
+    const organizations = await queryAll<{ organization_id: string }>(env.DB, "SELECT organization_id FROM organization_integrations WHERE provider='google_ads' UNION SELECT organization_id FROM payment_usage_events WHERE kind='ad_spend' AND delivery_at IS NULL ORDER BY organization_id")
     const failures: string[] = []
     let billed = 0
     let skipped = 0
     for (const { organization_id } of organizations) {
       try {
         for (const day of await unrecordedAdSpendDays(env.DB, env, organization_id, now, 2)) await recordAdSpend(env.DB, env, organization_id, day)
-        const pending = await queryFirst<{ amount: number }>(env.DB, "SELECT SUM(amount) AS amount FROM payment_usage_events WHERE organization_id=? AND kind='ad_spend' AND delivery_at IS NULL AND dead_letter_at IS NULL HAVING COUNT(*)>0", [organization_id])
+        const pending = await queryFirst<{ amount: number }>(env.DB, "SELECT SUM(amount) AS amount FROM payment_usage_events WHERE organization_id=? AND kind='ad_spend' AND delivery_at IS NULL HAVING COUNT(*)>0", [organization_id])
         if (!pending) { skipped++; continue }
         await deliverPaymentsUsage(env.DB, env, organization_id)
         if (pending.amount > 0) billed++

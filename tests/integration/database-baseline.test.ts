@@ -1132,8 +1132,8 @@ test('a v20 export transfers into the current baseline unchanged, which admits B
         assert.deepEqual(target.prepare(`SELECT ${columns} FROM ${table} ORDER BY 1, 2`).all(), rows, `${table} is unchanged`)
       }
       // v20's pending outbox migration ran: the refusal keeps its reason and has never been confirmed.
-      assert.deepEqual(target.prepare('SELECT date, state, detail, sent_json, attempts, retry_at FROM channel_night_pushes').all(),
-        [{ date: '2026-11-01', state: 'needs_review', detail: 'Recorded refusal', sent_json: null, attempts: 0, retry_at: null }])
+      assert.deepEqual(target.prepare('SELECT date, state, detail, sent_json FROM channel_night_pushes').all(),
+        [{ date: '2026-11-01', state: 'needs_review', detail: 'Recorded refusal', sent_json: null }])
       stayRow('booking-com-stay', 'booking_com', '2026-12-01', '2026-12-03')(target)
       assert.throws(() => stayRow('expedia-stay', 'expedia', '2026-12-05', '2026-12-06')(target), /stays_channel_check/)
     } finally { target.close() }
@@ -1275,7 +1275,7 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
   const recorded: Record<string, unknown[]> = {}
   // A column added after v22, such as a stay's answers, holds its default; every value v22 recorded is kept.
   const recordedColumns = (table: string) => recorded[table]!.length ? Object.keys(recorded[table]![0] as Record<string, unknown>).map(column => `"${column}"`).join(', ') : '*'
-  const pushProjection = 'product_id,date,state,detail,sent_json,attempts,retry_at'
+  const pushProjection = 'product_id,date,state,detail,sent_json'
   const nightProjection = 'organization_id,product_id,date,closed,price_minor,min_stay_arrival,max_stay,closed_to_arrival,closed_to_departure,source,updated_at,updated_by'
   const demoOrganization = '5mbJj0T09tvDCSfhOlUTEt4idxKt82tc', demoHome = '2521e20c-6857-448a-a3a9-7cd389be29e0'
   let originalPushes: Array<Record<string, unknown>>
@@ -1365,7 +1365,9 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
       arrivalRules = source.prepare(`SELECT ${nightProjection} FROM product_nights ORDER BY product_id,date`).all()
       homeMinimums = source.prepare('SELECT product_id,min_nights FROM product_stay_configs ORDER BY product_id').all()
       originalPushes = source.prepare(`SELECT ${pushProjection} FROM channel_night_pushes ORDER BY product_id,date`).all() as Array<Record<string, unknown>>
-      originalJobs = source.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all() as Array<Record<string, unknown>>
+      // v26 retires the retry columns; every other recorded value is kept.
+      originalJobs = (source.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all() as Array<Record<string, unknown>>)
+        .map(({ attempts: _attempts, next_attempt_at: _next, lease_token: _lease, lease_until: _until, ...kept }) => kept)
       assert.deepEqual(source.pragma('foreign_key_check'), [])
     } finally { source.close() }
 
@@ -1424,7 +1426,7 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
     assert.deepEqual(readFileSync(sourcePath), sourceBytes)
     assert.deepEqual(readFileSync(targetPath), initialBytes, 'the initial replacement remains the immutable final-delta baseline')
     const target = new Database(targetPath)
-    let retryRows: unknown[]
+    let jobRows: unknown[]
     try {
       target.pragma('foreign_keys = ON')
       assert.equal(target.prepare("SELECT consultation_settings_json FROM organization WHERE id='host'").get()!.consultation_settings_json, recordedConsultationSettings, 'the retired tracking flag and surrounding JSON are retained byte-for-byte')
@@ -1443,10 +1445,11 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
         { product_id: 'west', name: 'recorded-title-guard', minimum: earlierFingerprint },
       ])
       assert.deepEqual(target.prepare(`SELECT ${pushProjection} FROM channel_night_pushes ORDER BY product_id,date`).all(), originalPushes, 'confirmed provider snapshots are untouched before the real source refresh')
-      for (const row of originalJobs.filter(row => row.product_id !== 'derived')) assert.deepEqual(target.prepare('SELECT * FROM airbnb_sync_jobs WHERE listing_id=?').get(row.listing_id), row)
-      assert.deepEqual(target.prepare("SELECT product_id,action,state,requested_by,attempts,last_error,next_attempt_at,completed_at FROM airbnb_sync_jobs WHERE product_id IN ('derived','west') ORDER BY product_id").all(), [
-        { product_id: 'derived', action: 'sync', state: 'pending', requested_by: 'owner', attempts: 0, last_error: null, next_attempt_at: null, completed_at: null },
-        { product_id: 'west', action: 'sync', state: 'pending', requested_by: 'owner', attempts: 0, last_error: null, next_attempt_at: null, completed_at: null },
+      // A job in error waited for a retry that no longer runs: the forward migration copies it as failed with its recorded error.
+      for (const row of originalJobs.filter(row => row.product_id !== 'derived')) assert.deepEqual(target.prepare('SELECT * FROM airbnb_sync_jobs WHERE listing_id=?').get(row.listing_id), row.state === 'error' ? { ...row, state: 'failed' } : row)
+      assert.deepEqual(target.prepare("SELECT product_id,action,state,requested_by,last_error,completed_at FROM airbnb_sync_jobs WHERE product_id IN ('derived','west') ORDER BY product_id").all(), [
+        { product_id: 'derived', action: 'sync', state: 'pending', requested_by: 'owner', last_error: null, completed_at: null },
+        { product_id: 'west', action: 'sync', state: 'pending', requested_by: 'owner', last_error: null, completed_at: null },
       ])
       assert.deepEqual(target.prepare("SELECT product_id FROM airbnb_sync_jobs WHERE product_id IN ('disconnected','departed')").all(), [])
       assert.equal(target.prepare("SELECT id FROM airbnb_sync_jobs WHERE product_id='derived'").get()!.id, 'job-derived', 'resuming a completed job preserves its existing identity')
@@ -1455,18 +1458,18 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
         { product_id: 'derived', created_at: createdAt, updated_at: '2026-10-30T12:30:00.000Z' },
         { product_id: 'west', created_at: '2026-10-30T12:30:00.000Z', updated_at: '2026-10-30T12:30:00.000Z' },
       ])
-      target.prepare("UPDATE airbnb_sync_jobs SET attempts=6,next_attempt_at='2026-10-31T13:00:00.000Z',last_error_code='recorded_retry',last_error='Recorded retry' WHERE product_id='derived'").run()
+      target.prepare("UPDATE airbnb_sync_jobs SET state='failed',last_error_code='SYNC_STEP_FAILED',last_error='Recorded failure' WHERE product_id='derived'").run()
       const initialJobs = target.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all()
       target.exec(readFileSync(deltaPayload, 'utf8'))
       assert.deepEqual(target.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all(), initialJobs, 'the final delta applies without duplicate listing jobs or resetting their state')
       for (const table of preservedTables) assert.deepEqual(target.prepare(`SELECT ${recordedColumns(table)} FROM ${table} ORDER BY 1,2`).all(), recorded[table], `${table} keeps every recorded value`)
       assert.deepEqual(target.pragma('foreign_key_check'), [])
 
-      // The next copy is an ordinary current-epoch refresh, after delivery has made retry progress.
+      // The next copy is an ordinary current-epoch refresh, after a job has recorded its outcome.
       target.exec(`CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
         ${current.map(file => `INSERT INTO d1_migrations(name) VALUES('${file}');`).join('\n')}`)
       target.prepare("UPDATE product_stay_configs SET calendar_rules=? WHERE product_id='derived'").run(recordedCalendarRules)
-      retryRows = target.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all()
+      jobRows = target.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all()
     } finally { target.close() }
     const currentBytes = readFileSync(targetPath)
     const repeatedPath = join(directory, 'current-copy.sqlite')
@@ -1475,7 +1478,7 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
     assert.deepEqual(readFileSync(targetPath), currentBytes)
     const refreshed = new Database(repeatedPath, { readonly: true })
     try {
-      assert.deepEqual(refreshed.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all(), retryRows)
+      assert.deepEqual(refreshed.prepare('SELECT * FROM airbnb_sync_jobs ORDER BY listing_id').all(), jobRows)
       assert.equal(refreshed.prepare("SELECT consultation_settings_json FROM organization WHERE id='host'").get()!.consultation_settings_json, recordedConsultationSettings, 'current-epoch refreshes preserve the original consultation JSON too')
       assert.equal(refreshed.prepare("SELECT calendar_rules FROM product_stay_configs WHERE product_id='derived'").get()!.calendar_rules, recordedCalendarRules, 'current-epoch copies retain recorded calendar rules')
       assert.deepEqual(refreshed.prepare(`SELECT ${pushProjection} FROM channel_night_pushes ORDER BY product_id,date`).all(), originalPushes)

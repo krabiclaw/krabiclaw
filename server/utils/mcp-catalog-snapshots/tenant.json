@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:d0007d915ed275a6d083411b3b0c3838a3fff0230e2ee135d9dc47e098c9e8f8",
-  "documentationFingerprint": "sha256:24f2c645631c651a5504015711848296ad21df8beaa58cd8c13408c490a15636",
+  "fingerprint": "sha256:5045755bd0e11387ae34ea95ce88646c4258be835e04d9bbe7c632d9ee89464e",
+  "documentationFingerprint": "sha256:a0d69508ba606bc7e09e83c16253709f2909ce99a0115eb65ffee33298dfa69a",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -29139,7 +29139,7 @@
     {
       "name": "create_product_booking",
       "title": "Create product booking",
-      "description": "Book the named guest at a returned product session; review offerings start pending and instant offerings confirmed. Required online payment returns financial_action_required and a dashboard URL before any booking is created.",
+      "description": "Book the named guest at a returned product session; for a legal practice this books a client consultation. Review offerings start pending and instant offerings confirmed. Notifies the business’s staff and, when guest_acknowledgement is true, emails the guest. Required online payment returns financial_action_required and a dashboard URL before any booking is created.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -73940,7 +73940,7 @@
     {
       "name": "move_stay",
       "title": "Move stay",
-      "description": "Move a guest to another of the host’s homes, for example after a double booking. The nights, turnover and later messages follow the guest, a channel reservation stays on the listing it was booked on, the new home gets a job to be made ready, and the guest is sent the new address and check-in instructions. Moving back to the booked listing undoes the move. The new home must be free for every night and have check-in instructions.",
+      "description": "Move a guest to another of the host’s homes, for example after a double booking. The nights, turnover and later messages follow the guest, a channel reservation such as an Airbnb one stays on the listing it was booked on, and the new home gets a job to be made ready. Updates availability on both homes’ connected Airbnb listings through Channex. A failed channel update raises CHANNEL_PUSH_FAILED with committed:true: the move is saved; read get_stay before retrying. The guest is sent the new address and check-in instructions only when the response’s guest_notified is true. Moving back to the booked listing undoes the move. The new home must be free for every night and have check-in instructions.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -74022,7 +74022,7 @@
             ]
           },
           "guest_notified": {
-            "description": "False when the stay has no guest conversation to send through; tell the host to message the guest on the channel.",
+            "description": "True when the move message was queued in the stay’s guest conversation. False when the stay has no guest conversation to send through; tell the host to message the guest on the channel.",
             "type": "boolean"
           },
           "stay": {

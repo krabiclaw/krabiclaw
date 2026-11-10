@@ -30,8 +30,8 @@ export async function processStripeConnectEvent(
   env: CloudflareEnv,
   notification: Stripe.V2.Core.EventNotification,
   payload: string,
-): Promise<boolean> {
-  return await processStripeWebhookEvent(db, {
+): Promise<void> {
+  await processStripeWebhookEvent(db, {
     id: notification.id,
     type: notification.type,
     payload,

@@ -366,9 +366,7 @@ any later forward cutover so it receives new request idempotency keys. If the sn
 reconcile the changes under the release rollback procedure; do not force this
 command through drift. The post-apply read verifies the full reviewed object
 snapshot, including unchanged billing terms. Verify the Worker receives a signed
-webhook at the canonical path and use the existing event replay/reconciliation
-operator path for retained failed events. Preserve expired dead-letter tombstones;
-provider-retention expiry does not justify creating replacement historical events.
+webhook at the canonical path; Stripe redelivers an event whose delivery failed.
 
 Supported provider APIs: [Customer metadata update](https://docs.stripe.com/api/customers/update),
 [Subscription metadata update](https://docs.stripe.com/api/subscriptions/update),

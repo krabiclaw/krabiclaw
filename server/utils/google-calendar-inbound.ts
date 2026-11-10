@@ -240,7 +240,7 @@ async function applyCalendarEvent(env: CloudflareEnv, organizationId: string, in
   // event, not a move. The outbound pass owns it until it has written the booking back.
   if (!deleted && (subject.revision !== link.booking_revision || link.booking_revision !== link.synced_revision)) return 'unchanged'
   // The booking decides what the event says; writing it back is the outbound pass's job, asked for here.
-  const restore = () => execute(db, "UPDATE google_calendar_event_links SET state='pending', next_attempt_at=NULL, updated_at=? WHERE id=? AND state<>'deleted'", [new Date().toISOString(), link.id])
+  const restore = () => execute(db, "UPDATE google_calendar_event_links SET state='pending', updated_at=? WHERE id=? AND state<>'deleted'", [new Date().toISOString(), link.id])
   const change = `${item.id}:${item.etag ?? item.updated ?? 'deleted'}`
   const thread = subject.request_id ? await getGuestRequest(db, subject.request_id, organizationId) : null
   let restoring = false

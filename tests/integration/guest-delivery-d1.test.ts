@@ -1064,18 +1064,18 @@ test('Stripe account alerts follow what each Stripe event hands the business, no
     const id = 'person.documents.primary_verification'
 
     // Another kind of account event says nothing about what is due.
-    assert.equal(await deliver('evt_identity', 'v2.core.account[identity].updated'), true)
+    await deliver('evt_identity', 'v2.core.account[identity].updated')
     assert.deepEqual(await alerts(), [])
 
     // Filling in Stripe's form: the list changes, and the owner is already in the form.
-    assert.equal(await deliver('evt_form', requirementsEvent, { before: [entry('identity.entity_type', 'user')], after: [entry('owners.email', 'user')] }), true)
+    await deliver('evt_form', requirementsEvent, { before: [entry('identity.entity_type', 'user')], after: [entry('owners.email', 'user')] })
     assert.deepEqual(await alerts(), [])
     assert.equal(await status(), 'action_required')
 
     // Stripe finishes its review and refuses the document. Redelivering that event says nothing new.
     const refusal = { before: [entry(id, 'stripe'), entry('owners.email', 'user')], after: [entry(id, 'user', [refused]), entry('owners.email', 'user')] }
-    assert.equal(await deliver('evt_refused', requirementsEvent, refusal), true)
-    assert.equal(await deliver('evt_refused', requirementsEvent, refusal), true)
+    await deliver('evt_refused', requirementsEvent, refusal)
+    await deliver('evt_refused', requirementsEvent, refusal)
     const told = await alerts()
     assert.equal(told.length, 1)
     assert.match(String(told[0]!.body), /doesn't match information on the document/u)
@@ -1090,17 +1090,17 @@ test('Stripe account alerts follow what each Stripe event hands the business, no
     assert.match(mail[0]!.html, /href="https:\/\/proof\.example\/dashboard\/merchant\/payments\/payout-method"/u)
 
     // Another document goes to review while the refusal stands: the refusal was already told.
-    assert.equal(await deliver('evt_other_review', requirementsEvent, { before: [entry(id, 'user', [refused]), entry('identity.business_details.documents.primary_verification', 'user')], after: [entry(id, 'user', [refused]), entry('identity.business_details.documents.primary_verification', 'stripe')] }), true)
+    await deliver('evt_other_review', requirementsEvent, { before: [entry(id, 'user', [refused]), entry('identity.business_details.documents.primary_verification', 'user')], after: [entry(id, 'user', [refused]), entry('identity.business_details.documents.primary_verification', 'stripe')] })
     assert.equal((await alerts()).length, 1)
 
     // Setup finishes: nothing is due, so the same event type stays quiet.
     capability = { status: 'active', status_details: [] }
-    assert.equal(await deliver('evt_cleared', requirementsEvent, { before: [entry(id, 'stripe')], after: [] }), true)
+    await deliver('evt_cleared', requirementsEvent, { before: [entry(id, 'stripe')], after: [] })
     assert.equal(await status(), 'ready')
     assert.equal((await alerts()).length, 1)
 
     // Stripe later asks for exactly the same thing: nothing was due before this event, so it is told.
-    assert.equal(await deliver('evt_asked_again', requirementsEvent, { before: [], after: [entry(id, 'user', [refused])] }), true)
+    await deliver('evt_asked_again', requirementsEvent, { before: [], after: [entry(id, 'user', [refused])] })
     assert.equal(await status(), 'action_required')
     assert.equal((await alerts()).length, 2)
 
@@ -1111,7 +1111,7 @@ test('Stripe account alerts follow what each Stripe event hands the business, no
     // Stripe restricts the capability.
     requirements = []
     capability = { status: 'restricted', status_details: [] }
-    assert.equal(await deliver('evt_restricted', 'v2.core.account[configuration.merchant].capability_status_updated'), true)
+    await deliver('evt_restricted', 'v2.core.account[configuration.merchant].capability_status_updated')
     assert.equal(await status(), 'restricted')
     assert.equal((await alerts()).length, 3)
 

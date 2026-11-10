@@ -59,7 +59,9 @@ async function boot(){
  try {
  const migration=await generateSQLiteMigration(await generateSQLiteDrizzleJson({}),await generateSQLiteDrizzleJson(schema))
  await db.batch(migration.map(query=>db.prepare(query)))
- await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at, timezone) VALUES(?,'Payments','payments','payments','{}','theme','USD','active','complete','flat','experience',?, 'America/New_York')`).bind(ORG,NOW).run()
+ // A business taking payments is billed for them on its plan's Stripe customer, and the platform site records what it billed.
+ await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at, timezone, "stripeCustomerId") VALUES(?,'Payments','payments','payments','{}','theme','USD','active','complete','flat','experience',?, 'America/New_York','cus_operating')`).bind(ORG,NOW).run()
+ await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at,timezone) VALUES('platform','KrabiClaw','krabiclaw','krabiclaw','{}','krabiclaw-theme-v1','USD','active','complete','flat','service',?,'America/Los_Angeles')`).bind(NOW).run()
  await db.prepare("INSERT INTO organization_locales(id,organization_id,locale,is_source,status) VALUES('payments-en',?,'en',1,'published')").bind(ORG).run()
  for(const id of ['guest','verified','other'])await db.prepare("INSERT INTO user(id,name,email,emailVerified,isAnonymous) VALUES(?,?,?,1,?)").bind(id,id,`${id}@example.com`,Number(id==='guest')).run()
  await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('service','product',?,'Consultation','consultation','guest','guest')").bind(ORG).run()
@@ -440,10 +442,11 @@ test('Stripe cost report replay and correction bill attributable deltas while co
   await payable(db,'cost');await db.prepare("UPDATE payments SET stripe_charge_id='ch:cost' WHERE id='cost'").run()
   await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG,NOW,NOW).run()
   await db.prepare("INSERT INTO payment_servicing_tenants(organization_id,stripe_account_id,livemode,retained_at) VALUES('deleted-other-tenant','acct_seller',0,?)").bind(NOW).run()
-  const csv=(amount:string)=>`fee_transaction_id,incurred_by,currency,amount,tax,incurred_at\nfee1,ch:cost,usd,${amount},0.20,2026-10-01T00:00:00Z\nfee2,unknown,usd,5.00,0,2026-10-01T00:00:00Z\nfee3,acct_seller,usd,1.00,0,2026-10-01T00:00:00Z\n`
+  const csv=(amount:string)=>`fee_transaction_id,incurred_by,currency,amount,tax,incurred_at\nfee1,ch:cost,usd,${amount},0.20,2026-10-01T00:00:00Z\n,ch:cost,usd,0.60,0,2026-10-01T00:00:00Z\n,ch:cost,usd,0.40,0,2026-10-01T00:00:00Z\nfee2,unknown,usd,5.00,0,2026-10-01T00:00:00Z\nfee3,acct_seller,usd,1.00,0,2026-10-01T00:00:00Z\n`
   await ingestStripeFeeReport(db,false,csv('3.00'));await ingestStripeFeeReport(db,false,csv('3.00'));await ingestStripeFeeReport(db,false,csv('2.00'))
-  const events=(await db.prepare("SELECT amount,kind FROM payment_usage_events ORDER BY kind").all()).results
-  assert.deepEqual(events,[{amount:320,kind:'stripe_cost'},{amount:-100,kind:'stripe_cost_adjustment'}])
+  // Stripe leaves fee_transaction_id blank for a card processing fee netted inside the charge; those rows share one identity and are summed.
+  const events=(await db.prepare("SELECT amount,kind FROM payment_usage_events ORDER BY kind,amount").all()).results
+  assert.deepEqual(events,[{amount:100,kind:'stripe_cost'},{amount:320,kind:'stripe_cost'},{amount:-100,kind:'stripe_cost_adjustment'}])
   assert.equal(await db.prepare('SELECT COUNT(*) n FROM payment_cost_snapshots WHERE organization_id IS NULL').first('n'),2)
   assert.equal(await db.prepare("SELECT organization_id FROM payment_cost_snapshots WHERE incurred_by='acct_seller'").first('organization_id'),null)
   assert.throws(()=>stripeFeeMinor('1.2340','USD'), /precision exceeds/u)
@@ -816,10 +819,8 @@ test('an expired payment hold no longer consumes session capacity', {timeout:120
  }finally{await runtime.dispose()}
 })
 
-test('Payments usage reaches its Stripe meters once, a correction as a negative value, and a rejected event keeps Stripe’s reason', {timeout:120000},async(t)=>{
+test('Payments usage reaches its Stripe meters once, a correction as a negative value, and a rejected event keeps Stripe’s reason without holding back the others', {timeout:120000},async(t)=>{
  const {db,runtime}=await boot();try{
-  await db.prepare('UPDATE organization SET "stripeCustomerId"=? WHERE id=?').bind('cus_operating',ORG).run()
-  await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at,timezone) VALUES('platform','KrabiClaw','krabiclaw','krabiclaw','{}','krabiclaw-theme-v1','USD','active','complete','flat','service',?,'America/Los_Angeles')`).bind(NOW).run()
   await payable(db,'billable')
   const events=[
    ['volume','billable','captured_volume','USD',10000,'capture:billable'],
@@ -838,40 +839,51 @@ test('Payments usage reaches its Stripe meters once, a correction as a negative 
    const body=new URLSearchParams(String(init?.body))
    sent.push({event_name:body.get('event_name'),customer:body.get('payload[stripe_customer_id]'),value:body.get('payload[value]'),identifier:body.get('identifier'),key:new Headers(init?.headers).get('idempotency-key')})
    if(answer==='unavailable')return Response.json({error:{type:'api_error',message:'Meter events are unavailable at the test boundary'}},{status:500,headers:{'stripe-should-retry':'false'}})
-   if(answer==='invalid')return Response.json({error:{type:'invalid_request_error',message:'No active meter was found for event_name krabiclaw_ad_spend'}},{status:400})
+   if(answer==='invalid'&&body.get('event_name')==='krabiclaw_ad_spend')return Response.json({error:{type:'invalid_request_error',message:'No active meter was found for event_name krabiclaw_ad_spend'}},{status:400})
    return Response.json({object:'billing.meter_event',event_name:body.get('event_name'),identifier:body.get('identifier'),payload:{},timestamp:1,created:1,livemode:false})
   })
   const env={DB:db,STRIPE_SECRET_KEY:'sk_test_meter_boundary'} as CloudflareEnv
-  // Stripe unavailable: the event keeps the reason and stays deliverable.
-  await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/unavailable at the test boundary/u)
-  assert.deepEqual(await db.prepare("SELECT delivery_at,dead_letter_at,error FROM payment_usage_events WHERE id='volume'").first(),{delivery_at:null,dead_letter_at:null,error:'Meter events are unavailable at the test boundary'})
-  // Delivered: each to its meter, the correction negative, the repeat of the first under the same identifier and key.
+  // Stripe unavailable: every event is sent, each keeps the reason and stays deliverable.
+  await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/Stripe did not take 4 of 4 usage events.*unavailable at the test boundary/u)
+  assert.equal(sent.length,4)
+  assert.equal(await db.prepare("SELECT COUNT(*) n FROM payment_usage_events WHERE delivery_at IS NULL AND error='Meter events are unavailable at the test boundary'").first('n'),4)
+  // Delivered: each to its meter, the correction negative, the repeat of each under the same identifier and key.
   answer='ok'
   assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:4})
-  assert.deepEqual(sent.slice(1).map(({identifier,key,...row})=>row),[
+  assert.deepEqual(sent.slice(4).map(({identifier,key,...row})=>row),[
    {event_name:'krabiclaw_captured_volume',customer:'cus_operating',value:'10000'},
    {event_name:'krabiclaw_stripe_cost',customer:'cus_operating',value:'320'},
    {event_name:'krabiclaw_stripe_cost',customer:'cus_operating',value:'-30'},
    {event_name:'krabiclaw_ad_spend',customer:'cus_operating',value:'50000'},
   ])
-  assert.equal(sent[1]!.identifier,sent[0]!.identifier)
-  assert.equal(sent[1]!.key,sent[1]!.identifier)
-  assert.equal(sent[1]!.identifier,`payments:${await tokenHash('capture:billable')}`)
-  assert.equal(new Set(sent.slice(1).map(row=>row.identifier)).size,4)
+  assert.deepEqual(sent.slice(4).map(row=>row.identifier),sent.slice(0,4).map(row=>row.identifier))
+  assert.equal(sent[4]!.key,sent[4]!.identifier)
+  assert.equal(sent[4]!.identifier,`payments:${await tokenHash('capture:billable')}`)
+  assert.equal(new Set(sent.slice(4).map(row=>row.identifier)).size,4)
   assert.equal(await db.prepare('SELECT COUNT(*) n FROM payment_usage_events WHERE delivery_at IS NOT NULL AND error IS NULL').first('n'),4)
   assert.equal(await db.prepare("SELECT COUNT(*) n FROM analytics_events WHERE organization_id='platform' AND payload_json->>'$.event_name'='payments_volume_billed' AND payload_json->>'$.properties.volume_minor'=10000").first('n'),1)
   assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:0})
-  assert.equal(sent.length,5)
-  // Stripe refuses an event outright: it is set aside with Stripe’s reason, not retried.
+  assert.equal(sent.length,8)
+  // Stripe refuses one meter outright: that event keeps Stripe’s reason and fails every delivery until Stripe takes it; a later event on another meter is still billed.
   answer='invalid'
-  await db.prepare("INSERT INTO payment_usage_events(id,organization_id,kind,currency,amount,source_id,provider_occurred_at,created_at)VALUES('late',?,'ad_spend','USD',100,'google_ads:1234567890:2026-10-01',?,?)").bind(ORG,NOW,NOW).run()
+  await db.prepare("INSERT INTO payment_usage_events(id,organization_id,kind,currency,amount,source_id,provider_occurred_at,created_at)VALUES('late',?,'ad_spend','USD',100,'google_ads:1234567890:2026-10-01',?,?),('later',?,'stripe_cost','USD',45,'fee:txn_2:revision:1',?,?)").bind(ORG,NOW,NOW,ORG,NOW,new Date(Date.parse(NOW)+60_000).toISOString()).run()
+  await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/Stripe did not take 1 of 2 usage events.*No active meter/u)
+  assert.deepEqual(await db.prepare("SELECT id,delivery_at IS NOT NULL AS delivered,error FROM payment_usage_events WHERE id IN ('late','later') ORDER BY id").all().then(result=>result.results),[
+   {id:'late',delivered:0,error:'No active meter was found for event_name krabiclaw_ad_spend'},
+   {id:'later',delivered:1,error:null},
+  ])
   await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/No active meter/u)
-  const late=await db.prepare("SELECT delivery_at,dead_letter_at,error FROM payment_usage_events WHERE id='late'").first<{delivery_at:string|null;dead_letter_at:string|null;error:string}>()
-  assert.equal(late?.delivery_at,null)
-  assert.equal(typeof late?.dead_letter_at,'string')
-  assert.equal(late?.error,'No active meter was found for event_name krabiclaw_ad_spend')
-  assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:0})
-  assert.equal(sent.length,6)
+  assert.equal(sent.length,11)
+  answer='ok'
+  assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:1})
+  assert.equal(sent.length,12)
+  assert.deepEqual(await db.prepare("SELECT delivery_at IS NOT NULL AS delivered,error FROM payment_usage_events WHERE id='late'").first(),{delivered:1,error:null})
+  // A business with no Stripe customer has nothing to bill usage to: the delivery fails with that reason on the event.
+  await db.prepare('UPDATE organization SET "stripeCustomerId"=NULL WHERE id=?').bind(ORG).run()
+  await db.prepare("INSERT INTO payment_usage_events(id,organization_id,kind,currency,amount,source_id,provider_occurred_at,created_at)VALUES('orphaned',?,'ad_spend','USD',100,'google_ads:1234567890:2026-10-02',?,?)").bind(ORG,NOW,NOW).run()
+  await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/no Stripe customer to bill this usage to/u)
+  assert.deepEqual(await db.prepare("SELECT delivery_at,error FROM payment_usage_events WHERE id='orphaned'").first(),{delivery_at:null,error:'The business has no Stripe customer to bill this usage to'})
+  assert.equal(sent.length,12)
  }finally{await runtime.dispose()}
 })
 
@@ -1226,7 +1238,7 @@ test('processing webhooks extend only active checkout holds and preserve capacit
       await payable(db, id, expires)
       if (status !== 'active') await db.prepare('UPDATE payment_checkout_holds SET status=? WHERE payment_id=?').bind(status, id).run()
       const event = { id: `evt_${id}`, type: 'payment_intent.processing', account: 'acct_seller', livemode: false, data: { object: { id: `pi_${id}`, metadata: { krabiclaw_payment_id: id } } } } as Stripe.Event
-      assert.equal(await processPaymentEvent(db, getStripe(env), event, env), true)
+      await processPaymentEvent(db, getStripe(env), event, env)
       const hold = await db.prepare('SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id=?').bind(id).first<{ status: string; expires_at: string }>()
       assert.equal(hold?.status, status)
       assert.equal((await requirePayment(db, ORG, id)).captured_amount, 0)
@@ -1251,13 +1263,20 @@ async function confirmable(db: D1Database, id: string, holdExpires: string, chec
  await db.prepare('UPDATE payment_checkout_holds SET expires_at=?,request_id=? WHERE payment_id=?').bind(holdExpires, opening.id, id).run()
  return claim
 }
-/** Stripe's answers for the intents, charges and refunds a confirmation and its settlement read. */
+/** Stripe's answers for the intents, charges and refunds a confirmation and its settlement read, and the platform meter its captured volume is billed on. */
 function fakeStripe(t: TestContext, handle: (url: URL, init: RequestInit | undefined) => Promise<Response | null> | Response | null, statuses: Record<string, string>) {
  const originalFetch = globalThis.fetch
- const calls = { confirm: [] as string[], capture: [] as string[], cancel: [] as string[], refund: [] as string[], read: [] as string[] }
+ const calls = { confirm: [] as string[], capture: [] as string[], cancel: [] as string[], refund: [] as string[], read: [] as string[], billed: [] as string[] }
  t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(request instanceof Request ? request.url : String(request))
   if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
+  if (url.pathname === '/v1/billing/meter_events') {
+   const body = new URLSearchParams(String(init?.body))
+   assert.equal(new Headers(init?.headers).get('stripe-account'), null)
+   assert.equal(body.get('payload[stripe_customer_id]'), 'cus_operating')
+   calls.billed.push(`${body.get('event_name')}:${body.get('payload[value]')}`)
+   return Response.json({ object: 'billing.meter_event', event_name: body.get('event_name'), identifier: body.get('identifier'), payload: {}, timestamp: 1, created: 1, livemode: false })
+  }
   assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
   const handled = await handle(url, init)
   if (handled) return handled
@@ -1325,9 +1344,10 @@ test('a card is authorized, booked, then captured, and a hold that has lapsed st
   assert.deepEqual(calls.capture, ['direct'])
   statuses.authenticating = 'requires_capture'
   const event = { id: 'evt_authorized', type: 'payment_intent.amount_capturable_updated', account: 'acct_seller', livemode: false, data: { object: { id: 'pi_authenticating', metadata: { krabiclaw_payment_id: 'authenticating' } } } } as unknown as Stripe.Event
-  assert.equal(await processPaymentEvent(db, stripe, event, env), true)
+  await processPaymentEvent(db, stripe, event, env)
   assert.deepEqual(bookedWhenCaptured, { direct: 1, authenticating: 1 })
   assert.equal((await requirePayment(db, ORG, 'authenticating')).captured_amount, 10000)
+  assert.deepEqual(calls.billed, ['krabiclaw_captured_volume:10000', 'krabiclaw_captured_volume:10000'], 'each capture is billed on the business’s meter')
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 2)
  } finally { await runtime.dispose() }
 })
@@ -1357,7 +1377,7 @@ test('an authorization that lost its capacity is cancelled and never charged; ca
   await confirmable(db, 'taken', inMinutes(-1))
   await db.prepare("UPDATE payment_checkout_holds SET status='released' WHERE payment_id='taken'").run()
   const seat = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
-  assert.equal(await deliver('taken'), true)
+  await deliver('taken')
   assert.deepEqual([calls.cancel, calls.capture, calls.refund], [['taken'], [], []])
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings WHERE id<>?').bind(seat.bookingId).first('n'), 0)
   assert.equal(await db.prepare("SELECT count(*) n FROM payment_refunds WHERE payment_id='taken'").first('n'), 0)
@@ -1374,7 +1394,7 @@ test('an authorization that lost its capacity is cancelled and never charged; ca
   await assert.rejects(() => deliver('lost'))
   assert.equal(await bookingsOf('lost'), 1)
   assert.equal((await requirePayment(db, ORG, 'lost')).captured_amount, 0)
-  assert.equal(await deliver('lost', 'evt_lost_again'), true)
+  await deliver('lost', 'evt_lost_again')
   assert.deepEqual(calls.capture, [])
   assert.equal(await bookingsOf('lost'), 1)
   assert.equal((await requirePayment(db, ORG, 'lost')).captured_amount, 10000)
@@ -1384,14 +1404,14 @@ test('an authorization that lost its capacity is cancelled and never charged; ca
   await assert.rejects(() => deliver('refused'))
   assert.equal(await bookingsOf('refused'), 1)
   assert.equal(statuses.refused, 'requires_capture')
-  assert.equal(await deliver('refused', 'evt_refused_again'), true)
+  await deliver('refused', 'evt_refused_again')
   assert.deepEqual(calls.capture, ['refused'])
   assert.equal(await bookingsOf('refused'), 1)
   assert.equal((await requirePayment(db, ORG, 'refused')).captured_amount, 10000)
 
   // Another delivery captured first: Stripe's own status finishes this one.
   captures = 0
-  assert.equal(await deliver('raced'), true)
+  await deliver('raced')
   assert.equal(await bookingsOf('raced'), 1)
   assert.equal((await requirePayment(db, ORG, 'raced')).captured_amount, 10000)
 
@@ -1474,7 +1494,7 @@ test('a bank debit that cleared after its capacity went is refunded once and nev
   await confirmable(db, 'taken', inMinutes(-1))
   await db.prepare("UPDATE payment_checkout_holds SET status='released' WHERE payment_id='taken'").run()
   const seat = await claimSessionCapacity(db, { env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 })
-  assert.equal(await deliver('taken'), true)
+  await deliver('taken')
   assert.deepEqual(calls.refund, ['pi_taken'])
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings WHERE id<>?').bind(seat.bookingId).first('n'), 0)
   assert.equal((await db.prepare("SELECT idempotency_key FROM payment_refunds WHERE payment_id='taken'").first('idempotency_key')), 'unfulfillable:pi_taken')
@@ -1492,8 +1512,8 @@ test('a bank debit that cleared after its capacity went is refunded once and nev
   await assert.rejects(() => deliver('retried'))
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 0)
   assert.equal((await holdOf(db, 'retried'))?.status, 'active')
-  assert.equal(await deliver('retried'), true)
-  assert.equal(await deliver('retried', 'evt_retried_duplicate'), true)
+  await deliver('retried')
+  await deliver('retried', 'evt_retried_duplicate')
   assert.equal(await db.prepare('SELECT count(*) n FROM bookings').first('n'), 1)
   assert.equal((await holdOf(db, 'retried'))?.status, 'converted')
  } finally { await runtime.dispose() }
@@ -1746,17 +1766,18 @@ test('managed ads keeps MCP creation paused, preserves updates and billing conse
   deliveryUnavailable = false
   assert.deepEqual((await runDaily()).result, { billed: 1, skipped: 0 })
   assert.equal(googleReads, readsBeforeDelivery, 'queued spend no longer needs the old Google identity')
-  assert.equal(ingests.length, 5)
-  assert.deepEqual(ingests[0], ingests[1], 'failed delivery preserves the meter event identifier')
-  assert.deepEqual(ingests[1], ingests[2], 'concurrent failed deliveries preserve the meter event identifier')
-  assert.deepEqual(ingests[0], ingests[3], 'a failed zero-spend event retries under the same identifier')
-  assert.equal(ingests[3]?.value, '0')
-  assert.equal(ingests[4]?.value, '1250')
+  // Every delivery sends every pending day: the first failure, both concurrent failures, then the one Stripe took.
+  const zeroSpend = ingests.filter(row => row.value === '0'), spend = ingests.filter(row => row.value === '1250')
+  assert.deepEqual([ingests.length, zeroSpend.length, spend.length], [7, 4, 3])
+  assert.deepEqual(ingests[0], zeroSpend.at(-1), 'a failed zero-spend event retries under the same identifier')
+  assert.equal(new Set(zeroSpend.map(row => row.identifier)).size, 1, 'failed and concurrent deliveries preserve the meter event identifier')
+  assert.equal(new Set(spend.map(row => row.identifier)).size, 1, 'failed and concurrent deliveries preserve the meter event identifier')
+  assert.deepEqual(ingests.slice(-2).map(row => row.value), ['0', '1250'])
   const delivered = (await db.prepare("SELECT id,delivery_at FROM payment_usage_events WHERE kind='ad_spend' ORDER BY source_id").all()).results
   assert.deepEqual(delivered.map(row => row.id), captured.map(row => row.id))
   assert.ok(delivered.every(row => row.delivery_at === '2026-10-04T10:00:00.000Z'))
   assert.deepEqual((await runDaily()).result, { billed: 0, skipped: 1 })
-  assert.equal(ingests.length, 5)
+  assert.equal(ingests.length, 7)
  } finally { await runtime.dispose() }
 })
 

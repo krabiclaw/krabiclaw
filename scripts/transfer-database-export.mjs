@@ -1021,19 +1021,18 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       for (const home of target.prepare(provenDefaultsSql).all()) seeded += seed.run(hash(JSON.stringify(home.min_nights)), home.product_id).changes
       if (seeded) manifest.transforms.push({ name: 'airbnb_original_minimum_edit_guard_recorded', changes: seeded, sql_sha256: hash(provenDefaultsSql) })
       // Resume the existing sync operation under the original importing member.
-      // A newer pending/error/failed request or a stop is never replaced.
+      // A newer pending or failed request or a stop is never replaced.
       const candidatesSql = `SELECT m.organization_id, m.product_id, m.listing_id, c.created_by FROM product_channel_mappings m
         JOIN product_stay_configs c ON c.product_id = m.product_id AND c.organization_id = m.organization_id
         JOIN channex_connections connection ON connection.organization_id = m.organization_id
           AND connection.channel_id = m.channel_id AND connection.status = 'connected'
         JOIN member actor ON actor.organizationId = m.organization_id AND actor.userId = c.created_by AND actor.role IN ('owner', 'admin')
         WHERE m.provider = 'channex' AND m.enabled = 1 AND m.import_stage = 'complete'`
-      const queueSql = `INSERT INTO airbnb_sync_jobs (id, organization_id, listing_id, product_id, action, details, state, requested_by, attempts, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'sync', NULL, 'pending', ?, 0, ?, ?)
+      const queueSql = `INSERT INTO airbnb_sync_jobs (id, organization_id, listing_id, product_id, action, details, state, requested_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'sync', NULL, 'pending', ?, ?, ?)
         ON CONFLICT (organization_id, listing_id) DO UPDATE SET product_id = excluded.product_id,
-          details = NULL, state = 'pending', requested_by = excluded.requested_by, attempts = 0,
-          last_error_code = NULL, last_error = NULL, next_attempt_at = NULL, completed_at = NULL,
-          lease_token = NULL, lease_until = NULL, updated_at = excluded.updated_at
+          details = NULL, state = 'pending', requested_by = excluded.requested_by,
+          last_error_code = NULL, last_error = NULL, completed_at = NULL, updated_at = excluded.updated_at
         WHERE airbnb_sync_jobs.action = 'sync' AND airbnb_sync_jobs.state = 'done'`
       const queue = target.prepare(queueSql)
       let queued = 0

@@ -18,6 +18,6 @@ export default defineHandler(async event => {
   try {notification=await stripe.webhooks.constructEventAsync(payload,signature,keys.paymentsWebhookSecret)}
   catch {throw new HTTPError({statusCode:400,statusMessage:'Invalid Stripe payment signature'})}
   if(notification.livemode!==livemode) throw new HTTPError({statusCode:400,statusMessage:'Stripe event mode does not match this destination'})
-  if (!await processPaymentEvent(env.DB,stripe,notification,env)) throw new HTTPError({statusCode:503,statusMessage:'Stripe payment event processing is in progress'})
+  await processPaymentEvent(env.DB,stripe,notification,env)
   return jsonResponse({received:true})
 })

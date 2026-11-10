@@ -46,20 +46,21 @@ A partial unique index permits one live intent per subject while retaining
 deleted provider identities as history. `request_id` is the thread identity, never the operational Booking ID. Foundation reschedules keep the
 operational ID and therefore update the same mapped Google event.
 
-The worker preallocates a Google-compatible event ID before provider I/O. A
-create that times out after Google commits retries the same ID; a conflict
-reads that identity before deciding whether an update is necessary. The source
-revision covers canonical status, interval, timezone, names, assignment,
-participant emails, request identity and current buyer ownership eligibility.
-Existing mapped events therefore gain or lose their management link when
-those canonical facts change. Conversation messages and pending proposals do not send
-redundant calendar invitations. Leases fence concurrent
-processors, and each attempt re-reads current booking/integration state. A late
-result after cancellation/disconnect is compensated by deleting that exact
-managed identity; if compensation fails, the persisted intent is retried. A
-process killed between the provider write and local receipt is also reconciled
-from the same durable mapping. Cross-provider atomicity is impossible: a late
-in-flight event can be briefly visible until compensation/retry completes.
+The worker preallocates a Google-compatible event ID before provider I/O.
+Google refuses a second insert of the same ID
+([`events.insert`](https://developers.google.com/calendar/api/v3/reference/events/insert)),
+so the next pass reads that event instead of creating another, and an update
+carries the event's ETag
+([conditional modification](https://developers.google.com/calendar/api/guides/version-resources)).
+The source revision covers canonical status, interval, timezone, names,
+assignment, participant emails, request identity and current buyer ownership
+eligibility. Existing mapped events therefore gain or lose their management
+link when those canonical facts change. Conversation messages and pending
+proposals do not send redundant calendar invitations. Each pass re-reads
+current booking and integration state, and an event written after its booking
+was cancelled or its calendar disconnected is deleted again. A Google call that
+fails leaves its link in `error` with `last_error` and the integration in
+error; the next pass writes it again.
 
 ## Inbound sync
 
@@ -192,10 +193,9 @@ Unrelated Google events are never searched, changed or deleted.
 The existing `cleanupOrganizationBeforeDelete` hook stages minimal
 `google_calendar_cleanup_jobs` before Better Auth physically deletes an
 organization. The outbox retains only original tenant/account/calendar/event
-identities and retry/receipt state, without guest content, Booking IDs or tokens.
-It delays cleanup past any in-flight projection lease. No Google request blocks
-organization deletion. The orphan worker requires the organization to be absent
-both when selecting and claiming work; staging alone cannot authorize deletion
+identities and receipt state, without guest content, Booking IDs or tokens.
+No Google request blocks organization deletion. The orphan worker selects only
+jobs whose organization is absent; staging alone cannot authorize deletion
 if the subsequent Better Auth deletion aborts. These jobs can only delete their captured managed event;
 they cannot re-enroll or project a deleted tenant, and no normal tenant API reads
 them. Lost credentials retain `state=error` and `last_error`; the scheduled task
@@ -204,8 +204,8 @@ reports unresolved jobs instead of claiming successful external deletion.
 Operator inspection after tenant removal uses the retained outbox:
 
 ```sql
-SELECT organization_id, account_id, calendar_id, event_id, state, attempts,
-       last_error, next_attempt_at, completed_at
+SELECT organization_id, account_id, calendar_id, event_id, state,
+       last_error, updated_at, completed_at
 FROM google_calendar_cleanup_jobs WHERE state <> 'deleted';
 ```
 

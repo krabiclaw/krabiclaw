@@ -454,7 +454,6 @@ async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, ho
   await execute(db, `UPDATE channel_night_pushes SET
       state = CASE WHEN channel_night_pushes.updated_at = json_extract(value, '$.updated_at') THEN json_extract(value, '$.state') ELSE 'pending' END,
       detail = CASE WHEN channel_night_pushes.updated_at = json_extract(value, '$.updated_at') THEN json_extract(value, '$.detail') ELSE ? END,
-      retry_at = NULL,
       updated_at = ?
     FROM json_each(?) WHERE product_id = ? AND provider = 'channex' AND date = json_extract(value, '$.date')`,
   [CHANGED_DURING_DELIVERY, new Date().toISOString(), JSON.stringify(due.map((row) => {

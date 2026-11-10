@@ -80,15 +80,16 @@ Before enabling onboarding in an environment:
    moves from action required or pending review to ready when Stripe activates
    `card_payments`.
 5. Confirm the matching `connect_marketplace` event reaches `processed` in
-   `stripe_webhook_events`; inspect failures through the existing dead-letter
-   tooling.
+   `stripe_webhook_events`; a failed one is `failed` with its `error`.
 
 ## D1 behavior and limitations
 
 D1 has no Postgres advisory locks or transactional outbox. Account creation is
 therefore guarded by an organization-unique reservation plus a stable Stripe
-idempotency key. Webhook work uses conditional D1 lease claims, bounded retries,
-and the existing dead-letter/operator-requeue contract. Stripe remains the
+idempotency key. Stripe redelivers an event whose webhook failed
+([automatic retries](https://docs.stripe.com/webhooks#automatic-retries)), and
+`stripe_webhook_events` records the events each processor has processed, so a
+redelivery of a processed event does nothing. Stripe remains the
 source of truth, so dashboard refreshes retrieve the account again instead of
 inferring readiness from the return redirect.
 
