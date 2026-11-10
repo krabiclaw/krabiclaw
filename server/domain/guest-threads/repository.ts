@@ -88,7 +88,8 @@ export const OPEN_REPLY_TASK_SQL = `EXISTS (SELECT 1 FROM tasks reply_task WHERE
  * `timezone`. A conversation with no booking yields NULLs, and the surface
  * says it has no booking rather than printing a fabricated slot.
  */
-const OPERATIONAL_RECORD_SQL = `
+/** Built when read: requests.ts reaches this module through payments and notifications (the app badge). */
+const operationalRecordSql = () => `
   LEFT JOIN (
     SELECT b.id AS booking_id, b.organization_id, b.status, b.party_size, b.party_size_is_minimum, b.starts_at, ${BOOKING_ENDS_SQL('b')} AS ends_at, b.ends_at AS stored_ends_at, b.timezone,
            CASE WHEN b.product_session_id IS NULL THEN 'nights' ELSE 'slot' END AS unit, bc.assigned_member_id, b.product_id
@@ -153,7 +154,7 @@ async function inboxScope(organizationId: string | null, opts: ListGuestThreadsO
   if (!organizationId && !opts.buyerAudience) throw new Error('Conversation list requires organization scope')
   if (!opts.userId) throw new Error('Conversation list requires the viewer')
   const params: Array<string | number> = [opts.userId]
-  const from = `conversations gt${OPERATIONAL_RECORD_SQL}
+  const from = `conversations gt${operationalRecordSql()}
     LEFT JOIN conversation_participants me ON me.conversation_id = gt.id AND me.user_id = ?`
   let where: string
   if (opts.buyerAudience) {
@@ -555,7 +556,7 @@ export async function archiveConversation(db: DbClient, input: { organizationId:
   const now = new Date().toISOString()
   const rule = pastByRuleSql(now)
   const row = await queryFirst<{ kind: string; blocked_at: string | null; past_by_rule: number }>(db, `
-    SELECT gt.kind, gt.blocked_at, ${rule.sql} AS past_by_rule FROM conversations gt${OPERATIONAL_RECORD_SQL}
+    SELECT gt.kind, gt.blocked_at, ${rule.sql} AS past_by_rule FROM conversations gt${operationalRecordSql()}
      WHERE gt.organization_id = ? AND gt.id = ?`, [...rule.params, input.organizationId, input.conversationId])
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Conversation not found', data: { code: 'THREAD_NOT_FOUND', field: 'conversationId' } })
   if (row.blocked_at !== null) throw new HTTPError({ statusCode: 409, message: 'A blocked guest’s conversation is in Blocked; unblock it first', data: { code: 'INVALID_TRANSITION', field: 'archived' } })

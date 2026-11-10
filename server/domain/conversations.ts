@@ -390,3 +390,18 @@ export async function listUnreadIds(db: DbClient, conversationIds: string[], use
   const rows = await queryAll<{ id: string }>(db, `SELECT c.id FROM conversations c WHERE c.id IN (SELECT value FROM json_each(?)) AND ${unread.sql}`, [d1JsonStringSet(conversationIds), ...unread.params])
   return new Set(rows.map(row => row.id))
 }
+
+/**
+ * A person who left the organization keeps none of its conversations: their
+ * seats in team conversations and their read positions in guest ones go,
+ * while what they wrote stays. A guest's own place in their conversation is
+ * not a membership and stays.
+ */
+export function departedParticipantsQuery(organizationId: string): BatchQuery {
+  return {
+    query: `DELETE FROM conversation_participants WHERE organization_id = ?
+      AND NOT EXISTS (SELECT 1 FROM member m WHERE m.organizationId = conversation_participants.organization_id AND m.userId = conversation_participants.user_id)
+      AND user_id IS NOT (SELECT c.user_id FROM conversations c WHERE c.id = conversation_participants.conversation_id)`,
+    params: [organizationId],
+  }
+}

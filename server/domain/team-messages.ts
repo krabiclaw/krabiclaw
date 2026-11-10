@@ -33,7 +33,7 @@ import {
  *
  * Who may take part is Better Auth membership and the `team_messages`
  * permission. Leaving the organization ends a person's seats
- * (`departedParticipantsQuery`), while what they wrote stays with their user id.
+ * (conversations.ts `departedParticipantsQuery`), while what they wrote stays with their user id.
  */
 
 type TeamEnv = CloudflareEnv & GuestInboxPublicationEnv
@@ -749,19 +749,4 @@ export function teamMessageRemovalQueries(organizationId: string, messageId: str
     { query: `DELETE FROM media_placements WHERE organization_id = ? AND owner_type = 'message' AND owner_id = ?`, params: [organizationId, messageId] },
     { query: 'DELETE FROM messages WHERE organization_id = ? AND id = ?', params: [organizationId, messageId] },
   ]
-}
-
-/**
- * A person who left the organization keeps none of its conversations: their
- * seats in team conversations and their read positions in guest ones go,
- * while what they wrote stays. A guest's own place in their conversation is
- * not a membership and stays.
- */
-export function departedParticipantsQuery(organizationId: string): BatchQuery {
-  return {
-    query: `DELETE FROM conversation_participants WHERE organization_id = ?
-      AND NOT EXISTS (SELECT 1 FROM member m WHERE m.organizationId = conversation_participants.organization_id AND m.userId = conversation_participants.user_id)
-      AND user_id IS NOT (SELECT c.user_id FROM conversations c WHERE c.id = conversation_participants.conversation_id)`,
-    params: [organizationId],
-  }
 }
