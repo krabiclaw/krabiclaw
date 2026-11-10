@@ -17,7 +17,7 @@
               <TenantIcon name="calendar-days" class="size-10" />
             </div>
           </div>
-          <h2 class="tenant-display tenant-italic text-3xl">{{ copy('cancel_visit') }}</h2>
+          <h2 v-if="!cancellationClosed" class="tenant-display tenant-italic text-3xl">{{ copy('cancel_visit') }}</h2>
           <div class="mt-6 space-y-2 border-y border-default py-6 text-sm">
             <p><strong>{{ copy(kind === 'booking' ? 'booking_for' : 'reservation_for') }}</strong> {{ booking.name }}</p>
             <p v-if="booking.product_name"><strong>{{ booking.product_name }}</strong></p>

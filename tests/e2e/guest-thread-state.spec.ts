@@ -999,8 +999,8 @@ test('Calendar retains confirmed reservations and their detail sends one change 
   const before = await beforeResponse.json() as { booking: { partySize: number; threadId: string } }
   const targetPartySize = before.booking.partySize === 99 ? 98 : before.booking.partySize + 1
   await page.getByRole('spinbutton', { name: 'Guests', exact: true }).fill(String(targetPartySize))
-  // The number field commits a typed value as it loses focus, as Reka's NumberField does.
-  await page.getByRole('spinbutton', { name: 'Guests', exact: true }).press('Tab')
+  // A typed count enables Send without leaving the field.
+  await expect(page.getByRole('button', { name: 'Send request', exact: true })).toBeEnabled()
   const requestedAt = new Date().toISOString()
   const requestCompleted = page.waitForResponse(response =>
     response.request().method() === 'POST'

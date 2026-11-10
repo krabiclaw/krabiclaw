@@ -64,7 +64,7 @@
         </template>
 
         <UFormField :label="guestsLabel">
-          <UInputNumber v-model="draft.partySize" :min="1" :max="99" class="w-full" />
+          <UInputNumber v-model="draft.partySize" :min="1" :max="99" class="w-full" @input="typeGuests" />
         </UFormField>
       </section>
 
@@ -95,6 +95,13 @@ const policyLine = computed(() => booking.value?.policy?.items.find(item => item
 
 // The page's own draft, seeded from the record each time it is opened.
 const draft = reactive({ date: '', time: '', partySize: 1, locationId: '', sessionId: '' })
+// Reka's number field commits a typed value only on blur, so a click on Send
+// right after typing would land on a still-disabled button. Each keystroke that
+// forms a valid count is taken at once.
+function typeGuests(event: Event) {
+  const value = Number((event.target as HTMLInputElement).value)
+  if (Number.isInteger(value) && value >= 1 && value <= 99) draft.partySize = value
+}
 function seed(record: DashboardBookingDetails | null) {
   if (!record) return
   draft.date = record.bookingDate
