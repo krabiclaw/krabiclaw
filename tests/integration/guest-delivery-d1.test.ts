@@ -416,7 +416,7 @@ test('a replayed status email sends its recorded content and refuses a supersede
       record: {
         kind: 'reservation', id: 'reservation-status', status: 'cancelled', party_size: 2,
         starts_at: '2098-10-01T11:00:00.000Z', ends_at: '2098-10-01T13:00:00.000Z', timezone: 'Asia/Bangkok',
-        location_id: 'location-status', product_id: null, product_name: null, product_internal_name: null, assigned_member_id: null, check_in_date: null, check_out_date: null, no_show_at: null, review_id: null,
+        location_id: 'location-status', product_id: null, product_name: null, product_internal_name: null, assigned_member_id: null, check_in_date: null, check_out_date: null, no_show_at: null, review_id: null, advance_notice_minutes: null,
         organization_id: 'org-status', user_id: null,
       },
     })

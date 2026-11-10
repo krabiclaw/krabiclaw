@@ -49,7 +49,7 @@ export interface Collection {
 }
 
 /** What generating this product's occurrences starts from. Sessions keep their own. */
-export type ProductBookingConfig = Pick<import('~/server/utils/availability').ProductBookingConfigRecord, 'duration_minutes' | 'default_capacity' | 'confirmation_mode' | 'online_payment_required' | 'held_online' | 'scheduling_mode' | 'assigned_member_id' | 'assigned_team_id' | 'questions' | 'questions_revision'>
+export type ProductBookingConfig = Pick<import('~/server/utils/availability').ProductBookingConfigRecord, 'duration_minutes' | 'default_capacity' | 'confirmation_mode' | 'online_payment_required' | 'held_online' | 'scheduling_mode' | 'assigned_member_id' | 'assigned_team_id' | 'advance_notice_minutes' | 'questions' | 'questions_revision'>
 
 /**
  * A place to stay: the one location it is at and its stay settings. Times are

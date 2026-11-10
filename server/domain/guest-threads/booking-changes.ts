@@ -1,3 +1,4 @@
+import { changeNoticeMinutes, noticeDuration } from '~/shared/availability-settings'
 import { reservationAllocationPredicate, requireLocationReservationConfig, visitReschedulePolicyPredicate } from '~/server/utils/reservations'
 import { recordBookingChangeAnswer } from '~/server/domain/booking-analytics'
 import { createHmac, timingSafeEqual } from 'node:crypto'
@@ -173,8 +174,12 @@ interface Destination { assignedMemberId?: string | null; locationId: string | n
  * capacity for that start time.
  */
 async function validateDestination(db: DbClient, env: CloudflareEnv, thread: GuestThreadRow, before: Source, after: Fields, decisionDedupeKey?: string): Promise<Destination> {
-  const reschedulePolicy = visitReschedulePolicyPredicate({ startsAt: before.startsAt, overridePolicy: after.overridePolicy })
-  if (!await queryFirst(db, `SELECT 1 WHERE ${reschedulePolicy.query}`, reschedulePolicy.params)) throw new HTTPError({ statusCode: 409, message: 'Changes close 24 hours before the start. The business can explicitly approve an exception.', data: { code: 'policy_exception_required' } })
+  // A class's or consultation's advance notice closes its changes when it is longer than the 1-day rule.
+  const notice = before.recordKind === 'booking' && before.productId
+    ? (await queryFirst<{ advance_notice_minutes: number | null }>(db, 'SELECT advance_notice_minutes FROM product_booking_configs WHERE product_id=? AND organization_id=?', [before.productId, thread.organization_id]))?.advance_notice_minutes ?? null
+    : null
+  const reschedulePolicy = visitReschedulePolicyPredicate({ startsAt: before.startsAt, advanceNoticeMinutes: notice, overridePolicy: after.overridePolicy })
+  if (!await queryFirst(db, `SELECT 1 WHERE ${reschedulePolicy.query}`, reschedulePolicy.params)) throw new HTTPError({ statusCode: 409, message: `Changes close ${noticeDuration(changeNoticeMinutes(notice), 'en')} before the start. The business can explicitly approve an exception.`, data: { code: 'policy_exception_required' } })
   if (after.kind === 'booking') {
     if (before.recordKind !== 'booking' || !before.productId) throw new HTTPError({ statusCode: 409, message: 'This conversation is a reservation, not a booking' })
     const [target] = await listSessions(db, {

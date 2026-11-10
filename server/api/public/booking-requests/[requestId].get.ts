@@ -70,7 +70,7 @@ export default defineHandler(async (event) => {
     : canonicalLocation
   let productName = record.product_name
   let productKind: ProductKind | null = null
-  let policy: BookingPolicySummarySource = visitPolicySummarySource('experience')
+  let policy: BookingPolicySummarySource = visitPolicySummarySource('experience', record.advance_notice_minutes)
   if (record.kind === 'booking' && record.product_id) {
     const canonical = await getProduct(db, organizationId, record.product_id)
     const translation = localizations.find(item => item.resourceType === 'product' && item.resourceId === record.product_id)
@@ -80,7 +80,7 @@ export default defineHandler(async (event) => {
   } else if (record.kind === 'reservation') {
     const saved = await queryFirst<{ policy_json: string | null }>(db, 'SELECT policy_json FROM reservations WHERE id = ? AND organization_id = ?', [record.id, organizationId])
     if (!saved) return jsonResponse({ error: 'Booking not found' }, { status: 404 })
-    policy = saved.policy_json ? JSON.parse(saved.policy_json) as BookingPolicySummarySource : visitPolicySummarySource('reservation')
+    policy = saved.policy_json ? JSON.parse(saved.policy_json) as BookingPolicySummarySource : visitPolicySummarySource('reservation', null)
   }
 
   // The receipt leads with what was booked, pictured as its page pictures it: the offering's own photo, or the place's.
@@ -100,7 +100,9 @@ export default defineHandler(async (event) => {
       guests: `${record.party_size}${request.payload.party_size_is_minimum ? '+' : ''}`,
       status: record.status,
       can_retry_cancellation: await canRetryGuestVisitRefund(db, { organizationId, subjectType: record.kind, subjectId: record.id, requestId: request.id }),
-      refund_on_cancel: paid !== null && new Date().toISOString() <= freeCancellationUntil(record.starts_at),
+      refund_on_cancel: paid !== null && new Date().toISOString() <= freeCancellationUntil(record.starts_at, record.advance_notice_minutes),
+      // The guest's own cancellation closes at the offering's advance notice; null is no notice.
+      advance_notice_minutes: record.advance_notice_minutes,
       locale,
       product_id: record.product_id,
       product_kind: productKind,

@@ -777,6 +777,9 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	scheduling_mode: text().notNull(),
 	assigned_member_id: text(),
 	assigned_team_id: text().references(() => team.id, { onDelete: "set null" }),
+	// How long before a session's start booking, changing and cancelling close
+	// (shared/availability-settings.ts NOTICE_OPTIONS). NULL is no notice.
+	advance_notice_minutes: integer(),
 	// The tenant's own questions asked with each booking (shared/form-questions.ts):
 	// a JSON array validated by its one writer. Question-only edits leave sessions alone.
 	questions: text().default("[]").notNull(),

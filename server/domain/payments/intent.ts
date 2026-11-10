@@ -76,11 +76,11 @@ async function handoffSubject(db: DbClient, organizationId: string, payment: Pay
   if ((payment.subject_type === 'booking' || payment.subject_type === 'reservation') && !hold) throw new Error('Payment has no checkout hold for its time')
   const productId = snapshot.stay?.product_id ?? snapshot.product_id
   // A payment outlives its product: a deleted product leaves its kind unknown, and the summary omits what depends on it.
-  const product = productId ? await queryFirst<{ kind: string; slug: string }>(db, 'SELECT kind,slug FROM products WHERE id=? AND organization_id=?', [productId, organizationId]) : null
+  const product = productId ? await queryFirst<{ kind: string; slug: string; advance_notice_minutes: number | null }>(db, 'SELECT p.kind,p.slug,c.advance_notice_minutes FROM products p LEFT JOIN product_booking_configs c ON c.product_id=p.id AND c.organization_id=p.organization_id WHERE p.id=? AND p.organization_id=?', [productId, organizationId]) : null
   const locationId = hold?.location_id ?? payment.location_id
   const location = locationId ? await queryFirst<{ slug: string }>(db, 'SELECT slug FROM business_locations WHERE id=? AND organization_id=?', [locationId, organizationId]) : null
   // Null once it has passed: paying now buys a booking that is already non-refundable. A stay's terms are its booked policy.
-  const freeUntil = hold ? freeCancellationUntil(hold.starts_at) : null
+  const freeUntil = hold ? freeCancellationUntil(hold.starts_at, payment.subject_type === 'booking' ? product?.advance_notice_minutes ?? null : null) : null
   const [ownerType, ownerId] = productId ? ['product', productId] as const : ['business_location', hold?.location_id ?? payment.location_id] as const
   const picture = ownerId ? (await loadOwnerPictures(db, organizationId, ownerType, [ownerId])).get(ownerId) ?? null : null
   return {

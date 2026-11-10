@@ -8,6 +8,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { recordBookingCancelled } from '~/server/domain/booking-analytics'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
+import { noticeDuration, outsideNotice } from '~/shared/availability-settings'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { formAnswerSnapshotsSchema } from '~/shared/form-questions'
 
@@ -125,6 +126,8 @@ export interface ThreadOperationalRecord {
   no_show_at: string | null
   /** The review the thread's guest submitted, if any. */
   review_id: string | null
+  /** A class's or consultation's advance notice, which also closes the guest's own cancellation; null otherwise. */
+  advance_notice_minutes: number | null
 }
 
 /** A stay's thread instants, as described on ThreadOperationalRecord; `alias` is the stays row. */
@@ -178,21 +181,22 @@ export async function getThreadOperationalRecord(db: DbClient, requestId: string
   const record = await queryFirst<ThreadOperationalRecord>(db, `
     SELECT 'booking' AS kind, b.id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone,
            s.location_id, b.product_id, p.name AS product_name, NULL AS product_internal_name, b.assigned_member_id, b.organization_id, b.user_id,
-           NULL AS check_in_date, NULL AS check_out_date, b.no_show_at, owner.review_id
+           NULL AS check_in_date, NULL AS check_out_date, b.no_show_at, owner.review_id, c.advance_notice_minutes
       FROM bookings b
       JOIN requests owner ON owner.id = b.request_id AND owner.kind = 'booking' AND owner.organization_id = b.organization_id
       JOIN product_sessions s ON s.id = b.product_session_id AND s.product_id = b.product_id AND s.organization_id = b.organization_id
       JOIN products p ON p.id = b.product_id AND p.organization_id = b.organization_id
+      LEFT JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
      WHERE b.request_id = ?
     UNION ALL
     SELECT 'reservation', r.id, r.status, r.party_size, r.starts_at, r.ends_at, r.timezone,
-           r.location_id, NULL, NULL, NULL, NULL, r.organization_id, r.user_id, NULL, NULL, r.no_show_at, owner.review_id
+           r.location_id, NULL, NULL, NULL, NULL, r.organization_id, r.user_id, NULL, NULL, r.no_show_at, owner.review_id, NULL
       FROM reservations r
       JOIN requests owner ON owner.id = r.request_id AND owner.kind = 'reservation' AND owner.organization_id = r.organization_id
      WHERE r.request_id = ?
     UNION ALL
     SELECT 'stay', st.id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone,
-           c.location_id, st.product_id, p.name, c.internal_name, c.assigned_member_id, st.organization_id, st.user_id, st.check_in_date, st.check_out_date, st.no_show_at, owner.review_id
+           c.location_id, st.product_id, p.name, c.internal_name, c.assigned_member_id, st.organization_id, st.user_id, st.check_in_date, st.check_out_date, st.no_show_at, owner.review_id, NULL
       FROM stays st
       JOIN requests owner ON owner.id = st.request_id AND owner.kind = 'stay' AND owner.organization_id = st.organization_id
       JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
@@ -407,6 +411,10 @@ export async function cancelBookingRequest(db: DbClient, input: {
   }
   if (record.status === 'cancelled') return await readCancelled()
   if (!canCancelBookingRequest(record, input.now)) return null
+  // The offering's advance notice closes the guest's own cancellation as it closes booking; the business can still cancel.
+  if (record.advance_notice_minutes !== null && !outsideNotice(record.starts_at, record.advance_notice_minutes, Date.parse(input.now))) {
+    throw new HTTPError({ statusCode: 409, message: `Online cancellation closed ${noticeDuration(record.advance_notice_minutes, 'en')} before the start. Contact the business to cancel.`, data: { code: 'cancellation_closed' } })
+  }
 
   // Two writes, one batch, each carrying the other's condition: the token is
   // spent only while the record is still cancellable, and the record is
@@ -415,7 +423,7 @@ export async function cancelBookingRequest(db: DbClient, input: {
   // still holding its seats.
   const table = record.kind === 'booking' ? 'bookings' : 'reservations'
   const refund = await guestVisitRefundQueries(db, {
-    organizationId: input.organizationId, subjectType: record.kind, subjectId: record.id, requestId: input.id, startsAt: record.starts_at, now: input.now, buyerUserId: input.buyerUserId,
+    organizationId: input.organizationId, subjectType: record.kind, subjectId: record.id, requestId: input.id, startsAt: record.starts_at, advanceNoticeMinutes: record.advance_notice_minutes, now: input.now, buyerUserId: input.buyerUserId,
   })
   const [consumed, released] = await executeBatch(db, [
     {

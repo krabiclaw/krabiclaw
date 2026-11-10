@@ -146,7 +146,7 @@
   "booking_policy.experience_heading": "นโยบายประสบการณ์",
   "booking_policy.consultation_heading": "นโยบายการนัดปรึกษา",
   "booking_policy.minimum_guest_age": "อายุขั้นต่ำสำหรับผู้เข้าร่วมคือ {age} ปี",
-  "booking_policy.reschedule": "สามารถเปลี่ยนเวลาได้ล่วงหน้าไม่น้อยกว่า 24 ชั่วโมงก่อนเวลาเริ่ม",
+  "booking_policy.reschedule": "สามารถเปลี่ยนเวลาได้ล่วงหน้าไม่น้อยกว่า {window} ก่อนเวลาเริ่ม",
   "booking_policy.reservation_heading": "นโยบายการจอง",
   "dates.date_unavailable": "ไม่ระบุวันที่",
   "dates.time_unavailable": "ไม่ระบุเวลา",
@@ -719,11 +719,12 @@
   "stay.check_in_day": "วันเช็คอิน",
   "stay.check_out_day": "วันเช็คเอาท์",
   "stay.load_dates": "โหลดวันที่เพิ่มเติม",
-  "booking_policy.cancellation": "ยกเลิกได้ฟรีล่วงหน้าไม่น้อยกว่า 24 ชั่วโมงก่อนเวลาเริ่ม หลังจากนั้นจะไม่มีการคืนเงินโดยอัตโนมัติ",
+  "booking_policy.cancellation": "ยกเลิกได้ฟรีล่วงหน้าไม่น้อยกว่า {window} ก่อนเวลาเริ่ม หลังจากนั้นจะไม่มีการคืนเงินโดยอัตโนมัติ",
   "booking_policy.cancel_refund": "คุณจะได้รับเงินคืนเต็มจำนวน",
-  "booking_policy.cancel_no_refund": "เหลือเวลาน้อยกว่า 24 ชั่วโมงก่อนเวลาเริ่ม จึงไม่สามารถคืนเงินได้",
+  "booking_policy.cancel_no_refund": "เหลือเวลาน้อยกว่า {window} ก่อนเวลาเริ่ม จึงไม่สามารถคืนเงินได้",
   "payment.free_cancellation_until": "ยกเลิกได้ฟรีจนถึง {time} หลังจากนั้นจะไม่มีการคืนเงินรายการนี้โดยอัตโนมัติ",
   "payment.non_refundable": "การจองนี้ไม่สามารถขอคืนเงินได้",
   "site.experience_cancel.retry_refund": "ลองขอคืนเงินอีกครั้ง",
-  "site.experience_cancel.toast_refund_failed": "ไม่สามารถขอคืนเงินได้ โปรดลองอีกครั้ง"
+  "site.experience_cancel.toast_refund_failed": "ไม่สามารถขอคืนเงินได้ โปรดลองอีกครั้ง",
+  "booking_policy.cancel_closed": "การยกเลิกออนไลน์ปิดแล้วตั้งแต่ {window} ก่อนเวลาเริ่ม โปรดติดต่อธุรกิจเพื่อยกเลิก"
 }

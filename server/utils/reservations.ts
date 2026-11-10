@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { FREE_CANCELLATION_MINUTES } from '~/shared/availability-settings'
+import { changeNoticeMinutes, outsideNotice } from '~/shared/availability-settings'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '../db/index.ts'
 import { generateReservationTimes, parseOpeningHours, parseSpecialHours, locationAllowsBooking } from '~/shared/reservation-hours'
 import { RESERVATION_CAPACITY_CONSUMING_SQL } from '~/shared/bookings'
@@ -236,10 +236,11 @@ export function reservationPolicySummarySource(config: LocationReservationConfig
 }
 
 /** A visit with no saved terms of its own: the one cancellation rule, nothing else. */
-export function visitPolicySummarySource(policyType: 'reservation' | 'experience') {
+/** A class's or consultation's notice is its product's; a reservation's terms are its own snapshot. */
+export function visitPolicySummarySource(policyType: 'reservation' | 'experience', advanceNoticeMinutes: number | null) {
   return {
     policy_type: policyType,
-    advance_notice_minutes: null,
+    advance_notice_minutes: advanceNoticeMinutes,
     deposit_required: null,
     deposit_trigger_party_size: null,
     minimum_guest_age: null,
@@ -326,7 +327,7 @@ export async function listReservationSlots(db: DbClient, input: {
     const startsAt = localDateTimeToInstant(input.date, time, timezone, 'reject').toISOString()
     // Advance notice is the policy the guest reads, applied: a start inside the
     // notice is not offered, and the booking endpoint reads the same list.
-    if (!input.includePast && Date.parse(startsAt) <= Date.now() + (config.advance_notice_minutes ?? 0) * 60_000) continue
+    if (!input.includePast && !outsideNotice(startsAt, config.advance_notice_minutes)) continue
 
     if (!locationAllowsBooking({ starts_at: startsAt, ends_at: new Date(Date.parse(startsAt) + durationMinutes * 60_000).toISOString() }, location)) continue
     const capacity = config.slot_capacity
@@ -347,10 +348,10 @@ export class ReservationUnavailableError extends Error {
   }
 }
 
-/** Changes close when free cancellation does, unless the business approves an exception. */
-export function visitReschedulePolicyPredicate(input: { startsAt: string; overridePolicy?: boolean }): BatchQuery {
+/** Changes close when free cancellation does, unless the business approves an exception. A reservation's notice is null. */
+export function visitReschedulePolicyPredicate(input: { startsAt: string; advanceNoticeMinutes: number | null; overridePolicy?: boolean }): BatchQuery {
   if (input.overridePolicy) return { query: '1', params: [] }
-  return { query: `julianday('now') <= julianday(?) - ${FREE_CANCELLATION_MINUTES} / 1440.0`, params: [input.startsAt] }
+  return { query: `julianday('now') <= julianday(?) - ${changeNoticeMinutes(input.advanceNoticeMinutes)} / 1440.0`, params: [input.startsAt] }
 }
 
 /** The same location, hours and capacity boundary for a seat claim and a Checkout hold. */

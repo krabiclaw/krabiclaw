@@ -16,6 +16,10 @@
           <UInput v-model="p.form.booking_capacity" inputmode="numeric" pattern="[0-9]*" class="w-full" />
         </UFormField>
       </div>
+      <!-- Airbnb's Advance notice picker, the one the calendar's table settings use. -->
+      <UFormField v-else-if="concern === 'notice'" name="advance_notice_minutes">
+        <URadioGroup v-model="notice" :items="noticeOptions" variant="card" />
+      </UFormField>
       <UFormField v-else-if="concern === 'confirmation'" name="confirmation_mode">
         <URadioGroup v-model="p.form.confirmation_mode" :items="[{ value: 'instant', label: 'Confirm automatically' }, { value: 'review', label: 'Review each request' }]" variant="card" />
       </UFormField>
@@ -45,6 +49,7 @@ import { productEditorKey, type BookingConcern } from '~/components/dashboard/Pr
 import OfferCard from '~/components/dashboard/OfferCard.vue'
 import { offer } from '~/shared/offers'
 import ResponsibilityPicker from '~/components/dashboard/ResponsibilityPicker.vue'
+import { NOTICE_OPTIONS, noticeSummary } from '~/shared/availability-settings'
 
 definePageMeta({ layout: 'dashboard' })
 const p = inject(productEditorKey)!
@@ -59,6 +64,7 @@ const settings = computed(() => ({
   enabled: { title: legal.value ? 'Consultation calendar' : 'Booking calendar', lead: `Set up times for ${p.bookingCopy.value.guestsLabelPlural} to book. Removing the calendar deletes its schedule and is only allowed before any bookings. To pause this offering and keep its schedule, use its Website settings.` },
   duration: { title: 'Duration', lead: `How long does each ${occurrence.value} last? Existing appointments keep their saved duration.` },
   capacity: { title: legal.value ? 'Client limit' : 'Guest limit', lead: `How many ${p.bookingCopy.value.guestsLabelPlural} can book the same ${occurrence.value}? Existing appointments keep their saved ${p.bookingCopy.value.guestLabel} limit.` },
+  notice: { title: 'Advance notice', lead: `How much notice do you need before a ${occurrence.value}? ${peopleLabel.value} can’t book, reschedule or cancel online once it starts sooner than this. Changes and free cancellation close at least 24 hours before either way.` },
   confirmation: { title: 'Confirmation', lead: `Confirm ${legal.value ? 'consultations' : 'bookings'} as soon as ${p.bookingCopy.value.guestsLabelPlural} ${legal.value ? 'request a time' : 'reserve'}, or review each request before confirming.` },
   assignment: { title: p.bookingCopy.value.assigneeLabel, lead: legal.value ? 'Choose an attorney or legal team for new consultations. Clients book an available attorney’s working hours and see their published profile. Existing consultations keep their booked attorney.' : `Who runs it. ${peopleLabel.value} see ${p.form.assigned_team_id ? 'each team member’s' : `the ${p.bookingCopy.value.assigneeNoun}’s`} published profile on the page. A published host profile is required before publishing this offering. Existing bookings keep their assigned host.` },
   payment: { title: 'Payment', lead: `${peopleLabel.value} pay before their booking is made. Free ${occurrence.value}s remain bookable.` },
@@ -69,6 +75,16 @@ const paymentEntitled = computed(() => dashboard.entitlements.value.payments ===
 const { data: members, status: membersStatus } = await useMemberSchedulingList(() => dashboard.organization.value?.id)
 watch(() => [p.form.assigned_member_id, p.form.assigned_team_id], ([memberId, teamId]) => {
   if (legal.value && (memberId || teamId)) p.form.scheduling_mode = 'provider'
+})
+// A notice saved through MCP outside Airbnb's choices is still shown, selected, as its own card.
+const noticeOptions = computed(() => {
+  const saved = p.product.value?.booking?.advance_notice_minutes ?? 0
+  const options = NOTICE_OPTIONS.map(option => ({ value: String(option.value), label: option.label, description: 'description' in option ? option.description : undefined }))
+  return NOTICE_OPTIONS.some(option => option.value === saved) ? options : [...options, { value: String(saved), label: noticeSummary(saved), description: undefined }]
+})
+const notice = computed({
+  get: () => String(p.form.advance_notice_minutes ?? 0),
+  set: (value: string) => { p.form.advance_notice_minutes = Number(value) || null },
 })
 const hostHours = computed({
   get: () => p.form.scheduling_mode === 'provider',

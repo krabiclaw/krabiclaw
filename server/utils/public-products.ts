@@ -1,3 +1,4 @@
+import { outsideNotice } from '~/shared/availability-settings'
 import { HTTPError } from 'nitro'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import type { GoogleReviewMetadata } from '~/shared/google-review'
@@ -515,7 +516,7 @@ export async function loadPublicProductSessions(
     statuses: ['scheduled'],
   })
   return sessions
-    .filter(session => !session.is_full)
+    .filter(session => !session.is_full && outsideNotice(session.starts_at, detail.booking!.advance_notice_minutes))
     .map(session => ({
       id: session.id,
       starts_at: session.starts_at,

@@ -488,12 +488,15 @@ then asks Stripe for the refund, repeating the same idempotent request only if i
 response is lost. Ordinary cancellation is distinct.
 
 Every reservation, class and consultation has one cancellation rule, Airbnb's
-1-day policy, and it is not a setting. A guest who cancels at least 24 hours
-before the start gets the remaining payment back automatically. Later, the
-cancellation releases the seats without a refund; the business can still refund
-by hand. Changes close at the same deadline unless the business approves an
-exception. A booking made inside the 24 hours is non-refundable, and checkout
-says so. Stays use the home's booked policy instead.
+1-day policy. A guest who cancels at least 24 hours before the start gets the
+remaining payment back automatically. Later, the cancellation releases the seats
+without a refund; the business can still refund by hand. Changes close at the
+same deadline unless the business approves an exception. A booking made inside
+the 24 hours is non-refundable, and checkout says so. A class or consultation
+can set an advance notice (`product_booking_configs.advance_notice_minutes`,
+the same choices as a table's): booking and the guest's own cancellation close
+that long before the start, and changes and free cancellation close at the
+longer of 24 hours and the notice. Stays use the home's booked policy instead.
 
 Buyer ownership uses Better Auth identity. Signing in on any device reads the same
 owned purchases. A guest acts on a business's own site as an anonymous Better Auth

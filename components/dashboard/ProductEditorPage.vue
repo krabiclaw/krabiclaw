@@ -215,7 +215,7 @@ export const SECTION_KEYS = [
   'guests', 'availability', 'arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'house-rules', 'checkout-instructions', 'property-type', 'rooms', 'amenities', 'accessibility', 'cancellation', 'team', 'guest-safety', 'location', 'questions',
 ] as const
 export type SectionKey = typeof SECTION_KEYS[number]
-export type BookingConcern = 'enabled' | 'duration' | 'capacity' | 'confirmation' | 'payment' | 'location' | 'assignment' | number
+export type BookingConcern = 'enabled' | 'duration' | 'capacity' | 'confirmation' | 'notice' | 'payment' | 'location' | 'assignment' | number
 export type ProductConcern = BookingConcern | 'publication-visibility' | 'publication-availability' | 'house-rules' | 'additional-rules' | 'arrival-time' | StaySafetySection
 
 /** Where the product is offered and shown, per location, as its Locations leaf edits it. */
@@ -255,6 +255,8 @@ export interface ProductForm {
   booking_duration: string
   booking_capacity: string
   confirmation_mode: 'instant' | 'review'
+  /** null: no notice. */
+  advance_notice_minutes: number | null
   scheduling_mode: 'business' | 'provider'
   /** null: the business schedule rather than a member or team. */
   assigned_member_id: string | null
@@ -388,6 +390,7 @@ export const productEditorKey = Symbol('product-editor') as InjectionKey<Product
 
 <script setup lang="ts">
 import { MAX_STAY_NIGHTS } from '~/shared/bookings'
+import { noticeSummary } from '~/shared/availability-settings'
 import { cloneFnJSON } from '@vueuse/core'
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
@@ -836,7 +839,7 @@ const draft = useState<ProductForm>(draftKey, () => ({
   collection_ids: [] as string[],
   bookable: false,
   booking_duration: '',
-  booking_capacity: '', scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false,
+  booking_capacity: '', scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, confirmation_mode: 'instant', advance_notice_minutes: null, online_payment_required: false, held_online: false,
   image_asset_id: null as string | null,
   // A new place to stay starts from these settings; an existing one is loaded from its own.
   stay_location_id: '', check_in_time: '15:00', check_in_end_time: '', check_out_time: '11:00', max_guests: '', min_nights: '', stay_team_id: null, stay_member_id: null,
@@ -966,6 +969,7 @@ function loadForm(row: Product) {
   form.bookable = row.booking !== null
   form.booking_duration = row.booking?.duration_minutes === null || row.booking === null ? '' : String(row.booking.duration_minutes)
   form.confirmation_mode = row.booking?.confirmation_mode ?? 'instant'
+  form.advance_notice_minutes = row.booking?.advance_notice_minutes ?? null
   form.scheduling_mode = row.booking?.scheduling_mode ?? 'business'
   form.assigned_member_id = row.booking ? row.booking.assigned_member_id : null
   form.assigned_team_id = row.booking ? row.booking.assigned_team_id : null
@@ -1123,6 +1127,7 @@ function bookingSummary(): string {
     config.default_capacity === null ? `No ${bookingCopy.value.guestLabel} limit` : config.default_capacity === 0 ? `Closed to new ${bookingCopy.value.guestsLabelPlural}` : `Up to ${config.default_capacity} ${config.default_capacity === 1 ? bookingCopy.value.guestLabel : bookingCopy.value.guestsLabelPlural} per ${legalEditor.value ? 'consultation' : 'session'}`,
     config.scheduling_mode === 'provider' ? config.assigned_team_id ? 'Each team member’s working hours' : `${bookingCopy.value.assigneeNoun.replace(/^./u, letter => letter.toUpperCase())}’s working hours` : 'Calendar and repeating times',
     config.confirmation_mode === 'instant' ? 'Confirm automatically' : 'Review each request',
+    noticeSummary(config.advance_notice_minutes),
     config.online_payment_required ? `Online payment required for paid ${legalEditor.value ? 'consultations' : 'sessions'}` : 'No payment collected at booking',
   ].join('\n')
   if (!scheduleData.value) return minutes
@@ -1642,6 +1647,7 @@ async function commit(concern?: ProductConcern) {
     : concern === 'duration' ? { booking_duration: form.booking_duration }
     : concern === 'capacity' ? { booking_capacity: form.booking_capacity }
     : concern === 'confirmation' ? { confirmation_mode: form.confirmation_mode }
+    : concern === 'notice' ? { advance_notice_minutes: form.advance_notice_minutes }
     : concern === 'assignment' ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id, assigned_team_id: form.assigned_team_id }
     : concern === 'payment' ? { online_payment_required: form.online_payment_required }
     : concern === 'location' ? { held_online: form.held_online }
@@ -1860,6 +1866,7 @@ async function saveBooking(concern: BookingConcern) {
     : concern === 'enabled' && legalEditor.value ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id, assigned_team_id: form.assigned_team_id }
     : concern === 'capacity' ? { default_capacity: form.booking_capacity.trim() ? Number(form.booking_capacity) : null }
     : concern === 'confirmation' ? { confirmation_mode: form.confirmation_mode }
+    : concern === 'notice' ? { advance_notice_minutes: form.advance_notice_minutes }
     : concern === 'assignment' ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id, assigned_team_id: form.assigned_team_id }
     : concern === 'payment' ? { online_payment_required: form.online_payment_required }
     : concern === 'location' ? { held_online: form.held_online }

@@ -51,11 +51,11 @@ export async function visitRefundQueries(db:DbClient,input:{action:VisitRefundAc
 
 /** A guest's own cancellation before the free-cancellation deadline refunds the payment; cancellation always releases the seats. */
 export async function guestVisitRefundQueries(db: DbClient, input: {
- organizationId: string; subjectType: GuestRefundSubject; subjectId: string; requestId: string; startsAt: string; now: string; buyerUserId?: string
+ organizationId: string; subjectType: GuestRefundSubject; subjectId: string; requestId: string; startsAt: string; advanceNoticeMinutes: number | null; now: string; buyerUserId?: string
 }): Promise<{ queries: BatchQuery[]; guard: BatchQuery | null }> {
  const payment = await queryFirst<Payment>(db, 'SELECT * FROM payments WHERE organization_id = ? AND subject_type = ? AND subject_id = ? AND captured_amount > refunded_amount', [input.organizationId, input.subjectType, input.subjectId])
  if (!payment) return { queries: [], guard: null }
- if (Date.parse(input.now) > Date.parse(freeCancellationUntil(input.startsAt))) return { queries: [], guard: null }
+ if (Date.parse(input.now) > Date.parse(freeCancellationUntil(input.startsAt, input.advanceNoticeMinutes))) return { queries: [], guard: null }
  const key = guestVisitRefundKey(input.subjectType, input.subjectId)
  // One refund per cancellation: the batch refuses while an earlier one is still with Stripe.
  const guard: BatchQuery = {

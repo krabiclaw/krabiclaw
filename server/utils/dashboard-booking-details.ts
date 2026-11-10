@@ -10,7 +10,7 @@ import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { assertResourceAccess, assertAssignedBookingAccess, isOrganizationWideRole, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
 import { renderBookingPolicySummary, visitPolicySummarySource, type RenderedBookingPolicySummary } from '~/server/utils/reservations'
 import type { BookingPolicySummarySource } from '~/server/utils/booking-policy-summary'
-import { freeCancellationUntil } from '~/shared/availability-settings'
+import { freeCancellationUntil, outsideNotice } from '~/shared/availability-settings'
 import { assertProductKind, type ProductKind } from '~/shared/product-details'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { loadOwnerPictures } from '~/server/notifications/hero'
@@ -64,6 +64,8 @@ interface BookingRow {
   updated_at: string
   policy_json: string | null
   product_kind: string | null
+  /** A class's or consultation's advance notice; null for a reservation. */
+  advance_notice_minutes: number | null
   product_details_json: string | null
   no_show_at: string | null
   review_id: string | null
@@ -185,7 +187,7 @@ async function loadBookingRow(
   // refers to — a reservation or a booking — not on the thread. The thread
   // carries the conversation and the guest.
   return queryFirst<BookingRow>(db, `SELECT r.id, record.id AS operational_id, r.organization_id, s.name AS organization_name, s.vertical,
-    record.assigned_member_id, record.operational_updated_at, record.policy_json, record.product_kind, record.product_details_json, record.scheduling_mode, record.session_status, record.location_id, l.slug AS location_slug, l.title AS location_title, l.address AS location_address,
+    record.assigned_member_id, record.operational_updated_at, record.policy_json, record.product_kind, record.product_details_json, record.scheduling_mode, record.advance_notice_minutes, record.session_status, record.location_id, l.slug AS location_slug, l.title AS location_title, l.address AS location_address,
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
     (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, record.party_size, record.starts_at, record.ends_at, record.timezone, record.status, json_extract(r.payload_json, '$.notes') AS requests,
     record.product_id AS experience_id, record.product_name AS experience_title, record.product_session_id AS session_id,
@@ -193,11 +195,11 @@ async function loadBookingRow(
     FROM requests r
     JOIN organization s ON s.id = r.organization_id
     JOIN (
-      SELECT b.id, b.request_id, b.status, b.party_size, ps.starts_at, ps.ends_at, ps.timezone, ps.location_id, b.product_id, p.name AS product_name, ps.id AS product_session_id, b.assigned_member_id, b.updated_at AS operational_updated_at, NULL AS policy_json, p.kind AS product_kind, p.details_json AS product_details_json, cfg.scheduling_mode, ps.status AS session_status, b.no_show_at
+      SELECT b.id, b.request_id, b.status, b.party_size, ps.starts_at, ps.ends_at, ps.timezone, ps.location_id, b.product_id, p.name AS product_name, ps.id AS product_session_id, b.assigned_member_id, b.updated_at AS operational_updated_at, NULL AS policy_json, p.kind AS product_kind, p.details_json AS product_details_json, cfg.scheduling_mode, cfg.advance_notice_minutes, ps.status AS session_status, b.no_show_at
         FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id JOIN products p ON p.id = b.product_id
         LEFT JOIN product_booking_configs cfg ON cfg.product_id = b.product_id AND cfg.organization_id = b.organization_id
       UNION ALL
-      SELECT res.id, res.request_id, res.status, res.party_size, res.starts_at, res.ends_at, res.timezone, res.location_id, NULL, NULL, NULL, NULL, res.updated_at, res.policy_json, NULL, NULL, NULL, NULL, res.no_show_at FROM reservations res
+      SELECT res.id, res.request_id, res.status, res.party_size, res.starts_at, res.ends_at, res.timezone, res.location_id, NULL, NULL, NULL, NULL, res.updated_at, res.policy_json, NULL, NULL, NULL, NULL, NULL, res.no_show_at FROM reservations res
     ) record ON record.request_id = r.id
     LEFT JOIN business_locations l ON l.id = record.location_id
     WHERE r.id = ? AND r.kind = ? AND ${scope.buyerUserId ? `r.user_id = ? AND ${REQUEST_CURRENT_BUYER_SQL}` : 'r.organization_id = ?'}`, [bookingId, type, scope.buyerUserId ?? scope.organizationId])
@@ -305,11 +307,11 @@ async function composeBookingDetails(
   const visibleLocations = locations.filter(location => type === 'reservation' || location.id === row.location_id)
   const locationPictures = await loadOwnerPictures(db, row.organization_id, 'business_location', visibleLocations.map(location => location.id))
 
-  let policy: BookingPolicySummarySource = row.policy_json ? JSON.parse(row.policy_json) as BookingPolicySummarySource : visitPolicySummarySource('reservation')
+  let policy: BookingPolicySummarySource = row.policy_json ? JSON.parse(row.policy_json) as BookingPolicySummarySource : visitPolicySummarySource('reservation', null)
   let productKind: ProductKind | undefined
   if (type === 'booking') {
     productKind = assertProductKind(row.product_kind)
-    policy = visitPolicySummarySource('experience')
+    policy = visitPolicySummarySource('experience', row.advance_notice_minutes)
   }
   const [policyLocale, notes, timeZone, contact] = await Promise.all([
     getSourceLocale(db,row.organization_id),
@@ -383,9 +385,9 @@ async function composeBookingDetails(
     payments:reader.buyerUserId||reader.canReadPayments?payments:null,
     // The same rule the public cancel route applies, read here so the screen
     // does not offer a cancellation the write would refuse.
-    guestCanCancel: ['pending', 'confirmed'].includes(row.status) && row.ends_at > now && !complete && !row.cancellation_used_at,
+    guestCanCancel: ['pending', 'confirmed'].includes(row.status) && row.ends_at > now && !complete && !row.cancellation_used_at && (row.advance_notice_minutes === null || outsideNotice(row.starts_at, row.advance_notice_minutes, Date.parse(now))),
     guestCanRetryCancellation,
-    guestCancelRefunds: now <= freeCancellationUntil(row.starts_at),
+    guestCancelRefunds: now <= freeCancellationUntil(row.starts_at, row.advance_notice_minutes),
     contactPhone: contact?.contactPhone ?? null,
     noShowAt: row.no_show_at,
     canMarkNoShow: !reader.buyerUserId && row.status === 'confirmed' && row.no_show_at === null && row.review_id === null && row.starts_at <= now,

@@ -1,4 +1,5 @@
 import { isStayAmenityCodes, NEW_HOME_CANCELLATION_POLICIES, parseStayAmenityAnswers, planStayAmenityAnswers, STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, stayCodes, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
+import { outsideNotice } from '~/shared/availability-settings'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { assertResponsibilityTarget, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership, type ResponsibilityTarget } from '~/server/utils/member-access'
 import { assertPublishedHost, hasPublishedHost } from '~/server/utils/public-provider'
@@ -264,7 +265,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY location_id`, params: [organizationId, ids] },
     { query: `SELECT product_id, collection_id, sort_order FROM collection_products
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY collection_id`, params: [organizationId, ids] },
-    { query: `SELECT product_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, assigned_team_id, questions FROM product_booking_configs
+    { query: `SELECT product_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, assigned_team_id, advance_notice_minutes, questions FROM product_booking_configs
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
@@ -317,6 +318,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       held_online: Number(row.held_online) === 1,
       scheduling_mode: row.scheduling_mode as 'business' | 'provider', assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
+      advance_notice_minutes: row.advance_notice_minutes === null ? null : Number(row.advance_notice_minutes),
       ...storedQuestions(row.questions),
     }
   }
@@ -2117,8 +2119,10 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
       : locations.some(location => location.location_id === session.location_id && location.published && (!requireActive || location.active)))
   // Scheduled seats prove the booking capability even while full or closed.
   // Publication additionally guards a real allocation in its atomic write.
-  const candidate = sessions.find(session => !session.is_full)
-    ?? sessions.find(session => session.capacity === null || session.capacity > 0)
+  // A start inside the advance notice cannot be booked, so it proves nothing.
+  const bookable = sessions.filter(session => outsideNotice(session.starts_at, product.booking?.advance_notice_minutes ?? null))
+  const candidate = bookable.find(session => !session.is_full)
+    ?? bookable.find(session => session.capacity === null || session.capacity > 0)
   const scopes = [...new Set([
     ...locations.filter(location => location.published && (!requireActive || location.active)).map(location => location.location_id),
     ...(options.locationId === undefined && product.booking?.held_online ? [null] : []),
