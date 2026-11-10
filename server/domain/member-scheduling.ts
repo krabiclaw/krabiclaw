@@ -75,7 +75,8 @@ export async function readMemberScheduling(db: DbClient, env: CloudflareEnv, org
  if (!row) return null
  const linked = row.calendar_account_id ? await queryFirst(db,"SELECT a.id FROM account a JOIN member m ON m.userId=a.userId WHERE a.id=? AND a.providerId='google' AND m.id=? AND m.organizationId=?",[row.calendar_account_id,memberId,organizationId]) : null
  const checking = Boolean(row.calendar_account_id) && (JSON.parse(row.calendar_ids_json) as string[]).length>0 && Boolean(linked)
- const busy = checking ? await memberBusy(env, row, { from: new Date().toISOString(), until: new Date(Date.now()+BUSY_HORIZON_MS).toISOString() }) : []
+ const now = Date.now()
+ const busy = checking ? await memberBusy(env, row, { from: new Date(now).toISOString(), until: new Date(now+BUSY_HORIZON_MS).toISOString() }) : []
  const conflicts = checking ? await queryAll<{ session_id: string; starts_at: string; ends_at: string; booking_count: number; total: number }>(db, `
   SELECT s.id session_id,s.starts_at,s.ends_at,count(b.id) booking_count,count(*) OVER() total
   FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id
