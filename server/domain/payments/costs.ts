@@ -36,12 +36,18 @@ export function feeReportRows(csv:string):Record<string,string>[] {
  return rows.filter(r=>r.some(Boolean)).map(r=>{if(r.length!==headers.length)throw new Error('Stripe report row width mismatch');return Object.fromEntries(headers.map((h,i)=>[h,r[i]!]))})
 }
 interface Snapshot {source_id:string;organization_id:string|null;payment_id:string|null;amount:number;currency:string;revision:number;billing_basis_json:string|null}
-/** Native platform report only. An unresolved attribution is durable and never charged. */
+/**
+ * Native platform report only. An unresolved attribution is durable and never charged.
+ *
+ * `fee_transaction_id` is the fee transaction that deducts the fee from the
+ * balance; Stripe leaves it blank when the fee is netted inside the charge's own
+ * balance transaction, which is every card processing fee. Such rows are
+ * identified by what incurred them, and the rows sharing an identity are summed.
+ */
 export async function ingestStripeFeeReport(db:DbClient,livemode:boolean,csv:string,stripe?:Stripe) {
  const grouped=new Map<string,{incurred_by:string;currency:string;amount:number;incurred_at:string}>()
  for(const row of feeReportRows(csv)){
   const currency=row.currency!.toUpperCase(),source=`stripe-fee:${Number(livemode)}:${row.fee_transaction_id}:${row.incurred_by}:${currency}`
-  if(!row.fee_transaction_id) throw new Error('Stripe fee identity is missing')
   const amount=stripeFeeMinor(row.amount!,currency)+stripeFeeMinor(row.tax||'0',currency)
   const timestamp = row.incurred_at!
   const incurredAt=new Date(/[Zz]|[+-]\d{2}:?\d{2}$/u.test(timestamp) ? timestamp : timestamp.replace(' ', 'T')+'Z').toISOString()
