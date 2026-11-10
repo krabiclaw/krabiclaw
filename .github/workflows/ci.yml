@@ -199,11 +199,16 @@ jobs:
             echo "::error::Refusing outdated deployment $GITHUB_SHA; $GITHUB_REF now points to $branch_sha."
             exit 1
           fi
+      # D1 keeps no planner statistics until `PRAGMA optimize` runs (D1 "Use
+      # indexes"). Without them SQLite read a conversation's messages through
+      # the (kind, created_at) index, scanning every message once per inbox row.
       - name: Apply staging migrations
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: corepack yarn wrangler d1 migrations apply DB --env staging --remote
+        run: |
+          corepack yarn wrangler d1 migrations apply DB --env staging --remote
+          corepack yarn wrangler d1 execute DB --env staging --remote --command 'PRAGMA optimize'
       # `d1 migrations apply` skips a tag already in `d1_migrations`, so a
       # regenerated baseline leaves the database on whatever it first carried
       # and the deploy says nothing. This is where that stops being silent.
@@ -300,7 +305,9 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: corepack yarn wrangler d1 migrations apply DB --remote
+        run: |
+          corepack yarn wrangler d1 migrations apply DB --remote
+          corepack yarn wrangler d1 execute DB --remote --command 'PRAGMA optimize'
       - name: Verify the production database carries this baseline
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

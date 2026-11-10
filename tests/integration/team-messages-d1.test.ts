@@ -12,7 +12,7 @@ import { assertAssignedBookingAccess, listOrganizationNotificationMembers, membe
 import { createStay, listStayHomes, stayAccessFor, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import { receiveMemberEmail } from '../../server/domain/guest-threads/inbound-email.ts'
 import { InboundEmailRejection, parseReplyToAddress } from '../../server/utils/reply-address.ts'
-import { createTeamThread, listTeamMembers, listTeamMessages, listTeamThreads, markTeamThreadRead, operateTeamGroup, sendTeamMessage, teamAccessFor } from '../../server/domain/team-messages.ts'
+import { createTeamThread, listTeamMembers, listTeamMessages, listTeamThreads, markTeamThreadRead, markTeamThreadUnread, operateTeamGroup, sendTeamMessage, teamAccessFor } from '../../server/domain/team-messages.ts'
 import { setNotificationPreference } from '../../server/domain/notification-preferences.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 
@@ -210,6 +210,13 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.deepEqual(stayView.stay, { id: stay.id, productId: cabin.id, homeName: 'Cabin', checkInDate: day(3), checkOutDate: day(5), status: stay.status })
     await markTeamThreadRead(db, owner, direct.id)
     assert.equal((await listTeamThreads(env, db, owner)).find(thread => thread.id === direct.id)?.unreadCount, 0)
+    // Marked unread from the list: the cleaner's newest message counts as new again, then read again.
+    assert.equal((await markTeamThreadUnread(db, owner, direct.id)).status, 'unread')
+    assert.deepEqual((({ unread, unreadCount }) => ({ unread, unreadCount }))((await listTeamThreads(env, db, owner)).find(thread => thread.id === direct.id)!), { unread: true, unreadCount: 1 })
+    await markTeamThreadRead(db, owner, direct.id)
+    assert.equal((await listTeamThreads(env, db, owner)).find(thread => thread.id === direct.id)?.unreadCount, 0)
+    // Nobody else has written to the cleaner here, so there is nothing to be unread.
+    await assert.rejects(markTeamThreadUnread(db, cleaner, direct.id), refused(409, 'NO_TEAM_MESSAGE', 'threadId'))
 
     // A member switched team pushes off gets none, and nothing is recorded for them.
     await setNotificationPreference(db, env as never, 'owner', 'messages', { email: false, whatsapp: false, push: false })

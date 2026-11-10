@@ -1400,6 +1400,18 @@
         "open_world_justification": "Changes only the caller’s private read position within the workspace."
       }
     },
+    "mark_team_conversation_unread": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Persists the caller’s read position for the selected conversation, just before its newest message from someone else.",
+        "destructive_justification": "Overwrites the caller’s existing last-read timestamp.",
+        "open_world_justification": "Changes only the caller’s private read position within the workspace."
+      }
+    },
     "move_stay": {
       "annotations": {
         "readOnlyHint": false,
@@ -1841,6 +1853,18 @@
       "justifications": {
         "read_only_justification": "Persists the selected conversation’s archived or restored state.",
         "destructive_justification": "Overwrites its inbox archive state; it does not cancel the booking or send a guest message.",
+        "open_world_justification": "Operates only in the selected private business inbox."
+      }
+    },
+    "set_guest_conversation_read": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Persists whether the selected conversation is unread for the caller.",
+        "destructive_justification": "Overwrites the caller’s own read state for that conversation; it does not message the guest or change anyone else’s.",
         "open_world_justification": "Operates only in the selected private business inbox."
       }
     },

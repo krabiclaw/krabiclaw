@@ -15,7 +15,7 @@ import { requireOrganizationMembership } from '~/server/utils/location-access'
 import { assertAssignedBookingAccess, memberAccessPrincipal, assertRoleAllows, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { publishNotificationInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
-import { acknowledgeThreadNotifications } from '~/server/utils/notification-acknowledgement'
+import { acknowledgeThreadNotifications, setConversationRead } from '~/server/utils/notification-acknowledgement'
 import { getNotificationAccess } from '~/server/utils/notification-access'
 import { listTeamThreads, teamAccessFor } from '~/server/domain/team-messages'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -156,12 +156,14 @@ export async function loadDashboardGuestThread(
   threadId: string,
 ) {
   const { db, env, thread, principal } = await memberThread(event, organizationId, threadId)
-  const view = await getInboxThread(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal })
+  const [view, notificationAccess] = await Promise.all([
+    getInboxThread(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal }),
+    getNotificationAccess(event),
+  ])
   if (!view) {
     throw new HTTPError({ statusCode: 404, statusMessage: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
   }
 
-  const notificationAccess = await getNotificationAccess(event)
   const acknowledged = await acknowledgeThreadNotifications(db, notificationAccess, threadId)
   if (acknowledged > 0) {
     await publishNotificationInvalidation(env, {
@@ -172,6 +174,12 @@ export async function loadDashboardGuestThread(
     })
   }
   return { thread: view }
+}
+
+/** Read or unread for this member, from the list, without opening the conversation. */
+export async function setDashboardGuestThreadRead(event: H3Event, organizationId: string, threadId: string, read: boolean) {
+  const { db, thread, principal } = await memberThread(event, organizationId, threadId)
+  return setConversationRead(principal, db, thread, read)
 }
 
 /** "In this conversation": its people, gallery and actions. */

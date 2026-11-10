@@ -34,21 +34,21 @@ export async function getGuestThreadDetail(
   audience?: { buyerUserId: string },
 ): Promise<GuestThreadDetailViewModel | null> {
   const now = new Date().toISOString()
-  const thread = await getGuestRequest(db, threadId, organizationId, undefined, audience?.buyerUserId)
-  if (!thread || (audience && thread.user_id !== audience.buyerUserId)) return null
-  const record = await getThreadOperationalRecord(db, thread.id)
-  if (audience && record && (record.user_id !== audience.buyerUserId || record.organization_id !== organizationId || record.kind !== thread.kind)) return null
-  const organization = await queryFirst<{name:string;vertical:string}>(db,'SELECT name,vertical FROM organization WHERE id=?',[organizationId])
-  if (!organization) throw new Error('Conversation has no organization')
-
-
-  const [entryRows, deliveryRows, channelThread, answers] = await Promise.all([
+  // Everything read by the conversation's id goes in one wave: a D1 read is a
+  // round trip, and this view made a dozen of them one after another.
+  const [thread, record, organization, entryRows, deliveryRows, channelThread, needsReply] = await Promise.all([
+    getGuestRequest(db, threadId, organizationId, undefined, audience?.buyerUserId),
+    getThreadOperationalRecord(db, threadId),
+    queryFirst<{ name: string; vertical: string }>(db, 'SELECT name, vertical FROM organization WHERE id = ?', [organizationId]),
     listThreadEntries(db, threadId),
     listThreadDeliveries(db, threadId),
     queryFirst<{ request_id: string; product_id: string | null }>(db, `SELECT request_id, product_id FROM channel_threads WHERE organization_id = ? AND request_id = ?
       UNION ALL SELECT request_id, product_id FROM stays WHERE organization_id = ? AND request_id = ? AND owner = 'channel' LIMIT 1`, [organizationId, threadId, organizationId, threadId]),
-    threadAnswers(db, thread),
+    audience ? false : queryFirst(db, `SELECT 1 AS open FROM requests gt WHERE gt.id = ? AND ${OPEN_REPLY_TASK_SQL}`, [threadId]).then(Boolean),
   ])
+  if (!thread || (audience && thread.user_id !== audience.buyerUserId)) return null
+  if (audience && record && (record.user_id !== audience.buyerUserId || record.organization_id !== organizationId || record.kind !== thread.kind)) return null
+  if (!organization) throw new Error('Conversation has no organization')
 
   // One read of the deliveries answers both questions the thread asks of them:
   // where each entry went, and which sends failed.
@@ -63,14 +63,21 @@ export async function getGuestThreadDetail(
     throw new HTTPError({ statusCode: 500, message: 'A successful channel reply has no provider message ID', data: { code: 'CHANNEL_RECEIPT_INVALID', field: 'delivery.provider_message_id' } })
   }
 
-  const photos = await listMessagePhotos(db, 'activity_entry', entryRows.filter(entry => entry.kind === 'message').map(entry => entry.id))
-
-  // Who on the team said or did each thing, by the name their account carries.
+  // The second wave: what the conversation's own rows point at. Who on the team
+  // said or did each thing is read by the name their account carries.
   const actorUserIds = entryRows.flatMap(entry => entry.actor_user_id ? [entry.actor_user_id] : [])
-  const actorNames = new Map(actorUserIds.length
-    ? (await queryAll<{ id: string; name: string }>(db, 'SELECT id, name FROM user WHERE id IN (SELECT value FROM json_each(?))', [d1JsonStringSet(actorUserIds)]))
-        .map(row => [row.id, row.name])
-    : [])
+  const [photos, actorRows, changes, answers, summary, home, mailboxActivity, activityPath] = await Promise.all([
+    listMessagePhotos(db, 'activity_entry', entryRows.filter(entry => entry.kind === 'message').map(entry => entry.id)),
+    actorUserIds.length ? queryAll<{ id: string; name: string }>(db, 'SELECT id, name FROM user WHERE id IN (SELECT value FROM json_each(?))', [d1JsonStringSet(actorUserIds)]) : [],
+    bookingChangeViews(db, thread, entryRows, now),
+    threadAnswers(db, thread),
+    requestSummary(db, thread, record),
+    audience || record?.kind === 'stay' || !channelThread?.product_id ? null
+      : queryFirst<{ internal_name: string }>(db, 'SELECT internal_name FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, channelThread.product_id]),
+    readMailboxActivity(db, thread.id),
+    audience && thread.kind !== 'contact' ? buyerRequestActivityPath(db, audience.buyerUserId, thread.id) : null,
+  ])
+  const actorNames = new Map(actorRows.map(row => [row.id, row.name]))
 
   // The local attempt and its provider resource remain separate immutable facts.
   // Only an actual successful receipt ID proves the mirrored property message is
@@ -83,7 +90,6 @@ export async function getGuestThreadDetail(
     return !acceptedChannelIds.has(payload.provider_message_id)
   })
   const visibleEntries = audience ? presentationEntries.filter(isBuyerVisibleThreadEntry) : presentationEntries
-  const changes = await bookingChangeViews(db, thread, entryRows, now)
   const entries: GuestThreadEntryViewModel[] = visibleEntries.map(entry => {
     const payload = parseEntryPayload(entry)
     if (payload) delete payload.email
@@ -118,19 +124,17 @@ export async function getGuestThreadDetail(
     }
   })
 
-  const summary = await requestSummary(db, thread, record)
   if (!audience) {
-    const home = record?.kind === 'stay' ? { internal_name: record.product_internal_name } : channelThread?.product_id
-      ? await queryFirst<{ internal_name: string }>(db, 'SELECT internal_name FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, channelThread.product_id]) : null
-    if (home) { summary.productTitle = home.internal_name; summary.locationTitle = home.internal_name }
+    const named = record?.kind === 'stay' ? { internal_name: record.product_internal_name } : home
+    if (named) { summary.productTitle = named.internal_name; summary.locationTitle = named.internal_name }
   }
-  const mailbox = resolveGuestThreadMailbox(thread, record, now, await readMailboxActivity(db, thread.id), audience?'buyer':'member')
+  const mailbox = resolveGuestThreadMailbox(thread, record, now, mailboxActivity, audience?'buyer':'member')
 
   return {
     id: thread.id,
     organizationName: organization.name,
     organizationVertical: organization.vertical,
-    activityPath: audience && thread.kind!=='contact' ? await buyerRequestActivityPath(db,audience.buyerUserId,thread.id) : null,
+    activityPath,
     guestName: summary.guestName,
     participantLabel: summary.participantLabel,
     conversationChannel: channelThread ? 'airbnb' : 'direct',
@@ -139,7 +143,7 @@ export async function getGuestThreadDetail(
     submissionType: thread.kind,
     submissionId: thread.id,
     locationLabel: summary.locationTitle,
-    needsReply: !audience && Boolean(await queryFirst(db, `SELECT 1 AS open FROM requests gt WHERE gt.id = ? AND ${OPEN_REPLY_TASK_SQL}`, [thread.id])),
+    needsReply,
     operationalRecord: record ? { id: record.id, kind: record.kind, status: record.status, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, party_size: record.party_size, check_in_date: record.check_in_date, check_out_date: record.check_out_date } : null,
     source: {
       submissionType: thread.kind,

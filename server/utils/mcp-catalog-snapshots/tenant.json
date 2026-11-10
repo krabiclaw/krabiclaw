@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:85775c8d9366b92b547502d3a27f9b49b37627df738c2cadf29438e8ba83c21e",
-  "documentationFingerprint": "sha256:35ee20671191f76ffbddb9de69d920666e149b1b5f0140a713a1774a4a7aa87d",
+  "fingerprint": "sha256:d5dd8cc3814a09ee6c124e4676b52a6b24510240646502430f42030a0c94c5a6",
+  "documentationFingerprint": "sha256:99f82c0468127248f18aba867b02060aa35667bbf7acb225e35670ab1170ba49",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -68175,6 +68175,10 @@
                 "type": {
                   "type": "string"
                 },
+                "unread": {
+                  "description": "Unread for you, as the Messages list shows it.",
+                  "type": "boolean"
+                },
                 "updated_at": {
                   "type": "string"
                 }
@@ -68187,6 +68191,7 @@
                 "reply_not_possible",
                 "type",
                 "needs_reply",
+                "unread",
                 "operational_status",
                 "updated_at"
               ],
@@ -74027,6 +74032,67 @@
         "openWorldHint": false,
         "readOnlyHint": false,
         "title": "Mark team conversation read"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "team_messaging",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "mark_team_conversation_unread",
+      "title": "Mark team conversation unread",
+      "description": "Mark one of your internal conversations unread: its newest message from someone else counts as new again. Changes only your own read position; does not send a message or change another participant’s unread state.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "thread_id": {
+            "description": "Team conversation ID from list_team_conversations or start_team_conversation; never a guest request or Better Auth Team ID.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "lastReadAt": {
+            "type": "string"
+          },
+          "status": {
+            "const": "unread"
+          }
+        },
+        "required": [
+          "status",
+          "lastReadAt"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Mark team conversation unread"
       },
       "securitySchemes": [
         {
@@ -102101,6 +102167,72 @@
       "uiResourceUri": null
     },
     {
+      "name": "set_guest_conversation_read",
+      "title": "Set guest conversation read",
+      "description": "Mark the inbox conversation identified by request_id read or unread for you, as swiping it in Messages does, without reading it. Changes only your own unread state; does not message the guest or change anyone else's. Marking unread needs a guest message in the conversation.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "read": {
+            "type": "boolean"
+          },
+          "request_id": {
+            "description": "Conversation request_id from list_guest_conversations or a booking read.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "read"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "additionalProperties": false,
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "unread": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "request_id",
+          "unread"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Set guest conversation read"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "submissions",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "set_media",
       "title": "Set media",
       "description": "Assign an asset to one cover, hero, logo or menu section photo; null clears it. Use attach_media for galleries and presentation for logo cropping. Product photos are saved in KrabiClaw; a connected listing’s Airbnb photo tour is edited in Airbnb.",
@@ -130029,7 +130161,7 @@
         "get_product_booking": "sha256:1f0d7f20d207a6fb1aecb169e86483ae515c5b6209fbf9fe948a2be26860968d",
         "get_team_conversation": "sha256:12380ef1805dc5084585e661b7d481bf924b0ccaae5c0ffa1aac4d7999cd08e3",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:9bae34357644916476bec0c0d9a07dc7dbf2beb726716b882a886a05097d1ee0",
+        "list_guest_conversations": "sha256:2094e77b9c0524ea5996a63d5feff72271e44d4d38e6dab9ac469766844cf693",
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
@@ -130164,7 +130296,7 @@
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
         "get_product": "sha256:1215315eabf5691d64ddcc1c161b6ca4f71a40ca688483b6ff897a1911625f16",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
-        "list_guest_conversations": "sha256:9bae34357644916476bec0c0d9a07dc7dbf2beb726716b882a886a05097d1ee0",
+        "list_guest_conversations": "sha256:2094e77b9c0524ea5996a63d5feff72271e44d4d38e6dab9ac469766844cf693",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "publish_post": "sha256:fbfd1f5ff6cbdc02ecba0e29e88a7efc5bedb5e6b60ad98eca33b6e99016f1b2",

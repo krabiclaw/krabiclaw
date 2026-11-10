@@ -101,21 +101,21 @@ export function inboxGuestNames(raw: GuestThreadDetailViewModel): { kind: InboxT
 
 async function threadFacts(db: DbClient, raw: GuestThreadDetailViewModel, organizationId: string, now: Date): Promise<ThreadFacts> {
   const { kind, guestName, guestFullName } = inboxGuestNames(raw)
-  const place = await queryFirst<{ location_timezone: string | null; organization_timezone: string }>(db, `
-    SELECT l.timezone AS location_timezone, o.timezone AS organization_timezone
-      FROM requests r JOIN organization o ON o.id = r.organization_id
-      LEFT JOIN business_locations l ON l.id = r.location_id AND l.organization_id = r.organization_id
-     WHERE r.id = ? AND r.organization_id = ?`, [raw.id, organizationId])
-  if (!place) throw new HTTPError({ statusCode: 404, message: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
-  const timeZone = place.location_timezone ?? place.organization_timezone
   const automaticIds = raw.entries.filter(entry => entry.eventName === 'thread.scheduled_message').map(entry => entry.id)
-  const [owner, automatic] = await Promise.all([
+  const [place, owner, automatic] = await Promise.all([
+    queryFirst<{ location_timezone: string | null; organization_timezone: string }>(db, `
+      SELECT l.timezone AS location_timezone, o.timezone AS organization_timezone
+        FROM requests r JOIN organization o ON o.id = r.organization_id
+        LEFT JOIN business_locations l ON l.id = r.location_id AND l.organization_id = r.organization_id
+       WHERE r.id = ? AND r.organization_id = ?`, [raw.id, organizationId]),
     automaticIds.length ? queryFirst<{ name: string }>(db, `SELECT u.name FROM member m JOIN user u ON u.id = m.userId
       WHERE m.organizationId = ? AND m.role = 'owner' ORDER BY m.createdAt, m.id LIMIT 1`, [organizationId]) : null,
     automaticIds.length ? queryAll<{ entry_id: string; template_title: string }>(db,
       'SELECT entry_id, template_title FROM scheduled_guest_messages WHERE organization_id = ? AND entry_id IN (SELECT value FROM json_each(?))',
       [organizationId, d1JsonStringSet(automaticIds)]) : [],
   ])
+  if (!place) throw new HTTPError({ statusCode: 404, message: 'Thread not found', data: { code: 'THREAD_NOT_FOUND', field: 'threadId' } })
+  const timeZone = place.location_timezone ?? place.organization_timezone
   const inquiryEntry = raw.entries.findLast(entry => entry.eventName === 'channel.inquiry_received')
   const inquiry = inquiryEntry && text(inquiryEntry.payload?.check_in_date) && text(inquiryEntry.payload?.check_out_date)
     ? { checkIn: String(inquiryEntry.payload!.check_in_date), checkOut: String(inquiryEntry.payload!.check_out_date) } : null
@@ -311,7 +311,10 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
   const raw = await rawThread(db, threadId, organizationId, viewer)
   if (!raw) return null
   const facts = await threadFacts(db, raw, organizationId, now)
-  const replyComposer = await composer(db, raw.id, organizationId, viewer, facts.channel)
+  const [replyComposer, pending] = await Promise.all([
+    composer(db, raw.id, organizationId, viewer, facts.channel),
+    viewer.audience === 'member' ? pendingMessages(db, raw.id, organizationId, viewer.principal, facts.timeZone, now.toISOString()) : [],
+  ])
   const items = stream(facts, viewer, now, replyComposer.available)
   const record = raw.operationalRecord
   return {
@@ -328,7 +331,7 @@ export async function getInboxThread(db: DbClient, threadId: string, organizatio
     recordTitle: record ? record.kind === 'stay' ? 'Reservation' : threadRecordTitle(record.kind, raw.organizationVertical) : null,
     activityPath: raw.activityPath,
     stream: items,
-    pending: viewer.audience === 'member' ? await pendingMessages(db, raw.id, organizationId, viewer.principal, facts.timeZone, now.toISOString()) : [],
+    pending,
     composer: replyComposer,
   }
 }
