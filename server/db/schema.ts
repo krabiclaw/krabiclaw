@@ -79,51 +79,55 @@ export const business_locations = sqliteTable("business_locations", {
 	check("business_locations_stay_map_sharing_check", sql`stay_map_sharing IN (${sql.raw(STAY_MAP_SHARING_MODES.map(mode => `'${mode}'`).join(', '))})`),
 ]);
 
-// The inbox: one conversation thread with a guest, and its workflow state.
-// Row meaning: someone contacted this site, and this is the thread.
-// Owner/scope: organization + site; location_id routes the thread to a branch.
-// This table does NOT own booking truth. The occurrence is a product_sessions
-//   row and the seat claim a bookings row (a class, a consultation or a
-//   table), linked back here through request_id. A contact thread has neither
-//   and is not forced into the booking model.
-// Null semantics: user_id NULL is a guest with no Better Auth user. review_id NULL means
-//   no review was solicited from this thread. location_id NULL means the
-//   thread is site-wide.
-// Deletion: cascades from site; bookings survive with
-//   request_id set to NULL, because losing an inbox thread must not lose a
-//   seat allocation.
-// Read/write: server/domain/requests.ts.
-export const requests = sqliteTable("requests", {
- id: text().primaryKey(),
- // The inbox thread type. The OPERATIONAL record for a booking is the
- // bookings row that links back here; this
- // column only says which kind of thread the inbox is showing. A contact
- // thread is not a degenerate booking and carries no booking columns.
- kind: text({ enum: ["contact", "booking"] }).notNull(),
- organization_id: text().references((): AnySQLiteColumn => organization.id, { onDelete: "cascade" }),
- location_id: text().references((): AnySQLiteColumn => business_locations.id, { onDelete: "set null" }),
- user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
- review_id: text().references((): AnySQLiteColumn => reviews.id, { onDelete: "set null" }),
- // The tenant's explicit archive action, and who took it. Past/Current is
- // derived from the linked session's ends_at at runtime and is
- // never stored. Archiving is not conversation activity: it does not move
- // updated_at.
- archived_at: text(),
- archived_by_user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
- // A member blocked this guest: the conversation leaves Current and Past for
- // the Blocked mailbox and stops alerting the team. Who blocked it, and why, is
- // the content_reports row the block filed.
- blocked_at: text(),
- payload_json: text().notNull(),
- created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
- updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+// A conversation (server/domain/conversations.ts), as Slack and Discord have
+// them: a guest's with the business, or the team's own.
+// Kinds: `contact` (a guest wrote to the site), `booking` (about a booking, or
+//   one being made: a checkout or a channel inquiry), `team` (members of one
+//   organization: a direct conversation, a group, or a job's about a booking).
+// booking_id: the booking it is about, where it has one. A booking has at most
+//   one guest conversation; any number of team conversations may name it.
+// user_id: the guest's Better Auth user (every guest has one); NULL on team.
+// payload_json: what the guest gave when they wrote or booked (contact,
+//   provenance, the emailed cancellation token); '{}' on team.
+// name/is_group/participants_key/created_by_user_id: team only. A group keeps
+//   is_group after people leave; participants_key makes a direct or job
+//   conversation one per roster and a group one per creation key.
+// blocked_at: a member blocked this guest (content_reports holds who and why).
+// last_message_at: the newest message's time (a channel's own time where it
+//   gave one), or the creation time before the first message. Lists order by it.
+// Who reads a conversation and how far is conversation_participants; its
+// messages are messages. Visibility: a guest conversation by role or by
+//   handling its booking's product (server/utils/member-access.ts); a team
+//   conversation by its participants.
+// Deletion: cascades from the organization. A booking is not deleted while a
+//   conversation names it.
+export const conversations = sqliteTable("conversations", {
+	id: text().primaryKey(),
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	kind: text({ enum: ["contact", "booking", "team"] }).notNull(),
+	location_id: text(),
+	booking_id: text(),
+	user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
+	name: text(),
+	is_group: integer({ mode: "boolean" }).default(false).notNull(),
+	participants_key: text(),
+	created_by_user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
+	blocked_at: text(),
+	payload_json: text().default("{}").notNull(),
+	last_message_at: text().notNull(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, table => [
-	check("requests_instants_check", sql`(archived_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', archived_at, '+0 days') IS archived_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
- foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: "requests_location_scope_fk" }),
- check("requests_payload_check", sql`json_valid(payload_json) AND json_type(payload_json) = 'object'`),
+	check("conversations_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', last_message_at, '+0 days') IS last_message_at AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND (blocked_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', blocked_at, '+0 days') IS blocked_at)`),
+	foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: "conversations_location_scope_fk" }),
+	// Not SET NULL: that would null organization_id too, because this is a composite key.
+	foreignKey({ columns: [table.organization_id, table.booking_id], foreignColumns: [bookings.organization_id, bookings.id], name: "conversations_booking_scope_fk" }).onDelete("no action"),
+	check("conversations_payload_check", sql`json_valid(payload_json) AND json_type(payload_json) = 'object'`),
+	check("conversations_kind_check", sql`(kind = 'team' AND user_id IS NULL AND blocked_at IS NULL AND payload_json = '{}' AND participants_key IS NOT NULL)
+		OR (kind IN ('contact', 'booking') AND name IS NULL AND is_group = 0 AND participants_key IS NULL AND created_by_user_id IS NULL)`),
+	check("conversations_contact_check", sql`kind <> 'contact' OR (booking_id IS NULL AND json_type(payload_json, '$.message') IS 'text')`),
 	// A booking's guest may be known by name alone (an imported reservation);
 	// a contact needs an email or a phone to be answered.
-	check("requests_guest_payload_check", sql`(
+	check("conversations_guest_payload_check", sql`kind = 'team' OR (
     (json_type(payload_json, '$.participant') IS NULL AND json_type(payload_json, '$.guest.name') IS 'text'
       AND (json_type(payload_json, '$.guest.email') IS 'text' OR json_type(payload_json, '$.guest.email') IS 'null')
       AND (json_type(payload_json, '$.guest.phone') IS 'text' OR json_type(payload_json, '$.guest.phone') IS 'null')
@@ -136,54 +140,102 @@ export const requests = sqliteTable("requests", {
       AND (json_type(payload_json, '$.guest.email') IS 'text' OR json_type(payload_json, '$.guest.email') IS 'null')
       AND (json_type(payload_json, '$.guest.phone') IS 'text' OR json_type(payload_json, '$.guest.phone') IS 'null'))
   )`),
- check("requests_message_payload_check", sql`kind <> 'contact' OR json_type(payload_json, '$.message') IS 'text'`),
- check("requests_scope_check", sql`organization_id IS NOT NULL`),
- uniqueIndex("requests_scope_id_unique").on(table.organization_id, table.id),
- index("requests_org_kind_idx").on(table.kind, table.location_id, table.updated_at),
- index("requests_org_user_idx").on(table.organization_id, table.user_id),
- index("requests_org_archive_activity_idx").on(table.organization_id, table.archived_at, table.updated_at),
- index("requests_org_created_idx").on(table.organization_id, table.created_at),
- // Guest requests join the account whose verified email they were made with (#1282).
- index("requests_guest_email_idx").on(sql`lower(payload_json ->> '$.guest.email')`)
+	check("conversations_team_name_check", sql`name IS NULL OR (length(trim(name)) BETWEEN 1 AND 100 AND name = trim(name))`),
+	uniqueIndex("conversations_scope_id_unique").on(table.organization_id, table.id),
+	uniqueIndex("conversations_guest_booking_unique").on(table.booking_id).where(sql`kind = 'booking' AND booking_id IS NOT NULL`),
+	uniqueIndex("conversations_participants_unique").on(table.organization_id, table.participants_key).where(sql`participants_key IS NOT NULL`),
+	index("conversations_org_activity_idx").on(table.organization_id, table.last_message_at),
+	index("conversations_org_booking_idx").on(table.organization_id, table.booking_id),
+	index("conversations_org_user_idx").on(table.organization_id, table.user_id),
+	index("conversations_user_activity_idx").on(table.user_id, table.last_message_at),
+	// Guest conversations join the account whose verified email they were made with (#1282).
+	index("conversations_guest_email_idx").on(sql`lower(payload_json ->> '$.guest.email')`),
 ]);
 
+// One person's place in one conversation: how far they have read, and whether
+// they archived it for themselves (D2). On a team conversation the row is the
+// seat; a member who leaves the organization loses it
+// (reconcileResponsibilities). On a guest conversation the guest and any
+// member who read or archived it have one; visibility is not read from it. No
+// row reads as nothing read. A message from someone else after
+// last_read_message_id is unread (conversations.ts unreadSql, the one
+// statement of it).
+export const conversation_participants = sqliteTable("conversation_participants", {
+	conversation_id: text().notNull(),
+	organization_id: text().notNull(),
+	user_id: text().notNull().references((): AnySQLiteColumn => user.id, { onDelete: "cascade" }),
+	last_read_message_id: text().references((): AnySQLiteColumn => messages.id, { onDelete: "set null" }),
+	archived_at: text(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, table => [
+	primaryKey({ columns: [table.conversation_id, table.user_id], name: "conversation_participants_pk" }),
+	foreignKey({ columns: [table.organization_id, table.conversation_id], foreignColumns: [conversations.organization_id, conversations.id], name: "conversation_participants_conversation_scope_fk" }).onDelete("cascade"),
+	index("conversation_participants_user_idx").on(table.user_id, table.organization_id),
+	check("conversation_participants_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND (archived_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', archived_at, '+0 days') IS archived_at)`),
+]);
+
+// One message in one conversation, in `sequence` order. Its author is a person
+// (author_user_id: a member, or the guest's Better Auth user) or KrabiClaw
+// (`krabiclaw`): an automatic message, a booking's opening, a relayed Airbnb
+// Support message, or an event (event_name: a cancellation, a change, a
+// payment, a review), which names the person who caused it in author_user_id
+// when one did. Unread counts every message from someone else.
+// channel: where it was written or relayed (web, email, whatsapp, airbnb).
+// dedupe_key: a replay of the same message (an inbound id, a sender's
+//   idempotency key) returns it; a different message under the key is refused.
+// Photos are media_placements (owner_type 'message', slot 'attachments').
+// Ids are kept when a message moves, so reply-to mail already sent still threads.
+export const messages = sqliteTable("messages", {
+	id: text().primaryKey(),
+	organization_id: text().notNull(),
+	conversation_id: text().notNull(),
+	sequence: integer().notNull(),
+	author_kind: text({ enum: ["guest", "member", "krabiclaw"] }).notNull(),
+	author_user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
+	channel: text({ enum: ["web", "email", "whatsapp", "airbnb"] }),
+	body: text(),
+	event_name: text(),
+	payload_json: text().default("{}").notNull(),
+	dedupe_key: text().notNull().unique(),
+	occurred_at: text().notNull(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, table => [
+	foreignKey({ columns: [table.organization_id, table.conversation_id], foreignColumns: [conversations.organization_id, conversations.id], name: "messages_conversation_scope_fk" }).onDelete("cascade"),
+	uniqueIndex("messages_conversation_sequence_unique").on(table.conversation_id, table.sequence),
+	index("messages_conversation_event_idx").on(table.conversation_id, table.event_name),
+	check("messages_sequence_check", sql`sequence > 0`),
+	check("messages_payload_check", sql`json_valid(payload_json) AND json_type(payload_json) = 'object'`),
+	check("messages_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', occurred_at, '+0 days') IS occurred_at AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
+]);
+
+// The organization's audit log: who changed what (server/utils/organization-events.ts).
 export const activity_entries = sqliteTable("activity_entries", {
  id: text().primaryKey(),
- kind: text({ enum: ["submission", "message", "operation", "assignment", "resolution", "notification", "acknowledgement", "audit"] }).notNull(),
- scope_kind: text({ enum: ["request", "organization", "global"] }).notNull(),
- organization_id: text().references((): AnySQLiteColumn => organization.id, { onDelete: "cascade" }),
+ organization_id: text().notNull().references((): AnySQLiteColumn => organization.id, { onDelete: "cascade" }),
  location_id: text().references((): AnySQLiteColumn => business_locations.id, { onDelete: "set null" }),
- request_id: text().references((): AnySQLiteColumn => requests.id, { onDelete: "cascade" }),
- parent_id: text().references((): AnySQLiteColumn => activity_entries.id, { onDelete: "cascade" }),
- actor_kind: text({ enum: ["guest", "member", "system", "cloudflare"] }).notNull(),
+ actor_kind: text({ enum: ["member", "system", "cloudflare"] }).notNull(),
  actor_user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
- target_user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
- channel: text({ enum: ["web", "email", "whatsapp", "airbnb", "system"] }),
  body: text(),
- event_name: text(),
+ event_name: text().notNull(),
  payload_json: text().default("{}").notNull(),
  dedupe_key: text().notNull().unique(),
- sequence: integer(),
  occurred_at: text().notNull(),
  created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, table => [
-	check("activity_entries_instants_check", sql`(occurred_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', occurred_at, '+0 days') IS occurred_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at)`),
- check("activity_entries_scope_check", sql`(scope_kind = 'request' AND request_id IS NOT NULL AND organization_id IS NULL AND location_id IS NULL) OR (scope_kind = 'organization' AND organization_id IS NOT NULL AND request_id IS NULL) OR (scope_kind = 'global' AND organization_id IS NULL AND request_id IS NULL)`),
- check("activity_entries_payload_check", sql`json_valid(payload_json) AND json_type(payload_json) = 'object'`),
- check("activity_entries_timeline_check", sql`(kind IN ('submission', 'message', 'operation', 'assignment', 'resolution') AND request_id IS NOT NULL AND sequence IS NOT NULL AND sequence > 0 AND scope_kind = 'request') OR (kind NOT IN ('submission', 'message', 'operation', 'assignment', 'resolution') AND sequence IS NULL)`),
- uniqueIndex("activity_entries_request_sequence_unique").on(table.request_id, table.sequence),
- uniqueIndex("activity_entries_notification_source_unique").on(table.parent_id).where(sql`kind = 'notification' AND parent_id IS NOT NULL`),
- index("activity_entries_request_occurred_idx").on(table.request_id, table.occurred_at),
- index("activity_entries_parent_actor_idx").on(table.parent_id, table.actor_user_id, table.occurred_at),
- index("activity_entries_context_organization_created_idx").on(table.kind, table.organization_id, table.created_at),
- index("activity_entries_kind_org_created_idx").on(table.kind, table.created_at),
- index("activity_entries_org_created_idx").on(table.kind, table.organization_id, table.created_at),
- index("activity_entries_target_created_idx").on(table.kind, table.target_user_id, table.created_at)
+	check("activity_entries_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', occurred_at, '+0 days') IS occurred_at AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
+	check("activity_entries_payload_check", sql`json_valid(payload_json) AND json_type(payload_json) = 'object'`),
+	index("activity_entries_org_created_idx").on(table.organization_id, table.created_at),
 ]);
 
+// One send of something to someone, and what happened to it: a message in a
+// conversation (message_id), an organization event in the audit log
+// (activity_entry_id: a payout, a domain, a subscription, an invitation), or a
+// task (task_id: an assignment, a job reminder).
 export const guest_thread_deliveries = sqliteTable("guest_thread_deliveries", {
 	id: text().primaryKey(),
-	entry_id: text().notNull().references(() => activity_entries.id, { onDelete: "cascade" } ),
+	message_id: text().references(() => messages.id, { onDelete: "cascade" } ),
+	activity_entry_id: text().references(() => activity_entries.id, { onDelete: "cascade" } ),
+	task_id: text().references(() => tasks.id, { onDelete: "cascade" } ),
 	channel: text().notNull(),
 	provider: text().notNull(),
 	purpose: text().notNull(),
@@ -199,8 +251,11 @@ export const guest_thread_deliveries = sqliteTable("guest_thread_deliveries", {
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
 	check("guest_thread_deliveries_instants_check", sql`(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
+	check("guest_thread_deliveries_subject_check", sql`(message_id IS NOT NULL) + (activity_entry_id IS NOT NULL) + (task_id IS NOT NULL) = 1`),
 	uniqueIndex("guest_thread_deliveries_provider_message_unique").on(table.provider, table.provider_message_id).where(sql`provider_message_id IS NOT NULL`),
-	index("guest_thread_deliveries_entry_status_idx").on(table.entry_id, table.status),
+	index("guest_thread_deliveries_message_status_idx").on(table.message_id, table.status),
+	index("guest_thread_deliveries_activity_idx").on(table.activity_entry_id),
+	index("guest_thread_deliveries_task_idx").on(table.task_id),
 	check("guest_thread_deliveries_provider_check", sql`(channel = 'email' AND provider IN ('resend', 'log_only')) OR (channel = 'whatsapp' AND provider IN ('meta', 'log_only')) OR (channel = 'airbnb' AND provider = 'channex') OR (channel = 'push' AND provider IN ('apns', 'web_push'))`),
 ]);
 
@@ -297,7 +352,7 @@ export const tasks = sqliteTable('tasks', {
   id: text().primaryKey(),
   organization_id: text().notNull().references(() => organization.id, { onDelete: 'cascade' }),
   kind: text({ enum: ['turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up'] }).notNull(),
-  subject_type: text({ enum: ['request', 'scheduled_guest_message', 'booking', 'article', 'post', 'product'] }),
+  subject_type: text({ enum: ['conversation', 'scheduled_guest_message', 'booking', 'article', 'post', 'product'] }),
   subject_id: text(),
   product_id: text(),
   location_id: text(),
@@ -327,7 +382,7 @@ export const tasks = sqliteTable('tasks', {
   index('tasks_subject_idx').on(table.subject_type, table.subject_id),
   check('tasks_kind_check', sql`kind IN ('turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up')
     AND (subject_type IS NULL) = (subject_id IS NULL)
-    AND (subject_type IS NULL OR subject_type IN ('request', 'scheduled_guest_message', 'booking', 'article', 'post', 'product'))
+    AND (subject_type IS NULL OR subject_type IN ('conversation', 'scheduled_guest_message', 'booking', 'article', 'post', 'product'))
     AND (kind <> 'custom' OR subject_type IS NULL)
     AND ((kind = 'opportunity') = (opportunity_id IS NOT NULL))`),
   check('tasks_text_check', sql`(title IS NULL OR length(trim(title)) BETWEEN 1 AND 200) AND (kind NOT IN ('custom', 'opportunity') OR title IS NOT NULL)
@@ -396,7 +451,7 @@ export const media_placements = sqliteTable("media_placements", {
 		foreignColumns: [media_assets.organization_id, media_assets.id],
 		name: "media_placements_asset_scope_fk",
 	}).onDelete("cascade"),
-	check("media_placements_owner_type_check", sql`owner_type IN ('organization', 'business_location', 'product', 'collection', 'content_document', 'content_block', 'review', 'review_request', 'activity_entry', 'team_message', 'task')`),
+	check("media_placements_owner_type_check", sql`owner_type IN ('organization', 'business_location', 'product', 'collection', 'content_document', 'content_block', 'review', 'review_request', 'message', 'task')`),
 	check("media_placements_sort_order_check", sql`sort_order >= 0`),
 	unique("media_placements_org_owner_slot_asset_unique").on(table.owner_type, table.owner_id, table.slot, table.asset_id),
 	unique("media_placements_org_owner_slot_order_unique").on(table.owner_type, table.owner_id, table.slot, table.sort_order),
@@ -973,7 +1028,8 @@ export const product_sessions = sqliteTable("product_sessions", {
 //   day is known, the time is not, and none is invented.
 // Guest: user_id is the guest's Better Auth user, an anonymous one when the
 //   guest is known only by name (a channel or imported reservation). Their
-//   contact is on the conversation (request_id); every booking has one.
+//   contact is on its guest conversation (conversations.booking_id); every
+//   booking has one.
 // party_size is the one count; adults/children/infants break it down when the
 //   booking says so (a stay's party is adults + children; infants are extra).
 // Channel fields apply to every kind: `owner` 'channel' bookings arrive from a
@@ -997,7 +1053,6 @@ export const bookings = sqliteTable("bookings", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
-	request_id: text(),
 	product_id: text().notNull(),
 	product_variant_id: text().notNull(),
 	// Slot kinds only; a nights booking has no session.
@@ -1068,14 +1123,9 @@ export const bookings = sqliteTable("bookings", {
 	foreignKey({ columns: [table.organization_id, table.product_id, table.product_session_id], foreignColumns: [product_sessions.organization_id, product_sessions.product_id, product_sessions.id], name: "bookings_session_scope_fk" }).onDelete("no action"),
 	foreignKey({ columns: [table.organization_id, table.product_id, table.product_variant_id], foreignColumns: [product_variants.organization_id, product_variants.product_id, product_variants.id], name: "bookings_variant_scope_fk" }).onDelete("no action"),
 	foreignKey({ columns: [table.organization_id, table.booked_product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "bookings_booked_home_scope_fk" }).onDelete("no action"),
-	// Not SET NULL: that would null organization_id too, because this is a
-	// composite key. Deleting a conversation must not delete a booking, so the
-	// domain operation unlinks the booking first.
-	foreignKey({ columns: [table.organization_id, table.request_id], foreignColumns: [requests.organization_id, requests.id], name: "bookings_request_scope_fk" }).onDelete("no action"),
 	unique("bookings_org_id_unique").on(table.organization_id, table.id),
 	// Parent key for night claims, which name the home they hold.
 	unique("bookings_org_product_id_unique").on(table.organization_id, table.product_id, table.id),
-	uniqueIndex("bookings_request_unique").on(table.request_id).where(sql`request_id IS NOT NULL`),
 	uniqueIndex("bookings_idempotency_unique").on(table.organization_id, table.idempotency_key).where(sql`idempotency_key IS NOT NULL`),
 	uniqueIndex("bookings_provider_booking_unique").on(table.provider, table.external_booking_id).where(sql`external_booking_id IS NOT NULL`),
 	// One booking per channel reservation: a reservation re-imported under a new provider booking id updates it.
@@ -1444,7 +1494,6 @@ export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", 
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	product_id: text().notNull(),
 	booking_id: text().notNull(),
-	request_id: text(),
 	template_id: text(),
 	template_title: text().notNull(),
 	template_version: integer().notNull(),
@@ -1455,13 +1504,12 @@ export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", 
 	reason: text(),
 	error_code: text(),
 	error_field: text(),
-	entry_id: text().references(() => activity_entries.id, { onDelete: "no action" }),
+	message_id: text().references(() => messages.id, { onDelete: "no action" }),
 	started_at: text(),
 	sent_at: text(),
 	created_at: text().notNull(),
 	updated_at: text().notNull(),
 }, (table) => [
-	foreignKey({ columns: [table.organization_id, table.request_id], foreignColumns: [requests.organization_id, requests.id], name: "scheduled_guest_messages_request_scope_fk" }).onDelete("no action"),
 	foreignKey({ columns: [table.organization_id, table.template_id], foreignColumns: [message_templates.organization_id, message_templates.id], name: "scheduled_guest_messages_template_scope_fk" }).onDelete("no action"),
 	foreignKey({ columns: [table.organization_id, table.booking_id], foreignColumns: [bookings.organization_id, bookings.id], name: "scheduled_guest_messages_booking_scope_fk" }).onDelete("cascade"),
 	uniqueIndex("scheduled_guest_messages_template_booking_unique").on(table.template_id, table.booking_id),
@@ -1473,7 +1521,7 @@ export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", 
 	check("scheduled_guest_messages_status_check", sql`status IN ('pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled', 'skipped')`),
 	check("scheduled_guest_messages_due_check", sql`due_at IS NOT NULL OR status IN ('failed', 'skipped')`),
 	check("scheduled_guest_messages_error_check", sql`status NOT IN ('failed', 'needs_review') OR (length(trim(reason)) > 0 AND length(trim(error_code)) > 0 AND length(trim(error_field)) > 0)`),
-	check("scheduled_guest_messages_sent_check", sql`status <> 'sent' OR (entry_id IS NOT NULL AND sent_at IS NOT NULL)`),
+	check("scheduled_guest_messages_sent_check", sql`status <> 'sent' OR (message_id IS NOT NULL AND sent_at IS NOT NULL)`),
 	check("scheduled_guest_messages_sending_check", sql`status <> 'sending' OR started_at IS NOT NULL`),
 	check("scheduled_guest_messages_text_check", sql`length(trim(template_title)) BETWEEN 1 AND 100 AND length(trim(body)) BETWEEN 1 AND 5000 AND template_version >= 1`),
 	check("scheduled_guest_messages_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (due_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', due_at, '+0 days') IS due_at) AND (started_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', started_at, '+0 days') IS started_at) AND (sent_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', sent_at, '+0 days') IS sent_at)`),
@@ -1486,7 +1534,7 @@ export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", 
 export const send_later_messages = sqliteTable("send_later_messages", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
-	request_id: text().notNull(),
+	conversation_id: text().notNull(),
 	user_id: text().notNull().references(() => user.id, { onDelete: "cascade" }),
 	body: text().notNull(),
 	due_at: text().notNull(),
@@ -1494,19 +1542,19 @@ export const send_later_messages = sqliteTable("send_later_messages", {
 	reason: text(),
 	error_code: text(),
 	error_field: text(),
-	entry_id: text().references(() => activity_entries.id, { onDelete: "no action" }),
+	message_id: text().references(() => messages.id, { onDelete: "no action" }),
 	version: integer().notNull(),
 	started_at: text(),
 	sent_at: text(),
 	created_at: text().notNull(),
 	updated_at: text().notNull(),
 }, (table) => [
-	foreignKey({ columns: [table.organization_id, table.request_id], foreignColumns: [requests.organization_id, requests.id], name: "send_later_messages_request_scope_fk" }).onDelete("cascade"),
+	foreignKey({ columns: [table.organization_id, table.conversation_id], foreignColumns: [conversations.organization_id, conversations.id], name: "send_later_messages_conversation_scope_fk" }).onDelete("cascade"),
 	index("send_later_messages_due_idx").on(table.status, table.due_at),
 	index("send_later_messages_author_idx").on(table.organization_id, table.user_id, table.due_at),
 	check("send_later_messages_status_check", sql`status IN ('pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled')`),
 	check("send_later_messages_error_check", sql`(status NOT IN ('failed', 'needs_review') OR (length(trim(reason)) > 0 AND length(trim(error_code)) > 0 AND length(trim(error_field)) > 0)) IS TRUE`),
-	check("send_later_messages_sent_check", sql`status <> 'sent' OR (entry_id IS NOT NULL AND sent_at IS NOT NULL)`),
+	check("send_later_messages_sent_check", sql`status <> 'sent' OR (message_id IS NOT NULL AND sent_at IS NOT NULL)`),
 	check("send_later_messages_sending_check", sql`status <> 'sending' OR started_at IS NOT NULL`),
 	check("send_later_messages_text_check", sql`length(trim(body)) BETWEEN 1 AND 5000 AND version >= 1`),
 	check("send_later_messages_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND strftime('%Y-%m-%dT%H:%M:%fZ', due_at, '+0 days') IS due_at AND (started_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', started_at, '+0 days') IS started_at) AND (sent_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', sent_at, '+0 days') IS sent_at)`),
@@ -1813,7 +1861,7 @@ export const oauthAccessToken = sqliteTable("oauthAccessToken", {
 	confirmation: text(),
 });
 
-// The provider address of one conversation in the canonical requests/activity ledger.
+// The provider address of one guest conversation.
 // A channel inquiry has no stay yet; external_booking_id records a later provider
 // association without inventing an operational booking or guest contact.
 export const channel_threads = sqliteTable("channel_threads", {
@@ -1821,7 +1869,7 @@ export const channel_threads = sqliteTable("channel_threads", {
 	external_thread_id: text().notNull(),
 	organization_id: text().notNull(),
 	product_id: text().notNull(),
-	request_id: text().notNull(),
+	conversation_id: text().notNull(),
 	external_booking_id: text(),
 	provider_updated_at: text().notNull(),
 	// The thread this conversation was addressed by in a retired Channex
@@ -1832,10 +1880,10 @@ export const channel_threads = sqliteTable("channel_threads", {
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, table => [
 	primaryKey({ columns: [table.provider, table.external_thread_id], name: "channel_threads_pk" }),
-	foreignKey({ columns: [table.organization_id, table.request_id], foreignColumns: [requests.organization_id, requests.id], name: "channel_threads_request_scope_fk" }).onDelete("cascade"),
+	foreignKey({ columns: [table.organization_id, table.conversation_id], foreignColumns: [conversations.organization_id, conversations.id], name: "channel_threads_conversation_scope_fk" }).onDelete("cascade"),
 	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "channel_threads_home_scope_fk" }).onDelete("no action"),
 	foreignKey({ columns: [table.product_id, table.provider], foreignColumns: [product_channel_mappings.product_id, product_channel_mappings.provider], name: "channel_threads_mapping_fk" }).onDelete("no action"),
-	uniqueIndex("channel_threads_request_unique").on(table.request_id),
+	uniqueIndex("channel_threads_conversation_unique").on(table.conversation_id),
 	uniqueIndex("channel_threads_booking_unique").on(table.provider, table.external_booking_id).where(sql`external_booking_id IS NOT NULL`),
 	index("channel_threads_org_idx").on(table.organization_id),
 	check("channel_threads_provider_check", sql`provider = 'channex'`),
@@ -2239,93 +2287,17 @@ export const device_tokens = sqliteTable("device_tokens", {
 	check("device_tokens_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);
 
-// ---------------------------------------------------------------------------
-// Team conversations: members of one organization talking to each other, for
-// example a cleaner and the host about one stay. Guests are never in them.
-//
-// A seat is a Better Auth member row, so removing someone from the
-// organization removes their seats; their messages stay, sent by their user.
-// The thread may be about one booking (booking_id); that booking cannot be
-// deleted while a conversation names it.
-// ---------------------------------------------------------------------------
-export const team_threads = sqliteTable("team_threads", {
-	id: text().primaryKey(),
-	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
-	// The booking this conversation is about, if any.
-	booking_id: text(),
-	location_id: text(),
-	created_by_user_id: text().references(() => user.id, { onDelete: "set null" }),
-	name: text(),
-	// Kept after members leave: a group never becomes a direct conversation.
-	is_group: integer({ mode: "boolean" }).default(false).notNull(),
-	// Direct/contextual conversations use their initial roster. Mutable groups
-	// use a caller-scoped creation key, independent of their changing roster.
-	participants_key: text().notNull(),
-	// The newest message's time, or the creation time before the first message.
-	last_message_at: text().notNull(),
-	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-}, (table) => [
-	foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: "team_threads_location_scope_fk" }).onDelete("cascade"),
-	unique("team_threads_org_id_unique").on(table.organization_id, table.id),
-	uniqueIndex("team_threads_participants_unique").on(table.organization_id, table.participants_key),
-	index("team_threads_org_activity_idx").on(table.organization_id, table.last_message_at),
-	foreignKey({ columns: [table.organization_id, table.booking_id], foreignColumns: [bookings.organization_id, bookings.id], name: "team_threads_booking_scope_fk" }).onDelete("no action"),
-	index("team_threads_org_booking_idx").on(table.organization_id, table.booking_id),
-	index("team_threads_org_location_idx").on(table.organization_id, table.location_id),
-	check("team_threads_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', last_message_at, '+0 days') IS last_message_at AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
-]);
-
-// One seat per member, with how far that member has read.
-export const team_thread_members = sqliteTable("team_thread_members", {
-	thread_id: text().notNull(),
-	organization_id: text().notNull(),
-	member_id: text().notNull(),
-	last_read_at: text(),
-	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-}, (table) => [
-	primaryKey({ columns: [table.thread_id, table.member_id] }),
-	foreignKey({ columns: [table.organization_id, table.thread_id], foreignColumns: [team_threads.organization_id, team_threads.id], name: "team_thread_members_thread_scope_fk" }).onDelete("cascade"),
-	foreignKey({ columns: [table.member_id, table.organization_id], foreignColumns: [member.id, member.organizationId], name: "team_thread_members_member_scope_fk" }).onDelete("cascade"),
-	index("team_thread_members_member_idx").on(table.member_id),
-	check("team_thread_members_instants_check", sql`(last_read_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', last_read_at, '+0 days') IS last_read_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
-]);
-
-// A message's photos are media placements (team_message / attachments).
-// sender_user_id is NULL only once the sender's account has been deleted.
-// The sender's idempotency key replays the same message instead of a second one.
-// An automatic message is one KrabiClaw wrote into the conversation (a job, a
-// reminder, a move); it is shown as sent automatically, alerts only the people
-// it is for, and is never counted as unread.
-export const team_messages = sqliteTable("team_messages", {
-	id: text().primaryKey(),
-	organization_id: text().notNull(),
-	thread_id: text().notNull(),
-	sender_user_id: text().references(() => user.id, { onDelete: "set null" }),
-	body: text().notNull(),
-	automatic: integer({ mode: "boolean" }).default(false).notNull(),
-	idempotency_key: text().notNull(),
-	request_hash: text().notNull(),
-	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-}, (table) => [
-	foreignKey({ columns: [table.organization_id, table.thread_id], foreignColumns: [team_threads.organization_id, team_threads.id], name: "team_messages_thread_scope_fk" }).onDelete("cascade"),
-	unique("team_messages_org_id_unique").on(table.organization_id, table.id),
-	uniqueIndex("team_messages_thread_idempotency_unique").on(table.thread_id, table.idempotency_key),
-	index("team_messages_thread_created_idx").on(table.thread_id, table.created_at, table.id),
-	check("team_messages_body_check", sql`length(body) <= 5000 AND body = trim(body)`),
-	check("team_messages_idempotency_check", sql`length(idempotency_key) BETWEEN 1 AND 200`),
-	check("team_messages_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
-]);
-
-// A member's report of a guest conversation or a team message (App Store
-// guideline 1.2), and what platform staff decided. `excerpt` keeps what was
-// reported, so the decision can be reviewed after the message is removed.
+// A member's report of a guest conversation or of a message in a team
+// conversation (App Store guideline 1.2), and what platform staff decided.
+// `excerpt` keeps what was reported, so the decision can be reviewed after the
+// message is removed.
 export const content_reports = sqliteTable("content_reports", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	reporter_user_id: text().references(() => user.id, { onDelete: "set null" }),
-	subject: text({ enum: ["guest_thread", "team_message"] }).notNull(),
-	request_id: text().references((): AnySQLiteColumn => requests.id, { onDelete: "cascade" }),
-	team_message_id: text().references(() => team_messages.id, { onDelete: "set null" }),
+	subject: text({ enum: ["conversation", "message"] }).notNull(),
+	conversation_id: text().references((): AnySQLiteColumn => conversations.id, { onDelete: "cascade" }),
+	message_id: text().references((): AnySQLiteColumn => messages.id, { onDelete: "set null" }),
 	// The KrabiClaw account that wrote the reported content, when it has one:
 	// the team message's sender, or the guest's account. Staff ban this user.
 	author_user_id: text().references(() => user.id, { onDelete: "set null" }),
@@ -2338,9 +2310,9 @@ export const content_reports = sqliteTable("content_reports", {
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
 	index("content_reports_status_created_idx").on(table.status, table.created_at),
-	index("content_reports_request_idx").on(table.request_id),
-	index("content_reports_team_message_idx").on(table.team_message_id),
-	check("content_reports_subject_check", sql`(subject = 'guest_thread' AND team_message_id IS NULL) OR (subject = 'team_message' AND request_id IS NULL AND blocked = 0)`),
+	index("content_reports_conversation_idx").on(table.conversation_id),
+	index("content_reports_message_idx").on(table.message_id),
+	check("content_reports_subject_check", sql`(subject = 'conversation' AND message_id IS NULL) OR (subject = 'message' AND conversation_id IS NULL AND blocked = 0)`),
 	check("content_reports_reason_check", sql`length(reason) BETWEEN 1 AND 1000 AND reason = trim(reason)`),
 	check("content_reports_resolution_check", sql`(status = 'open') = (resolved_at IS NULL)`),
 	check("content_reports_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND (resolved_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', resolved_at, '+0 days') IS resolved_at)`),
@@ -3100,7 +3072,7 @@ export const payment_checkout_holds = sqliteTable("payment_checkout_holds", {
  location_id: text(),
  timezone: text(),
  buyer_user_id: text().references(() => user.id, { onDelete: "set null" }),
- request_id: text(),
+ conversation_id: text(),
  payment_id: text().notNull().unique().references(() => payments.id, { onDelete: "restrict" }),
  quantity: integer().notNull(),
  amount: integer().notNull(),

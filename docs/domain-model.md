@@ -31,11 +31,11 @@ extend that model. Never add a second one beside it.
 | Night claim (the nights a booking, a checkout hold or a linked calendar holds at a home, as a session's seats are a slot booking's claim) | `stay_nights` | server/domain/stays.ts | KrabiClaw |
 | Home rooms and accessibility | `product_stay_photo_rooms` `product_stay_photo_room_memberships` `product_stay_photo_room_amenities` `product_stay_room_accessibility` `product_stay_room_accessibility_photos` `product_stay_accessibility` `product_stay_accessibility_photos` | server/domain/stays.ts | KrabiClaw |
 | Booked record (a class seat, a consultation, a table or a stay at a home, with the terms frozen when it was made) | `bookings` | server/domain/product-bookings.ts | KrabiClaw |
-| Conversation and its ledger | `requests` `activity_entries` | server/domain/requests.ts | KrabiClaw |
-| Guest message delivery | `guest_thread_deliveries` | server/domain/guest-threads/deliveries.ts | KrabiClaw |
+| Conversation (a guest's with the business, or the team's: direct, group or a job's), each person's read position and archive, and its messages from people and from KrabiClaw | `conversations` `conversation_participants` `messages` | server/domain/conversations.ts | KrabiClaw |
+| Audit log (who changed what in an organization) | `activity_entries` | server/utils/organization-events.ts | KrabiClaw |
+| Delivery of a message, an audited event or a task to a person (email, WhatsApp, Airbnb, push) | `guest_thread_deliveries` | server/domain/guest-threads/deliveries.ts | KrabiClaw |
 | Guest message template | `message_templates` | server/domain/scheduled-guest-messages.ts | KrabiClaw |
 | Future guest message | `scheduled_guest_messages` | server/domain/scheduled-guest-messages.ts | KrabiClaw |
-| Team conversation | `team_threads` `team_thread_members` `team_messages` | server/domain/team-messages.ts | KrabiClaw |
 | Reported content | `content_reports` | server/domain/content-reports.ts | KrabiClaw |
 | Work and suggestions | `tasks` `opportunities` `organization_goals` | server/domain/tasks.ts | KrabiClaw |
 | Provider working hours | `member_scheduling` | server/domain/member-scheduling.ts | KrabiClaw |
@@ -91,6 +91,8 @@ Each of these columns exists on its owner table only.
 | `check_out_time` | `product_booking_configs` |
 | `min_nights` | `product_booking_configs` |
 | `cancellation_policy` | `product_booking_configs` |
+| `last_read_message_id` | `conversation_participants` |
+| `blocked_at` | `conversations` |
 | `guest_name` | (none) |
 | `guest_email` | (none) |
 | `guest_phone` | (none) |
