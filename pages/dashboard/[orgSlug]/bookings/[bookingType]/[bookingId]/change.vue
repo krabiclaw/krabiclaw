@@ -8,6 +8,7 @@
     title="What do you want to change?"
     :lead="booking ? `Nothing changes until ${b.firstName(booking.guestName ?? '')} accepts.` : undefined"
     save-label="Send request"
+    desktop-cancel
     :saving="saving"
     :disabled="!booking || !valid || !dirty"
     :error="error ?? ''"
