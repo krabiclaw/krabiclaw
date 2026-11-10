@@ -143,7 +143,7 @@ referenced by other tables must change, Drizzle generates a table rebuild whose
 database, unless every table that references the parent is itself rebuilt and
 dropped first, so the parent is unreferenced when it is dropped and no
 foreign-key action can run; `yarn lint:migrations` replays the chain and refuses
-any other order. `0003_messages_by_booked_record.sql` is that case: it
+any other order. `0003_booked_record_references.sql` is that case: it
 holds `scheduled_guest_messages` rows in a plain table, drops it, rebuilds
 `message_templates`, then recreates the child and restores its rows. Name the
 constraint and affected references in the pull request. A

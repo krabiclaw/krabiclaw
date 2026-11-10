@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:f0607903b36126889be18f268cf61b5cc81fb6612f00844ce11ff81bafc5fc62",
-  "documentationFingerprint": "sha256:3eb4a814fed62bf4d73ecace171193fafc9cb0cc547da0256e089ab90cc85a5e",
+  "fingerprint": "sha256:f351b75f202ebff0673be42adf1a31aff904237dc3f93eaabcfb1d6dd12a103d",
+  "documentationFingerprint": "sha256:b814b53432714b768a2cd17205929833f5e06d90b186e37332f1c0b0b6aaf920",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -71896,7 +71896,7 @@
     {
       "name": "list_scheduled_guest_messages",
       "title": "List scheduled guest messages",
-      "description": "Read automatic guest-message snapshots and visible failure reasons for stays, bookings and table reservations (stayId, bookingId or reservationId names which), optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.",
+      "description": "Read automatic guest-message snapshots and visible failure reasons for stays, bookings and table reservations (subjectType is stay, booking or reservation; subjectId is its ID), optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

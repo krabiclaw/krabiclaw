@@ -467,14 +467,14 @@ export async function cancelBookingRequest(db: DbClient, input: {
     const before = JSON.parse(entry.payload_json).beforeStatus
     if (!['pending', 'confirmed'].includes(before)) throw new Error('Cancellation audit has no valid prior status')
     if (cancelled.kind === 'booking') await recordBookingCancelled(db, { organizationId: input.organizationId, bookingId: cancelled.id, cancelledBy: 'guest', actorUserId: input.buyerUserId ?? null })
-    // A cancelled visit sends none of its pending automatic messages.
-    await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, input.organizationId, { kind: cancelled.kind, id: cancelled.id })
     const refund = await queryFirst<{ payment_id: string; idempotency_key: string }>(db, `SELECT r.payment_id,r.idempotency_key FROM payment_refunds r
       JOIN payments p ON p.id=r.payment_id WHERE p.organization_id=? AND p.subject_type=? AND p.subject_id=? AND r.idempotency_key=?`, [input.organizationId, cancelled.kind, cancelled.id, guestVisitRefundKey(cancelled.kind, cancelled.id)])
     if (refund) {
       const payment = await requirePayment(db, input.organizationId, refund.payment_id)
       await executeRefund(db, paymentsStripe(input.env, Boolean(payment.livemode)), payment, null, refund.idempotency_key, 'requested_by_customer', input.buyerUserId ?? null, input.env)
     }
+    // A cancelled visit sends none of its pending automatic messages; the guest's refund comes first.
+    await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, input.organizationId, { kind: cancelled.kind, id: cancelled.id })
     return { request, record: cancelled, wasConfirmed: before === 'confirmed', changed }
   }
   if (record.status === 'cancelled') return await readCancelled()

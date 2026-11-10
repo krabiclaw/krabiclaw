@@ -661,7 +661,7 @@ async function assertSubjectAccess(db: DbClient, access: TeamAccess, subject: Jo
   if (!record) fail(404, 'SUBJECT_NOT_FOUND', `That ${subject.kind} is not one you can see`, 'subjectId')
   try {
     if (subject.kind === 'stay') await getStay(db, await stayAccessFor(access.principal), subject.id)
-    else if (record.request_id === null) throw new Error(`The ${subject.kind} ${subject.id} has no conversation`)
+    else if (record.request_id === null) fail(422, 'SUBJECT_HAS_NO_CONVERSATION', `That ${subject.kind} has no conversation for its team to reach`, 'subjectId')
     else await assertAssignedBookingAccess(db, { ...access.principal, requestId: record.request_id })
   } catch (error) {
     if (HTTPError.isError(error) && error.status === 404) fail(404, 'SUBJECT_NOT_FOUND', `That ${subject.kind} is not one you can see`, 'subjectId')

@@ -114,6 +114,8 @@ function seed(record: DashboardBookingDetails | null) {
   draft.sessionId = record.sessionId ?? ''
 }
 watch(() => booking.value?.updatedAt, () => seed(booking.value), { immediate: true })
+// A session belongs to one day: changing the day clears it, and the booked day restores the booked session.
+watch(() => draft.date, (date) => { draft.sessionId = date === booking.value?.bookingDate ? (booking.value?.sessionId ?? '') : '' })
 
 type SessionRow = { id: string; starts_at: string; timezone: string; remaining: number | null; assigned_member_id: string | null }
 const isSessionList = (value: unknown): value is { sessions: SessionRow[] } => isRecord(value) && Array.isArray(value.sessions)
