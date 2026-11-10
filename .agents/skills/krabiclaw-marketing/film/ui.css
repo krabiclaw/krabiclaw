@@ -4,6 +4,7 @@
 @font-face { font-family: "Poppins"; font-weight: 600; src: url("fonts/poppins-latin-600-normal.woff2") format("woff2"); }
 @font-face { font-family: "Poppins"; font-weight: 700; src: url("fonts/poppins-latin-700-normal.woff2") format("woff2"); }
 
+.cam, .cam *, .cam *::before, .cam *::after { box-sizing: border-box; }
 .cam { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; font-family: "Poppins", sans-serif; color: #202545;
   --page: #f8f6f3; --ink: #202545; --muted: #6e7087; --line: #e7e4de; --coral: #ee4237; --off: #8e90a2; }
 .phone { position: absolute; left: 753px; top: 106px; width: 414px; height: 868px; border-radius: 64px; background: #1c1c1e;

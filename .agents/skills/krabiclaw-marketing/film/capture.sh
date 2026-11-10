@@ -37,7 +37,7 @@ for i in {1..15}; do
   r=$(js "(location.pathname==='$want')+':'+document.body.innerText.length")
   [[ $r == true:* && ${r#true:} -gt 80 ]] && break
 done
-[[ $r == true:* ]] || { echo "$name: page never reached $want ($r)" >&2; exit 1; }
+[[ $r == true:* && ${r#true:} -gt 80 ]] || { echo "$name: $want never finished loading ($r)" >&2; exit 1; }
 sleep 2.5
 js "document.documentElement.outerHTML" > $out/html/$name.html
 node $here/render-capture.mjs $out/html/$name.html $out/$name.png "$sel" "$top"
