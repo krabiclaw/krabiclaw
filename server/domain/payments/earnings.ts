@@ -22,7 +22,7 @@ export interface PaymentPicture {
 }
 
 /** What each payment was for — its immutable title, the thing's picture, and the visit's dates when it paid for one. */
-export async function paymentPictures(db: DbClient, organizationId: string, payments: readonly Pick<Payment, 'id' | 'subject_type' | 'subject_id' | 'location_id' | 'price_snapshot_json'>[]): Promise<Map<string, PaymentPicture>> {
+export async function paymentPictures(db: DbClient, organizationId: string, payments: readonly Pick<Payment, 'id' | 'subject_type' | 'subject_id' | 'price_snapshot_json'>[]): Promise<Map<string, PaymentPicture>> {
   const ids = payments.map(payment => payment.id)
   if (!ids.length) return new Map()
   const json = JSON.stringify(ids)
@@ -33,10 +33,12 @@ export async function paymentPictures(db: DbClient, organizationId: string, paym
         FROM payments p JOIN ${BOOKED_RECORDS_SQL} br ON br.kind = p.subject_type AND br.id = p.subject_id AND br.organization_id = p.organization_id
         LEFT JOIN business_locations l ON l.id = br.location_id AND l.organization_id = br.organization_id
        WHERE p.id IN (SELECT value FROM json_each(?))`, [json]),
-    queryAll<{ payment_id: string; product_id: string | null }>(db, `SELECT o.payment_id, (SELECT l.product_id FROM payment_order_lines l WHERE l.order_id = o.id ORDER BY l.rowid LIMIT 1) AS product_id FROM payment_orders o WHERE o.payment_id IN (SELECT value FROM json_each(?))`, [json]),
+    // What a payment with no booked record yet bought: its order's first line, or its checkout hold's home, offering or table location.
+    queryAll<{ payment_id: string; product_id: string | null; location_id: string | null }>(db, `SELECT o.payment_id, (SELECT l.product_id FROM payment_order_lines l WHERE l.order_id = o.id ORDER BY l.rowid LIMIT 1) AS product_id, NULL AS location_id FROM payment_orders o WHERE o.payment_id IN (SELECT value FROM json_each(?))
+      UNION ALL SELECT h.payment_id, h.product_id, CASE WHEN h.product_id IS NULL THEN h.location_id END FROM payment_checkout_holds h WHERE h.organization_id = ? AND h.payment_id IN (SELECT value FROM json_each(?))`, [json, organizationId, json]),
   ])
   const productIds = [...records.flatMap(row => row.product_id ? [row.product_id] : []), ...lines.flatMap(row => row.product_id ? [row.product_id] : [])]
-  const locationIds = records.flatMap(row => row.product_id === null && row.location_id ? [row.location_id] : [])
+  const locationIds = [...records.flatMap(row => row.product_id === null && row.location_id ? [row.location_id] : []), ...lines.flatMap(row => row.location_id ? [row.location_id] : [])]
   const [products, locations] = await Promise.all([
     loadOwnerPictures(db, organizationId, 'product', productIds),
     loadOwnerPictures(db, organizationId, 'business_location', locationIds),
@@ -50,6 +52,7 @@ export async function paymentPictures(db: DbClient, organizationId: string, paym
     // Use only the image of the payment's actual subject: its offering or home, or a table's location.
     const imageUrl = record ? record.product_id ? products.get(record.product_id)?.imageUrl : record.location_id ? locations.get(record.location_id)?.imageUrl : null
       : line?.product_id ? products.get(line.product_id)?.imageUrl
+      : line?.location_id ? locations.get(line.location_id)?.imageUrl
       : null
     // A stay runs from check-in to checkout at its home's times.
     const window = record ? bookedRecordWindow(record) : null

@@ -12,6 +12,8 @@ import { claimSessionCapacity } from '../../server/utils/availability.ts'
 import { ingestStripeFeeReport, stripeFeeMinor, stripeFeeScaled } from '../../server/domain/payments/costs.ts'
 import { buyerActivities, buyerPaymentActivityPath, claimCheckoutReturn, tokenHash } from '../../server/domain/payments/buyer.ts'
 import { loadBuyerBookingDetails } from '../../server/utils/dashboard-booking-details.ts'
+import { paymentPictures } from '../../server/domain/payments/earnings.ts'
+import { loadOwnerPictures } from '../../server/notifications/hero.ts'
 import { cancelBookingRequest, requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
 import { claimReservation, listReservationSlots, upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
@@ -997,6 +999,15 @@ test('a stay purchase claim cancels Stripe before releasing only its held nights
       subtotal: 20000, currency: 'USD', expires_at: '2099-09-30T00:00:00.000Z', stripe_account_id: 'acct_seller', publishable_key: 'pk_test_local_boundary',
       payment_method_types: ['card'], customer_session_client_secret: null, bank_verification_url: null, surcharge_basis_points: null,
     })
+    await db.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url, status) VALUES ('cabin-photo', ?, 'image', 'cloudflare_images', 'uploaded', 'https://imagedelivery.net/h/cabin/public', 'active')").bind(ORG).run()
+    await db.prepare("INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id) VALUES ('cabin-cover', ?, 'product', 'cabin', 'image', 'cabin-photo')").bind(ORG).run()
+    const pending = await db.prepare("SELECT id, subject_type, subject_id, price_snapshot_json FROM payments WHERE id='changing'").first<{ id: string; subject_type: string; subject_id: string; price_snapshot_json: string }>()
+    assert.equal(pending!.subject_id, null, 'the stay is not booked yet')
+    const homePhoto = (await loadOwnerPictures(db, ORG, 'product', ['cabin'])).get('cabin')?.imageUrl
+    assert.match(homePhoto!, /cabin/)
+    assert.equal((await paymentPictures(db, ORG, [pending!])).get('changing')!.imageUrl, homePhoto, 'a stay payment shows its home before the stay is booked')
+    // The handoff shows the same home photo from here on.
+    open.image_url = homePhoto
     const originalNights = (await db.prepare('SELECT * FROM stay_nights ORDER BY date').all()).results
     for (const column of ['checkout_expires_at', 'return_expires_at']) {
       const expiry = await db.prepare(`SELECT ${column} AS expires_at FROM payments WHERE id='changing'`).first<string>('expires_at')
