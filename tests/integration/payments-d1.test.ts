@@ -9,7 +9,7 @@ import { Miniflare } from 'miniflare'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import * as schema from '../../server/db/schema.ts'
 import { claimSessionCapacity } from '../../server/utils/availability.ts'
-import { ingestStripeFeeReport, stripeFeeMinor } from '../../server/domain/payments/costs.ts'
+import { ingestStripeFeeReport, stripeFeeMinor, stripeFeeScaled } from '../../server/domain/payments/costs.ts'
 import { buyerActivities, buyerPaymentActivityPath, claimCheckoutReturn, tokenHash } from '../../server/domain/payments/buyer.ts'
 import { loadBuyerBookingDetails } from '../../server/utils/dashboard-booking-details.ts'
 import { cancelBookingRequest, requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
@@ -442,14 +442,17 @@ test('Stripe cost report replay and correction bill attributable deltas while co
   await payable(db,'cost');await db.prepare("UPDATE payments SET stripe_charge_id='ch:cost' WHERE id='cost'").run()
   await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG,NOW,NOW).run()
   await db.prepare("INSERT INTO payment_servicing_tenants(organization_id,stripe_account_id,livemode,retained_at) VALUES('deleted-other-tenant','acct_seller',0,?)").bind(NOW).run()
-  const csv=(amount:string)=>`fee_transaction_id,incurred_by,currency,amount,tax,incurred_at\nfee1,ch:cost,usd,${amount},0.20,2026-10-01T00:00:00Z\n,ch:cost,usd,0.60,0,2026-10-01T00:00:00Z\n,ch:cost,usd,0.40,0,2026-10-01T00:00:00Z\nfee2,unknown,usd,5.00,0,2026-10-01T00:00:00Z\nfee3,acct_seller,usd,1.00,0,2026-10-01T00:00:00Z\n`
+  const csv=(amount:string)=>`fee_transaction_id,incurred_by,currency,amount,tax,incurred_at\nfee1,ch:cost,usd,${amount},0.20,2026-10-01T00:00:00Z\n,ch:cost,usd,0.600000000000000000,0.000000000000000000,2026-10-01T00:00:00Z\n,ch:cost,usd,0.343000000000000000,0.041160000000000000,2026-10-01T00:00:00Z\nfee2,unknown,usd,5.00,0,2026-10-01T00:00:00Z\nfee3,acct_seller,usd,1.00,0,2026-10-01T00:00:00Z\n`
   await ingestStripeFeeReport(db,false,csv('3.00'));await ingestStripeFeeReport(db,false,csv('3.00'));await ingestStripeFeeReport(db,false,csv('2.00'))
-  // Stripe leaves fee_transaction_id blank for a card processing fee netted inside the charge; those rows share one identity and are summed.
+  // Stripe leaves fee_transaction_id blank for a card processing fee netted inside the charge, and itemizes below a cent; those rows share one identity, are summed exactly and rounded once (0.60 + 0.38416 = 0.98416 → 98).
   const events=(await db.prepare("SELECT amount,kind FROM payment_usage_events ORDER BY kind,amount").all()).results
-  assert.deepEqual(events,[{amount:100,kind:'stripe_cost'},{amount:320,kind:'stripe_cost'},{amount:-100,kind:'stripe_cost_adjustment'}])
+  assert.deepEqual(events,[{amount:98,kind:'stripe_cost'},{amount:320,kind:'stripe_cost'},{amount:-100,kind:'stripe_cost_adjustment'}])
   assert.equal(await db.prepare('SELECT COUNT(*) n FROM payment_cost_snapshots WHERE organization_id IS NULL').first('n'),2)
   assert.equal(await db.prepare("SELECT organization_id FROM payment_cost_snapshots WHERE incurred_by='acct_seller'").first('organization_id'),null)
-  assert.throws(()=>stripeFeeMinor('1.2340','USD'), /precision exceeds/u)
+  assert.equal(stripeFeeMinor(stripeFeeScaled('-0.003000000000000000')+stripeFeeScaled('-0.001160000000000000'),'USD'),0)
+  assert.equal(stripeFeeMinor(stripeFeeScaled('0.005'),'USD'),1)
+  assert.equal(stripeFeeMinor(stripeFeeScaled('1.5'),'JPY'),2)
+  assert.throws(()=>stripeFeeScaled('1,20'), /exact decimal/u)
  }finally{await runtime.dispose()}
 })
 
