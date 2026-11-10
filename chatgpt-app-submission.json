@@ -4,7 +4,7 @@
   "app_info": {
     "display_name": "KrabiClaw",
     "subtitle": "Manage your business website",
-    "description": "Create and manage your KrabiClaw business website from ChatGPT. Save a private website draft, publish it once its required details are complete, and add locations. Edit products, prices, announcements, articles, translations and media. Read customer inquiries, manage bookings and propose changes for guest acceptance. Read and send internal team messages with the current business members, optionally about an accessible stay or location. Manage host-entered stays, nightly availability and prices; connected homes update Airbnb through Channex and apply existing automatic guest-message schedules. Read payment reports, transactions and payouts. Read Google Ads campaigns, create paused Search campaigns, pause or enable campaigns and change daily budgets in the connected account; enabled campaigns can spend its advertising budget. Publishing a website emails KrabiClaw operators; live content and uploaded media can be public, and booking actions may email guests. Payment setup, online payment collection, refund preparation and refund execution require the authenticated KrabiClaw dashboard. Publish to connected Facebook, Instagram or Discord destinations only when requested. A KrabiClaw account is required, with access to each business you manage.",
+    "description": "Create and manage your KrabiClaw business website from ChatGPT. Save a private website draft, publish it once its required details are complete, and add locations. Edit products, prices, announcements, articles, translations and media. Read customer inquiries, manage bookings and legal consultations, and propose changes for guest acceptance. Read guest conversations and reply to guests now or at a time you schedule, by email, Airbnb or their KrabiClaw inbox; set up automatic messages that are sent to every guest at the homes you choose. Read and send internal team messages with the current business members, optionally about an accessible stay or location. Manage stays, nightly availability and prices: add stays you took directly, change or cancel stays kept in KrabiClaw, and move a guest to another of your homes, including an Airbnb reservation, which messages the guest the new address when the stay has a guest conversation. Connected homes update Airbnb through Channex and apply existing automatic guest-message schedules. Adding, changing, moving or cancelling a stay opens, moves or cancels its cleaning job, and a legal practice’s booking changes open or cancel the attorney’s preparation and follow-up jobs; jobs are posted to the team as automatic team messages. Read, add, assign, complete or skip tasks, and accept, defer or dismiss suggested opportunities. Read payment reports, transactions and payouts. Read Google Analytics and Search Console reports for the connected accounts. Read Google Ads campaigns, create paused Search campaigns, pause or enable campaigns and change daily budgets in the connected account; enabled campaigns can spend its advertising budget. Invite new members by email, which sends an invitation to an address outside the business. Publishing a website emails KrabiClaw operators; live content and uploaded media can be public, and booking actions may email guests. Payment setup, online payment collection, refund preparation and refund execution require the authenticated KrabiClaw dashboard. Publish to connected Facebook, Instagram or Discord destinations, and delete posts from Facebook or Discord, only when requested. A KrabiClaw account is required, with access to each business you manage.",
     "category": "BUSINESS"
   },
   "tools": {
@@ -111,9 +111,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Changes the selected booking to cancelled and releases places.",
-        "destructive_justification": "Cancels the booking and emails the guest; a required refund is handed off first.",
-        "open_world_justification": "Sends the selected booking’s guest an email."
+        "read_only_justification": "Changes the selected booking to cancelled and releases its places; for a legal practice it also cancels the attorney’s preparation and follow-up jobs, posted to the team as an automatic team message.",
+        "destructive_justification": "Cancels the booking and emails the guest; a required refund is handed off to the dashboard first.",
+        "open_world_justification": "Sends the selected booking’s guest an email; for a legal practice the cancelled jobs are posted to the team."
       }
     },
     "cancel_scheduled_guest_message": {
@@ -147,9 +147,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Version-checks cancellation, frees nights, cancels pending message plans and updates Airbnb; required website refunds return a financial handoff before cancellation.",
-        "destructive_justification": "Cancels a saved stay and pending outgoing messages.",
-        "open_world_justification": "Changes connected Airbnb availability and guest-facing operational state."
+        "read_only_justification": "Checks the stay’s version, then cancels it, frees its nights, cancels its turnover job and pending guest messages and updates Airbnb availability; a required website refund returns a dashboard handoff before cancellation.",
+        "destructive_justification": "Cancels a saved stay, its turnover job and its pending outgoing messages.",
+        "open_world_justification": "Changes connected Airbnb availability, and the cancelled turnover job is posted to the team as an automatic team message."
       }
     },
     "cancel_table_reservation": {
@@ -183,9 +183,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Changes the selected pending booking to confirmed.",
+        "read_only_justification": "Changes the selected pending booking to confirmed; for a legal practice it opens the attorney’s preparation and follow-up jobs, posted to the team as an automatic team message.",
         "destructive_justification": "Overwrites booking state and emails confirmation to the guest.",
-        "open_world_justification": "Sends the selected booking’s guest an email."
+        "open_world_justification": "Sends the selected booking’s guest an email and posts the attorney’s jobs to the team."
       }
     },
     "create_article_category": {
@@ -197,7 +197,7 @@
       "justifications": {
         "read_only_justification": "Creates a new empty category at an explicit existing parent or top level; articles are assigned separately.",
         "destructive_justification": "Only inserts a new empty category and preserves existing articles/categories.",
-        "open_world_justification": "An empty category is excluded by the public projection until it or a descendant contains published listed articles."
+        "open_world_justification": "An empty category does not appear on the public website until it or a category inside it contains published listed articles."
       }
     },
     "create_blog_post": {
@@ -221,7 +221,7 @@
       "justifications": {
         "read_only_justification": "Creates a new empty product collection at an optional location; existing collections and products remain.",
         "destructive_justification": "Only adds the new grouping; existing memberships and content remain.",
-        "open_world_justification": "The public catalog payload includes collections even when empty, so a new grouping can enter the public projection."
+        "open_world_justification": "The public catalog includes collections even when empty, so a new grouping can appear publicly."
       }
     },
     "create_google_ads_search_campaign": {
@@ -315,9 +315,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Persists a booking and inbox record and initiates configured guest/staff notifications.",
-        "destructive_justification": "Sends notifications, and consumes bookable capacity; payment-required creation is refused before booking.",
-        "open_world_justification": "Can email the supplied guest address and notify business staff."
+        "read_only_justification": "Saves a booking, for a legal practice a client consultation, with its inbox conversation; emails the guest when acknowledgement is chosen and notifies business staff. A confirmed consultation opens the attorney’s preparation and follow-up jobs, posted to the team as an automatic team message.",
+        "destructive_justification": "Sends notifications that cannot be recalled and uses up bookable places; a booking that requires online payment is refused before it is created.",
+        "open_world_justification": "Can email the supplied guest address, notify business staff and post the attorney’s jobs to the team."
       }
     },
     "create_product_session": {
@@ -363,9 +363,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Creates a confirmed host-entered stay, claims its nights, plans automatic guest messages and pushes connected Airbnb availability; this MCP tool accepts no payment input.",
-        "destructive_justification": "Can queue irreversible guest sends and changes the nights available for sale; it is not only an additive private note.",
-        "open_world_justification": "Queued guest messages can reach guests and connected Airbnb availability is updated."
+        "read_only_justification": "Creates a confirmed stay the host took directly, holds its nights, opens its turnover job, plans automatic guest messages and updates connected Airbnb availability; the turnover job is posted to the team as an automatic team message, and this tool takes no payment.",
+        "destructive_justification": "Can queue guest messages that cannot be recalled and changes the nights available for sale; it is not only an additive private note.",
+        "open_world_justification": "Queued guest messages can reach guests, connected Airbnb availability is updated and the turnover job is posted to the team."
       }
     },
     "create_table_reservation": {
@@ -425,7 +425,7 @@
       "justifications": {
         "read_only_justification": "Deletes only an empty category with no child categories or articles, including its private localizations.",
         "destructive_justification": "Permanently removes the empty category and its translations.",
-        "open_world_justification": "The public projection excludes an empty childless category, and nonempty deletion is refused."
+        "open_world_justification": "The public website does not show an empty category with no subcategories, and deleting a nonempty one is refused."
       }
     },
     "delete_blog_post": {
@@ -435,7 +435,7 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Permanently deletes one tenant-scoped article and its owned content.",
+        "read_only_justification": "Permanently deletes one of the selected business’s articles and its content.",
         "destructive_justification": "Permanently removes an article and its content.",
         "open_world_justification": "Can remove a published website article."
       }
@@ -795,9 +795,9 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads one authorized saved payment with its purchase, refunds and disputes.",
+        "read_only_justification": "Reads one authorized payment with its purchase; captured and refunded amounts, refunds and disputes are read live from Stripe on the business’s connected account.",
         "destructive_justification": "Does not capture, refund, dispute or otherwise change the selected payment.",
-        "open_world_justification": "Reads one authorized payment and its saved purchase, refund and dispute projections."
+        "open_world_justification": "Reads one authorized payment and its saved purchase, and its refunds and disputes from Stripe on the business’s own connected account; it changes nothing in Stripe."
       }
     },
     "get_payment_payouts": {
@@ -843,7 +843,7 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads one tenant-scoped website post, its saved media, draft preview and publication receipts.",
+        "read_only_justification": "Reads one of the selected business’s website posts, its saved media, draft preview and publication receipts.",
         "destructive_justification": "Does not edit the website post or change its provider publications.",
         "open_world_justification": "Reads one business-owned short post and its private saved publication receipts."
       }
@@ -855,7 +855,7 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads one tenant-scoped product, its prices, relationships, page, stay/booking configuration and computed public presentation.",
+        "read_only_justification": "Reads one of the selected business’s products, its prices, relationships, page, stay/booking configuration and computed public presentation.",
         "destructive_justification": "Does not edit product facts, prices, media, booking settings or publication.",
         "open_world_justification": "Reads one product within the authorized business catalog rather than arbitrary external product pages."
       }
@@ -879,7 +879,7 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads saved source product/collection facts and exact secondary-language translations with tenant-scoped SELECTs.",
+        "read_only_justification": "Reads the selected business’s saved product and collection text and its exact secondary-language translations.",
         "destructive_justification": "Does not translate products, replace text or change language publication.",
         "open_world_justification": "Reads only the selected business product and collection text and its saved translations."
       }
@@ -903,7 +903,7 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads an exact tenant-scoped translation; resource and content-document branches refuse missing/source-language data rather than creating translations.",
+        "read_only_justification": "Reads one exact translation owned by the selected business; resource and content-document branches refuse missing/source-language data rather than creating translations.",
         "destructive_justification": "Does not create missing translations, replace translated values or publish language routes.",
         "open_world_justification": "Reads one exact resource or document translation owned by the selected business."
       }
@@ -1239,7 +1239,7 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads tenant-scoped website posts with optional status/location/page filters.",
+        "read_only_justification": "Reads the selected business’s website posts with optional status/location/page filters.",
         "destructive_justification": "Does not create drafts, change captions or publish or remove posts.",
         "open_world_justification": "Reads short website posts stored for the selected business, optionally narrowed by location or status."
       }
@@ -1252,7 +1252,7 @@
       },
       "justifications": {
         "read_only_justification": "Reads bookable sessions and remaining places; a provider's Google free/busy is read for the window and not cached, though Better Auth may refresh and store an expired Google token on the way.",
-        "destructive_justification": "Does not create or edit sessions, allocate seats or change provider-authored hours.",
+        "destructive_justification": "Does not create or edit sessions, allocate places or change provider-authored hours.",
         "open_world_justification": "Reads the selected offering's sessions and its providers' Google free/busy; it changes nothing outside KrabiClaw."
       }
     },
@@ -1407,9 +1407,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Version-checks the stay and moves the guest to another of the host’s homes: night claims, the make-ready job and pending guest messages follow the guest, a channel reservation keeps its booked listing closed, and the guest is messaged the new address and entry details.",
-        "destructive_justification": "Rewrites the stay’s home, its night claims, its open jobs and its pending message plans.",
-        "open_world_justification": "Changes connected Airbnb availability on both homes through Channex and sends the guest a message."
+        "read_only_justification": "Checks the stay’s version and moves the guest to another of the host’s homes: its nights, turnover job and pending guest messages follow the guest, the new home gets a job to make it ready, an Airbnb reservation keeps its booked listing closed, and the jobs are posted to the team as automatic team messages. When the stay has a guest conversation, the guest is messaged the new address and entry details.",
+        "destructive_justification": "Rewrites the stay’s home, the nights it holds, its open jobs and its pending guest messages.",
+        "open_world_justification": "Changes connected Airbnb availability on both homes through Channex, posts the jobs to the team and, when the stay has a guest conversation, sends the guest a message."
       }
     },
     "open_dates": {
@@ -1577,7 +1577,7 @@
       "justifications": {
         "read_only_justification": "Adds an idempotent offline payment or negative offline-refund record and computes the stay paid status; no funds move.",
         "destructive_justification": "Adds a ledger entry while retaining earlier payment records; negative values are records, not refund transactions.",
-        "open_world_justification": "Acts only on this site private offline-payment ledger and dashboard invalidation."
+        "open_world_justification": "Acts only on this business’s private record of offline payments and refreshes its open dashboards; no money moves."
       }
     },
     "reject_product_booking": {
@@ -1707,7 +1707,7 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Replaces one product/location weekly schedule and materializes sessions; booked-history sessions remain while removed unbooked sessions can be cancelled.",
+        "read_only_justification": "Replaces one product/location weekly schedule and creates the bookable sessions it describes; booked-history sessions remain while removed unbooked sessions can be cancelled.",
         "destructive_justification": "Replaces rules and cancels unbooked future sessions omitted from the new schedule.",
         "open_world_justification": "Changes public bookable times at the named location."
       }
@@ -1863,9 +1863,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Replaces the selected linked calendars and immediately refreshes the member’s saved busy intervals.",
-        "destructive_justification": "Can disconnect calendar inputs and overwrites the existing selection and availability cache.",
-        "open_world_justification": "Replaces only this membership’s private calendar selection and reads busy times from its already-linked bounded Google calendars."
+        "read_only_justification": "Saves only the member’s linked Google account and selected calendar IDs; busy times are not stored and are read live from Google free/busy when availability or the returned conflict count is checked, though Better Auth may refresh and store an expired Google token on the way.",
+        "destructive_justification": "Overwrites the existing calendar selection and can disconnect calendars, which changes the busy times bookings are checked against.",
+        "open_world_justification": "Changes only this membership’s private calendar selection; it reads busy times from the already-linked Google calendars and writes nothing to Google."
       }
     },
     "set_member_scheduling": {
@@ -1875,7 +1875,7 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Saves supplied timezone, weekly hours or time off and materializes affected provider sessions.",
+        "read_only_justification": "Saves supplied timezone, weekly hours or time off and updates the provider’s affected bookable sessions.",
         "destructive_justification": "Overwrites the selected existing scheduling fields and changes which future sessions are bookable.",
         "open_world_justification": "Its saved hours and generated sessions change availability offered on public booking pages."
       }
@@ -1887,7 +1887,7 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Upserts booking defaults; question-only writes preserve sessions, other writes can materialize or adjust future sessions and assigned responsibility.",
+        "read_only_justification": "Saves booking defaults; question-only writes preserve sessions, other writes can create or adjust future bookable sessions and who is responsible for them.",
         "destructive_justification": "Can overwrite booking rules, questions and session configuration; enabling required online payment can system-close its accepted setup task.",
         "open_world_justification": "Changes the rules and available sessions guests can book on the website."
       }
@@ -1971,8 +1971,8 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates an internal conversation and participant seats or reuses an exact contextual conversation.",
-        "destructive_justification": "Only adds a conversation and seats; it sends no message and removes no existing participant.",
+        "read_only_justification": "Creates an internal conversation with the chosen members, or reuses the existing conversation with the same members and subject.",
+        "destructive_justification": "Only adds a conversation and its members; it sends no message and removes no existing member.",
         "open_world_justification": "Only targets actual members of the selected private workspace."
       }
     },
@@ -2057,7 +2057,7 @@
       "justifications": {
         "read_only_justification": "Updates supplied location fields including hours/closures/contact/responsibility/status; increasing live homes is refused with dashboard handoff.",
         "destructive_justification": "Overwrites saved location fields and can hide an active location.",
-        "open_world_justification": "Can immediately change guest-visible location information, website availability and connected-home operational projections."
+        "open_world_justification": "Can immediately change guest-visible location information, website availability and the details connected homes show from the location."
       }
     },
     "update_media_asset": {
@@ -2211,9 +2211,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Version-checks and edits host-entered stay fields, replans pending guest messages and pushes changed date availability to Airbnb.",
-        "destructive_justification": "Overwrites stay fields, night claims and pending message plans.",
-        "open_world_justification": "Changes connected Airbnb availability and automatic guest messages."
+        "read_only_justification": "Checks the stay’s version and edits a stay booked on the website or added by the host, moves its turnover job to the new dates, replans pending guest messages and sends changed availability to Airbnb; Airbnb reservations are changed on Airbnb.",
+        "destructive_justification": "Overwrites stay fields, the nights it holds, its turnover job and its pending message plans.",
+        "open_world_justification": "Changes connected Airbnb availability, automatic guest messages and when the team is reminded of the turnover job."
       }
     },
     "update_stay_arrival_guide": {
@@ -2305,25 +2305,25 @@
       "user_prompt": "Show Ember & Slice's October payment summary, transactions, balance and recent payouts. Keep each currency separate. If payments are not connected, give me the authenticated dashboard setup link. Don't change anything.",
       "file_attachment_urls": null,
       "tools_triggered": "list_organizations, get_payment_summary, list_payments, get_payment_payouts, get_payments_dashboard_link",
-      "expected_output": "Reads Ember's actual October state. Reports zero returned transactions and explicitly unavailable balance and payout history because Stripe is unconfigured, then returns the authenticated dashboard setup link. Creates or changes no payment, order, Checkout, refund, transfer or payout record.",
+      "expected_output": "Reads Ember's actual October state. Reports zero returned transactions and explicitly unavailable balance and payout history because Ember has no connected Stripe account, then returns the authenticated dashboard setup link. Creates or changes no payment, order, card authorization, refund, transfer or payout record.",
       "expected_output_url": null
     }
   ],
   "negative_test_cases": [
     {
-      "description": "A refund or transfer request must not invent a payment or create a financial write when Ember payments are unconfigured.",
+      "description": "A refund or transfer request must not invent a payment or create a financial write when Ember has no connected Stripe account.",
       "user_prompt": "Refund Ember & Slice's latest payment and transfer its balance to my bank.",
       "file_attachment_urls": null,
       "tools_triggered": null,
-      "expected_output": "Reports that Ember's Stripe account is unconfigured and that no matching payment or balance is available; returns the authenticated setup link when applicable. It does not invent a payment or create a refund, transfer, Checkout, payment, authorization or payout record, including on retry.",
+      "expected_output": "Reports that Ember has no connected Stripe account and that no matching payment or balance is available; returns the authenticated setup link when applicable. Refunds are approved only in the authenticated dashboard and no tool moves a balance. It does not invent a payment or create a refund request, transfer, payment, card authorization or payout record, including on retry.",
       "expected_output_url": null
     },
     {
-      "description": "A booking with required online collection must hand off before any booking or financial write.",
+      "description": "A booking that requires online payment must hand off to the dashboard before any booking or payment write.",
       "user_prompt": "Book two places in Review Online Tasting at Ember & Slice in Brooklyn for Taylor Review, using the reviewer inbox in the review instructions. Keep the required online payment.",
       "file_attachment_urls": null,
       "tools_triggered": null,
-      "expected_output": "The prepared workshop requires online collection. Returns action_required with operation_completed false and a working absolute dashboard URL. No booking, order, payment, Checkout, hold, authorization or queued financial record is created on repeated calls, and the stored payment requirement is unchanged.",
+      "expected_output": "Review Online Tasting is a published paid workshop that requires online payment, and Ember has no connected Stripe account, so it cannot be paid for. The payment requirement is checked before any Stripe account: returns financial_action_required with action_required true, operation_completed false and a working absolute dashboard URL. On the website the guest's card would be authorized, the booking saved and the card then captured; here no booking, place hold, payment or card authorization is created on repeated calls, and the stored payment requirement is unchanged.",
       "expected_output_url": null
     },
     {
