@@ -127,7 +127,7 @@ async function boot() {
       VALUES ('site', ?, 'site', 'Site', 'active', ?, '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`).bind(ORG, TZ).run()
     const home = async (name: string, price: number | null) => (await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
       kind: 'stay', name, ...(price === null ? {} : { variants: [{ name, prices: [{ unit_amount: price, currency: 'USD' }] }] }),
-      stay: { location_id: 'site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: null },
+      stay: { location_id: 'site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: null },
     } })).id
     const connected = await home('Cabin', 150_00)
     const unpriced = await home('Loft', null)

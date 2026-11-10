@@ -66,7 +66,6 @@ export const business_locations = sqliteTable("business_locations", {
 	seo_description: text(),
 	canonical_url: text(),
 	assigned_member_id: text(),
-	assigned_team_id: text().references(() => team.id, { onDelete: "set null" }),
 }, (table) => [
 	check("business_locations_instants_check", sql`(last_synced_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', last_synced_at, '+0 days') IS last_synced_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
 	check("business_locations_address_check", sql`address IS NULL OR (json_valid(address) AND json_type(address) IS 'object' AND json_type(address, '$.regionCode') IS 'text' AND trim(address ->> '$.regionCode') <> '' AND json_type(address, '$.addressLines') IS 'array' AND json_array_length(address, '$.addressLines') > 0 AND (json_type(address, '$.languageCode') IS NULL OR json_type(address, '$.languageCode') IS 'text') AND (json_type(address, '$.locality') IS NULL OR json_type(address, '$.locality') IS 'text') AND (json_type(address, '$.sublocality') IS NULL OR json_type(address, '$.sublocality') IS 'text') AND (json_type(address, '$.administrativeArea') IS NULL OR json_type(address, '$.administrativeArea') IS 'text') AND (json_type(address, '$.postalCode') IS NULL OR json_type(address, '$.postalCode') IS 'text'))`),
@@ -215,7 +214,6 @@ export const invitation = sqliteTable("invitation", {
 	status: text().default("pending").notNull(),
 	expiresAt: integer({ mode: "timestamp" }).notNull(),
 	inviterId: text().notNull().references(() => user.id, { onDelete: "cascade" } ),
-	teamId: text(),
 	createdAt: integer({ mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
 }, (table) => [
 	index("invitation_organizationId_idx").on(table.organizationId),
@@ -309,7 +307,6 @@ export const tasks = sqliteTable('tasks', {
   title: text(),
   notes: text(),
   assigned_member_id: text(),
-  assigned_team_id: text(),
   starts_at: text(),
   due_at: text(),
   timezone: text().notNull(),
@@ -326,11 +323,9 @@ export const tasks = sqliteTable('tasks', {
   foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [products.organization_id, products.id], name: 'tasks_product_scope_fk' }).onDelete('cascade'),
   foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: 'tasks_location_scope_fk' }).onDelete('cascade'),
   foreignKey({ columns: [table.organization_id, table.opportunity_id], foreignColumns: [opportunities.organization_id, opportunities.id], name: 'tasks_opportunity_scope_fk' }).onDelete('no action'),
-  foreignKey({ columns: [table.organization_id, table.assigned_team_id], foreignColumns: [team.organizationId, team.id], name: 'tasks_team_scope_fk' }).onDelete('no action'),
   uniqueIndex('tasks_opportunity_unique').on(table.opportunity_id).where(sql`opportunity_id IS NOT NULL`),
   index('tasks_status_due_idx').on(table.organization_id, table.status, table.due_at),
   index('tasks_member_status_due_idx').on(table.organization_id, table.assigned_member_id, table.status, table.due_at),
-  index('tasks_team_status_due_idx').on(table.organization_id, table.assigned_team_id, table.status, table.due_at),
   index('tasks_subject_idx').on(table.subject_type, table.subject_id),
   check('tasks_kind_check', sql`kind IN ('turnover', 'guest_reply', 'message_delivery', 'booking_review', 'booking_change', 'opportunity', 'custom', 'stay_ready', 'consultation_prep', 'consultation_follow_up')
     AND (subject_type IS NULL) = (subject_id IS NULL)
@@ -340,7 +335,6 @@ export const tasks = sqliteTable('tasks', {
   check('tasks_text_check', sql`(title IS NULL OR length(trim(title)) BETWEEN 1 AND 200) AND (kind NOT IN ('custom', 'opportunity') OR title IS NOT NULL)
     AND (notes IS NULL OR length(trim(notes)) BETWEEN 1 AND 5000) AND (outcome_note IS NULL OR length(trim(outcome_note)) BETWEEN 1 AND 5000)
     AND length(trim(dedupe_key)) > 0 AND timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'`),
-  check('tasks_assignee_check', sql`assigned_member_id IS NULL OR assigned_team_id IS NULL`),
   check('tasks_window_check', sql`starts_at IS NULL OR due_at IS NULL OR starts_at <= due_at`),
   check('tasks_status_check', sql`status IN ('open', 'done', 'skipped', 'cancelled') AND (status = 'open') = (closed_at IS NULL) AND (status <> 'open' OR closed_by_user_id IS NULL) AND version >= 1`),
   check('tasks_instants_check', sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (starts_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', starts_at, '+0 days') IS starts_at) AND (due_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', due_at, '+0 days') IS due_at) AND (closed_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', closed_at, '+0 days') IS closed_at)`),
@@ -424,23 +418,6 @@ export const member = sqliteTable("member", {
 	index("member_organizationId_idx").on(table.organizationId),
 	uniqueIndex("member_id_organizationId_unique").on(table.id, table.organizationId),
 ]);
-
-export const team = sqliteTable("team", {
-	id: text().primaryKey(),
-	name: text().notNull(),
-	organizationId: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
-	memberCount: integer().default(0).notNull(),
-	createdAt: integer({ mode: "timestamp" }).notNull(),
-	updatedAt: integer({ mode: "timestamp" }),
-}, table => [index("team_organizationId_idx").on(table.organizationId), unique("team_org_id_unique").on(table.organizationId, table.id)]);
-
-export const teamMember = sqliteTable("teamMember", {
-	id: text().primaryKey(),
-	teamId: text().notNull().references(() => team.id, { onDelete: "cascade" }),
-	userId: text().notNull().references(() => user.id, { onDelete: "cascade" }),
-	membershipKey: text().unique(),
-	createdAt: integer({ mode: "timestamp" }).notNull(),
-}, table => [index("teamMember_teamId_idx").on(table.teamId), index("teamMember_userId_idx").on(table.userId)]);
 
 // ---------------------------------------------------------------------------
 // Catalog: products, variants, prices, publication, collections.
@@ -773,10 +750,9 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	// that provider's timezone, rather than from weekly slots at a location.
 	held_online: integer({ mode: "boolean" }).default(false).notNull(),
 	// business: the business publishes its own sessions. provider: an assigned
-	// member's or team's working hours. Every writer names it; there is no default.
+	// member's working hours. Every writer names it; there is no default.
 	scheduling_mode: text().notNull(),
 	assigned_member_id: text(),
-	assigned_team_id: text().references(() => team.id, { onDelete: "set null" }),
 	// How long before a session's start booking, changing and cancelling close
 	// (shared/availability-settings.ts NOTICE_OPTIONS). NULL is no notice.
 	advance_notice_minutes: integer(),
@@ -790,7 +766,6 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 }, (table) => [
 	check("product_booking_configs_instants_check", sql`(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
 	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [products.organization_id, products.id], name: "product_booking_configs_product_scope_fk" }).onDelete("cascade"),
-	foreignKey({ columns: [table.organization_id, table.assigned_team_id], foreignColumns: [team.organizationId, team.id], name: "product_booking_configs_team_scope_fk" }).onDelete("no action"),
 	// Parent key for rules and sessions: they scope by (organization, product)
 	// so a rule can never attach to another tenant's Product.
 	unique("product_booking_configs_org_product_unique").on(table.organization_id, table.product_id),
@@ -1119,7 +1094,7 @@ export const reservations = sqliteTable("reservations", {
 // Places to stay.
 //
 // A home is a Product of kind `stay` at exactly one location: the location is
-// the place (address, timezone, team), the Product is what a guest books, and
+// the place (address, timezone), the Product is what a guest books, and
 // its default variant's price is the base nightly rate. Nights are calendar
 // dates in the location's timezone; a stay holds the half-open range
 // [check_in_date, check_out_date). Overnight stays are not product_sessions:
@@ -1132,7 +1107,7 @@ export const reservations = sqliteTable("reservations", {
 //   true in SQL: the config names the one relationship, and the relationship
 //   cannot be removed while the config names it.
 // Times are local wall-clock HH:MM in the location's timezone.
-// Assignment: the member or team who look after the home (cleaning,
+// Assignment: the member who looks after the home (cleaning,
 //   turnovers). Members with assigned-operations access read this home's stays
 //   and nothing else; NULL means only organization-wide roles do.
 // Deletion: cascades from Product; refused while stays exist (see stays).
@@ -1183,7 +1158,6 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	// The host's own questions asked with each direct stay (shared/form-questions.ts).
 	questions: text().default("[]").notNull(),
 	assigned_member_id: text(),
-	assigned_team_id: text().references(() => team.id, { onDelete: "set null" }),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	created_by: text().notNull(),
@@ -1192,7 +1166,6 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	check("product_stay_configs_instants_check", sql`(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
 	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [products.organization_id, products.id], name: "product_stay_configs_product_scope_fk" }).onDelete("cascade"),
 	foreignKey({ columns: [table.organization_id, table.product_id, table.location_id], foreignColumns: [product_locations.organization_id, product_locations.product_id, product_locations.location_id], name: "product_stay_configs_location_scope_fk" }).onDelete("no action"),
-	foreignKey({ columns: [table.organization_id, table.assigned_team_id], foreignColumns: [team.organizationId, team.id], name: "product_stay_configs_team_scope_fk" }).onDelete("no action"),
 	unique("product_stay_configs_org_product_unique").on(table.organization_id, table.product_id),
 	check("product_stay_configs_times_check", sql`check_in_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_time < '24:00' AND check_out_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_out_time < '24:00'`),
 	check("product_stay_configs_check_in_end_check", sql`check_in_end_time IS NULL OR (check_in_end_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_end_time < '24:00')`),
@@ -2361,7 +2334,6 @@ export const session = sqliteTable("session", {
 	ipAddress: text(),
 	userAgent: text(),
 	activeOrganizationId: text(),
-	activeTeamId: text(),
 	impersonatedBy: text(),
 	userId: text().notNull().references(() => user.id, { onDelete: "cascade" } ),
 }, (table) => [

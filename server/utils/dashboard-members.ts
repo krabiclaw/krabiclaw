@@ -13,15 +13,6 @@ export async function getInvitationDeliveries(db: DbClient, organizationId: stri
   return new Map(invitations.map(invitation => [invitation.id, byId.get(`organization-invitation-email:${invitation.id}:${invitation.expiresAt.toISOString()}`) ?? null]))
 }
 
-export async function getOrganizationTeamsData(env: CloudflareEnv, organizationId: string) {
-  const adapter = await organizationAdapter(env)
-  const teams = await adapter.listTeams(organizationId)
-  return Promise.all(teams.map(async team => ({
-    ...team,
-    members: await adapter.listTeamMembers({ teamId: team.id }),
-  })))
-}
-
 export async function getOrganizationMembersData(env: CloudflareEnv, organizationId: string) {
   const adapter = await organizationAdapter(env)
   const [memberRows, invitationRows] = await Promise.all([

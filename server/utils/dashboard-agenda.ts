@@ -2,7 +2,7 @@ import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import { assertCalendarDate, isValidTimezone, instantDate, localDateAt, addLocalDays, localDateTimeToInstant } from '~/utils/timezone'
 import { HTTPError } from 'nitro'
 import { d1JsonStringSet, executeBatch, queryAll, type DbClient } from '~/server/db'
-import { assignedGuestThreadScope, assignedResponsibilitySql, roleAllows, assertRoleAllows, type ResolvedMembership } from '~/server/utils/member-access'
+import { assignedGuestThreadScope, assignedMemberSql, roleAllows, assertRoleAllows, type ResolvedMembership } from '~/server/utils/member-access'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { BOOKED_RECORDS_SQL, REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
@@ -204,9 +204,9 @@ export async function listAgenda(
     { query: `SELECT l.id, l.organization_id, l.title FROM business_locations l WHERE l.organization_id = ? AND l.organization_id ${scopeSql}
         ${staff ? `AND (EXISTS (SELECT 1 FROM requests rq
           WHERE rq.organization_id = l.organization_id AND rq.location_id = l.id AND ${assignedRequests!.sql})
-          OR EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = l.organization_id AND c.location_id = l.id AND ${assignedResponsibilitySql('c')})
-          OR (${assignedResponsibilitySql('l')}))` : ''}
-        ORDER BY l.title, l.id`, params: [scope.organizationId ?? '', scopeParam, ...(staff ? [...assignedRequests!.params, staff.userId, staff.userId, staff.userId, staff.userId] : [])] },
+          OR EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = l.organization_id AND c.location_id = l.id AND ${assignedMemberSql('c')})
+          OR (${assignedMemberSql('l')}))` : ''}
+        ORDER BY l.title, l.id`, params: [scope.organizationId ?? '', scopeParam, ...(staff ? [...assignedRequests!.params, staff.userId, staff.userId] : [])] },
     { query: `SELECT 1 AS present FROM product_stay_configs WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam] },
   ], { operation: 'Read the agenda scope' })
   const locations = scope.organizationId ? (locationResult?.results ?? []) as LocationRow[] : []
@@ -290,8 +290,8 @@ export async function listAgenda(
        SELECT 1 FROM requests r WHERE r.id = st.request_id AND r.organization_id = st.organization_id AND r.kind = 'stay' AND r.user_id = st.user_id AND ${REQUEST_CURRENT_BUYER_SQL}))`
        : 'st.organization_id = ?'} AND st.status <> 'cancelled'
        AND ${scope.buyerUserId || query.currentStaysAt && !staff ? 'st.check_in_date <= ? AND st.check_out_date >= ?' : '(st.check_in_date BETWEEN ? AND ? OR st.check_out_date BETWEEN ? AND ?)'}
-       ${query.organizationId ? 'AND st.organization_id = ?' : ''} ${query.locationId ? 'AND c.location_id = ?' : ''} ${staff ? `AND ${assignedResponsibilitySql('c')}` : ''}`,
-    [scopeParam, ...(scope.buyerUserId || query.currentStaysAt && !staff ? [query.to, query.from] : [query.from, query.to, query.from, query.to]), ...(query.organizationId ? [query.organizationId] : []), ...(query.locationId ? [query.locationId] : []), ...(staff ? [staff.userId, staff.userId] : [])])
+       ${query.organizationId ? 'AND st.organization_id = ?' : ''} ${query.locationId ? 'AND c.location_id = ?' : ''} ${staff ? `AND ${assignedMemberSql('c')}` : ''}`,
+    [scopeParam, ...(scope.buyerUserId || query.currentStaysAt && !staff ? [query.to, query.from] : [query.from, query.to, query.from, query.to]), ...(query.organizationId ? [query.organizationId] : []), ...(query.locationId ? [query.locationId] : []), ...(staff ? [staff.userId] : [])])
     : Promise.resolve([])
 
   // The branch pictures depend on nothing the source rows carry, so they are

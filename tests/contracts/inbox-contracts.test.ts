@@ -129,7 +129,7 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
     } as unknown as CloudflareEnv
     const home = await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
       kind: 'stay', name: '74 D · Sky', variants: [{ name: '74 D · Sky', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
-      stay: { location_id: 'location', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null, assigned_team_id: null },
+      stay: { location_id: 'location', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null },
     } })
     await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
       VALUES (?, ?, 'channex', 'listing', 'channel', ?, 'room', 'rate', 'complete', 1)`).bind(ORG, home.id, PROPERTY).run()

@@ -12,7 +12,7 @@ import { whatsAppServiceWindowOpen } from '~/server/utils/mcp-context'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { getWhatsAppDeliveryMode } from '~/server/utils/whatsapp-delivery'
 import { buildReplyToAddress, type ReplyAs } from '~/server/utils/reply-address'
-import { assignedResponsibilitySql, listOrganizationNotificationMembers } from '~/server/utils/member-access'
+import { assignedMemberSql, listOrganizationNotificationMembers } from '~/server/utils/member-access'
 import { wantsNotification } from '~/server/domain/notification-preferences'
 import { listUserDevices, retireDevice, type UserDevice } from '~/server/domain/devices'
 import { sendApnsAlert, type ApnsAlert, type ApnsEnv } from '~/server/utils/apns'
@@ -1450,7 +1450,7 @@ export async function notifyBookingCreated(
  */
 async function stayTurnoverAudience(env: NotificationEnv, db: DbClient, organizationId: string, stay: { id: string; product_id: string; arrival_time: string | null }) {
   const responsible = await queryAll<{ id: string }>(db, `SELECT m.id FROM member m JOIN product_stay_configs c ON c.organization_id = m.organizationId
-    WHERE c.organization_id = ? AND c.product_id = ? AND ${assignedResponsibilitySql('c', 'm.userId')}`, [organizationId, stay.product_id])
+    WHERE c.organization_id = ? AND c.product_id = ? AND ${assignedMemberSql('c', 'm.userId')}`, [organizationId, stay.product_id])
   return {
     memberIds: responsible.map(member => member.id),
     stayUrl: await dashboardPathUrl(env, db, organizationId, `/bookings/stay/${encodeURIComponent(stay.id)}`),

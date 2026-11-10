@@ -523,7 +523,7 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
 
 registry.en.service = {
   ...(registry.en.experience ?? registry.en.restaurant!),
-  assigneeLabel: "Attorney or legal team",
+  assigneeLabel: "Attorney",
   assigneeNoun: "attorney",
   aboutImageAlt: "About our firm",
   ctaTitle: "Talk with our legal team.",

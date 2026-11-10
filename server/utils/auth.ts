@@ -76,7 +76,6 @@ export function oauthSigningConfig(authBaseUrl: string) {
 export const organizationOptions = {
   ac: organizationAccessControl,
   roles: organizationRoles,
-  teams: { enabled: true, defaultTeam: { enabled: false }, allowRemovingAllTeams: true },
   // A business cannot exist without the currency it sells in and the clock it
   // reports in, so Better Auth requires both when the organization is created.
   schema: {
@@ -404,18 +403,6 @@ function buildAuth(env: CloudflareEnv) {
           metadata: { userId: member.userId, previousRole, role: member.role },
         })])
       },
-      afterAddTeamMember: async ({ team, user }: { team: { organizationId: string }; user: { id: string } }) => {
-        const { materializeMemberSessions } = await import('~/server/utils/availability')
-        await materializeMemberSessions(db, { organizationId: team.organizationId, userId: user.id, actorId: 'system' })
-        await recordMemberChange(team.organizationId)
-      },
-      afterRemoveTeamMember: async ({ team }: { team: { organizationId: string } }) => recordMemberChange(team.organizationId),
-      // A team's tasks keep their history; the deleted team stops being their assignee (tasks_team_scope_fk).
-      beforeDeleteTeam: async ({ team }: { team: { id: string; organizationId: string } }) => {
-        await executeBatch(db, [{ query: 'UPDATE tasks SET assigned_team_id = NULL, version = version + 1, updated_at = ? WHERE organization_id = ? AND assigned_team_id = ?', params: [new Date().toISOString(), team.organizationId, team.id] }], { operation: 'Unassign a deleted team' })
-      },
-      afterDeleteTeam: async ({ team }: { team: { organizationId: string } }) => recordMemberChange(team.organizationId),
-      afterUpdateTeam: async ({ organization }: { organization: { id: string } }) => recordMemberChange(organization.id),
     },
     sendInvitationEmail: async (data: {
       id: string

@@ -56,7 +56,7 @@ const savedLocation = computed(() => p.allLocations.value.find(location => locat
 const scopeError = computed(() => {
   if (Object.hasOwn(route.query, 'date') && (typeof route.query.date !== 'string' || !isValidCalendarDate(route.query.date))) return 'Choose a valid calendar date.'
   if (p.scope.value && p.scope.value !== 'online' && !p.location.value) return `This offering is not assigned to the ${legal.value ? 'office' : 'location'} in this address.`
-  if (isNew.value) return p.scope.value === 'online' ? `Online times follow ${p.product.value?.booking?.assigned_team_id ? 'each team member’s' : `the ${copy.value.assigneeNoun}’s`} working hours.` : p.location.value && !canCreate.value ? `Choose an active ${legal.value ? 'office' : 'location'} before adding availability.` : null
+  if (isNew.value) return p.scope.value === 'online' ? `Online times follow the ${copy.value.assigneeNoun}’s working hours.` : p.location.value && !canCreate.value ? `Choose an active ${legal.value ? 'office' : 'location'} before adding availability.` : null
   const session = data.value?.session
   if (session?.location_id && !savedLocation.value) return `This scheduled time’s saved ${legal.value ? 'office' : 'location'} could not be loaded.`
   return session && (p.locationId.value && session.location_id !== p.locationId.value || p.scope.value === 'online' && session.location_id !== null)

@@ -13,7 +13,6 @@ import type { InboxThread, InboxThreadDetails } from '../../server/domain/guest-
 import { formQuestionsRevision } from '../../shared/form-questions'
 import type { SessionAvailability } from '../../server/utils/availability'
 import type { readMemberScheduling } from '../../server/domain/member-scheduling'
-import type { OrganizationMembersData } from '../../utils/organization-members'
 import { E2E_ADMIN_ID, findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import type { TaskView } from '../../server/domain/tasks'
 
@@ -1099,14 +1098,14 @@ test.describe('stateless MCP server', () => {
         const enabled = await request.put(`${productUrl}/booking`, { data: { duration_minutes: 60, default_capacity: 9 } })
         expect(enabled.status(), await enabled.text()).toBe(200)
         let product = mcpData<{ product: { booking: unknown } }>(await call('get_product', { product_id: productId })).product
-        expect(product.booking).toEqual({ duration_minutes: 60, default_capacity: 9, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, advance_notice_minutes: null, ...noQuestions })
+        expect(product.booking).toEqual({ duration_minutes: 60, default_capacity: 9, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: null, advance_notice_minutes: null, ...noQuestions })
         expect((await call('set_product_booking_config', { product_id: productId, default_capacity: 0 })).result.isError).not.toBe(true)
         const httpProduct = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products`)
         expect(httpProduct.status(), await httpProduct.text()).toBe(200)
-        expect((await httpProduct.json()).products.find((row: { id: string }) => row.id === productId).booking).toEqual({ duration_minutes: 60, default_capacity: 0, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, advance_notice_minutes: null, ...noQuestions })
+        expect((await httpProduct.json()).products.find((row: { id: string }) => row.id === productId).booking).toEqual({ duration_minutes: 60, default_capacity: 0, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: null, advance_notice_minutes: null, ...noQuestions })
         expect((await call('set_product_booking_config', { product_id: productId, default_capacity: null })).result.isError).not.toBe(true)
         product = mcpData<{ product: { booking: unknown } }>(await call('get_product', { product_id: productId })).product
-        expect(product.booking).toEqual({ duration_minutes: 60, default_capacity: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, advance_notice_minutes: null, ...noQuestions })
+        expect(product.booking).toEqual({ duration_minutes: 60, default_capacity: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: null, advance_notice_minutes: null, ...noQuestions })
         expect((await request.put(`${productUrl}/booking`, { data: { duration_minutes: 0 } })).status()).toBe(400)
         expect((await call('set_product_booking_config', { product_id: productId, duration_minutes: 0 })).result.isError).toBe(true)
         const schedule = { location_id: locationId, slots: [{ weekday: 2, start_time: '10:00' }] }
@@ -1143,7 +1142,7 @@ test.describe('stateless MCP server', () => {
         expect((await call('set_product_booking_config', { product_id: productId, ...policy })).result.isError).not.toBe(true)
         const policyRead = await request.get(productUrl)
         expect(policyRead.status()).toBe(200)
-        expect((await policyRead.json()).product.booking).toEqual({ duration_minutes: 60, default_capacity: null, ...policy, held_online: false, scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, advance_notice_minutes: null, ...noQuestions })
+        expect((await policyRead.json()).product.booking).toEqual({ duration_minutes: 60, default_capacity: null, ...policy, held_online: false, scheduling_mode: 'business', assigned_member_id: null, advance_notice_minutes: null, ...noQuestions })
         // Weekly times belong to a location. Online, the provider's hours are the schedule, so neither surface takes online weekly times.
         const online = { location_id: null, slots: [{ weekday: 3, start_time: '11:30' }] }
         expect((await call('replace_product_weekly_schedule', { product_id: productId, ...online })).result.isError).toBe(true)
@@ -1152,7 +1151,7 @@ test.describe('stateless MCP server', () => {
         expect((await request.put(`${productUrl}/booking`, { data: { held_online: true } })).status()).toBe(400)
         const updatedPolicy = await request.put(`${productUrl}/booking`, { data: { confirmation_mode: 'instant', online_payment_required: false } })
         expect(updatedPolicy.status()).toBe(200)
-        expect(mcpData<{ product: { booking: unknown } }>(await call('get_product', { product_id: productId })).product.booking).toEqual({ duration_minutes: 60, default_capacity: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, advance_notice_minutes: null, ...noQuestions })
+        expect(mcpData<{ product: { booking: unknown } }>(await call('get_product', { product_id: productId })).product.booking).toEqual({ duration_minutes: 60, default_capacity: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false, scheduling_mode: 'business', assigned_member_id: null, advance_notice_minutes: null, ...noQuestions })
 
         const viaHttp = await request.post(qaUrl, { data: { question: '  Shared HTTP question  ', answer: 'HTTP answer', page_path: '/parity-check' } })
         expect(viaHttp.status(), await viaHttp.text()).toBe(201)
@@ -1856,7 +1855,7 @@ test.describe('stateless MCP server', () => {
       await expect(page).toHaveURL(`${bookingPath}/enabled`)
       expect((await call<{ product: Product }>('get_product', { product_id: product.id })).product.booking).toBeNull()
     })
-    test('MCP teams and invitation delivery use the same Better Auth records as the dashboard', async ({request,baseURL}) => {
+    test('MCP members and invitation delivery use the same Better Auth records as the dashboard', async ({request,baseURL}) => {
       await loginAs(request,baseURL!)
       const organizationId = mcpOrganizationId()
       const call = async <T>(toolName:string,args:Record<string,unknown>={}) => {
@@ -1867,34 +1866,8 @@ test.describe('stateless MCP server', () => {
       const members = await call<{members:Array<{userId:string}>}>('list_organization_members')
       const person = members.members.find(member=>member.userId==='user-e2e-demo-owner')
       expect(person).toBeTruthy()
-      let teamId:string|null=null,invitationId:string|null=null
+      let invitationId:string|null=null
       try {
-        const name = `Hosts ${crypto.randomUUID()}`
-        teamId = (await call<{team:{id:string}}>('create_team',{name})).team.id
-        const dashboardBefore = await request.get(`${baseURL}/api/dashboard/members`,{params:{org:'ember-slice-demo'}})
-        expect(dashboardBefore.status(),await dashboardBefore.text()).toBe(200)
-        const teamBefore = (await dashboardBefore.json() as OrganizationMembersData).teams.find(team=>team.id===teamId)
-        expect(teamBefore).toMatchObject({id:teamId,name,organizationId})
-        expect(teamBefore!.members.map(member=>member.userId)).not.toContain(person!.userId)
-        const membership = await call<{team_id:string;user_id:string;included:boolean}>('set_team_member',{team_id:teamId,user_id:person!.userId,included:true})
-        expect(membership).toEqual({team_id:teamId,user_id:person!.userId,included:true})
-        const dashboardIncluded = await request.get(`${baseURL}/api/dashboard/members`,{params:{org:'ember-slice-demo'}})
-        expect(dashboardIncluded.status(),await dashboardIncluded.text()).toBe(200)
-        const includedTeam = (await dashboardIncluded.json() as OrganizationMembersData).teams.find(team=>team.id===teamId)
-        expect(includedTeam).toMatchObject({id:teamId,name,organizationId})
-        expect(includedTeam!.members).toHaveLength(teamBefore!.members.length+1)
-        expect(includedTeam!.members).toEqual(expect.arrayContaining(teamBefore!.members))
-        expect(includedTeam!.members.find(member=>member.userId===person!.userId)).toMatchObject({teamId,userId:person!.userId})
-        const nativeTeams = await request.get(`${baseURL}/api/auth/organization/list-teams`,{params:{organizationId}})
-        expect(nativeTeams.status(),await nativeTeams.text()).toBe(200)
-        expect(await nativeTeams.json()).toContainEqual(expect.objectContaining({id:teamId,name,organizationId}))
-        const removed = await call<{team_id:string;user_id:string;included:boolean}>('set_team_member',{team_id:teamId,user_id:person!.userId,included:false})
-        expect(removed).toEqual({team_id:teamId,user_id:person!.userId,included:false})
-        const dashboardMembers = await request.get(`${baseURL}/api/dashboard/members`,{params:{org:'ember-slice-demo'}})
-        expect(dashboardMembers.status(),await dashboardMembers.text()).toBe(200)
-        const dashboardTeam = (await dashboardMembers.json() as OrganizationMembersData).teams.find(team=>team.id===teamId)
-        expect(dashboardTeam).toMatchObject({id:teamId,name,organizationId})
-        expect(dashboardTeam!.members).toEqual(teamBefore!.members)
         const email = `invite-${crypto.randomUUID()}@playwright.example`
         const invited = await call<{invitation:{id:string;status:string;delivery:{status:string}}}>('invite_organization_member',{email,role:'member'})
         invitationId = invited.invitation.id
@@ -1908,7 +1881,6 @@ test.describe('stateless MCP server', () => {
         expect(stored.invitations.find(invitation=>invitation.id===invitationId)).toMatchObject({delivery:{status:'sent'}})
       } finally {
         if(invitationId) expect((await call<{invitation:{status:string}}>('cancel_organization_invitation',{invitation_id:invitationId})).invitation.status).toBe('canceled')
-        if(teamId) expect((await call<{deleted:boolean}>('delete_team',{team_id:teamId})).deleted).toBe(true)
       }
     })
 

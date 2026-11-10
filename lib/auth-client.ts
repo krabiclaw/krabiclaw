@@ -30,7 +30,7 @@ export const authClient = createAuthClient({
     lastLoginMethodClient(),
     adminClient(),
     anonymousClient(),
-    organizationClient({ ac: organizationAccessControl, roles: organizationRoles, teams: { enabled: true } }),
+    organizationClient({ ac: organizationAccessControl, roles: organizationRoles }),
     phoneNumberClient(),
     emailOTPClient(),
     oauthProviderClient(),

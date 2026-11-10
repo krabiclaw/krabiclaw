@@ -8,7 +8,7 @@ import { NOT_HANDLED, optionalString, requiredString, resolveUserUploadedMediaFi
 
 const text = { type: 'string' }, nullableText = { type: ['string', 'null'] }
 const instant = { type: 'string', format: 'date-time', description: 'An instant with Z or a numeric offset.' }
-const person = { type: 'object', properties: { type: { type: 'string', enum: ['member', 'team'] }, id: text, name: text, initial: text, you: { type: 'boolean' } }, required: ['type', 'id', 'name', 'initial', 'you'] }
+const person = { type: 'object', properties: { type: { type: 'string', enum: ['member'] }, id: text, name: text, initial: text, you: { type: 'boolean' } }, required: ['type', 'id', 'name', 'initial', 'you'] }
 export const TASK_VIEW_SCHEMA = { type: 'object', properties: {
   id: text, kind: { type: 'string', enum: [...TASK_KINDS] }, status: { type: 'string', enum: ['open', 'done', 'skipped', 'cancelled'] }, version: { type: 'integer' },
   face: { type: 'string', enum: ['photo', 'compact'] }, tag: nullableText, imageUrl: nullableText, avatar: { type: ['object', 'null'] },
@@ -38,11 +38,10 @@ const opportunity = { type: 'object', properties: { id: text, statusLine: text, 
 required: ['id', 'statusLine', 'title', 'detail', 'icon', 'path', 'productId', 'locationId', 'requestId', 'message'] }
 const assignee = {
   assigned_member_id: { type: ['string', 'null'], description: 'A Better Auth member id from list_tasks assignees; null to unassign.' },
-  assigned_team_id: { type: ['string', 'null'], description: 'A Better Auth team id from list_tasks assignees. Give a member or a team, not both.' },
 }
 
 export const TASK_TOOLS: McpToolDefinition[] = [
-  organizationTool({ name: 'list_tasks', domain: 'tasks', minimumRole: 'member', description: 'Read Today or Upcoming as stored tasks: turnovers, guest questions awaiting a reply, scheduled messages that did not send, accepted opportunities and tasks people added. Today is open work starting or due today or earlier plus what was done today; Upcoming is later open work by day. A member sees the tasks given to them or their team and the turnovers at homes they look after. assignees lists who a manager can give work to.',
+  organizationTool({ name: 'list_tasks', domain: 'tasks', minimumRole: 'member', description: 'Read Today or Upcoming as stored tasks: turnovers, guest questions awaiting a reply, scheduled messages that did not send, accepted opportunities and tasks people added. Today is open work starting or due today or earlier plus what was done today; Upcoming is later open work by day. A member sees the tasks given to them and the turnovers at homes they look after. assignees lists who a manager can give work to.',
     inputSchema: { range: { type: 'string', enum: ['today', 'upcoming'] }, assignee: { type: 'string', description: 'me, all, or a member id.' }, location_id: { ...text, minLength: 1 }, status: { type: 'string', enum: ['open', 'done', 'skipped', 'cancelled'] }, kind: { type: 'string', enum: [...TASK_KINDS] } },
     outputSchema: { type: 'object', properties: { sections: { type: 'array', items: { type: 'object', properties: { id: text, title: nullableText, subtitle: nullableText, tasks: { type: 'array', items: task } }, required: ['id', 'title', 'subtitle', 'tasks'] } }, assignees: { type: 'array', items: person }, resolvedAt: text }, required: ['sections', 'assignees', 'resolvedAt'] },
   }),
@@ -82,7 +81,6 @@ export const TASK_TOOLS: McpToolDefinition[] = [
 
 const assigneeBody = (args: Record<string, unknown>) => ({
   ...(args.assigned_member_id !== undefined ? { assignedMemberId: args.assigned_member_id } : {}),
-  ...(args.assigned_team_id !== undefined ? { assignedTeamId: args.assigned_team_id } : {}),
 })
 
 export async function handleTaskTools(ctx: McpExecutorContext): Promise<unknown> {

@@ -502,7 +502,7 @@ test('a failed stay cancellation email retries its recorded content after displa
     const access = { organizationId: 'org-stay-cancel', actorId: 'owner-stay-cancel', manage: true }
     const home = await createProduct(db, { env, organizationId: access.organizationId, actor: { actorId: access.actorId }, publication: { published: true }, product: {
       kind: 'stay', name: 'Original Cabin', variants: [{ name: 'Original Cabin', prices: [{ unit_amount: 15000, currency: 'USD' }] }],
-      stay: { location_id: 'location-stay-cancel', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: null },
+      stay: { location_id: 'location-stay-cancel', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: null },
     } })
     const walkIn = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'stay-walk-in', check_in_date: '2098-11-01', check_out_date: '2098-11-03',
       adults: 2, guest_name: 'Bo', guest_email: 'walkin@provider-proof.com', total_minor: 30000 })
@@ -587,7 +587,7 @@ test('a failed stay cancellation email retries its recorded content after displa
   }
 })
 
-test('a guest-cancelled stay alerts owners with the whole stay and the team looking after the home with its turnover', async (t) => {
+test('a guest-cancelled stay alerts owners with the whole stay and the member looking after the home with its turnover', async (t) => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'stay-member-alert-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
@@ -619,8 +619,6 @@ test('a guest-cancelled stay alerts owners with the whole stay and the team look
       "INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('turnover-en', 'org-turnover', 'en', 1, 'published')",
       "INSERT INTO user (id, name, email) VALUES ('owner-turnover', 'Owner', 'owner@provider-proof.com'), ('cleaner-turnover', 'Cleaner', 'cleaner@provider-proof.com')",
       "INSERT INTO member (id, organizationId, userId, role) VALUES ('member-owner-turnover', 'org-turnover', 'owner-turnover', 'owner'), ('member-cleaner-turnover', 'org-turnover', 'cleaner-turnover', 'member')",
-      "INSERT INTO team (id, name, organizationId, createdAt) VALUES ('cleaning', 'Cleaning', 'org-turnover', 0)",
-      "INSERT INTO teamMember (id, teamId, userId, createdAt) VALUES ('tm-cleaner', 'cleaning', 'cleaner-turnover', 0)",
       "INSERT INTO business_locations (id, organization_id, slug, title, timezone, status) VALUES ('location-turnover', 'org-turnover', 'retreat', 'Retreat', 'Asia/Bangkok', 'active')",
       "INSERT INTO session (id, expiresAt, token, userId) VALUES ('session-cleaner', unixepoch() + 3600, 'session-token-cleaner', 'cleaner-turnover')",
     ]) await db.prepare(statement).run()
@@ -629,7 +627,7 @@ test('a guest-cancelled stay alerts owners with the whole stay and the team look
     const access = { organizationId: 'org-turnover', actorId: 'owner-turnover', manage: true as const }
     const home = await createProduct(db, { env, organizationId: access.organizationId, actor: { actorId: access.actorId }, product: {
       kind: 'stay', name: 'Turnover Cabin', variants: [{ name: 'Turnover Cabin', prices: [{ unit_amount: 15000, currency: 'USD' }] }],
-      stay: { location_id: 'location-turnover', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: 'cleaning' },
+      stay: { location_id: 'location-turnover', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: 'member-cleaner-turnover' },
     } })
     // A site checkout saves the guest's whole name in guest_name.
     const stay = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'turnover-alert', check_in_date: '2098-10-01', check_out_date: '2098-10-03', arrival_time: '15:30',

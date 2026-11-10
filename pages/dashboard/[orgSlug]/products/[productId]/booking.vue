@@ -36,7 +36,7 @@ const groups = computed<EditorNavigationGroup[]>(() => {
     row('notice', 'Advance notice', noticeSummary(config.advance_notice_minutes), 'i-lucide-alarm-clock'),
     row('questions', 'Questions', formQuestionsSummary(config.questions), 'i-lucide-message-square-text'),
     ...((p.product.value?.kind === 'experience' || legal.value ? config.scheduling_mode === 'provider' : config.held_online)
-      ? [{ id: 'hours', icon: 'i-lucide-clock', label: 'Bookable times', summary: config.assigned_team_id ? 'Each team member\'s working hours' : `The ${copy.assigneeNoun}'s working hours`, to: config.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${config.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team` }]
+      ? [{ id: 'hours', icon: 'i-lucide-clock', label: 'Bookable times', summary: `The ${copy.assigneeNoun}'s working hours`, to: config.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${config.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team` }]
       : []),
     // Defaults above belong to the offering; weekly times belong to the chosen physical location.
     ...(route.query.location_id !== 'online' && (!config.held_online || p.product.value?.kind === 'experience' && (p.locationId.value || p.product.value.locations.length))

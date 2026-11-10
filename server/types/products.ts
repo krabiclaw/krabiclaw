@@ -49,7 +49,7 @@ export interface Collection {
 }
 
 /** What generating this product's occurrences starts from. Sessions keep their own. */
-export type ProductBookingConfig = Pick<import('~/server/utils/availability').ProductBookingConfigRecord, 'duration_minutes' | 'default_capacity' | 'confirmation_mode' | 'online_payment_required' | 'held_online' | 'scheduling_mode' | 'assigned_member_id' | 'assigned_team_id' | 'advance_notice_minutes' | 'questions' | 'questions_revision'>
+export type ProductBookingConfig = Pick<import('~/server/utils/availability').ProductBookingConfigRecord, 'duration_minutes' | 'default_capacity' | 'confirmation_mode' | 'online_payment_required' | 'held_online' | 'scheduling_mode' | 'assigned_member_id' | 'advance_notice_minutes' | 'questions' | 'questions_revision'>
 
 /**
  * A place to stay: the one location it is at and its stay settings. Times are
@@ -98,7 +98,6 @@ export interface ProductStayConfig {
   long_term_cancellation_policy: StayLongTermCancellationPolicy | null
   /** Who looks after the home: their stays are what an assigned member sees. */
   assigned_member_id: string | null
-  assigned_team_id: string | null
   /** Whether the home is live, so billed: active at its active location, and published or syncing with Airbnb. Read only. */
   live: boolean
   /** The host's own questions asked with each direct stay, and the revision a form built from them carries. */
@@ -111,7 +110,7 @@ export type StayListingField = 'property_type_group' | 'property_type' | 'listin
 export type ProductStayConfigInput = Omit<ProductStayConfig, StayListingField | 'internal_name' | 'photo_rooms' | 'accessibility' | 'check_in_end_time' | 'calendar_rules' | 'live' | 'questions' | 'questions_revision'> & Partial<Pick<ProductStayConfig, Exclude<StayListingField, 'amenity_answers'> | 'internal_name' | 'check_in_end_time' | 'calendar_rules'>> & { amenity_answers?: import('~/shared/stay-listing').StayAmenityAnswerPatch[] }
 
 /** Who looks after a product: workspace state the public site never carries. */
-export type StaffAssignment = 'assigned_member_id' | 'assigned_team_id'
+export type StaffAssignment = 'assigned_member_id'
 
 /** Membership of one product in one collection, carrying its position there. */
 export interface CollectionMembership {

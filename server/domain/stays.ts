@@ -6,7 +6,7 @@ import { acceptFormAnswers } from '~/server/domain/form-questions'
 import { MAX_STAY_NIGHTS, NIGHT_PRICE_CHANGE_PERCENT, STAY_CALENDAR_DAYS, changeNightPrice, parseStayCalendarRules, resolveStayNightPolicy, type StayCalendarRules, STAY_CHANNELS, STAY_CHANNEL_LABELS, isChannelManagedStay, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { assertRoleAllows, assignedResponsibilitySql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { assertRoleAllows, assignedMemberSql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery, type OrganizationEvent } from '~/server/utils/organization-events'
 import { createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
 import { liveHomeSql } from '~/server/utils/billing'
@@ -230,9 +230,8 @@ export interface StayHome {
   directions: string | null
   house_manual: string | null
   checkout_instructions: StayCheckoutInstruction[]
-  /** The member (member.id) and the team who look after the home; assigned members see its stays. */
+  /** The member (member.id) who looks after the home; that member sees its stays. */
   assigned_member_id: string | null
-  assigned_team_id: string | null
   /**
    * The channel this home is connected to, if any. null is a home kept only in
    * KrabiClaw: its night changes go nowhere else. A connected home pushes its
@@ -393,7 +392,7 @@ function channelOwned(stay: Stay, state: 'belongs to' | 'is paid through'): neve
 
 /** The SQL that limits rows to homes this caller may see, and its parameters. */
 function visibleHomes(access: StayAccess, alias = 'c'): { sql: string; params: string[] } {
-  return access.manage ? { sql: '1 = 1', params: [] } : { sql: assignedResponsibilitySql(alias), params: [access.userId, access.userId] }
+  return access.manage ? { sql: '1 = 1', params: [] } : { sql: assignedMemberSql(alias), params: [access.userId] }
 }
 
 function requireManager(access: StayAccess): asserts access is StayAccess & { manage: true } {
@@ -411,7 +410,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
            c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, c.calendar_rules, c.property_type_group, c.property_type,
            c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
            c.cancellation_policy, c.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
-           c.directions, c.house_manual, c.checkout_instructions, c.assigned_member_id, c.assigned_team_id, c.questions,
+           c.directions, c.house_manual, c.checkout_instructions, c.assigned_member_id, c.questions,
            COALESCE((SELECT pp.published FROM product_publications pp WHERE pp.organization_id = c.organization_id AND pp.product_id = c.product_id), 0) AS published,
            ${liveHomeSql('p')} AS live, m.enabled AS channel_enabled, m.import_stage AS channel_stage, m.listing_id AS airbnb_listing_id
       FROM product_stay_configs c
@@ -465,7 +464,6 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       directions: nullableText(row.directions), house_manual: nullableText(row.house_manual),
       checkout_instructions: JSON.parse(String(row.checkout_instructions)) as StayCheckoutInstruction[],
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
-      assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
       ...(() => { const questions = parseStoredFormQuestions(String(row.questions)); return { questions, questions_revision: formQuestionsRevision(questions) } })(),
       channel: row.channel_stage === null ? null : {
         provider: 'channex',
@@ -662,7 +660,7 @@ const LISTING_FIELDS = ['property_type_group', 'property_type', 'listing_type', 
 const ARRIVAL_FIELDS = [...Object.keys(STAY_ARRIVAL_TEXT_LIMITS) as Array<keyof typeof STAY_ARRIVAL_TEXT_LIMITS>, 'check_in_method', 'checkout_instructions'] as const
 const LOCATION_FIELDS = ['address', 'latitude', 'longitude', 'stay_map_sharing'] as const
 const EDITABLE_HOME_FIELDS = ['internal_name', 'name', 'description', 'published', 'timezone', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'base_price_minor',
-  'assigned_member_id', 'assigned_team_id', 'questions', 'expected_questions_revision', ...LISTING_FIELDS, ...Object.values(STAY_ALARM_DETAIL_KEYS), ...ARRIVAL_FIELDS, ...LOCATION_FIELDS] as const
+  'assigned_member_id', 'questions', 'expected_questions_revision', ...LISTING_FIELDS, ...Object.values(STAY_ALARM_DETAIL_KEYS), ...ARRIVAL_FIELDS, ...LOCATION_FIELDS] as const
 
 /** The arrival guide fields a request names, checked; each problem names its field. */
 function arrivalPatch(body: Record<string, unknown>): Record<string, string | null> {
@@ -725,7 +723,7 @@ function locationPatch(body: Record<string, unknown>): UpdateLocationInput {
 /**
  * Change a home's details. Fields left out keep their value. Its time zone is
  * its location's, so it moves every home at that location. Who looks after it
- * is a member (member.id) or a team of this organization, or null. On a
+ * is a member (member.id) of this organization, or null. On a
  * connected home, a new base price or minimum stay is pushed for the nights
  * ahead, because nights without their own value use them.
  */
@@ -763,9 +761,7 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   if ('published' in body && Object.keys(body).length > 1) fail(422, 'INVALID_DETAIL', 'Change published on its own', 'published')
   if ('description' in body && typeof body.description !== 'string') fail(422, 'INVALID_DETAIL', 'description must be text; send an empty one to clear it', 'description')
   for (const key of LISTING_FIELDS) if (key in body) (stay as Record<string, unknown>)[key] = body[key]
-  for (const field of ['assigned_member_id', 'assigned_team_id'] as const) {
-    if (body[field] !== undefined) stay[field] = body[field] as string | null
-  }
+  if (body.assigned_member_id !== undefined) stay.assigned_member_id = body.assigned_member_id as string | null
   // Questions are replaced whole by the product writer, against the revision the host read.
   if ('questions' in body) Object.assign(stay, { questions: body.questions, expected_questions_revision: body.expected_questions_revision })
   else if ('expected_questions_revision' in body) fail(422, 'INVALID_DETAIL', 'expected_questions_revision is only sent with questions', 'expected_questions_revision')
@@ -856,7 +852,7 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
     product: {
       kind: 'stay', name: home.name,
       ...(home.base_price_minor === null ? {} : { variants: [{ name: home.name, prices: [{ unit_amount: home.base_price_minor, location_id: locationId }] }] }),
-      stay: { ...(home.internal_name === undefined ? {} : { internal_name: home.internal_name }), location_id: locationId, check_in_time: home.check_in_time, check_in_end_time: home.check_in_end_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, calendar_rules: home.calendar_rules, assigned_member_id: null, assigned_team_id: null,
+      stay: { ...(home.internal_name === undefined ? {} : { internal_name: home.internal_name }), location_id: locationId, check_in_time: home.check_in_time, check_in_end_time: home.check_in_end_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, calendar_rules: home.calendar_rules, assigned_member_id: null,
         ...(home.cancellation_policy === undefined ? {} : { cancellation_policy: home.cancellation_policy }),
         ...(home.long_term_cancellation_policy === undefined ? {} : { long_term_cancellation_policy: home.long_term_cancellation_policy }) },
     },
@@ -1919,8 +1915,8 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
   const [from, to] = await Promise.all([readStayHome(db, access, current.product_id), readStayHome(db, access, input.product_id)])
   if (current.check_out_date < localDateAt(new Date(), to.timezone)) fail(409, 'STAY_MOVE_ENDED', 'This stay has already ended', 'product_id')
   if (current.adults + current.children > to.max_guests) fail(422, 'STAY_MOVE_TOO_SMALL', `${to.internal_name} sleeps ${to.max_guests}; this party is ${current.adults + current.children}`, 'product_id')
-  const config = await queryFirst<{ check_in_instructions: string | null; assigned_member_id: string | null; assigned_team_id: string | null }>(db,
-    'SELECT check_in_instructions, assigned_member_id, assigned_team_id FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [access.organizationId, to.product_id])
+  const config = await queryFirst<{ check_in_instructions: string | null; assigned_member_id: string | null }>(db,
+    'SELECT check_in_instructions, assigned_member_id FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [access.organizationId, to.product_id])
   if (!config?.check_in_instructions?.trim()) fail(422, 'STAY_MOVE_NEEDS_INSTRUCTIONS', `Add check-in instructions to ${to.internal_name} before moving a guest there, so they can be told how to get in`, 'product_id')
   if (nightsTaken(await homeNights(db, access.organizationId, to, current.check_in_date, current.check_out_date), stayId).length) fail(409, 'STAY_MOVE_NIGHTS_TAKEN', `${to.internal_name} is not free for every night of this stay`, 'product_id')
   await Promise.all([requireChannelPush(db, env, access.organizationId, from.product_id), requireChannelPush(db, env, access.organizationId, to.product_id)])
@@ -1953,7 +1949,7 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
       ...stayThreadQueries({ organizationId: access.organizationId, stayId, now, openedBy: { userId: access.actorId } }),
       ...turnovers,
       ...stayReadyTaskQueries({ organizationId: access.organizationId, stayId, now, previousProductId: from.product_id, guard: { query: moved, params: movedParams },
-        home: backOnListing ? null : { product_id: to.product_id, location_id: to.location_id, timezone: to.timezone, check_in_time: to.check_in_time, internal_name: to.internal_name, assigned_member_id: config.assigned_member_id, assigned_team_id: config.assigned_team_id },
+        home: backOnListing ? null : { product_id: to.product_id, location_id: to.location_id, timezone: to.timezone, check_in_time: to.check_in_time, internal_name: to.internal_name, assigned_member_id: config.assigned_member_id },
         guestName: stayGuestFirstName(current.guest_name), checkInDate: current.check_in_date }),
       ...(current.request_id === null ? [] : [{
         query: `INSERT INTO scheduled_guest_messages (id, organization_id, product_id, subject_type, subject_id, request_id, template_id, template_title, template_version, body, due_at, timezone, status, created_at, updated_at)

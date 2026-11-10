@@ -663,8 +663,8 @@ function visitJobQueries(requestId: string, now: string): BatchQuery[] {
         FROM ${BOOKED_RECORDS_SQL} br
        WHERE br.request_id = ? AND br.kind <> 'stay' AND br.status = 'confirmed' AND br.assigned_member_id IS NOT NULL AND ${job.at} > ?
       ON CONFLICT (dedupe_key) DO UPDATE SET status = CASE WHEN tasks.status = 'cancelled' THEN 'open' ELSE tasks.status END, closed_at = CASE WHEN tasks.status = 'cancelled' THEN NULL ELSE tasks.closed_at END,
-        starts_at = excluded.starts_at, due_at = excluded.due_at, assigned_member_id = excluded.assigned_member_id, assigned_team_id = NULL, version = tasks.version + 1, updated_at = excluded.updated_at
-        WHERE tasks.status = 'cancelled' OR (tasks.status = 'open' AND (tasks.starts_at IS NOT excluded.starts_at OR tasks.assigned_member_id IS NOT excluded.assigned_member_id OR tasks.assigned_team_id IS NOT NULL))`,
+        starts_at = excluded.starts_at, due_at = excluded.due_at, assigned_member_id = excluded.assigned_member_id, version = tasks.version + 1, updated_at = excluded.updated_at
+        WHERE tasks.status = 'cancelled' OR (tasks.status = 'open' AND (tasks.starts_at IS NOT excluded.starts_at OR tasks.assigned_member_id IS NOT excluded.assigned_member_id))`,
     params: [crypto.randomUUID(), now, now, requestId, now],
   }))]
 }

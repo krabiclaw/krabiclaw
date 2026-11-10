@@ -1098,7 +1098,7 @@ a token for other unpublished pages.
 the same saved-summary cards and focused editors. A practice area without a
 booking configuration does not imply an attorney assignment or available
 consultations. Configured consultations use the existing Product booking owner,
-attorneys or legal teams, clients and offices. Page content links to the bound
+attorneys, clients and offices. Page content links to the bound
 Page editor, and Preview uses that Page's saved path; a Product slug does not
 invent a second legal page. Assigned attorneys retain their authorized Product
 work without gaining organization-wide Page editing, preview or translations.

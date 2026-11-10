@@ -81,10 +81,10 @@ content. Both apps clear that thread's cached transcript and close its open
 view. Current participants receive the normal `team_thread.changed` event.
 
 The iOS Message host action continues to include all workspace owners/admins
-in a protected stay conversation. No assignment, invite, or Better Auth Team
-change automatically enrolls someone in another conversation.
+in a protected stay conversation. No assignment or invite
+automatically enrolls someone in another conversation.
 
-Assignment/member/team writes also emit content-free `access.changed` with only
+Assignment and member writes also emit content-free `access.changed` with only
 the normal event/organization/time fields. Every currently authorized workspace
 socket receives it and re-reads its permitted guest conversations. A denied
 403/404 read clears the displayed conversation and draft. Group participation,
@@ -94,12 +94,10 @@ their actual payloads, including booking moves and financial summaries, across
 all four verticals.
 
 Locations, experience/legal offering configurations and homes use the same
-`assigned_member_id` / `assigned_team_id` pair. The first names an actual
-Better Auth membership in the organization; the second names an actual Better
-Auth Team there. At most one is selected. All roles are eligible for explicit
-responsibility, including owners and admins. The resource editor is the write
-boundary; there is no alternate bulk member-to-homes operation. Better Auth
-Team changes affect authorized work, without creating chat participation.
+`assigned_member_id`, naming an actual Better Auth membership in the
+organization. All roles are eligible for explicit responsibility, including
+owners and admins. The resource editor is the write boundary; there is no
+alternate bulk member-to-homes operation.
 
 ### 3.1 Homes quote
 

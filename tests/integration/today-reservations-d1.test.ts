@@ -123,7 +123,7 @@ test('Today shows every booking type as a reservation card for its own business,
     const manager: StayAccess = { organizationId: 'inn', actorId: OWNER, manage: true }
     const home = await createProduct(db, { env, organizationId: 'inn', actor: { actorId: OWNER }, product: {
       kind: 'stay', name: 'Seaview Cottage', variants: [{ name: 'Night', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
-      stay: { location_id: 'inn-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: null, assigned_team_id: null },
+      stay: { location_id: 'inn-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: null },
     } })
     const directions = 'Take the coast road past the lighthouse; the cottage is the blue door.'
     await updateStayHome(env, db, manager, home.id, { directions, wifi_network: 'Seaview', wifi_password: 'saltwater' })

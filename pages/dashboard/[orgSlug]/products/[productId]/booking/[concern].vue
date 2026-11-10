@@ -25,10 +25,10 @@
       </UFormField>
       <div v-if="concern === 'assignment' || concern === 'enabled' && legal && p.form.bookable" class="space-y-6">
         <UFormField name="assigned_member_id" :label="p.bookingCopy.value.assigneeLabel">
-          <ResponsibilityPicker v-model:member-id="p.form.assigned_member_id" v-model:team-id="p.form.assigned_team_id" :organization-id="p.organizationId" :disabled="p.saving.value" :people-label="peopleLabel" required profiles />
+          <ResponsibilityPicker v-model:member-id="p.form.assigned_member_id" :organization-id="p.organizationId" :disabled="p.saving.value" :people-label="peopleLabel" required profiles />
           <UButton v-if="unpublishedHost" class="mt-4" color="neutral" variant="outline" :to="`/dashboard/${route.params.orgSlug}/team/${unpublishedHost.id}/profile`">Edit {{ unpublishedHost.name }}'s profile</UButton>
         </UFormField>
-        <SettingRow v-model="hostHours" :disabled="!p.form.assigned_member_id && !p.form.assigned_team_id || p.form.held_online || legal && hostHours" :label="workingHoursLabel" :description="legal ? 'Each new consultation is booked with an available attorney from this selection. Existing consultations keep their booked attorney.' : `${peopleLabel} choose from ${p.form.assigned_team_id ? 'each team member’s' : `the ${p.bookingCopy.value.assigneeNoun}’s`} own hours instead of the weekly schedule.`" />
+        <SettingRow v-model="hostHours" :disabled="!p.form.assigned_member_id || p.form.held_online || legal && hostHours" :label="workingHoursLabel" :description="legal ? 'Each new consultation is booked in the attorney’s working hours. Existing consultations keep their booked attorney.' : `${peopleLabel} choose from the ${p.bookingCopy.value.assigneeNoun}’s own hours instead of the weekly schedule.`" />
       </div>
       <UFormField v-else-if="concern === 'payment'" name="online_payment_required">
         <SettingRow v-model="p.form.online_payment_required" :disabled="!paymentEntitled && !p.form.online_payment_required" :label="`Require online payment for paid ${occurrence}s`" />
@@ -59,22 +59,22 @@ const concern = computed(() => String(route.params.concern))
 const legal = computed(() => p.product.value?.kind === 'service')
 const occurrence = computed(() => legal.value ? 'consultation' : 'session')
 const peopleLabel = computed(() => legal.value ? 'Clients' : 'Guests')
-const workingHoursLabel = computed(() => p.form.assigned_team_id ? 'Book each team member’s working hours' : `Book the ${p.bookingCopy.value.assigneeNoun}'s working hours`)
+const workingHoursLabel = computed(() => `Book the ${p.bookingCopy.value.assigneeNoun}'s working hours`)
 const settings = computed(() => ({
   enabled: { title: legal.value ? 'Consultation calendar' : 'Booking calendar', lead: `Set up times for ${p.bookingCopy.value.guestsLabelPlural} to book. Removing the calendar deletes its schedule and is only allowed before any bookings. To pause this offering and keep its schedule, use its Website settings.` },
   duration: { title: 'Duration', lead: `How long does each ${occurrence.value} last? Existing appointments keep their saved duration.` },
   capacity: { title: legal.value ? 'Client limit' : 'Guest limit', lead: `How many ${p.bookingCopy.value.guestsLabelPlural} can book the same ${occurrence.value}? Existing appointments keep their saved ${p.bookingCopy.value.guestLabel} limit.` },
   notice: { title: 'Advance notice', lead: `How much notice do you need before a ${occurrence.value}? ${peopleLabel.value} can’t book or cancel online once it starts sooner than this, and you can’t move a booking into that time. Free cancellation closes at least 24 hours before either way.` },
   confirmation: { title: 'Confirmation', lead: `Confirm ${legal.value ? 'consultations' : 'bookings'} as soon as ${p.bookingCopy.value.guestsLabelPlural} ${legal.value ? 'request a time' : 'reserve'}, or review each request before confirming.` },
-  assignment: { title: p.bookingCopy.value.assigneeLabel, lead: legal.value ? 'Choose an attorney or legal team for new consultations. Clients book an available attorney’s working hours and see their published profile. Existing consultations keep their booked attorney.' : `Who runs it. ${peopleLabel.value} see ${p.form.assigned_team_id ? 'each team member’s' : `the ${p.bookingCopy.value.assigneeNoun}’s`} published profile on the page. A published host profile is required before publishing this offering. Existing bookings keep their assigned host.` },
+  assignment: { title: p.bookingCopy.value.assigneeLabel, lead: legal.value ? 'Choose an attorney for new consultations. Clients book the attorney’s working hours and see their published profile. Existing consultations keep their booked attorney.' : `Who runs it. ${peopleLabel.value} see the ${p.bookingCopy.value.assigneeNoun}’s published profile on the page. A published host profile is required before publishing this offering. Existing bookings keep their assigned host.` },
   payment: { title: 'Payment', lead: `${peopleLabel.value} pay before their booking is made. Free ${occurrence.value}s remain bookable.` },
-  location: { title: 'Meeting format', lead: `Enable online ${legal.value ? 'consultations' : 'booking'} in ${p.form.assigned_team_id ? 'each team member’s' : `the ${p.bookingCopy.value.assigneeNoun}’s`} working hours. Edit physical availability and repeating times at each saved ${legal.value ? 'office' : 'location'}.` },
+  location: { title: 'Meeting format', lead: `Enable online ${legal.value ? 'consultations' : 'booking'} in the ${p.bookingCopy.value.assigneeNoun}’s working hours. Edit physical availability and repeating times at each saved ${legal.value ? 'office' : 'location'}.` },
 }))
 const dashboard = useDashboardOrganization()
 const paymentEntitled = computed(() => dashboard.entitlements.value.payments === true)
 const { data: members, status: membersStatus } = await useMemberSchedulingList(() => dashboard.organization.value?.id)
-watch(() => [p.form.assigned_member_id, p.form.assigned_team_id], ([memberId, teamId]) => {
-  if (legal.value && (memberId || teamId)) p.form.scheduling_mode = 'provider'
+watch(() => p.form.assigned_member_id, (memberId) => {
+  if (legal.value && memberId) p.form.scheduling_mode = 'provider'
 })
 // A notice saved through MCP outside Airbnb's choices is still shown, selected, as its own card.
 const noticeOptions = computed(() => {
@@ -115,7 +115,7 @@ watch(capacityChoice, choice => {
   else if (Number(p.form.booking_capacity) < 2) p.form.booking_capacity = ''
 })
 const valid = computed(() => {
-  if (concern.value === 'assignment' || concern.value === 'enabled' && legal.value && p.form.bookable) return membersStatus.value === 'success' && Boolean(p.form.assigned_member_id || p.form.assigned_team_id) && (!legal.value || p.form.scheduling_mode === 'provider')
+  if (concern.value === 'assignment' || concern.value === 'enabled' && legal.value && p.form.bookable) return membersStatus.value === 'success' && Boolean(p.form.assigned_member_id) && (!legal.value || p.form.scheduling_mode === 'provider')
   if (concern.value === 'duration') return Number.isSafeInteger(Number(p.form.booking_duration)) && Number(p.form.booking_duration) > 0
   if (concern.value === 'capacity') return capacityChoice.value !== 'group' || (Number.isSafeInteger(Number(p.form.booking_capacity)) && Number(p.form.booking_capacity) >= 2)
   if (concern.value === 'location') return !p.form.held_online || p.form.scheduling_mode === 'provider'

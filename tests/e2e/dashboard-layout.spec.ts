@@ -192,99 +192,6 @@ test.describe('dashboard pane hierarchy', () => {
     }
   })
 
-  test('Booking team forms create, rename and change native Better Auth membership', async ({ page, baseURL, playwright }, testInfo) => {
-    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Team writes require isolated local D1.')
-    const organizationId = seededTenant('restaurant').organizationId
-    const release = await acquireTenantMutationLock(testInfo, organizationId)
-    try {
-    const membersResponse = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
-    expect(membersResponse.status(), await membersResponse.text()).toBe(200)
-    const member = (await membersResponse.json() as { members: Array<{ userId: string; user: { name: string } }> }).members.find(row => row.userId === 'user-e2e-demo-role-owner')
-    expect(member).toBeDefined()
-    const readTeams = async () => {
-      const response = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
-      expect(response.status(), await response.text()).toBe(200)
-      return (await response.json() as OrganizationMembersData).teams
-    }
-    const name = `E2E Booking Team ${Date.now().toString(36)}`
-    let teamId: string | null = null
-    try {
-      await page.setViewportSize(PHONE)
-      await open(page, `${ORG}/team/groups/new/name`)
-      const leaf = page.locator('#dashboard-panel-booking-team-setting')
-      await expect(page.getByRole('dialog', { name: 'Team name', exact: true })).toBeVisible()
-      await expect(page.locator('#dashboard-panel-booking-team')).toBeVisible()
-      await expect(leaf.getByRole('button', { name: 'Create booking team', exact: true })).toBeDisabled()
-      await leaf.getByRole('textbox', { name: 'Team name', exact: true }).fill(name)
-      const created = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/organization/create-team' && response.request().method() === 'POST')
-      await leaf.getByRole('button', { name: 'Create booking team', exact: true }).click()
-      const createdResponse = await created
-      expect(createdResponse.status(), await createdResponse.text()).toBe(200)
-      teamId = (await createdResponse.json() as { id: string }).id
-      await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
-      await expect(page.getByRole('dialog')).toHaveCount(0)
-      await expect(page.locator('#dashboard-panel-booking-team')).toContainText(name)
-      const original = (await readTeams()).find(row => row.id === teamId)
-      expect(original).toMatchObject({ id: teamId, name, organizationId })
-      expect(original!.members.map(row => row.userId)).not.toContain(member!.userId)
-
-      await open(page, `${ORG}/team/groups/${teamId}/name`)
-      await expect(page.getByRole('dialog', { name: 'Team name', exact: true })).toBeVisible()
-      await expect(page.locator('#dashboard-panel-booking-team')).toContainText(name)
-      const save = leaf.getByRole('button', { name: 'Save', exact: true })
-      await expect(save).toBeDisabled()
-      const renamed = `${name} renamed`
-      await leaf.getByRole('textbox', { name: 'Team name', exact: true }).fill(renamed)
-      await expect(save).toBeEnabled()
-      for (const viewport of [WIDE, PHONE]) {
-        await page.setViewportSize(viewport)
-        await expect(leaf.getByRole('textbox', { name: 'Team name', exact: true })).toHaveValue(renamed)
-        await expect(save).toBeEnabled()
-      }
-      await save.click()
-      await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
-      await expect(page.getByRole('dialog')).toHaveCount(0)
-      await expect(page.locator('#dashboard-panel-booking-team')).toContainText(renamed)
-      expect((await readTeams()).find(row => row.id === teamId)?.name).toBe(renamed)
-
-      await open(page, `${ORG}/team/groups/${teamId}/members`)
-      const included = leaf.getByRole('switch', { name: member!.user.name, exact: true })
-      await expect(included).not.toBeChecked()
-      await expect(save).toBeDisabled()
-      await included.click()
-      await expect(save).toBeEnabled()
-      await save.click()
-      await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
-      expect((await readTeams()).find(row => row.id === teamId)?.members.map(row => row.userId).sort()).toEqual([...original!.members.map(row => row.userId), member!.userId].sort())
-      const memberReader = await playwright.request.newContext({ baseURL })
-      try {
-        await loginAs(memberReader, baseURL!, member!.userId)
-        const nativeMembers = await memberReader.get('/api/auth/organization/list-team-members', { params: { teamId } })
-        expect(nativeMembers.status(), await nativeMembers.text()).toBe(200)
-        expect((await nativeMembers.json() as OrganizationMembersData['teams'][number]['members']).map(row => row.userId).sort()).toEqual([...original!.members.map(row => row.userId), member!.userId].sort())
-      } finally {
-        await memberReader.dispose()
-      }
-
-      await open(page, `${ORG}/team/groups/${teamId}/members`)
-      await expect(included).toBeChecked()
-      await expect(save).toBeDisabled()
-      await included.click()
-      await save.click()
-      await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
-      expect((await readTeams()).find(row => row.id === teamId)?.members.map(row => row.userId).sort()).toEqual(original!.members.map(row => row.userId).sort())
-    } finally {
-      if (teamId) {
-        const removed = await page.request.post('/api/auth/organization/remove-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId } })
-        expect(removed.status(), await removed.text()).toBe(200)
-        expect((await readTeams()).map(row => row.id)).not.toContain(teamId)
-      }
-    }
-    } finally {
-      await release()
-    }
-  })
-
   test('location assignments survive reload and let assigned staff discover and edit their branch', async ({ page, baseURL, browser }, testInfo) => {
     test.setTimeout(120_000)
     test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Location assignments and role changes use disposable local data only.')
@@ -295,11 +202,10 @@ test.describe('dashboard pane hierarchy', () => {
     const independentEndpoint = `/api/organizations/${organizationId}/locations/${locationId}`
     const release = await acquireTenantMutationLock(testInfo, organizationId)
     let memberContext: BrowserContext | null = null
-    type Location = { id: string; slug: string; title: string; email: string | null; assigned_member_id: string | null; assigned_team_id: string | null }
+    type Location = { id: string; slug: string; title: string; email: string | null; assigned_member_id: string | null }
     type Member = { id: string; userId: string; role: string; user: { name: string } }
     let original: Location | null = null
     let actor: Member | undefined
-    let teamId: string | null = null
     let roleChanged = false
     let originalProfile: MemberSchedule = null
     let photoAttempted = false
@@ -312,7 +218,7 @@ test.describe('dashboard pane hierarchy', () => {
     try {
       memberContext = await browser.newContext({ baseURL, viewport: PHONE })
       original = await readLocation()
-      expect(original).toMatchObject({ id: locationId, assigned_team_id: null })
+      expect(original).toMatchObject({ id: locationId })
       const otherTenant = await page.request.get(`/api/dashboard/locations/${seededTenant('experience').locations['ao-nang'].id}`, { params: { org: 'clayhouse-studio' } })
       expect(otherTenant.status(), await otherTenant.text()).toBe(200)
       expect(await otherTenant.json()).toMatchObject({ location: { id: seededTenant('experience').locations['ao-nang'].id, organization_id: seededTenant('experience').organizationId } })
@@ -343,7 +249,7 @@ test.describe('dashboard pane hierarchy', () => {
       await page.setViewportSize(WIDE)
       await open(page, assignmentPath)
       const leaf = page.locator('#dashboard-panel-location-assignment')
-      await expect(leaf.getByRole('radio', { name: responsible ? responsible.user.name : 'Unassigned No person or team is assigned.', exact: true })).toBeChecked()
+      await expect(leaf.getByRole('radio', { name: responsible ? responsible.user.name : 'Unassigned No person is assigned.', exact: true })).toBeChecked()
       const memberChoice = leaf.getByRole('radio', { name: actor.user.name, exact: true })
       await memberChoice.click()
       const saved = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
@@ -354,7 +260,7 @@ test.describe('dashboard pane hierarchy', () => {
       await waitForNuxtHydration(page)
       await expect(memberChoice).toBeChecked()
       await expect(page.locator('#dashboard-panel-location-settings').getByRole('link', { name: /Team assignment/ })).toContainText(actor.user.name)
-      expect(await readLocation()).toMatchObject({ assigned_member_id: actor.id, assigned_team_id: null })
+      expect(await readLocation()).toMatchObject({ assigned_member_id: actor.id })
 
       const memberPage = await memberContext.newPage()
       await dismissPreviewToolbar(memberPage)
@@ -375,41 +281,13 @@ test.describe('dashboard pane hierarchy', () => {
       await memberPage.reload()
       await waitForNuxtHydration(memberPage)
       await expect(contact.getByRole('textbox', { name: 'Email', exact: true })).toHaveValue(email)
-      expect(await readLocation()).toMatchObject({ email, assigned_member_id: actor.id, assigned_team_id: null })
-      const forbidden = await memberContext.request.patch(endpoint, { params: { org }, data: { assigned_member_id: null, assigned_team_id: null } })
+      expect(await readLocation()).toMatchObject({ email, assigned_member_id: actor.id })
+      const forbidden = await memberContext.request.patch(endpoint, { params: { org }, data: { assigned_member_id: null } })
       expect(forbidden.status(), await forbidden.text()).toBe(403)
-      expect(await readLocation()).toMatchObject({ email, assigned_member_id: actor.id, assigned_team_id: null })
+      expect(await readLocation()).toMatchObject({ email, assigned_member_id: actor.id })
       const wrongTenant = await memberContext.request.get(`/api/organizations/${organizationId}/locations/${seededTenant('experience').locations['ao-nang'].id}`)
       expect(wrongTenant.status(), await wrongTenant.text()).toBe(404)
 
-      const name = `E2E Location Team ${Date.now().toString(36)}`
-      const created = await page.request.post('/api/auth/organization/create-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, name } })
-      expect(created.status(), await created.text()).toBe(200)
-      teamId = (await created.json() as { id: string }).id
-      const included = await page.request.post('/api/auth/organization/add-team-member', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId, userId: actor.userId } })
-      expect(included.status(), await included.text()).toBe(200)
-      const nativeMembers = await memberContext.request.get('/api/auth/organization/list-team-members', { params: { teamId } })
-      expect(nativeMembers.status(), await nativeMembers.text()).toBe(200)
-      expect((await nativeMembers.json() as Array<{ userId: string }>).map(member => member.userId)).toContain(actor.userId)
-      await page.reload()
-      await waitForNuxtHydration(page)
-      const teamChoice = leaf.getByRole('radio', { name: `Team: ${name} 1 member`, exact: true })
-      await teamChoice.click()
-      const teamSaved = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
-      await leaf.getByRole('button', { name: 'Save', exact: true }).click()
-      expect((await teamSaved).status()).toBe(200)
-      await expect(leaf.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-      await page.reload()
-      await waitForNuxtHydration(page)
-      await expect(teamChoice).toBeChecked()
-      expect(await readLocation()).toMatchObject({ assigned_member_id: null, assigned_team_id: teamId })
-      await open(memberPage, `${ORG}/locations`)
-      await expect(branch).toBeVisible()
-      await branch.click()
-      await expect(memberPage.locator('#dashboard-panel-location-index').getByRole('heading', { name: original.title, exact: true })).toBeVisible()
-      const teamForbidden = await memberContext.request.patch(endpoint, { params: { org }, data: { assigned_member_id: actor.id, assigned_team_id: null } })
-      expect(teamForbidden.status(), await teamForbidden.text()).toBe(403)
-      expect(await readLocation()).toMatchObject({ assigned_member_id: null, assigned_team_id: teamId })
 
       // An administrator edits this existing member's portrait through the same
       // media library, without initializing Hours or altering calendar facts.
@@ -525,23 +403,14 @@ test.describe('dashboard pane hierarchy', () => {
       try {
         if (original) {
           const restored = await page.request.patch(endpoint, { params: { org }, data: {
-            email: original.email, assigned_member_id: original.assigned_member_id, assigned_team_id: original.assigned_team_id,
+            email: original.email, assigned_member_id: original.assigned_member_id,
           } })
           expect(restored.status(), await restored.text()).toBe(200)
-          expect(await readLocation()).toMatchObject({ email: original.email, assigned_member_id: original.assigned_member_id, assigned_team_id: original.assigned_team_id })
+          expect(await readLocation()).toMatchObject({ email: original.email, assigned_member_id: original.assigned_member_id })
           if (roleChanged && memberContext) {
             const restoredAccess = await memberContext.request.get(endpoint, { params: { org } })
             expect(restoredAccess.status(), await restoredAccess.text()).toBe(404)
           }
-        }
-      } catch (error) { failures.push(error) }
-      try {
-        if (teamId) {
-          const removed = await page.request.post('/api/auth/organization/remove-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId } })
-          expect(removed.status(), await removed.text()).toBe(200)
-          const teams = await page.request.get('/api/auth/organization/list-teams', { params: { organizationId } })
-          expect(teams.status(), await teams.text()).toBe(200)
-          expect((await teams.json() as Array<{ id: string }>).map(team => team.id)).not.toContain(teamId)
         }
       } catch (error) { failures.push(error) }
       try {
@@ -1190,13 +1059,13 @@ test.describe('dashboard pane hierarchy', () => {
       if (!actor) throw new Error('The canonical Clayhouse role actor is missing')
       bookingAttempted = true
       const assigned = await page.request.put(bookingEndpoint, { data: {
-        scheduling_mode: original.booking.scheduling_mode, assigned_member_id: actor.id, assigned_team_id: null,
+        scheduling_mode: original.booking.scheduling_mode, assigned_member_id: actor.id,
       } })
       expect(assigned.status(), await assigned.text()).toBe(200)
       const assignmentRead = await page.request.get(endpoint)
       expect(assignmentRead.status(), await assignmentRead.text()).toBe(200)
       expect((await assignmentRead.json() as { product: Product }).product.booking).toMatchObject({
-        scheduling_mode: original.booking.scheduling_mode, assigned_member_id: actor.id, assigned_team_id: null,
+        scheduling_mode: original.booking.scheduling_mode, assigned_member_id: actor.id,
       })
       roleAttempted = true
       const demoted = await page.request.post('/api/auth/organization/update-member-role', {
@@ -1275,7 +1144,7 @@ test.describe('dashboard pane hierarchy', () => {
       try {
         if (bookingAttempted && original?.booking) {
           const restored = await cleanupRequest!.put(bookingEndpoint, { data: {
-            scheduling_mode: original.booking.scheduling_mode, assigned_member_id: original.booking.assigned_member_id, assigned_team_id: original.booking.assigned_team_id,
+            scheduling_mode: original.booking.scheduling_mode, assigned_member_id: original.booking.assigned_member_id,
           } })
           expect(restored.status(), await restored.text()).toBe(200)
           const restoredBooking = await cleanupRequest!.get(endpoint)

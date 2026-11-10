@@ -404,18 +404,6 @@
         "open_world_justification": "Sends configured email, WhatsApp or push notifications to workspace assignees through external delivery services."
       }
     },
-    "create_team": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Creates a named Better Auth team in the selected business.",
-        "destructive_justification": "Only adds a private team record; it removes no member and sends no invitation.",
-        "open_world_justification": "Confined to the selected private business’s Better Auth teams."
-      }
-    },
     "defer_opportunity": {
       "annotations": {
         "readOnlyHint": false,
@@ -618,18 +606,6 @@
         "read_only_justification": "Deletes one selected offline payment record, then recomputes paid status; online Stripe payment cannot be removed here.",
         "destructive_justification": "Permanently removes an offline ledger entry.",
         "open_world_justification": "Acts only on private payment records and moves no money."
-      }
-    },
-    "delete_team": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Deletes the selected Better Auth team.",
-        "destructive_justification": "Removes the team and its membership associations and clears open tasks assigned to that team.",
-        "open_world_justification": "Only deletes a team within the selected private business."
       }
     },
     "disable_organization_language": {
@@ -1400,18 +1376,6 @@
         "open_world_justification": "Reads only internal conversations the signed-in member already participates in."
       }
     },
-    "list_teams": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads Better Auth teams and memberships in the selected business.",
-        "destructive_justification": "Does not create teams, remove them or change their membership.",
-        "open_world_justification": "Reads Better Auth teams and memberships only in the selected private business."
-      }
-    },
     "mark_team_conversation_read": {
       "annotations": {
         "readOnlyHint": false,
@@ -1988,18 +1952,6 @@
         "open_world_justification": "Updates website bookable nights and a connected Airbnb listing."
       }
     },
-    "set_team_member": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Adds or removes an existing business teammate’s Better Auth team membership.",
-        "destructive_justification": "The removal branch revokes that team membership.",
-        "open_world_justification": "Only accepts members and teams of the selected private business."
-      }
-    },
     "set_workspace_context": {
       "annotations": {
         "readOnlyHint": false,
@@ -2310,18 +2262,6 @@
         "read_only_justification": "Changes a stored task's assignee, window, title or notes.",
         "destructive_justification": "Overwrites the task's saved assignment or schedule and notifies a new assignee.",
         "open_world_justification": "Reassignment can send configured email, WhatsApp or push notifications to the new assignee through external delivery services."
-      }
-    },
-    "update_team": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Renames the selected Better Auth team.",
-        "destructive_justification": "Overwrites the saved team name.",
-        "open_world_justification": "Only changes a team in the selected private business."
       }
     },
     "update_team_group": {

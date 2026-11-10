@@ -59,7 +59,6 @@ export interface BusinessLocation {
   last_synced_at: string | null
   timezone: string
   assigned_member_id: string | null
-  assigned_team_id: string | null
 }
 
 /**
@@ -183,7 +182,6 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       && isNullableString(value.phone)
       && isNullableString(value.google_place_id)
       && isNullableString(value.assigned_member_id)
-      && isNullableString(value.assigned_team_id)
   }
   const isLocationResponse = (value: unknown): value is { success: true; location: BusinessLocation } =>
     isRecord(value) && value.success === true && isBusinessLocation(value.location)
@@ -248,7 +246,6 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     description: '',
     status: 'active',
     assigned_member_id: null as string | null,
-    assigned_team_id: null as string | null,
   })
   const addressDraftKeys = ['addressLines', 'regionCode', 'locality', 'sublocality', 'administrativeArea', 'postalCode'] as const
   const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/localization`)
@@ -284,16 +281,14 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     hoursForm.value = { timezone: loc.timezone, hours: parseOpeningHours(loc.opening_hours), specialHours: parseSpecialHours(loc.special_hours) }
     detailsForm.status = loc.status
     detailsForm.assigned_member_id = loc.assigned_member_id
-    detailsForm.assigned_team_id = loc.assigned_team_id
   }
 
   const schedulingMembersResource = useMemberSchedulingList(() => organizationId)
   const { data: schedulingMembers, error: schedulingMembersError } = schedulingMembersResource
   const assignmentSummary = computed(() => {
-    if (!detailsForm.assigned_team_id && !detailsForm.assigned_member_id) return 'Unassigned'
+    if (!detailsForm.assigned_member_id) return 'Unassigned'
     if (schedulingMembersError.value) return 'Team members could not be loaded'
     if (!schedulingMembers.value) return 'Loading team members…'
-    if (detailsForm.assigned_team_id) return schedulingMembers.value.teams.find(t => t.id === detailsForm.assigned_team_id)?.name ?? 'Assigned team not found in this business'
     return schedulingMembers.value.members.find(m => m.id === detailsForm.assigned_member_id)?.name ?? 'Assigned member not found in this business'
   })
 
@@ -318,7 +313,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       case 'stay-map-sharing': return JSON.stringify(detailsForm.stay_map_sharing)
       case 'address': return JSON.stringify([detailsForm.addressLines, detailsForm.regionCode, detailsForm.locality, detailsForm.sublocality, detailsForm.administrativeArea, detailsForm.postalCode])
       case 'contact': return JSON.stringify([detailsForm.phone, detailsForm.email])
-      case 'assignment': return JSON.stringify([detailsForm.assigned_member_id, detailsForm.assigned_team_id])
+      case 'assignment': return JSON.stringify([detailsForm.assigned_member_id])
       case 'status': return JSON.stringify(detailsForm.status)
       case 'hours': return JSON.stringify(hoursForm.value)
       case 'description': return JSON.stringify([detailsForm.short_description, detailsForm.description, detailsForm.price_level])
@@ -491,7 +486,6 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     if (key === 'assignment') {
       await patchLocation({
         assigned_member_id: detailsForm.assigned_member_id,
-        assigned_team_id: detailsForm.assigned_team_id,
       })
       return
     }

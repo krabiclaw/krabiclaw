@@ -32,9 +32,7 @@ test('Google time and exact attorney replacement request client approval while c
     await db.prepare("INSERT INTO account(id,accountId,providerId,userId,scope) VALUES('linked-account','google-owner','google','owner','https://www.googleapis.com/auth/calendar.app.created')").run()
     for (const member of ['host-org', 'second-org']) await db.prepare(`INSERT INTO member_scheduling(member_id, organization_id, public_name, public_approved, timezone, weekly_json, time_off_json, updated_at, updated_by) VALUES(?,'org','Host',1,'UTC','[{"weekday":0,"start":"00:00","end":"23:59"},{"weekday":1,"start":"00:00","end":"23:59"},{"weekday":2,"start":"00:00","end":"23:59"},{"weekday":3,"start":"00:00","end":"23:59"},{"weekday":4,"start":"00:00","end":"23:59"},{"weekday":5,"start":"00:00","end":"23:59"},{"weekday":6,"start":"00:00","end":"23:59"}]','[]','2026-01-01T00:00:00.000Z','actor')`).bind(member).run()
     await db.prepare("UPDATE member_scheduling SET public_approved=1,public_name=CASE member_id WHEN 'host-org' THEN 'Attorney One' ELSE 'Attorney Two' END WHERE organization_id='org'").run()
-    await db.prepare("INSERT INTO team(id,name,organizationId,createdAt) VALUES('legal-team','Legal Team','org',1)").run()
-    await db.prepare("INSERT INTO teamMember(id,teamId,userId,createdAt) VALUES('team-one','legal-team','host',1),('team-two','legal-team','second',1)").run()
-    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,held_online,scheduling_mode,assigned_team_id,confirmation_mode,created_by,updated_by) VALUES('p','org',30,1,'provider','legal-team','review','actor','actor')").run()
+    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,held_online,scheduling_mode,assigned_member_id,confirmation_mode,created_by,updated_by) VALUES('p','org',30,1,'provider','host-org','review','actor','actor')").run()
     const day = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10)
     const at = (time: string) => `${day}T${time}:00.000Z`
     for (const [id, member, start, end] of [['s','host-org',at('14:00'),at('14:30')], ['s2','host-org',at('15:00'),at('15:30')], ['s3','second-org',at('15:00'),at('15:30')]]) await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES(?,'org','p',?,'America/New_York',?,?,1,'actor','actor')").bind(id,member,start,end).run()
@@ -133,8 +131,10 @@ test('Google time and exact attorney replacement request client approval while c
     await syncCalendarOrganization(env,'org',25,provider)
     assert.deepEqual(events.get(eventId)?.start,{dateTime:at('15:00'),timeZone:'America/New_York'})
 
-    // Same time, different attorney: retain the original participant until the
-    // buyer accepts. Declining sends no invitation to the proposed attorney.
+    // Same time, different attorney: the consultation is now Attorney Two's, and
+    // the booked client keeps Attorney One until they accept. Declining sends no
+    // invitation to the proposed attorney.
+    await db.prepare("UPDATE product_booking_configs SET assigned_member_id='second-org' WHERE organization_id='org' AND product_id='p'").run()
     const invitesBeforeReplacement=invitations.length
     editEvent({attendees:[{email:'jane@example.test',responseStatus:'accepted'},{email:'second@example.test',responseStatus:'needsAction'}]})
     assert.deepEqual(await pullCalendarChanges(env,'org',provider),{events:1,applied:1,reviewed:0})
@@ -214,6 +214,8 @@ test('Google time and exact attorney replacement request client approval while c
 
     // A delivery/configuration failure does not leave the proposed attorney
     // invited or lose the proposal's delivery retry identity after restoration.
+    // The consultation is Attorney One's again, so a proposal back to them is possible.
+    await db.prepare("UPDATE product_booking_configs SET assigned_member_id='host-org' WHERE organization_id='org' AND product_id='p'").run()
     editEvent({attendees:[{email:'jane@example.test'},{email:'host@example.test'}]})
     await assert.rejects(pullCalendarChanges({...env,EMAIL_DELIVERY_MODE:'invalid'},'org',provider),/EMAIL_DELIVERY_MODE/)
     assert.match((await readCalendarSync(db,'org'))!.last_error!,/EMAIL_DELIVERY_MODE/)

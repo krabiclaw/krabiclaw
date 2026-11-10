@@ -60,7 +60,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
       VALUES ('cabin-site', ?, 'cabin', 'Pine Cabin', 'active', ?, '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`).bind(ORG, ZONE).run()
     const cabin = await createProduct(db, { env, organizationId: ORG, actor: { actorId: 'owner' }, product: {
       kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
-      stay: { location_id: 'cabin-site', check_in_time: '15:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: 'm-cleaner', assigned_team_id: null },
+      stay: { location_id: 'cabin-site', check_in_time: '15:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: 'm-cleaner' },
     } })
     const manager: StayAccess = { organizationId: ORG, actorId: 'owner', manage: true }
     const principal = (userId: string, role: string) => memberAccessPrincipal({ userId, role, organizationId: ORG } as never, { env })
@@ -120,7 +120,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     assert.deepEqual(await runOrganizationJobs(env, db, ORG, at(day(3), '13:05')).then(run => [run.next?.toISOString(), run.failures]), [at(day(4), '18:00').toISOString(), []], 'only Lee’s turnover is still pending')
 
     // The home is handed to the cook: the open job follows, the cleaner is told it is no longer theirs, the cook gets it.
-    await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cook', assigned_team_id: null })
+    await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cook' })
     assert.equal((await taskRow(`turnover:${dee.id}`))!.assigned_member_id, 'm-cook')
     await runOrganizationJobs(env, db, ORG, at(day(3), '13:10'))
     assert.match((await automatic(thread.id)).find(message => message.key === `released:${turnover.id}`)!.body, /^No longer yours: turnover at Cabin, /)
@@ -155,7 +155,7 @@ test('a cleaning job lives in the stay’s team conversation from assignment to 
     // A job the owner takes for themselves has no conversation: the task alert goes out on the morning of, once.
     const leeTurnover = (await taskRow(`turnover:${lee.id}`))!
     const ownerViewer = await taskViewer(db, principal('owner', 'owner'))
-    await updateTask(db, ownerViewer, leeTurnover.id, { expectedVersion: leeTurnover.version, assignedMemberId: 'm-owner', assignedTeamId: null })
+    await updateTask(db, ownerViewer, leeTurnover.id, { expectedVersion: leeTurnover.version, assignedMemberId: 'm-owner' })
     await runOrganizationJobs(env, db, ORG, at(day(5), '08:05'))
     await runOrganizationJobs(env, db, ORG, at(day(5), '08:06'))
     const alerts = await db.prepare("SELECT dedupe_key FROM activity_entries WHERE kind = 'notification' AND dedupe_key = ?").bind(`notification:task-starting:${leeTurnover.id}:${day(5)}:owner`).all()

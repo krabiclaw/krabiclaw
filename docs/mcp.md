@@ -72,17 +72,16 @@ and cleanup.
 - AGENTS.md's "Platform and authorization boundaries" is the canonical statement
   of Better Auth authorization scope.
 - MCP uses Better Auth Organization roles and permissions through the shared
-  authorization utilities and domain services. Team membership and explicit
-  location, offering and home responsibility use the same member-or-Team pair
-  and determine access to scoped work. `assigned_member_id` names a membership,
-  not a user. `assigned_team_id` names a Better Auth Team. Choose at most one;
-  send null for the other when changing target. A booking's actual recorded
+  authorization utilities and domain services. Explicit location, offering and
+  home responsibility is one `assigned_member_id` and determines access to
+  scoped work. `assigned_member_id` names a membership, not a user. A booking's
+  actual recorded
   provider remains distinct from current resource responsibility.
 - Native organization roles are `owner`, `admin` and `member`, scoped to the
   selected tenant. `member` includes assigned product and booking operations and
   the member's own scheduling; it is not an inherently read-only role.
 - A Better Auth admin (impersonation rights) does not receive MCP access to a
-  site from that role alone. Access requires real organization/team membership or
+  site from that role alone. Access requires real organization membership or
   a Better Auth impersonation session for a member of that organization.
 - The real runtime boundary is the token `aud` claim bound to the MCP resource
   URL, plus the server-side membership checks. Never rely on scope presence or
@@ -99,7 +98,7 @@ members and identifies the caller. `start_team_conversation` reuses direct and
 stay/location conversations with exactly the selected member user IDs and
 explicit context. A manual group of at least three people is a distinct
 conversation with an optional name and required stable `idempotency_key`.
-This neither invites someone nor creates a Better Auth Team.
+This does not invite anyone.
 `list_team_conversations` reads only conversations the caller participates in;
 `get_team_conversation` pages their messages newest first with the native
 `before`/`before_id` pair. Reading does not mark a conversation read.

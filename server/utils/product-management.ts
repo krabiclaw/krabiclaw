@@ -1,7 +1,7 @@
 import { isStayAmenityCodes, NEW_HOME_CANCELLATION_POLICIES, parseStayAmenityAnswers, planStayAmenityAnswers, STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, stayCodes, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
 import { outsideNotice } from '~/shared/availability-settings'
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { assertResponsibilityTarget, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership, type ResponsibilityTarget } from '~/server/utils/member-access'
+import { assertResponsibleMember, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership } from '~/server/utils/member-access'
 import { assertPublishedHost, hasPublishedHost } from '~/server/utils/public-provider'
 import type { ProductBookingSetupInput, SessionAvailability } from '~/server/utils/availability'
 import { HTTPError } from 'nitro'
@@ -134,7 +134,7 @@ type Row = Record<string, unknown>
 export function publicProduct<T extends Product>(product: T): PublicProduct<T> {
   const { booking, stay, ...rest } = product
   const strip = <C extends Record<StaffAssignment, string | null>>(config: C): Omit<C, StaffAssignment> => {
-    const { assigned_member_id: _member, assigned_team_id: _team, ...shown } = config
+    const { assigned_member_id: _member, ...shown } = config
     return shown
   }
   const publicStay = (config: ProductStayConfig): Omit<ProductStayConfig, StaffAssignment | 'live' | 'internal_name'> => {
@@ -265,14 +265,14 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY location_id`, params: [organizationId, ids] },
     { query: `SELECT product_id, collection_id, sort_order FROM collection_products
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY collection_id`, params: [organizationId, ids] },
-    { query: `SELECT product_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, assigned_team_id, advance_notice_minutes, questions FROM product_booking_configs
+    { query: `SELECT product_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, advance_notice_minutes, questions FROM product_booking_configs
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
       WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
     { query: `SELECT c.product_id, c.internal_name, c.location_id, c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, c.calendar_rules, c.property_type_group, c.property_type,
         c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
-        c.cancellation_policy, c.long_term_cancellation_policy, c.assigned_member_id, c.assigned_team_id, c.questions, ${liveHomeSql('p')} AS live
+        c.cancellation_policy, c.long_term_cancellation_policy, c.assigned_member_id, c.questions, ${liveHomeSql('p')} AS live
       FROM product_stay_configs c JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
       WHERE c.organization_id = ? AND c.product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
   ], { operation: 'Hydrate products' }), readStayPhotoRooms(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id)), readStayHomeAccessibility(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id))])
@@ -295,7 +295,6 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       max_guests: Number(row.max_guests), min_nights: Number(row.min_nights), calendar_rules: parseStayCalendarRules(row.calendar_rules === null ? null : JSON.parse(String(row.calendar_rules))),
       ...storedStayListing(row),
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
-      assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
       live: Number(row.live) === 1,
       ...storedQuestions(row.questions),
     }
@@ -317,7 +316,6 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       confirmation_mode: row.confirmation_mode as 'instant' | 'review', online_payment_required: Number(row.online_payment_required) === 1,
       held_online: Number(row.held_online) === 1,
       scheduling_mode: row.scheduling_mode as 'business' | 'provider', assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
-      assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
       advance_notice_minutes: row.advance_notice_minutes === null ? null : Number(row.advance_notice_minutes),
       ...storedQuestions(row.questions),
     }
@@ -489,7 +487,7 @@ export async function listOrganizationProducts(db: DbClient, input: ProductListI
   const params = [input.organizationId, input.publishedOnly ? 1 : 0,
     ...(input.kind ? [input.kind] : []),
     ...(input.featured === undefined ? [] : [Number(input.featured)]),
-    ...(input.assignedUserId ? [input.assignedUserId, input.assignedUserId] : [])]
+    ...(input.assignedUserId ? [input.assignedUserId] : [])]
   const [rows, counts] = await Promise.all([
     queryAll<Row>(db, `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id ${window ? 'LIMIT ? OFFSET ?' : ''}`, [...params, ...(window ? [window.limit + 1, window.offset] : [])]),
     input.withCounts && window ? queryAll<{ kind: ProductKind; count: number }>(db, `SELECT p.kind, count(*) AS count ${selection} GROUP BY p.kind`, params) : undefined,
@@ -522,7 +520,7 @@ export async function listLocationProducts(db: DbClient, input: ProductListInput
   const params = [input.organizationId, input.locationId,
     ...(input.kind ? [input.kind] : []),
     ...(input.featured === undefined ? [] : [Number(input.featured)]),
-    ...(input.assignedUserId ? [input.assignedUserId, input.assignedUserId] : [])]
+    ...(input.assignedUserId ? [input.assignedUserId] : [])]
   const [rows, counts] = await Promise.all([
     queryAll<Row>(db, `SELECT ${PRODUCT_COLUMNS} ${selection} ORDER BY p.name, p.id ${window ? 'LIMIT ? OFFSET ?' : ''}`, [...params, ...(window ? [window.limit + 1, window.offset] : [])]),
     input.withCounts && window ? queryAll<{ kind: ProductKind; count: number }>(db, `SELECT p.kind, count(*) AS count ${selection} GROUP BY p.kind`, params) : undefined,
@@ -760,7 +758,7 @@ function stayUnitLabel(kind: ProductKind, unitLabel: string | null): string | nu
 }
 
 /** A place to stay is at one location of this organization, with stay settings the calendar and channels enforce. */
-async function planStayConfig(db: DbClient, organizationId: string, kind: ProductKind, value: unknown, stored?: ResponsibilityTarget): Promise<Omit<ProductStayConfig, 'photo_rooms' | 'accessibility' | 'live'> | null> {
+async function planStayConfig(db: DbClient, organizationId: string, kind: ProductKind, value: unknown, stored?: { assigned_member_id: string | null }): Promise<Omit<ProductStayConfig, 'photo_rooms' | 'accessibility' | 'live'> | null> {
   if (kind !== 'stay') {
     if (value !== undefined && value !== null) invalid('Only a place to stay takes stay settings')
     return null
@@ -788,10 +786,8 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
   const location = await queryFirst<{ id: string }>(db, 'SELECT id FROM business_locations WHERE organization_id = ? AND id = ?', [organizationId, locationId])
   if (!location) notFound('That location is not in this organization')
   // An edit names the responsibility it changes; the stored target it keeps is carried, not re-checked.
-  const named = stored
-    ? Object.fromEntries((['assigned_member_id', 'assigned_team_id'] as const).filter(field => (stay[field] ?? null) !== stored[field]).map(field => [field, stay[field]]))
-    : stay
-  const target = await assertResponsibilityTarget(db, organizationId, named, stored)
+  const named = stored && (stay.assigned_member_id ?? null) === stored.assigned_member_id ? {} : stay
+  const assignedMember = await assertResponsibleMember(db, organizationId, named, stored?.assigned_member_id ?? null)
   let questions: ProductStayConfig['questions']
   try { questions = normalizeFormQuestionsInput(stay.questions ?? []) }
   catch (error) {
@@ -799,7 +795,7 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
     invalidStayField('questions', error.message)
   }
   return { internal_name: requireTrimmedProductString(stay.internal_name, 'stay.internal_name', PRODUCT_LIMITS.name), location_id: locationId, check_in_time: stay.check_in_time as string | null, check_in_end_time: checkInEnd as string | null, check_out_time: stay.check_out_time as string | null, max_guests: maxGuests, min_nights: minNights, calendar_rules: calendarRules,
-    ...planStayListing(stay), ...target, questions, questions_revision: formQuestionsRevision(questions) }
+    ...planStayListing(stay), assigned_member_id: assignedMember, questions, questions_revision: formQuestionsRevision(questions) }
 }
 
 function invalidStayField(field: string, message: string): never {
@@ -984,7 +980,7 @@ async function planProduct(
     idOwners?: SuppliedIdOwners
     knownSlugs?: ReadonlyMap<string, string>
     /** An edited place to stay's saved responsibility, which the edit keeps unless it names another. */
-    stayResponsibility?: ResponsibilityTarget
+    stayResponsibility?: { assigned_member_id: string | null }
   },
 ): Promise<PlannedProduct> {
   if (!context.existingId && input.stay && Object.hasOwn(input.stay, 'accessibility')) invalid('Use the home accessibility operation to author accessibility information')
@@ -1087,7 +1083,7 @@ function productWrites(
     const columns = [
       'internal_name', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'property_type_group', 'property_type',
       'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit',
-      'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy', 'assigned_member_id', 'assigned_team_id', 'questions',
+      'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy', 'assigned_member_id', 'questions',
     ] as const satisfies readonly (keyof ProductStayConfig)[]
     const assignments = columns.filter(column => options.stayFields === undefined || options.stayFields.includes(column) || (column === 'amenities' && options.stayFields.includes('amenity_answers')))
       .map(column => `${column} = excluded.${column}`)
@@ -1102,8 +1098,8 @@ function productWrites(
     }, {
       query: `INSERT INTO product_stay_configs (product_id, organization_id, internal_name, location_id, check_in_time, check_in_end_time, check_out_time, max_guests, min_nights, calendar_rules,
                  property_type_group, property_type, listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit,
-                 bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id, questions, created_at, updated_at, created_by, updated_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, questions, created_at, updated_at, created_by, updated_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (product_id) DO UPDATE SET ${[...assignments, 'updated_at = excluded.updated_at', 'updated_by = excluded.updated_by'].join(', ')}
                WHERE product_stay_configs.organization_id = excluded.organization_id AND product_stay_configs.location_id = excluded.location_id`,
       params: [planned.id, organizationId, planned.stay.internal_name, planned.stay.location_id, planned.stay.check_in_time, planned.stay.check_in_end_time, planned.stay.check_out_time,
@@ -1111,17 +1107,17 @@ function productWrites(
         planned.stay.listing_type, planned.stay.total_floors, planned.stay.listing_floor, planned.stay.year_built, planned.stay.property_size, planned.stay.property_size_unit,
         planned.stay.bedrooms, planned.stay.beds, planned.stay.bathrooms,
         JSON.stringify(planned.stay.amenity_answers), planned.stay.cancellation_policy, planned.stay.long_term_cancellation_policy,
-        planned.stay.assigned_member_id, planned.stay.assigned_team_id, JSON.stringify(planned.stay.questions), now, now, actor.actorId, actor.actorId],
+        planned.stay.assigned_member_id, JSON.stringify(planned.stay.questions), now, now, actor.actorId, actor.actorId],
     })
-    if (upsert && (options.stayFields === undefined || options.stayFields.includes('assigned_member_id') || options.stayFields.includes('assigned_team_id'))) {
+    if (upsert && (options.stayFields === undefined || options.stayFields.includes('assigned_member_id'))) {
       // The home's open cleaning jobs are its assignee's: a new assignee takes them over. A save that
       // restates the same assignee leaves a job's own assignment alone, so this runs before the home is written.
       writes.splice(writes.length - 1, 0, {
-        query: `UPDATE tasks SET assigned_member_id = ?, assigned_team_id = ?, version = version + 1, updated_at = ?
-          WHERE organization_id = ? AND product_id = ? AND status = 'open' AND kind IN ('turnover', 'stay_ready') AND (assigned_member_id IS NOT ? OR assigned_team_id IS NOT ?)
-            AND EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = ? AND c.product_id = ? AND (c.assigned_member_id IS NOT ? OR c.assigned_team_id IS NOT ?))`,
-        params: [planned.stay.assigned_member_id, planned.stay.assigned_team_id, now, organizationId, planned.id, planned.stay.assigned_member_id, planned.stay.assigned_team_id,
-          organizationId, planned.id, planned.stay.assigned_member_id, planned.stay.assigned_team_id],
+        query: `UPDATE tasks SET assigned_member_id = ?, version = version + 1, updated_at = ?
+          WHERE organization_id = ? AND product_id = ? AND status = 'open' AND kind IN ('turnover', 'stay_ready') AND assigned_member_id IS NOT ?
+            AND EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = ? AND c.product_id = ? AND c.assigned_member_id IS NOT ?)`,
+        params: [planned.stay.assigned_member_id, now, organizationId, planned.id, planned.stay.assigned_member_id,
+          organizationId, planned.id, planned.stay.assigned_member_id],
       })
     }
     if (upsert && (options.stayFields === undefined || options.stayFields.includes('amenities') || options.stayFields.includes('amenity_answers'))) {
@@ -1625,7 +1621,7 @@ async function planProductUpdate(db: DbClient, input: {
   const planned = await planProduct(db, organizationId, merged, {
     organizationId: input.organizationId, existingId: productId, existingSlug: current.slug, defaultCurrency: input.defaultCurrency,
     takenSlugs: input.takenSlugs, idOwners: input.idOwners, knownSlugs: input.knownSlugs,
-    stayResponsibility: current.stay ? { assigned_member_id: current.stay.assigned_member_id, assigned_team_id: current.stay.assigned_team_id } : undefined,
+    stayResponsibility: current.stay ? { assigned_member_id: current.stay.assigned_member_id } : undefined,
   })
   planned.source = current.source
   assertVariantPricesConsistent(planned)
@@ -1819,8 +1815,8 @@ export async function updateProduct(db: DbClient, input: {
   let reprice = false
   let settings: AirbnbSettingSections | null = null
   const complete = async (product: Product): Promise<ProductMutation> => {
-    if ((product.kind === 'stay' && (input.patch.stay?.assigned_member_id !== undefined || input.patch.stay?.assigned_team_id !== undefined))
-      || input.booking?.data.assigned_member_id !== undefined || input.booking?.data.assigned_team_id !== undefined) {
+    if ((product.kind === 'stay' && input.patch.stay?.assigned_member_id !== undefined)
+      || input.booking?.data.assigned_member_id !== undefined) {
       await publishAccessInvalidation(env, { organizationId: input.organizationId })
     }
     let channelPush: ChannelPushCompletion = null
@@ -2288,7 +2284,7 @@ export async function listCollections(db: DbClient, input: {
       ${input.assignedUserId ? `AND EXISTS (SELECT 1 FROM collection_products cp JOIN products p ON p.id = cp.product_id AND p.organization_id = cp.organization_id
         WHERE cp.collection_id = collections.id AND cp.organization_id = collections.organization_id AND (${ASSIGNED_SERVICE_SQL}))` : ''}
     ORDER BY sort_order, name, id
-  `, [input.organizationId, input.locationId === undefined ? 0 : 1, input.locationId ?? null, ...(input.assignedUserId ? [input.assignedUserId, input.assignedUserId] : [])])
+  `, [input.organizationId, input.locationId === undefined ? 0 : 1, input.locationId ?? null, ...(input.assignedUserId ? [input.assignedUserId] : [])])
   return mapCollectionRows(db, input.organizationId, rows)
 }
 
@@ -2611,7 +2607,7 @@ export async function reconcileProducts(db: DbClient, input: {
   })
   const { pushStayHomeChannel } = await import('~/server/domain/stays')
   const complete = async (products: Product[], completion: unknown, replay = false): Promise<ProductMutation[]> => {
-    if (input.products.some(product => product.stay?.assigned_member_id !== undefined || product.stay?.assigned_team_id !== undefined)) {
+    if (input.products.some(product => product.stay?.assigned_member_id !== undefined)) {
       await publishAccessInvalidation(input.env, { organizationId: input.organizationId })
     }
     const plans = typeof completion === 'object' && completion !== null && !Array.isArray(completion) ? completion as Record<string, unknown> : null

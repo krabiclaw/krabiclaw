@@ -3,7 +3,6 @@ import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import sharp from 'sharp'
-import { HTTPError } from 'nitro'
 import * as schema from '../../server/db/schema.ts'
 import { createDb } from '../../server/db/index.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
@@ -67,7 +66,7 @@ test('members talk in team conversations, see unread state and receive recorded 
       VALUES ('cabin-site', ?, 'cabin', 'Pine Cabin', 'active', 'America/Denver', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`).bind(ORG).run()
     const cabin = await createProduct(db, { env, organizationId: ORG, actor: { actorId: 'owner' }, product: {
       kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
-      stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null, assigned_team_id: null },
+      stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null },
     } })
     const manager: StayAccess = { organizationId: ORG, actorId: 'owner', manage: true }
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(3), check_out_date: day(5), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 30_000 })
@@ -115,37 +114,22 @@ test('members talk in team conversations, see unread state and receive recorded 
 
     // A stay conversation needs a stay the caller can see: a member sees only the homes they look after.
     await assert.rejects(createTeamThread(env, db, cleaner, { memberIds: ['owner'], stayId: stay.id }), refused(404, 'STAY_NOT_FOUND', 'stayId'))
-    await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-owner', assigned_team_id: null })
+    await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-owner' })
     assert.equal((await listStayHomes(db, manager)).find(home => home.product_id === cabin.id)?.assigned_member_id, 'm-owner', 'an owner can hold explicit business responsibility')
     await assert.rejects(updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-outsider' }), refused(422, 'INVALID_RESPONSIBILITY', 'assigned_member_id'))
-    await assert.rejects(updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner', assigned_team_id: 'another-target' }), refused(422, 'RESPONSIBILITY_TARGET_CONFLICT', 'assigned_team_id'))
     await assert.rejects(updateStayHome(env, db, await stayAccessFor(principal('cook', 'member')), cabin.id, { assigned_member_id: 'm-cook' }), { status: 403, data: { code: 'STAY_ROLE_REQUIRED' } })
-    await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner', assigned_team_id: null })
+    await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner' })
     assert.equal((await listStayHomes(db, manager)).find(home => home.product_id === cabin.id)?.assigned_member_id, 'm-cleaner')
     assert.ok(stay.request_id)
     // A stay's guest conversation is owners' and admins': the member looking after the home reads its turnover.
     await assert.rejects(assertAssignedBookingAccess(db, { ...principal('cleaner', 'member'), requestId: stay.request_id }), refused(404, 'THREAD_NOT_FOUND', 'threadId'))
     assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId).sort(), ['owner'], 'a stay conversation alerts owner oversight, not the member looking after the home')
-    await db.prepare("INSERT INTO team(id,organizationId,name,createdAt) VALUES('operators',?,'Cabin operators',0),('outsider-team',?,'Other operators',0)").bind(ORG, OTHER).run()
-    await db.prepare("INSERT INTO teamMember(id,teamId,userId,createdAt) VALUES('operators-cleaner','operators','cleaner',0),('operators-cook','operators','cook',0)").run()
     const unassignedLocation = (await getLocation(db, ORG, 'cabin-site'))!
-    const locationAssignments = await Promise.allSettled([
-      updateLocation(db, ORG, 'cabin-site', { assigned_member_id: 'm-cook' }, 'owner', env),
-      updateLocation(db, ORG, 'cabin-site', { assigned_team_id: 'operators' }, 'owner', env),
-    ])
-    for (const result of locationAssignments) {
-      if (result.status === 'fulfilled') assert.equal(result.value.status, 200)
-      else {
-        assert.ok(HTTPError.isError(result.reason))
-        assert.equal(result.reason.status, 422)
-        assert.deepEqual(result.reason.data, { code: 'RESPONSIBILITY_TARGET_CONFLICT', field: 'assigned_team_id' })
-      }
-    }
+    assert.equal((await updateLocation(db, ORG, 'cabin-site', { assigned_member_id: 'm-cook' }, 'owner', env)).status, 200)
     const assignedLocation = (await getLocation(db, ORG, 'cabin-site'))!
-    assert.ok((assignedLocation.assigned_member_id === 'm-cook' && assignedLocation.assigned_team_id === null)
-      || (assignedLocation.assigned_member_id === null && assignedLocation.assigned_team_id === 'operators'), 'concurrent location assignments retain exactly one validated target')
+    assert.equal(assignedLocation.assigned_member_id, 'm-cook')
     assert.deepEqual(await updateLocation(db, ORG, 'cabin-site', {
-      assigned_member_id: null, assigned_team_id: 'operators', expected_updated_at: unassignedLocation.updated_at!,
+      assigned_member_id: 'm-cleaner', expected_updated_at: unassignedLocation.updated_at!,
     }, 'owner', env), { status: 409, data: { error: 'The location changed since it was read. Reload it and try again.', code: 'LOCATION_VERSION_CONFLICT', field: 'expected_updated_at' } },
     'an explicit stale revision keeps its version conflict instead of rebasing a responsibility change')
     const assignmentActivity = await db.prepare("SELECT actor_user_id, payload_json FROM activity_entries WHERE scope_kind = 'organization' AND organization_id = ? AND event_name = 'location.updated' AND json_extract(payload_json, '$.entityId') = 'cabin-site'").bind(ORG).all<{ actor_user_id: string | null; payload_json: string }>()
@@ -153,16 +137,11 @@ test('members talk in team conversations, see unread state and receive recorded 
       actorId: 'owner', payload: {
         entityType: 'business_location', entityId: 'cabin-site', actorType: 'member',
         beforeState: { updated_at: unassignedLocation.updated_at }, afterState: { updated_at: assignedLocation.updated_at },
-        metadata: { title: 'Pine Cabin', changed_fields: [assignedLocation.assigned_member_id === 'm-cook' ? 'assigned_member_id' : 'assigned_team_id'], evidence_basis: 'persisted_change' },
+        metadata: { title: 'Pine Cabin', changed_fields: ['assigned_member_id'], evidence_basis: 'persisted_change' },
       },
-    }], 'only the winning assignment records its actual actor, field change and persisted revision')
-    assert.equal((await updateLocation(db, ORG, 'cabin-site', { assigned_member_id: null, assigned_team_id: null }, 'owner', env)).status, 200)
-    await assert.rejects(updateStayHome(env, db, manager, cabin.id, { assigned_team_id: 'operators' }), refused(422, 'RESPONSIBILITY_TARGET_CONFLICT', 'assigned_team_id'))
-    await assert.rejects(updateStayHome(env, db, manager, cabin.id, { assigned_member_id: null, assigned_team_id: 'outsider-team' }), refused(422, 'INVALID_RESPONSIBILITY', 'assigned_team_id'))
-    await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: null, assigned_team_id: 'operators' })
-    await assert.rejects(assertAssignedBookingAccess(db, { ...principal('cook', 'member'), requestId: stay.request_id }), refused(404, 'THREAD_NOT_FOUND', 'threadId'))
-    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId).sort(), ['owner'], 'a responsible Better Auth team reaches the stay conversation no more than a responsible member')
-    await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner', assigned_team_id: null })
+    }], 'only the saved assignment records its actual actor, field change and persisted revision')
+    assert.equal((await updateLocation(db, ORG, 'cabin-site', { assigned_member_id: null }, 'owner', env)).status, 200)
+    await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner' })
     const about = await createTeamThread(env, db, cleaner, { memberIds: ['owner'], stayId: stay.id })
     assert.equal(about.created, true)
     assert.notEqual(about.id, direct.id)
@@ -462,7 +441,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.equal(await db.prepare('SELECT id FROM team_messages WHERE thread_id = ?').bind(group.id).first('id'), groupMessage.message.id)
 
     // The home's one canonical assignment write retains its other details.
-    await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cook', assigned_team_id: null, check_in_time: '17:00', check_out_time: '11:00' })
+    await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cook', check_in_time: '17:00', check_out_time: '11:00' })
     assert.equal((await listStayHomes(db, manager)).find(home => home.product_id === cabin.id)?.assigned_member_id, 'm-cook')
     assert.deepEqual(await db.prepare('SELECT assigned_member_id, check_in_time, check_out_time FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first(), {
       assigned_member_id: 'm-cook', check_in_time: '17:00', check_out_time: '11:00',
@@ -481,13 +460,13 @@ test('members talk in team conversations, see unread state and receive recorded 
     const retainedGroup = (await listTeamThreads(env, db, owner)).find(thread => thread.name === 'Retained group')!
     assert.equal(retainedGroup.participants.length, 3)
     // Leaving the organization ends the seat; what they wrote stays, sent by their user.
-    await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner', assigned_team_id: null })
+    await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner' })
     const auth = createAuth(env)
     const headers = new Headers({ authorization: 'Bearer owner-session-token' })
     const removedMember = await auth.api.removeMember({ headers, body: { organizationId: ORG, memberIdOrEmail: 'm-cleaner' } })
     assert.equal(removedMember.member.id, 'm-cleaner')
     assert.equal((await listStayHomes(db, manager)).find(home => home.product_id === cabin.id)?.assigned_member_id, null, 'Better Auth removal releases current responsibility through its real organization hook')
-    await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cook', assigned_team_id: null })
+    await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cook' })
     await publicationCache.delete('team-publication:refuse')
     assert.deepEqual(await createTeamThread(env, db, owner, retainedCreation), { id: retainedGroup.id, created: false })
     assert.deepEqual((await listTeamThreads(env, db, owner)).find(thread => thread.id === retainedGroup.id)?.participants.map(person => person.id).sort(), ['cook', 'owner'])
@@ -512,7 +491,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.deepEqual(await db.prepare('SELECT assigned_member_id, max_guests, check_in_time, check_out_time FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first(), {
       assigned_member_id: null, max_guests: 3, check_in_time: '17:00', check_out_time: '11:00',
     })
-    await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cook', assigned_team_id: null })
+    await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cook' })
     const promotedMember = await auth.api.updateMemberRole({ headers, body: { organizationId: ORG, memberId: 'm-cook', role: 'admin' } })
     assert.equal(promotedMember.role, 'admin')
     assert.equal(await assignee(), 'm-cook')

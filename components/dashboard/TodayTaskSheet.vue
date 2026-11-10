@@ -125,7 +125,7 @@ async function reopen() {
 
 async function assign(person: TaskPerson | null) {
   await run('assign', () => applicationFetch(base.value, { method: 'PATCH', validate: isTaskResult,
-    body: { expectedVersion: props.task!.version, assignedMemberId: person?.type === 'member' ? person.id : null, assignedTeamId: person?.type === 'team' ? person.id : null } }), false)
+    body: { expectedVersion: props.task!.version, assignedMemberId: person?.id ?? null } }), false)
 }
 </script>
 

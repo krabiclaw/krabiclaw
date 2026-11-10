@@ -140,8 +140,8 @@ export async function acceptOpportunity(db: DbClient, principal: MemberAccessPri
     fail(409, 'OPPORTUNITY_CHANGED', 'What this opportunity was based on has changed. Reload Today to see what is current.', 'opportunity_id')
   }
   const viewer = await taskViewer(db, principal)
-  const assigned = body.assignedMemberId === undefined && body.assignedTeamId === undefined
-    ? { member: viewer.memberId, team: null }
+  const assigned = body.assignedMemberId === undefined
+    ? viewer.memberId
     : await readTaskAssignee(db, principal.organizationId, body)
   const place = item.locationId ? await queryFirst<{ timezone: string }>(db, 'SELECT timezone FROM business_locations WHERE organization_id = ? AND id = ?', [principal.organizationId, item.locationId]) : null
   const organization = await queryFirst<{ timezone: string }>(db, 'SELECT timezone FROM organization WHERE id = ?', [principal.organizationId])
@@ -159,13 +159,12 @@ export async function acceptOpportunity(db: DbClient, principal: MemberAccessPri
         WHERE c.organization_id = opportunities.organization_id AND c.product_id = opportunities.subject_id AND c.online_payment_required = 0))`,
       params: [now.toISOString(), principal.userId, now.toISOString(), principal.organizationId, id] },
     opportunityTaskInsert({ organizationId: principal.organizationId, opportunityId: id, title: item.headline, subject: subjectType && subjectId ? { type: subjectType, id: subjectId } : null,
-      productId: item.productId, locationId: item.locationId, assigned, dueAt, timezone, userId: principal.userId, now: now.toISOString(), taskId }),
-    eventQuery(principal, row, 'opportunity.accepted', { taskId, assigned_member_id: assigned.member, assigned_team_id: assigned.team, due_at: dueAt }),
+      productId: item.productId, locationId: item.locationId, assignedMemberId: assigned, dueAt, timezone, userId: principal.userId, now: now.toISOString(), taskId }),
+    eventQuery(principal, row, 'opportunity.accepted', { taskId, assigned_member_id: assigned, due_at: dueAt }),
   ], { operation: 'Accept opportunity' })
   if (results[0]?.meta.changes !== 1) fail(409, 'OPPORTUNITY_DECIDED', 'This opportunity was decided while you were looking at it', 'status')
-  const recipients = assigned.member === viewer.memberId ? [] : assigned.member
-    ? (await queryAll<{ userId: string }>(db, 'SELECT userId FROM member WHERE organizationId = ? AND id = ?', [principal.organizationId, assigned.member])).map(member => member.userId)
-    : assigned.team ? (await queryAll<{ userId: string }>(db, 'SELECT tm.userId FROM teamMember tm JOIN team t ON t.id = tm.teamId WHERE t.organizationId = ? AND t.id = ?', [principal.organizationId, assigned.team])).map(member => member.userId).filter(userId => userId !== principal.userId) : []
+  const recipients = assigned === viewer.memberId || !assigned ? []
+    : (await queryAll<{ userId: string }>(db, 'SELECT userId FROM member WHERE organizationId = ? AND id = ?', [principal.organizationId, assigned])).map(member => member.userId)
   if (recipients.length) {
     const { notifyTaskAssigned } = await import('~/server/utils/notifications')
     await notifyTaskAssigned(principal.env as CloudflareEnv, db, { organizationId: principal.organizationId, taskId, actorUserId: principal.userId, recipientUserIds: recipients })

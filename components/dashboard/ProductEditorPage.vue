@@ -258,9 +258,8 @@ export interface ProductForm {
   /** null: no notice. */
   advance_notice_minutes: number | null
   scheduling_mode: 'business' | 'provider'
-  /** null: the business schedule rather than a member or team. */
+  /** null: the business schedule rather than a member. */
   assigned_member_id: string | null
-  assigned_team_id: string | null
   online_payment_required: boolean
   /** Held online: booked in the provider's working hours rather than weekly times at a location. */
   held_online: boolean
@@ -273,9 +272,7 @@ export interface ProductForm {
   check_out_time: string
   max_guests: string
   min_nights: string
-  /** Null is the home looked after by owners and admins only: no team is assigned. */
-  stay_team_id: string | null
-  /** Kept as loaded: this editor assigns a team, and saving never clears a member set elsewhere. */
+  /** Null is the home looked after by owners and admins only: no member is assigned. */
   stay_member_id: string | null
   stay_property_type_group: StayPropertyTypeGroup | null
   stay_property_type: StayPropertyType | null
@@ -839,10 +836,10 @@ const draft = useState<ProductForm>(draftKey, () => ({
   collection_ids: [] as string[],
   bookable: false,
   booking_duration: '',
-  booking_capacity: '', scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: null, confirmation_mode: 'instant', advance_notice_minutes: null, online_payment_required: false, held_online: false,
+  booking_capacity: '', scheduling_mode: 'business', assigned_member_id: null, confirmation_mode: 'instant', advance_notice_minutes: null, online_payment_required: false, held_online: false,
   image_asset_id: null as string | null,
   // A new place to stay starts from these settings; an existing one is loaded from its own.
-  stay_location_id: '', check_in_time: '15:00', check_in_end_time: '', check_out_time: '11:00', max_guests: '', min_nights: '', stay_team_id: null, stay_member_id: null,
+  stay_location_id: '', check_in_time: '15:00', check_in_end_time: '', check_out_time: '11:00', max_guests: '', min_nights: '', stay_member_id: null,
   stay_property_type_group: null, stay_property_type: null,
   stay_listing_type: null, stay_total_floors: '', stay_listing_floor: '', stay_year_built: '', stay_property_size: '', stay_property_size_unit: null,
   stay_bedrooms: '', stay_beds: '', stay_bathrooms: '',
@@ -972,7 +969,6 @@ function loadForm(row: Product) {
   form.advance_notice_minutes = row.booking?.advance_notice_minutes ?? null
   form.scheduling_mode = row.booking?.scheduling_mode ?? 'business'
   form.assigned_member_id = row.booking ? row.booking.assigned_member_id : null
-  form.assigned_team_id = row.booking ? row.booking.assigned_team_id : null
   form.online_payment_required = row.booking?.online_payment_required ?? false
   form.held_online = row.booking?.held_online ?? false
   form.booking_capacity = row.booking?.default_capacity === null || row.booking === null ? '' : String(row.booking.default_capacity)
@@ -981,7 +977,6 @@ function loadForm(row: Product) {
   form.check_out_time = stay?.check_out_time ?? ''
   form.max_guests = stay ? String(stay.max_guests) : ''
   form.min_nights = stay ? String(stay.min_nights) : ''
-  form.stay_team_id = stay ? stay.assigned_team_id : null
   form.stay_member_id = stay ? stay.assigned_member_id : null
   form.stay_property_type_group = stay ? stay.property_type_group : null
   form.stay_property_type = stay ? stay.property_type : null
@@ -1068,15 +1063,11 @@ function checkInWindowValid(): boolean {
   return (form.check_in_time === '' || MINUTE_TIME_PATTERN.test(form.check_in_time)) && (form.check_out_time === '' || MINUTE_TIME_PATTERN.test(form.check_out_time))
     && (form.check_in_end_time === '' || (MINUTE_TIME_PATTERN.test(form.check_in_end_time) && form.check_in_end_time !== form.check_in_time))
 }
-function stayTeamSummary(): string {
-  if (schedulingMembersError.value) return 'Teams could not be loaded'
-  if (!schedulingMembers.value) return 'Loading team…'
-  if (form.stay_member_id) {
-    const member = schedulingMembers.value.members.find(candidate => candidate.id === form.stay_member_id)
-    return member?.name ?? 'Assigned member not found in this business'
-  }
-  if (!form.stay_team_id) return 'Unassigned'
-  return schedulingMembers.value.teams.find(candidate => candidate.id === form.stay_team_id)?.name ?? 'Assigned team not found in this business'
+function stayAssigneeSummary(): string {
+  if (!form.stay_member_id) return 'Unassigned'
+  if (schedulingMembersError.value) return 'Team members could not be loaded'
+  if (!schedulingMembers.value) return 'Loading team members…'
+  return schedulingMembers.value.members.find(candidate => candidate.id === form.stay_member_id)?.name ?? 'Assigned member not found in this business'
 }
 function roomsSummary(): string {
   const parts: string[] = []
@@ -1098,10 +1089,9 @@ const { data: schedulingMembers, error: schedulingMembersError } = useMemberSche
 /** The assignee by its loaded name; a read failure, a pending read or an unknown id says so. */
 function assignmentSummary(): string {
   const assignment = isNew.value ? form : product.value?.booking
-  if (!assignment?.assigned_team_id && !assignment?.assigned_member_id) return 'Unassigned'
+  if (!assignment?.assigned_member_id) return 'Unassigned'
   if (schedulingMembersError.value) return 'Team members could not be loaded'
   if (!schedulingMembers.value) return 'Loading team members…'
-  if (assignment.assigned_team_id) return schedulingMembers.value.teams.find(team => team.id === assignment.assigned_team_id)?.name ?? 'Assigned team not found in this business'
   const member = schedulingMembers.value.members.find(member => member.id === assignment.assigned_member_id)
   return member ? `${member.name}${(experienceEditor.value || legalEditor.value) && member.scheduling?.public_approved !== 1 ? ' · Profile not published' : ''}` : 'Assigned member not found in this business'
 }
@@ -1125,7 +1115,7 @@ function bookingSummary(): string {
   if ((experienceEditor.value || legalEditor.value) && config) return [
     minutes,
     config.default_capacity === null ? `No ${bookingCopy.value.guestLabel} limit` : config.default_capacity === 0 ? `Closed to new ${bookingCopy.value.guestsLabelPlural}` : `Up to ${config.default_capacity} ${config.default_capacity === 1 ? bookingCopy.value.guestLabel : bookingCopy.value.guestsLabelPlural} per ${legalEditor.value ? 'consultation' : 'session'}`,
-    config.scheduling_mode === 'provider' ? config.assigned_team_id ? 'Each team member’s working hours' : `${bookingCopy.value.assigneeNoun.replace(/^./u, letter => letter.toUpperCase())}’s working hours` : 'Calendar and repeating times',
+    config.scheduling_mode === 'provider' ? `${bookingCopy.value.assigneeNoun.replace(/^./u, letter => letter.toUpperCase())}’s working hours` : 'Calendar and repeating times',
     config.confirmation_mode === 'instant' ? 'Confirm automatically' : 'Review each request',
     noticeSummary(config.advance_notice_minutes),
     config.online_payment_required ? `Online payment required for paid ${legalEditor.value ? 'consultations' : 'sessions'}` : 'No payment collected at booking',
@@ -1219,7 +1209,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
         { id: 'description', label: sectionLabels.description, summary: row.description || 'Nothing written yet', placeholder: !row.description, to: sectionPath('description') },
         ...(legalEditor.value ? pageItems : []),
         ...(!legalEditor.value || row.booking || prices !== 'No price set' ? [{ id: 'price', label: location.value ? `Price at ${location.value.title}` : sectionLabels.price, summary: prices, placeholder: prices === 'No price set', to: sectionPath('price') }] : []),
-        ...(!legalEditor.value || row.booking ? [{ id: 'assignment', label: bookingCopy.value.assigneeLabel, icon: 'i-lucide-user-round', summary: row.booking ? assignmentSummary() : 'Set up bookings first', placeholder: !row.booking || !row.booking.assigned_team_id && !row.booking.assigned_member_id, to: sectionPath(row.booking ? 'booking/assignment' : 'booking') }] : []),
+        ...(!legalEditor.value || row.booking ? [{ id: 'assignment', label: bookingCopy.value.assigneeLabel, icon: 'i-lucide-user-round', summary: row.booking ? assignmentSummary() : 'Set up bookings first', placeholder: !row.booking || !row.booking.assigned_member_id, to: sectionPath(row.booking ? 'booking/assignment' : 'booking') }] : []),
         ...(!legalEditor.value || row.booking ? [{ id: 'booking', label: sectionLabels.booking, icon: 'i-lucide-calendar-check', summary: row.booking ? bookingSummary() : 'No booking calendar', placeholder: !row.booking, to: sectionPath('booking') }] : []),
         ...(!legalEditor.value || row.booking || row.locations.length ? [{ id: 'locations', label: sectionLabels.locations, icon: 'i-lucide-map-pin', summary: productLocationSummary(), placeholder: !row.locations.length && !row.booking?.held_online, to: sectionPath('locations') }] : []),
         ...details,
@@ -1332,7 +1322,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       { id: 'house-rules', label: 'House rules', summary: savedHouseRules.value.join('\n') || 'Add details', placeholder: !savedHouseRules.value.length, to: sectionPath('house-rules') },
       { id: 'guest-safety', label: 'Guest safety', summary: savedSafety.value.join('\n') || 'Add details', placeholder: !savedSafety.value.length, to: sectionPath('guest-safety') },
       { id: 'location', label: 'Location', summary: stayLocationError.value || (stayLocation.value ? formatPostalAddress(stayLocation.value.address) || 'Add address' : 'Loading location…'), placeholder: !stayLocation.value?.address, to: sectionPath('location') },
-      { id: 'team', label: 'Looked after by', summary: stayTeamSummary(), to: sectionPath('team') },
+      { id: 'team', label: 'Looked after by', summary: stayAssigneeSummary(), to: sectionPath('team') },
       { id: 'questions', label: 'Questions', icon: 'i-lucide-message-square-text', summary: formQuestionsSummary(product.value.stay!.questions), placeholder: !product.value.stay!.questions.length, to: sectionPath('questions') },
       ...otherDetails,
       ...(form.collection_ids.length ? [{ id: 'collections', label: sectionLabels.collections, summary: collectionsSummary(), to: sectionPath('collections') }] : []),
@@ -1558,7 +1548,6 @@ function payload(concern?: ProductConcern) {
       max_guests: Number(form.max_guests),
       min_nights: Number(form.min_nights),
       assigned_member_id: form.stay_member_id,
-      assigned_team_id: form.stay_team_id,
       property_type_group: form.stay_property_type_group || null,
       property_type: form.stay_property_type || null,
       listing_type: form.stay_listing_type,
@@ -1582,7 +1571,6 @@ function payload(concern?: ProductConcern) {
     } } : {}),
     ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'team' ? { stay: {
       assigned_member_id: form.stay_member_id,
-      assigned_team_id: form.stay_team_id,
     } } : {}),
     ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'rooms' ? { stay: {
       bedrooms: String(form.stay_bedrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bedrooms)) ? Number(form.stay_bedrooms) : null,
@@ -1643,12 +1631,12 @@ async function commit(concern?: ProductConcern) {
   const id = locationId.value
   const removesOnlineScope = locationScope.value === 'online' && (concern === 'location' && !form.held_online || concern === 'enabled' && !form.bookable)
   let ordinaryDraft: { version: string | null; values: ProductForm } | null = null
-  const bookingDraft: Partial<ProductForm> | null = concern === 'enabled' ? { bookable: form.bookable, ...(legalEditor.value && form.bookable ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id, assigned_team_id: form.assigned_team_id } : {}) }
+  const bookingDraft: Partial<ProductForm> | null = concern === 'enabled' ? { bookable: form.bookable, ...(legalEditor.value && form.bookable ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id } : {}) }
     : concern === 'duration' ? { booking_duration: form.booking_duration }
     : concern === 'capacity' ? { booking_capacity: form.booking_capacity }
     : concern === 'confirmation' ? { confirmation_mode: form.confirmation_mode }
     : concern === 'notice' ? { advance_notice_minutes: form.advance_notice_minutes }
-    : concern === 'assignment' ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id, assigned_team_id: form.assigned_team_id }
+    : concern === 'assignment' ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id }
     : concern === 'payment' ? { online_payment_required: form.online_payment_required }
     : concern === 'location' ? { held_online: form.held_online }
     : null
@@ -1863,11 +1851,11 @@ async function saveBooking(concern: BookingConcern) {
     return
   }
   const body = concern === 'duration' ? { duration_minutes: Number(form.booking_duration) }
-    : concern === 'enabled' && legalEditor.value ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id, assigned_team_id: form.assigned_team_id }
+    : concern === 'enabled' && legalEditor.value ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id }
     : concern === 'capacity' ? { default_capacity: form.booking_capacity.trim() ? Number(form.booking_capacity) : null }
     : concern === 'confirmation' ? { confirmation_mode: form.confirmation_mode }
     : concern === 'notice' ? { advance_notice_minutes: form.advance_notice_minutes }
-    : concern === 'assignment' ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id, assigned_team_id: form.assigned_team_id }
+    : concern === 'assignment' ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id }
     : concern === 'payment' ? { online_payment_required: form.online_payment_required }
     : concern === 'location' ? { held_online: form.held_online }
     : {}

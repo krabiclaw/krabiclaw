@@ -10,8 +10,8 @@ import { listStayHomes, updateStayHome, type StayAccess } from '../../server/dom
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 
 // Whoever leaves a business — removed by an owner, leaving on their own, or
-// deleting their account — stops being responsible for its homes, locations
-// and Teams, and open apps are told access changed. Each path runs through
+// deleting their account — stops being responsible for its homes and
+// locations, and open apps are told access changed. Each path runs through
 // Better Auth's own HTTP handler, the way the dashboard and the app call it.
 
 const BASE = 'https://departure-proof.example'
@@ -19,7 +19,7 @@ const PASSWORD = 'DepartureProof123!'
 const ORG = 'org'
 const PEOPLE = ['owner', 'removed', 'leaver', 'deleter'] as const
 
-test('every way a member leaves clears their homes, locations and Teams and publishes access.changed', { timeout: 120_000 }, async () => {
+test('every way a member leaves clears their homes and locations and publishes access.changed', { timeout: 120_000 }, async () => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'departure-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: `export class Hub {
@@ -83,7 +83,7 @@ test('every way a member leaves clears their homes, locations and Teams and publ
     assert.equal(restoredRole.status, 200, await restoredRole.clone().text())
 
     // Each departing member looks after one home at its own location, through
-    // the same writes the dashboard makes, and belongs to one Team.
+    // the same writes the dashboard makes.
     const manager: StayAccess = { organizationId: ORG, actorId: 'owner', manage: true }
     const homes: Record<string, string> = {}
     for (const person of PEOPLE.slice(1)) {
@@ -91,32 +91,23 @@ test('every way a member leaves clears their homes, locations and Teams and publ
         VALUES (?, ?, ?, ?, 'active', 'America/Denver', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`).bind(`site-${person}`, ORG, `site-${person}`, `Site ${person}`).run()
       const home = await createProduct(db, { env, organizationId: ORG, actor: { actorId: 'owner' }, product: {
         kind: 'stay', name: `Home ${person}`, variants: [{ name: `Home ${person}`, prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
-        stay: { location_id: `site-${person}`, check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null, assigned_team_id: null },
+        stay: { location_id: `site-${person}`, check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null },
       } })
       homes[person] = home.id
-      await updateStayHome(env, db, manager, home.id, { assigned_member_id: `m-${person}`, assigned_team_id: null })
-      const located = await updateLocation(db, ORG, `site-${person}`, { assigned_member_id: `m-${person}`, assigned_team_id: null }, 'owner', env)
+      await updateStayHome(env, db, manager, home.id, { assigned_member_id: `m-${person}` })
+      const located = await updateLocation(db, ORG, `site-${person}`, { assigned_member_id: `m-${person}` }, 'owner', env)
       assert.equal(located.status, 200, JSON.stringify(located.data))
     }
     const activated = await post('/organization/set-active', tokens.owner!, { organizationId: ORG })
     assert.equal(activated.status, 200, await activated.clone().text())
-    const createdTeam = await post('/organization/create-team', tokens.owner!, { organizationId: ORG, name: 'Housekeeping' })
-    assert.equal(createdTeam.status, 200, await createdTeam.clone().text())
-    const teamId = (await createdTeam.json() as { id: string }).id
-    for (const person of PEOPLE) {
-      const added = await post('/organization/add-team-member', tokens.owner!, { teamId, userId: person })
-      assert.equal(added.status, 200, await added.clone().text())
-    }
 
     const homeAssignee = async (person: string) => (await listStayHomes(db, manager)).find(home => home.product_id === homes[person])?.assigned_member_id
     const locationAssignee = async (person: string) => (await getLocation(db, ORG, `site-${person}`))?.assigned_member_id
-    const teamSeats = async (person: string) => db.prepare('SELECT COUNT(*) AS n FROM teamMember WHERE teamId = ? AND userId = ?').bind(teamId, person).first('n')
     const removals = async (person: string) => db.prepare("SELECT COUNT(*) AS n FROM activity_entries WHERE organization_id = ? AND event_name = 'member.removed' AND json_extract(payload_json, '$.metadata.userId') = ?").bind(ORG, person).first('n')
     const accessChanges = async () => Number(await cache.get('access-changed:count') ?? '0')
     for (const person of PEOPLE.slice(1)) {
       assert.equal(await homeAssignee(person), `m-${person}`)
       assert.equal(await locationAssignee(person), `m-${person}`)
-      assert.equal(await teamSeats(person), 1)
     }
 
     const departures: Array<[string, () => Promise<Response>]> = [
@@ -131,7 +122,6 @@ test('every way a member leaves clears their homes, locations and Teams and publ
       assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM member WHERE organizationId = ? AND userId = ?').bind(ORG, person).first('n'), 0)
       assert.equal(await homeAssignee(person), null, `${person}'s home is unassigned`)
       assert.equal(await locationAssignee(person), null, `${person}'s location is unassigned`)
-      assert.equal(await teamSeats(person), 0, `${person} has no Team seat`)
       assert.equal(await removals(person), 1, `${person}'s departure is recorded once`)
       const departure = await db.prepare("SELECT actor_kind, actor_user_id, payload_json FROM activity_entries WHERE organization_id = ? AND event_name = 'member.removed' AND json_extract(payload_json, '$.metadata.userId') = ?")
         .bind(ORG, person).first<{ actor_kind: string; actor_user_id: string | null; payload_json: string }>()
@@ -145,8 +135,6 @@ test('every way a member leaves clears their homes, locations and Teams and publ
     }
     assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM user WHERE id = 'deleter'").first('n'), 0)
 
-    // The owner who stayed keeps their Team seat; the Team itself remains.
-    assert.equal(await teamSeats('owner'), 1)
     assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM activity_entries WHERE organization_id = ? AND event_name = 'member.access_scope_revoked'").bind(ORG).first('n'), 6)
   } finally {
     await runtime.dispose()

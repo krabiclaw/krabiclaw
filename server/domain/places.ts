@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { ASSIGNED_SERVICE_SQL, assertLocationAccess, assertProductAccess, assignedResponsibilitySql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { ASSIGNED_SERVICE_SQL, assertLocationAccess, assertProductAccess, assignedMemberSql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { updateLocation } from '~/server/utils/location-management'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
@@ -59,7 +59,7 @@ export interface Place {
 export interface PlacesCalendar { from: string; to: string; manage: boolean; places: Array<{ place: Place; days: PlaceDay[] }> }
 
 interface LocationRow { id: string; slug: string; title: string; status: string; timezone: string; address: string | null; opening_hours: string | null; special_hours: string | null; updated_at: string }
-interface OfferingRow { id: string; name: string; kind: 'experience' | 'service'; timezone: string; scheduling_mode: string; assigned_member_id: string | null; assigned_team_id: string | null; provider_name: string | null; locations: string | null }
+interface OfferingRow { id: string; name: string; kind: 'experience' | 'service'; timezone: string; scheduling_mode: string; assigned_member_id: string | null; provider_name: string | null; locations: string | null }
 interface SessionRow { id: string; product_id: string; timezone: string; starts_at: string; status: 'scheduled' | 'cancelled'; claimed: number; updated_at: string }
 
 function fail(statusCode: number, message: string, field?: string): never {
@@ -86,10 +86,10 @@ async function listPlaces(db: DbClient, principal: MemberAccessPrincipal, only?:
     FROM business_locations l
     WHERE l.organization_id = ? AND (? IS NULL OR l.id = ?)
       ${only ? '' : 'AND EXISTS (SELECT 1 FROM location_reservation_configs c WHERE c.organization_id = l.organization_id AND c.location_id = l.id)'}
-      ${everyLocation ? '' : `AND ${assignedResponsibilitySql('l')}`}
-    ORDER BY l.title, l.id`, [organizationId, only?.id ?? null, only?.id ?? null, ...(everyLocation ? [] : [userId, userId])])
+      ${everyLocation ? '' : `AND ${assignedMemberSql('l')}`}
+    ORDER BY l.title, l.id`, [organizationId, only?.id ?? null, only?.id ?? null, ...(everyLocation ? [] : [userId])])
   const offerings = only && only.kind !== 'offering' ? [] : await queryAll<OfferingRow>(db, `
-    SELECT p.id, p.name, p.kind, c.scheduling_mode, c.assigned_member_id, c.assigned_team_id,
+    SELECT p.id, p.name, p.kind, c.scheduling_mode, c.assigned_member_id,
            COALESCE((SELECT l.timezone FROM product_locations pl JOIN business_locations l ON l.id = pl.location_id AND l.organization_id = pl.organization_id WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id ORDER BY l.title LIMIT 1),
              (SELECT ms.timezone FROM member_scheduling ms WHERE ms.member_id = c.assigned_member_id AND ms.organization_id = c.organization_id), o.timezone) AS timezone,
            (SELECT ${MEMBER_NAME_SQL} FROM member m JOIN user u ON u.id = m.userId LEFT JOIN member_scheduling ms ON ms.member_id = m.id AND ms.organization_id = m.organizationId WHERE m.id = c.assigned_member_id AND m.organizationId = c.organization_id) AS provider_name,
@@ -97,7 +97,7 @@ async function listPlaces(db: DbClient, principal: MemberAccessPrincipal, only?:
     FROM products p JOIN product_booking_configs c ON c.product_id = p.id AND c.organization_id = p.organization_id JOIN organization o ON o.id = p.organization_id
     WHERE p.organization_id = ? AND p.kind IN ('experience', 'service') AND (? IS NULL OR p.id = ?)
       ${everyOffering ? '' : `AND ${ASSIGNED_SERVICE_SQL}`}
-    ORDER BY p.name, p.id`, [organizationId, only?.id ?? null, only?.id ?? null, ...(everyOffering ? [] : [userId, userId])])
+    ORDER BY p.name, p.id`, [organizationId, only?.id ?? null, only?.id ?? null, ...(everyOffering ? [] : [userId])])
   return { locations, offerings }
 }
 
@@ -128,7 +128,7 @@ function locationDays(row: LocationRow, window: string[], reservations: Map<stri
 function offeringDays(row: OfferingRow, window: string[], sessions: Map<string, SessionRow[]>): PlaceDay[] {
   const provider = row.scheduling_mode === 'provider'
   const first = stayGuestFirstName(row.provider_name)
-  const hoursText = provider ? `Outside ${row.assigned_member_id && first ? `${first}'s` : 'the team\'s'} hours` : 'No session on this day'
+  const hoursText = provider ? `Outside ${first ? `${first}'s` : 'the provider\'s'} hours` : 'No session on this day'
   return window.map((date) => {
     const onDay = sessions.get(date) ?? []
     const booked = onDay.filter(session => session.claimed > 0).length

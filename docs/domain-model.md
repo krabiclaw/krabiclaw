@@ -70,8 +70,6 @@ Each of these tables is a second model of a concept above. The check fails until
 | `location_reservation_configs` | How a product is booked, and who handles it |
 | `stay_payments` | Payments |
 | `send_later_messages` | Future guest message |
-| `team` | Organization and membership (Better Auth Teams, never used: production has no team) |
-| `teamMember` | Organization and membership (unused) |
 
 ## Single-owner columns
 
@@ -80,7 +78,6 @@ Each of these columns exists on its owner table only.
 | Column | Owner |
 |---|---|
 | `assigned_member_id` | `product_booking_configs` `tasks` |
-| `assigned_team_id` | (none) |
 | `party_size` | `bookings` |
 | `no_show_at` | `bookings` |
 | `cancellation_reason` | `bookings` |

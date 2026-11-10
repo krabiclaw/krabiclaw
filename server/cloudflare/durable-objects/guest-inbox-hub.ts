@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { HTTPError } from 'nitro'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../../shared/dashboard-invalidations'
 import { queryFirst } from '~/server/db'
-import { assertAssignedBookingAccess, assignedResponsibilitySql, memberAccessPrincipal, resolveOrganizationMembership, roleAllows, type ResolvedMembership } from '~/server/utils/member-access'
+import { assertAssignedBookingAccess, assignedMemberSql, memberAccessPrincipal, resolveOrganizationMembership, roleAllows, type ResolvedMembership } from '~/server/utils/member-access'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
 import { runOrganizationJobs } from '~/server/domain/cleaner-jobs'
 
@@ -67,8 +67,8 @@ async function canReceive(env: GuestInboxHubEnv, attachment: InboxSocketAttachme
   if ('targetUserId' in event) return event.targetUserId === attachment.userId
   if ('productId' in event) {
     return Boolean(await queryFirst(env.DB, `SELECT c.product_id FROM product_stay_configs c
-      WHERE c.organization_id = ? AND c.product_id = ? AND (${assignedResponsibilitySql('c')})`,
-    [attachment.organizationId, event.productId, attachment.userId, attachment.userId]))
+      WHERE c.organization_id = ? AND c.product_id = ? AND (${assignedMemberSql('c')})`,
+    [attachment.organizationId, event.productId, attachment.userId]))
   }
   try {
     // The same resource guard used by the canonical inbox handles assigned

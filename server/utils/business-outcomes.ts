@@ -459,7 +459,7 @@ export async function readBusinessProgressReference(
     const evidence = { kind: 'product_readiness' as const, missing: blocker }
     // A price is missing where the experience is booked, so where that is belongs to the evidence.
     const scope = { online: product.booking?.held_online ?? false, locations: product.locations.filter(entry => entry.published).map(entry => entry.location_id).sort() }
-    return result(evidence, blocker === 'host' ? { ...evidence, member: product.booking?.assigned_member_id, team: product.booking?.assigned_team_id }
+    return result(evidence, blocker === 'host' ? { ...evidence, member: product.booking?.assigned_member_id }
       : blocker === 'variants.prices' ? { ...evidence, scope } : evidence)
   }
   if (input.operation === 'product.payment' || input.operation === 'stay.gap') {

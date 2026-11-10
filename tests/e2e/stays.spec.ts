@@ -354,7 +354,7 @@ test('a home keeps its operator name independent from its public title across CM
 
 // A member responsible for a home reads turnover details while owners and
 // admins retain the guest's contact, money and conversation.
-test('a responsible home team reads its stays as turnovers on every surface until Better Auth removes its membership', async ({ page, browser, baseURL }) => {
+test('a responsible home member reads its stays as turnovers on every surface until the host unassigns them', async ({ page, browser, baseURL }) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Home responsibility uses disposable local data only')
   const { headers, slug, organizationId, call, api, productId } = await createStayHome(page, baseURL!)
@@ -366,23 +366,21 @@ test('a responsible home team reads its stays as turnovers on every surface unti
     const { token } = await offered.json() as { token: string }
     const accepted = await memberContext.request.post(`/api/invite-links/${token}/accept`, { data: {} })
     await expectStatus(accepted, 200)
-    const teamName = 'Home hosts'
-    const team = await page.request.post('/api/auth/organization/create-team', { headers, data: { organizationId, name: teamName } })
-    await expectStatus(team, 200)
-    const { id: teamId } = await team.json() as { id: string }
-    const included = await page.request.post('/api/auth/organization/add-team-member', { headers, data: { organizationId, teamId, userId: 'user-e2e-lodging-native' } })
-    await expectStatus(included, 200)
+    const { memberId } = await accepted.json() as { memberId: string }
+    const memberSession = await memberContext.request.get('/api/auth/get-session')
+    await expectStatus(memberSession, 200)
+    const memberName = (await memberSession.json() as { user: { name: string } }).user.name
     await page.goto(`/dashboard/${slug}/products/${productId}/team`)
     const responsibility = page.locator('#dashboard-panel-product-team')
-    await expect(responsibility.getByRole('radio', { name: 'Unassigned No person or team is assigned.', exact: true })).toBeChecked()
-    await responsibility.getByRole('radio', { name: `Team: ${teamName} 1 member`, exact: true }).check()
+    await expect(responsibility.getByRole('radio', { name: 'Unassigned No person is assigned.', exact: true })).toBeChecked()
+    await responsibility.getByRole('radio', { name: memberName, exact: true }).check()
     const assigned = page.waitForResponse(response => response.request().method() === 'PATCH'
       && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${productId}`)
     await responsibility.getByRole('button', { name: 'Save', exact: true }).click()
     await expectStatus(await assigned, 200)
     const productRead = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(productRead.error).toBeNull()
-    expect(productRead.data!.product.stay).toMatchObject({ assigned_member_id: null, assigned_team_id: teamId })
+    expect(productRead.data!.product.stay).toMatchObject({ assigned_member_id: memberId })
     const marker = crypto.randomUUID().slice(0, 8)
     const guestName = `Ana${marker}`
     const surname = `Surname${marker}`
@@ -415,7 +413,7 @@ test('a responsible home team reads its stays as turnovers on every surface unti
     expect(await memberCall('list_stays', { from: localDay(0), to: localDay(3) })).toEqual({ data: { stays: [turnover] }, error: null })
     const memberCalendar = await memberCall<{ stays: unknown[] }>('get_stay_calendar', { product_id: productId, from: localDay(0), to: localDay(3) })
     expect(memberCalendar.data!.stays).toEqual([turnover])
-    // The stay checks out in two days: its turnover is the team's Upcoming work, under that day, and Today holds nothing.
+    // The stay checks out in two days: its turnover is the member's Upcoming work, under that day, and Today holds nothing.
     const today = await memberContext.request.get(api('today'))
     await expectStatus(today, 200)
     const todayBody = await today.json() as BusinessToday
@@ -428,7 +426,7 @@ test('a responsible home team reads its stays as turnovers on every surface unti
     expect(turnoverDay?.id).toBe(localDay(2))
     expect(turnoverDay!.tasks.filter(task => task.stayId === stay.id)).toEqual([expect.objectContaining({
       kind: 'turnover', status: 'open', title: 'Cliff Cabin', productId, requestId: null, path: null,
-      assignee: { type: 'team', id: teamId, name: teamName, initial: 'H', you: false },
+      assignee: { type: 'member', id: memberId, name: 'You', initial: memberName.trim().charAt(0).toUpperCase(), you: true },
       can: { complete: true, skip: true, reopen: false, assign: false, edit: false },
     })])
     // The member reads the turnover as its card does: the guest by first name, never their contact, note or conversation.
@@ -517,7 +515,7 @@ test('a responsible home team reads its stays as turnovers on every surface unti
     await expect(page.locator('#dashboard-panel-stay-move').getByText('You have no other homes to move this guest to.', { exact: true })).toBeVisible()
     await expect(page.locator('#dashboard-panel-stay-move').getByRole('button', { name: 'Move guest', exact: true })).toBeDisabled()
 
-    const removed = await page.request.post('/api/auth/organization/remove-team-member', { headers, data: { organizationId, teamId, userId: 'user-e2e-lodging-native' } })
+    const removed = await page.request.patch(`/api/editor/organizations/${organizationId}/products/${productId}`, { data: { stay: { assigned_member_id: null } } })
     await expectStatus(removed, 200)
     await expectStatus(await memberContext.request.get(stayPath), 404)
     const homes = await memberContext.request.get(api('stay-homes'))
@@ -526,7 +524,7 @@ test('a responsible home team reads its stays as turnovers on every surface unti
     const afterList = await memberContext.request.get(api(`stays?from=${localDay(0)}&to=${localDay(3)}`))
     await expectStatus(afterList, 200)
     expect(await afterList.json()).toEqual({ stays: [], manage: false })
-    // Out of the team, the home's turnover is no longer the member's work.
+    // Unassigned, the home's turnover is no longer the member's work.
     const afterUpcoming = await memberContext.request.get(api('today?range=upcoming'))
     await expectStatus(afterUpcoming, 200)
     expect((await afterUpcoming.json() as BusinessToday).tasks.flatMap(section => section.tasks).filter(task => task.stayId === stay.id)).toEqual([])
@@ -1257,7 +1255,7 @@ test('a host saves cancellation policies, guests, minimum nights and arrival tim
     expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
       product_id: productId, product_updated_at: settingsRead.data!.product.updated_at, name: 'Cliff Cabin', internal_name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
       // A home the editor creates has a flexible check-in end until the host chooses one.
-      check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 6, min_nights: 1, calendar_rules: null, assigned_member_id: null, assigned_team_id: null, channel: null,
+      check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 6, min_nights: 1, calendar_rules: null, assigned_member_id: null, channel: null,
       check_in_instructions: null, photos: [], photo_rooms: [],
       // The editor's listing choices persist through the native home projection too.
       description: listingDescription, published: false, live: false, airbnb_listing_id: null, airbnb_editor_url: null, address: homeAddress, latitude: null, longitude: null, stay_map_sharing: 'general',
@@ -3285,10 +3283,10 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   expect(JSON.parse(userIdAssignment.error!)).toMatchObject({ status: 422, code: 'INVALID_RESPONSIBILITY', message: 'The responsible member must belong to this organization' })
   const unchangedAssignment = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${productId}`)
   await expectStatus(unchangedAssignment, 200)
-  expect((await unchangedAssignment.json()).product.stay).toMatchObject({ assigned_member_id: null, assigned_team_id: null })
+  expect((await unchangedAssignment.json()).product.stay).toMatchObject({ assigned_member_id: null })
   const hosted = await call<{ product: Product }>('update_product', { product_id: productId, stay: { assigned_member_id: host.memberId } })
   expect(hosted.error).toBeNull()
-  expect(hosted.data!.product.stay).toMatchObject({ assigned_member_id: host.memberId, assigned_team_id: null })
+  expect(hosted.data!.product.stay).toMatchObject({ assigned_member_id: host.memberId })
   const productEndpoint = `/api/editor/organizations/${organizationId}/products/${productId}`
   const activationHandoff = { status: 409, code: 'HOME_ACTIVATION_REQUIRES_DASHBOARD', operation_completed: false, action_required: true, dashboard_url: `${baseURL}/dashboard/${slug}/products` }
   const unpublishedNativeRead = await request.get(`${baseURL}${productEndpoint}`)
@@ -3827,7 +3825,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
     const assignedHome = (await madeHome.json() as { home: { product_id: string; location_id: string } }).home
     const otherHomeInput = { kind: 'stay', name: 'Other Cabin', stay: {
       location_id: locations.data!.locations[0]!.id, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1,
-      assigned_member_id: null, assigned_team_id: null,
+      assigned_member_id: null,
     } }
     const otherHomeRequest = { idempotency_key: crypto.randomUUID(), products: [otherHomeInput] }
     const discovery = await mcpRequest(page.request, baseURL!, { method: 'tools/list' })

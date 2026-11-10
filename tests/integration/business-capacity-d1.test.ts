@@ -108,7 +108,7 @@ test('live homes are reported to their Stripe meter, drafts and locations are fr
     const place = (organizationId: string, title: string) => createLocation(env, db, organizationId, { title, timezone: 'America/Denver' }, OWNER)
     const homeAt = (organizationId: string, locationId: string, name: string, published = false) => createProduct(db, { env, organizationId, actor, ...(published ? { publication: { published: true } } : {}), product: {
       kind: 'stay', name, variants: [{ name, prices: [{ unit_amount: 150_00, currency: 'USD' }] }],
-      stay: { location_id: locationId, check_in_time: '15:00', check_out_time: '11:00', max_guests: 2, min_nights: 1, assigned_member_id: null, assigned_team_id: null },
+      stay: { location_id: locationId, check_in_time: '15:00', check_out_time: '11:00', max_guests: 2, min_nights: 1, assigned_member_id: null },
     } })
     const reportsFor = (customer: string) => reported.filter(row => row.customer === customer).length
     const activationBoundaryTables = ['products', 'product_publications', 'business_locations', 'activity_entries', 'public_resource_cache_invalidations']

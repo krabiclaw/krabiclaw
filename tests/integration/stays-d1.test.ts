@@ -74,8 +74,6 @@ async function boot() {
       await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, 0, 0)").bind(id, id, `${id}@example.test`).run()
       await db.prepare('INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, ?, 0)').bind(`m-${id}`, ORG, id, role).run()
     }
-    await db.prepare("INSERT INTO team (id, name, organizationId, createdAt) VALUES ('cleaning', 'Cleaning', ?, 0)").bind(ORG).run()
-    await db.prepare("INSERT INTO teamMember (id, teamId, userId, createdAt) VALUES ('tm-cleaner', 'cleaning', ?, 0)").bind(CLEANER).run()
     for (const loc of ['cabin-site', 'lake-site']) {
       await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
         VALUES (?, ?, ?, ?, 'active', 'America/Denver', ?, ?)`).bind(loc, ORG, loc, loc, NOW, NOW).run()
@@ -87,11 +85,11 @@ async function boot() {
   }
 }
 
-async function home(db: D1Database, env: CloudflareEnv, input: { name: string; location: string; team?: string }) {
+async function home(db: D1Database, env: CloudflareEnv, input: { name: string; location: string; member?: string }) {
   return createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
     kind: 'stay', name: input.name,
     variants: [{ name: input.name, prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
-    stay: { location_id: input.location, check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: input.team ?? null },
+    stay: { location_id: input.location, check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: input.member ?? null },
   } })
 }
 
@@ -286,13 +284,13 @@ test('a place to stay is a Product at exactly one location, priced per night', {
   const { runtime, db, env } = await boot()
   try {
     await assert.rejects(createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: { kind: 'stay', name: 'No rules' } }), /needs its location/)
-    await assert.rejects(createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: { kind: 'dish', name: 'Soup', stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 2, min_nights: 1, assigned_member_id: null, assigned_team_id: null } } }), /Only a place to stay/)
-    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
+    await assert.rejects(createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: { kind: 'dish', name: 'Soup', stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 2, min_nights: 1, assigned_member_id: null } } }), /Only a place to stay/)
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })
     assert.equal(cabin.kind, 'stay')
     assert.equal(cabin.unit_label, 'night')
     assert.deepEqual(cabin.stay, { internal_name: 'Cabin', location_id: 'cabin-site', check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 4, min_nights: 2, calendar_rules: null,
       property_type_group: null, property_type: null, listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null,
-      bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', assigned_member_id: null, assigned_team_id: 'cleaning', live: false, photo_rooms: [],
+      bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', assigned_member_id: `m-${CLEANER}`, live: false, photo_rooms: [],
       accessibility: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(feature => ({ feature, available: null, photo_ids: [] })),
       questions: [], questions_revision: formQuestionsRevision([]) })
     // Property classification is either one authored pair or fully unknown.
@@ -552,7 +550,7 @@ test('authored photo rooms move photos atomically and follow the listing placeme
   const { runtime, db, env } = await boot()
   try {
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('room-en', ?, 'en', 1, 'published')").bind(ORG).run()
-    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })
     const lake = await home(db, env, { name: 'Lake house', location: 'lake-site' })
     // A draft home owns its photos before it has a publication row. Withdrawing
     // an already unlisted home preserves that state instead of inventing one.
@@ -1259,7 +1257,7 @@ test('the host changes only the chosen weekdays and moves each night’s own pri
 test('the multi-calendar reads every home the caller looks after, each night as its own home calendar reads it', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
   try {
-    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })
     const lake = await home(db, env, { name: 'Lake house', location: 'lake-site' })
     await setStayNights(db, env, manager, { product_id: lake.id, from: '2026-11-02', to: '2026-11-04', price_minor: 22_000, min_stay_arrival: 3 })
     await setStayNights(db, env, manager, { product_id: cabin.id, from: '2026-11-05', to: '2026-11-06', closed: true })
@@ -1376,7 +1374,7 @@ test('unknown home clocks preserve turnover dates without inventing task instant
   const { runtime, db, env } = await boot()
   try {
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-31T12:00:00.000Z') })
-    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })
     await updateStayHome(env, db, manager, cabin.id, { check_in_time: null, check_out_time: null })
     const first = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'unknown-first', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
     const next = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'unknown-next', check_in_date: '2026-11-03', check_out_date: '2026-11-05', ...guest })
@@ -1406,7 +1404,7 @@ test('members see only the homes they look after and change nothing; a home with
   try {
     // The stays are booked ahead of their dates, so their turnovers are work rather than history.
     t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-31T12:00:00.000Z') })
-    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })
     const lake = await home(db, env, { name: 'Lake house', location: 'lake-site' })
     const cabinStay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'c', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
     const lakeStay = await createStay(db, env, manager, { product_id: lake.id, idempotency_key: 'l', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
@@ -1452,7 +1450,7 @@ test('members see only the homes they look after and change nothing; a home with
 test('a member reads a stay at a home they look after as its turnover on every read path, and nothing of its guest, money or conversation', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
   try {
-    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', member: `m-${CLEANER}` })
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'turnover', check_in_date: '2026-11-01', check_out_date: '2026-11-03', arrival_time: '15:30',
       adults: 2, children: 1, infants: 1, guest_name: 'Ana', guest_surname: 'Silva', guest_email: 'ana@example.test', notes: 'Door code 4411', total_minor: 45_000 })
     await recordStayPayment(db, env, manager, stay.id, { amount_minor: 20_000, method: 'cash', paid_on: '2026-11-01', idempotency_key: 'turnover-pay' })

@@ -164,12 +164,11 @@ const collectionObject = {
 } as const
 
 const bookingPolicyFields = {
-  scheduling_mode: { type: 'string', enum: ['business', 'provider'], description: 'Legal consultations require provider scheduling with an explicitly assigned attorney or legal team. business: the business publishes its own sessions; an assigned member or team is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s or team’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.' },
-  assigned_member_id: { type: ['string', 'null'], description: 'Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. Guests see this member’s approved public profile. Read get_member_public_profile; publication requires an approved profile with a nonblank public_name. Clear assigned_team_id when choosing a member.' },
-  assigned_team_id: { type: ['string', 'null'], description: 'Host team ID from list_teams. Guests see the team’s members with approved public profiles; at least one is required for publication. Clear assigned_member_id when choosing a team.' },
+  scheduling_mode: { type: 'string', enum: ['business', 'provider'], description: 'Legal consultations require provider scheduling with an explicitly assigned attorney. business: the business publishes its own sessions; an assigned member is optional and hosts them, but their working hours do not set the times. Experiences may use it. provider: times come from the assigned member’s working hours. Physical provider times also respect the selected member’s availability; online times come from their working hours.' },
+  assigned_member_id: { type: ['string', 'null'], description: 'Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. Guests see this member’s approved public profile. Read get_member_public_profile; publication requires an approved profile with a nonblank public_name.' },
   confirmation_mode: { type: 'string', enum: ['instant', 'review'], default: 'instant', description: 'instant confirms immediately (default); review waits for staff approval.' },
   online_payment_required: { type: 'boolean', default: false, description: 'True requires online payment when booking; false is the default and does not collect online.' },
-  held_online: { type: 'boolean', description: 'True holds the offering online: its times are its provider\'s working hours, in the provider\'s timezone. Requires scheduling_mode provider with an assigned member or team.' },
+  held_online: { type: 'boolean', description: 'True holds the offering online: its times are its provider\'s working hours, in the provider\'s timezone. Requires scheduling_mode provider with an assigned member.' },
 } as const
 const advanceNoticeField = { advance_notice_minutes: { type: ['integer', 'null'], minimum: 0, description: 'Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book or cancel online a session that starts sooner, and no booking is moved into one. Free cancellation closes at least 24 hours before the start either way. Null means no notice.' } } as const
 // Setup states online-ness through location_id null, never a second flag beside it.
@@ -184,7 +183,6 @@ const bookingConfigObject = {
   type: ['object', 'null'],
   properties: { product_id: { type: 'string' }, organization_id: { type: 'string' }, duration_minutes: { type: ['integer', 'null'], minimum: 1 }, default_capacity: { type: ['integer', 'null'], minimum: 0 }, ...bookingPolicyFields, ...advanceNoticeField,
     assigned_member_id: { type: ['string', 'null'], description: 'Better Auth organization membership ID of the assigned host; null when no individual host is selected.' },
-    assigned_team_id: { type: ['string', 'null'], description: 'Better Auth team ID of the assigned host team; null when no team is selected.' },
     questions: questionsRead, questions_revision: questionsRevisionRead },
   required: ['duration_minutes', 'default_capacity', 'confirmation_mode', 'online_payment_required', 'held_online', 'advance_notice_minutes', 'questions', 'questions_revision'],
 } as const
@@ -192,7 +190,7 @@ const bookingConfigObject = {
 const weeklySlot = { type: 'object', properties: { weekday: { type: 'integer', minimum: 0, maximum: 6 }, start_time: { type: 'string', pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', description: 'Local HH:mm start time; visit duration is configured separately.' } }, required: ['weekday', 'start_time'], additionalProperties: false }
 const bookingSetup = {
   type: 'object',
-  description: 'Complete booking setup for a published offering. Legal consultations require provider scheduling and an explicitly selected attorney or legal team. At a location, provide weekly_slots or dated sessions; an update can retain its saved weekly times. location_id null holds it online: it needs scheduling_mode provider with an assigned member or team, takes no weekly_slots or sessions, and is booked in that provider\'s working hours. Runtime validation requires actual future availability before publication.',
+  description: 'Complete booking setup for a published offering. Legal consultations require provider scheduling and an explicitly selected attorney. At a location, provide weekly_slots or dated sessions; an update can retain its saved weekly times. location_id null holds it online: it needs scheduling_mode provider with an assigned member, takes no weekly_slots or sessions, and is booked in that provider\'s working hours. Runtime validation requires actual future availability before publication.',
   properties: { ...onlineSetupPolicyFields, location_id: { type: ['string', 'null'] }, duration_minutes: { type: 'integer', minimum: 1, description: 'Minutes each visit occupies its booking slot or seats, independent of the interval between start times.' }, default_capacity: { type: ['integer', 'null'], minimum: 1, description: 'Places per session; null means unlimited.' },
     weekly_slots: { type: 'array', minItems: 1, maxItems: 100, items: weeklySlot },
     sessions: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'object', properties: { starts_at: { type: 'string', format: 'date-time' }, ends_at: { type: 'string', format: 'date-time' }, capacity: { type: ['integer', 'null'], minimum: 1 } }, required: ['starts_at', 'ends_at'], additionalProperties: false } },
@@ -212,16 +210,14 @@ const stayRules = {
   max_guests: { type: 'integer', minimum: 1, maximum: 99 },
   min_nights: { type: 'integer', minimum: 1, maximum: MAX_STAY_NIGHTS, description: 'The listing’s required default minimum; individual arrival dates may override it.' },
   calendar_rules: STAY_CALENDAR_RULES_SCHEMA,
-  assigned_member_id: { type: ['string', 'null'], description: 'Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. This assignment grants the member access to the home’s stays and shows their approved public profile to guests. Publication requires an approved profile with a nonblank public_name; read get_member_public_profile. Clear assigned_team_id when choosing a member.' },
-  assigned_team_id: { type: ['string', 'null'], description: 'Host team ID from list_teams. This assignment grants the team access to the home’s stays and shows its members with approved public profiles to guests. At least one approved profile is required for publication. Clear assigned_member_id when choosing a team.' },
+  assigned_member_id: { type: ['string', 'null'], description: 'Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. This assignment grants the member access to the home’s stays and shows their approved public profile to guests. Publication requires an approved profile with a nonblank public_name; read get_member_public_profile.' },
   ...STAY_LISTING_SCHEMA,
 }
 const stayObject = { type: ['object', 'null'], description: 'Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms and listing accessibility are read-only here and use their stay operations.', properties: { location_id: { type: 'string' }, ...stayRules,
   assigned_member_id: { type: ['string', 'null'], description: 'Better Auth organization membership ID of the home’s assigned host; null when no individual host is selected.' },
-  assigned_team_id: { type: ['string', 'null'], description: 'Better Auth team ID assigned to host and look after the home; null when no team is selected.' },
   photo_rooms: { type: 'array', items: STAY_PHOTO_ROOM_SCHEMA }, accessibility: STAY_HOME_ACCESSIBILITY_SCHEMA,
   questions: { ...questionsRead, description: 'The host\'s own questions asked with each direct stay booking.' }, questions_revision: questionsRevisionRead },
-  required: ['internal_name', 'location_id', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'assigned_member_id', 'assigned_team_id', 'photo_rooms', 'accessibility', 'questions', 'questions_revision', ...Object.keys(STAY_LISTING_SCHEMA)] }
+  required: ['internal_name', 'location_id', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'calendar_rules', 'assigned_member_id', 'photo_rooms', 'accessibility', 'questions', 'questions_revision', ...Object.keys(STAY_LISTING_SCHEMA)] }
 const staySetup = { type: 'object', description: 'Required for kind stay and refused for every other kind: the location the home is at (fixed once created) and its stay settings. Guest-facing house rules go in details.house_rules. Base nightly rate is the variant price.',
   properties: { location_id: { type: 'string' }, ...stayRules, ...STAY_LISTING_WRITE_SCHEMA }, required: ['location_id', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights'], additionalProperties: false }
 const stayPatch = { type: 'object', description: 'Stay settings to change on a place to stay. Its location is fixed.', properties: { ...stayRules, ...STAY_LISTING_WRITE_SCHEMA,
@@ -496,7 +492,7 @@ export async function handleProductsTools(ctx: McpExecutorContext) {
     case 'set_product_booking_config': {
       const config = await setProductBookingConfig(organization.db, {
         ...scope, productId: requiredString(args, 'product_id'), actorId: organization.userId, env: organization.env,
-        patch: { duration_minutes: args.duration_minutes, default_capacity: args.default_capacity, confirmation_mode: args.confirmation_mode, online_payment_required: args.online_payment_required, held_online: args.held_online, scheduling_mode: args.scheduling_mode, assigned_member_id: args.assigned_member_id, assigned_team_id: args.assigned_team_id, advance_notice_minutes: args.advance_notice_minutes, questions: args.questions, expected_questions_revision: args.expected_questions_revision },
+        patch: { duration_minutes: args.duration_minutes, default_capacity: args.default_capacity, confirmation_mode: args.confirmation_mode, online_payment_required: args.online_payment_required, held_online: args.held_online, scheduling_mode: args.scheduling_mode, assigned_member_id: args.assigned_member_id, advance_notice_minutes: args.advance_notice_minutes, questions: args.questions, expected_questions_revision: args.expected_questions_revision },
       })
       return { config }
     }

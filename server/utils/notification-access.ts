@@ -1,6 +1,6 @@
 import { HTTPError, type H3Event } from 'nitro'
 import { getQuery } from 'nitro/h3'
-import { assignedGuestThreadScope, assignedResponsibilitySql, isOrganizationWideRole } from '~/server/utils/member-access'
+import { assignedGuestThreadScope, assignedMemberSql, isOrganizationWideRole } from '~/server/utils/member-access'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { hasPlatformEventPermission } from '~/server/utils/platform-admin-users'
 import { CONVERSATION_NOTIFICATION_SQL } from '~/server/utils/notification-center'
@@ -39,10 +39,10 @@ export function buildNotificationVisibilityFilter(principal: NotificationVisibil
           OR EXISTS (SELECT 1 FROM stays s JOIN product_stay_configs c
             ON c.product_id = s.product_id AND c.organization_id = s.organization_id
             WHERE s.id = json_extract(n.payload_json, '$.stay_id') AND s.organization_id = n.organization_id
-              AND ${assignedResponsibilitySql('c')})))
+              AND ${assignedMemberSql('c')})))
           OR ((n.target_user_id = ? OR ${CONVERSATION_NOTIFICATION_SQL}) AND EXISTS (SELECT 1 FROM requests r
             WHERE r.id = json_extract(n.payload_json, '$.thread_id') AND r.organization_id = n.organization_id AND ${thread.sql}))))`)
-      params.push(principal.organization.id, principal.userId, principal.userId, principal.userId, principal.userId, ...thread.params)
+      params.push(principal.organization.id, principal.userId, principal.userId, principal.userId, ...thread.params)
     }
   }
 

@@ -218,10 +218,8 @@ test('member self-service uses Better Auth permissions, public approval is admin
   const following=new Date(Date.parse(start)+14*86400000).toISOString(),followingEnd=new Date(Date.parse(end)+14*86400000).toISOString()
   await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES('group','org','two','member-two','UTC',?,?,3,'owner','owner')").bind(following,followingEnd).run()
   await db.prepare("INSERT INTO organization_locales(id,organization_id,locale,is_source,status)VALUES('org-en','org','en',1,'published')").run()
-  await db.prepare("INSERT INTO team(id,name,organizationId,createdAt)VALUES('attorneys','Attorneys','org',?)").bind(Date.now()).run()
-  for (const id of ['one','two']) await db.prepare("INSERT INTO teamMember(id,teamId,userId,createdAt)VALUES(?,'attorneys',?,?)").bind(`attorney-${id}`,id,Date.now()).run()
   await db.prepare("UPDATE products SET kind='service' WHERE id='two'").run()
-  await db.prepare("UPDATE product_booking_configs SET assigned_member_id=NULL,assigned_team_id='attorneys',default_capacity=3 WHERE product_id='two'").run()
+  await db.prepare("UPDATE product_booking_configs SET default_capacity=3 WHERE product_id='two'").run()
   await db.prepare("UPDATE member_scheduling SET public_name=member_id,public_approved=1 WHERE member_id IN ('member-one','member-two')").run()
   const group=[]
   for (const index of [0,1]) {
@@ -232,6 +230,8 @@ test('member self-service uses Better Auth permissions, public approval is admin
   }
   const read=()=>db.prepare('SELECT id,product_session_id,assigned_member_id,updated_at FROM bookings WHERE id=?').bind(group[0]!.bookingId).first<{id:string;product_session_id:string;assigned_member_id:string;updated_at:string}>()
   const original=await read()
+  // The consultation is now Attorney One's; its booked clients keep Attorney Two until they accept a change.
+  await db.prepare("UPDATE product_booking_configs SET assigned_member_id='member-one' WHERE product_id='two'").run()
   const move={booking_id:group[0]!.bookingId,member_id:'member-one',expected_updated_at:original!.updated_at,idempotency_key:'client-attorney-change'}
   await assert.rejects(()=>reassignBookingProvider(own,move),{statusCode:403})
   const pending=await reassignBookingProvider(owner,move)

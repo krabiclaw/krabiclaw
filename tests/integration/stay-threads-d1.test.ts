@@ -51,7 +51,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
       VALUES ('cabin-site', ?, 'cabin', 'Cabin', 'active', 'America/Denver', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`).bind(ORG).run()
     const cabin = await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
       kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
-      stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: `m-${CLEANER}`, assigned_team_id: null },
+      stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: `m-${CLEANER}` },
     } })
     const thread = (requestId: string) => db.prepare(`SELECT kind, location_id, payload_json,
       (SELECT count(*) FROM tasks WHERE kind = 'guest_reply' AND subject_type = 'request' AND subject_id = requests.id AND status = 'open') AS open_replies

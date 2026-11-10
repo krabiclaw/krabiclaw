@@ -62,7 +62,7 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
       VALUES ('cabin-site', ?, 'cabin', 'Cabin', 'active', 'America/Denver', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`).bind(ORG).run()
     const cabin = await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
       kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
-      stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null, assigned_team_id: null },
+      stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null },
     } })
     const checkIn = (stayId: string) => db.prepare("SELECT * FROM scheduled_guest_messages WHERE subject_type = 'stay' AND subject_id = ? AND template_id IS NULL AND template_title = 'Check-in instructions'").bind(stayId).first<Record<string, string | null>>()
 

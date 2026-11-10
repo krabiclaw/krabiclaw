@@ -320,7 +320,7 @@ async function main() {
         product_id: productId,
         unit_label: 'consultation',
         variants: [{ id: variant.id, prices: [{ ...(price ? { id: price.id } : {}), currency: 'USD', unit_amount: area.unit_amount, type: 'one_time', location_id: null }] }],
-        booking: { location_id: null, duration_minutes: 30, default_capacity: 1, scheduling_mode: 'provider', assigned_member_id: area.host, assigned_team_id: null, confirmation_mode: 'instant', online_payment_required: true },
+        booking: { location_id: null, duration_minutes: 30, default_capacity: 1, scheduling_mode: 'provider', assigned_member_id: area.host, confirmation_mode: 'instant', online_payment_required: true },
       }
       // The key names this exact request, so a changed consultation is a new write rather than a refused replay.
       const bookingRes = await mcp(headers, 'update_product', {

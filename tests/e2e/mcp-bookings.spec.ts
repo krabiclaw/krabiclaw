@@ -357,10 +357,9 @@ test('MCP consultation attorney replacement waits for buyer conversation approva
   const failures: unknown[] = []
   const bookings: Created[] = []
   let product: Product | null = null
-  let teamId: string | null = null
   let previousMode: { mode: string; external_url: string | null } | null = null
   type Schedule = { timezone: string | null; weekly: Array<{ weekday: number; start: string; end: string }> | null; time_off: Array<{ start: string; end: string }> | null; public_name: string | null; public_photo_url: string | null; public_bio: string | null; public_approved: number; updated_at: string }
-  type Actor = { id: string; userId: string; role: string; user: { email: string }; previous: Schedule | null; teamIds: string[]; changed: boolean; client: APIRequestContext }
+  type Actor = { id: string; userId: string; role: string; user: { email: string }; previous: Schedule | null; changed: boolean; client: APIRequestContext }
   const actors: Actor[] = []
   const body = async <T>(response: APIResponse, status = 200): Promise<T> => {
     expect(response.status(), await response.text()).toBe(status)
@@ -381,8 +380,7 @@ test('MCP consultation attorney replacement waits for buyer conversation approva
       expect(member, 'The consultation uses the seeded Harbor Legal Aid Better Auth actor memberships').toBeDefined()
       if (!member) throw new Error('The Harbor Legal Aid attorney fixture membership is missing')
       const saved = await body<{ scheduling: Schedule | null }>(await request.get(`/api/organizations/${organizationId}/members/${member.id}/scheduling`))
-      const teams = await body<Array<{ id: string }>>(await request.get('/api/auth/organization/list-user-teams', { params: { organizationId, userId } }))
-      actors.push({ ...member, previous: saved.scheduling, teamIds: teams.map(team => team.id), changed: false, client })
+      actors.push({ ...member, previous: saved.scheduling, changed: false, client })
     }
     const [originalAttorney, replacementAttorney] = actors as [Actor, Actor]
     previousMode = await body(await request.get(`${editor}/consultation`))
@@ -396,8 +394,6 @@ test('MCP consultation attorney replacement waits for buyer conversation approva
       } }))
       actor.changed = true
     }
-    teamId = (await body<{ id: string }>(await request.post('/api/auth/organization/create-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, name: `Consultation approval ${crypto.randomUUID()}` } }))).id
-    for (const actor of actors) await body(await request.post('/api/auth/organization/add-team-member', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId, userId: actor.userId } }))
     product = (await body<{ product: Product }>(await request.post(`${editor}/products`, { data: {
       kind: 'service', active: true, name: `MCP consultation approval ${crypto.randomUUID()}`, description: 'A legal consultation to discuss questions with an attorney.',
       details: { preparation: 'Bring your consultation questions.' },
@@ -405,17 +401,14 @@ test('MCP consultation attorney replacement waits for buyer conversation approva
     } }), 201)).product
     await body(await request.put(`${editor}/products/${product.id}/booking`, { data: {
       duration_minutes: 45, default_capacity: 2, confirmation_mode: 'review', online_payment_required: false,
-      scheduling_mode: 'provider', assigned_member_id: null, assigned_team_id: teamId, held_online: true,
+      scheduling_mode: 'provider', assigned_member_id: originalAttorney.id, held_online: true,
     } }))
     await body(await request.put(`${editor}/products/${product.id}/publication`, { data: { published: true } }))
     await body(await request.put(`${editor}/consultation`, { data: { mode: 'native' } }))
-    const sessions = (await call<{ sessions: Array<{ id: string; assigned_member_id: string | null; starts_at: string; ends_at: string; remaining: number | null }> }>('list_product_booking_sessions', { product_id: product.id, from: `${day}T00:00:00.000Z`, to: `${day}T23:59:59.999Z` })).sessions
-    const originalSession = sessions.find(session => session.starts_at === `${day}T14:00:00.000Z` && session.assigned_member_id === originalAttorney.id)
-    const replacementSession = sessions.find(session => session.starts_at === `${day}T14:00:00.000Z` && session.assigned_member_id === replacementAttorney.id)
+    const listSessions = async () => (await call<{ sessions: Array<{ id: string; assigned_member_id: string | null; starts_at: string; ends_at: string; remaining: number | null }> }>('list_product_booking_sessions', { product_id: product!.id, from: `${day}T00:00:00.000Z`, to: `${day}T23:59:59.999Z` })).sessions
+    const originalSession = (await listSessions()).find(session => session.starts_at === `${day}T14:00:00.000Z` && session.assigned_member_id === originalAttorney.id)
     expect(originalSession, 'The original attorney has a real returned consultation session').toBeDefined()
-    expect(replacementSession, 'The replacement attorney has a real same-time consultation session').toBeDefined()
-    if (!originalSession || !replacementSession) throw new Error('The attorney team has no matching consultation sessions')
-    expect(replacementSession.ends_at).toBe(originalSession.ends_at)
+    if (!originalSession) throw new Error('The original attorney has no matching consultation session')
     for (const [client, guestName, email] of [[page.request, 'E2E Buyer', 'buyer@playwright.example'], [otherClient, 'Other consultation client', 'other-consultation@playwright.example']] as const) {
       const booked = await body<Created>(await client.post(`/api/public/products/${product.slug}/book`, { headers: seededSiteHeaders('legal'), data: {
         session_id: originalSession.id, variant_id: product.variants[0]!.id, party_size: 1, guest_name: guestName, guest_email: email, locale: 'en', idempotency_key: crypto.randomUUID(),
@@ -430,6 +423,13 @@ test('MCP consultation attorney replacement waits for buyer conversation approva
     const before = await read(first)
     const otherBefore = await read(other)
     expect(before.record).toMatchObject({ status: 'confirmed', assigned_member_id: originalAttorney.id, starts_at: originalSession.starts_at, ends_at: originalSession.ends_at })
+    // The consultation is now the replacement attorney's; booked clients keep the original attorney until they accept.
+    await body(await request.put(`${editor}/products/${product.id}/booking`, { data: { scheduling_mode: 'provider', assigned_member_id: replacementAttorney.id } }))
+    const replacementSession = (await listSessions()).find(session => session.starts_at === `${day}T14:00:00.000Z` && session.assigned_member_id === replacementAttorney.id)
+    expect(replacementSession, 'The replacement attorney has a real same-time consultation session').toBeDefined()
+    if (!replacementSession) throw new Error('The replacement attorney has no matching consultation session')
+    expect(replacementSession.ends_at).toBe(originalSession.ends_at)
+    expect(await read(first)).toEqual(before)
     const since = new Date().toISOString()
     const change = { operational_booking_id: first.operational_booking_id, member_id: replacementAttorney.id, expected_updated_at: before.operational_updated_at, idempotency_key: crypto.randomUUID() }
     const pending = await call<{ session_id: string; assigned_member_id: string | null; request_id: string; change_status: string }>('reassign_product_booking', change)
@@ -474,7 +474,7 @@ test('MCP consultation attorney replacement waits for buyer conversation approva
     await page.goto(`${baseURL}/dashboard/account/messages/${first.request_id}`)
     const card = page.getByTestId('booking-change-request')
     await expect(card).toHaveCount(1)
-    await expect(card).toContainText('Attorney or legal team')
+    await expect(card).toContainText('Attorney')
     await expect(card).toContainText('MCP Original Attorney')
     await expect(card).toContainText('MCP Replacement Attorney')
     await expect(card).toContainText('Your booking stays unchanged until you accept.')
@@ -509,18 +509,15 @@ test('MCP consultation attorney replacement waits for buyer conversation approva
     if (product) {
       try {
         await body(await request.put(`${editor}/products/${product.id}/publication`, { data: { published: false } }))
-        // A legal consultation always keeps an attorney: the temporary team is
-        // released by handing the archived consultation to the original attorney.
-        await body(await request.put(`${editor}/products/${product.id}/booking`, { data: { scheduling_mode: 'provider', assigned_member_id: actors[0]!.id, assigned_team_id: null } }))
+        // A legal consultation always keeps an attorney: the archived
+        // consultation is handed back to the original attorney.
+        await body(await request.put(`${editor}/products/${product.id}/booking`, { data: { scheduling_mode: 'provider', assigned_member_id: actors[0]!.id } }))
         if (bookings.length) await body(await request.patch(`${editor}/products/${product.id}`, { data: { active: false } }))
         else await body(await request.delete(`${editor}/products/${product.id}`))
       } catch (error) { failures.push(error) }
     }
     if (previousMode) {
       try { await body(await request.put(`${editor}/consultation`, { data: { mode: previousMode.mode, ...(previousMode.external_url ? { external_url: previousMode.external_url } : {}) } })) } catch (error) { failures.push(error) }
-    }
-    if (teamId) {
-      try { await body(await request.post('/api/auth/organization/remove-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId } })) } catch (error) { failures.push(error) }
     }
     for (const actor of actors.filter(actor => actor.changed)) {
       try {
@@ -533,11 +530,10 @@ test('MCP consultation attorney replacement waits for buyer conversation approva
           } }))
         } else {
           // Scheduling has no separate deletion lifecycle. Better Auth removes the
-          // temporary actor schedule; its existing account, role and teams return.
+          // temporary actor schedule; its existing account and role return.
           await body(await admin.post('/api/auth/organization/remove-member', { headers: authRequestHeaders(baseURL!), data: { organizationId, memberIdOrEmail: actor.id } }))
           const invitation = await body<{ id: string }>(await admin.post('/api/auth/organization/invite-member', { headers: authRequestHeaders(baseURL!), data: { organizationId, email: actor.user.email, role: actor.role, resend: true } }))
           await body(await actor.client.post('/api/auth/organization/accept-invitation', { headers: authRequestHeaders(baseURL!), data: { invitationId: invitation.id } }))
-          for (const id of actor.teamIds) await body(await admin.post('/api/auth/organization/add-team-member', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId: id, userId: actor.userId } }))
           const restored = await body<{ members: Array<{ id: string; userId: string; role: string }> }>(await admin.get('/api/auth/organization/list-members', { params: { organizationId } }))
           const member = restored.members.find(member => member.userId === actor.userId)
           expect(member?.role).toBe(actor.role)
@@ -550,8 +546,6 @@ test('MCP consultation attorney replacement waits for buyer conversation approva
         const saved = await body<{ scheduling: Schedule | null }>(await actor.client.get(`/api/organizations/${organizationId}/members/${actor.id}/scheduling`))
         if (actor.previous) expect(saved.scheduling).toMatchObject({ timezone: actor.previous.timezone, weekly: actor.previous.weekly, time_off: actor.previous.time_off, public_name: actor.previous.public_name, public_photo_url: actor.previous.public_photo_url, public_bio: actor.previous.public_bio, public_approved: actor.previous.public_approved })
         else expect(saved.scheduling).toBeNull()
-        const teams = await body<Array<{ id: string }>>(await actor.client.get('/api/auth/organization/list-user-teams', { params: { organizationId } }))
-        expect(teams.map(team => team.id).sort()).toEqual(actor.teamIds.sort())
       } catch (error) { failures.push(error) }
     }
     await attorneyRequest.dispose()

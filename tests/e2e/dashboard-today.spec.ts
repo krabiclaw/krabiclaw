@@ -167,7 +167,7 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
   }
 })
 
-test('branch assignments grant and revoke a member’s reservation agenda and inbox through native team membership', async ({ page, browser, request, baseURL }, testInfo) => {
+test('branch assignments grant and revoke a member’s reservation agenda and inbox', async ({ page, browser, request, baseURL }, testInfo) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Reservations and role changes use disposable local data only')
   const release = await acquireTenantMutationLock(testInfo, seededTenant('restaurant').organizationId)
@@ -176,12 +176,10 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
   const locationId = seededTenant('restaurant').locations.brooklyn.id
   const locationPath = `/api/dashboard/locations/${locationId}`
   const inboxPath = `/api/dashboard/organizations/${organizationId}/guest-threads`
-  type Assignment = { assigned_member_id: string | null; assigned_team_id: string | null }
+  type Assignment = { assigned_member_id: string | null }
   type Member = { id: string; userId: string; role: string }
   let original: Assignment | null = null
   let actor: Member | undefined
-  let originalTeamIds: string[] | null = null
-  let teamId: string | null = null
   let reservationId: string | null = null
   let memberContext: BrowserContext | null = null
   const failures: unknown[] = []
@@ -202,10 +200,6 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
     if (!actor) throw new Error('The canonical demo role actor is missing')
     // The branch keeps the tenant's own responsibility; the actor holds none of it.
     expect(original.assigned_member_id).not.toBe(actor.id)
-    expect(original.assigned_team_id).toBeNull()
-    const teams = await page.request.get('/api/auth/organization/list-teams', { params: { organizationId } })
-    expect(teams.status(), await teams.text()).toBe(200)
-    originalTeamIds = (await teams.json() as Array<{ id: string }>).map(team => team.id).sort()
 
     const availability = await request.get('/api/public/reservations/availability', {
       headers: seededSiteHeaders('restaurant'), params: { location_id: locationId, date: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10), days: 7 },
@@ -285,25 +279,12 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
       }
     }
     await verifyAccess(false)
-    const assignedMember = { assigned_member_id: actor.id, assigned_team_id: null }
+    const assignedMember = { assigned_member_id: actor.id }
     const memberSaved = await page.request.patch(locationPath, { params: { org }, data: assignedMember })
     expect(memberSaved.status(), await memberSaved.text()).toBe(200)
     expect(await readAssignment()).toMatchObject(assignedMember)
     await verifyAccess(true)
 
-    const created = await page.request.post('/api/auth/organization/create-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, name: `E2E Branch Inbox ${Date.now()}` } })
-    expect(created.status(), await created.text()).toBe(200)
-    teamId = (await created.json() as { id: string }).id
-    const included = await page.request.post('/api/auth/organization/add-team-member', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId, userId: actor.userId } })
-    expect(included.status(), await included.text()).toBe(200)
-    const membership = await memberRequest.get('/api/auth/organization/list-team-members', { params: { teamId } })
-    expect(membership.status(), await membership.text()).toBe(200)
-    expect((await membership.json() as Array<{ userId: string }>).map(member => member.userId)).toContain(actor.userId)
-    const assignedTeam = { assigned_member_id: null, assigned_team_id: teamId }
-    const teamSaved = await page.request.patch(locationPath, { params: { org }, data: assignedTeam })
-    expect(teamSaved.status(), await teamSaved.text()).toBe(200)
-    expect(await readAssignment()).toMatchObject(assignedTeam)
-    await verifyAccess(true)
     const socket = sockets.findLast(socket => !socket.isClosed() && new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket')
     expect(socket, 'The open guest conversation has a live dashboard socket').toBeDefined()
     if (!socket) throw new Error('The assigned member has no live dashboard socket')
@@ -312,7 +293,7 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
       const event: unknown = JSON.parse(String(frame.payload))
       return isDashboardInvalidation(event) && event.type === 'access.changed' && event.organizationId === organizationId
     } })
-    const cleared = await page.request.patch(locationPath, { params: { org }, data: { assigned_member_id: null, assigned_team_id: null } })
+    const cleared = await page.request.patch(locationPath, { params: { org }, data: { assigned_member_id: null } })
     expect(cleared.status(), await cleared.text()).toBe(200)
     await accessChanged
     // Revocation clears the conversation already on screen before any fresh navigation or member reads.
@@ -321,7 +302,7 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
     await expect(memberPage.getByRole('textbox', { name: 'Write a message…', exact: true })).toHaveCount(0)
     await expect(memberPage.locator(`[data-thread-row="${reservationId}"]`)).toHaveCount(0)
     await expect(memberPage.getByText('This conversation is no longer available', { exact: true })).toBeVisible()
-    expect(await readAssignment()).toMatchObject({ assigned_member_id: null, assigned_team_id: null })
+    expect(await readAssignment()).toMatchObject({ assigned_member_id: null })
     await verifyAccess(false)
   } catch (error) {
     failures.push(error)
@@ -337,18 +318,9 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
     } catch (error) { failures.push(error) }
     try {
       if (original) {
-        const restored = await page.request.patch(locationPath, { params: { org }, data: { assigned_member_id: original.assigned_member_id, assigned_team_id: original.assigned_team_id } })
+        const restored = await page.request.patch(locationPath, { params: { org }, data: { assigned_member_id: original.assigned_member_id } })
         expect(restored.status(), await restored.text()).toBe(200)
-        expect(await readAssignment()).toMatchObject({ assigned_member_id: original.assigned_member_id, assigned_team_id: original.assigned_team_id })
-      }
-    } catch (error) { failures.push(error) }
-    try {
-      if (teamId) {
-        const removed = await page.request.post('/api/auth/organization/remove-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId } })
-        expect(removed.status(), await removed.text()).toBe(200)
-        const teams = await page.request.get('/api/auth/organization/list-teams', { params: { organizationId } })
-        expect(teams.status(), await teams.text()).toBe(200)
-        expect((await teams.json() as Array<{ id: string }>).map(team => team.id).sort()).toEqual(originalTeamIds)
+        expect(await readAssignment()).toMatchObject({ assigned_member_id: original.assigned_member_id })
       }
     } catch (error) { failures.push(error) }
     try {

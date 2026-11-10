@@ -17,7 +17,7 @@ import { SITE_RECIPE_DESCRIPTIONS, SITE_RECIPE_KEYS, SITE_RECIPE_OPTIONS } from 
 import { resolveColor } from '~/utils/color-utils'
 import { requireMcpOrganizationApi } from '~/server/utils/mcp-auth'
 import { organizationRoles } from '~/utils/organization-access'
-import { getOrganizationTeamsData, getInvitationDeliveries } from '~/server/utils/dashboard-members'
+import { getInvitationDeliveries } from '~/server/utils/dashboard-members'
 import { assertRoleAllows, organizationAdapter } from '~/server/utils/member-access'
 
 const PALETTE_COLORS_SCHEMA = {
@@ -67,14 +67,6 @@ const invitationObject = { type: 'object', properties: {
   delivery: { type: ['object','null'], properties: {status:{type:'string'},error:{type:['string','null']}}, required:['status','error'] },
 }, required: ['id', 'email', 'role', 'status', 'expiresAt','delivery'], additionalProperties: false } as const
 const roleField = { type: 'string', enum: Object.keys(organizationRoles) }
-const teamObject = { type: 'object', properties: {
-  id: { type: 'string' }, name: { type: 'string' }, organizationId: { type: 'string' }, createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
-  members: { type: 'array', items: { type: 'object', properties: {
-    id: { type: 'string' }, teamId: { type: 'string' }, userId: { type: 'string' }, createdAt: { type: 'string', format: 'date-time' },
-  }, required: ['id', 'teamId', 'userId', 'createdAt'] } },
-}, required: ['id', 'name', 'organizationId', 'createdAt', 'members'] } as const
-const teamOutput = { type: 'object', properties: { team: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } }, required: ['id', 'name'], additionalProperties: false } }, required: ['team'] }
-
 const websiteDraftLocationSchema = {
   type: 'object', properties: {
     street_address: { type: 'string' }, address_line_2: { type: 'string' }, city: { type: 'string' }, region: { type: 'string' }, postal_code: { type: 'string' },
@@ -174,26 +166,6 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
       public_url: { type: 'string', format: 'uri' }, ready: { const: true }, context: workspaceContextObject,
     }, required: ['organization_id', 'location_id', 'draft_id', 'public_url', 'ready', 'context'], additionalProperties: false },
   })),
-  organizationTool({
-    name: 'list_teams', description: 'Read the business’s Better Auth teams and their members. Choose a team for an offering when any available member can host its bookings.',
-    domain: 'organizations', minimumRole: 'admin', outputSchema: { type: 'object', properties: { teams: { type: 'array', items: teamObject } }, required: ['teams'] },
-  }),
-  organizationTool({
-    name: 'create_team', description: 'Create a named team within this business using Better Auth. Existing teammates can then be added to it.',
-    domain: 'organizations', minimumRole: 'admin', inputSchema: { name: { type: 'string', minLength: 1, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' } }, required: ['name'], outputSchema: teamOutput,
-  }),
-  organizationTool({
-    name: 'update_team', description: 'Rename a team in this business.', domain: 'organizations', minimumRole: 'admin', inputSchema: { team_id: { type: 'string' }, name: { type: 'string', minLength: 1, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' } }, required: ['team_id', 'name'], outputSchema: teamOutput,
-  }),
-  organizationTool({
-    name: 'set_team_member', description: 'Add an existing business teammate to a team, or remove them from it. Existing bookings keep their saved provider.',
-    domain: 'organizations', minimumRole: 'admin', inputSchema: { team_id: { type: 'string' }, user_id: { type: 'string' }, included: { type: 'boolean' } }, required: ['team_id', 'user_id', 'included'], outputSchema: { type: 'object', properties: { team_id: { type: 'string' }, user_id: { type: 'string' }, included: { type: 'boolean' } }, required: ['team_id', 'user_id', 'included'], additionalProperties: false },
-  }),
-  organizationTool({
-    name: 'delete_team', description: 'Delete a team from this business. Existing bookings keep their saved provider. Offerings assigned to this team require a new schedule assignment.',
-    domain: 'organizations', minimumRole: 'admin', inputSchema: { team_id: { type: 'string' } }, required: ['team_id'],
-    outputSchema: { type: 'object', properties: { deleted: { const: true }, team_id: { type: 'string' } }, required: ['deleted', 'team_id'] },
-  }),
   organizationTool({
     name: 'list_organization_members', description: 'Read the business’s teammates and invitations. Member IDs identify organization memberships; user IDs identify people.',
     domain: 'organizations', minimumRole: 'admin', inputSchema: { limit: { type: 'integer', minimum: 1, maximum: 100 }, offset: { type: 'integer', minimum: 0 } },
@@ -355,38 +327,6 @@ function resolvePaletteColorNames(patch: SitePalettePatch): SitePalettePatch {
 export async function handleOrganizationsTools(ctx: McpExecutorContext): Promise<unknown> {
   const { toolName, args, organization } = ctx
   switch (toolName) {
-    case 'list_teams': return { teams: await getOrganizationTeamsData(organization.env, organization.organizationId) }
-    case 'create_team':
-    case 'update_team':
-    case 'set_team_member':
-    case 'delete_team': {
-      const { api, headers } = await requireMcpOrganizationApi(ctx.event, organization)
-      const organizationId = organization.organizationId
-      let teamId: string
-      if (toolName === 'create_team') teamId = (await api.createTeam({ headers, body: { organizationId, name: requiredString(args, 'name') } })).id
-      else {
-        teamId = requiredString(args, 'team_id')
-        if (toolName === 'update_team') await api.updateTeam({ headers, body: { teamId, data: { organizationId, name: requiredString(args, 'name') } } })
-        else if (toolName === 'delete_team') await api.removeTeam({ headers, body: { teamId, organizationId } })
-        else {
-          const body = { teamId, organizationId, userId: requiredString(args, 'user_id') }
-          if (args.included === true) await api.addTeamMember({ headers, body })
-          else await api.removeTeamMember({ headers, body })
-        }
-      }
-      const team = (await getOrganizationTeamsData(organization.env, organizationId)).find(team => team.id === teamId)
-      if (toolName === 'delete_team') {
-        if (team) throw new Error('The deleted team is still present')
-        return { deleted: true, team_id: teamId }
-      }
-      if (!team) throw new Error('The saved team could not be read back')
-      if (toolName === 'set_team_member') {
-        const included = team.members.some(member => member.userId === args.user_id)
-        if (included !== args.included) throw new Error('The saved team membership does not match the requested change')
-        return { team_id: team.id, user_id: requiredString(args, 'user_id'), included }
-      }
-      return { team: { id: team.id, name: team.name } }
-    }
     case 'list_organization_members': {
       await assertRoleAllows({ ...organization.membership, permissions: { members: ['read'], invitations: ['read'] } })
       const adapter = await organizationAdapter(organization.env)

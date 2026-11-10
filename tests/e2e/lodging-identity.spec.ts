@@ -573,7 +573,7 @@ test.describe('lodging identity boundary', () => {
     })
   }
 
-  test('an experience team manages a business-scheduled booking without a booked individual and loses access when removed', async ({ baseURL, page, browser, request }) => {
+  test('an experience host manages a business-scheduled booking without a booked individual and loses access when removed', async ({ baseURL, page, browser, request }) => {
     test.setTimeout(120_000)
     const { api, signInBearer } = session(baseURL)
     const ownerBearer = await signInBearer(fixture.email)
@@ -595,12 +595,6 @@ test.describe('lodging identity boundary', () => {
       const { memberId } = await accepted.json() as { memberId: string }
       const profile = await api.put(`/api/organizations/${organization.id}/members/${memberId}/scheduling`, { headers: ownerBearer, data: { expected_updated_at: null, public_name: 'Experience guide', public_bio: 'Leads the local experience.', public_approved: true } })
       expect(profile.status, await profile.text()).toBe(200)
-      const teamName = 'Experience hosts'
-      const madeTeam = await api.post('/api/auth/organization/create-team', { headers: ownerBearer, data: { organizationId: organization.id, name: teamName } })
-      expect(madeTeam.status, await madeTeam.text()).toBe(200)
-      const { id: teamId } = await madeTeam.json() as { id: string }
-      const included = await api.post('/api/auth/organization/add-team-member', { headers: ownerBearer, data: { organizationId: organization.id, teamId, userId: invitee.id } })
-      expect(included.status, await included.text()).toBe(200)
       const context = await api.get(`/api/dashboard/context?org=${slug}`, { headers: ownerBearer })
       expect(context.status, await context.text()).toBe(200)
       const { locations } = await context.json() as { locations: Array<{ id: string }> }
@@ -617,16 +611,16 @@ test.describe('lodging identity boundary', () => {
       await loginAs(page.request, baseURL!, fixture.id)
       await page.goto(`/dashboard/${slug}/products/${product.id}/booking/assignment`)
       const assignment = page.locator('#dashboard-panel-booking-assignment')
-      await assignment.getByRole('radio', { name: `Team: ${teamName} 1 member: Guests see each one with a published profile`, exact: true }).check()
-      await expect(assignment.getByRole('switch', { name: 'Book each team member’s working hours', exact: true })).not.toBeChecked()
+      await assignment.getByRole('radio', { name: 'Experience guide Profile published', exact: true }).check()
+      await expect(assignment.getByRole('switch', { name: 'Book the host\'s working hours', exact: true })).not.toBeChecked()
       const assigned = page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname === `${editor}/products/${product.id}/booking`)
       await assignment.getByRole('button', { name: 'Save', exact: true }).click()
       const assignedResponse = await assigned
       expect(assignedResponse.status(), await assignedResponse.text()).toBe(200)
-      expect(assignedResponse.request().postDataJSON()).toEqual({ scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: teamId })
+      expect(assignedResponse.request().postDataJSON()).toEqual({ scheduling_mode: 'business', assigned_member_id: memberId })
       const productRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: organization.id, product_id: product.id } })
       expect(productRead.status(), await productRead.text()).toBe(200)
-      expect(mcpData<{ product: Product }>(await productRead.json()).product.booking).toMatchObject({ scheduling_mode: 'business', assigned_member_id: null, assigned_team_id: teamId })
+      expect(mcpData<{ product: Product }>(await productRead.json()).product.booking).toMatchObject({ scheduling_mode: 'business', assigned_member_id: memberId })
       const placed = await api.put(`${editor}/products/${product.id}/locations/${locationId}`, { headers: ownerBearer, data: { active: true, published: false } })
       expect(placed.status, await placed.text()).toBe(200)
       const day = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10)
@@ -662,7 +656,7 @@ test.describe('lodging identity boundary', () => {
         const event: unknown = JSON.parse(String(frame.payload))
         return isDashboardInvalidation(event) && event.type === 'access.changed' && event.organizationId === organization.id
       } })
-      const removed = await api.post('/api/auth/organization/remove-team-member', { headers: ownerBearer, data: { organizationId: organization.id, teamId, userId: invitee.id } })
+      const removed = await api.put(`${editor}/products/${product.id}/booking`, { headers: ownerBearer, data: { assigned_member_id: null } })
       expect(removed.status, await removed.text()).toBe(200)
       await revoked
       await expect(memberPage.getByText(guestName, { exact: true })).toHaveCount(0)

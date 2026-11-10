@@ -14,7 +14,7 @@ import { prepareContentDocumentDeletion } from '~/server/utils/content/documents
 import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { capacityRefusalOf, executeWithinCapacity, reportBillingUsage } from '~/server/utils/billing'
 import { publishAccessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
-import { assertResponsibilityTarget } from '~/server/utils/member-access'
+import { assertResponsibleMember } from '~/server/utils/member-access'
 
 type SetupEnv = CloudflareEnv;
 
@@ -52,7 +52,6 @@ export interface CreateLocationInput {
   seo_description?: string | null;
   canonical_url?: string | null;
   assigned_member_id?: string | null;
-  assigned_team_id?: string | null;
 }
 
 export interface UpdateLocationInput extends Partial<CreateLocationInput> {
@@ -93,7 +92,6 @@ export interface LocationRecord {
   seo_description?: string | null;
   canonical_url?: string | null;
   assigned_member_id?: string | null;
-  assigned_team_id?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -202,7 +200,7 @@ async function loadLocation(
            rating, review_count, description, short_description, status,
            address, stay_map_sharing, opening_hours, special_hours, categories, price_level,
            timezone, max_capacity, seo_title, seo_description, canonical_url,
-           assigned_member_id, assigned_team_id,
+           assigned_member_id,
            created_at, updated_at`;
   // Check id first so a slug that happens to collide with another row's id can
   // never shadow the row actually addressed by that id.
@@ -325,7 +323,7 @@ export async function createLocation(
     return locationValidationFailure(error, 'special_hours');
   }
 
-  await assertResponsibilityTarget(db, organizationId, input);
+  await assertResponsibleMember(db, organizationId, input);
 
   const baseSlug = toSlug((input.slug ?? title).trim());
   const id = crypto.randomUUID();
@@ -345,10 +343,10 @@ export async function createLocation(
             price_level,
             timezone, max_capacity, status,
             seo_title, seo_description, canonical_url,
-            assigned_member_id, assigned_team_id,
+            assigned_member_id,
             created_at, updated_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         params: [
           id,
@@ -376,7 +374,6 @@ export async function createLocation(
           input.seo_description ?? null,
           input.canonical_url ?? null,
           input.assigned_member_id ?? null,
-          input.assigned_team_id ?? null,
           now,
           now,
         ],
@@ -528,7 +525,7 @@ export async function updateLocation(
     };
   }
 
-  const responsibility = await assertResponsibilityTarget(db, organizationId, input, { assigned_member_id: existing.assigned_member_id ?? null, assigned_team_id: existing.assigned_team_id ?? null });
+  const responsibleMember = await assertResponsibleMember(db, organizationId, input, existing.assigned_member_id ?? null);
 
   const now = new Date(Math.max(Date.now(), Date.parse(existing.updated_at!) + 1)).toISOString();
   const sets: string[] = ["updated_at = ?"];
@@ -575,11 +572,9 @@ export async function updateLocation(
       );
     }
   }
-  if (input.assigned_member_id !== undefined || input.assigned_team_id !== undefined) {
-    for (const field of ['assigned_member_id', 'assigned_team_id'] as const) {
-      sets.push(`${field} = ?`);
-      params.push(responsibility[field]);
-    }
+  if (input.assigned_member_id !== undefined) {
+    sets.push("assigned_member_id = ?");
+    params.push(responsibleMember);
   }
 
   if (submittedAddress) {
@@ -674,7 +669,7 @@ export async function updateLocation(
     // active again is guarded by the same home-activation boundary.
     const results = await executeWithinCapacity(env, db, organizationId, [...(writeGuard ? [writeGuard] : []), ...statements], { action: 'make it active', allowHomeActivation: options.allowHomeActivation });
     const changed = (results[writeGuard ? 1 : 0]?.meta?.changes ?? 0) === 1;
-    if (changed && (input.assigned_member_id !== undefined || input.assigned_team_id !== undefined)) {
+    if (changed && input.assigned_member_id !== undefined) {
       await publishAccessInvalidation(env, { organizationId });
     }
     // The saved privacy mode must be visible even if readback or card work fails.
@@ -685,9 +680,9 @@ export async function updateLocation(
   params.push(locationId, organizationId);
   try {
     if (!(await runUpdate(params))) {
-      if (input.expected_updated_at === undefined && (input.assigned_member_id !== undefined || input.assigned_team_id !== undefined)) {
+      if (input.expected_updated_at === undefined && input.assigned_member_id !== undefined) {
         const current = await loadLocation(db, organizationId, locationId);
-        if (current) await assertResponsibilityTarget(db, organizationId, input, { assigned_member_id: current.assigned_member_id ?? null, assigned_team_id: current.assigned_team_id ?? null });
+        if (current) await assertResponsibleMember(db, organizationId, input, current.assigned_member_id ?? null);
       }
       return stale;
     }

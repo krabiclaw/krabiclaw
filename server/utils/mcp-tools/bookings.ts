@@ -3,7 +3,7 @@ import { reassignBookingProvider } from '~/server/domain/provider-reassignment'
 import { HTTPError } from 'nitro'
 import { createTableReservation } from '~/server/domain/table-reservations'
 import { renderStructuredResponse } from '~/server/utils/mcp-render'
-import { assertResourceAccess, assertProductAccess, assertAssignedBookingAccess, assignedBookingSql, roleAllows, memberAccessPrincipal } from '~/server/utils/member-access'
+import { assertResourceAccess, assertProductAccess, assertAssignedBookingAccess, assignedMemberSql, roleAllows, memberAccessPrincipal } from '~/server/utils/member-access'
 import { queryAll, queryFirst } from '~/server/db'
 import { createSession, listSessions, requireBookingConfig, updateSession } from '~/server/utils/availability'
 import { mcpPageInfo, mcpPageWindow, paginateMcpCollection } from '~/server/utils/mcp-pagination'
@@ -40,7 +40,7 @@ function mcpBookingProvenance(provenance: ThreadPayload['provenance'] | null) {
 }
 
 export const BOOKINGS_TOOLS: McpToolDefinition[] = [
-  organizationTool({ name: 'create_product_session', domain: 'bookings', minimumRole: 'member', description: 'Add a dated time at a location for an existing bookable offering using its actual start and end. An assigned team gets one session per member. Online offerings take no dated sessions: they are booked in their provider\'s working hours.',
+  organizationTool({ name: 'create_product_session', domain: 'bookings', minimumRole: 'member', description: 'Add a dated time at a location for an existing bookable offering using its actual start and end. Online offerings take no dated sessions: they are booked in their provider\'s working hours.',
     inputSchema: { product_id: text, location_id: { ...text, description: 'Session location.' }, starts_at: { type: 'string', format: 'date-time' }, ends_at: { type: 'string', format: 'date-time' }, capacity: { type: ['integer', 'null'], minimum: 0 }, idempotency_key: key }, required: ['product_id', 'location_id', 'starts_at', 'ends_at', 'idempotency_key'],
     outputSchema: { type: 'object', properties: { sessions: { type: 'array', items: session, minItems: 1 } }, required: ['sessions'] },
   }),
@@ -49,7 +49,7 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
     outputSchema: { type: 'object', properties: { session }, required: ['session'] },
   }),
 
-  organizationTool({ name: 'reassign_product_booking', outputSchema: { type: 'object', properties: { session_id: text, assigned_member_id: nullableText, request_id: text, change_status: { type: 'string', enum: ['awaiting_guest_acceptance', 'accepted', 'declined'] } }, required: ['session_id', 'assigned_member_id', 'request_id', 'change_status'] }, domain: 'bookings', minimumRole: 'admin', description: 'Propose a same-time attorney replacement for one consultation. The current appointment and other clients remain unchanged until this client accepts in their conversation. Requires a published available session for that attorney outside the consultation’s minimum notice. Read get_product_booking and supply operational_updated_at.', inputSchema: { operational_booking_id: bookingId, member_id: { type: 'string', description: 'Better Auth organization member ID from get_member_scheduling or list_teams.' }, expected_updated_at: { type: 'string', description: 'operational_updated_at from get_product_booking.' }, idempotency_key: { ...key, maxLength: 120 } }, required: ['operational_booking_id', 'member_id', 'expected_updated_at', 'idempotency_key'] }),
+  organizationTool({ name: 'reassign_product_booking', outputSchema: { type: 'object', properties: { session_id: text, assigned_member_id: nullableText, request_id: text, change_status: { type: 'string', enum: ['awaiting_guest_acceptance', 'accepted', 'declined'] } }, required: ['session_id', 'assigned_member_id', 'request_id', 'change_status'] }, domain: 'bookings', minimumRole: 'admin', description: 'Propose a same-time attorney replacement for one consultation. The current appointment and other clients remain unchanged until this client accepts in their conversation. Requires a published available session for that attorney outside the consultation’s minimum notice. Read get_product_booking and supply operational_updated_at.', inputSchema: { operational_booking_id: bookingId, member_id: { type: 'string', description: 'Better Auth organization member ID from get_member_scheduling.' }, expected_updated_at: { type: 'string', description: 'operational_updated_at from get_product_booking.' }, idempotency_key: { ...key, maxLength: 120 } }, required: ['operational_booking_id', 'member_id', 'expected_updated_at', 'idempotency_key'] }),
   organizationTool({ name: 'list_product_booking_sessions', outputSchema: { type: 'object', properties: { sessions: { type: 'array', items: session }, page_info: pageInfoObject }, required: ['sessions', 'page_info'] }, domain: 'bookings', minimumRole: 'member', description: 'Read scheduled times and remaining places for a product, including shared calendar conflicts. Choose a returned session ID to create or change a booking.',
     inputSchema: { product_id: { type: 'string' }, from: { type: 'string', description: 'Inclusive ISO UTC instant.' }, to: { type: 'string', description: 'Exclusive ISO UTC instant, at most 93 days after from.' }, ...paginationInputSchema }, required: ['product_id', 'from', 'to'],
   }),
@@ -137,7 +137,7 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
   if (toolName === 'list_product_bookings') {
     const filters: string[] = ['b.organization_id = ?']
     const params: Array<string | number | null> = [organizationId]
-    if (!managesBookings) { filters.push(assignedBookingSql('b')); params.push(organization.userId) }
+    if (!managesBookings) { filters.push(assignedMemberSql('b')); params.push(organization.userId) }
     for (const [argument, column] of [['assigned_member_id', 'b.assigned_member_id'], ['product_id', 'b.product_id']] as const) {
       if (typeof args[argument] === 'string') { filters.push(`${column} = ?`); params.push(args[argument] as string) }
     }

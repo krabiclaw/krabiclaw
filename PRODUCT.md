@@ -14,14 +14,13 @@ success, a quota or a customer-facing promise.
 
 ## Calendar and bookings
 
-New legal consultations book an available attorney from the explicitly selected
-attorney or legal team, using Better Auth organization membership and the
-attorney's published profile, working hours, timezone and time off. Experiences
-can use a business schedule without one named provider, or allocate an eligible
-member. Locations, offerings and homes share one responsibility model: an
-explicit Better Auth membership or Team, never both. It grants the same scoped
-work across the inbox, Today, calendar and notifications. A Team may include a
-host and supporting people. Owners and admins remain selectable; promotion
+New legal consultations book the explicitly selected attorney, using Better
+Auth organization membership and the attorney's published profile, working
+hours, timezone and time off. Experiences can use a business schedule without
+one named provider, or allocate an eligible member. Locations, offerings and
+homes share one responsibility model: one explicit Better Auth membership. It
+grants the same scoped work across the inbox, Today, calendar and
+notifications. Owners and admins remain selectable; promotion
 does not clear their responsibility. Missing choices remain unassigned.
 Existing bookings retain their recorded provider until an explicit
 reassignment; staffing and offering configuration edits do not rewrite that

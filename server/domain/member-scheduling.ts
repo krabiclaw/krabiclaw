@@ -6,7 +6,6 @@ import { addLocalDays, localDateAt, localDateTimeToInstant, isValidTimezone, isV
 import { MEMBER_BUSY_SCOPES, MEMBER_NAME_SQL, type WorkingHours, type SchedulingInterval } from '~/shared/member-scheduling'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
-import { getOrganizationTeamsData } from '~/server/utils/dashboard-members'
 import { getR2KeyFromPublicUrl } from '~/server/utils/cloudflare-r2'
 
 export interface SchedulingActor { env: CloudflareEnv; userId: string; organizationId: string }
@@ -218,7 +217,7 @@ export async function memberSchedulingList(actor: SchedulingActor) {
  const {roleAllows}=await import('~/server/utils/member-access')
  const admin=await roleAllows({...membership,permissions:{members:['read']}})
  const members=await queryAll<{id:string;name:string;image:string|null;is_self:number}>(actor.env.DB,`SELECT m.id,${MEMBER_NAME_SQL} name,u.image,m.userId=? AS is_self FROM member m JOIN user u ON u.id=m.userId LEFT JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE m.organizationId=? AND (?=1 OR m.userId=?)`,[actor.userId,actor.organizationId,Number(admin),actor.userId])
- return { members: await Promise.all(members.map(async ({is_self,...member})=>({...member,self:Boolean(is_self),scheduling:await readMemberScheduling(actor.env.DB,actor.env,actor.organizationId,member.id)}))), teams: admin ? await getOrganizationTeamsData(actor.env, actor.organizationId) : [] }
+ return { members: await Promise.all(members.map(async ({is_self,...member})=>({...member,self:Boolean(is_self),scheduling:await readMemberScheduling(actor.env.DB,actor.env,actor.organizationId,member.id)}))) }
 }
 export async function connectPersonalCalendar(actor:SchedulingActor, memberId:string, accountId:string) {
  const member=await requireSchedulingAccess(actor,memberId)
