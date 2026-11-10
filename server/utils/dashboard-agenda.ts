@@ -5,7 +5,7 @@ import { d1JsonStringSet, executeBatch, queryAll, type DbClient } from '~/server
 import { assignedGuestThreadScope, assignedResponsibilitySql, roleAllows, assertRoleAllows, type ResolvedMembership } from '~/server/utils/member-access'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { loadOwnerPictures } from '~/server/notifications/hero'
-import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
+import { BOOKED_RECORDS_SQL, REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import { postEditorPath } from '~/server/utils/dashboard-links'
 import type { Stay } from '~/server/domain/stays'
 import { STAY_CHANNEL_LABELS, stayGuestFirstName } from '~/shared/bookings'
@@ -229,57 +229,44 @@ export async function listAgenda(
   const sourceQueries: Promise<SourceRow[]>[] = []
   const broadFrom = `${addLocalDays(query.from, -2)}T00:00:00.000Z`
   const broadTo = `${addLocalDays(query.to, 2)}T23:59:59.999Z`
-  const commonSelect = (alias: string, kind: AgendaKind, fields: string, enrichment: {
-    joins?: string
-    pictureOwner?: { type: string; id: string }
-    resourceTitle?: string
-    assignedMember?: string
-    /** The zone the row's instant was offered in; a post has none and reads the business's. */
-    timezone?: string
-  } = {}) => `
-    SELECT ${enrichment.assignedMember??'NULL'} assigned_member_id, ${enrichment.assignedMember?`(SELECT ${MEMBER_NAME_SQL} FROM member m JOIN user u ON u.id=m.userId LEFT JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE m.id=${enrichment.assignedMember} AND m.organizationId=${alias}.organization_id)`:'NULL'} assigned_member_name, ${alias}.id, ${kind === 'booking' ? 'agenda_booking.id' : kind === 'reservation' ? 'agenda_reservation.id' : 'NULL'} AS operational_id, ${kind === 'booking' ? 'agenda_booking.product_id' : 'NULL'} AS product_id, '${kind}' AS kind, ${fields}, ${alias}.organization_id,
-           s.name AS organization_name,
-           s.vertical,
-           ${alias}.location_id,
-           l.title AS location_title,
-           ${enrichment.timezone ?? 's.timezone'} AS timezone,
-           ${kind === 'post' ? 'NULL' : `(SELECT u.image FROM user u WHERE u.id = ${alias}.user_id)`} AS guest_image_url,
-           ${(enrichment.pictureOwner ?? locationPictureOwner(alias)).type} AS picture_owner_type,
-           ${(enrichment.pictureOwner ?? locationPictureOwner(alias)).id} AS picture_owner_id,
-           ${enrichment.resourceTitle ?? 'COALESCE(l.title, s.name, s.subdomain, s.id)'} AS resource_title
-    FROM ${kind === 'post' ? 'content_documents' : 'requests'} ${alias}
-    JOIN organization s ON s.id = ${alias}.organization_id
-    LEFT JOIN business_locations l ON l.id = ${alias}.location_id AND l.organization_id = ${alias}.organization_id
-    
-    ${enrichment.joins ?? ''}
-    WHERE ${kind === 'post' ? `${alias}.kind = 'social_post' AND ${alias}.row_role = 'root' AND ` : `${alias}.kind = '${kind}' AND `}${scopeConditions(scope, query, alias)}
-  `
   const params = () => scopeParams(scope, query)
 
-  // A held table and a booked seat are their own rows, and each states one
-  // instant in its own zone. The window here is deliberately broad in UTC; the
-  // day a row belongs to is decided below, in that row's zone.
-  if (requestedKinds.has('reservation')) sourceQueries.push(queryAll(db, `${commonSelect('rq', 'reservation', `agenda_reservation.starts_at, agenda_reservation.ends_at,
-    json_extract(rq.payload_json, '$.guest.name') AS title, json_extract(rq.payload_json, '$.party_size_is_minimum') AS party_size_is_minimum, agenda_reservation.party_size, agenda_reservation.status`, {
-    joins: 'JOIN reservations agenda_reservation ON agenda_reservation.request_id = rq.id',
-    timezone: 'agenda_reservation.timezone',
-  })} ${assignedRequests ? `AND ${assignedRequests.sql}` : ''} AND agenda_reservation.status <> 'cancelled' AND agenda_reservation.starts_at BETWEEN ? AND ?`, [...params(), ...(assignedRequests?.params ?? []), broadFrom, broadTo]))
-  if (requestedKinds.has('booking')) sourceQueries.push(queryAll(db, `${commonSelect('rq', 'booking', `agenda_session.starts_at, agenda_session.ends_at,
-    json_extract(rq.payload_json, '$.guest.name') AS title, NULL AS party_size_is_minimum, agenda_booking.party_size AS party_size, agenda_booking.status`, {
-    joins: `JOIN bookings agenda_booking ON agenda_booking.request_id = rq.id
-      JOIN product_sessions agenda_session ON agenda_session.id = agenda_booking.product_session_id
-      LEFT JOIN products agenda_product ON agenda_product.id = agenda_booking.product_id AND agenda_product.organization_id = agenda_booking.organization_id`,
-    assignedMember:'agenda_booking.assigned_member_id',
-    timezone: 'agenda_session.timezone',
-    pictureOwner: { type: `'product'`, id: 'agenda_booking.product_id' },
-    resourceTitle: 'COALESCE(agenda_product.name, l.title, s.name, s.subdomain, s.id)',
-  })} ${assignedRequests ? `AND ${assignedRequests.sql}` : ''} AND agenda_booking.status <> 'cancelled' AND agenda_session.starts_at BETWEEN ? AND ?`, [...params(), ...(assignedRequests?.params ?? []), broadFrom, broadTo]))
+  // A held table and a booked seat are booked records (BOOKED_RECORDS_SQL),
+  // each with its conversation and one instant in its own zone. The window here
+  // is deliberately broad in UTC; the day a row belongs to is decided below, in
+  // that row's zone.
+  const visitKinds = (['reservation', 'booking'] as const).filter(kind => requestedKinds.has(kind))
+  if (visitKinds.length) {
+    const location = locationPictureOwner('rq')
+    sourceQueries.push(queryAll(db, `
+    SELECT br.assigned_member_id, (SELECT ${MEMBER_NAME_SQL} FROM member m JOIN user u ON u.id=m.userId LEFT JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE m.id=br.assigned_member_id AND m.organizationId=rq.organization_id) assigned_member_name,
+           rq.id, br.id AS operational_id, br.product_id, br.kind, br.starts_at, br.ends_at,
+           json_extract(rq.payload_json, '$.guest.name') AS title,
+           CASE br.kind WHEN 'reservation' THEN json_extract(rq.payload_json, '$.party_size_is_minimum') END AS party_size_is_minimum, br.party_size, br.status,
+           rq.organization_id, s.name AS organization_name, s.vertical, rq.location_id, l.title AS location_title, br.timezone,
+           (SELECT u.image FROM user u WHERE u.id = rq.user_id) AS guest_image_url,
+           CASE br.kind WHEN 'booking' THEN 'product' ELSE ${location.type} END AS picture_owner_type,
+           CASE br.kind WHEN 'booking' THEN br.product_id ELSE ${location.id} END AS picture_owner_id,
+           COALESCE(CASE br.kind WHEN 'booking' THEN br.product_name END, l.title, s.name, s.subdomain, s.id) AS resource_title
+      FROM ${BOOKED_RECORDS_SQL} br
+      JOIN requests rq ON rq.id = br.request_id AND rq.kind = br.kind AND rq.organization_id = br.organization_id
+      JOIN organization s ON s.id = rq.organization_id
+      LEFT JOIN business_locations l ON l.id = rq.location_id AND l.organization_id = rq.organization_id
+     WHERE br.organization_id ${scopeSql} AND br.kind IN (SELECT value FROM json_each(?)) AND br.status <> 'cancelled' AND br.starts_at BETWEEN ? AND ?
+       AND ${scopeConditions(scope, query, 'rq')} ${assignedRequests ? `AND ${assignedRequests.sql}` : ''}`,
+    [scopeParam, JSON.stringify(visitKinds), broadFrom, broadTo, ...params(), ...(assignedRequests?.params ?? [])]))
+  }
   // A post is on the agenda on the day it was published; nothing is due.
-  if (requestedKinds.has('post')) sourceQueries.push(queryAll(db, `${commonSelect('p', 'post', `p.published_at AS starts_at, NULL AS ends_at,
-    NULLIF(p.title, '') AS title, NULL AS party_size_is_minimum, NULL AS party_size, p.status`, {
-    pictureOwner: { type: `'content_document'`, id: 'p.id' },
-  })}
-    AND p.status = 'published' AND p.published_at BETWEEN ? AND ?`, [...params(), broadFrom, broadTo]))
+  if (requestedKinds.has('post')) sourceQueries.push(queryAll(db, `
+    SELECT NULL AS assigned_member_id, NULL AS assigned_member_name, p.id, NULL AS operational_id, NULL AS product_id, 'post' AS kind,
+           p.published_at AS starts_at, NULL AS ends_at, NULLIF(p.title, '') AS title, NULL AS party_size_is_minimum, NULL AS party_size, p.status,
+           p.organization_id, s.name AS organization_name, s.vertical, p.location_id, l.title AS location_title, s.timezone, NULL AS guest_image_url,
+           'content_document' AS picture_owner_type, p.id AS picture_owner_id, COALESCE(l.title, s.name, s.subdomain, s.id) AS resource_title
+      FROM content_documents p
+      JOIN organization s ON s.id = p.organization_id
+      LEFT JOIN business_locations l ON l.id = p.location_id AND l.organization_id = p.organization_id
+     WHERE p.kind = 'social_post' AND p.row_role = 'root' AND ${scopeConditions(scope, query, 'p')}
+       AND p.status = 'published' AND p.published_at BETWEEN ? AND ?`, [...params(), broadFrom, broadTo]))
 
   // A stay is two moments at its home: guests arrive on the check-in date at the
   // home's check-in time and leave on the checkout date at its checkout time,

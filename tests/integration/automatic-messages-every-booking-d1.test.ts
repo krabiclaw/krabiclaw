@@ -128,15 +128,16 @@ test('consultations, classes and table reservations are sent their automatic mes
     // The studio's message never reaches the law firm's clients, nor the reverse.
     assert.equal(await db.prepare("SELECT count(*) AS n FROM scheduled_guest_messages WHERE subject_type = 'booking' AND subject_id = ? AND template_id = ?").bind(ana.bookingId, reminder.id).first('n'), 0)
 
-    // Every confirmed visit has its preparation and follow-up work, a class and a table as much as a consultation.
-    const jobs = (kind: 'booking' | 'reservation', id: string) => db.prepare("SELECT kind, starts_at, status FROM tasks WHERE subject_type = ? AND subject_id = ? AND kind IN ('consultation_prep', 'consultation_follow_up') ORDER BY kind").bind(kind, id).all().then(result => result.results)
-    const session = (id: string) => db.prepare('SELECT ps.starts_at, ps.ends_at FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id WHERE b.id = ?').bind(id).first<{ starts_at: string; ends_at: string }>()
-    for (const [kind, id, window] of [['booking', ana.bookingId, await session(ana.bookingId)], ['booking', cy.bookingId, await session(cy.bookingId)], ['reservation', dee.reservationId, table]] as const) {
-      assert.deepEqual(await jobs(kind, id), [
-        { kind: 'consultation_follow_up', starts_at: new Date(Date.parse(window!.ends_at) + 86_400_000).toISOString(), status: 'open' },
-        { kind: 'consultation_prep', starts_at: window!.starts_at, status: 'open' },
-      ], `${kind} ${id}`)
-    }
+    // A visit a person holds is their work to prepare and follow up; one nobody holds (a table here) is a Calendar commitment, not a task.
+    const jobs = (kind: 'booking' | 'reservation', id: string) => db.prepare("SELECT kind, starts_at, status, assigned_member_id FROM tasks WHERE subject_type = ? AND subject_id = ? AND kind IN ('consultation_prep', 'consultation_follow_up') ORDER BY kind").bind(kind, id).all().then(result => result.results)
+    const held = await db.prepare('SELECT b.assigned_member_id, ps.starts_at, ps.ends_at FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id WHERE b.id = ?').bind(ana.bookingId).first<{ assigned_member_id: string; starts_at: string; ends_at: string }>()
+    assert.ok(held?.assigned_member_id)
+    assert.deepEqual(await jobs('booking', ana.bookingId), [
+      { kind: 'consultation_follow_up', starts_at: new Date(Date.parse(held.ends_at) + 86_400_000).toISOString(), status: 'open', assigned_member_id: held.assigned_member_id },
+      { kind: 'consultation_prep', starts_at: held.starts_at, status: 'open', assigned_member_id: held.assigned_member_id },
+    ])
+    assert.deepEqual(await jobs('booking', cy.bookingId), [])
+    assert.deepEqual(await jobs('reservation', dee.reservationId), [])
 
     // The firm cancels Ben's consultation: nothing of it is sent.
     const thread = async (organizationId: string, requestId: string) => (await getGuestRequest(db, requestId, organizationId)) as unknown as GuestThreadRow

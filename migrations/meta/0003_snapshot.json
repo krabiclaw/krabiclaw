@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "44574c09-9845-4658-b867-e99a05f73ecd",
+  "id": "d3dcedfc-5688-424f-ab65-50f2da230463",
   "prevId": "9812afd5-6878-4a47-a5dd-bd71ff93941f",
   "tables": {
     "account": {
@@ -18106,15 +18106,15 @@
           "notNull": true,
           "autoincrement": false
         },
-        "stay_id": {
-          "name": "stay_id",
+        "subject_type": {
+          "name": "subject_type",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "booking_id": {
-          "name": "booking_id",
+        "subject_id": {
+          "name": "subject_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -18189,19 +18189,12 @@
           ],
           "isUnique": false
         },
-        "team_threads_org_stay_idx": {
-          "name": "team_threads_org_stay_idx",
+        "team_threads_org_subject_idx": {
+          "name": "team_threads_org_subject_idx",
           "columns": [
             "organization_id",
-            "stay_id"
-          ],
-          "isUnique": false
-        },
-        "team_threads_org_booking_idx": {
-          "name": "team_threads_org_booking_idx",
-          "columns": [
-            "organization_id",
-            "booking_id"
+            "subject_type",
+            "subject_id"
           ],
           "isUnique": false
         },
@@ -18236,19 +18229,6 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "team_threads_booking_id_bookings_id_fk": {
-          "name": "team_threads_booking_id_bookings_id_fk",
-          "tableFrom": "team_threads",
-          "tableTo": "bookings",
-          "columnsFrom": [
-            "booking_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
         "team_threads_created_by_user_id_user_id_fk": {
           "name": "team_threads_created_by_user_id_user_id_fk",
           "tableFrom": "team_threads",
@@ -18260,21 +18240,6 @@
             "id"
           ],
           "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "team_threads_stay_scope_fk": {
-          "name": "team_threads_stay_scope_fk",
-          "tableFrom": "team_threads",
-          "tableTo": "stays",
-          "columnsFrom": [
-            "organization_id",
-            "stay_id"
-          ],
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onDelete": "no action",
           "onUpdate": "no action"
         },
         "team_threads_location_scope_fk": {
@@ -18296,6 +18261,10 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {
+        "team_threads_subject_check": {
+          "name": "team_threads_subject_check",
+          "value": "(subject_type IS NULL) = (subject_id IS NULL) AND (subject_type IS NULL OR subject_type IN ('stay', 'booking', 'reservation'))"
+        },
         "team_threads_instants_check": {
           "name": "team_threads_instants_check",
           "value": "strftime('%Y-%m-%dT%H:%M:%fZ', last_message_at, '+0 days') IS last_message_at AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at"

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:db26ef9a50e4a28845e5c819517cbe296b69e87effcd4a4df3ba781c4ebb9b56",
-  "documentationFingerprint": "sha256:b85a2ca48fd06faac8631fcc370054d429742674516f18a48373dcb387957c3f",
+  "fingerprint": "sha256:a063da47834d9e3eeb349e61d7a510d328058bf0d378f6a19243d7ca8cd21b7e",
+  "documentationFingerprint": "sha256:dfc0fc9accae8435a8c8fa2d1a26ad78141c126ca14325dd798c38c17eef687f",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -73452,7 +73452,7 @@
                   "type": "boolean"
                 },
                 "job": {
-                  "description": "A stay conversation’s cleaning job (the turnover, or the job to get the home ready after a move) as list_tasks presents it; null when the stay has none the caller may see.",
+                  "description": "The job for the conversation’s booked record (a turnover or home-ready job for a stay, the prep or follow-up for a booking or reservation) as list_tasks presents it; null when there is none the caller may see.",
                   "properties": {
                     "action": {
                       "type": [
@@ -73912,6 +73912,33 @@
                   },
                   "type": "array"
                 },
+                "record": {
+                  "description": "The booking or table reservation the conversation is about: who booked, else what.",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "booking",
+                        "reservation"
+                      ],
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "title"
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
                 "stay": {
                   "properties": {
                     "checkInDate": {
@@ -73957,6 +73984,24 @@
                     "null"
                   ]
                 },
+                "subjectId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "subjectType": {
+                  "enum": [
+                    "stay",
+                    "booking",
+                    "reservation",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "unread": {
                   "type": "boolean"
                 },
@@ -73968,9 +74013,12 @@
                 "id",
                 "createdAt",
                 "lastMessageAt",
+                "subjectType",
+                "subjectId",
                 "stayId",
                 "bookingId",
                 "locationId",
+                "record",
                 "name",
                 "isGroup",
                 "createdByUserId",
@@ -130277,7 +130325,7 @@
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
-        "list_team_conversations": "sha256:1d7d0e453b5897c4f47bc11a4be939eed31a39eed442513ff59f78f953ef7d0c",
+        "list_team_conversations": "sha256:88b9488527690e03c33a2d12de8af89ff611fdd21be1ab0892a066da0f2617f6",
         "mark_team_conversation_read": "sha256:3ad65b07c9bd78090f9f81aeffa74ac00f1c201ee8b6325cf16cd879f1e2644d",
         "reject_product_booking": "sha256:91a5bee34d02b729a3dacb01885157ce63b443594116d8710ca90313fb76e357",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",

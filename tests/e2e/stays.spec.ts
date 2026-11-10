@@ -14,6 +14,7 @@ import { STAY_SAFETY_DETAIL_KEYS } from '../../shared/stay-safety'
 import { formQuestionsRevision } from '../../shared/form-questions'
 import type { PublicLocationDisclosure } from '../../types/public-location'
 import type { StayPhotoRoom } from '../../shared/stay-photos'
+import type { TodayReservation } from '../../shared/dashboard-today'
 import type { StayHomeAccessibility } from '../../shared/stay-accessibility'
 import { formatMinorAmount } from '../../shared/prices'
 import type { TaskPerson, TaskSection, TaskView } from '../../server/domain/tasks'
@@ -28,7 +29,7 @@ import type { OpportunityView } from '../../server/domain/opportunities'
 const TIME_ZONE = 'Asia/Bangkok'
 
 /** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
+type BusinessToday = { reservations: { title: string | null; cards: TodayReservation[] }; tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
 
 function localDay(offset: number): string {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
@@ -253,11 +254,14 @@ test('a home keeps its operator name independent from its public title across CM
   expect((await scheduled.json() as { task: TaskView }).task).toMatchObject({ id: task.id, version: task.version + 1, startsAt, dueAt: startsAt, action: task.action })
   const upcoming = await request.get(api('today?range=upcoming'))
   await expectStatus(upcoming, 200)
-  const upcomingTasks = (await upcoming.json() as BusinessToday).tasks.flatMap(section => section.tasks)
+  const upcomingToday = await upcoming.json() as BusinessToday
+  const upcomingTasks = upcomingToday.tasks.flatMap(section => section.tasks)
   expect(upcomingTasks.filter(item => item.stayId === stay.id).map(item => item.kind).sort()).toEqual(['guest_reply', 'turnover'])
-  expect(upcomingTasks.find(item => item.id === task.id)).toMatchObject({
-    version: task.version + 1, action: task.action, detail: task.detail, reservation: task.reservation,
-  })
+  // Upcoming draws the stay once, as its reservation card; the reply under it is the question alone.
+  const upcomingReply = upcomingTasks.find(item => item.id === task.id)!
+  expect(upcomingReply).toMatchObject({ version: task.version + 1, action: task.action, detail: task.detail })
+  expect(upcomingReply.reservation).toBeUndefined()
+  expect(upcomingToday.reservations.cards.filter(card => card.stayId === stay.id).map(card => [card.headline, card.resourceName])).toEqual([['Ana’s group of 3', internalName]])
   expect(upcomingTasks.find(item => item.kind === 'turnover' && item.stayId === stay.id)).toMatchObject({
     face: 'photo', action: { type: 'complete', label: 'Done' },
   })

@@ -639,10 +639,12 @@ const replyTaskCutoff = (now: string) => new Date(Date.parse(now) - REPLY_TASK_E
 
 /** The reply tasks (server/domain/tasks.ts) for one conversation, for the batch that changes it. */
 /**
- * The work around a booked visit: preparing for its start and following up the
- * day after it ends, for every booking and table reservation (a stay's is its
- * turnover). Both follow the record: they move with it, follow its assigned
- * member, and close if it is cancelled. The kind names are the shipped API's.
+ * A person's work around a visit they hold: preparing for its start and
+ * following up the day after it ends, for any booked record with an assigned
+ * member (an attorney's consultation, a guide's class). A visit nobody holds is
+ * a Calendar commitment, not a task; a stay's work is its turnover. Both jobs
+ * follow the record: they move with it, follow its member, and close if it is
+ * cancelled or loses its member. The kind names are the shipped API's.
  */
 const VISIT_JOBS = [
   { kind: 'consultation_prep', at: 'br.starts_at' },
@@ -652,14 +654,14 @@ const VISIT_JOBS = [
 function visitJobQueries(requestId: string, now: string): BatchQuery[] {
   return [{
     query: `UPDATE tasks SET status = 'cancelled', closed_at = ?, closed_by_user_id = NULL, version = tasks.version + 1, updated_at = ?
-      FROM ${BOOKED_RECORDS_SQL} br WHERE br.request_id = ? AND br.kind <> 'stay' AND br.status <> 'confirmed' AND tasks.status = 'open'
+      FROM ${BOOKED_RECORDS_SQL} br WHERE br.request_id = ? AND br.kind <> 'stay' AND (br.status <> 'confirmed' OR br.assigned_member_id IS NULL) AND tasks.status = 'open'
         AND tasks.subject_type = br.kind AND tasks.subject_id = br.id AND tasks.kind IN ('consultation_prep', 'consultation_follow_up')`,
     params: [now, now, requestId],
   }, ...VISIT_JOBS.map(job => ({
     query: `INSERT INTO tasks (id, organization_id, kind, subject_type, subject_id, product_id, location_id, assigned_member_id, starts_at, due_at, timezone, status, dedupe_key, version, created_at, updated_at)
       SELECT ?, br.organization_id, '${job.kind}', br.kind, br.id, br.product_id, br.location_id, br.assigned_member_id, ${job.at}, ${job.at}, br.timezone, 'open', '${job.kind}:' || br.id, 1, ?, ?
         FROM ${BOOKED_RECORDS_SQL} br
-       WHERE br.request_id = ? AND br.kind <> 'stay' AND br.status = 'confirmed' AND ${job.at} > ?
+       WHERE br.request_id = ? AND br.kind <> 'stay' AND br.status = 'confirmed' AND br.assigned_member_id IS NOT NULL AND ${job.at} > ?
       ON CONFLICT (dedupe_key) DO UPDATE SET status = CASE WHEN tasks.status = 'cancelled' THEN 'open' ELSE tasks.status END, closed_at = CASE WHEN tasks.status = 'cancelled' THEN NULL ELSE tasks.closed_at END,
         starts_at = excluded.starts_at, due_at = excluded.due_at, assigned_member_id = excluded.assigned_member_id, assigned_team_id = NULL, version = tasks.version + 1, updated_at = excluded.updated_at
         WHERE tasks.status = 'cancelled' OR (tasks.status = 'open' AND (tasks.starts_at IS NOT excluded.starts_at OR tasks.assigned_member_id IS NOT excluded.assigned_member_id OR tasks.assigned_team_id IS NOT NULL))`,

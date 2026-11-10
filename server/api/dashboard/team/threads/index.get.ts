@@ -13,5 +13,6 @@ export default defineHandler(async (event) => {
   const locationId = typeof query.locationId === 'string' && query.locationId ? query.locationId : undefined
   const stayId = typeof query.stayId === 'string' && query.stayId ? query.stayId : undefined
   const bookingId = typeof query.bookingId === 'string' && query.bookingId ? query.bookingId : undefined
-  return jsonResponse({ threads: await listTeamThreads(env, db, access, { locationId, bookingId, stayId }) })
+  const subject = stayId ? { kind: 'stay' as const, id: stayId } : bookingId ? { kind: 'booking' as const, id: bookingId } : undefined
+  return jsonResponse({ threads: await listTeamThreads(env, db, access, { locationId, subject }) })
 })

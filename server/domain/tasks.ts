@@ -672,7 +672,7 @@ function present(row: TaskRow, viewer: TaskViewer, context: Context, now: Date):
     complete: row.status === 'open' && action?.type === 'complete' && reachable,
     skip: row.status === 'open' && reachable,
     reopen: personClosed && (viewer.manage || row.closed_by_user_id === viewer.principal.userId),
-    // A visit job follows its booking's assigned member; it is reassigned by reassigning the booking.
+    // A visit job is its holder's: it is reassigned by reassigning the booking.
     assign: viewer.manage && row.status === 'open' && row.kind !== 'consultation_prep' && row.kind !== 'consultation_follow_up',
     edit: viewer.manage && row.status === 'open',
   }
