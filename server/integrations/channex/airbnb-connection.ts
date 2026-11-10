@@ -488,7 +488,7 @@ export class AirbnbConnection {
    * update is committed with the import's mapping. A detail set in Brand ›
    * Contact while the import ran is kept: each is written only while still empty.
    */
-  private organizationContactUpdate(details: ListingDetails, values: Record<DetailField, string>): BatchQuery | null {
+  private organizationContactUpdate(details: ListingDetails, values: Record<Exclude<DetailField, 'assigned_member_id'>, string>): BatchQuery | null {
     const sets: string[] = []
     const params: unknown[] = []
     if (details.missingFields.includes('email')) {
@@ -531,10 +531,10 @@ export class AirbnbConnection {
       if (supplied.some(key => !(details.missingFields as string[]).includes(key))) fail(422, 'ONLY_MISSING_DETAILS', 'Only the listing details Airbnb left out may be supplied')
       const field = (key: DetailField): string => {
         const value = details.fields[key] ?? input.missingDetails?.[key]
-        if (typeof value !== 'string' || !value.trim()) fail(422, 'MISSING_DETAIL', `${key} is required`)
+        if (typeof value !== 'string' || !value.trim()) fail(422, 'MISSING_DETAIL', `${key} is required`, { field: `details.${key}` })
         return value.trim()
       }
-      const values = Object.fromEntries(DETAIL_FIELDS.map(key => [key, field(key)])) as Record<DetailField, string>
+      const values = Object.fromEntries(DETAIL_FIELDS.filter(key => key !== 'assigned_member_id').map(key => [key, field(key)])) as Record<Exclude<DetailField, 'assigned_member_id'>, string>
       if (details.defaultOccupancy > details.maxGuests) fail(422, 'INVALID_DETAIL', "The included guest count exceeds the listing's capacity")
       const organization = await queryFirst<{ default_currency: string }>(this.db, 'SELECT default_currency FROM organization WHERE id = ?', [this.organizationId])
       if (!organization || !isCurrencyCode(organization.default_currency)) throw new Error(`Organization ${this.organizationId} has no supported default currency`)
@@ -567,14 +567,14 @@ export class AirbnbConnection {
       // Resume that home even if Airbnb's details have changed since the first attempt.
       const creationKey = `airbnb-listing:${listingId}`
       const created = await readCreationRecord(this.db, creationDedupeKey('product', this.organizationId, creationKey))
-      // The admin who imports a listing looks after the home it becomes until they assign it to someone else.
-      const importer = created ? null : await queryFirst<{ id: string }>(this.db, 'SELECT id FROM member WHERE organizationId = ? AND userId = ?', [this.organizationId, this.userId])
-      if (!created && !importer) fail(403, 'MEMBERSHIP_REQUIRED', 'Only a member of this organization can import its listings')
+      // The host names the member who looks after the home; Airbnb never says.
+      const memberId = created ? null : field('assigned_member_id')
+      if (memberId !== null && !await queryFirst(this.db, 'SELECT id FROM member WHERE organizationId = ? AND id = ?', [this.organizationId, memberId])) fail(422, 'INVALID_DETAIL', 'assigned_member_id must be a member of this organization', { field: 'details.assigned_member_id' })
       const home = created ? await readStayHome(this.db, this.manager(), created.entityId) : await createStayHome(this.env, this.db, this.manager(), stayHomeInput({
         name: details.title, timezone: values.timezone, address: values.address, city: values.city, state: values.state, country: values.country,
         zip_code: values.zipCode, phone: values.phone, email: values.email, check_in_time: details.checkInTime, check_in_end_time: details.checkInEndTime, check_out_time: details.checkOutTime,
         max_guests: details.maxGuests, min_nights: details.minimumNights, calendar_rules: details.calendarRules, base_price_minor: provided(() => minorUnits(details.nightlyRate, organization.default_currency)),
-        cancellation_policy: details.cancellationPolicy, long_term_cancellation_policy: details.longTermCancellationPolicy, assigned_member_id: importer!.id,
+        cancellation_policy: details.cancellationPolicy, long_term_cancellation_policy: details.longTermCancellationPolicy, assigned_member_id: memberId!,
       }), creationKey)
       // The nights land before the mapping: until the mapping exists a retry
       // runs this whole step again (the location and product replay by their

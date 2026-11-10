@@ -291,7 +291,7 @@ async function connected(db: D1Database, env: CloudflareEnv, channex: FakeChanne
   return connection
 }
 
-const form = { missingDetails: { email: 'Stay@Example.test', phone: '+1 435 555 0100' } }
+const form = { missingDetails: { email: 'Stay@Example.test', phone: '+1 435 555 0100', assigned_member_id: 'm-owner' } }
 const manager = { organizationId: ORG, actorId: OWNER, manage: true } as const
 
 /** Tell the fake which Channex room type and rate plan the import's reads are about. */
@@ -324,9 +324,9 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
   try {
     const connection = await connected(db, env, channex)
     const details = await connection.details(LISTING)
-    // The organization has no contact details yet, so the import asks for them once.
+    // The organization has no contact details yet, so the import asks for them once, and always for the member who looks after the home.
     // Children and infants are not asked: Airbnb counts neither.
-    assert.deepEqual(details.missingFields, ['email', 'phone'])
+    assert.deepEqual(details.missingFields, ['email', 'phone', 'assigned_member_id'])
     assert.deepEqual({ timezone: details.fields.timezone, checkIn: details.checkInTime, checkInEnd: details.checkInEndTime, checkOut: details.checkOutTime }, { timezone: TZ, checkIn: '16:00', checkInEnd: '21:00', checkOut: '10:00' })
     // Translate provider aliases without rejecting categories Channex can validate itself.
     assert.equal(details.fields.propertyType, 'holiday_home')
@@ -340,9 +340,9 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
     assert.equal(started.stage, 'property')
     // Asking again returns the same import; nothing is created twice.
     assert.deepEqual(await connection.prepare(LISTING, form), started)
-    // What the host typed is now the organization's contact, so the next listing will not ask.
+    // What the host typed is now the organization's contact, so the next listing asks only who looks after it.
     assert.deepEqual(await db.prepare('SELECT contact_email, contact_phone FROM organization WHERE id = ?').bind(ORG).first(), { contact_email: 'stay@example.test', contact_phone: '+1 435 555 0100' })
-    assert.deepEqual((await connection.details(LISTING)).missingFields, [])
+    assert.deepEqual((await connection.details(LISTING)).missingFields, ['assigned_member_id'])
     const productId = started.product_id
 
     const home = await db.prepare(`SELECT p.kind, p.name, b.check_in_time, b.check_in_end_time, b.check_out_time, b.default_capacity AS max_guests, b.min_nights, l.title AS location, l.timezone, l.email, pr.unit_amount, pr.currency
@@ -1260,9 +1260,10 @@ test('a full-plan sync swap stops its old home before activation and reconnects 
     channex.listings.push('listing-88', 'listing-99')
     const first = await connection.prepare(LISTING, form)
     await importAll(connection, db, channex, first.product_id)
-    const second = await connection.prepare('listing-88', { missingDetails: {} })
+    assert.equal(await db.prepare('SELECT assigned_member_id FROM product_booking_configs WHERE product_id = ?').bind(first.product_id).first('assigned_member_id'), 'm-owner')
+    const second = await connection.prepare('listing-88', { missingDetails: { assigned_member_id: 'm-owner' } })
     await importAll(connection, db, channex, second.product_id)
-    const replacement = await connection.prepare('listing-99', { missingDetails: {} })
+    const replacement = await connection.prepare('listing-99', { missingDetails: { assigned_member_id: 'm-owner' } })
     await advanceTo(connection, db, channex, replacement.product_id, 'draft')
     assert.equal(await countActiveHomes(db, ORG), 2)
     const queued = await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: 'listing-99' }], stop: [first.product_id] })
@@ -1788,6 +1789,11 @@ test('the import asks only for required contact details and preserves provider b
     channex.availabilityRules = realRules
     // Only the fields Airbnb left out may be supplied.
     await assert.rejects(connection.prepare(LISTING, { missingDetails: { ...form.missingDetails, city: 'Elsewhere' } }), { status: 422, data: { code: 'ONLY_MISSING_DETAILS' } })
+    // Airbnb never says who looks after a home: the host names a member of this organization, or nothing is created.
+    const { assigned_member_id: _member, ...withoutMember } = form.missingDetails
+    await assert.rejects(connection.prepare(LISTING, { missingDetails: withoutMember }), { status: 422, data: { code: 'MISSING_DETAIL', field: 'details.assigned_member_id' } })
+    await assert.rejects(connection.prepare(LISTING, { missingDetails: { ...form.missingDetails, assigned_member_id: 'm-elsewhere' } }), { status: 422, data: { code: 'INVALID_DETAIL', field: 'details.assigned_member_id' } })
+    assert.equal(await count(db, 'products'), 0)
     const policies = channex.booking.cancellation_policy_settings
     // Untranslated provider terms do not block the home or acquire a different local policy.
     channex.booking = { ...channex.booking, cancellation_policy_settings: { cancellation_policy_category: 'super_strict_30', lts_cancellation_policy_id: 'CANCEL_LONG_TERM_FAIR' } }
