@@ -181,14 +181,14 @@ test.describe('lodging identity boundary', () => {
       const beforeInvalidCursor = await api.get(`${teamPath}/messages?org=${slug}`, { headers: bearer })
       expect(beforeInvalidCursor.status, await beforeInvalidCursor.text()).toBe(200)
       const messagesBeforeInvalidCursor = await beforeInvalidCursor.json()
-      for (const cursor of [{ before: replyMessage.createdAt }, { before_id: replyMessage.id }]) {
+      for (const [cursor, missing] of [[{ before: replyMessage.createdAt }, 'beforeId'], [{ before_id: replyMessage.id }, 'before']] as const) {
         const invalidCursor = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_team_conversation', args: { organization_id: organization.id, thread_id: threadId, ...cursor } })
         expect(invalidCursor.status(), await invalidCursor.text()).toBe(200)
         const invalidCursorResult = (await invalidCursor.json()).result
         expect(invalidCursorResult.isError).toBe(true)
         expect(invalidCursorResult.structuredContent).toBeUndefined()
         // Half a cursor passes the schema, which has no combinator Claude clients mis-render; the team-message domain refuses it.
-        expect(JSON.parse(invalidCursorResult.content[0].text)).toEqual({ status: 422, message: 'before and beforeId are sent together', code: 'INVALID_CURSOR', field: 'beforeId' })
+        expect(JSON.parse(invalidCursorResult.content[0].text)).toEqual({ status: 422, message: 'before and beforeId are sent together', code: 'INVALID_CURSOR', field: missing })
       }
       const afterInvalidCursor = await api.get(`${teamPath}/messages?org=${slug}`, { headers: bearer })
       expect(afterInvalidCursor.status, await afterInvalidCursor.text()).toBe(200)
