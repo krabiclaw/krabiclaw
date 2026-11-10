@@ -38,9 +38,7 @@ export default defineHandler(async (event) => {
   }
 
   if (notification.livemode !== livemode) throw new HTTPError({ statusCode: 400, statusMessage: 'Stripe event mode does not match this destination' })
-  if (!await processStripeConnectEvent(env.DB, stripe, env, notification, payload)) {
-    throw new HTTPError({ statusCode: 503, statusMessage: 'Stripe Connect event processing is in progress' })
-  }
+  await processStripeConnectEvent(env.DB, stripe, env, notification, payload)
 
   return jsonResponse({ received: true })
 })

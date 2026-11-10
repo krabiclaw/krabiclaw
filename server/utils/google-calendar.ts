@@ -39,7 +39,7 @@ export interface EventLink {
   id: string; organization_id: string; integration_revision: string; account_id: string
   calendar_id: string; event_id: string; booking_kind: CalendarSubject['booking_kind']; operational_id: string
   request_id: string | null; booking_revision: string; synced_revision: string | null
-  state: string; attempts: number; lease_token: string | null; updated_at: string
+  state: string; updated_at: string
 }
 export class CalendarError extends Error {
   readonly status: number
@@ -192,13 +192,12 @@ async function reconcileIntents(db: DbClient, organizationId: string, integratio
       ON CONFLICT(organization_id, integration_revision, booking_kind, operational_id) WHERE state <> 'deleted' DO UPDATE SET
       request_id = excluded.request_id, booking_revision = excluded.booking_revision,
       state = CASE WHEN google_calendar_event_links.booking_revision <> excluded.booking_revision THEN 'pending' ELSE google_calendar_event_links.state END,
-      next_attempt_at = CASE WHEN google_calendar_event_links.booking_revision <> excluded.booking_revision THEN NULL ELSE google_calendar_event_links.next_attempt_at END,
       updated_at = excluded.updated_at WHERE google_calendar_event_links.booking_revision <> excluded.booking_revision`,
     [id, organizationId, integration.revision, integration.account_id, integration.calendar_id, 'kc' + id.replaceAll('-', ''), subject.booking_kind, subject.operational_id, subject.request_id, revision, now, now, organizationId, integration.revision])
   }
   // Select only stale identities. Unchanged and historical successful events
   // receive no writes; cleanup also has a database batch limit.
-  await execute(db, `UPDATE google_calendar_event_links SET state='cleanup', next_attempt_at=NULL
+  await execute(db, `UPDATE google_calendar_event_links SET state='cleanup'
     WHERE id IN (SELECT l.id FROM google_calendar_event_links l
       WHERE l.organization_id=? AND l.state NOT IN ('deleted','cleanup')
         AND (?='disabled' OR l.integration_revision<>? OR NOT (
@@ -230,11 +229,6 @@ async function currentSubject(db: DbClient, organizationId: string, link: EventL
   if (integration?.revision !== link.integration_revision || integration.status === 'disabled') return null
   return (await calendarSubjects(db, organizationId, integration, link))[0] ?? null
 }
-async function ownsMutation(db: DbClient, link: EventLink, lease: string, revision: string) {
-  return Boolean(await queryFirst<{ id: string }>(db, `SELECT id FROM google_calendar_event_links WHERE id=?
-    AND lease_token=? AND lease_until>? AND booking_revision=? AND state IN ('pending','error')`,
-  [link.id, lease, new Date(Date.now() + 30_000).toISOString(), revision]))
-}
 export interface CalendarProvider {
   token(accountId: string): Promise<string>
 }
@@ -246,37 +240,28 @@ export async function syncCalendarOrganization(env: CloudflareEnv, organizationI
   const integration = await readCalendarIntegration(db, organizationId)
   if (!integration) return { checked: 0, failed: 0 }
   await reconcileIntents(db, organizationId, integration)
-  const now = new Date().toISOString()
+  // A failure moves its link's updated_at on, so it waits behind the others rather than starving them.
   const links = await queryAll<EventLink>(db, `SELECT * FROM google_calendar_event_links WHERE organization_id = ?
-    AND state IN ('pending', 'cleanup', 'error') AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-    AND (lease_until IS NULL OR lease_until <= ?) AND (? IS NULL OR id=?) ORDER BY COALESCE(next_attempt_at, created_at), updated_at, id LIMIT ?`, [organizationId, now, now, eventLinkId ?? null, eventLinkId ?? null, limit])
+    AND state IN ('pending', 'cleanup', 'error') AND (? IS NULL OR id=?) ORDER BY updated_at, id LIMIT ?`, [organizationId, eventLinkId ?? null, eventLinkId ?? null, limit])
   let checked = 0; let failed = 0
   for (const link of links) {
-    const lease = crypto.randomUUID()
-    const claim = await execute(db, 'UPDATE google_calendar_event_links SET lease_token=?, lease_until=? WHERE id=? AND (lease_until IS NULL OR lease_until<=?)',
-      [lease, new Date(Date.now() + 120_000).toISOString(), link.id, now])
-    if (claim.meta?.changes !== 1) continue
     checked++
     try {
       const token = await provider.token(link.account_id)
       const subject = await currentSubject(db, organizationId, link)
       if (!subject || link.state === 'cleanup') {
         await removeEvent(token, link)
-        await execute(db, "UPDATE google_calendar_event_links SET state='deleted', last_error=NULL, lease_token=NULL, lease_until=NULL, updated_at=? WHERE id=? AND lease_token=?", [new Date().toISOString(), link.id, lease])
+        await execute(db, "UPDATE google_calendar_event_links SET state='deleted', last_error=NULL, updated_at=? WHERE id=?", [new Date().toISOString(), link.id])
         continue
       }
       const revision = subject.revision
       if (revision !== link.booking_revision) {
-        await execute(db, "UPDATE google_calendar_event_links SET state='pending', lease_token=NULL, lease_until=NULL WHERE id=? AND lease_token=?", [link.id, lease])
+        await execute(db, "UPDATE google_calendar_event_links SET state='pending' WHERE id=?", [link.id])
         continue
       }
       await requireWriter(token, link.calendar_id)
       const url = subject.request_id && subject.buyer_user_id ? composeBuyerActivityUrl(env, subject.booking_kind, subject.request_id) : null
       const path = `/calendars/${encodeURIComponent(link.calendar_id)}/events`
-      if (!await ownsMutation(db, link, lease, revision)) {
-        await execute(db, 'UPDATE google_calendar_event_links SET lease_token=NULL, lease_until=NULL WHERE id=? AND lease_token=?', [link.id, lease])
-        continue
-      }
       let existing: GoogleEvent | undefined
       try { existing = await google<GoogleEvent>(token, `${path}/${link.event_id}`) }
       catch (error) { if (!(error instanceof CalendarError) || ![404, 410].includes(error.status)) throw error }
@@ -286,16 +271,16 @@ export async function syncCalendarOrganization(env: CloudflareEnv, organizationI
       const beforeUpdate = await currentSubject(db, organizationId, link)
       if (!beforeUpdate) {
         await removeEvent(token, link)
-        await execute(db, "UPDATE google_calendar_event_links SET state='deleted', lease_token=NULL, lease_until=NULL WHERE id=? AND lease_token=?", [link.id, lease])
+        await execute(db, "UPDATE google_calendar_event_links SET state='deleted' WHERE id=?", [link.id])
         continue
       }
-      if (beforeUpdate.revision !== revision || !await ownsMutation(db, link, lease, revision)) {
-        await execute(db, "UPDATE google_calendar_event_links SET state=CASE WHEN state='cleanup' THEN state ELSE 'pending' END, lease_token=NULL, lease_until=NULL WHERE id=? AND lease_token=?", [link.id, lease])
+      if (beforeUpdate.revision !== revision) {
+        await execute(db, "UPDATE google_calendar_event_links SET state=CASE WHEN state='cleanup' THEN state ELSE 'pending' END WHERE id=?", [link.id])
         continue
       }
       if (!existing) {
-        // A concurrent insert's 409 remains a visible retryable outcome. The
-        // next attempt reads that identity, rather than overwriting it blindly.
+        // Google refuses a second insert of the same event id with 409, a
+        // visible failure; the next pass reads that event instead.
         await google(token, `${path}?sendUpdates=all`, { method: 'POST', body: JSON.stringify({ id: link.event_id, ...payload }) })
       } else {
         if (!existing.etag) throw new Error('Google returned no event ETag; the event cannot be updated without risking a concurrent change.')
@@ -306,22 +291,21 @@ export async function syncCalendarOrganization(env: CloudflareEnv, organizationI
         })
         if (!unchanged) await google(token, `${path}/${link.event_id}?sendUpdates=all`, { method: 'PUT', headers: { 'If-Match': existing.etag }, body: JSON.stringify(payload) })
       }
-      // Fence late provider results against committed cancellation/disconnect.
-      // Compensating deletion uses the same durable identity and retains errors.
+      // A booking cancelled or a calendar disconnected while Google wrote the
+      // event: the event that write left is deleted again.
       const afterSubject = await currentSubject(db, organizationId, link)
       if (!afterSubject) {
         await removeEvent(token, link)
-        await execute(db, "UPDATE google_calendar_event_links SET state='deleted', lease_token=NULL, lease_until=NULL WHERE id=? AND lease_token=?", [link.id, lease])
+        await execute(db, "UPDATE google_calendar_event_links SET state='deleted' WHERE id=?", [link.id])
       } else {
-        await execute(db, `UPDATE google_calendar_event_links SET state=?, synced_revision=?, last_synced_at=?, last_error=NULL, attempts=0,
-          lease_token=NULL, lease_until=NULL WHERE id=? AND lease_token=?`,
-        [afterSubject.revision === revision ? 'synced' : 'pending', revision, new Date().toISOString(), link.id, lease])
+        await execute(db, 'UPDATE google_calendar_event_links SET state=?, synced_revision=?, last_synced_at=?, last_error=NULL WHERE id=?',
+          [afterSubject.revision === revision ? 'synced' : 'pending', revision, new Date().toISOString(), link.id])
       }
     } catch (error) {
       failed++
       const message = error instanceof Error ? error.message : String(error)
       await executeBatch(db, [
-        { query: "UPDATE google_calendar_event_links SET state=CASE WHEN state='cleanup' THEN state ELSE 'error' END, last_error=?, attempts=attempts+1, next_attempt_at=?, lease_token=NULL, lease_until=NULL WHERE id=? AND lease_token=?", params: [message, new Date(Date.now() + Math.min(3600_000, 30_000 * 2 ** Math.min(link.attempts, 7))).toISOString(), link.id, lease] },
+        { query: "UPDATE google_calendar_event_links SET state=CASE WHEN state='cleanup' THEN state ELSE 'error' END, last_error=?, updated_at=? WHERE id=?", params: [message, new Date().toISOString(), link.id] },
         { query: "UPDATE organization_integrations SET status=CASE WHEN status='disabled' THEN 'disabled' ELSE 'error' END, last_error=? WHERE organization_id=? AND provider='google_calendar' AND revision=?", params: [message, organizationId, integration.revision] },
       ])
     }
@@ -333,7 +317,7 @@ export async function syncCalendarOrganization(env: CloudflareEnv, organizationI
 /** Disable first, then clean managed identities. A failed cleanup stays visible. */
 export async function disconnectCalendar(db: DbClient, organizationId: string) {
   await execute(db, "UPDATE organization_integrations SET status='disabled', updated_at=? WHERE organization_id=? AND provider='google_calendar'", [new Date().toISOString(), organizationId])
-  await execute(db, "UPDATE google_calendar_event_links SET state='cleanup', next_attempt_at=NULL WHERE organization_id=? AND state <> 'deleted'", [organizationId])
+  await execute(db, "UPDATE google_calendar_event_links SET state='cleanup' WHERE organization_id=? AND state <> 'deleted'", [organizationId])
 }
 export async function storeCalendarSelection(db: DbClient, organizationId: string, selection: Pick<GoogleCalendarIntegration, 'account_id' | 'calendar_id' | 'calendar_name'>) {
   const pending = await queryFirst<{ n: number }>(db, "SELECT count(*) n FROM google_calendar_event_links WHERE organization_id=? AND state <> 'deleted'", [organizationId])
@@ -356,20 +340,19 @@ export async function storeCalendarSelection(db: DbClient, organizationId: strin
 }
 
 interface CleanupJob {
-  id: string; organization_id: string; account_id: string; calendar_id: string; event_id: string; attempts: number
+  id: string; organization_id: string; account_id: string; calendar_id: string; event_id: string
 }
 /** Common deletion hook: stage identities durably; no Google calls can block deletion. */
 export async function stageCalendarOrganizationCleanup(db: DbClient, organizationId: string) {
   const now = new Date().toISOString()
   await executeBatch(db, [
     { query: `INSERT INTO google_calendar_cleanup_jobs
-      (id, organization_id, account_id, calendar_id, event_id, next_attempt_at, created_at, updated_at)
-      SELECT id, organization_id, account_id, calendar_id, event_id,
-        CASE WHEN lease_until > ? THEN strftime('%Y-%m-%dT%H:%M:%fZ', lease_until, '+30 seconds') ELSE ? END, ?, ?
+      (id, organization_id, account_id, calendar_id, event_id, created_at, updated_at)
+      SELECT id, organization_id, account_id, calendar_id, event_id, ?, ?
       FROM google_calendar_event_links WHERE organization_id=? AND state <> 'deleted'
-      ON CONFLICT(calendar_id, event_id) DO NOTHING`, params: [now, now, now, now, organizationId] },
+      ON CONFLICT(calendar_id, event_id) DO NOTHING`, params: [now, now, organizationId] },
     { query: "UPDATE organization_integrations SET status='disabled', updated_at=? WHERE organization_id=? AND provider='google_calendar'", params: [now, organizationId] },
-    { query: "UPDATE google_calendar_event_links SET state='cleanup', next_attempt_at=NULL WHERE organization_id=? AND state <> 'deleted'", params: [organizationId] },
+    { query: "UPDATE google_calendar_event_links SET state='cleanup' WHERE organization_id=? AND state <> 'deleted'", params: [organizationId] },
   ], { operation: 'retain Google Calendar organization cleanup identities' })
 }
 /** Delete-only outbox. Orphan jobs cannot enroll, recreate, update or expose a tenant. */
@@ -377,31 +360,22 @@ export async function runCalendarCleanupJobs(env: CloudflareEnv, limit = 25, pro
   token: async accountId => (await linkedAccountAccessToken(env, accountId)).accessToken,
 }) {
   const db = env.DB
-  const now = new Date().toISOString()
-  const jobs = await queryAll<CleanupJob>(db, `SELECT id, organization_id, account_id, calendar_id, event_id, attempts
+  // A failure moves its job's updated_at on, so it waits behind the others rather than starving them.
+  const jobs = await queryAll<CleanupJob>(db, `SELECT id, organization_id, account_id, calendar_id, event_id
     FROM google_calendar_cleanup_jobs WHERE state IN ('pending','error')
     AND NOT EXISTS (SELECT 1 FROM organization WHERE organization.id=google_calendar_cleanup_jobs.organization_id)
-    AND (next_attempt_at IS NULL OR next_attempt_at <= ?) AND (lease_until IS NULL OR lease_until <= ?)
-    ORDER BY COALESCE(next_attempt_at, created_at), id LIMIT ?`, [now, now, limit])
+    ORDER BY updated_at, id LIMIT ?`, [limit])
   let checked = 0; let failed = 0
   for (const job of jobs) {
-    const lease = crypto.randomUUID()
-    const claimed = await execute(db, `UPDATE google_calendar_cleanup_jobs SET lease_token=?, lease_until=?
-      WHERE id=? AND state IN ('pending','error') AND (lease_until IS NULL OR lease_until <= ?)
-      AND NOT EXISTS (SELECT 1 FROM organization WHERE organization.id=google_calendar_cleanup_jobs.organization_id)`,
-    [lease, new Date(Date.now() + 120_000).toISOString(), job.id, now])
-    if (claimed.meta?.changes !== 1) continue
     checked++
     try {
       await removeEvent(await provider.token(job.account_id), job)
-      await execute(db, `UPDATE google_calendar_cleanup_jobs SET state='deleted', last_error=NULL, next_attempt_at=NULL,
-        lease_token=NULL, lease_until=NULL, completed_at=?, updated_at=? WHERE id=? AND lease_token=?`,
-      [new Date().toISOString(), new Date().toISOString(), job.id, lease])
+      await execute(db, "UPDATE google_calendar_cleanup_jobs SET state='deleted', last_error=NULL, completed_at=?, updated_at=? WHERE id=?",
+        [new Date().toISOString(), new Date().toISOString(), job.id])
     } catch (error) {
       failed++
-      await execute(db, `UPDATE google_calendar_cleanup_jobs SET state='error', last_error=?, attempts=attempts+1,
-        next_attempt_at=?, lease_token=NULL, lease_until=NULL, updated_at=? WHERE id=? AND lease_token=?`,
-      [error instanceof Error ? error.message : String(error), new Date(Date.now() + Math.min(3600_000, 30_000 * 2 ** Math.min(job.attempts, 7))).toISOString(), new Date().toISOString(), job.id, lease])
+      await execute(db, "UPDATE google_calendar_cleanup_jobs SET state='error', last_error=?, updated_at=? WHERE id=?",
+        [error instanceof Error ? error.message : String(error), new Date().toISOString(), job.id])
     }
   }
   return { checked, failed }

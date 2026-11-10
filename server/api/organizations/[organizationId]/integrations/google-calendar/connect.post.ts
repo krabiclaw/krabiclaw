@@ -1,6 +1,5 @@
 import { defineHandler } from 'nitro'
 import { getRouterParam, readBody } from 'nitro/h3'
-import { execute } from '~/server/db'
 import { INTEGRATION_SCOPES } from '~/shared/organization-settings'
 import { jsonResponse } from '~/server/utils/api-response'
 import { linkedAccountAccessToken, requireIntegrationAccount } from '~/server/utils/auth'
@@ -19,7 +18,6 @@ export default defineHandler(async event => {
  await requireIntegrationAccount(env, body.account_id, { userId: session.user.id, currentAccountId: current?.account_id, providerId: 'google', scopes: INTEGRATION_SCOPES['google-calendar'] })
  try {
   await connectCalendar(env.DB, organization.id, body.account_id, (await linkedAccountAccessToken(env, body.account_id)).accessToken)
-  if(current?.status==='error' && current.account_id===body.account_id)await execute(env.DB,'UPDATE google_calendar_event_links SET next_attempt_at=NULL WHERE organization_id=?',[organization.id])
   const result = await syncCalendarOrganization(env, organization.id)
   if (result.failed) throw new Error('Your calendar is connected, but bookings could not be synced. Retry to finish syncing.')
   // Google tells us when the calendar changes from now on; its change list is read from here.

@@ -332,7 +332,7 @@ test('checkout reads Stripe Tax only for a seller in a Stripe Tax business locat
   })
 })
 
-test('Connect webhook work is claimed once across concurrent D1 deliveries', async () => {
+test('a failed Connect event keeps its error for Stripe to redeliver, and a processed one is not processed again', async () => {
   await withD1(async (db) => {
     let executions = 0
     const event = {
@@ -341,29 +341,17 @@ test('Connect webhook work is claimed once across concurrent D1 deliveries', asy
       payload: JSON.stringify({ id: 'evt_connect_test', type: 'v2.core.account.updated' }),
       processor: 'connect_marketplace' as const,
     }
-    const started = Promise.withResolvers<undefined>()
-    const finish = Promise.withResolvers<undefined>()
-    const work = async () => {
+    const receipt = () => db.prepare("SELECT processor, status, error, payload FROM stripe_webhook_events WHERE stripe_event_id='evt_connect_test'").first()
+    await assert.rejects(processStripeWebhookEvent(db, event, async () => {
       executions += 1
-      started.resolve(undefined)
-      await finish.promise
-    }
-    const processing = processStripeWebhookEvent(db, event, work)
-    assert.equal(await Promise.race([started.promise.then(() => 'started'), processing.then(() => 'settled')]), 'started')
-    try {
-      assert.equal(await processStripeWebhookEvent(db, event, work), false)
-    } finally {
-      finish.resolve(undefined)
-      assert.equal(await processing, true)
-    }
-    assert.equal(executions, 1)
-    const row = await db.prepare("SELECT processor, status, attempt_count FROM stripe_webhook_events WHERE stripe_event_id='evt_connect_test'").first<{
-      processor: string
-      status: string
-      attempt_count: number
-    }>()
-    assert.deepEqual(row, { processor: 'connect_marketplace', status: 'processed', attempt_count: 1 })
-    assert.equal(await processStripeWebhookEvent(db, event, work), true)
-    assert.equal(executions, 1)
+      throw new Error('Stripe account read refused')
+    }), /Stripe account read refused/)
+    assert.deepEqual(await receipt(), { processor: 'connect_marketplace', status: 'failed', error: 'Stripe account read refused', payload: event.payload })
+    const work = async () => { executions += 1 }
+    await processStripeWebhookEvent(db, event, work)
+    assert.equal(executions, 2, 'the redelivery runs the failed work again')
+    assert.deepEqual(await receipt(), { processor: 'connect_marketplace', status: 'processed', error: null, payload: null })
+    await processStripeWebhookEvent(db, event, work)
+    assert.equal(executions, 2, 'a redelivery of a processed event does nothing')
   })
 })

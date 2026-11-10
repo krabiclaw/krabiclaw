@@ -1680,10 +1680,6 @@ export const product_channel_mappings = sqliteTable("product_channel_mappings", 
 	// so a host's own edit is never overwritten. Null until the stage ran.
 	import_written: text(),
 	enabled: integer({ mode: "boolean" }).default(false).notNull(),
-	// The one nightly calendar delivery to this Channex property running now,
-	// and when its hold lapses (server/integrations/channex/ari.ts); both null when none runs.
-	delivery_lease: text(),
-	delivery_lease_until: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
@@ -1707,11 +1703,9 @@ export const product_channel_mappings = sqliteTable("product_channel_mappings", 
 // What a host asked KrabiClaw to do with each Airbnb listing of its connected
 // account, done in the background: `sync` imports the listing as a home if it
 // is not one yet and makes it live; `stop` takes its home back to a free draft.
-// One row per listing; a new request for it replaces the row. Leased and
-// retried by the airbnb-sync cron task the way google_calendar_cleanup_jobs
-// are: `error` (a transient provider failure) is retried after
-// next_attempt_at up to a cap, `failed` waits for a new request, `done` is
-// finished. product_id is the home once it exists.
+// One row per listing; a new request for it replaces the row. The airbnb-sync
+// cron task advances `pending` rows: `done` is finished, `failed` keeps its
+// error until a new request names the listing. product_id is the home once it exists.
 export const airbnb_sync_jobs = sqliteTable("airbnb_sync_jobs", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
@@ -1720,25 +1714,19 @@ export const airbnb_sync_jobs = sqliteTable("airbnb_sync_jobs", {
 	action: text({ enum: ["sync", "stop"] }).notNull(),
 	// The listing fields the host supplied for a sync, as JSON { field: value }: what Airbnb leaves out and the organization does not fill.
 	details: text(),
-	state: text({ enum: ["pending", "error", "done", "failed"] }).default("pending").notNull(),
+	state: text({ enum: ["pending", "done", "failed"] }).default("pending").notNull(),
 	requested_by: text().references(() => user.id, { onDelete: "set null" }),
-	attempts: integer().default(0).notNull(),
 	last_error_code: text(),
 	last_error: text(),
-	next_attempt_at: text(),
-	lease_token: text(),
-	lease_until: text(),
 	completed_at: text(),
 	created_at: text().notNull(),
 	updated_at: text().notNull(),
 }, table => [
 	uniqueIndex("airbnb_sync_jobs_listing_unique").on(table.organization_id, table.listing_id),
-	index("airbnb_sync_jobs_due_idx").on(table.state, table.next_attempt_at),
 	check("airbnb_sync_jobs_action_check", sql`action IN ('sync', 'stop')`),
-	check("airbnb_sync_jobs_state_check", sql`state IN ('pending', 'error', 'done', 'failed')`),
-	// A retried row keeps its last error until it succeeds; an error or failure always names one.
-	check("airbnb_sync_jobs_error_check", sql`state NOT IN ('error', 'failed') OR (last_error_code IS NOT NULL AND last_error IS NOT NULL)`),
-	check("airbnb_sync_jobs_lease_check", sql`(lease_token IS NULL) = (lease_until IS NULL)`),
+	check("airbnb_sync_jobs_state_check", sql`state IN ('pending', 'done', 'failed')`),
+	// A failure always names its error.
+	check("airbnb_sync_jobs_error_check", sql`state <> 'failed' OR (last_error_code IS NOT NULL AND last_error IS NOT NULL)`),
 	check("airbnb_sync_jobs_details_check", sql`details IS NULL OR (action = 'sync' AND json_valid(details) AND json_type(details) = 'object')`),
 ]);
 
@@ -1776,9 +1764,9 @@ export const channel_sync_log = sqliteTable("channel_sync_log", {
 // The delivery outbox for one night of one connected home. A change marks the
 // night pending; delivery sends only what differs from sent_json, the values
 // the channel last confirmed, and marks it pushed, or needs_review with the
-// reason. A pending night waiting out a rate limit or a failed attempt carries
-// its reason and retry_at. The calendar shows each state, so a night the
-// channel did not take is never silently out of date.
+// reason. A night Channex did not confirm stays pending with the reason. The
+// calendar shows each state, so a night the channel did not take is never
+// silently out of date.
 export const channel_night_pushes = sqliteTable("channel_night_pushes", {
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	product_id: text().notNull(),
@@ -1787,21 +1775,16 @@ export const channel_night_pushes = sqliteTable("channel_night_pushes", {
 	state: text().$type<'pending' | 'pushed' | 'needs_review'>().notNull(),
 	detail: text(),
 	sent_json: text(),
-	attempts: integer().default(0).notNull(),
-	retry_at: text(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
 	primaryKey({ columns: [table.product_id, table.provider, table.date], name: "channel_night_pushes_pk" }),
 	foreignKey({ columns: [table.product_id, table.provider], foreignColumns: [product_channel_mappings.product_id, product_channel_mappings.provider], name: "channel_night_pushes_mapping_fk" }).onDelete("cascade"),
 	index("channel_night_pushes_state_idx").on(table.organization_id, table.state),
-	index("channel_night_pushes_due_idx").on(table.state, table.retry_at),
 	check("channel_night_pushes_provider_check", sql`provider = 'channex'`),
 	check("channel_night_pushes_state_check", sql`state IN ('pending', 'pushed', 'needs_review')`),
 	check("channel_night_pushes_detail_check", sql`state <> 'needs_review' OR detail IS NOT NULL`),
 	check("channel_night_pushes_date_check", sql`date(date) IS date`),
 	check("channel_night_pushes_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
-	check("channel_night_pushes_attempts_check", sql`attempts >= 0`),
-	check("channel_night_pushes_retry_check", sql`retry_at IS NULL OR (state = 'pending' AND strftime('%Y-%m-%dT%H:%M:%fZ', retry_at, '+0 days') IS retry_at)`),
 ]);
 
 // ---------------------------------------------------------------------------
@@ -2652,18 +2635,15 @@ export const stripe_webhook_events = sqliteTable("stripe_webhook_events", {
 	stripe_event_id: text().notNull().unique(),
 	event_type: text(),
 	// Platform subscriptions remain owned by Better Auth. Connect and one-time
-	// payment handlers use this receipt only for concurrent delivery deduplication.
+	// payment handlers record here whether they processed an event; Stripe
+	// redelivers one that failed.
 	processor: text().notNull(),
 	status: text().default("pending").notNull(),
 	payload: text(),
 	error: text(),
-	claimed_at: text(),
-	lease_expires_at: text(),
-	claim_token: text(),
-	attempt_count: integer().default(0).notNull(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, () => [
-	check("stripe_webhook_events_instants_check", sql`(claimed_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', claimed_at, '+0 days') IS claimed_at) AND (lease_expires_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', lease_expires_at, '+0 days') IS lease_expires_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at)`),
+	check("stripe_webhook_events_instants_check", sql`(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at)`),
 	check("stripe_webhook_events_payload_check", sql`payload IS NULL OR (json_valid(payload))`),
 ]);
 
@@ -3034,16 +3014,13 @@ export const public_resource_cache_invalidations = sqliteTable("public_resource_
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" } ),
 	reason: text().notNull(),
 	status: text().default("pending").notNull(),
-	attempt_count: integer().default(0).notNull(),
-	claimed_at: text(),
 	processed_at: text(),
 	last_error: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
-	check("public_resource_cache_invalidations_instants_check", sql`(claimed_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', claimed_at, '+0 days') IS claimed_at) AND (processed_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', processed_at, '+0 days') IS processed_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at)`),
+	check("public_resource_cache_invalidations_instants_check", sql`(processed_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', processed_at, '+0 days') IS processed_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at)`),
 	index("public_resource_cache_invalidations_status_idx").on(table.status, table.created_at),
 	index("public_resource_cache_invalidations_org_idx").on(table.organization_id, table.status),
-	check("public_resource_cache_invalidations_attempt_count_check", sql`attempt_count >= 0`),
 ]);
 
 export const analytics_events = sqliteTable("analytics_events", {
@@ -3185,17 +3162,12 @@ export const google_calendar_event_links = sqliteTable("google_calendar_event_li
  synced_revision: text(),
  state: text({ enum: ["pending", "synced", "cleanup", "deleted", "error"] }).default("pending").notNull(),
  last_error: text(),
- attempts: integer().default(0).notNull(),
- next_attempt_at: text(),
- lease_token: text(),
- lease_until: text(),
  last_synced_at: text(),
  created_at: text().notNull(),
  updated_at: text().notNull(),
 }, table => [
  uniqueIndex("google_calendar_subject_unique").on(table.organization_id, table.integration_revision, table.booking_kind, table.operational_id).where(sql`state <> 'deleted'`),
  uniqueIndex("google_calendar_provider_unique").on(table.calendar_id, table.event_id),
- index("google_calendar_due_idx").on(table.organization_id, table.state, table.next_attempt_at),
  check("google_calendar_kind_check", sql`booking_kind IN ('booking', 'reservation')`),
  check("google_calendar_state_check", sql`state IN ('pending', 'synced', 'cleanup', 'deleted', 'error')`),
 ]);
@@ -3209,17 +3181,12 @@ export const google_calendar_cleanup_jobs = sqliteTable("google_calendar_cleanup
  calendar_id: text().notNull(),
  event_id: text().notNull(),
  state: text({ enum: ["pending", "error", "deleted"] }).default("pending").notNull(),
- attempts: integer().default(0).notNull(),
  last_error: text(),
- next_attempt_at: text(),
- lease_token: text(),
- lease_until: text(),
  completed_at: text(),
  created_at: text().notNull(),
  updated_at: text().notNull(),
 }, table => [
  uniqueIndex("google_calendar_cleanup_provider_unique").on(table.calendar_id, table.event_id),
- index("google_calendar_cleanup_due_idx").on(table.state, table.next_attempt_at),
  check("google_calendar_cleanup_state_check", sql`state IN ('pending', 'error', 'deleted')`),
 ]);
 // Financial tenant IDs are immutable historical references. Canonical tenant cleanup
@@ -3365,7 +3332,6 @@ export const payment_usage_events = sqliteTable("payment_usage_events", {
  provider_occurred_at: text().notNull(),
  delivery_at: text(),
  error: text(),
- dead_letter_at: text(),
  created_at: text().notNull(),
 });
 
