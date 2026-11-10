@@ -1411,7 +1411,6 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
     const manifest = await transferDatabaseExport(sourcePath, targetPath)
     assert.deepEqual(readFileSync(sourcePath), sourceBytes, 'the archived source must remain byte-for-byte unchanged')
     assert.deepEqual(manifest.transforms.map(({ name, changes }) => ({ name, changes })), [
-      { name: 'airbnb_sync_errors_failed', changes: 1 },
       { name: 'airbnb_duplicated_through_minimum_removed', changes: 5 },
       { name: 'owner_approved_saltleaf_through_minimum_removed', changes: 163 },
       { name: 'airbnb_original_minimum_edit_guard_recorded', changes: 4 },
@@ -1446,7 +1445,7 @@ test('a v22 replacement preserves stay rules, retires imported duplicates and ap
         { product_id: 'west', name: 'recorded-title-guard', minimum: earlierFingerprint },
       ])
       assert.deepEqual(target.prepare(`SELECT ${pushProjection} FROM channel_night_pushes ORDER BY product_id,date`).all(), originalPushes, 'confirmed provider snapshots are untouched before the real source refresh')
-      // A job in error waited for a retry that no longer runs: it failed with its recorded error.
+      // A job in error waited for a retry that no longer runs: the forward migration copies it as failed with its recorded error.
       for (const row of originalJobs.filter(row => row.product_id !== 'derived')) assert.deepEqual(target.prepare('SELECT * FROM airbnb_sync_jobs WHERE listing_id=?').get(row.listing_id), row.state === 'error' ? { ...row, state: 'failed' } : row)
       assert.deepEqual(target.prepare("SELECT product_id,action,state,requested_by,last_error,completed_at FROM airbnb_sync_jobs WHERE product_id IN ('derived','west') ORDER BY product_id").all(), [
         { product_id: 'derived', action: 'sync', state: 'pending', requested_by: 'owner', last_error: null, completed_at: null },

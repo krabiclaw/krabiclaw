@@ -957,9 +957,6 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       if (!columns(stage, 'team_threads').includes('booking_id')) stage.exec('ALTER TABLE team_threads ADD COLUMN booking_id TEXT')
       // Every message so far was written by a person.
       if (!columns(stage, 'team_messages').includes('automatic')) stage.exec('ALTER TABLE team_messages ADD COLUMN automatic INTEGER NOT NULL DEFAULT 0')
-      // An Airbnb sync job in error waited for a retry that no longer runs: it failed with its recorded error.
-      const unretried = stage.prepare("UPDATE airbnb_sync_jobs SET state = 'failed' WHERE state = 'error'").run().changes
-      if (unretried) manifest.transforms.push({ name: 'airbnb_sync_errors_failed', changes: unretried })
       for (const name of files.slice(1)) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))
     }
     // Airbnb's single minimum was duplicated by the old importer. The owner also

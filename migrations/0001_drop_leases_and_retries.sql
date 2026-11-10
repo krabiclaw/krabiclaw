@@ -21,7 +21,7 @@ CREATE TABLE `__new_airbnb_sync_jobs` (
 	CONSTRAINT "airbnb_sync_jobs_details_check" CHECK(details IS NULL OR (action = 'sync' AND json_valid(details) AND json_type(details) = 'object'))
 );
 --> statement-breakpoint
-INSERT INTO `__new_airbnb_sync_jobs`("id", "organization_id", "listing_id", "product_id", "action", "details", "state", "requested_by", "last_error_code", "last_error", "completed_at", "created_at", "updated_at") SELECT "id", "organization_id", "listing_id", "product_id", "action", "details", "state", "requested_by", "last_error_code", "last_error", "completed_at", "created_at", "updated_at" FROM `airbnb_sync_jobs`;--> statement-breakpoint
+INSERT INTO `__new_airbnb_sync_jobs`("id", "organization_id", "listing_id", "product_id", "action", "details", "state", "requested_by", "last_error_code", "last_error", "completed_at", "created_at", "updated_at") SELECT "id", "organization_id", "listing_id", "product_id", "action", "details", CASE WHEN "state" = 'error' THEN 'failed' ELSE "state" END, "requested_by", "last_error_code", "last_error", "completed_at", "created_at", "updated_at" FROM `airbnb_sync_jobs`;--> statement-breakpoint
 DROP TABLE `airbnb_sync_jobs`;--> statement-breakpoint
 ALTER TABLE `__new_airbnb_sync_jobs` RENAME TO `airbnb_sync_jobs`;--> statement-breakpoint
 PRAGMA foreign_keys=ON;--> statement-breakpoint
