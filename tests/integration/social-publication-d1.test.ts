@@ -885,7 +885,7 @@ test('opportunity MCP tools preserve saved decisions during incomplete social re
     assert(partial.issues.every(issue => /Social connection status for (facebook|instagram) could not be read:.*Network connection lost/.test(issue)))
     assert(!partial.opportunities.some(item => ids.includes(item.id) || /^(Reconnect your social account|Capture a new business photo)/.test(item.title)))
     await assert.rejects(tool('accept_opportunity', { opportunity_id: open }), (error: unknown) => {
-      assert.deepEqual(asMcpError(error).data, { status: 503, code: 'OPPORTUNITY_EVIDENCE_UNAVAILABLE', field: 'id', operation_completed: false })
+      assert.deepEqual(asMcpError(error).data, { status: 503, code: 'OPPORTUNITY_EVIDENCE_UNAVAILABLE', operation_completed: false, field: 'id' })
       return true
     })
     assert.deepEqual(await status(open), { status: 'open', available_at: null })
