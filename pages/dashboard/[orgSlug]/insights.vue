@@ -257,7 +257,7 @@
           :actions="[{ label: 'Google Ads settings', to: `/dashboard/${scope?.orgSlug}/integrations/google-ads` }]"
         />
         <template v-else-if="ads && ads.status === 'connected'">
-          <p class="text-xs text-muted">{{ ads.customer.descriptiveName }} ({{ ads.customer.id }}) · Ad spend is reported by Google Ads.</p>
+          <p class="text-xs text-muted">{{ ads.customer.name }} ({{ ads.customer.id }}) · Ad spend is reported by Google Ads.</p>
           <MetricHeaderStrip :items="adsMetricCards" />
 
           <section class="rounded-2xl border border-default bg-default p-6 shadow-2xs">
