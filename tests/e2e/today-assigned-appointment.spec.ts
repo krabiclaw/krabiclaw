@@ -56,7 +56,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
       variants: [{ name: 'Online', prices: [{ unit_amount: 0, currency: 'USD' }] }],
     } }), 201)).product
     expect(product.image, 'The authored consultation has no Product photo').toBeNull()
-    await body(await page.request.put(`${EDITOR}/products/${product.id}/booking`, { data: { duration_minutes: 45, default_capacity: 1,
+    await body(await page.request.put(`${EDITOR}/products/${product.id}/booking`, { data: { duration_minutes: 45, default_capacity: 2,
       confirmation_mode: 'review', online_payment_required: false, scheduling_mode: 'provider', assigned_member_id: actor.id, held_online: true } }), 200)
     await body(await page.request.put(`${EDITOR}/products/${product.id}/publication`, { data: { published: true } }), 200)
     await body(await page.request.put(`${EDITOR}/consultation`, { data: { mode: 'native' } }), 200)

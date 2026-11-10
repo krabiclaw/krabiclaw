@@ -612,7 +612,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   expect(beforeInvalidCalendarResponse.status()).toBe(200)
   const beforeInvalidCalendar = await beforeInvalidCalendarResponse.json()
   // The stay domain owns patch validation for every caller, including MCP clients.
-  const stayField = (message: string) => JSON.stringify({ status: 422, message, code: 'INVALID_STAY_FIELD' })
+  const stayField = (message: string) => ({ status: 422, code: 'INVALID_STAY_FIELD', message })
   for (const [fields, refusal] of [
     [{}, stayField('Name at least one night setting to change, or reset')],
     [{ reset: false }, stayField('Name at least one night setting to change, or reset')],
@@ -620,7 +620,7 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
     [{ reset: true, price_minor: null }, stayField('reset cannot be combined with night settings')],
   ] as const) {
     const refused = await call('set_stay_nights', { product_id: productId, from: checkIn, to: checkOut, ...fields })
-    expect(refused.error).toContain(refusal)
+    expect(JSON.parse(refused.error!)).toEqual(refusal)
     const unchanged = await request.get(calendarPath)
     expect(unchanged.status()).toBe(200)
     expect(await unchanged.json()).toEqual(beforeInvalidCalendar)
