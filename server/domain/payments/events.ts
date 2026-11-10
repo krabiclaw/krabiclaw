@@ -20,7 +20,7 @@ import { completeStayFromCheckout, isStayNightConflict, readStayHome, releaseLap
 
 interface Hold {
   id:string; organization_id:string; product_id:string|null; variant_id:string|null; session_id:string|null; location_id:string|null; timezone:string|null
-  buyer_user_id:string|null; request_id:string|null; quantity:number; status:string; expires_at:string; converted_booking_id:string|null; starts_at:string; ends_at:string
+  buyer_user_id:string|null; conversation_id:string|null; quantity:number; status:string; expires_at:string; converted_booking_id:string|null; starts_at:string; ends_at:string
 }
 /** Provider retrieval, account/mode and frozen money checks precede every conversion; the paid analytics event and usage billing follow it. */
 export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,intent:Stripe.PaymentIntent, env:CloudflareEnv):Promise<Stripe.PaymentIntent> {
@@ -98,10 +98,10 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,rep
     raiseSettledFailures('Captured booking delivery',payment.id,outcomes,['channel and publication','capture notification','stay confirmation'])
     return intent
   }
-  if (!hold.request_id) throw new Error('Captured visit payment has no guest request')
-  const outcomes=await Promise.allSettled([paid,notifyProductBookingCreated(env,db,hold.organization_id,hold.request_id)])
+  if (!hold.conversation_id) throw new Error('Captured visit payment has no guest conversation')
+  const outcomes=await Promise.allSettled([paid,notifyProductBookingCreated(env,db,hold.organization_id,hold.conversation_id)])
   raiseSettledFailures('Captured booking delivery',payment.id,outcomes,['capture notification','booking creation notification'])
-  await execute(db,"UPDATE requests SET payload_json=json_set(payload_json,'$.provenance.followups_completed',json('true')) WHERE id=? AND organization_id=? AND json_type(payload_json,'$.provenance')='object'",[hold.request_id,hold.organization_id])
+  await execute(db,"UPDATE conversations SET payload_json=json_set(payload_json,'$.provenance.followups_completed',json('true')) WHERE id=? AND organization_id=? AND json_type(payload_json,'$.provenance')='object'",[hold.conversation_id,hold.organization_id])
   return intent
 }
 
@@ -155,11 +155,13 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
  const policy=JSON.stringify(snapshot.policy)
  let claim:BatchQuery[]
  if(hold.session_id){
-  if(!hold.request_id)throw new Error('Visit hold has no guest request')
+  if(!hold.conversation_id)throw new Error('Visit hold has no guest conversation')
   if(!hold.variant_id)throw new Error('Booking hold has no offering or session')
-  claim=[await sessionClaimQuery(db,{env,bookingId,organizationId:hold.organization_id,productId:hold.product_id,sessionId:hold.session_id,productVariantId:hold.variant_id,partySize:hold.quantity,userId:hold.buyer_user_id,requestId:hold.request_id,now,chargedPaymentId:payment.id,chargedAt,policyJson:policy,answers:frozenAnswers(snapshot)}),
-   {query:`INSERT INTO activity_entries(id,request_id,kind,scope_kind,actor_kind,event_name,payload_json,dedupe_key,sequence,occurred_at,created_at) SELECT ?,v.request_id,'operation','request','system','booking.created',json_object('operational_booking_id',v.id,'request_id',v.request_id,'afterStatus',v.status,'payment_id',?,'intent','booking.created'),?,COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id=v.request_id),0)+1,?,? FROM bookings v WHERE v.id=? AND v.request_id IS NOT NULL ON CONFLICT(dedupe_key) DO NOTHING`,params:[crypto.randomUUID(),payment.id,`booking:${bookingId}:created`,now,now,bookingId]},
-   ...conversationTaskQueries(hold.request_id,now)]
+  claim=[await sessionClaimQuery(db,{env,bookingId,organizationId:hold.organization_id,productId:hold.product_id,sessionId:hold.session_id,productVariantId:hold.variant_id,partySize:hold.quantity,userId:hold.buyer_user_id,now,chargedPaymentId:payment.id,chargedAt,policyJson:policy,answers:frozenAnswers(snapshot)}),
+   // The conversation the checkout waited in is the booking's, created in the status the booking was.
+   {query:`UPDATE conversations SET booking_id=v.id,payload_json=json_set(payload_json,'$.provenance.creation_status',v.status) FROM bookings v
+     WHERE v.id=? AND conversations.id=? AND conversations.organization_id=v.organization_id AND conversations.kind='booking' AND conversations.booking_id IS NULL`,params:[bookingId,hold.conversation_id]},
+   ...conversationTaskQueries(hold.conversation_id,now)]
  }else{
   if(!await queryFirst(db,'SELECT id FROM organization WHERE id=?',[payment.organization_id]))return null
   const purchase=snapshot.stay

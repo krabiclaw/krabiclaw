@@ -67,8 +67,7 @@ async function start() {
       method: 'POST', body: { ...body, idempotencyKey: attempt.key },
       validate: (value): value is { id: string } => isRecord(value) && typeof value.id === 'string' && Boolean(value.id),
     })
-    await refreshNuxtData(`team-threads:${dashboard.organizationId.value}`)
-    await navigateTo({ path: `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages/team/${encodeURIComponent(thread.id)}`, query: { view: 'team' } })
+    await navigateTo({ path: `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages/team/${encodeURIComponent(thread.id)}`, query: { kind: 'team' } })
   } catch (error) { actionError.value = getErrorMessage(error, 'The team conversation could not be started') }
   finally { saving.value = false }
 }

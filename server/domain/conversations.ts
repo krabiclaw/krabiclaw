@@ -54,6 +54,28 @@ export const OPENING_EVENT = 'thread.opening'
 export const SCHEDULED_MESSAGE_EVENT = 'thread.scheduled_message'
 export const MEMBER_REPLY_EVENT = 'thread.member_reply'
 export const MIRRORED_EVENT = 'channel.message_mirrored'
+/** A contact form's own words: the guest's first message. */
+export const SUBMISSION_EVENT = 'thread.submission'
+/** A booking guest's note, written with the booking as their own message. */
+export const GUEST_NOTE_EVENT = 'thread.guest_note'
+/** KrabiClaw's messages that are words to read, not events about the booking. */
+const KRABICLAW_WORDS = new Set<string | null>([OPENING_EVENT, SCHEDULED_MESSAGE_EVENT, MIRRORED_EVENT])
+
+/** An event KrabiClaw recorded (a cancellation, a change, a payment), as opposed to words someone wrote. */
+export function isEventMessage(message: Pick<MessageRow, 'author_kind' | 'event_name'>): boolean {
+  return message.author_kind === 'krabiclaw' && !KRABICLAW_WORDS.has(message.event_name)
+}
+
+/**
+ * The part a message's person plays in its conversation: its guest, the team,
+ * or KrabiClaw alone. An event names the person who caused it, so its role is
+ * read from who that is.
+ */
+export function messageRole(message: Pick<MessageRow, 'author_kind' | 'author_user_id' | 'event_name'>, guestUserId: string | null): MessageAuthorKind {
+  if (!isEventMessage(message)) return message.author_kind
+  if (message.author_user_id === null) return 'krabiclaw'
+  return message.author_user_id === guestUserId ? 'guest' : 'member'
+}
 
 /**
  * What a conversation's guest sees of it, the one statement: their own words
@@ -280,13 +302,12 @@ function nothingToMark(): never {
 }
 
 /**
- * Opening a conversation reads it through to the newest message shown; Mark
- * as read reads it through to its newest. Either needs a message from someone
- * else, as Mark as unread does.
+ * Opening a conversation reads it through to the newest message shown
+ * (`throughMessageId`), whatever it holds; Mark as read reads it through to its
+ * newest, and needs a message from someone else, as Mark as unread does.
  */
 export async function markConversationRead(db: DbClient, input: { organizationId: string; conversationId: string; userId: string; throughMessageId?: string | null }): Promise<{ read: true; lastReadMessageId: string }> {
-  const newest = await newestFromSomeoneElse(db, input.conversationId, input.userId)
-  if (!newest) nothingToMark()
+  if (!input.throughMessageId && !await newestFromSomeoneElse(db, input.conversationId, input.userId)) nothingToMark()
   const through = input.throughMessageId ?? (await queryFirst<{ id: string }>(db, 'SELECT id FROM messages WHERE conversation_id = ? ORDER BY sequence DESC LIMIT 1', [input.conversationId]))!.id
   const [written] = await executeBatch(db, [readThroughQuery({ ...input, messageId: through, now: new Date().toISOString() })], { operation: 'Read conversation' })
   if (input.throughMessageId && Number(written?.meta?.changes ?? 0) === 0
@@ -326,7 +347,7 @@ export function archiveReplyTaskQuery(input: { conversationId: string; userId: s
  * handling its booking's product or its location (operations:assigned); a
  * team conversation by being in it (team_messages:read).
  */
-export async function conversationAccessSql(alias: string, principal: MemberAccessPrincipal): Promise<{ sql: string; params: string[] }> {
+export async function conversationAccessSql(alias: string, principal: Pick<MemberAccessPrincipal, 'organizationId' | 'role' | 'userId'>): Promise<{ sql: string; params: string[] }> {
   const [allGuests, assignedGuests, team] = await Promise.all([
     roleAllows({ ...principal, permissions: { operations: ['read'] } }),
     roleAllows({ ...principal, permissions: { operations: ['assigned'] } }),

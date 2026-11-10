@@ -1,13 +1,14 @@
 import { bookingEndsInstant, type GuestRequest, type ThreadOperationalRecord } from '~/server/domain/requests'
-import { queryFirst, type DbClient } from '~/server/db'
 
 /**
  * Where a conversation lives in the inbox: Current or Past, the way Airbnb's
  * does, or Blocked once a member blocked the guest (inbox-parity.md,
  * Revision 2026-11-06).
  *
- * Past is derived, never stored. A thread is Past when a member archived it,
- * or when it has been quiet for 30 days: nobody has written for 30 days and
+ * Past is derived, never stored. A conversation is Past for a member when they
+ * archived it (archive is each person's own, D2; a new message from someone
+ * else brings it back), or when it has been quiet for 30 days: nothing has
+ * been written for 30 days and
  * the booking or stay it refers to (if any) ended at least 30
  * days ago. Airbnb keeps an ended, read trip in the main list the same way;
  * a new message brings a thread back to Current.
@@ -22,7 +23,7 @@ export const QUIET_DAYS = 30
 
 /** What the rule reads beyond the thread and its record. */
 export interface MailboxActivity {
-  /** When anyone last wrote (a submission counts), or the thread's creation. */
+  /** When anything was last written in it, or its creation (conversations.last_message_at). */
   lastMessageAt: string
 }
 
@@ -40,7 +41,7 @@ function quietSince(now: string): string {
 }
 
 export function resolveGuestThreadMailbox(
-  thread: Pick<GuestRequest, 'archived_at' | 'blocked_at'>,
+  thread: Pick<GuestRequest, 'blocked_at'> & { /** When the viewer archived it. */ archived_at: string | null },
   record: Pick<ThreadOperationalRecord, 'ends_at'> | null,
   now: string,
   activity: MailboxActivity,
@@ -63,28 +64,19 @@ export function resolveGuestThreadMailbox(
   }
 }
 
-/** The activity the rule reads, for one thread. */
-export async function readMailboxActivity(db: DbClient, threadId: string): Promise<MailboxActivity> {
-  const row = await queryFirst<{ last_any: string | null; created_at: string }>(db, `
-    SELECT (SELECT MAX(e.occurred_at) FROM activity_entries e WHERE e.request_id = gt.id AND e.kind IN ('message', 'submission')) AS last_any, gt.created_at
-    FROM requests gt WHERE gt.id = ?`, [threadId])
-  if (!row) throw new Error(`Conversation ${threadId} has no mailbox activity to read`)
-  return { lastMessageAt: row.last_any ?? row.created_at }
-}
-
 /**
  * `resolveGuestThreadMailbox`'s `pastByRule`, said to the database for the
  * thread `gt` joined to its occurrence `op`.
  */
 export function pastByRuleSql(now: string): { sql: string; params: string[] } {
   return {
-    sql: `(MAX(COALESCE((SELECT MAX(e.occurred_at) FROM activity_entries e WHERE e.request_id = gt.id AND e.kind IN ('message', 'submission')), gt.created_at), COALESCE(op.ends_at, '')) < ?)`,
+    sql: `(MAX(gt.last_message_at, COALESCE(op.ends_at, '')) < ?)`,
     params: [quietSince(now)],
   }
 }
 
-/** Past: archived, or past by the rule. Blocked threads are filtered apart. */
+/** Past: archived by the viewer (their participant row `me`), or past by the rule. Blocked conversations are filtered apart. */
 export function pastSql(now: string): { sql: string; params: string[] } {
   const rule = pastByRuleSql(now)
-  return { sql: `(gt.archived_at IS NOT NULL OR ${rule.sql})`, params: rule.params }
+  return { sql: `(me.archived_at IS NOT NULL OR ${rule.sql})`, params: rule.params }
 }

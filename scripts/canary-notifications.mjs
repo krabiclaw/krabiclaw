@@ -97,10 +97,9 @@ async function main() {
   let missing
   do {
     const rows = read(`
-      SELECT d.id, e.request_id, d.channel, d.provider, d.purpose, d.status, d.provider_message_id
-      FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
-      JOIN requests r ON r.id = e.request_id
-      WHERE r.organization_id = ${quote(organization)} AND r.id IN (${quote(contact.request_id)}, ${quote(reservation.request_id)})
+      SELECT d.id, m.conversation_id AS request_id, d.channel, d.provider, d.purpose, d.status, d.provider_message_id
+      FROM guest_thread_deliveries d JOIN messages m ON m.id = d.message_id
+      WHERE m.organization_id = ${quote(organization)} AND m.conversation_id IN (${quote(contact.request_id)}, ${quote(reservation.request_id)})
     `)
     const evidence = Object.fromEntries(requiredReceipts.map(([label, requestId, channel, provider, purpose, template, recipient]) => {
       const suffix = `:${purpose}:${channel}:${template}:${recipientHash(recipient)}`

@@ -5,7 +5,7 @@ import { isValidInstant } from '~/utils/timezone'
 import { guestMessageDueAt, messagingError, type ScheduleAnchor } from './guest-message-schedule'
 import { templateSchedule, type MessageTemplateRow, type ScheduledGuestMessageRow } from './guest-messaging'
 import { sendScheduledGuestReply, type OperationOutcome } from './guest-threads/operations'
-import { publishGuestInboxThreadEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { publishConversationEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { ChannexError } from '~/server/integrations/channex/client'
 import { BOOKING_RECORDS_SQL, bookedRecordGuard, bookedRecordWindow, readBookedRecord, type BookedRecord } from './requests'
 
@@ -17,15 +17,21 @@ function anchors(record: BookedRecord): { check_in: ScheduleAnchor; check_out: S
   return { check_in: window.start, check_out: window.end }
 }
 
-/** A scheduled message belongs to its booking's conversation; every booking has one. */
+/** The guest conversation of a scheduled message's booking, or null while it has none. */
+async function bookingConversationId(db: DbClient, row: Pick<ScheduledGuestMessageRow, 'organization_id' | 'booking_id'>): Promise<string | null> {
+  return (await queryFirst<{ id: string }>(db, "SELECT id FROM conversations WHERE organization_id = ? AND booking_id = ? AND kind = 'booking'", [row.organization_id, row.booking_id]))?.id ?? null
+}
+
+/** A scheduled message is shown in its booking's conversation; a plan changing there is a change open apps must see. */
 export async function publishScheduledGuestMessageChange(
   db: DbClient,
   env: GuestInboxPublicationEnv,
-  row: Pick<ScheduledGuestMessageRow, 'organization_id' | 'booking_id' | 'request_id' | 'updated_at'>,
-  type: 'thread.changed' | 'entry.appended' = 'thread.changed',
+  row: Pick<ScheduledGuestMessageRow, 'organization_id' | 'booking_id'>,
+  type: 'MESSAGE_CREATE' | 'MESSAGE_UPDATE' = 'MESSAGE_UPDATE',
 ): Promise<void> {
-  if (row.request_id === null) messagingError(500, 'INVALID_MESSAGE_BOOKING', `The scheduled message’s booking ${row.booking_id} has no conversation; open apps could not be updated`, 'requestId')
-  await publishGuestInboxThreadEvent(env, db, { threadId: row.request_id, type })
+  const conversationId = await bookingConversationId(db, row)
+  if (conversationId === null) messagingError(500, 'INVALID_MESSAGE_BOOKING', `The scheduled message’s booking ${row.booking_id} has no conversation; open apps could not be updated`, 'bookingId')
+  await publishConversationEvent(env, db, { conversationId, type })
 }
 
 function validTimestamp(value: string, field: string): void {
@@ -40,10 +46,10 @@ async function plan(db: DbClient, template: MessageTemplateRow, source: BookedRe
   const covered = schedule !== null && schedule.productIds.includes(source.offering_id)
   const guard = bookedRecordGuard(source)
   if (!covered || source.status === 'cancelled') {
-    if (existing) await execute(db, `UPDATE scheduled_guest_messages SET request_id = ?, status = 'cancelled', reason = ?, updated_at = ?
+    if (existing) await execute(db, `UPDATE scheduled_guest_messages SET status = 'cancelled', reason = ?, updated_at = ?
       WHERE id = ? AND status = 'pending' AND updated_at = ?
         AND EXISTS (SELECT 1 FROM message_templates WHERE id = ? AND organization_id = ? AND version = ?) AND ${guard.query}`,
-    [source.request_id, source.status === 'cancelled' ? `The ${bookingNoun(source)} was cancelled.` : 'The automatic message no longer includes this offering.', now, existing.id, existing.updated_at,
+    [source.status === 'cancelled' ? `The ${bookingNoun(source)} was cancelled.` : 'The automatic message no longer includes this offering.', now, existing.id, existing.updated_at,
       template.id, template.organization_id, template.version, ...guard.params])
     return
   }
@@ -76,8 +82,7 @@ async function plan(db: DbClient, template: MessageTemplateRow, source: BookedRe
     values = { due_at: null, status: 'failed', reason: error.message, error_code: error.data.code, error_field: error.data.field }
   }
   // An unchanged plan is not rewritten.
-  if (existing && existing.template_version === template.version && existing.template_title === template.title && existing.body === template.body
-    && existing.request_id === source.request_id && existing.product_id === source.product_id && existing.timezone === source.timezone
+  if (existing && existing.template_version === template.version && existing.template_title === template.title && existing.body === template.body && existing.product_id === source.product_id && existing.timezone === source.timezone
     && (Object.keys(values) as (keyof Plan)[]).every(key => existing[key] === values[key])) return
   await savePlan(db, template, source, existing, values, now)
 }
@@ -91,15 +96,15 @@ async function savePlan(db: DbClient, template: MessageTemplateRow, source: Book
   // A plan that fails is someone's work: its task is written with it.
   const id = existing?.id ?? crypto.randomUUID()
   await executeBatch(db, [existing ? {
-    query: `UPDATE scheduled_guest_messages SET request_id = ?, product_id = ?, template_title = ?, template_version = ?, body = ?, due_at = ?, timezone = ?, status = ?, reason = ?, error_code = ?, error_field = ?, updated_at = ?
+    query: `UPDATE scheduled_guest_messages SET product_id = ?, template_title = ?, template_version = ?, body = ?, due_at = ?, timezone = ?, status = ?, reason = ?, error_code = ?, error_field = ?, updated_at = ?
       WHERE id = ? AND status = 'pending' AND updated_at = ? AND ${scope}`,
-    params: [source.request_id, source.product_id, template.title, template.version, template.body, values.due_at, source.timezone, values.status, values.reason, values.error_code, values.error_field, now, existing.id, existing.updated_at, ...guards],
+    params: [source.product_id, template.title, template.version, template.body, values.due_at, source.timezone, values.status, values.reason, values.error_code, values.error_field, now, existing.id, existing.updated_at, ...guards],
   } : {
-    query: `INSERT INTO scheduled_guest_messages (id, organization_id, product_id, booking_id, request_id, template_id, template_title, template_version,
+    query: `INSERT INTO scheduled_guest_messages (id, organization_id, product_id, booking_id, template_id, template_title, template_version,
       body, due_at, timezone, status, reason, error_code, error_field, created_at, updated_at)
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${scope}
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${scope}
       ON CONFLICT(template_id, booking_id) DO NOTHING`,
-    params: [id, source.organization_id, source.product_id, source.id, source.request_id, template.id, template.title, template.version,
+    params: [id, source.organization_id, source.product_id, source.id, template.id, template.title, template.version,
       template.body, values.due_at, source.timezone, values.status, values.reason, values.error_code, values.error_field, now, now, ...guards],
   }, ...messageDeliveryTaskQueries(id, now)], { operation: 'Plan scheduled guest message' })
 }
@@ -140,28 +145,28 @@ async function planCheckInMessage(db: DbClient, stay: CheckInStay, now: string):
   const guards = [...guard.params, stay.organization_id, stay.product_id, stay.check_in_instructions]
   const arrival = bookedRecordWindow(stay).start
   const arrived = arrival.instant === null ? arrival.date < new Intl.DateTimeFormat('en-CA', { timeZone: stay.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now)) : arrival.instant <= now
-  if (stay.status !== 'confirmed' || instructions === null || stay.request_id === null || arrived) {
+  if (stay.status !== 'confirmed' || instructions === null || stay.conversation_id === null || arrived) {
     if (existing?.status === 'pending') await execute(db, `UPDATE scheduled_guest_messages SET status = ?, reason = ?, updated_at = ? WHERE id = ? AND status = 'pending' AND updated_at = ?`,
-      [arrived && stay.status === 'confirmed' && instructions !== null && stay.request_id !== null ? 'skipped' : 'cancelled',
+      [arrived && stay.status === 'confirmed' && instructions !== null && stay.conversation_id !== null ? 'skipped' : 'cancelled',
         stay.status !== 'confirmed' ? CHECK_IN_NOT_CONFIRMED : instructions === null ? CHECK_IN_NO_INSTRUCTIONS
-          : stay.request_id === null ? CHECK_IN_NO_CONVERSATION : 'Check-in had already passed.',
+          : stay.conversation_id === null ? CHECK_IN_NO_CONVERSATION : 'Check-in had already passed.',
         now, existing.id, existing.updated_at])
     return
   }
   const planned = guestMessageDueAt({ trigger: 'check_in', offsetDays: -1, localTime: '10:00', productIds: [] }, anchors(stay), stay.timezone)
   const due = planned > now ? planned : existing?.status === 'pending' && existing.due_at && existing.due_at <= now ? existing.due_at : now
   if (existing?.status === 'pending' && existing.body === instructions && existing.due_at === due
-    && existing.timezone === stay.timezone && existing.request_id === stay.request_id) return
+    && existing.timezone === stay.timezone) return
   if (existing) {
-    await execute(db, `UPDATE scheduled_guest_messages SET request_id = ?, body = ?, due_at = ?, timezone = ?, status = 'pending', reason = NULL, updated_at = ?
+    await execute(db, `UPDATE scheduled_guest_messages SET body = ?, due_at = ?, timezone = ?, status = 'pending', reason = NULL, updated_at = ?
       WHERE id = ? AND status = ? AND updated_at = ? AND ${scope}`,
-    [stay.request_id, instructions, due, stay.timezone, now, existing.id, existing.status, existing.updated_at, ...guards])
+    [instructions, due, stay.timezone, now, existing.id, existing.status, existing.updated_at, ...guards])
   } else {
-    await execute(db, `INSERT INTO scheduled_guest_messages (id, organization_id, product_id, booking_id, request_id, template_id, template_title, template_version,
+    await execute(db, `INSERT INTO scheduled_guest_messages (id, organization_id, product_id, booking_id, template_id, template_title, template_version,
       body, due_at, timezone, status, created_at, updated_at)
-      SELECT ?, ?, ?, ?, ?, NULL, ?, 1, ?, ?, ?, 'pending', ?, ? WHERE ${scope}
+      SELECT ?, ?, ?, ?, NULL, ?, 1, ?, ?, ?, 'pending', ?, ? WHERE ${scope}
       ON CONFLICT(booking_id) WHERE template_id IS NULL AND template_title = 'Check-in instructions' DO NOTHING`,
-    [crypto.randomUUID(), stay.organization_id, stay.product_id, stay.id, stay.request_id, CHECK_IN_MESSAGE_TITLE,
+    [crypto.randomUUID(), stay.organization_id, stay.product_id, stay.id, CHECK_IN_MESSAGE_TITLE,
       instructions, due, stay.timezone, now, now, ...guards])
   }
 }
@@ -233,7 +238,7 @@ type SendFailure = { status: 'failed' | 'needs_review'; reason: string; error_co
 /** Every non-sent reply outcome carries its own typed facts; none is generalized here. */
 function sendFailure(outcome: Exclude<OperationOutcome, { ok: true }>): SendFailure {
   switch (outcome.reason) {
-    case 'thread_not_found': return { status: 'failed', reason: 'The guest conversation no longer exists.', error_code: 'THREAD_NOT_FOUND', error_field: 'requestId' }
+    case 'thread_not_found': return { status: 'failed', reason: 'The guest conversation no longer exists.', error_code: 'THREAD_NOT_FOUND', error_field: 'conversationId' }
     case 'source_not_found': return { status: 'failed', reason: 'The conversation’s booking no longer exists.', error_code: 'SOURCE_NOT_FOUND', error_field: 'source' }
     case 'guest_unreachable': return { status: 'failed', reason: outcome.message, error_code: outcome.code, error_field: outcome.field }
     case 'empty_body': return { status: 'failed', reason: 'The scheduled message has no text.', error_code: 'EMPTY_MESSAGE', error_field: 'body' }
@@ -244,15 +249,15 @@ function sendFailure(outcome: Exclude<OperationOutcome, { ok: true }>): SendFail
   }
 }
 
-async function finishSend(db: DbClient, env: SendEnv, row: ScheduledGuestMessageRow, values: { status: 'sent' | 'failed' | 'needs_review'; reason: string | null; error_code: string | null; error_field: string | null; entry_id: string | null; sent_at: string | null }): Promise<void> {
+async function finishSend(db: DbClient, env: SendEnv, row: ScheduledGuestMessageRow, values: { status: 'sent' | 'failed' | 'needs_review'; reason: string | null; error_code: string | null; error_field: string | null; message_id: string | null; sent_at: string | null }): Promise<void> {
   const now = new Date().toISOString()
   const [result] = await executeBatch(db, [{
-    query: `UPDATE scheduled_guest_messages SET status = ?, reason = ?, error_code = ?, error_field = ?, entry_id = ?, sent_at = ?, updated_at = ?
+    query: `UPDATE scheduled_guest_messages SET status = ?, reason = ?, error_code = ?, error_field = ?, message_id = ?, sent_at = ?, updated_at = ?
       WHERE id = ? AND status = 'sending'`,
-    params: [values.status, values.reason, values.error_code, values.error_field, values.entry_id, values.sent_at, now, row.id],
+    params: [values.status, values.reason, values.error_code, values.error_field, values.message_id, values.sent_at, now, row.id],
   }, ...messageDeliveryTaskQueries(row.id, now)], { operation: 'Record scheduled message outcome' })
   if (result?.meta.changes !== 1) messagingError(409, 'SCHEDULED_MESSAGE_NOT_SENDING', 'The scheduled message outcome could not be recorded because it is no longer sending', 'status')
-  await publishScheduledGuestMessageChange(db, env, { ...row, updated_at: now }, values.entry_id === null ? 'thread.changed' : 'entry.appended')
+  await publishScheduledGuestMessageChange(db, env, row, values.message_id === null ? 'MESSAGE_UPDATE' : 'MESSAGE_CREATE')
 }
 
 /**
@@ -268,28 +273,29 @@ async function sendScheduledGuestMessage(db: DbClient, env: SendEnv, row: Pick<S
   const claim = await execute(db, `UPDATE scheduled_guest_messages SET status = 'sending', started_at = ?, updated_at = ? WHERE id = ? AND status = 'pending' AND updated_at = ?`,
     [now, now, current.id, current.updated_at])
   if (claim.meta.changes !== 1) return 'not_due'
-  if (current.request_id === null) {
-    await finishSend(db, env, current, { status: 'failed', reason: 'There is no guest conversation to send through.', error_code: 'CONVERSATION_REQUIRED', error_field: 'requestId', entry_id: null, sent_at: null })
+  const conversationId = await bookingConversationId(db, current)
+  if (conversationId === null) {
+    await finishSend(db, env, current, { status: 'failed', reason: 'There is no guest conversation to send through.', error_code: 'CONVERSATION_REQUIRED', error_field: 'conversationId', message_id: null, sent_at: null })
     return 'failed'
   }
   let sent: Awaited<ReturnType<typeof sendScheduledGuestReply>>
   try {
-    sent = await sendScheduledGuestReply(db, { threadId: current.request_id, organizationId: current.organization_id, body: current.body, idempotencyKey: `scheduled-guest-message:${current.id}`, env })
+    sent = await sendScheduledGuestReply(db, { threadId: conversationId, organizationId: current.organization_id, body: current.body, idempotencyKey: `scheduled-guest-message:${current.id}`, env })
   } catch (error) {
     // The Channex send itself records its own outcome on the reply receipt, so a
     // ChannexError here came from a read before anything was sent.
     const data = error instanceof HTTPError || error instanceof ChannexError ? error.data : null
     if (!data || typeof data !== 'object' || !('code' in data) || typeof data.code !== 'string' || !('field' in data) || typeof data.field !== 'string') throw error
-    await finishSend(db, env, current, { status: 'failed', reason: (error as Error).message, error_code: data.code, error_field: data.field, entry_id: null, sent_at: null })
+    await finishSend(db, env, current, { status: 'failed', reason: (error as Error).message, error_code: data.code, error_field: data.field, message_id: null, sent_at: null })
     return 'failed'
   }
   if (sent.outcome.ok) {
-    if (sent.entryId === null) messagingError(500, 'SCHEDULED_MESSAGE_ENTRY_REQUIRED', 'The scheduled message was sent but its conversation entry could not be read', 'entryId')
-    await finishSend(db, env, current, { status: 'sent', reason: null, error_code: null, error_field: null, entry_id: sent.entryId, sent_at: new Date().toISOString() })
+    if (sent.messageId === null) messagingError(500, 'SCHEDULED_MESSAGE_ENTRY_REQUIRED', 'The scheduled message was sent but its message could not be read', 'messageId')
+    await finishSend(db, env, current, { status: 'sent', reason: null, error_code: null, error_field: null, message_id: sent.messageId, sent_at: new Date().toISOString() })
     return 'sent'
   }
   const failure = sendFailure(sent.outcome)
-  await finishSend(db, env, current, { ...failure, entry_id: sent.entryId, sent_at: null })
+  await finishSend(db, env, current, { ...failure, message_id: sent.messageId, sent_at: null })
   return failure.status
 }
 

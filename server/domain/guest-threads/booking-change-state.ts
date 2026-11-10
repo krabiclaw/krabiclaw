@@ -5,11 +5,11 @@ export interface BookingChangeState { status: BookingChangeStatus; decisionId: s
 
 /** Compare the immutable source shown to the client with its current canonical record. */
 function sourceMatchesSql(proposal: string, owner: string): string {
-  const recorded = ['recordKind', 'sessionId', 'operationalUpdatedAt', 'recordId', 'status', 'partySize', 'startsAt', 'endsAt', 'timezone', 'locationId', 'productId', 'partySizeIsMinimum', 'notes', 'guest.name', 'guest.email', 'guest.phone']
+  const recorded = ['recordKind', 'sessionId', 'operationalUpdatedAt', 'recordId', 'status', 'partySize', 'startsAt', 'endsAt', 'timezone', 'locationId', 'productId', 'partySizeIsMinimum', 'guest.name', 'guest.email', 'guest.phone']
     .map(field => `json_extract(${proposal}.payload_json,'$.before.${field}')`).join(',')
-  const guest = ['notes', 'guest.name', 'guest.email', 'guest.phone'].map(field => `json_extract(${owner}.payload_json,'$.${field}')`).join(',')
+  const guest = ['guest.name', 'guest.email', 'guest.phone'].map(field => `json_extract(${owner}.payload_json,'$.${field}')`).join(',')
   return `(EXISTS (SELECT 1 FROM bookings b
-      WHERE b.request_id=${owner}.id AND b.organization_id=${owner}.organization_id AND ${owner}.kind='booking' AND b.product_session_id IS NOT NULL
+      WHERE b.id=${owner}.booking_id AND b.organization_id=${owner}.organization_id AND ${owner}.kind='booking' AND b.product_session_id IS NOT NULL
         AND json_array('booking',b.product_session_id,b.updated_at,b.id,b.status,b.party_size,b.starts_at,b.ends_at,b.timezone,b.location_id,b.product_id,b.party_size_is_minimum,${guest})=json_array(${recorded})))`
 }
 
@@ -24,10 +24,10 @@ function statusSql(proposal: string, owner: string, decision: string, now: strin
     WHEN ${decision}.event_name='booking_change.declined' THEN 'declined'
     WHEN ${decision}.event_name='booking_change.withdrawn' THEN 'withdrawn'
     WHEN ${decision}.id IS NOT NULL THEN json('Invalid booking change decision')
-    WHEN EXISTS (SELECT 1 FROM bookings b WHERE b.request_id=${owner}.id AND b.organization_id=${owner}.organization_id AND b.product_session_id IS NULL) THEN 'pending'
+    WHEN EXISTS (SELECT 1 FROM bookings b WHERE b.id=${owner}.booking_id AND b.organization_id=${owner}.organization_id AND b.product_session_id IS NULL) THEN 'pending'
     WHEN julianday(${proposal}.occurred_at)+7<=julianday(${now})
-      OR EXISTS (SELECT 1 FROM bookings b WHERE b.request_id=${owner}.id AND b.organization_id=${owner}.organization_id AND b.ends_at<=${now}) THEN 'expired'
-    WHEN ${proposal}.id IS NOT (SELECT latest.id FROM activity_entries latest WHERE latest.request_id=${owner}.id AND latest.event_name='booking_change.requested' ORDER BY latest.sequence DESC LIMIT 1)
+      OR EXISTS (SELECT 1 FROM bookings b WHERE b.id=${owner}.booking_id AND b.organization_id=${owner}.organization_id AND b.ends_at<=${now}) THEN 'expired'
+    WHEN ${proposal}.id IS NOT (SELECT latest.id FROM messages latest WHERE latest.conversation_id=${owner}.id AND latest.event_name='booking_change.requested' ORDER BY latest.sequence DESC LIMIT 1)
       OR NOT ${sourceMatchesSql(proposal, owner)} THEN 'stale'
     ELSE 'pending' END)`
 }
@@ -44,8 +44,8 @@ export async function bookingChangeStates(db: DbClient, proposalIds: string[], n
   const states = new Map<string, BookingChangeState>()
   if (!proposalIds.length) return states
   const rows = await queryAll<{ id: string; status: BookingChangeStatus; decision_id: string | null }>(db, `SELECT proposal.id,decision.id decision_id,${statusSql('proposal', 'owner', 'decision', clockSql(now))} status
-    FROM activity_entries proposal JOIN requests owner ON owner.id=proposal.request_id
-    LEFT JOIN activity_entries decision ON decision.request_id=proposal.request_id AND decision.dedupe_key='booking-change-decision:'||proposal.id
+    FROM messages proposal JOIN conversations owner ON owner.id=proposal.conversation_id
+    LEFT JOIN messages decision ON decision.conversation_id=proposal.conversation_id AND decision.dedupe_key='booking-change-decision:'||proposal.id
     WHERE proposal.event_name='booking_change.requested' AND proposal.id IN (SELECT value FROM json_each(?))`, [JSON.stringify(proposalIds)])
   for (const row of rows) states.set(row.id, { status: row.status, decisionId: row.decision_id, ...(['stale', 'expired'].includes(row.status) ? { message: messages[row.status as 'stale' | 'expired'] } : {}) })
   return states

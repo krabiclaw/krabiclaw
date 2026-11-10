@@ -34,6 +34,7 @@ export type OrganizationEventType =
   | 'canonical_domain_changed' | 'cloudflare_create_failed' | 'cloudflare_delete_failed'
   | 'domain_added' | 'domain_deleted' | 'domain_state_changed'
   | 'member.invited' | 'member.role_changed' | 'member.removed' | 'member.access_scope_revoked'
+  | 'owner.alerted'
   | 'google_ads.campaign_change_requested' | 'google_ads.campaign_created' | 'google_ads.campaign_updated' | 'google_ads.campaign_change_failed' | 'google_ads.campaign_change_unconfirmed'
 
 export interface OrganizationEvent {
@@ -86,9 +87,9 @@ export function organizationEventQuery(event: OrganizationEvent): BatchQuery {
   return {
     query: `
       INSERT INTO activity_entries
-        (id, kind, scope_kind, organization_id, location_id, actor_kind, actor_user_id,
+        (id, organization_id, location_id, actor_kind, actor_user_id,
          event_name, body, payload_json, occurred_at, created_at, dedupe_key)
-      SELECT ?, 'audit', 'organization', ?, ?, ?, ?, ?, ?, ${event.beforeStateQuery ? `json_set(?, '$.beforeState', json((${event.beforeStateQuery.query})))` : '?'}, ?, ?, ?
+      SELECT ?, ?, ?, ?, ?, ?, ?, ${event.beforeStateQuery ? `json_set(?, '$.beforeState', json((${event.beforeStateQuery.query})))` : '?'}, ?, ?, ?
       ${event.onlyIfPreviousChangedOneRow ? 'WHERE changes() = 1' : ''}
     `,
     params: [id, organizationId, locationId ?? null,

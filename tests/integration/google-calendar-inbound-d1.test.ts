@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { nameConversationBooking } from './support/booking-state.ts'
 import { OPEN_TERMS_JSON } from './support/booking-terms.ts'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
@@ -39,9 +40,10 @@ test('Google time changes request client approval while canonical appointments a
     const day = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10)
     const at = (time: string) => `${day}T${time}:00.000Z`
     for (const [id, start, end] of [['s',at('14:00'),at('14:30')], ['s2',at('15:00'),at('15:30')]]) await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES(?,'org','p','America/New_York',?,?,1,'actor','actor')").bind(id,start,end).run()
-    await db.prepare(`INSERT INTO requests(id,kind,organization_id,user_id,payload_json) VALUES('thread','booking','org','buyer','{"guest":{"name":"Jane Doe","email":"jane@example.test","phone":null},"notes":"PRIVATE LEGAL MATTER","party_size_is_minimum":false,"ip_hash":null,"cancellation":{"token_hash":null,"expires_at":null,"used_at":null}}')`).run()
+    await db.prepare(`INSERT INTO conversations(id,kind,organization_id,user_id,last_message_at,payload_json) VALUES('thread','booking','org','buyer','2099-01-01T00:00:00.000Z','{"guest":{"name":"Jane Doe","email":"jane@example.test","phone":null},"notes":"PRIVATE LEGAL MATTER","party_size_is_minimum":false,"ip_hash":null,"cancellation":{"token_hash":null,"expires_at":null,"used_at":null}}')`).run()
     const env = { ...await mf.getBindings<CloudflareEnv>(), BETTER_AUTH_URL:'https://proof.example', BETTER_AUTH_SECRET:'local-proof-secret-long-enough-for-auth', STRIPE_SECRET_KEY:'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN:'https://krabiclaw.test', EMAIL_REPLY_SECRET:'reply-secret', EMAIL_DELIVERY_MODE:'log_only' } as CloudflareEnv
-    const { bookingId } = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId:'org', productId:'p', sessionId:'s', productVariantId:'v', partySize:1, requestId:'thread', userId:'buyer' })
+    const { bookingId } = await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId:'org', productId:'p', sessionId:'s', productVariantId:'v', partySize:1, userId:'buyer' })
+    await nameConversationBooking(db, 'thread', bookingId)
     await storeCalendarSelection(db,'org',{account_id:'linked-account',calendar_id:'chosen',calendar_name:'KrabiClaw'})
     const provider = {token:async()=> 'token'}
     const events = new Map<string,Record<string,unknown>>()
@@ -105,14 +107,14 @@ test('Google time changes request client approval while canonical appointments a
     assert.equal((await db.prepare('SELECT product_session_id FROM bookings WHERE id=?').bind(bookingId).first())?.product_session_id,'s')
     assert.equal(await db.prepare("SELECT count(*) n FROM tasks WHERE kind='guest_reply' AND subject_id='thread' AND status='open'").first('n'),0,'an attorney proposal leaves no reply owed to the client')
     assert.deepEqual(events.get(eventId)?.start,{dateTime:at('14:00'),timeZone:'America/New_York'})
-    const first=(await db.prepare("SELECT * FROM activity_entries WHERE event_name='booking_change.requested'").first())!
+    const first=(await db.prepare("SELECT * FROM messages WHERE event_name='booking_change.requested'").first())!
     assert.equal(first.actor_kind,'system')
     const before=await respondToBookingChange(db,env,{threadId:'thread',requestId:String(first.id),buyerUserId:'buyer'})
     assert.equal(before.status,'pending')
     assert.notEqual(before.before.whenLabel,before.after.whenLabel)
     assert.equal(JSON.parse(String(first.payload_json)).before.startsAt,at('14:00'))
     assert.equal(JSON.parse(String(first.payload_json)).afterStartsAt,at('15:00'))
-    const delivered=(await db.prepare('SELECT provider,status,email_json FROM guest_thread_deliveries WHERE entry_id=?').bind(first.id).first())!
+    const delivered=(await db.prepare('SELECT provider,status,email_json FROM guest_thread_deliveries WHERE message_id=?').bind(first.id).first())!
     assert.equal(delivered.provider,'log_only')
     assert.equal(delivered.status,'sent')
     const message=JSON.parse(String(delivered.email_json)).message
@@ -123,8 +125,8 @@ test('Google time changes request client approval while canonical appointments a
     // rather than producing another proposal or delivering a second email.
     changes=[firstChange]
     assert.deepEqual(await pullCalendarChanges(env,'org',provider),{events:1,applied:0,reviewed:0})
-    assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE event_name='booking_change.requested'").first('n'),1)
-    assert.equal(await db.prepare("SELECT count(*) n FROM guest_thread_deliveries WHERE entry_id=? AND purpose='status_update'").bind(first.id).first('n'),1)
+    assert.equal(await db.prepare("SELECT count(*) n FROM messages WHERE event_name='booking_change.requested'").first('n'),1)
+    assert.equal(await db.prepare("SELECT count(*) n FROM guest_thread_deliveries WHERE message_id=? AND purpose='status_update'").bind(first.id).first('n'),1)
     editEvent({attendees:[{email:'jane@example.test',responseStatus:'accepted'},{email:'host@example.test',responseStatus:'accepted'}]})
     assert.deepEqual(await pullCalendarChanges(env,'org',provider),{events:1,applied:0,reviewed:0})
     assert.equal((await respondToBookingChange(db,env,{threadId:'thread',requestId:String(first.id),buyerUserId:'buyer'})).status,'pending','Google RSVP does not accept a KrabiClaw change request')
@@ -135,10 +137,10 @@ test('Google time changes request client approval while canonical appointments a
     assert.deepEqual(events.get(eventId)?.start,{dateTime:at('15:00'),timeZone:'America/New_York'})
 
     // Who handles a consultation changes in KrabiClaw, never from its event: an attendee swap is refused and put back.
-    const proposalsBeforeSwap=await db.prepare("SELECT count(*) n FROM activity_entries WHERE event_name='booking_change.requested'").first('n')
+    const proposalsBeforeSwap=await db.prepare("SELECT count(*) n FROM messages WHERE event_name='booking_change.requested'").first('n')
     editEvent({attendees:[{email:'jane@example.test',responseStatus:'accepted'},{email:'second@example.test',responseStatus:'needsAction'}]})
     assert.deepEqual(await pullCalendarChanges(env,'org',provider),{events:1,applied:0,reviewed:1})
-    assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE event_name='booking_change.requested'").first('n'),proposalsBeforeSwap)
+    assert.equal(await db.prepare("SELECT count(*) n FROM messages WHERE event_name='booking_change.requested'").first('n'),proposalsBeforeSwap)
     assert.deepEqual(events.get(eventId)?.attendees,[{email:'jane@example.test',responseStatus:'accepted'},{email:'host@example.test',responseStatus:'needsAction'}])
     // The practice area is given to Attorney Two: every consultation of it, booked or new, is theirs, and the invitation follows.
     await db.prepare("UPDATE product_booking_configs SET assigned_member_id='second-org' WHERE organization_id='org' AND product_id='p'").run()
@@ -148,12 +150,12 @@ test('Google time changes request client approval while canonical appointments a
 
     // RSVP alone is neither a new proposal nor consent; no calendar rewrite
     // resets it. Arbitrary or foreign attendees are rejected and removed.
-    const proposalsBefore=await db.prepare("SELECT count(*) n FROM activity_entries WHERE event_name='booking_change.requested'").first('n')
+    const proposalsBefore=await db.prepare("SELECT count(*) n FROM messages WHERE event_name='booking_change.requested'").first('n')
     const invitationCount=invitations.length
     editEvent({attendees:[{email:'jane@example.test',responseStatus:'declined'},{email:'second@example.test',responseStatus:'accepted'}]})
     assert.deepEqual(await pullCalendarChanges(env,'org',provider),{events:1,applied:0,reviewed:0})
     assert.equal(invitations.length,invitationCount)
-    assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE event_name='booking_change.requested'").first('n'),proposalsBefore)
+    assert.equal(await db.prepare("SELECT count(*) n FROM messages WHERE event_name='booking_change.requested'").first('n'),proposalsBefore)
     editEvent({attendees:[{email:'jane@example.test',responseStatus:'declined'},{email:'second@example.test',responseStatus:'accepted'},{email:'owner@example.test'}]})
     assert.deepEqual(await pullCalendarChanges(env,'org',provider),{events:1,applied:0,reviewed:1})
     assert.equal((events.get(eventId)?.attendees as unknown[]).length,2)
@@ -164,7 +166,7 @@ test('Google time changes request client approval while canonical appointments a
     editEvent({guestsCanModify:true,attendees:[{email:'jane@example.test'},{email:'host@example.test'}]})
     assert.deepEqual(await pullCalendarChanges(env,'org',provider),{events:1,applied:0,reviewed:1})
     assert.equal(events.get(eventId)?.guestsCanModify,false)
-    assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE event_name='booking_change.requested'").first('n'),proposalsBefore,'guest-editable events cannot be attributed to staff as an attorney proposal')
+    assert.equal(await db.prepare("SELECT count(*) n FROM messages WHERE event_name='booking_change.requested'").first('n'),proposalsBefore,'guest-editable events cannot be attributed to staff as an attorney proposal')
     editEvent({status:'confirmed'})
     assert.deepEqual(await pullCalendarChanges(env,'org',provider),{events:1,applied:0,reviewed:0})
     assert.equal(events.get(eventId)?.status,'tentative','Google status does not confirm a pending consultation')
@@ -176,17 +178,17 @@ test('Google time changes request client approval while canonical appointments a
     assert.deepEqual(await pullCalendarChanges(env,'org',provider),{events:1,applied:0,reviewed:1})
     assert.equal((await db.prepare('SELECT status FROM bookings WHERE id=?').bind(bookingId).first())?.status,'pending')
     assert.equal(events.get(eventId)?.status,'tentative')
-    assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE event_name='calendar_sync.event_deleted' AND kind='operation'").first('n'),1)
+    assert.equal(await db.prepare("SELECT count(*) n FROM messages WHERE event_name='calendar_sync.event_deleted'").first('n'),1)
     // Each refused move is an open change task the owner acknowledges; each Google proposal's task closed when it was
     // answered or replaced; a deleted event the booking put back is nobody's work.
-    const changeTasks = (await db.prepare(`SELECT e.event_name, t.status, count(*) n FROM tasks t JOIN activity_entries e ON t.dedupe_key = 'booking_change:' || e.id
+    const changeTasks = (await db.prepare(`SELECT e.event_name, t.status, count(*) n FROM tasks t JOIN messages e ON t.dedupe_key = 'booking_change:' || e.id
       WHERE t.kind = 'booking_change' GROUP BY e.event_name, t.status ORDER BY e.event_name, t.status`).all()).results
-    const refused = await db.prepare("SELECT count(*) n FROM activity_entries WHERE event_name='calendar_sync.move_refused' AND kind='operation'").first<number>('n')
+    const refused = await db.prepare("SELECT count(*) n FROM messages WHERE event_name='calendar_sync.move_refused'").first<number>('n')
     assert.deepEqual(changeTasks, [{ event_name: 'booking_change.requested', status: 'done', n: 1 }, { event_name: 'calendar_sync.move_refused', status: 'open', n: refused }])
     const deletionInvitations=invitations.length
     changes=[deletion]
     await pullCalendarChanges(env,'org',provider)
-    assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE event_name='calendar_sync.event_deleted' AND kind='operation'").first('n'),1,'a repeated provider tombstone has one canonical operation')
+    assert.equal(await db.prepare("SELECT count(*) n FROM messages WHERE event_name='calendar_sync.event_deleted'").first('n'),1,'a repeated provider tombstone has one canonical operation')
     assert.equal(invitations.length,deletionInvitations,'repeated provider tombstones do not resend unchanged invitations')
     // An edit racing the restore is never overwritten. Its current ETag is
     // consumed on replay and the visible error clears only after reconciliation.

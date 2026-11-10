@@ -10,7 +10,7 @@ import { createTables } from './support/table-product.ts'
 import test, { mock } from 'node:test'
 import { Miniflare } from 'miniflare'
 import { createDeliveryReceipt, deliverReceiptEmail, getDeliveryById, isVisibleDeliveryFailure, listThreadDeliveries, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
-import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
+import { appendMessage } from '../../server/domain/conversations.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { listGuestThreads, updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
 import { moveBooking, requestBookingChange, respondToBookingChange } from '../../server/domain/guest-threads/booking-changes.ts'
@@ -315,14 +315,14 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     // A reply whose send completes after a newer guest message leaves the
     // thread on that message.
     const delayedOperationKey = 'delayed-reply-proof'
-    const delayedReplyEntry = await appendEntry(db, {
-      threadId: 'contact-proof',
+    const delayedReplyEntry = await appendMessage(db, {
+      conversationId: 'contact-proof',
       kind: 'message',
-      actorKind: 'member',
+      authorKind: 'member', authorUserId: null,
       actorUserId: 'user-proof',
       channel: 'email',
       body: 'A delayed reply',
-      payloadJson: { request_hash: await creationRequestHash({body:'A delayed reply',photos:[]}) },
+      payload: { request_hash: await creationRequestHash({body:'A delayed reply',photos:[]}) },
       eventName: 'thread.member_reply',
       dedupeKey: `guest-thread-operation:contact-proof:${delayedOperationKey}`,
     })
@@ -333,10 +333,10 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       purpose: 'member_reply',
       idempotencyKey: `guest-thread-email:contact-proof:${delayedOperationKey}`,
     })
-    const inboundEntry = await appendEntry(db, {
-      threadId: 'contact-proof',
+    const inboundEntry = await appendMessage(db, {
+      conversationId: 'contact-proof',
       kind: 'message',
-      actorKind: 'guest',
+      authorKind: 'guest', authorUserId: null,
       channel: 'email',
       body: 'A newer guest reply',
       dedupeKey: 'email:newer-guest-reply-proof',
@@ -348,14 +348,14 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
 
     // A failed send shows on the thread, and replaying the reply sends it again.
     const failedOperationKey = 'failed-reply-proof'
-    const failedEntry = await appendEntry(db, {
-      threadId: 'contact-proof',
+    const failedEntry = await appendMessage(db, {
+      conversationId: 'contact-proof',
       kind: 'message',
-      actorKind: 'member',
+      authorKind: 'member', authorUserId: null,
       actorUserId: 'user-proof',
       channel: 'email',
       body: 'A failed reply',
-      payloadJson: { request_hash: await creationRequestHash({body:'A failed reply',photos:[]}) },
+      payload: { request_hash: await creationRequestHash({body:'A failed reply',photos:[]}) },
       eventName: 'thread.member_reply',
       dedupeKey: `guest-thread-operation:contact-proof:${failedOperationKey}`,
     })
@@ -1105,7 +1105,7 @@ test('native Resend test transport persists one delivered financial email throug
       scope: 'global', template: 'native_threading_reply', targetUserId: 'native-recipient', idempotencyKey: replyIdempotencyKey,
       title: reply.subject, message: reply.text, deepLink: '/dashboard/account/activity',
     })
-    const replyReceipt = await createDeliveryReceipt(db, { entryId: replyEntryId, channel: 'email', provider: 'resend', purpose: 'status_update', idempotencyKey: replyIdempotencyKey })
+    const replyReceipt = await createDeliveryReceipt(db, { subject: { messageId: replyEntryId }, channel: 'email', provider: 'resend', purpose: 'status_update', idempotencyKey: replyIdempotencyKey })
     const threaded = await deliverReceiptEmail(db, { env, delivery: replyReceipt, threadId: null, email: reply })
     assert.equal(threaded.status, 'sent')
     assert.equal(threaded.error, null)

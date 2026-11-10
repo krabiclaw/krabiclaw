@@ -5,9 +5,9 @@
     :ui="{
       body: 'overflow-y-auto',
       // Nuxt UI floats the close button with `absolute end-4`, which would leave
-      // the bell stranded next to the title while the menu page renders it on
-      // the right. Returning close to the flow lets both sit together, bell then
-      // close, the way the menu page's navbar already lays them out.
+      // search stranded next to the title while the menu page renders it on
+      // the right. Returning close to the flow lets both sit together, search
+      // then close, the way the menu page's navbar already lays them out.
       close: 'static',
     }"
   >
@@ -23,7 +23,6 @@
           data-testid="dashboard-search"
           @click="openSearch"
         />
-        <DashboardNotificationBell :to="notificationsTo" />
       </div>
     </template>
 
@@ -35,13 +34,12 @@
 
 <script setup lang="ts">
 import DashboardMenuContent from './DashboardMenuContent.vue'
-import DashboardNotificationBell from './DashboardNotificationBell.vue'
 
 const open = defineModel<boolean>('open', { default: false })
 
 const route = useRoute()
 const nuxtApp = useNuxtApp()
-const { notificationsTo, personal } = useDashboardMenu()
+const { personal } = useDashboardMenu()
 
 function openSearch() {
   open.value = false

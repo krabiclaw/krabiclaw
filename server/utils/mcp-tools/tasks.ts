@@ -34,7 +34,7 @@ const task = TASK_VIEW_SCHEMA
 const taskResult = { type: 'object', properties: { task }, required: ['task'] }
 const opportunity = { type: 'object', properties: { id: text, statusLine: text, title: text, detail: text, icon: text, path: text, productId: nullableText, locationId: nullableText,
   requestId: { type: ['string', 'null'], description: 'The guest conversation a message opportunity is sent in.' },
-  message: { type: ['string', 'null'], description: 'The message it pre-writes from the business’s own records. Review it, then send it with reply_to_guest in requestId’s conversation; nothing is sent until then.' } },
+  message: { type: ['string', 'null'], description: 'The message it pre-writes from the business’s own records. Review it, then send it with send_message in requestId’s conversation; nothing is sent until then.' } },
 required: ['id', 'statusLine', 'title', 'detail', 'icon', 'path', 'productId', 'locationId', 'requestId', 'message'] }
 const assignee = {
   assigned_member_id: { type: ['string', 'null'], description: 'A Better Auth member id from list_tasks assignees; null to unassign.' },

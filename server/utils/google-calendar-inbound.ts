@@ -7,10 +7,10 @@ import { CalendarError, calendarEvent, calendarSubjects, defaultProvider, google
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { listSessions } from '~/server/utils/availability'
 import { bookingChangeViews, requestBookingChange } from '~/server/domain/guest-threads/booking-changes'
-import { appendEntry, findEntryByDedupeKey } from '~/server/domain/guest-threads/entries'
-import { updateThreadProjectionIfLatestEntry } from '~/server/domain/guest-threads/repository'
+import { appendMessage, findMessageByDedupeKey, type MessageRow } from '~/server/domain/conversations'
+import { conversationTaskQueries } from '~/server/domain/guest-threads/repository'
 import { getGuestRequest } from '~/server/domain/requests'
-import type { GuestThreadEntryRow, GuestThreadRow } from '~/server/domain/guest-threads/types'
+import type { GuestThreadRow } from '~/server/domain/guest-threads/types'
 import { notifyCalendarSyncOwner } from '~/server/utils/notifications'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
@@ -186,18 +186,17 @@ async function flagForReview(env: CloudflareEnv, organizationId: string, link: E
   const db = env.DB
   if (!subject.request_id) return
   const dedupeKey = `calendar-sync:${change}`
-  const existing = await findEntryByDedupeKey(db, dedupeKey)
+  const existing = await findMessageByDedupeKey(db, dedupeKey)
   const organization = await queryFirst<{ name: string | null; vertical: string | null }>(db, 'SELECT name, vertical FROM organization WHERE id=?', [organizationId])
   const noun = resolveBookingPresentation(subject.product_kind, organization?.vertical).noun
   const whenLabel = new Intl.DateTimeFormat('en-US', { timeZone: subject.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(subject.starts_at))
-  const entry = existing ?? await appendEntry(db, { threadId: subject.request_id, kind: 'operation', actorKind: 'system', eventName: `calendar_sync.${kind}`, dedupeKey,
+  const entry = existing ?? await appendMessage(db, { conversationId: subject.request_id, authorKind: 'krabiclaw', authorUserId: null, eventName: `calendar_sync.${kind}`, dedupeKey,
     body: kind === 'event_deleted'
       ? `The ${noun}'s event was deleted in Google Calendar. The ${noun} is still booked for ${whenLabel}, and the event has been put back.`
       : `The ${noun}'s event was moved in Google Calendar, but the ${noun} could not follow${reason ? `: ${reason}` : ''}. It stays at ${whenLabel}, and the event has been moved back.`,
-    payloadJson: { kind, reason, event_id: link.event_id, operational_booking_id: subject.booking_id } })
-  if (!existing) await updateThreadProjectionIfLatestEntry(db, subject.request_id, entry.id)
-  const request = await queryFirst<{ location_id: string | null }>(db, 'SELECT location_id FROM requests WHERE id=?', [subject.request_id])
-  await notifyCalendarSyncOwner(env, db, { organizationId, organizationName: organization?.name, kind, threadId: subject.request_id, submissionType: 'booking', sourceEntryId: entry.id,
+    payload: { kind, reason, event_id: link.event_id, operational_booking_id: subject.booking_id } }, conversationTaskQueries(subject.request_id, new Date().toISOString()))
+  const request = await queryFirst<{ location_id: string | null }>(db, 'SELECT location_id FROM conversations WHERE id=?', [subject.request_id])
+  await notifyCalendarSyncOwner(env, db, { organizationId, organizationName: organization?.name, kind, threadId: subject.request_id, submissionType: 'booking', messageId: entry.id,
     locationId: request?.location_id ?? null, guestName: subject.guest_name ?? 'The guest', noun, whenLabel, reason,
     day: new Intl.DateTimeFormat('en-US', { timeZone: subject.timezone, month: 'short', day: 'numeric' }).format(new Date(subject.starts_at)) })
 }
@@ -251,7 +250,7 @@ async function applyCalendarEvent(env: CloudflareEnv, organizationId: string, in
         // restoration has a new ETag, so a failed client delivery resumes from
         // the latest canonical proposal, never from that new provider revision.
         if (thread) {
-          const latest = await queryFirst<GuestThreadEntryRow>(db, "SELECT * FROM activity_entries WHERE request_id=? AND event_name='booking_change.requested' ORDER BY sequence DESC LIMIT 1", [thread.id])
+          const latest = await queryFirst<MessageRow>(db, "SELECT * FROM messages WHERE conversation_id=? AND event_name='booking_change.requested' ORDER BY sequence DESC LIMIT 1", [thread.id])
           const prefix = `booking-change-request:${thread.id}:`
           if (latest?.dedupe_key?.startsWith(`${prefix}google-calendar:${link.event_id}:`) && (await bookingChangeViews(db, thread as GuestThreadRow, [latest])).get(latest.id)?.status === 'pending') {
             const account = await readLinkedAccount(env, integration.account_id)
@@ -278,7 +277,7 @@ async function applyCalendarEvent(env: CloudflareEnv, organizationId: string, in
       const connection = await readCalendarIntegration(db, organizationId)
       if (connection?.revision !== integration.revision || connection.status === 'disabled') throw new HTTPError({ statusCode: 409, message: 'The Calendar connection changed before this request could be proposed.' })
       const idempotencyKey = `google-calendar:${change}`
-      const previous = await findEntryByDedupeKey(db, `booking-change-request:${thread.id}:${idempotencyKey}`)
+      const previous = await findMessageByDedupeKey(db, `booking-change-request:${thread.id}:${idempotencyKey}`)
       const expectedUpdatedAt = previous ? JSON.parse(previous.payload_json!).updatedAt as string : bookingUpdatedAt
       await requestBookingChange(db, env, thread as GuestThreadRow, { source: 'google_calendar', userId: account.userId }, { ...fields, expectedUpdatedAt }, idempotencyKey)
       await logInbound(db, { organizationId, externalId: item.id, status: 'applied', detail: `client approval requested for ${new Date(start).toISOString()}; the original appointment is retained` })

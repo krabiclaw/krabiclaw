@@ -19,7 +19,6 @@ import {
   occurrenceKey,
   parseStayCalendarRules,
   PUBLIC_BOOKING_WINDOW_DAYS,
-  type BookingStatus,
   type StayCalendarRules,
   type ProductSessionStatus,
 } from '~/shared/bookings'
@@ -1104,8 +1103,8 @@ export async function sessionAllocationPredicate(db: DbClient, input: SessionAll
   const span = await queryFirst<{ starts_at: string; ends_at: string }>(db, 'SELECT starts_at, ends_at FROM product_sessions WHERE id=? AND organization_id=?', [input.sessionId, input.organizationId])
   const availability = span ? await memberAvailabilityJson(db, input.env, input.organizationId, { from: span.starts_at, until: span.ends_at }, (await sessionProviderIds(db, input.organizationId, { sessionIds: [input.sessionId] })).members) : '{}'
   return { query: `${input.chargedPaymentId ? `EXISTS (SELECT 1 FROM payment_checkout_holds h JOIN payments p ON p.id=h.payment_id WHERE p.id=? AND p.organization_id=? AND p.refunded_amount=0 AND h.status IN ('active','released') AND h.expires_at>? AND h.session_id=? AND h.quantity=? AND h.organization_id=p.organization_id AND h.amount=p.amount AND h.currency=p.currency) AND ` : ''}${input.requireUndecided
-        ? `EXISTS (SELECT 1 FROM requests WHERE id = ? AND organization_id = ?)
-           AND NOT EXISTS (SELECT 1 FROM activity_entries WHERE dedupe_key = ?) AND `
+        ? `EXISTS (SELECT 1 FROM conversations WHERE id = ? AND organization_id = ?)
+           AND NOT EXISTS (SELECT 1 FROM messages WHERE dedupe_key = ?) AND `
         : ''}EXISTS (
         SELECT 1 FROM product_sessions s
         WHERE s.id = ? AND s.organization_id = ? AND s.product_id = ?
@@ -1169,7 +1168,6 @@ export async function sessionClaimQuery(db: DbClient, input: {
   partySize: number
   /** The Better Auth user the booking belongs to. */
   userId?: string | null
-  requestId?: string | null
   /**
    * A booking this claim replaces. Its seats are not counted against the
    * destination's capacity: a guest moving within a full session is not
@@ -1204,14 +1202,14 @@ export async function sessionClaimQuery(db: DbClient, input: {
     query: `
       INSERT INTO bookings (
         id, organization_id, product_id, product_session_id, product_variant_id, location_id, starts_at, ends_at, timezone,
-        user_id, request_id, party_size, party_size_is_minimum, answers, policy_json, status, received_at, created_at, updated_at
+        user_id, party_size, party_size_is_minimum, answers, policy_json, status, received_at, created_at, updated_at
       )
       SELECT ?, ?, ?, ?, ?,
         (SELECT location_id FROM product_sessions WHERE id = ? AND organization_id = ?),
         (SELECT starts_at FROM product_sessions WHERE id = ? AND organization_id = ?),
         (SELECT ends_at FROM product_sessions WHERE id = ? AND organization_id = ?),
         (SELECT timezone FROM product_sessions WHERE id = ? AND organization_id = ?),
-        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?,
         COALESCE((SELECT status FROM bookings WHERE id = ?),
           (SELECT CASE WHEN confirmation_mode = 'review' THEN 'pending' ELSE 'confirmed' END
            FROM product_booking_configs WHERE product_id = ? AND organization_id = ?)), ?, ?, ?
@@ -1222,7 +1220,7 @@ export async function sessionClaimQuery(db: DbClient, input: {
     params: [
       input.bookingId, input.organizationId, input.productId, input.sessionId, input.productVariantId,
       ...[0, 1, 2, 3].flatMap(() => [input.sessionId, input.organizationId]),
-      input.userId ?? null, input.requestId ?? null, input.partySize, input.partySizeIsMinimum ?? false, JSON.stringify(input.answers ?? []), input.policyJson, input.replacingBookingId ?? null, input.productId, input.organizationId, input.now, input.now, input.now,
+      input.userId ?? null, input.partySize, input.partySizeIsMinimum ?? false, JSON.stringify(input.answers ?? []), input.policyJson, input.replacingBookingId ?? null, input.productId, input.organizationId, input.now, input.now, input.now,
       ...allocation.params!, input.productVariantId,input.productId,input.organizationId,
     ],
   }
@@ -1236,9 +1234,6 @@ export async function sessionClaimQuery(db: DbClient, input: {
  * not the concurrency control: the insert carries its own capacity predicate,
  * so two concurrent claims for the last seat cannot both succeed. D1 applies
  * each statement atomically, and the second inserts zero rows and raises.
- *
- * A thread already holding a booking returns that booking instead of claiming
- * a second time.
  */
 export async function claimSessionCapacity(db: DbClient, input: {
   env: CloudflareEnv
@@ -1249,7 +1244,6 @@ export async function claimSessionCapacity(db: DbClient, input: {
   partySize: number
   /** The Better Auth user the booking belongs to. */
   userId?: string | null
-  requestId?: string | null
   /** The terms the guest agreed to (BookingPolicy), frozen on the booking. */
   policyJson: string
   answers?: FormAnswerSnapshot[]
@@ -1266,16 +1260,6 @@ export async function claimSessionCapacity(db: DbClient, input: {
 }): Promise<{ bookingId: string }> {
   if (!Number.isSafeInteger(input.partySize) || input.partySize < 1) badRequest('party_size must be a positive integer')
 
-  if (input.requestId) {
-    const existing = await queryFirst<{ id: string; product_id: string; product_session_id: string; product_variant_id: string; party_size: number }>(db, `
-      SELECT id, product_id, product_session_id, product_variant_id, party_size FROM bookings WHERE organization_id = ? AND request_id = ?
-    `, [input.organizationId, input.requestId])
-    if (existing) {
-      if (existing.product_id !== input.productId || existing.product_session_id !== input.sessionId || existing.product_variant_id !== input.productVariantId || existing.party_size !== input.partySize) throw new HTTPError({ statusCode: 409, statusMessage: 'This request already holds a different booking' })
-      return { bookingId: existing.id }
-    }
-  }
-
   await requireBookingConfig(db, input.organizationId, input.productId)
   const bookingId = crypto.randomUUID()
   const claim = await sessionClaimQuery(db, { ...input, bookingId, now: new Date().toISOString() })
@@ -1283,36 +1267,6 @@ export async function claimSessionCapacity(db: DbClient, input: {
   if ((results[0]?.meta?.changes ?? 0) === 0) throw new CapacityUnavailableError()
   return { bookingId }
 }
-
-/**
- * Move a booking to a new state, releasing exactly the seats it held.
- *
- * Cancellation releases this booking's party_size and nothing else, because
- * the seats were never tracked as a counter that could drift — availability is
- * always the sum over live bookings.
- */
-export async function setBookingStatus(db: DbClient, input: {
-  organizationId: string
-  bookingId: string
-  status: BookingStatus
-  reason?: string | null
-}): Promise<void> {
-  const now = new Date().toISOString()
-  const results = await executeBatch(db, [{
-    query: `
-      UPDATE bookings SET
-        status = ?,
-        cancelled_at = CASE WHEN ? = 'cancelled' THEN COALESCE(cancelled_at, ?) ELSE NULL END,
-        cancellation_reason = CASE WHEN ? = 'cancelled' THEN ? ELSE NULL END,
-        version = version + 1, updated_at = ?
-      WHERE organization_id = ? AND id = ?
-        AND (status = ? OR (status = 'pending' AND ? = 'confirmed') OR (? = 'cancelled' AND status IN ('pending', 'confirmed')))
-    `,
-    params: [input.status, input.status, now, input.status, input.reason ?? null, now, input.organizationId, input.bookingId, input.status, input.status, input.status],
-  }], { operation: 'Set booking status' })
-  if ((results[0]?.meta?.changes ?? 0) === 0) throw new HTTPError({ statusCode: 404, statusMessage: 'Booking not found' })
-}
-
 
 /**
  * Edit one session: its time, its capacity, or its state.

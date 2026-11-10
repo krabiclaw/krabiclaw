@@ -66,8 +66,11 @@ export async function seedExperience(createTenant: CreateTenant): Promise<SeedTe
       product_slug: wheel.slug, session_id: session!.id, party_size: 1, guest_name: 'Past Guest', guest_email: 'past-guest@playwright.example',
       source: 'phone', guest_acknowledgement: false, idempotency_key: 'seed-experience-ended-booking',
     })
-    // The owner opens the conversation, as a click on it does, which reads its alerts.
-    await owner.json('GET', `/api/dashboard/organizations/${tenant.organizationId}/guest-threads/${pastGuest.request_id}`)
+    // The owner opens the conversation, as a click on it does: the screen reads it through to the newest message it shows.
+    const opened = await owner.json<{ thread: { stream: Array<{ type: string; id: string }> } }>('GET', `/api/dashboard/organizations/${tenant.organizationId}/guest-threads/${pastGuest.request_id}`)
+    const newest = opened.thread.stream.filter(item => item.type !== 'day').at(-1)
+    if (!newest) throw new Error('The ended booking’s conversation shows no message to read')
+    await owner.json('POST', `/api/dashboard/organizations/${tenant.organizationId}/conversations/${pastGuest.request_id}/read`, { messageId: newest.id })
     tenant.endedSessionEndsAt = endsAt.toISOString()
     return tenant
   } finally { await owner.dispose() }

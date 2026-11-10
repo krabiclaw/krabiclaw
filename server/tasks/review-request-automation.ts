@@ -30,11 +30,11 @@ async function sendDue(db: D1Database, env: ApiRecord): Promise<{ sent: number; 
   // is never invited (reviewInvitationDue); SQL leaves it out by its length.
   const candidates = await queryAllPages<SendDueRow>(db, `
       SELECT b.id, b.organization_id
-        FROM bookings b JOIN requests r ON r.id = b.request_id AND r.organization_id = b.organization_id AND r.kind = 'booking'
+        FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.organization_id = b.organization_id AND r.kind = 'booking'
        WHERE b.channel = 'direct' AND b.status = 'confirmed' AND b.no_show_at IS NULL AND length(b.ends_at) > 10
          AND datetime(b.ends_at) <= datetime('now', '-${REVIEW_REQUEST_DELAY_HOURS} hours')
          AND datetime(b.ends_at) > datetime('now', '-${REVIEW_REQUEST_TTL_DAYS + 2} days')
-         AND r.review_id IS NULL
+         AND NOT EXISTS (SELECT 1 FROM reviews rv WHERE rv.organization_id = b.organization_id AND rv.booking_id = b.id)
          AND NOT EXISTS (SELECT 1 FROM review_requests rr WHERE rr.booking_id = b.id AND rr.first_sent_at IS NOT NULL)
          AND r.user_id IS NOT NULL
          AND ${wantsReviewRequests.sql}

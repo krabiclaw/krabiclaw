@@ -293,7 +293,7 @@ export interface OrganizationNotificationMember {
 export async function listOrganizationNotificationMembers(
   env: CloudflareEnv,
   organizationId: string,
-  options: { /** Explicit previous/new provider notices. */ includeMemberIds?: readonly string[]; requestId?: string } = {},
+  options: { /** Explicit previous/new provider notices. */ includeMemberIds?: readonly string[]; /** The guest conversation whose handlers are told. */ requestId?: string } = {},
 ): Promise<OrganizationNotificationMember[]> {
   const adapter = await organizationAdapter(env)
   const members = await listAllOrganizationMembers(adapter, organizationId)
@@ -303,7 +303,7 @@ export async function listOrganizationNotificationMembers(
   const included = new Set(options.includeMemberIds)
   if (options.requestId) {
     const scope = assignedGuestThreadScope('r', { column: 'recipient.userId' })
-    const responsible = await queryAll<{ id: string }>(env.DB, `SELECT recipient.id FROM member recipient JOIN requests r ON r.organization_id = recipient.organizationId
+    const responsible = await queryAll<{ id: string }>(env.DB, `SELECT recipient.id FROM member recipient JOIN conversations r ON r.organization_id = recipient.organizationId
       WHERE recipient.organizationId = ? AND r.id = ? AND ${scope.sql}`, [organizationId, options.requestId])
     for (const member of responsible) included.add(member.id)
   }
@@ -401,6 +401,15 @@ export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, d
       if (chunk.some((_row, index) => results[index * 2]?.meta.changes === 1)) changed = true
     }
   }
+  // Someone who left the organization leaves its conversations: their seats in
+  // the team's, and their read positions in the guests'. A guest keeps their own.
+  const [left] = await executeBatch(db, [{
+    query: `DELETE FROM conversation_participants WHERE organization_id = ?
+      AND NOT EXISTS (SELECT 1 FROM member m WHERE m.organizationId = conversation_participants.organization_id AND m.userId = conversation_participants.user_id)
+      AND NOT EXISTS (SELECT 1 FROM conversations c WHERE c.id = conversation_participants.conversation_id AND c.user_id = conversation_participants.user_id)`,
+    params: [input.organizationId],
+  }], { operation: 'Remove departed members from conversations' })
+  if (Number(left?.meta.changes ?? 0) > 0) changed = true
   if (changed) await publishAccessInvalidation(env, { organizationId: input.organizationId })
 }
 
@@ -451,23 +460,20 @@ export async function assertProductAccess(db: DbClient, input: MemberAccessPrinc
 export function assignedGuestThreadScope(alias: string, user: string | { /** Trusted query column, never request input. */ column: string }): { sql: string; params: string[] } {
   const userSql = typeof user === 'string' ? '?' : user.column
   const sql = `((${alias}.kind = 'booking' AND EXISTS (SELECT 1 FROM bookings b JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
-        WHERE b.request_id = ${alias}.id AND b.organization_id = ${alias}.organization_id AND b.product_session_id IS NOT NULL AND ${assignedMemberSql('c', userSql)}))
+        WHERE b.id = ${alias}.booking_id AND b.organization_id = ${alias}.organization_id AND b.product_session_id IS NOT NULL AND ${assignedMemberSql('c', userSql)}))
       OR (${alias}.kind = 'contact' AND ${alias}.location_id IS NOT NULL AND ${locationMemberSql(`${alias}.organization_id`, `${alias}.location_id`, userSql)}))`
   return { sql, params: typeof user === 'string' ? Array(sql.match(/\?/g)?.length ?? 0).fill(user) : [] }
 }
 
-/** A booking is its product's assigned member's. */
-export async function assertAssignedBookingAccess(db: DbClient, input: MemberAccessPrincipal & { bookingId?: string; requestId?: string }): Promise<void> {
+/** A booking is its product's assigned member's. Who sees a conversation is conversations.ts conversationAccessSql. */
+export async function assertAssignedBookingAccess(db: DbClient, input: MemberAccessPrincipal & { bookingId: string }): Promise<void> {
   if (await roleAllows({ ...input, permissions: { operations: ['update'] } })) return
   await assertRoleAllows({ ...input, permissions: { operations: ['assigned'] } })
-  const threadScope = assignedGuestThreadScope('r', input.userId)
-  const assigned = input.requestId && !input.bookingId
-    ? await queryFirst(db, `SELECT r.id FROM requests r WHERE r.organization_id = ? AND r.id = ? AND ${threadScope.sql}`, [input.organizationId, input.requestId, ...threadScope.params])
-    : await queryFirst(db, `SELECT b.id FROM bookings b LEFT JOIN requests r ON r.id = b.request_id AND r.organization_id = b.organization_id
-      LEFT JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
-      WHERE b.organization_id = ? AND b.id = ? AND (${assignedMemberSql('c')} OR (r.id IS NOT NULL AND ${threadScope.sql}))`,
-    [input.organizationId, input.bookingId, input.userId, ...threadScope.params])
-  if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Conversation not found or access denied', data: { code: 'THREAD_NOT_FOUND', field: input.requestId ? 'threadId' : 'bookingId' } })
+  const assigned = await queryFirst(db, `SELECT b.id FROM bookings b
+      JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
+      WHERE b.organization_id = ? AND b.id = ? AND ${assignedMemberSql('c')}`,
+    [input.organizationId, input.bookingId, input.userId])
+  if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Conversation not found or access denied', data: { code: 'THREAD_NOT_FOUND', field: 'bookingId' } })
 }
 
 /** The location must belong to the tenant the caller authorized against; reaching it is an org-wide role or handling a product offered there. */

@@ -1682,39 +1682,16 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(page.getByRole('heading', { name: 'Calendar', exact: true })).toBeVisible()
       await mobileNav.getByRole('link', { name: 'Messages', exact: true }).click()
       await expect(page).toHaveURL('/dashboard/account/messages')
-      // A guest's own Messages lists their conversations and nothing else: no kind
-      // menu at all, so no Updates in it; updates are the bell's.
-      await expect(page.locator('[data-guest-thread-list-hydrated="true"]')).toBeVisible()
+      // A guest's own Messages lists their conversations and nothing else: no kind menu at all.
+      await expect(page.locator('[data-conversation-list-hydrated="true"]')).toBeVisible()
       await expect(page.getByRole('button', { name: /filter by (conversation|message) type$/ })).toHaveCount(0)
       await expect(page.getByRole('menuitemcheckbox', { name: 'Updates', exact: true })).toHaveCount(0)
-      const personalUnread = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/notifications/unread-count'
-        && new URL(response.url()).searchParams.get('scope') === 'personal')
-      const personalNotifications = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/notifications'
-        && new URL(response.url()).searchParams.get('scope') === 'personal')
+      // Alerts are gone: the Menu is the account's launcher and carries no bell; unread is Messages' alone.
       await mobileNav.getByRole('link', { name: 'Menu', exact: true }).click()
-      const notificationBell = page.locator('#dashboard-panel-account-menu').getByTestId('dashboard-notification-bell')
-      await expect(notificationBell).toHaveAttribute('href', '/dashboard/account/notifications')
-      await notificationBell.click()
-      const updatesResponse = await personalNotifications
-      expect(updatesResponse.status(), await updatesResponse.text()).toBe(200)
-      const updates = await updatesResponse.json() as { notifications: Array<{ id: string; scope: string; title: string | null; target_user_id: string | null }>; unread_count: number }
-      const unreadResponse = await personalUnread
-      expect(unreadResponse.status(), await unreadResponse.text()).toBe(200)
-      expect((await unreadResponse.json()).unread_count, 'the Personal bell reads the same owned unread total through its count endpoint').toBe(updates.unread_count)
-      const viewer = await (await page.request.get('/api/auth/get-session')).json() as { user: { id: string } }
-      // Personal Notifications are platform notifications addressed to this account, or to everyone; never a business's.
-      expect(updates.notifications.every(item => item.scope === 'global' && (item.target_user_id === viewer.user.id || item.target_user_id === null)), 'personal Notifications carry only this account\'s notifications').toBe(true)
-      await expect(page).toHaveURL('/dashboard/account/notifications')
-      await expect(page.getByRole('heading', { name: 'Notifications', exact: true })).toBeVisible()
-      if (updates.notifications.length) {
-        for (const item of updates.notifications) {
-          const row = page.getByTestId(`notification-${item.id}`)
-          await expect(row).toBeVisible()
-          if (item.title) await expect(row).toContainText(item.title)
-        }
-      } else {
-        await expect(page.getByText('No notifications yet.', { exact: true })).toBeVisible()
-      }
+      await expect(page).toHaveURL('/dashboard/account/menu')
+      await expect(page.locator('#dashboard-panel-account-menu')).toBeVisible()
+      await expect(page.getByTestId('dashboard-notification-bell')).toHaveCount(0)
+      await expect(page.getByTestId('dashboard-menu-unread')).toHaveCount(0)
       await expect(mobileNav.getByTestId('dashboard-nav-label')).toHaveText(['Today', 'Calendar', 'Messages', 'Menu'])
       await page.setViewportSize(WIDE)
       await expect(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }).getByTestId('dashboard-nav-label')).toHaveText(['Today', 'Calendar', 'Messages'])

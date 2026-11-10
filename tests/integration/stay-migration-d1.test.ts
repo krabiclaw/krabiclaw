@@ -218,7 +218,7 @@ test('the authenticated migration route scopes discovery and writes to the selec
     const preview = await previewResponse.json() as { fingerprint: string }
     const imported = await request(owner, '/import', { ...source, fingerprint: preview.fingerprint })
     assert.equal(imported.status, 200, await imported.clone().text())
-    const persisted = await db.prepare("SELECT b.product_id, json_extract(r.payload_json, '$.guest.name') AS guest_name FROM bookings b JOIN requests r ON r.id = b.request_id WHERE b.idempotency_key = 'hostaway:67459976'").first()
+    const persisted = await db.prepare("SELECT b.product_id, json_extract(r.payload_json, '$.guest.name') AS guest_name FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking' WHERE b.idempotency_key = 'hostaway:67459976'").first()
     assert.deepEqual(persisted, { product_id: home.id, guest_name: 'Dylan from 1A' })
   } finally { await runtime.dispose() }
 })

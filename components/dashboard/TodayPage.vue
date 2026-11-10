@@ -304,7 +304,7 @@ async function removeGoal(goal: BusinessGoal) {
 
 watch(realtime.event, (event) => {
   if (!event) return
-  if (['business.changed', 'stay.changed', 'access.changed', 'thread.created', 'thread.changed', 'entry.appended', 'delivery.changed'].includes(event.type)) void refresh()
+  if (['business.changed', 'stay.changed', 'access.changed', 'MESSAGE_CREATE', 'MESSAGE_UPDATE'].includes(event.type)) void refresh()
 })
 watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refresh() })
 function resume() { if (document.visibilityState === 'visible') void refresh() }

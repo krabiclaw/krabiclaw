@@ -9,9 +9,10 @@ export function isTeamMembersResponse(value: unknown): value is { members: TeamM
   return isRecord(value) && Array.isArray(value.members) && value.members.every(member => identity(member) && isRecord(member) && typeof member.email === 'string' && typeof member.role === 'string')
 }
 
-export function isTeamThreadsResponse(value: unknown): value is { threads: TeamThread[] } {
-  return isRecord(value) && Array.isArray(value.threads) && value.threads.every(thread => isRecord(thread)
-    && typeof thread.id === 'string' && typeof thread.createdAt === 'string' && typeof thread.lastMessageAt === 'string'
+/** One team conversation as its screen draws it; what is unread is the conversation list's. */
+export function isTeamThreadResponse(value: unknown, id: string): value is { thread: TeamThread } {
+  const thread = isRecord(value) ? value.thread : null
+  return isRecord(thread) && thread.id === id && typeof thread.createdAt === 'string' && typeof thread.lastMessageAt === 'string'
     && nullableString(thread.name) && nullableString(thread.createdByUserId)
     && typeof thread.isGroup === 'boolean' && typeof thread.canManage === 'boolean' && typeof thread.canLeave === 'boolean'
     && nullableString(thread.bookingId) && nullableString(thread.locationId)
@@ -20,8 +21,6 @@ export function isTeamThreadsResponse(value: unknown): value is { threads: TeamT
     && (thread.job === null || isRecord(thread.job) && typeof thread.job.id === 'string' && typeof thread.job.version === 'number' && isRecord(thread.job.sheet) && isRecord(thread.job.can))
     && (thread.location === null || isRecord(thread.location) && typeof thread.location.id === 'string' && typeof thread.location.title === 'string')
     && Array.isArray(thread.participants) && thread.participants.every(identity)
-    && (thread.lastMessage === null || isRecord(thread.lastMessage) && typeof thread.lastMessage.id === 'string' && typeof thread.lastMessage.body === 'string' && typeof thread.lastMessage.attachmentCount === 'number')
-    && typeof thread.unread === 'boolean' && typeof thread.unreadCount === 'number')
 }
 
 function isTeamMessage(value: unknown): value is TeamMessage {
@@ -59,9 +58,9 @@ export const useTeamGroupLeaveRequest = () => useState<string | null>('team-grou
 export async function useTeamGroup() {
   const route = useRoute()
   const api = useDashboardApi()
-  const { data, error, refresh } = await useTeamThreads()
   const threadId = computed(() => String(route.params.teamThreadId))
-  const thread = computed(() => data.value?.threads.find(item => item.id === threadId.value) ?? null)
+  const { data, error, refresh } = await useTeamThread(threadId)
+  const thread = computed(() => data.value?.thread ?? null)
   const leaving = useTeamGroupLeaveRequest()
   const keys = new Map<string, string>()
   async function operate(operation: TeamGroupOperation) {
@@ -76,13 +75,18 @@ export async function useTeamGroup() {
           && value.threadId === id && value.status === (operation.action === 'leave' ? 'left' : 'updated'),
       })
       await refresh()
-      if (error.value) throw error.value
-      const saved = data.value?.threads.find(item => item.id === id)
-      const verified = operation.action === 'leave' ? !saved : saved && (
-        operation.action === 'rename' ? saved.name === operation.name
-          : operation.action === 'add' ? operation.memberIds.every(userId => saved.participants.some(person => person.id === userId))
-            : !saved.participants.some(person => person.id === operation.userId))
-      if (!verified) throw new Error('The conversation change could not be verified. Retry the same action.')
+      // Having left, the conversation is no longer this member's to read: 404 is the proof.
+      if (operation.action === 'leave') {
+        if (error.value?.statusCode !== 404) throw new Error('Leaving the conversation could not be verified. Retry the same action.')
+      } else {
+        if (error.value) throw error.value
+        const saved = data.value?.thread
+        const verified = saved && (
+          operation.action === 'rename' ? saved.name === operation.name
+            : operation.action === 'add' ? operation.memberIds.every(userId => saved.participants.some(person => person.id === userId))
+              : !saved.participants.some(person => person.id === operation.userId))
+        if (!verified) throw new Error('The conversation change could not be verified. Retry the same action.')
+      }
       keys.delete(identity)
       return result
     } finally { if (leaving.value === id) leaving.value = null }
@@ -90,16 +94,17 @@ export async function useTeamGroup() {
   return { thread, error, operate }
 }
 
-export async function useTeamThreads() {
+/** One team conversation: who is in it, what it is about and what this member may do to it. */
+export async function useTeamThread(threadId: Ref<string> | ComputedRef<string>) {
   const dashboard = useDashboardOrganization()
   const api = useDashboardApi()
   return useAsyncData(
-    () => `team-threads:${dashboard.organizationId.value}`,
-    () => api('/api/dashboard/team/threads', { validate: isTeamThreadsResponse }),
+    () => `team-conversation:${dashboard.organizationId.value}:${threadId.value}`,
+    () => api(`/api/dashboard/team/threads/${encodeURIComponent(threadId.value)}`, { validate: (value): value is { thread: TeamThread } => isTeamThreadResponse(value, threadId.value) }),
     {
       getCachedData(cacheKey, nuxtApp, ctx) {
         if (ctx?.cause === 'refresh:manual' || ctx?.cause === 'refresh:hook') return undefined
-        return nuxtApp.payload.data[cacheKey] as { threads: TeamThread[] } | undefined
+        return nuxtApp.payload.data[cacheKey] as { thread: TeamThread } | undefined
       },
     },
   )

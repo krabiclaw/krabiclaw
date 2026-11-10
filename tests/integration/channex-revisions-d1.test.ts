@@ -158,7 +158,7 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
     assert.equal(landed.status, 'acknowledged')
     const stayId = (landed as { stay_id: string }).stay_id
     const stored = await db.prepare(`SELECT b.channel, b.owner, b.status, b.overbooked, b.total_minor, b.currency, json_extract(r.payload_json, '$.guest.name') AS guest_name, b.adults, b.children, b.version, b.provider_updated_at
-      FROM bookings b JOIN requests r ON r.id = b.request_id WHERE b.id = ?`).bind(stayId).first()
+      FROM bookings b JOIN conversations r ON r.booking_id = b.id AND r.kind = 'booking' WHERE b.id = ?`).bind(stayId).first()
     assert.deepEqual(stored, { channel: 'airbnb', owner: 'channel', status: 'confirmed', overbooked: 0, total_minor: 45_050, currency: 'USD', guest_name: 'Lee Park', adults: 2, children: 1, version: 1, provider_updated_at: '2026-10-15T01:00:00Z' })
     assert.deepEqual(await nights(db, stayId), ['2027-01-10', '2027-01-11', '2027-01-12'])
     assert.deepEqual(channex.acked, ['rev-1'])
@@ -245,8 +245,8 @@ test('a moved guest takes the nights, turnover and messages to the new home whil
     } })).id
     const booking: Booking = { id: 'bk-move', property_id: 'prop-1', status: 'new', arrival: '2027-03-10', departure: '2027-03-13', amount: '300.00', revision: '' }
     // Channex delivered the guest's conversation for this booking on its listing.
-    await db.prepare(`INSERT INTO requests (id, kind, organization_id, payload_json) VALUES ('thread-move', 'booking', ?, '{"guest":{"name":"Lee","email":"lee@example.test","phone":null},"notes":null,"ip_hash":null,"cancellation":{"token_hash":null,"expires_at":null,"used_at":null}}')`).bind(ORG).run()
-    await db.prepare(`INSERT INTO channel_threads (provider, external_thread_id, organization_id, product_id, request_id, external_booking_id, provider_updated_at) VALUES ('channex', 'ext-thread', ?, ?, 'thread-move', 'bk-move', '2026-10-15T00:00:00Z')`).bind(ORG, productId).run()
+    await db.prepare(`INSERT INTO conversations (id, kind, organization_id, payload_json, last_message_at) VALUES ('thread-move', 'booking', ?, '{"guest":{"name":"Lee","email":"lee@example.test","phone":null},"ip_hash":null,"cancellation":{"token_hash":null,"expires_at":null,"used_at":null}}', '2026-10-15T00:00:00.000Z')`).bind(ORG).run()
+    await db.prepare(`INSERT INTO channel_threads (provider, external_thread_id, organization_id, product_id, conversation_id, external_booking_id, provider_updated_at) VALUES ('channex', 'ext-thread', ?, ?, 'thread-move', 'bk-move', '2026-10-15T00:00:00Z')`).bind(ORG, productId).run()
     channex.revise('rev-move', booking, '2026-10-15T01:00:00Z')
     const stayId = (await applyBookingRevision(db, env, 'rev-move') as { stay_id: string }).stay_id
     const landed = await getStay(db, access, stayId)

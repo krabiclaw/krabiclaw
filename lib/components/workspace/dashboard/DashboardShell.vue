@@ -55,7 +55,6 @@
       :items="showNavChrome ? primaryNavItems : []"
       :home-to="topNavHomeTo"
       :menu-active="isMenuPageActive"
-      :menu-unread="menuUnread"
       @menu="menuOpen = true"
     />
 
@@ -116,12 +115,8 @@
         :class="isMenuPageActive ? 'text-primary' : 'text-dimmed hover:text-highlighted'"
         :aria-current="isMenuPageActive ? 'page' : undefined"
         data-testid="dashboard-mobile-nav-menu-link"
-        :aria-describedby="menuUnread ? 'mobile-nav-unread-menu' : undefined"
       >
-        <span class="relative">
-          <UIcon name="i-lucide-menu" class="size-6 shrink-0" />
-          <span v-if="menuUnread" id="mobile-nav-unread-menu" class="absolute -right-1 -top-0.5 size-2.5 rounded-full bg-error" aria-hidden="true" aria-label="Unread notifications" data-testid="dashboard-menu-unread" />
-        </span>
+        <UIcon name="i-lucide-menu" class="size-6 shrink-0" />
         <span class="text-xs leading-tight font-medium" data-testid="dashboard-nav-label">Menu</span>
       </NuxtLink>
     </nav>
@@ -426,11 +421,9 @@ const navTargets = computed<DashboardMobileNavItem[]>(() => {
 // it, because a slideover is the wrong control on a phone.
 const menuOpen = ref(false)
 
-// What is unread: conversations on Messages, and the notifications the Menu's bell lists as a dot on Menu.
-const { unreadCount, unreadConversations, unavailable: unreadUnavailable } = useNotificationUnreadCount(realtime)
+// The conversations with something unread, on Messages. A count that could not be read is marked as such, never shown stale.
+const { unreadConversations, unavailable: unreadUnavailable } = useConversationUnreadCount(realtime)
 const primaryNavItems = computed(() => navTargets.value.map(item => ({ ...item, active: item.key === activeTab.value, ...(item.key === 'messages' ? { badge: unreadConversations.value, badgeUnavailable: unreadUnavailable.value } : {}) })))
-// A count that could not be read is marked as such on Messages, never shown stale.
-const menuUnread = computed(() => !unreadUnavailable.value && unreadCount.value > 0)
 // A signed-in owner always gets the header: the wordmark and the account menu
 // are user-scoped and need no organization. Only the nav links and the bottom
 // bar wait for an organization, because Today, Calendar, Catalog and Messages do not

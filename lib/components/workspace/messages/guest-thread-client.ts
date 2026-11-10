@@ -11,7 +11,7 @@ import type {
 } from '~/server/domain/guest-threads/types'
 
 /*
-  What the thread list and the conversation both need from the guest-thread API.
+  What the conversation list and a guest conversation both need from the API.
   The list and the detail are separate levels of the editor frame and separate
   components, so the response shapes, their runtime validators and the action
   vocabulary live here once rather than in each.
@@ -44,7 +44,7 @@ const isNullableText = (value: unknown) => value === null || typeof value === 's
 const isCount = (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0
 
 function isRow(value: unknown): value is InboxRow {
-  return isRecord(value) && isText(value.id) && (value.kind === 'guest' || value.kind === 'support')
+  return isRecord(value) && isText(value.id) && (value.kind === 'guest' || value.kind === 'support' || value.kind === 'team')
     && isText(value.guestName) && isText(value.avatarInitial) && (value.channel === 'airbnb' || value.channel === 'direct')
     && isNullableText(value.home) && isNullableText(value.when) && typeof value.preview === 'string' && (value.preview ? isText(value.previewFrom) : value.previewFrom === null)
     && isText(value.time) && typeof value.unread === 'boolean'

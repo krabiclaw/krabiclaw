@@ -35,7 +35,7 @@ import { bookingPolicy, type BookingPolicy } from '~/server/utils/booking-policy
 import { requireBookingConfig } from '~/server/utils/availability'
 import { openingMessageQueries, openingSentence } from '~/server/domain/guest-threads/opening'
 import { ownedBuyerRequest } from '~/server/domain/payments/buyer'
-import { publishBusinessInvalidation, publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { publishBusinessInvalidation, publishConversationEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planSourceMessages } from '~/server/domain/scheduled-guest-messages'
 import { listingCalendar } from '~/server/integrations/channex/airbnb-listing'
 import { joinBookingConversationQueries } from '~/server/domain/guest-threads/channel-messages'
@@ -386,10 +386,10 @@ function amount(value: unknown, field: string, allowNegative = false): number {
 
 /** A nights booking at its home, with its conversation's guest contact: `s` is the booking. */
 const STAY_FROM = `bookings s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
-  JOIN requests r ON r.organization_id = s.organization_id AND r.id = s.request_id`
+  JOIN conversations r ON r.organization_id = s.organization_id AND r.booking_id = s.id AND r.kind = 'booking'`
 const STAY_COLUMNS = `s.id, s.product_id, s.booked_product_id, (SELECT b.internal_name FROM product_stay_configs b WHERE b.organization_id = s.organization_id AND b.product_id = s.booked_product_id) AS booked_home_name, s.location_id, s.timezone, s.channel, s.owner, s.status, s.overbooked, s.starts_at, s.ends_at,
   s.adults, s.children, s.infants, s.party_size, json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
-  s.user_id, s.total_minor, s.currency, s.private_notes, s.provider, s.external_booking_id, s.channel_booking_id, s.request_id, s.cancelled_at, s.cancellation_reason,
+  s.user_id, s.total_minor, s.currency, s.private_notes, s.provider, s.external_booking_id, s.channel_booking_id, r.id AS request_id, s.cancelled_at, s.cancellation_reason,
   json_extract(s.policy_json, '$.cancellation') AS cancellation_policy, s.no_show_at, s.answers, s.version, s.created_at, s.updated_at`
 
 function mapStay(row: Record<string, unknown>): Stay {
@@ -1813,7 +1813,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv & Cloudflare
       ...bookedListingGuardQueries(access.organizationId, home.product_id, id, null, fields),
       ...reconcileNightsQueries(access.organizationId, id, { updated_at: now, version: 1, product_id: home.product_id, ...window, check_in_date: fields.check_in_date, check_out_date: fields.check_out_date }),
       ...bookingConversationQueries({ organizationId: access.organizationId, bookingId: id, requestId: crypto.randomUUID(), locationId: home.location_id, userId: guestUserId, now,
-        guest: { name: fields.guest_name, email: fields.guest_email, phone: fields.guest_phone }, openedBy: { userId: access.actorId } }),
+        guest: { name: fields.guest_name, email: fields.guest_email, phone: fields.guest_phone } }),
       organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.created', entityType: 'stay', entityId: id,
         context: access.audit, afterState: { ...fields, channel, channel_booking_id: channelBookingId }, ...(imported ? { metadata: { imported } } : {}) }),
       ...(payment ? stayPaymentInsert(access, { id, currency: home.currency, location_id: home.location_id }, payment, `${key}:payment`, now) : []),
@@ -2015,9 +2015,9 @@ export async function moveStay(db: DbClient, env: StayMutationEnv, access: StayA
         home: backOnListing ? null : { product_id: to.product_id, location_id: to.location_id, timezone: to.timezone, check_in_time: to.check_in_time, internal_name: to.internal_name, assigned_member_id: config.assigned_member_id },
         guestName: stayGuestFirstName(current.guest_name), checkInDate: current.check_in_date }),
       {
-        query: `INSERT INTO scheduled_guest_messages (id, organization_id, product_id, booking_id, request_id, template_id, template_title, template_version, body, due_at, timezone, status, created_at, updated_at)
-                SELECT ?, ?, ?, ?, ?, NULL, ?, 1, ?, ?, ?, 'pending', ?, ? WHERE ${moved}`,
-        params: [crypto.randomUUID(), access.organizationId, to.product_id, stayId, current.request_id, STAY_MOVED_MESSAGE_TITLE, body, now, to.timezone, now, now, ...movedParams],
+        query: `INSERT INTO scheduled_guest_messages (id, organization_id, product_id, booking_id, template_id, template_title, template_version, body, due_at, timezone, status, created_at, updated_at)
+                SELECT ?, ?, ?, ?, NULL, ?, 1, ?, ?, ?, 'pending', ?, ? WHERE ${moved}`,
+        params: [crypto.randomUUID(), access.organizationId, to.product_id, stayId, STAY_MOVED_MESSAGE_TITLE, body, now, to.timezone, now, now, ...movedParams],
       },
     ], { operation: 'Move stay' })
   } catch (error) {
@@ -2127,14 +2127,15 @@ export interface GuestStay {
 /** The account's stay by its activity ID: its conversation's ID, or the stay's own when it has none. */
 export async function readGuestStay(db: DbClient, buyerUserId: string, activityId: string): Promise<GuestStay> {
   const owned = await queryFirst<{ id: string; request_id: string; organization_id: string; product_id: string; status: string; name: string; organization_name: string; check_in_time: string | null; check_out_time: string | null; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; paid_online: number }>(db, `
-    SELECT s.id, s.request_id, s.organization_id, s.product_id, s.status, p.name, o.name AS organization_name, b.check_in_time, b.check_out_time, l.address, l.latitude, l.longitude, l.maps_url,
+    SELECT s.id, r.id AS request_id, s.organization_id, s.product_id, s.status, p.name, o.name AS organization_name, b.check_in_time, b.check_out_time, l.address, l.latitude, l.longitude, l.maps_url,
            EXISTS (SELECT 1 FROM payments WHERE organization_id = s.organization_id AND subject_type = 'booking' AND subject_id = s.id AND captured_amount > 0) AS paid_online
-      FROM bookings s JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
+      FROM conversations r JOIN bookings s ON s.id = r.booking_id AND s.organization_id = r.organization_id
+      JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
       JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
       JOIN product_booking_configs b ON b.organization_id = s.organization_id AND b.product_id = s.product_id
       JOIN organization o ON o.id = s.organization_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
-     WHERE s.request_id = ? AND s.user_id = ? AND s.owner = 'app' AND s.product_session_id IS NULL`, [activityId, buyerUserId])
+     WHERE r.id = ? AND r.kind = 'booking' AND s.user_id = ? AND s.owner = 'app' AND s.product_session_id IS NULL`, [activityId, buyerUserId])
   if (!owned) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'stay_id')
   await ownedBuyerRequest(db, buyerUserId, owned.request_id)
   const [stay, pictures] = await Promise.all([
@@ -2523,12 +2524,12 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   if (!/^[A-Z]{3}$/.test(booking.currency)) throw new Error(`Channel booking ${booking.external_booking_id} has an invalid currency`)
   type ChannelStayRow = { id: string; product_id: string; booked_product_id: string | null; provider_updated_at: string | null; revision_id: string | null; external_booking_id: string | null; user_id: string | null; request_id: string | null }
   const currentChannelStay = () => queryFirst<ChannelStayRow>(db,
-    'SELECT id, product_id, booked_product_id, provider_updated_at, revision_id, external_booking_id, user_id, request_id FROM bookings WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])
+    `SELECT id, product_id, booked_product_id, provider_updated_at, revision_id, external_booking_id, user_id, (SELECT c.id FROM conversations c WHERE c.booking_id = bookings.id AND c.kind = 'booking') AS request_id FROM bookings WHERE provider = ? AND external_booking_id = ?`, [booking.provider, booking.external_booking_id])
   // The same reservation under a new provider booking id (a re-import after a
   // new Channex account) is the stay it already is: the revision's write moves
   // it onto the new id, when that revision is newer than the stay.
   const existing = await currentChannelStay() ?? (booking.channel_booking_id === null ? null : await queryFirst<ChannelStayRow>(db,
-    `SELECT id, product_id, booked_product_id, provider_updated_at, revision_id, external_booking_id, user_id, request_id FROM bookings WHERE organization_id = ? AND channel = ? AND channel_booking_id = ?
+    `SELECT id, product_id, booked_product_id, provider_updated_at, revision_id, external_booking_id, user_id, (SELECT c.id FROM conversations c WHERE c.booking_id = bookings.id AND c.kind = 'booking') AS request_id FROM bookings WHERE organization_id = ? AND channel = ? AND channel_booking_id = ?
       AND ((provider = ? AND external_booking_id <> ?) OR owner = 'app')`,
     [organizationId, booking.channel, booking.channel_booking_id, booking.provider, booking.external_booking_id]))
   // A revision names the listing it was booked on. A guest the host moved stays where they sleep; a revision for another listing is a real re-map.
@@ -2536,7 +2537,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   if (existing?.external_booking_id === null && existing.product_id !== landing) fail(409, 'CHANNEL_MIGRATION_HOME_CONFLICT', 'This reservation was imported into a different occupied home. Resolve its property assignment before accepting the channel revision.', 'product_id')
   const reimported = existing && existing.external_booking_id !== booking.external_booking_id ? existing.external_booking_id : null
   const conversation = await queryFirst<{ organization_id: string; product_id: string; request_id: string }>(db,
-    'SELECT organization_id, product_id, request_id FROM channel_threads WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])
+    'SELECT organization_id, product_id, conversation_id AS request_id FROM channel_threads WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])
   if (conversation && (conversation.organization_id !== organizationId || conversation.product_id !== productId)) {
     throw new HTTPError({ statusCode: 409, message: 'The provider booking and conversation belong to different homes', data: { code: 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', field: 'external_booking_id' } })
   }
@@ -2548,7 +2549,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   const recordedChange = async (): Promise<{ previous: ChannelStayTerms | null; terms: ChannelStayTerms } | null> => {
     const audit = await queryFirst<{ previous: string | null; terms: string | null; type: string | null }>(db, `SELECT json_extract(payload_json, '$.metadata.previous_terms') AS previous,
       json_extract(payload_json, '$.metadata.terms') AS terms, json_type(payload_json, '$.metadata.previous_terms') AS type
-      FROM activity_entries WHERE organization_id = ? AND kind = 'audit' AND dedupe_key = ?`, [organizationId, revisionKey])
+      FROM activity_entries WHERE organization_id = ? AND dedupe_key = ?`, [organizationId, revisionKey])
     if (!audit) throw new HTTPError({ statusCode: 503, message: 'The saved channel revision has no audit', data: { code: 'CHANNEL_REVISION_AUDIT_REQUIRED', field: 'revision_id', revision_id: booking.revision_id } })
     if (audit.type === null) return null
     if (!audit.terms) throw new HTTPError({ statusCode: 500, message: 'The channel revision audit records what it replaced but not what it wrote', data: { code: 'CHANNEL_REVISION_AUDIT_INVALID', field: 'terms', revision_id: booking.revision_id } })
@@ -2569,7 +2570,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
       json_extract(payload_json, '$.metadata.previous_location_id') AS previous_location_id,
       json_type(payload_json, '$.metadata.previous_product_id') AS previous_product_type,
       json_type(payload_json, '$.metadata.previous_location_id') AS previous_location_type
-      FROM activity_entries WHERE organization_id = ? AND kind = 'audit' AND dedupe_key = ?`, [organizationId, revisionKey])
+      FROM activity_entries WHERE organization_id = ? AND dedupe_key = ?`, [organizationId, revisionKey])
     if (receipt) {
       const scope = (product: unknown, location: unknown) => typeof product === 'string' && Boolean(product) && typeof location === 'string' && Boolean(location)
       if (receipt.stay_id !== stored.id || receipt.provider !== booking.provider || receipt.external_booking_id !== booking.external_booking_id || receipt.revision_id !== booking.revision_id || receipt.provider_updated_at !== booking.provider_updated_at
@@ -2673,15 +2674,16 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   ...reconcileNightsQueries(organizationId, id, { updated_at: now, version, product_id: landing, ...window, check_in_date: booking.check_in_date, check_out_date: booking.check_out_date }),
   // The conversation the channel opened before the guest booked is the booking's; otherwise the booking opens its own.
   {
-    query: `UPDATE bookings SET request_id = t.request_id FROM channel_threads t
-      WHERE bookings.id = ? AND bookings.organization_id = ? AND bookings.product_id = ? AND bookings.version = ?
-        AND t.provider = bookings.provider AND t.external_booking_id = bookings.external_booking_id
-        AND t.organization_id = bookings.organization_id AND t.product_id = COALESCE(bookings.booked_product_id, bookings.product_id)
-        AND bookings.request_id IS NULL`,
+    query: `UPDATE conversations SET booking_id = b.id FROM bookings b JOIN channel_threads t
+        ON t.provider = b.provider AND t.external_booking_id = b.external_booking_id
+        AND t.organization_id = b.organization_id AND t.product_id = COALESCE(b.booked_product_id, b.product_id)
+      WHERE b.id = ? AND b.organization_id = ? AND b.product_id = ? AND b.version = ?
+        AND conversations.id = t.conversation_id AND conversations.organization_id = b.organization_id AND conversations.kind = 'booking' AND conversations.booking_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM conversations booked WHERE booked.booking_id = b.id AND booked.kind = 'booking')`,
     params: [id, organizationId, landing, version],
   },
   ...bookingConversationQueries({ organizationId, bookingId: id, requestId: crypto.randomUUID(), locationId: home.location_id, userId: guestUserId, now,
-    guest: { name: guestName, email: booking.guest_email, phone: booking.guest_phone }, ...(guestName === null ? { participant: { kind: 'channel' as const, title: reservation } } : {}), openedBy: 'channel' }),
+    guest: { name: guestName, email: booking.guest_email, phone: booking.guest_phone }, ...(guestName === null ? { participant: { kind: 'channel' as const, title: reservation } } : {}) }),
   bookingContactQuery({ organizationId, bookingId: id, version, updatedAt: now, locationId: home.location_id, guest: { name: guestName, email: booking.guest_email, phone: booking.guest_phone } }),
   ...turnovers,
   ...readyJob,
@@ -2702,7 +2704,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   if (changed === 0 && (current.provider_updated_at === null || current.provider_updated_at < booking.provider_updated_at)) {
     throw new HTTPError({ statusCode: 409, message: 'The channel booking home changed concurrently. Retry this revision from the feed.', data: { code: 'CHANNEL_REVISION_CONFLICT', field: 'revision_id', revision_id: booking.revision_id, stay_id: stored.id, version: stored.version } })
   }
-  const linked = await queryFirst<{ request_id: string | null; mapped_request_id: string | null }>(db, `SELECT s.request_id, t.request_id AS mapped_request_id FROM bookings s
+  const linked = await queryFirst<{ request_id: string | null; mapped_request_id: string | null }>(db, `SELECT (SELECT c.id FROM conversations c WHERE c.booking_id = s.id AND c.kind = 'booking') AS request_id, t.conversation_id AS mapped_request_id FROM bookings s
     LEFT JOIN channel_threads t ON t.provider = s.provider AND t.external_booking_id = s.external_booking_id WHERE s.id = ?`, [stored.id])
   if (linked?.mapped_request_id && linked.request_id !== null && linked.request_id !== linked.mapped_request_id) await joinChannelConversation(stored.id, linked.request_id, linked.mapped_request_id)
   await planSourceMessages(db, organizationId, stored.id)
@@ -2715,7 +2717,7 @@ async function publishStayChange(env: GuestInboxPublicationEnv, db: DbClient, or
   await publishStayInvalidation(env, { ...input, type: 'stay.changed' }, { version: stay.version })
   if (nightsChanged) await publishStayInvalidation(env, { ...input, type: 'nights.changed' }, { version: stay.version })
   try {
-    await publishGuestInboxThreadEvent(env, db, { threadId: stay.request_id, type: 'thread.changed' })
+    await publishConversationEvent(env, db, { conversationId: stay.request_id, type: 'MESSAGE_UPDATE' })
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'The stay was saved, but its conversation update could not be published. Reload before retrying.',
       data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, stay_id: stay.id, product_id: stay.product_id, version: stay.version, request_id: stay.request_id }, cause })
@@ -2994,9 +2996,9 @@ export function stayFromCheckoutQueries(input: { organizationId: string; stayId:
     organizationEventQuery({ organizationId: input.organizationId, locationId: input.home.location_id, actorId: null, eventType: 'stay.created', entityType: 'stay', entityId: input.stayId, metadata: { channel: 'direct', payment_id: input.paymentId }, onlyIfPreviousChangedOneRow: true }),
     ...reconcileNightsQueries(input.organizationId, input.stayId, { updated_at: input.now, version: 1, product_id: quote.product_id, ...window, check_in_date: quote.check_in_date, check_out_date: quote.check_out_date }),
     ...bookingConversationQueries({ organizationId: input.organizationId, bookingId: input.stayId, requestId, locationId: input.home.location_id, userId: input.buyerUserId, now: input.now,
-      guest: { name: guest.name, email: guest.email, phone: guest.phone }, openedBy: 'guest' }),
+      guest: { name: guest.name, email: guest.email, phone: guest.phone } }),
     // The stay's own message opens its conversation, then the guest's note.
-    ...openingMessageQueries({ target: { requestId }, at: input.now, guestUserId: input.buyerUserId, note: guest.notes,
+    ...openingMessageQueries({ conversationId: requestId, at: input.now, guestUserId: input.buyerUserId, openedByUserId: input.buyerUserId, note: guest.notes,
       body: openingSentence({ kind: 'stay', homeTitle: input.home.name, checkIn: quote.check_in_date, checkOut: quote.check_out_date, guests: quote.adults + quote.children,
         guestName: guest.name, guestPhone: guest.phone, answers: guest.answers ?? [] }) }),
   ]

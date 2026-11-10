@@ -188,7 +188,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
     if (input.unit === 'slot') {
       if (!session || !catalogPriceId) throw new Error('The selected session or price is missing')
       const allocation = await sessionAllocationPredicate(db, { env, organizationId: input.organizationId, productId: input.productId, sessionId: session.id, partySize: input.quantity, now })
-      hold = { query: `INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at,location_id,timezone)
+      hold = { query: `INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,buyer_user_id,conversation_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at,location_id,timezone)
         SELECT ?,?,?,?,?,?,?,?,?,?,?,?,s.starts_at,s.ends_at,'active',?,?,s.location_id,s.timezone FROM product_sessions s JOIN product_booking_configs c ON c.product_id=s.product_id AND c.organization_id=s.organization_id WHERE s.id=? AND s.organization_id=? AND s.product_id=? AND ${allocation.query}`,
         params: [holdId,input.organizationId,input.productId,input.variantId,catalogPriceId,session.id,input.buyerUserId,input.requestId,id,input.quantity,amount,price.currency,expiresAt,now,session.id,input.organizationId,input.productId,...allocation.params!] }
     } else {
@@ -198,7 +198,7 @@ export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, in
       // A lapsed hold on these nights is cleared before this one claims them; the hold's nights are claimed after it.
       const [clearLapsed, claim] = stayHoldClaimQueries({ ...scope, holdId })
       preceding.push(clearLapsed!)
-      hold = { query: `INSERT INTO payment_checkout_holds(id,organization_id,product_id,location_id,timezone,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at)
+      hold = { query: `INSERT INTO payment_checkout_holds(id,organization_id,product_id,location_id,timezone,buyer_user_id,conversation_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at)
         SELECT ?,?,?,?,?,?,NULL,?,?,?,?,?,?,'active',?,? WHERE ${bookable.query}`,
         params: [holdId,input.organizationId,stay.product_id,stay.location_id,stay.timezone,input.buyerUserId,id,stay.adults+stay.children,amount,price.currency,stay.check_in_date,stay.check_out_date,expiresAt,now,...bookable.params] }
       following.push(claim!)

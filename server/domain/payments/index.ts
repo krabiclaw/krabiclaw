@@ -92,7 +92,7 @@ export async function readPaymentDetails(db:DbClient,env:CloudflareEnv,organizat
  const [refundRows,disputeRows,booking,order,stripeFacts]=await Promise.all([
   queryAll<{id:string;amount:number;status:string;stripe_refund_id:string|null}>(db,'SELECT * FROM payment_refunds WHERE payment_id=?',[recorded.id]),
   queryAll<{id:string;stripe_dispute_id:string;amount:number;currency:string;reason:string;status:string;evidence_due_at:string|null;updated_at:string}>(db,'SELECT * FROM payment_disputes WHERE payment_id=?',[recorded.id]),
-  recorded.subject_type==='booking'?queryFirst<{request_id:string|null}>(db,`SELECT request_id FROM bookings WHERE id=? AND organization_id=?`,[recorded.subject_id,organizationId]):Promise.resolve(null),
+  recorded.subject_type==='booking'?queryFirst<{request_id:string|null}>(db,`SELECT (SELECT c.id FROM conversations c WHERE c.booking_id=b.id AND c.kind='booking') AS request_id FROM bookings b WHERE b.id=? AND b.organization_id=?`,[recorded.subject_id,organizationId]):Promise.resolve(null),
    readPaymentOrder(db,organizationId,recorded.id),
   stripePaymentFacts(env,recorded),
  ])

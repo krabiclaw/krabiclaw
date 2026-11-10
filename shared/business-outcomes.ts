@@ -49,7 +49,7 @@ export interface BusinessOutcomeReceipt {
 export interface BusinessOutcome {
   /** Activity keeps its stored ID. Other sources are namespaced; source.id is always the stored identity. */
   id: string
-  source: { table: 'activity_entries' | 'post_publications' | 'reviews' | 'analytics_events'; id: string }
+  source: { table: 'activity_entries' | 'messages' | 'post_publications' | 'reviews' | 'analytics_events'; id: string }
   event: BusinessOutcomeEvent
   subject: { kind: string; id: string }
   actor: { kind: 'guest' | 'member' | 'system' | 'cloudflare' | 'user' | 'agent' | 'unknown'; userId: string | null }
@@ -147,7 +147,6 @@ export interface BusinessProgressReference {
     message: string
   } | {
     kind: 'guest_thread'
-    archivedAt: string | null
     blockedAt: string | null
     latestGuestEntryId: string | null
     latestReplyEntryId: string | null

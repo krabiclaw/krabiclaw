@@ -1,19 +1,19 @@
 import { HTTPError } from 'nitro'
 import { execute, queryAll, queryAllPages, queryFirst, type DbClient } from '~/server/db'
-import { assertAssignedBookingAccess, memberAccessPrincipal, resolveMembership, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { memberAccessPrincipal, resolveMembership, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { assertConversationAccess, findMessageByDedupeKey } from '~/server/domain/conversations'
 import { getGuestRequest } from '~/server/domain/requests'
 import { isValidInstant } from '~/utils/timezone'
 import { messageText, messagingError } from './guest-message-schedule'
 import { guestReplyDestination, operationDedupeKey, sendScheduledGuestReply, type OperationOutcome } from './guest-threads/operations'
-import { findEntryByDedupeKey } from './guest-threads/entries'
-import { publishGuestInboxThreadEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { publishConversationEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { ChannexError } from '~/server/integrations/channex/client'
 import type { CloudflareEnv } from '~/server/utils/auth'
 
 export interface SendLaterMessageRow {
   id: string
   organization_id: string
-  request_id: string
+  conversation_id: string
   user_id: string
   body: string
   due_at: string
@@ -21,7 +21,7 @@ export interface SendLaterMessageRow {
   reason: string | null
   error_code: string | null
   error_field: string | null
-  entry_id: string | null
+  message_id: string | null
   version: number
   started_at: string | null
   sent_at: string | null
@@ -31,8 +31,8 @@ export interface SendLaterMessageRow {
 
 export function sendLaterMessage(row: SendLaterMessageRow) {
   return {
-    id: row.id, organizationId: row.organization_id, threadId: row.request_id, body: row.body, sendAt: row.due_at,
-    status: row.status, reason: row.reason, errorCode: row.error_code, errorField: row.error_field, entryId: row.entry_id,
+    id: row.id, organizationId: row.organization_id, threadId: row.conversation_id, body: row.body, sendAt: row.due_at,
+    status: row.status, reason: row.reason, errorCode: row.error_code, errorField: row.error_field, messageId: row.message_id,
     version: row.version, sentAt: row.sent_at, createdAt: row.created_at, updatedAt: row.updated_at,
   }
 }
@@ -59,16 +59,16 @@ export async function createSendLaterMessage(db: DbClient, principal: MemberAcce
   const due = sendAt(value.sendAt, now)
   const thread = await getGuestRequest(db, threadId, principal.organizationId)
   if (!thread) messagingError(404, 'THREAD_NOT_FOUND', 'Thread not found', 'threadId')
-  await assertAssignedBookingAccess(db, { ...principal, requestId: thread.id })
+  await assertConversationAccess(db, principal, thread.id)
   // Nothing is scheduled to a guest the reply could not reach.
   const destination = await guestReplyDestination(db, thread)
-  if (destination.channel === null) messagingError(409, 'GUEST_UNREACHABLE', destination.reason, 'request_id')
+  if (destination.channel === null) messagingError(409, 'GUEST_UNREACHABLE', destination.reason, 'conversation_id')
   const id = crypto.randomUUID()
-  await execute(db, `INSERT INTO send_later_messages (id, organization_id, request_id, user_id, body, due_at, status, version, created_at, updated_at)
+  await execute(db, `INSERT INTO send_later_messages (id, organization_id, conversation_id, user_id, body, due_at, status, version, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, 'pending', 1, ?, ?)`, [id, principal.organizationId, thread.id, principal.userId, body, due, now, now])
   const saved = await ownMessage(db, principal, id)
   try {
-    await publishGuestInboxThreadEvent(principal.env, db, { threadId: saved.request_id, type: 'thread.changed' })
+    await publishConversationEvent(principal.env, db, { conversationId: saved.conversation_id, type: 'MESSAGE_UPDATE' })
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'Your reply was scheduled, but open apps could not be updated. Reload before scheduling it again.',
       data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, message_id: saved.id }, cause })
@@ -79,7 +79,7 @@ export async function createSendLaterMessage(db: DbClient, principal: MemberAcce
 /** The author's messages still to send, then those that failed in the last week, optionally for one conversation. */
 export async function listSendLaterMessages(db: DbClient, principal: MemberAccessPrincipal, threadId: string | null, now = new Date().toISOString()) {
   const rows = await queryAll<SendLaterMessageRow>(db, `SELECT * FROM send_later_messages WHERE organization_id = ? AND user_id = ?
-    AND (? IS NULL OR request_id = ?) AND (status IN ('pending', 'sending') OR (status IN ('failed', 'needs_review') AND updated_at >= strftime('%Y-%m-%dT%H:%M:%fZ', ?, '-7 days')))
+    AND (? IS NULL OR conversation_id = ?) AND (status IN ('pending', 'sending') OR (status IN ('failed', 'needs_review') AND updated_at >= strftime('%Y-%m-%dT%H:%M:%fZ', ?, '-7 days')))
     ORDER BY status NOT IN ('pending', 'sending'), due_at, id LIMIT 200`, [principal.organizationId, principal.userId, threadId, threadId, now])
   return rows.map(sendLaterMessage)
 }
@@ -95,7 +95,7 @@ export async function updateSendLaterMessage(db: DbClient, principal: MemberAcce
   if (result.meta.changes !== 1) messagingError(409, 'SEND_LATER_VERSION_CONFLICT', 'This scheduled message changed; reload it before editing', 'expectedVersion')
   const saved = await ownMessage(db, principal, current.id)
   try {
-    await publishGuestInboxThreadEvent(principal.env, db, { threadId: saved.request_id, type: 'thread.changed' })
+    await publishConversationEvent(principal.env, db, { conversationId: saved.conversation_id, type: 'MESSAGE_UPDATE' })
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'Your scheduled reply was changed, but open apps could not be updated. Reload before editing it again.',
       data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, message_id: saved.id, version: saved.version }, cause })
@@ -110,7 +110,7 @@ export async function cancelSendLaterMessage(db: DbClient, principal: MemberAcce
   if (result.meta.changes !== 1) messagingError(409, 'SEND_LATER_NOT_PENDING', 'This message has already started sending and can no longer be cancelled', 'status')
   const saved = await ownMessage(db, principal, current.id)
   try {
-    await publishGuestInboxThreadEvent(principal.env, db, { threadId: saved.request_id, type: 'thread.changed' })
+    await publishConversationEvent(principal.env, db, { conversationId: saved.conversation_id, type: 'MESSAGE_UPDATE' })
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'Your scheduled reply was cancelled, but open apps could not be updated. Reload to see its saved status.',
       data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, message_id: saved.id }, cause })
@@ -134,11 +134,11 @@ function failure(outcome: Exclude<OperationOutcome, { ok: true }>): Outcome {
   }
 }
 
-async function finish(db: DbClient, env: SendEnv, row: SendLaterMessageRow, values: { status: 'failed' | 'needs_review'; reason: string | null; error_code: string | null; error_field: string | null; entry_id: string | null; sent_at: null }): Promise<void> {
-  const result = await execute(db, `UPDATE send_later_messages SET status = ?, reason = ?, error_code = ?, error_field = ?, entry_id = ?, sent_at = ?, updated_at = ?
-    WHERE id = ? AND status = 'sending'`, [values.status, values.reason, values.error_code, values.error_field, values.entry_id, values.sent_at, new Date().toISOString(), row.id])
+async function finish(db: DbClient, env: SendEnv, row: SendLaterMessageRow, values: { status: 'failed' | 'needs_review'; reason: string | null; error_code: string | null; error_field: string | null; message_id: string | null; sent_at: null }): Promise<void> {
+  const result = await execute(db, `UPDATE send_later_messages SET status = ?, reason = ?, error_code = ?, error_field = ?, message_id = ?, sent_at = ?, updated_at = ?
+    WHERE id = ? AND status = 'sending'`, [values.status, values.reason, values.error_code, values.error_field, values.message_id, values.sent_at, new Date().toISOString(), row.id])
   if (result.meta.changes !== 1) messagingError(409, 'SEND_LATER_NOT_SENDING', 'The scheduled message outcome could not be recorded because it is no longer sending', 'status')
-  await publishGuestInboxThreadEvent(env, db, { threadId: row.request_id, type: values.entry_id === null ? 'thread.changed' : 'entry.appended' })
+  await publishConversationEvent(env, db, { conversationId: row.conversation_id, type: values.message_id === null ? 'MESSAGE_UPDATE' : 'MESSAGE_CREATE' })
 }
 
 /**
@@ -154,38 +154,38 @@ async function sendOne(db: DbClient, env: SendEnv, row: SendLaterMessageRow, now
   try {
     const membership = await resolveMembership(env, { organizationId: row.organization_id, userId: row.user_id })
     if (!membership) messagingError(403, 'SEND_LATER_AUTHOR_NOT_MEMBER', 'Its author is no longer a member of this workspace', 'userId')
-    await assertAssignedBookingAccess(db, { ...memberAccessPrincipal(membership, { env }), requestId: row.request_id })
+    await assertConversationAccess(db, memberAccessPrincipal(membership, { env }), row.conversation_id)
   } catch (error) {
     if (!(error instanceof HTTPError)) {
       // Nothing was sent: the message goes back to pending for the next run, and this run fails.
       await execute(db, `UPDATE send_later_messages SET status = 'pending', started_at = NULL, updated_at = ? WHERE id = ? AND status = 'sending'`, [new Date().toISOString(), row.id])
       throw error
     }
-    await finish(db, env, row, { status: 'failed', reason: error.message, error_code: 'SEND_LATER_ACCESS_REVOKED', error_field: 'userId', entry_id: null, sent_at: null })
+    await finish(db, env, row, { status: 'failed', reason: error.message, error_code: 'SEND_LATER_ACCESS_REVOKED', error_field: 'userId', message_id: null, sent_at: null })
     return 'failed'
   }
   let sent: Awaited<ReturnType<typeof sendScheduledGuestReply>>
   try {
-    sent = await sendScheduledGuestReply(db, { threadId: row.request_id, organizationId: row.organization_id, body: row.body, idempotencyKey: `send-later:${row.id}`, actorUserId: row.user_id, env })
+    sent = await sendScheduledGuestReply(db, { threadId: row.conversation_id, organizationId: row.organization_id, body: row.body, idempotencyKey: `send-later:${row.id}`, actorUserId: row.user_id, env })
   } catch (error) {
     const data = error instanceof HTTPError || error instanceof ChannexError ? error.data : null
     const typed = data && typeof data === 'object' && 'code' in data && typeof data.code === 'string' && 'field' in data && typeof data.field === 'string' ? { code: data.code, field: data.field } : null
-    const entry = await findEntryByDedupeKey(db, operationDedupeKey({ threadId: row.request_id, idempotencyKey: `send-later:${row.id}` }))
+    const entry = await findMessageByDedupeKey(db, operationDedupeKey({ threadId: row.conversation_id, idempotencyKey: `send-later:${row.id}` }))
     // A send may already have committed before its publication failed. Keep
     // the sent outcome; the thrown error still fails the run for the caller.
     const current = await queryFirst<SendLaterMessageRow>(db, 'SELECT * FROM send_later_messages WHERE id = ?', [row.id])
-    if (current?.status === 'sent' && current.entry_id === entry?.id) throw error
+    if (current?.status === 'sent' && current.message_id === entry?.id) throw error
     // A send that threw did not send: it fails with its cause, and the run reports the error.
-    await finish(db, env, row, { status: 'failed', reason: error instanceof Error ? error.message : String(error), error_code: typed?.code ?? 'SEND_LATER_DELIVERY_FAILED', error_field: typed?.field ?? 'delivery', entry_id: entry?.id ?? null, sent_at: null })
+    await finish(db, env, row, { status: 'failed', reason: error instanceof Error ? error.message : String(error), error_code: typed?.code ?? 'SEND_LATER_DELIVERY_FAILED', error_field: typed?.field ?? 'delivery', message_id: entry?.id ?? null, sent_at: null })
     if (!typed) throw error
     return 'failed'
   }
   if (sent.outcome.ok) {
-    if (sent.entryId === null) messagingError(500, 'SEND_LATER_ENTRY_REQUIRED', 'The message was sent but its conversation entry could not be read', 'entryId')
+    if (sent.messageId === null) messagingError(500, 'SEND_LATER_ENTRY_REQUIRED', 'The message was sent but its message could not be read', 'messageId')
     return 'sent'
   }
   const outcome = failure(sent.outcome)
-  await finish(db, env, row, { ...outcome, entry_id: sent.entryId, sent_at: null })
+  await finish(db, env, row, { ...outcome, message_id: sent.messageId, sent_at: null })
   return outcome.status
 }
 

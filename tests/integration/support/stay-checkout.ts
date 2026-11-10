@@ -46,7 +46,7 @@ export async function buyStay(db: D1Database, input: {
   // A nights conversion claims no session, so it reads nothing from the environment.
   const stayId = await commitBooking(db as never, { DB: db } as unknown as CloudflareEnv, await requirePayment(db as never, input.organizationId, paymentId), now)
   if (!stayId) throw new Error(`The checkout for ${input.id} did not convert into a stay`)
-  const stay = await db.prepare('SELECT id, request_id FROM bookings WHERE id = ? AND product_session_id IS NULL').bind(stayId).first<{ id: string; request_id: string | null }>()
+  const stay = await db.prepare("SELECT b.id, c.id AS request_id FROM bookings b LEFT JOIN conversations c ON c.booking_id = b.id AND c.kind = 'booking' WHERE b.id = ? AND b.product_session_id IS NULL").bind(stayId).first<{ id: string; request_id: string | null }>()
   if (!stay?.request_id) throw new Error(`The stay bought by ${input.id} has no conversation`)
   return { id: stay.id, request_id: stay.request_id }
 }

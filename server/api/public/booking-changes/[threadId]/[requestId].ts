@@ -4,7 +4,7 @@ import { cloudflareEnv } from '~/server/utils/api-response'
 import { createDb } from '~/server/db'
 import { respondToBookingChange } from '~/server/domain/guest-threads/booking-changes'
 import { readBearerToken } from '~/server/utils/reservation-cancel-token'
-import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
+import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 
 export default defineHandler(async (event) => {
   const method = event.req.method
@@ -19,6 +19,6 @@ export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
   const db = createDb(env.DB)
   const result = await respondToBookingChange(db, env, { threadId, requestId, token, decision })
-  if (decision) await publishGuestInboxThreadEvent(env, db, { threadId, type: 'thread.changed' })
+  if (decision) await publishConversationEvent(env, db, { conversationId: threadId, type: 'MESSAGE_CREATE' })
   return new Response(JSON.stringify(result), { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' } })
 })

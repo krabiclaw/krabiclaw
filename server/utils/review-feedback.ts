@@ -54,7 +54,7 @@ export async function loadReviewFeedback(db: DbClient, input: {
       LEFT JOIN business_locations bl ON bl.id = r.location_id AND bl.organization_id = r.organization_id
      WHERE r.organization_id = ? AND r.source = 'direct' AND r.booking_id IS NOT NULL
        AND r.created_at >= ? AND r.created_at < ?
-       ${scope ? `AND EXISTS (SELECT 1 FROM bookings visit JOIN requests q ON q.id = visit.request_id AND q.organization_id = visit.organization_id WHERE visit.id = r.booking_id AND visit.organization_id = r.organization_id AND ${scope.sql})` : ''}
+       ${scope ? `AND EXISTS (SELECT 1 FROM bookings visit JOIN conversations q ON q.booking_id = visit.id AND q.kind = 'booking' AND q.organization_id = visit.organization_id WHERE visit.id = r.booking_id AND visit.organization_id = r.organization_id AND ${scope.sql})` : ''}
      ORDER BY r.created_at DESC, r.id`, [input.organizationId, from, until, ...(scope?.params ?? [])])
   const reviews = (await attachReviewCategoryRatings(db, rows)).map(row => ({ ...row, subject: reviewSubject(row.product_kind === 'stay' ? 'stay' : 'booking', row.product_kind) }))
 

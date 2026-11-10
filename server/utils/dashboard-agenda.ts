@@ -5,7 +5,8 @@ import { d1JsonStringSet, executeBatch, queryAll, type DbClient } from '~/server
 import { assignedGuestThreadScope, assignedMemberSql, locationMemberSql, roleAllows, assertRoleAllows, type ResolvedMembership } from '~/server/utils/member-access'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { loadOwnerPictures } from '~/server/notifications/hero'
-import { BOOKING_RECORDS_SQL, REQUEST_CURRENT_BUYER_SQL, bookingDay } from '~/server/domain/requests'
+import { BOOKING_RECORDS_SQL, bookingDay } from '~/server/domain/requests'
+import { CURRENT_GUEST_SQL } from '~/server/domain/conversations'
 import { postEditorPath } from '~/server/utils/dashboard-links'
 import type { Stay } from '~/server/domain/stays'
 import { STAY_CHANNEL_LABELS, stayGuestFirstName } from '~/shared/bookings'
@@ -140,13 +141,13 @@ function scopeParams(scope: AgendaScope, query: AgendaQuery): unknown[] {
   return params
 }
 
-// A buyer's row is one whose request they still own, which is the same
+// A buyer's row is one whose conversation they still own, which is the same
 // condition the account's activity and conversations read with. The condition
-// names its request `r`, so no row reading it may use that alias itself.
+// names its conversation `r`, so no row reading it may use that alias itself.
 function scopeConditions(scope: AgendaScope, query: AgendaQuery, alias: string): string {
   return [
     scope.buyerUserId
-      ? `${alias}.user_id = ? AND EXISTS (SELECT 1 FROM requests r WHERE r.id = ${alias}.id AND ${REQUEST_CURRENT_BUYER_SQL})`
+      ? `${alias}.user_id = ? AND EXISTS (SELECT 1 FROM conversations r WHERE r.id = ${alias}.id AND ${CURRENT_GUEST_SQL('r')})`
       : `${alias}.organization_id = ?`,
     query.organizationId ? `AND ${alias}.organization_id = ?` : '',
     query.locationId ? `AND ${alias}.location_id = ?` : '',
@@ -191,7 +192,7 @@ export async function listAgenda(
   // Read configured and historical activity kinds plus the explicit locations
   // in one round trip. Template features do not establish actual activity.
   const scopeSql = scope.buyerUserId
-    ? `IN (SELECT r.organization_id FROM requests r WHERE r.user_id = ? AND ${REQUEST_CURRENT_BUYER_SQL})`
+    ? `IN (SELECT r.organization_id FROM conversations r WHERE r.user_id = ? AND ${CURRENT_GUEST_SQL('r')})`
     : '= ?'
   const scopeParam = scope.buyerUserId ?? scope.organizationId
   const [bookableResult, locationResult, hostingResult] = await executeBatch(db, [
@@ -199,7 +200,7 @@ export async function listAgenda(
         UNION ALL SELECT 1 AS present FROM bookings WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam, scopeParam] },
     // A buyer's calendar is not filtered by branch; the business's is.
     { query: `SELECT l.id, l.organization_id, l.title FROM business_locations l WHERE l.organization_id = ? AND l.organization_id ${scopeSql}
-        ${staff ? `AND (EXISTS (SELECT 1 FROM requests rq
+        ${staff ? `AND (EXISTS (SELECT 1 FROM conversations rq
           WHERE rq.organization_id = l.organization_id AND rq.location_id = l.id AND ${assignedRequests!.sql})
           OR EXISTS (SELECT 1 FROM product_stay_configs c JOIN product_booking_configs b ON b.organization_id = c.organization_id AND b.product_id = c.product_id
             WHERE c.organization_id = l.organization_id AND c.location_id = l.id AND ${assignedMemberSql('b')})
@@ -245,7 +246,7 @@ export async function listAgenda(
            CASE br.product_kind WHEN 'table' THEN ${location.id} ELSE br.product_id END AS picture_owner_id,
            COALESCE(CASE WHEN br.product_kind <> 'table' THEN br.product_name END, l.title, s.name, s.subdomain, s.id) AS resource_title
       FROM ${BOOKING_RECORDS_SQL} br
-      JOIN requests rq ON rq.id = br.request_id AND rq.kind = 'booking' AND rq.organization_id = br.organization_id
+      JOIN conversations rq ON rq.booking_id = br.id AND rq.kind = 'booking' AND rq.organization_id = br.organization_id
       JOIN organization s ON s.id = rq.organization_id
       LEFT JOIN business_locations l ON l.id = rq.location_id AND l.organization_id = rq.organization_id
      WHERE br.organization_id ${scopeSql} AND br.unit = 'slot' AND br.status <> 'cancelled' AND br.starts_at BETWEEN ? AND ?
@@ -274,18 +275,18 @@ export async function listAgenda(
   const stayRows = requestedKinds.has('stay') ? queryAll<{
     id: string; request_id: string; organization_id: string; organization_name: string; vertical: string; product_id: string; product_name: string; status: string; overbooked: number; starts_at: string; ends_at: string
     owner: 'app' | 'channel'; channel: Stay['channel']; guest_name: string | null; guest_image_url: string | null; party_size: number; location_id: string; location_title: string; timezone: string
-  }>(db, `SELECT st.id, st.request_id, st.organization_id, o.name AS organization_name, o.vertical, st.product_id, ${scope.buyerUserId ? 'p.name' : 'c.internal_name'} AS product_name, st.status, st.overbooked, st.starts_at, st.ends_at, st.owner, st.channel,
+  }>(db, `SELECT st.id, r.id AS request_id, st.organization_id, o.name AS organization_name, o.vertical, st.product_id, ${scope.buyerUserId ? 'p.name' : 'c.internal_name'} AS product_name, st.status, st.overbooked, st.starts_at, st.ends_at, st.owner, st.channel,
         json_extract(r.payload_json, '$.guest.name') AS guest_name,
         ${staff || scope.buyerUserId ? 'NULL' : '(SELECT u.image FROM user u WHERE u.id = st.user_id)'} AS guest_image_url,
         st.party_size, c.location_id, l.title AS location_title, st.timezone
       FROM bookings st
-      JOIN requests r ON r.id = st.request_id AND r.organization_id = st.organization_id AND r.kind = 'booking'
+      JOIN conversations r ON r.booking_id = st.id AND r.organization_id = st.organization_id AND r.kind = 'booking'
       JOIN organization o ON o.id = st.organization_id
       JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
       JOIN product_booking_configs b ON b.organization_id = st.organization_id AND b.product_id = st.product_id
       JOIN products p ON p.organization_id = st.organization_id AND p.id = st.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
-     WHERE ${scope.buyerUserId ? `st.user_id = ? AND st.owner = 'app' AND r.user_id = st.user_id AND ${REQUEST_CURRENT_BUYER_SQL}` : 'st.organization_id = ?'}
+     WHERE ${scope.buyerUserId ? `st.user_id = ? AND st.owner = 'app' AND r.user_id = st.user_id AND ${CURRENT_GUEST_SQL('r')}` : 'st.organization_id = ?'}
        AND st.product_session_id IS NULL AND st.status <> 'cancelled' AND st.starts_at <= ? AND st.ends_at >= ?
        ${query.organizationId ? 'AND st.organization_id = ?' : ''} ${query.locationId ? 'AND c.location_id = ?' : ''} ${staff ? `AND ${assignedMemberSql('b')}` : ''}`,
     [scopeParam, `${addLocalDays(query.to, 1)}T14:00:00.000Z`, `${addLocalDays(query.from, -1)}T10:00:00.000Z`, ...(query.organizationId ? [query.organizationId] : []), ...(query.locationId ? [query.locationId] : []), ...(staff ? [staff.userId] : [])])
@@ -438,7 +439,7 @@ export async function listTodayReservations(
       })
   const requestIds = [...new Set(items.flatMap(item => item.requestId ? [item.requestId] : []))]
   // The team's note is the booking's one private note.
-  const notes = new Map((requestIds.length ? await queryAll<{ request_id: string }>(db, `SELECT request_id FROM bookings
-    WHERE request_id IN (SELECT value FROM json_each(?)) AND private_notes IS NOT NULL`, [d1JsonStringSet(requestIds)]) : []).map(row => [row.request_id, 1]))
+  const notes = new Map((requestIds.length ? await queryAll<{ request_id: string }>(db, `SELECT c.id AS request_id FROM conversations c JOIN bookings b ON b.id = c.booking_id AND b.organization_id = c.organization_id
+    WHERE c.id IN (SELECT value FROM json_each(?)) AND b.private_notes IS NOT NULL`, [d1JsonStringSet(requestIds)]) : []).map(row => [row.request_id, 1]))
   return items.map(item => agendaToTodayReservation(item, { range: input.range, vertical: input.vertical, notes: item.requestId ? notes.get(item.requestId) ?? 0 : 0 }))
 }

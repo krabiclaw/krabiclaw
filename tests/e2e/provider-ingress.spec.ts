@@ -119,10 +119,10 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   // The route never implemented search, so the filter was dropped and the
   // assertion held only while the tenant happened to contain exactly one thread.
   // The route refuses unknown parameters now, so asking for one is a 400.
-  const rejected = await fetchPhase('reject unsupported filter', `/api/dashboard/organizations/${organizationId}/guest-threads`, { params: { search: name } })
+  const rejected = await fetchPhase('reject unsupported filter', `/api/dashboard/organizations/${organizationId}/conversations`, { params: { search: name } })
   expect(rejected.status(), await rejected.text()).toBe(400)
 
-  const listed = await fetchPhase('find contact thread', `/api/dashboard/organizations/${organizationId}/guest-threads`, {})
+  const listed = await fetchPhase('find contact thread', `/api/dashboard/organizations/${organizationId}/conversations`, {})
   expect(listed.status(), await listed.text()).toBe(200)
   const { threads } = await listed.json() as { threads: InboxRow[] }
   const own = threads.filter(thread => thread.guestName === name)
@@ -140,7 +140,7 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
     return mcpData<{ conversation: { entries: Array<{ id: string; kind: string; channel: string | null; body: string | null; payload: Record<string, unknown> | null }> } }>(await response.json()).conversation.entries
   }
   type EmailReceipt = {
-    id: string; request_id: string; entry_id: string; purpose: string; status: string;
+    id: string; conversation_id: string; message_id: string; purpose: string; status: string;
     email_json: string | null; email_message_id: string | null; provider_message_id: string | null;
   }
   type FrozenEmail = {
@@ -156,7 +156,7 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
     })
     expect(response.status(), await response.text()).toBe(200)
     const { deliveries } = await response.json() as { deliveries: EmailReceipt[] }
-    return deliveries.filter(delivery => delivery.request_id === initial.id)
+    return deliveries.filter(delivery => delivery.conversation_id === initial.id)
   }
   const acknowledgements = (await readDeliveries('read initial email receipt')).filter(delivery => delivery.purpose === 'guest_acknowledgement')
   expect(acknowledgements).toHaveLength(1)

@@ -1,7 +1,8 @@
 import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import { memberBusyIntervals } from '~/server/domain/member-scheduling'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { getGuestRequest, REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
+import { getGuestRequest } from '~/server/domain/requests'
+import { CURRENT_GUEST_SQL, type MessageRow } from '~/server/domain/conversations'
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
@@ -17,7 +18,7 @@ import { addLocalDays, isValidCalendarDate, localDateTimeToInstant, localPartsAt
 import { listSessions } from '~/server/utils/availability'
 import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
 import { moveBooking, requestBookingChange, bookingChangeViews } from '~/server/domain/guest-threads/booking-changes'
-import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
+import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { readPaymentDetails } from '~/server/domain/payments'
 import { formAnswerSnapshotsSchema, type FormAnswerSnapshot } from '~/shared/form-questions'
@@ -187,16 +188,16 @@ async function loadBookingRow(
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
     (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, record.party_size, record.starts_at, record.ends_at, record.timezone, record.status, json_extract(r.payload_json, '$.notes') AS requests,
     record.product_id AS experience_id, record.product_name AS experience_title, record.product_session_id AS session_id,
-    r.id AS request_id, record.answers AS answers_json, json_extract(r.payload_json, '$.cancellation.used_at') AS cancellation_used_at, r.created_at, r.updated_at, record.no_show_at, r.review_id, record.private_notes
-    FROM requests r
+    r.id AS request_id, record.answers AS answers_json, json_extract(r.payload_json, '$.cancellation.used_at') AS cancellation_used_at, r.created_at, r.last_message_at AS updated_at, record.no_show_at, (SELECT rv.id FROM reviews rv WHERE rv.organization_id = record.organization_id AND rv.booking_id = record.id ORDER BY rv.created_at LIMIT 1) AS review_id, record.private_notes
+    FROM conversations r
     JOIN organization s ON s.id = r.organization_id
     JOIN (
-      SELECT b.id, b.request_id, b.status, b.party_size, b.starts_at, b.ends_at, b.timezone, b.location_id, b.product_id, p.name AS product_name, ps.id AS product_session_id, cfg.assigned_member_id, b.updated_at AS operational_updated_at, b.policy_json, p.kind AS product_kind, p.details_json AS product_details_json, cfg.scheduling_mode, cfg.advance_notice_minutes, ps.status AS session_status, b.no_show_at, b.answers, b.private_notes
+      SELECT b.id, b.organization_id, b.status, b.party_size, b.starts_at, b.ends_at, b.timezone, b.location_id, b.product_id, p.name AS product_name, ps.id AS product_session_id, cfg.assigned_member_id, b.updated_at AS operational_updated_at, b.policy_json, p.kind AS product_kind, p.details_json AS product_details_json, cfg.scheduling_mode, cfg.advance_notice_minutes, ps.status AS session_status, b.no_show_at, b.answers, b.private_notes
         FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id JOIN products p ON p.id = b.product_id
         LEFT JOIN product_booking_configs cfg ON cfg.product_id = b.product_id AND cfg.organization_id = b.organization_id
-    ) record ON record.request_id = r.id
+    ) record ON record.id = r.booking_id AND record.organization_id = r.organization_id
     LEFT JOIN business_locations l ON l.id = record.location_id
-    WHERE r.id = ? AND r.kind = ? AND ${scope.buyerUserId ? `r.user_id = ? AND ${REQUEST_CURRENT_BUYER_SQL}` : 'r.organization_id = ?'}`, [bookingId, type, scope.buyerUserId ?? scope.organizationId])
+    WHERE r.id = ? AND r.kind = ? AND ${scope.buyerUserId ? `r.user_id = ? AND ${CURRENT_GUEST_SQL('r')}` : 'r.organization_id = ?'}`, [bookingId, type, scope.buyerUserId ?? scope.organizationId])
 }
 
 async function assertBookingAccess(context: BookingAccessContext, row: BookingRow) {
@@ -216,7 +217,7 @@ function localTimeOf(row: Pick<BookingRow, 'starts_at' | 'timezone'>): string {
 /** The latest proposal on the thread with no acceptance or decline answering it. */
 async function pendingBookingChange(db: DbClient, threadId: string | null): Promise<DashboardBookingDetails['pendingChange']> {
   if (!threadId) return null
-  const row = await queryFirst<import('~/server/domain/guest-threads/types').GuestThreadEntryRow>(db, "SELECT * FROM activity_entries WHERE request_id=? AND event_name='booking_change.requested' ORDER BY sequence DESC LIMIT 1", [threadId])
+  const row = await queryFirst<MessageRow>(db, "SELECT * FROM messages WHERE conversation_id=? AND event_name='booking_change.requested' ORDER BY sequence DESC LIMIT 1", [threadId])
   if (!row) return null
   const thread = await getGuestRequest(db, threadId)
   if (!thread) return null
@@ -394,7 +395,7 @@ export async function requestDashboardBookingChange(
   // `apply` moves it now and tells the guest; otherwise the guest is asked first.
   if ('apply' in input.body && input.body.apply === true) await moveBooking(context.db, context.env, thread, { userId: context.userId }, input.body, input.body.idempotencyKey)
   else await requestBookingChange(context.db, context.env, thread, context.userId, input.body, input.body.idempotencyKey)
-  await publishGuestInboxThreadEvent(context.env, context.db, { threadId: threadId, type: 'thread.changed' })
+  await publishConversationEvent(context.env, context.db, { conversationId: threadId, type: 'MESSAGE_UPDATE' })
   return await loadDashboardBookingDetails(event, { type: input.type, bookingId: row.id })
 }
 
@@ -452,7 +453,7 @@ export async function setDashboardBookingNote(
   const written = await execute(context.db, `UPDATE bookings SET private_notes = ?, version = version + 1, updated_at = ?
     WHERE organization_id = ? AND id = ? AND updated_at = ?`, [note || null, now, row.organization_id, row.operational_id, payload.operationalUpdatedAt])
   if (written.meta.changes !== 1) throw new HTTPError({ statusCode: 409, message: 'This booking changed since you opened it. Reload and try again.' })
-  await publishGuestInboxThreadEvent(context.env, context.db, { threadId: row.id, type: 'thread.changed' })
+  await publishConversationEvent(context.env, context.db, { conversationId: row.id, type: 'MESSAGE_UPDATE' })
   return await loadDashboardBookingDetails(event, { type: input.type, bookingId: row.id })
 }
 

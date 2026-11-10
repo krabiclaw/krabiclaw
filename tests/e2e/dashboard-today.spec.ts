@@ -35,7 +35,7 @@ test('automation remains in Inbox while Today keeps the unanswered inquiry', asy
       message: 'Can you accommodate a group for dinner next week?',
     } })
     expect(submitted.status(), await submitted.text()).toBe(201)
-    const inbox = await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads`, { params: { type: 'contact' } })
+    const inbox = await page.request.get(`/api/dashboard/organizations/${organizationId}/conversations`, { params: { type: 'contact' } })
     expect(inbox.status(), await inbox.text()).toBe(200)
     const threads = (await inbox.json() as { threads: Array<{ id: string; guestName: string }> }).threads.filter(thread => thread.guestName === marker)
     expect(threads).toHaveLength(1)
@@ -180,6 +180,7 @@ test('the member who handles a branch’s tables gains and loses its table booki
   const tablesPath = `/api/editor/organizations/${organizationId}/products/${tables.id}/booking`
   const chefMemberId = seededTenant('restaurant').memberIds['user-e2e-demo-owner']!
   const inboxPath = `/api/dashboard/organizations/${organizationId}/guest-threads`
+  const listPath = `/api/dashboard/organizations/${organizationId}/conversations`
   type Member = { id: string; userId: string; role: string }
   let reassigned = false
   let actor: Member | undefined
@@ -237,13 +238,11 @@ test('the member who handles a branch’s tables gains and loses its table booki
       const agenda = await agendaResponse.json() as AgendaPayload
       if (assigned) expect(agenda.items.find(item => item.requestId === reservationId)).toMatchObject({ id: `booking:${reservationId}`, kind: 'booking', requestId: reservationId, locationId, title: guestName, status: 'confirmed', startsAt: slot.starts_at, to: destination })
       else expect(agenda.items.some(item => item.requestId === reservationId)).toBe(false)
-      for (const path of [inboxPath, '/api/dashboard/guest-threads']) {
-        const response = await memberRequest.get(path, { params: { org, location_id: locationId, type: 'booking' } })
-        expect(response.status(), await response.text()).toBe(200)
-        const { threads } = await response.json() as InboxListPage
-        if (assigned) expect(threads.find(thread => thread.id === reservationId)).toMatchObject({ id: reservationId, kind: 'guest', guestName, home: booking.locationTitle, when: ownerConversation.when })
-        else expect(threads.some(thread => thread.id === reservationId)).toBe(false)
-      }
+      const response = await memberRequest.get(listPath, { params: { org, location_id: locationId, type: 'booking' } })
+      expect(response.status(), await response.text()).toBe(200)
+      const { threads } = await response.json() as InboxListPage
+      if (assigned) expect(threads.find(thread => thread.id === reservationId)).toMatchObject({ id: reservationId, kind: 'guest', guestName, home: booking.locationTitle, when: ownerConversation.when })
+      else expect(threads.some(thread => thread.id === reservationId)).toBe(false)
       const detail = await memberRequest.get(`${inboxPath}/${reservationId}`)
       expect(detail.status(), await detail.text()).toBe(assigned ? 200 : 404)
       const record = await memberRequest.get(bookingPath, { params: { org } })

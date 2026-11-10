@@ -20,6 +20,7 @@ import type { StayHomeAccessibility } from '../../shared/stay-accessibility'
 import { formatMinorAmount } from '../../shared/prices'
 import type { TaskPerson, TaskSection, TaskView } from '../../server/domain/tasks'
 import type { TeamMessage, TeamThread } from '../../server/domain/team-messages'
+import type { InboxRow } from '../../server/domain/guest-threads/types'
 import type { OpportunityView } from '../../server/domain/opportunities'
 
 // A host's place to stay, end to end through the surfaces that own it: the
@@ -410,7 +411,7 @@ test('a responsible home member reads its stays as turnovers on every surface un
     const stayPath = api(`stays/${stay.id}`)
     const memberStay = await memberContext.request.get(stayPath)
     await expectStatus(memberStay, 200)
-    expect(await memberStay.json()).toEqual({ stay: turnover, manage: false, unreadNotificationIds: [] })
+    expect(await memberStay.json()).toEqual({ stay: turnover, manage: false })
     const memberList = await memberContext.request.get(api(`stays?from=${localDay(0)}&to=${localDay(3)}`))
     await expectStatus(memberList, 200)
     expect(await memberList.json()).toEqual({ stays: [turnover], manage: false })
@@ -495,26 +496,31 @@ test('a responsible home member reads its stays as turnovers on every surface un
     // Worker's hub posts it after the stay write, and "Message host" from the
     // member lands in that same conversation, titled by the home, with the
     // job strip that opens the task sheet.
+    // The member's team conversations are rows of the one conversation list; each one's screen says what it is about.
+    const teamRows = () => memberContext.request.get(api(`organizations/${organizationId}/conversations?kind=team`)).then(async response => { await expectStatus(response, 200); return (await response.json() as { threads: InboxRow[] }).threads })
+    const teamThread = (id: string) => memberContext.request.get(api(`team/threads/${id}`)).then(async response => { await expectStatus(response, 200); return (await response.json() as { thread: TeamThread }).thread })
     let jobThreadId = ''
     await expect.poll(async () => {
-      const threads = await memberContext.request.get(api('team/threads'))
-      await expectStatus(threads, 200)
-      jobThreadId = (await threads.json() as { threads: TeamThread[] }).threads.find(thread => thread.stayId === stay.id && thread.job)?.id ?? ''
+      for (const row of await teamRows()) {
+        const thread = await teamThread(row.id)
+        if (thread.bookingId === stay.id && thread.job) jobThreadId = thread.id
+      }
       return jobThreadId
     }, { timeout: 30_000, message: 'the hub opens the turnover’s conversation after the stay write' }).not.toBe('')
-    const hosted = await memberContext.request.post(api('team/threads'), { data: { memberIds: ['user-e2e-lodging-host'], stayId: stay.id } })
+    const hosted = await memberContext.request.post(api('team/threads'), { data: { memberIds: ['user-e2e-lodging-host'], bookingId: stay.id } })
     await expectStatus(hosted, 200)
     expect((await hosted.json() as { id: string }).id).toBe(jobThreadId)
-    const jobThread = () => memberContext.request.get(api('team/threads')).then(async response => { await expectStatus(response, 200); return (await response.json() as { threads: TeamThread[] }).threads.find(thread => thread.id === jobThreadId)! })
-    expect(await jobThread()).toMatchObject({ name: 'Cliff Cabin', stayId: stay.id, job: expect.objectContaining({ kind: 'turnover', status: 'open', title: 'Cliff Cabin', stayId: stay.id }) })
+    expect(await teamThread(jobThreadId)).toMatchObject({ name: 'Cliff Cabin', bookingId: stay.id, job: expect.objectContaining({ kind: 'turnover', status: 'open', title: 'Cliff Cabin', stayId: stay.id }) })
     await expect.poll(async () => {
       const read = await memberContext.request.get(api(`team/threads/${jobThreadId}/messages`))
       await expectStatus(read, 200)
       return (await read.json() as { messages: TeamMessage[] }).messages.filter(message => message.automatic).map(message => message.body.split('\n')[0])
     }, { timeout: 30_000, message: 'the hub posts the turnover into the conversation after the stay write' }).toEqual(['Turnover: Cliff Cabin'])
-    expect((await jobThread()).unread).toBe(false)
-    await memberPage.goto(`/dashboard/${slug}/messages/team/${jobThreadId}?view=team`)
+    // KrabiClaw's job message is news to the member until they open the conversation.
+    expect((await teamRows()).find(row => row.id === jobThreadId)).toMatchObject({ kind: 'team', unread: true })
+    await memberPage.goto(`/dashboard/${slug}/messages/team/${jobThreadId}?kind=team`)
     await expect(memberPage.getByText('Sent automatically')).toBeVisible()
+    await expect.poll(async () => (await teamRows()).find(row => row.id === jobThreadId)?.unread).toBe(false)
     const strip = memberPage.getByTestId('team-thread-job')
     await expect(strip).toContainText('Cliff Cabin')
     await strip.getByRole('button', { name: 'Cliff Cabin', exact: true }).click()
@@ -4604,19 +4610,25 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expectStatus(otherLocation, 200)
       expect((await otherLocation.json() as BusinessToday).tasks).toEqual([])
       // The host takes the turnover back and gives it to the cleaner again. A cleaner's job is a team
-      // conversation with the owners: the organization's jobs post it there as an automatic message once
-      // they wake, that message is the cleaner's alert (push, email, WhatsApp), it never counts as unread,
-      // and no task alert is sent beside it.
+      // conversation with the owners: the organization's jobs post it there as KrabiClaw's message once
+      // they wake, that message is the cleaner's alert (push, email, WhatsApp), and it is unread until read.
       const unassigned = await call<{ task: { version: number } }>('update_task', { task_id: turnover.id, expected_version: turnover.version, assigned_member_id: null })
       expect(unassigned.error).toBeNull()
       const reassigned = await call<{ task: { version: number } }>('update_task', { task_id: turnover.id, expected_version: unassigned.data!.task.version, assigned_member_id: memberId })
       expect(reassigned.error).toBeNull()
-      let jobThread: { id: string; unread: boolean } | undefined
+      const cleanerTeamRows = async () => {
+        const response = await cleaner.request.get(`/api/dashboard/organizations/${organizationId}/conversations?kind=team&org=${encodeURIComponent(slug)}`)
+        await expectStatus(response, 200)
+        return (await response.json() as { threads: Array<{ id: string; unread: boolean }> }).threads
+      }
+      let jobThread: { id: string } | undefined
       await expect.poll(async () => {
-        const threads = await cleaner.request.get(api('team/threads'))
-        await expectStatus(threads, 200)
-        jobThread = (await threads.json() as { threads: Array<{ id: string; stayId: string | null; unread: boolean; job: { id: string } | null }> }).threads
-          .find(item => item.stayId === stays[0]!.id && item.job?.id === turnover.id)
+        for (const row of await cleanerTeamRows()) {
+          const response = await cleaner.request.get(api(`team/threads/${row.id}`))
+          await expectStatus(response, 200)
+          const { thread } = await response.json() as { thread: { id: string; bookingId: string | null; job: { id: string } | null } }
+          if (thread.bookingId === stays[0]!.id && thread.job?.id === turnover.id) jobThread = thread
+        }
         return jobThread?.id ?? ''
       }, { timeout: 30_000, message: 'the organization’s jobs open the cleaner’s conversation for the turnover' }).not.toBe('')
       // The job is posted once; a wake that saw the moment between unassigning and reassigning also told the
@@ -4627,13 +4639,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
         const lines = (await read.json() as { messages: Array<{ automatic: boolean; body: string }> }).messages.filter(message => message.automatic).map(message => message.body.split('\n')[0])
         return { job: lines.filter(line => line === 'Turnover: Assigned Cabin').length, other: lines.filter(line => line !== 'Turnover: Assigned Cabin' && !/^No longer yours: turnover at Assigned Cabin, /.test(line)) }
       }, { timeout: 30_000, message: 'the job is posted into the conversation as an automatic message' }).toEqual({ job: 1, other: [] })
-      const threadsAfterPost = await cleaner.request.get(api('team/threads'))
-      await expectStatus(threadsAfterPost, 200)
-      expect((await threadsAfterPost.json() as { threads: Array<{ id: string; unread: boolean }> }).threads.find(item => item.id === jobThread!.id)?.unread).toBe(false)
-      const alertsResponse = await cleaner.request.get(api('notifications'))
-      await expectStatus(alertsResponse, 200)
-      const alerts = await alertsResponse.json() as { notifications: Array<{ template: string }> }
-      expect(alerts.notifications.filter(alert => alert.template === 'task_assigned')).toEqual([])
+      expect((await cleanerTeamRows()).find(item => item.id === jobThread!.id)?.unread).toBe(true)
 
       // The cleaner finishes the turnover through the tasks route; Today reads it back as today's done work,
       // and the host reads the same task through MCP.

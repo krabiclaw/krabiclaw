@@ -128,7 +128,7 @@ test('committed stays report publication failures and idempotent retries publish
     assert.equal(await db.prepare('SELECT count(*) FROM bookings WHERE idempotency_key = ?').bind(input.idempotency_key).first('count(*)'), 1)
     // Every stay has its conversation, which hears the change after the stay's own screens.
     assert.deepEqual((await events()).slice(-3).map(event => ({ type: event.type, ...('stayId' in event ? { stayId: event.stayId, productId: event.productId } : {}) })), [
-      { type: 'stay.changed', stayId: replay.id, productId: cabin.id }, { type: 'nights.changed', stayId: replay.id, productId: cabin.id }, { type: 'thread.changed' },
+      { type: 'stay.changed', stayId: replay.id, productId: cabin.id }, { type: 'nights.changed', stayId: replay.id, productId: cabin.id }, { type: 'MESSAGE_UPDATE' },
     ])
 
     await hub.fetch('https://inbox.test/failure', { method: 'PUT' })
@@ -161,7 +161,7 @@ test('committed stays report publication failures and idempotent retries publish
     assert.deepEqual(published.slice(-3).map(event => ({ type: event.type, ...('stayId' in event ? { stayId: event.stayId, productId: event.productId, locationId: event.locationId } : {}) })), [
       { type: 'stay.changed', stayId: channel.id, productId: cabin.id, locationId: 'cabin-site' },
       { type: 'nights.changed', stayId: channel.id, productId: cabin.id, locationId: 'cabin-site' },
-      { type: 'thread.changed' },
+      { type: 'MESSAGE_UPDATE' },
     ])
     assert.equal(new Set(published.map(event => event.eventId)).size, published.length)
   } finally {
@@ -213,7 +213,7 @@ test('a moved channel revision repairs its audited home scopes without rewriting
       { type: 'stay.changed', productId: lake.id, locationId: 'lake-site', stayId: first.id },
       { type: 'nights.changed', productId: lake.id, locationId: 'lake-site', stayId: first.id },
       // The reservation's conversation, which every channel stay has from its first revision.
-      { type: 'thread.changed' },
+      { type: 'MESSAGE_UPDATE' },
     ])
     assert.deepEqual((await audit()).results, appliedAudits.results)
 
@@ -1766,7 +1766,7 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
 
     const back = await call('/api/public/payments/stay-pay/return', { method: 'POST', body: JSON.stringify({ claim }) })
     assert.equal(back.status, 200)
-    const stay = (await db.prepare("SELECT s.id, s.request_id FROM bookings s JOIN payment_checkout_holds h ON h.converted_booking_id = s.id WHERE h.id = 'stay-hold'").first<{ id: string; request_id: string }>())!
+    const stay = (await db.prepare("SELECT s.id, c.id AS request_id FROM bookings s JOIN payment_checkout_holds h ON h.converted_booking_id = s.id JOIN conversations c ON c.booking_id = s.id AND c.kind = 'booking' WHERE h.id = 'stay-hold'").first<{ id: string; request_id: string }>())!
     assert.ok(stay, 'The return converted the checkout into its stay')
     const activityId = stay.request_id
     // The stay is read by its signed link, not by a browser's session: none, or a forged one, opens nothing.
@@ -2057,7 +2057,7 @@ test('migrated unpaid stays occupy nights without a fresh reservation message an
     const source = { source: 'hostaway' as const, source_id: 'source-1', row: { id: 'source-1', payment: 'Unpaid' }, fingerprint: 'source-fingerprint', channel: 'airbnb' as const, channel_booking_id: 'ABB-EXACT-SOURCE' }
     const imported = await createStay(db, env, manager, input, { imported: source })
     // An imported stay has its conversation like every booking, naming the guest it was imported with.
-    assert.deepEqual(await db.prepare("SELECT kind, json_extract(payload_json, '$.guest.name') AS name, json_extract(payload_json, '$.guest.email') AS email FROM requests WHERE id = ?").bind(imported.request_id).first(),
+    assert.deepEqual(await db.prepare("SELECT kind, json_extract(payload_json, '$.guest.name') AS name, json_extract(payload_json, '$.guest.email') AS email FROM conversations WHERE id = ?").bind(imported.request_id).first(),
       { kind: 'booking', name: 'Ana', email: 'ana@example.test' })
     assert.deepEqual({ channel: imported.channel, owner: imported.owner, status: imported.status, payment: imported.payment_status, paid: imported.paid_minor }, { channel: 'airbnb', owner: 'app', status: 'confirmed', payment: null, paid: 0 })
     await assert.rejects(updateStay(db, env, manager, imported.id, { expected_version: imported.version, check_out_date: '2027-06-04' }), code('STAY_NOT_EDITABLE'))

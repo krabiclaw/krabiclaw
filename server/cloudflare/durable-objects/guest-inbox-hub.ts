@@ -2,7 +2,8 @@ import { DurableObject } from 'cloudflare:workers'
 import { HTTPError } from 'nitro'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../../shared/dashboard-invalidations'
 import { queryFirst } from '~/server/db'
-import { assertAssignedBookingAccess, assignedMemberSql, memberAccessPrincipal, resolveOrganizationMembership, roleAllows, type ResolvedMembership } from '~/server/utils/member-access'
+import { assignedMemberSql, memberAccessPrincipal, resolveOrganizationMembership, roleAllows, type ResolvedMembership } from '~/server/utils/member-access'
+import { assertConversationAccess } from '~/server/domain/conversations'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
 import { runOrganizationJobs } from '~/server/domain/cleaner-jobs'
 
@@ -51,34 +52,30 @@ async function canReceive(env: GuestInboxHubEnv, attachment: InboxSocketAttachme
   // Scope changes carry no resource or person identity. Former assignees must
   // learn to re-read too, even though resource events no longer reach them.
   if (event.type === 'access.changed' || event.type === 'business.changed') return true
-  if (event.type === 'team_thread.access_ended') {
+  // A read position or archive moved: the reader's own apps alone.
+  if (event.type === 'MESSAGE_ACK') return event.targetUserId === attachment.userId
+  if (event.type === 'CONVERSATION_LEAVE') {
     if (event.targetUserId !== attachment.userId) return false
-    // An old keyed retry must not evict someone who has since been re-added.
-    return !await queryFirst(env.DB, `SELECT 1 FROM team_thread_members s JOIN member m ON m.id = s.member_id AND m.organizationId = s.organization_id
-      WHERE s.organization_id = ? AND s.thread_id = ? AND m.userId = ?`, [attachment.organizationId, event.teamThreadId, attachment.userId])
+    // An old keyed retry must not evict someone who has since been added again.
+    return !await queryFirst(env.DB, 'SELECT 1 FROM conversation_participants WHERE organization_id = ? AND conversation_id = ? AND user_id = ?',
+      [attachment.organizationId, event.conversationId, attachment.userId])
   }
-  // A team conversation is its members' alone, whatever their role.
-  if (event.type === 'team_thread.changed') {
-    return Boolean(await queryFirst(env.DB, `SELECT 1 FROM team_thread_members s JOIN member m ON m.id = s.member_id AND m.organizationId = s.organization_id
-      WHERE s.organization_id = ? AND s.thread_id = ? AND m.userId = ?`, [attachment.organizationId, event.teamThreadId, attachment.userId]))
+  if (event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') {
+    // The one statement of who sees a conversation: a team conversation its participants, a guest one by role or responsibility.
+    try {
+      await assertConversationAccess(env.DB, memberAccessPrincipal(membership, { env }), event.conversationId)
+      return true
+    } catch (error) {
+      if (error instanceof HTTPError && error.status === 404) return false
+      throw error
+    }
   }
-  if ('targetUserId' in event && event.targetUserId && event.targetUserId !== attachment.userId) return false
+  if (event.type !== 'stay.changed' && event.type !== 'nights.changed') throw new Error(`Dashboard event ${event.type} has no audience rule`)
   if (await roleAllows({ ...membership, permissions: { operations: ['read'] } })) return true
-  if ('targetUserId' in event) return event.targetUserId === attachment.userId
-  if ('productId' in event) {
-    return Boolean(await queryFirst(env.DB, `SELECT c.product_id FROM product_stay_configs s JOIN product_booking_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
+  // What remains is a home's stay or nights change: the home's responsible members.
+  return Boolean(await queryFirst(env.DB, `SELECT c.product_id FROM product_stay_configs s JOIN product_booking_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
       WHERE c.organization_id = ? AND c.product_id = ? AND (${assignedMemberSql('c')})`,
     [attachment.organizationId, event.productId, attachment.userId]))
-  }
-  try {
-    // The same resource guard used by the canonical inbox handles assigned
-    // appointments, stays and channel inquiries. The hub has no second scope.
-    await assertAssignedBookingAccess(env.DB, { ...memberAccessPrincipal(membership, { env }), requestId: event.threadId })
-    return true
-  } catch (error) {
-    if (error instanceof HTTPError && error.status === 404) return false
-    throw error
-  }
 }
 
 export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
@@ -177,8 +174,8 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     if (!organizationId || !isDashboardInvalidation(event) || event.organizationId !== organizationId) {
       return failure(400, 'INVALID_DASHBOARD_INVALIDATION', 'Invalid dashboard invalidation', 'body')
     }
-    // A stay, booking or task write is announced this way; the organization's jobs follow it.
-    if (event.type === 'stay.changed' || event.type === 'business.changed' || event.type === 'thread.created' || event.type === 'thread.changed') await this.wakeJobs(organizationId)
+    // A stay, booking or task write is announced this way (a booking's in its guest conversation); the organization's jobs follow it.
+    if (event.type === 'stay.changed' || event.type === 'business.changed' || ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && !event.team)) await this.wakeJobs(organizationId)
 
     // Every eligible dashboard must receive the event. A socket whose send
     // throws is closed so its client reconnects and reconciles, and the

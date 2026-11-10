@@ -36,7 +36,7 @@ function safeDashboardUrl(raw: string): string {
  * A domain lifecycle change, told as an owner alert: every member who wants
  * organization-and-billing messages hears on each channel they chose, and the
  * platform operator addresses are copied by email. Every send is a recorded
- * delivery on the in-app notification.
+ * delivery on the audit row that says the owner was told.
  */
 export async function notifyDomainLifecycle(
   env: DomainNotificationEnv,
@@ -57,7 +57,9 @@ export async function notifyDomainLifecycle(
     payload: { deep_link: dashboardUrl },
     message,
     whatsappTemplate: 'domain_update',
-    notification: { message: message.intro!, severity: status === 'active' ? 'success' : 'warning' },
+    // One alert per domain, change and state: the same state told again sends nothing.
+    idempotencyKey: `domain:${opts.domain.id}:${opts.event}:${status}:${opts.domain.updated_at}`,
+    entity: { type: 'domain', id: opts.domain.id },
     operatorEmails: platformOperatorEmails(env),
   })
 }

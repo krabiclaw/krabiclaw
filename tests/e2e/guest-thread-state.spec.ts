@@ -18,23 +18,10 @@ import type { TaskPerson, TaskSection } from '../../server/domain/tasks'
 import type { OpportunityView } from '../../server/domain/opportunities'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 
-interface NotificationView {
-  id: string
-  title: string | null
-  created_at: string
-  read_at: string | null
-}
-
-interface NotificationList {
-  notifications: NotificationView[]
-  unread_count: number
-  next_cursor: string | null
-}
-
 interface DeliveryView {
   id: string
-  request_id: string
-  entry_id: string
+  conversation_id: string
+  message_id: string
   purpose: string
   status: string
 }
@@ -150,10 +137,9 @@ test.afterEach(async ({ page }) => {
   }
 })
 
-// The list has no search of its own any more (search is the dashboard's one
-// palette), so the guest under test is picked out of the tenant's contact threads.
+// The one conversation list, narrowed to the tenant's contact conversations; the guest under test is picked out of it.
 async function loadThreadList(request: APIRequestContext, guestName: string) {
-  const response = await request.get(`/api/dashboard/organizations/${organizationId()}/guest-threads`, {
+  const response = await request.get(`/api/dashboard/organizations/${organizationId()}/conversations`, {
     params: { type: 'contact' },
   })
   await expectStatus(response, 200)
@@ -223,18 +209,12 @@ async function loadReplyTasks(request: APIRequestContext, slug: string, threadId
   return (await response.json() as BusinessToday).tasks.map(section => ({ section: section.id, tasks: section.tasks.filter(task => task.requestId === threadId) })).filter(section => section.tasks.length)
 }
 
-async function loadNotifications(request: APIRequestContext) {
-  const response = await request.get('/api/dashboard/notifications', { params: { limit: 50 } })
+/** Opening a conversation reads it through to the newest message shown; the GET that showed it wrote nothing. */
+async function readThrough(request: APIRequestContext, thread: InboxThread) {
+  const newest = thread.stream.filter(item => item.type !== 'day').at(-1)!.id
+  const response = await request.post(`/api/dashboard/organizations/${organizationId()}/conversations/${thread.id}/read`, { data: { messageId: newest } })
   await expectStatus(response, 200)
-  return await response.json() as NotificationList
-}
-
-// The alert addresses the guest by first name, which each proof makes unique to its run.
-function contactNotification(state: NotificationList, guestName: string) {
-  const notification = state.notifications.find(row => row.title === `Message from ${guestName.split(' ')[0]}`)
-  expect(notification).toBeDefined()
-  if (!notification) throw new Error('Contact notification was not visible to the owner')
-  return notification
+  expect(await response.json()).toEqual({ read: true, lastReadMessageId: newest })
 }
 
 test('guest thread state stays source-owned, per-user, tenant-isolated, and idempotent', async ({ playwright }) => {
@@ -263,58 +243,21 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     })
     await expectStatus(submission, 201)
 
-    const [ownerListBefore, secondOwnerListBefore, ownerNotificationsBefore, secondOwnerNotificationsBefore] = await Promise.all([
+    const [ownerListBefore, secondOwnerListBefore] = await Promise.all([
       loadThreadList(owner, guestName),
       loadThreadList(secondOwner, guestName),
-      loadNotifications(owner),
-      loadNotifications(secondOwner),
     ])
     expect(ownerListBefore.threads).toHaveLength(1)
     expect(secondOwnerListBefore.threads).toHaveLength(1)
     const threadId = ownerListBefore.threads[0]!.id
-    const organizationList = await owner.get('/api/dashboard/guest-threads', {
-      params: { org: organizationSlug(), type: 'contact' },
-    })
-    await expectStatus(organizationList, 200)
-    expect((await organizationList.json() as { threads: InboxRow[] }).threads.filter(thread => thread.guestName === guestName))
-      .toMatchObject([{ id: threadId }])
-    await expectStatus(await foreignOwner.get('/api/dashboard/guest-threads', {
-      params: { org: organizationSlug(), type: 'contact' },
-    }), 404)
+    expect([403, 404]).toContain((await foreignOwner.get(`/api/dashboard/organizations/${organizationId()}/conversations`, {
+      params: { type: 'contact' },
+    })).status())
     expect(secondOwnerListBefore.threads[0]!.id).toBe(threadId)
     // The row is the guest's own words, from them, on the business's own channel.
     const guestFirstName = guestName.split(' ')[0]!
     expect(ownerListBefore.threads[0]).toMatchObject({ guestName, kind: 'guest', channel: 'direct', preview: message, previewFrom: guestFirstName, unread: true })
     expect(secondOwnerListBefore.threads[0]).toMatchObject({ guestName, kind: 'guest', channel: 'direct', preview: message, previewFrom: guestFirstName, unread: true })
-    expect(contactNotification(ownerNotificationsBefore, guestName).read_at).toBeNull()
-    expect(contactNotification(secondOwnerNotificationsBefore, guestName).read_at).toBeNull()
-
-    // Two real contacts own the endpoints of this paging proof. Parallel
-    // contacts can appear between them; no shared-history row is a premise.
-    const firstNotification = contactNotification(ownerNotificationsBefore, guestName)
-    const paginationGuestName = `Pagination${nonce} Proof`
-    await submitContact(owner, paginationGuestName)
-    const newerNotification = contactNotification(await loadNotifications(owner), paginationGuestName)
-    expect(newerNotification.created_at > firstNotification.created_at || newerNotification.created_at === firstNotification.created_at && newerNotification.id > firstNotification.id).toBe(true)
-    const seenNotifications = new Set([newerNotification.id])
-    let cursor = newerNotification
-    while (cursor.id !== firstNotification.id) {
-      const olderResponse = await owner.get('/api/dashboard/notifications', { params: { limit: 1, after: cursor.id } })
-      await expectStatus(olderResponse, 200)
-      const older = await olderResponse.json() as NotificationList
-      expect(older.notifications).toHaveLength(1)
-      const row = older.notifications[0]!
-      expect(seenNotifications.has(row.id)).toBe(false)
-      expect(row.created_at < cursor.created_at || row.created_at === cursor.created_at && row.id < cursor.id).toBe(true)
-      expect(row.created_at > firstNotification.created_at || row.created_at === firstNotification.created_at && row.id >= firstNotification.id).toBe(true)
-      if (row.id !== firstNotification.id) expect(older.next_cursor).toBe(row.id)
-      seenNotifications.add(row.id)
-      cursor = row
-    }
-    expect(cursor.id).toBe(firstNotification.id)
-    // unread_count covers the whole audience and may change when concurrent
-    // contacts arrive. Per-user read state is verified exactly below.
-    await expectStatus(await foreignOwner.get('/api/dashboard/notifications', { params: { limit: 1, after: newerNotification.id } }), 404)
 
     const detail = await loadThreadDetail(owner, threadId)
     // A contact has no record behind it, and a reply goes to the email the guest left.
@@ -330,18 +273,16 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     })
     // The guest's own words open the conversation, once, as their message.
     expect(streamMessages(detail)).toMatchObject([{ side: 'guest', author: guestName, body: message, photos: [], translated: null }])
-    // The submission's contact details stay in the ledger the opening message was drawn from.
+    // The guest's contact details stay on the conversation; their words are its first message, the one source of them.
     // The subject the form asked for is no longer drawn anywhere (inbox-parity.md: the opening submission dump is gone).
     const openingLedger = await loadLedger(owner, threadId)
     expect(openingLedger.guest).toEqual({ name: guestName, email: guestEmail, phone: null })
-    const openingEntries = openingLedger.entries.filter(entry => entry.kind === 'submission')
-    expect(openingEntries).toHaveLength(1)
-    expect(openingEntries[0]).toMatchObject({
+    expect(openingLedger.entries.filter(entry => entry.kind === 'submission')).toHaveLength(0)
+    expect(openingLedger.entries[0]).toMatchObject({
       id: streamMessages(detail)[0]!.id,
       channel: 'web',
-      body: null,
-      event: null,
-      payload: { kind: 'contact' },
+      body: message,
+      event: 'thread.submission',
     })
     // The guest's question is the business's to answer: one open reply task on Today, which opens the conversation.
     expect(openingLedger.needs_reply).toBe(true)
@@ -352,24 +293,20 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     })] }])
     const replyTask = (await loadReplyTasks(owner, organizationSlug(), threadId))[0]!.tasks[0]!
 
-    const [ownerListAfterRead, ownerNotificationsAfterRead, secondOwnerListStillUnread, secondOwnerNotificationsStillUnread] = await Promise.all([
+    // Showing the conversation wrote nothing; reading it through is this owner's alone.
+    expect((await loadThreadList(owner, guestName)).threads[0]).toMatchObject({ id: threadId, unread: true })
+    await readThrough(owner, detail)
+    const [ownerListAfterRead, secondOwnerListStillUnread] = await Promise.all([
       loadThreadList(owner, guestName),
-      loadNotifications(owner),
       loadThreadList(secondOwner, guestName),
-      loadNotifications(secondOwner),
     ])
     expect(ownerListAfterRead.threads[0]).toMatchObject({ id: threadId, unread: false })
-    expect(contactNotification(ownerNotificationsAfterRead, guestName).read_at).toEqual(expect.any(String))
     expect(secondOwnerListStillUnread.threads[0]).toMatchObject({ id: threadId, unread: true })
-    expect(contactNotification(secondOwnerNotificationsStillUnread, guestName).read_at).toBeNull()
 
-    await loadThreadDetail(secondOwner, threadId)
-    const [secondOwnerListAfterRead, secondOwnerNotificationsAfterRead] = await Promise.all([
-      loadThreadList(secondOwner, guestName),
-      loadNotifications(secondOwner),
-    ])
-    expect(secondOwnerListAfterRead.threads[0]).toMatchObject({ id: threadId, unread: false })
-    expect(contactNotification(secondOwnerNotificationsAfterRead, guestName).read_at).toEqual(expect.any(String))
+    await readThrough(secondOwner, await loadThreadDetail(secondOwner, threadId))
+    expect((await loadThreadList(secondOwner, guestName)).threads[0]).toMatchObject({ id: threadId, unread: false })
+    // Another business's owner cannot move this conversation's read position.
+    expect([403, 404]).toContain((await foreignOwner.post(`/api/dashboard/organizations/${organizationId()}/conversations/${threadId}/unread`)).status())
 
     const foreignRead = await foreignOwner.get(`/api/dashboard/organizations/${organizationId()}/guest-threads/${threadId}`)
     expect([403, 404]).toContain(foreignRead.status())
@@ -398,7 +335,6 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     expect(replyEntries).toMatchObject([{ side: 'business', author: 'You', receipt: 'Recorded locally' }])
     expect((await loadLedger(owner, threadId)).entries.filter(entry => entry.body === replyBody)).toMatchObject([{
       id: replyEntries[0]!.id,
-      kind: 'message',
       channel: 'email',
       event: 'thread.member_reply',
     }])
@@ -409,15 +345,17 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     })
     await expectStatus(deliveryResponse, 200)
     const deliveries = (await deliveryResponse.json() as DeliveryList).deliveries.filter(row =>
-      row.request_id === threadId && row.purpose === 'member_reply',
+      row.conversation_id === threadId && row.purpose === 'member_reply',
     )
     expect(deliveries).toHaveLength(1)
-    expect(deliveries[0]!.entry_id).toBe(replyEntries[0]!.id)
+    expect(deliveries[0]!.message_id).toBe(replyEntries[0]!.id)
 
-    const [ownerListAfterReply, ownerNotificationsAfterReply] = await Promise.all([
+    // The owner's own reply is not news to them, and the second owner has not read it yet.
+    const [ownerListAfterReply, secondOwnerListAfterReply] = await Promise.all([
       loadThreadList(owner, guestName),
-      loadNotifications(owner),
+      loadThreadList(secondOwner, guestName),
     ])
+    expect(secondOwnerListAfterReply.threads[0]).toMatchObject({ id: threadId, unread: true })
     expect(ownerListAfterReply.threads[0]).toMatchObject({
       id: threadId,
       preview: replyBody,
@@ -429,7 +367,6 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     expect((await loadLedger(owner, threadId)).needs_reply).toBe(true)
     expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({ id: replyTask.id, status: 'open', outcome: null })] }])
     expect(await loadReplyTasks(secondOwner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({ id: replyTask.id, status: 'open' })] }])
-    expect(contactNotification(ownerNotificationsAfterReply, guestName).read_at).toEqual(expect.any(String))
   } finally {
     await Promise.all([owner.dispose(), secondOwner.dispose(), foreignOwner.dispose()])
   }
@@ -437,18 +374,11 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
 
 type Mailbox = 'current' | 'past'
 
-// Both list loaders, so the mailbox vocabulary cannot survive in only one.
+// The one list, in one mailbox.
 async function loadMailbox(request: APIRequestContext, mailbox: Mailbox) {
-  const [byId, byOrg] = await Promise.all([
-    request.get(`/api/dashboard/organizations/${organizationId()}/guest-threads`, { params: { mailbox } }),
-    request.get('/api/dashboard/guest-threads', { params: { org: organizationSlug(), mailbox } }),
-  ])
-  await expectStatus(byId, 200)
-  await expectStatus(byOrg, 200)
-  return {
-    byId: (await byId.json() as { threads: InboxRow[] }).threads,
-    byOrg: (await byOrg.json() as { threads: InboxRow[] }).threads,
-  }
+  const response = await request.get(`/api/dashboard/organizations/${organizationId()}/conversations`, { params: { mailbox } })
+  await expectStatus(response, 200)
+  return (await response.json() as { threads: InboxRow[] }).threads
 }
 
 async function submitContact(request: APIRequestContext, guestName: string) {
@@ -459,17 +389,17 @@ async function submitContact(request: APIRequestContext, guestName: string) {
   await expectStatus(response, 201)
 }
 
-test('archive and Move to messages file a conversation without reordering the inbox', async ({ playwright }) => {
+test('archive and Move to messages file a conversation for the one member, without reordering the inbox', async ({ playwright }) => {
   test.skip(!writable, 'Guest-thread writes require disposable local or preview data')
 
   const owner = await playwright.request.newContext({ baseURL })
+  const secondOwner = await playwright.request.newContext({ baseURL })
   const foreignOwner = await playwright.request.newContext({ baseURL })
   try {
-    await Promise.all([loginAs(owner, baseURL, ownerId), loginAs(foreignOwner, baseURL, foreignOwnerId)])
+    await Promise.all([loginAs(owner, baseURL, ownerId), loginAs(secondOwner, baseURL, secondOwnerId), loginAs(foreignOwner, baseURL, foreignOwnerId)])
 
-    // The retired vocabulary is refused by both loaders rather than ignored.
-    await expectStatus(await owner.get(`/api/dashboard/organizations/${organizationId()}/guest-threads`, { params: { occurrence: 'upcoming' } }), 400)
-    await expectStatus(await owner.get('/api/dashboard/guest-threads', { params: { org: organizationSlug(), occurrence: 'past' } }), 400)
+    // The retired vocabulary is refused rather than ignored.
+    await expectStatus(await owner.get(`/api/dashboard/organizations/${organizationId()}/conversations`, { params: { occurrence: 'upcoming' } }), 400)
 
     const nonce = Date.now()
     const filedName = `Mailbox filed ${nonce}`
@@ -478,67 +408,53 @@ test('archive and Move to messages file a conversation without reordering the in
     await submitContact(owner, newerName)
 
     const current = await loadMailbox(owner, 'current')
-    const filed = current.byId.find(thread => thread.guestName === filedName)
-    const newer = current.byId.find(thread => thread.guestName === newerName)
+    const filed = current.find(thread => thread.guestName === filedName)
+    const newer = current.find(thread => thread.guestName === newerName)
     expect(filed).toBeDefined()
-    expect(current.byOrg.some(thread => thread.id === filed!.id)).toBe(true)
     const threadId = filed!.id
     expect(await loadThreadActions(owner, threadId)).toMatchObject({ archive: true, unarchive: false })
-    const before = await loadLedger(owner, threadId)
-    expect(before.archived).toBe(false)
     // The guest's contact message is unanswered: the owner owes a reply.
-    expect(before.needs_reply).toBe(true)
+    expect((await loadLedger(owner, threadId)).needs_reply).toBe(true)
+    const streamBefore = (await loadThreadDetail(owner, threadId)).stream.map(item => item.id)
 
-    const operationUrl = (action: 'archive' | 'unarchive') =>
-      `/api/dashboard/organizations/${organizationId()}/guest-threads/${threadId}/operations/${action}`
+    const archiveUrl = `/api/dashboard/organizations/${organizationId()}/conversations/${threadId}/archive`
+    // Another business's owner cannot reach it, and the request says which way it files it.
+    expect([403, 404]).toContain((await foreignOwner.post(archiveUrl, { data: { archived: true } })).status())
+    await expectStatus(await owner.post(archiveUrl, { data: {} }), 400)
+    expect((await loadMailbox(owner, 'current')).some(thread => thread.id === threadId)).toBe(true)
 
-    // Another business's owner cannot reach it, and a key is required.
-    expect([403, 404]).toContain((await foreignOwner.post(operationUrl('archive'), { data: { idempotencyKey: `foreign-${nonce}` } })).status())
-    await expectStatus(await owner.post(operationUrl('archive'), { data: {} }), 400)
-    expect((await loadLedger(owner, threadId)).archived).toBe(false)
-    expect((await loadMailbox(owner, 'current')).byId.some(thread => thread.id === threadId)).toBe(true)
-
-    // One key, sent twice at once and once more after: one archive, said once in the conversation.
-    const archive = () => owner.post(operationUrl('archive'), { data: { idempotencyKey: `archive-${nonce}` } })
-    for (const response of await Promise.all([archive(), archive()])) await expectStatus(response, 200)
-    const archived = await loadThreadDetail(owner, threadId)
-    const archivedEvents = streamEvents(archived, 'You archived this conversation')
-    expect(archivedEvents).toHaveLength(1)
-    // Filing it away is not conversation activity: its last change is the one it had. It does close the reply owed.
-    expect(await loadLedger(owner, threadId)).toMatchObject({ archived: true, needs_reply: false, updated_at: before.updated_at })
+    // Archiving twice at once and once more after files it once. It is this owner's filing:
+    // no message is written, and the other owner still has it in Messages.
+    const archive = () => owner.post(archiveUrl, { data: { archived: true } })
+    for (const response of await Promise.all([archive(), archive()])) {
+      await expectStatus(response, 200)
+      expect(await response.json()).toEqual({ archived: true })
+    }
+    await expectStatus(await archive(), 200)
+    expect((await loadThreadDetail(owner, threadId)).stream.map(item => item.id)).toEqual(streamBefore)
+    expect((await loadMailbox(owner, 'current')).some(thread => thread.id === threadId)).toBe(false)
+    expect((await loadMailbox(owner, 'past')).some(thread => thread.id === threadId)).toBe(true)
+    expect((await loadMailbox(secondOwner, 'current')).some(thread => thread.id === threadId)).toBe(true)
+    // Archiving dismisses the reply the owner owed, as Dismiss does.
+    expect((await loadLedger(owner, threadId)).needs_reply).toBe(false)
     expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([])
     expect(await loadThreadActions(owner, threadId)).toMatchObject({ archive: false, unarchive: true })
-    await expectStatus(await archive(), 200)
-    const retried = await loadThreadDetail(owner, threadId)
-    expect(streamEvents(retried, 'You archived this conversation')).toEqual(archivedEvents)
-    expect((await loadLedger(owner, threadId)).entries.filter(entry => entry.event === 'thread.archived')).toMatchObject([{ id: archivedEvents[0]!.id, kind: 'operation' }])
 
-    const afterArchiveCurrent = await loadMailbox(owner, 'current')
-    const afterArchivePast = await loadMailbox(owner, 'past')
-    expect(afterArchiveCurrent.byId.some(thread => thread.id === threadId)).toBe(false)
-    expect(afterArchiveCurrent.byOrg.some(thread => thread.id === threadId)).toBe(false)
-    expect(afterArchivePast.byId.some(thread => thread.id === threadId)).toBe(true)
-    expect(afterArchivePast.byOrg.some(thread => thread.id === threadId)).toBe(true)
-
-    const unarchive = () => owner.post(operationUrl('unarchive'), { data: { idempotencyKey: `unarchive-${nonce}` } })
+    const unarchive = () => owner.post(archiveUrl, { data: { archived: false } })
     for (const response of await Promise.all([unarchive(), unarchive()])) await expectStatus(response, 200)
     await expectStatus(await unarchive(), 200)
-    const restored = await loadThreadDetail(owner, threadId)
-    expect(streamEvents(restored, 'You moved this conversation back to Messages')).toHaveLength(1)
-    expect(streamEvents(restored, 'You archived this conversation')).toEqual(archivedEvents)
-    // Back in Messages, the question nobody answered is owed again.
-    expect(await loadLedger(owner, threadId)).toMatchObject({ archived: false, needs_reply: true, updated_at: before.updated_at })
-    expect(await loadReplyTasks(owner, organizationSlug(), threadId)).toEqual([{ section: 'open', tasks: [expect.objectContaining({ kind: 'guest_reply', status: 'open', requestId: threadId })] }])
+    expect((await loadThreadDetail(owner, threadId)).stream.map(item => item.id)).toEqual(streamBefore)
+    expect((await loadMailbox(owner, 'current')).some(thread => thread.id === threadId)).toBe(true)
     expect(await loadThreadActions(owner, threadId)).toMatchObject({ archive: true, unarchive: false })
 
     // Filing it away and back is not conversation activity: the newer thread
     // is still ahead of it.
-    const order = (await loadMailbox(owner, 'current')).byId.map(thread => thread.id)
+    const order = (await loadMailbox(owner, 'current')).map(thread => thread.id)
     expect(order.indexOf(newer!.id)).toBeGreaterThanOrEqual(0)
     expect(order.indexOf(newer!.id)).toBeLessThan(order.indexOf(threadId))
 
   } finally {
-    await Promise.all([owner.dispose(), foreignOwner.dispose()])
+    await Promise.all([owner.dispose(), secondOwner.dispose(), foreignOwner.dispose()])
   }
 })
 
@@ -612,7 +528,7 @@ for (const viewport of [
     // only once a thread is open.
     const openMessages = async (query = '') => {
       await page.goto(`${baseURL}/dashboard/${organizationSlug()}/messages${query}`)
-      await expect(page.locator('[data-guest-thread-list-hydrated="true"]')).toBeVisible()
+      await expect(page.locator('[data-conversation-list-hydrated="true"]')).toBeVisible()
       if (viewport.name === 'desktop') await expect(page).toHaveURL(/\/messages\/[^/?]+(\?|$)/)
     }
     const rowFor = (name: string) => page.locator('[data-thread-row]').filter({ hasText: name })
@@ -636,7 +552,7 @@ for (const viewport of [
     await sheetButton.click()
     await expect(sheet.getByRole('button', { name: 'Archive', exact: true })).toBeVisible()
     await expect(sheet.getByRole('button', { name: 'Move to Messages', exact: true })).toHaveCount(0)
-    const archived = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/guest-threads/${threadId}/operations/archive`))
+    const archived = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/conversations/${threadId}/archive`))
     await sheet.getByRole('button', { name: 'Archive', exact: true }).click()
     expect((await archived).status()).toBe(200)
     await expect(sheet).toHaveCount(0)
@@ -654,12 +570,11 @@ for (const viewport of [
     await expect(sheet.getByRole('button', { name: 'Report', exact: true })).toBeVisible()
     await expect(sheet.getByRole('button', { name: 'Block', exact: true })).toBeVisible()
     await expect(sheet.getByRole('button', { name: 'Archive', exact: true })).toHaveCount(0)
-    const moved = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/guest-threads/${threadId}/operations/unarchive`))
+    const moved = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/conversations/${threadId}/archive`))
     await sheet.getByRole('button', { name: 'Move to Messages', exact: true }).click()
     expect((await moved).status()).toBe(200)
     await expect(sheet).toHaveCount(0)
     await expect(page).toHaveURL(new RegExp(`/messages/${threadId}\\?archived=$`))
-    await expect(thread.getByText('You moved this conversation back to Messages', { exact: true })).toBeVisible()
     if (viewport.name === 'desktop') await expect(rowFor(guestName)).toHaveCount(0)
 
     await openMessages()
@@ -934,7 +849,7 @@ test('Calendar retains confirmed table bookings and their detail sends one chang
     params: { organization_id: demoOrganizationId(), since: requestedAt },
   })
   await expectStatus(deliveryResponse, 200)
-  const deliveries = (await deliveryResponse.json() as DeliveryList).deliveries.filter(row => row.entry_id === requests[0]!.id)
+  const deliveries = (await deliveryResponse.json() as DeliveryList).deliveries.filter(row => row.message_id === requests[0]!.id)
   expect(deliveries.some(row => row.purpose === 'status_update' && row.status === 'sent')).toBe(true)
   expect(deliveries.some(row => row.purpose === 'owner_alert' && row.status === 'sent')).toBe(true)
 
@@ -971,11 +886,11 @@ test('buyer conversation approves and declines canonical changes without moving 
     await loginAs(page.request, baseURL, 'user-e2e-buyer')
     // The seating sits at least three full days out whatever the location's clock says relative to this run's.
     const seating = await openSeating(page.request, 2, 3 * 86_400_000)
-    // The guest's own Messages count: their conversations with a business reply they have not read.
+    // The guest's own Messages count: their conversations with something from the business they have not read.
     const guestUnread = async () => {
-      const response = await page.request.get('/api/dashboard/notifications/unread-count', { params: { scope: 'personal' } })
+      const response = await page.request.get('/api/account/unread-count')
       await expectStatus(response, 200)
-      return (await response.json() as { unread_conversations: number }).unread_conversations
+      return (await response.json() as { count: number }).count
     }
     const unreadBefore = await guestUnread()
     threadId = (await bookTable(page.request, { name: 'E2E Buyer', email: 'buyer@playwright.example', phone: '+12025550123', partySize: 1, seating })).requestId
@@ -1069,7 +984,7 @@ test('buyer conversation approves and declines canonical changes without moving 
     expect(customerRequest).toMatchObject([{ author: 'E2E Buyer' }])
     const requestDelivery = await owner.get('/api/dev/notifications', { headers: devLoginHeaders(), params: { organization_id: demoOrganizationId(), since: sentAt } })
     await expectStatus(requestDelivery, 200)
-    expect((await requestDelivery.json() as DeliveryList).deliveries.some(delivery => delivery.entry_id === customerRequest[0]!.id && delivery.purpose === 'owner_alert' && delivery.status === 'sent')).toBe(true)
+    expect((await requestDelivery.json() as DeliveryList).deliveries.some(delivery => delivery.message_id === customerRequest[0]!.id && delivery.purpose === 'owner_alert' && delivery.status === 'sent')).toBe(true)
   } finally {
     if (threadId) await expectStatus(await owner.post(`/api/dashboard/organizations/${demoOrganizationId()}/guest-threads/${threadId}/operations/cancel`, { data: { idempotencyKey: crypto.randomUUID() } }), 200)
     await owner.dispose()

@@ -1,12 +1,10 @@
 import type { GuestRequest, ThreadOperationalRecord } from '~/server/domain/requests'
+import type { MessageAuthorKind, MessageChannel } from '~/server/domain/conversations'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import type { GuestThreadMailbox } from './mailbox'
 import type { StayChannel } from '~/shared/bookings'
 import type { BookingChangeView } from './booking-changes'
 
-export type GuestThreadEntryKind = 'submission' | 'message' | 'operation' | 'assignment'
-export type GuestThreadActorKind = 'guest' | 'member' | 'system'
-export type GuestThreadChannel = 'web' | 'email' | 'whatsapp' | 'airbnb' | 'system'
 export type GuestThreadSubmissionType = 'contact' | 'booking' | 'stay'
 export type GuestThreadDeliveryChannel = 'email' | 'whatsapp' | 'airbnb' | 'push'
 export type GuestThreadDeliveryProvider = 'resend' | 'meta' | 'channex' | 'apns' | 'web_push' | 'log_only'
@@ -15,25 +13,11 @@ export type GuestThreadDeliveryStatus = 'pending' | 'sending' | 'accepted' | 'se
 
 export type GuestThreadRow = GuestRequest
 
-export interface GuestThreadEntryRow {
-  id: string
-  request_id: string
-  kind: GuestThreadEntryKind
-  actor_kind: GuestThreadActorKind
-  actor_user_id: string | null
-  channel: GuestThreadChannel | null
-  body: string | null
-  event_name: string | null
-  payload_json: string | null
-  dedupe_key: string
-  sequence: number
-  occurred_at: string
-  created_at: string
-}
-
 export interface GuestThreadDeliveryRow {
   id: string
-  entry_id: string
+  message_id: string | null
+  activity_entry_id: string | null
+  task_id: string | null
   channel: GuestThreadDeliveryChannel
   provider: GuestThreadDeliveryProvider
   purpose: GuestThreadDeliveryPurpose
@@ -94,53 +78,11 @@ export interface ThreadDetailSourceModel {
 }
 
 
-export interface GuestThreadListItemViewModel {
-  id: string
-  organizationId?: string
-  organizationName?: string | null
-  organizationVertical?: string | null
-  guestName: string | null
-  participantLabel: string
-  submissionType: GuestThreadSubmissionType
-  locationLabel: string | null
-  locationId: string | null
-  assignedMemberId: string | null
-  productId: string | null
-  stayChannel: StayChannel | null
-  occurrenceAt: string | null
-  timeZone: string | null
-  latestMessageFromGuest: boolean
-  /** An open guest_reply task: the guest asked something nobody has answered. */
-  needsReply: boolean
-  operationalStatus: string | null
-  operationalStatusLabel: string | null
-  unread: boolean
-  unreadCount: number
-  preview: { kind: 'message' | 'submission'; text: string } | null
-  lastActivityAt: string
-  /** The location hero the row leads with. Null when the thread or the location has none. */
-  imageUrl: string | null
-  /** A business logo its owner shows whole is fitted inside the frame rather than cropped to fill it. */
-  imageFit: 'cover' | 'contain'
-  /** When the booking behind this thread happens, in its own timezone. A contact thread has none. */
-  whenLabel: string | null
-  /** From `resolveGuestThreadMailbox`; the client never works these out from dates. */
-  mailbox: GuestThreadMailbox
-  manuallyArchived: boolean
-  canArchive: boolean
-  canUnarchive: boolean
-}
-
 export interface GuestThreadPagination {
   limit: number
   offset: number
   hasMore: boolean
   nextOffset: number | null
-}
-
-export interface GuestThreadListPage {
-  threads: GuestThreadListItemViewModel[]
-  pagination: GuestThreadPagination
 }
 
 /**
@@ -169,15 +111,17 @@ export interface GuestThreadEntryAttachmentViewModel {
 
 export interface GuestThreadEntryViewModel {
   id: string
-  kind: GuestThreadEntryKind
-  actorKind: GuestThreadActorKind
+  /** Words someone wrote (or KrabiClaw's opening, automatic and relayed messages), or an event KrabiClaw recorded. */
+  kind: 'message' | 'event'
+  /** The part its person plays: the guest, the team, or KrabiClaw alone (conversations.ts messageRole). */
+  actorKind: MessageAuthorKind
   actorUserId: string | null
   actorLabel: string | null
-  channel: GuestThreadChannel | null
+  channel: MessageChannel | null
   body: string | null
   eventName: string | null
   payload: Record<string, unknown> | null
-  sequence: number | null
+  sequence: number
   occurredAt: string
   /** Channex's original timestamp; a timezone-free value is not an instant. */
   providerTimestamp: string | null
@@ -217,19 +161,21 @@ export interface GuestThreadDetailViewModel {
   /** A stay's check-in and checkout days in its home's clock; null for any other booking. */
   operationalRecord: (Pick<ThreadOperationalRecord, 'id' | 'unit' | 'product_kind' | 'status' | 'starts_at' | 'ends_at' | 'timezone' | 'party_size'> & { check_in_date: string | null; check_out_date: string | null }) | null
   entries: GuestThreadEntryViewModel[]
+  /** The dates a channel's guest asked about before booking; null once there is no such inquiry. */
+  inquiry: { checkIn: string; checkOut: string } | null
   /** What can be done to the booking. Where the conversation lives is below, separately. */
   availableActions: string[]
-  /** From `resolveGuestThreadMailbox`. */
+  /** From `resolveGuestThreadMailbox`, for the viewer. */
   mailbox: GuestThreadMailbox
   manuallyArchived: boolean
+  /** When the viewer archived it; archive is each person's own. */
   archivedAt: string | null
-  archivedByUserId: string | null
   blockedAt: string | null
   canArchive: boolean
   canUnarchive: boolean
   deliveryFailures: GuestThreadDeliveryFailureViewModel[]
   createdAt: string
-  updatedAt: string
+  lastMessageAt: string
 }
 
 /*
@@ -240,8 +186,8 @@ export interface GuestThreadDetailViewModel {
   submission fields stay on the server.
 */
 
-/** Airbnb Support is a case, not a guest: its own filter, never under Guests. */
-export type InboxThreadKind = 'guest' | 'support'
+/** Airbnb Support is a case, not a guest: its own filter, never under Guests. A team conversation is the team's own. */
+export type InboxThreadKind = 'guest' | 'support' | 'team'
 /** The mark at the corner of the person's circle: Airbnb, or the business's own site and email. */
 export type InboxChannel = 'airbnb' | 'direct'
 
@@ -359,7 +305,8 @@ export interface ListGuestThreadsOptions {
   organizationId?: string | null
   locationId?: string | null
   assignedMemberId?: string | null
-  principal?: MemberAccessPrincipal | null
+  /** The viewer's role in the organization; absent for a server read on the viewer's behalf. */
+  principal?: Pick<MemberAccessPrincipal, 'organizationId' | 'role' | 'userId'> | null
   userId: string
   type?: GuestThreadSubmissionType | null
   /** Only conversations with an open guest_reply task. */

@@ -416,7 +416,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     audience: 'owner',
     title: 'Operator — a member reported or blocked someone',
     message: contentReportedMessage({
-      organizationName: 'Pinecone Stays', reporter: 'Priya Shah (priya@example.com)', subject: 'guest_thread', blocked: true,
+      organizationName: 'Pinecone Stays', reporter: 'Priya Shah (priya@example.com)', subject: 'conversation', blocked: true,
       reason: 'Harassing messages', excerpt: 'You will regret this. I know where you live.',
       reviewUrl: 'https://krabiclaw.com/dashboard/krabiclaw/platform-reports',
     }),

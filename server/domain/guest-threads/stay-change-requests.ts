@@ -7,19 +7,19 @@ import type { ChannexEnv } from '~/server/integrations/channex/client'
 import { notifyBookingChangeOwner, stayParty } from '~/server/utils/notifications'
 import { stayChangeDifferences } from '~/server/notifications/events'
 import { getPersistedSourceLocale } from '~/server/utils/localization'
-import { publishGuestInboxThreadEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { publishConversationEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { landBookingRevision, pendingBookingRevisions } from '~/server/integrations/channex/booking-revisions'
 import { listAlterationRequests, readAlterationRequest, resolveAlterationRequest, type AlterationRequest } from '~/server/integrations/channex/live-feed'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
 import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { formatCalendarDate } from '~/utils/timezone'
-import { appendEntry, findEntryByDedupeKey, getEntryById } from './entries'
+import { appendMessage, findMessageByDedupeKey, getMessage, type MessageRow } from '~/server/domain/conversations'
 import { mirrorChannexThread } from './channel-messages'
-import { updateThreadProjectionIfLatestEntry } from './repository'
+import { conversationTaskQueries } from './repository'
 import type { BookingChangeStatus } from './booking-change-state'
 import type { BookingChangeView } from './booking-changes'
-import type { GuestThreadEntryRow, GuestThreadRow } from './types'
+import type { GuestThreadRow } from './types'
 
 /**
  * An Airbnb guest's request to change their stay, as a booking change request
@@ -41,7 +41,7 @@ type Proposal = z.infer<typeof proposalSchema>
 type Outcome = NonNullable<AlterationRequest['outcome']>
 type AnswerEnv = ChannexEnv & GuestInboxPublicationEnv & CloudflareEnv
 
-export function isStayChangeRequest(entry: Pick<GuestThreadEntryRow, 'event_name' | 'dedupe_key'>): boolean {
+export function isStayChangeRequest(entry: Pick<MessageRow, 'event_name' | 'dedupe_key'>): boolean {
   return entry.event_name === 'booking_change.requested' && entry.dedupe_key.startsWith(PREFIX)
 }
 
@@ -62,20 +62,19 @@ const ANSWERS: Record<Outcome, { event: string; host: string; guest: string; air
 }
 
 /** Airbnb's outcome, recorded once as the request's answer; a member is named only for the answer they chose. */
-async function recordOutcome(db: DbClient, env: AnswerEnv, entry: GuestThreadEntryRow, proposal: Proposal, outcome: Outcome, actorUserId: string | null): Promise<void> {
+async function recordOutcome(db: DbClient, env: AnswerEnv, entry: MessageRow, proposal: Proposal, outcome: Outcome, actorUserId: string | null): Promise<void> {
   const answer = ANSWERS[outcome]
-  const decision = await appendEntry(db, {
-    threadId: entry.request_id, kind: 'operation', actorKind: actorUserId ? 'member' : 'system', actorUserId, channel: 'airbnb',
+  await appendMessage(db, {
+    conversationId: entry.conversation_id, authorKind: 'krabiclaw', authorUserId: actorUserId, channel: 'airbnb',
     eventName: answer.event, dedupeKey: `booking-change-decision:${entry.id}`,
     body: actorUserId ? answer.host : proposal.initiated_by === 'guest' ? answer.guest : answer.airbnb,
-    payloadJson: { requestId: entry.id, outcome },
-  })
-  await updateThreadProjectionIfLatestEntry(db, entry.request_id, decision.id)
-  await publishGuestInboxThreadEvent(env, db, { threadId: entry.request_id, type: 'thread.changed' })
+    payload: { requestId: entry.id, outcome },
+  }, conversationTaskQueries(entry.conversation_id, new Date().toISOString()))
+  await publishConversationEvent(env, db, { conversationId: entry.conversation_id, type: 'MESSAGE_CREATE' })
 }
 
 /** Whether the stay was written after an outcome was recorded: the accepted revision, or a later one. */
-async function stayChangedSince(db: DbClient, proposal: Proposal, decision: GuestThreadEntryRow): Promise<boolean> {
+async function stayChangedSince(db: DbClient, proposal: Proposal, decision: MessageRow): Promise<boolean> {
   const stay = await queryFirst<{ updated_at: string }>(db, 'SELECT updated_at FROM bookings WHERE id = ?', [proposal.stay_id])
   if (!stay) throw new Error(`Stay ${proposal.stay_id} disappeared under its change request`)
   return stay.updated_at > decision.created_at
@@ -86,7 +85,7 @@ async function landAcceptedChange(db: DbClient, env: AnswerEnv, proposal: Propos
   for (const revision of await pendingBookingRevisions(env, proposal.property_id, proposal.booking_id)) await landBookingRevision(db, env, revision)
 }
 
-async function alertOwners(db: DbClient, env: CloudflareEnv, thread: { id: string; organization_id: string; guest_name: string | null }, entry: GuestThreadEntryRow, proposal: Proposal, status: 'requested' | 'withdrawn') {
+async function alertOwners(db: DbClient, env: CloudflareEnv, thread: { id: string; organization_id: string; guest_name: string | null }, entry: MessageRow, proposal: Proposal, status: 'requested' | 'withdrawn') {
   if (!thread.guest_name) throw new Error(`Conversation ${thread.id} has no guest name to alert its owners with`)
   const home = await queryFirst<{ name: string; location_id: string; product_id: string; organization_name: string }>(db, `SELECT p.name, c.location_id, s.product_id, o.name AS organization_name
     FROM bookings s JOIN products p ON p.id = s.product_id AND p.organization_id = s.organization_id
@@ -102,7 +101,7 @@ async function alertOwners(db: DbClient, env: CloudflareEnv, thread: { id: strin
   })
   const counts = (side: Terms) => ({ checkIn: side.check_in_date, checkOut: side.check_out_date, guests: side.adults + side.children, infants: side.infants, totalMinor: side.total_minor })
   await notifyBookingChangeOwner(env, db, {
-    organizationId: thread.organization_id, organizationName: home.organization_name, threadId: thread.id, submissionType: 'stay', submissionId: thread.id, sourceEntryId: entry.id,
+    organizationId: thread.organization_id, organizationName: home.organization_name, threadId: thread.id, submissionType: 'stay', submissionId: thread.id, messageId: entry.id,
     locationId: home.location_id, vertical: 'lodging', stay: { id: proposal.stay_id, product_id: home.product_id },
     change: {
       recordKind: 'stay', channel: 'Airbnb', guestName: thread.guest_name, requestedBy: { kind: 'guest' }, status, locationLabel: 'Home',
@@ -123,14 +122,15 @@ export async function takeAlterationRequest(db: DbClient, env: CloudflareEnv, re
     "SELECT organization_id, product_id, enabled FROM product_channel_mappings WHERE provider = 'channex' AND property_id = ?", [request.propertyId])
   if (!mapping || mapping.enabled !== 1) return 'ignored'
   const dedupeKey = `${PREFIX}${request.id}`
-  let entry = await findEntryByDedupeKey(db, dedupeKey)
+  let entry = await findMessageByDedupeKey(db, dedupeKey)
   if (!entry && request.outcome) return 'ignored'
   if (!entry) {
-    type StayRow = Omit<Terms, 'check_in_date' | 'check_out_date'> & { id: string; request_id: string; starts_at: string; ends_at: string; timezone: string; mirrored: number }
-    const read = async (): Promise<(Terms & { id: string; request_id: string; mirrored: boolean }) | null> => {
-      const row = await queryFirst<StayRow>(db, `SELECT id, request_id, starts_at, ends_at, timezone, adults, children, infants, total_minor, currency,
-          EXISTS (SELECT 1 FROM channel_threads t WHERE t.request_id = bookings.request_id) AS mirrored
-        FROM bookings WHERE provider = 'channex' AND external_booking_id = ? AND organization_id = ? AND product_id = ? AND product_session_id IS NULL`, [request.bookingId, mapping.organization_id, mapping.product_id])
+    type StayRow = Omit<Terms, 'check_in_date' | 'check_out_date'> & { id: string; conversation_id: string; guest_user_id: string | null; starts_at: string; ends_at: string; timezone: string; mirrored: number }
+    const read = async (): Promise<(Terms & { id: string; conversation_id: string; guest_user_id: string | null; mirrored: boolean }) | null> => {
+      const row = await queryFirst<StayRow>(db, `SELECT b.id, c.id AS conversation_id, c.user_id AS guest_user_id, b.starts_at, b.ends_at, b.timezone, b.adults, b.children, b.infants, b.total_minor, b.currency,
+          EXISTS (SELECT 1 FROM channel_threads t WHERE t.conversation_id = c.id) AS mirrored
+        FROM bookings b JOIN conversations c ON c.booking_id = b.id AND c.organization_id = b.organization_id AND c.kind = 'booking'
+        WHERE b.provider = 'channex' AND b.external_booking_id = ? AND b.organization_id = ? AND b.product_id = ? AND b.product_session_id IS NULL`, [request.bookingId, mapping.organization_id, mapping.product_id])
       if (!row) return null
       const { starts_at, ends_at, timezone, mirrored, ...terms } = row
       return { ...terms, check_in_date: bookingDay(starts_at, timezone), check_out_date: bookingDay(ends_at, timezone), mirrored: mirrored === 1 }
@@ -147,29 +147,29 @@ export async function takeAlterationRequest(db: DbClient, env: CloudflareEnv, re
       stay = await read()
     }
     if (!stay) throw new HTTPError({ statusCode: 409, message: `Airbnb change request ${request.id} names a stay that changed while its conversation was mirrored`, data: { code: 'CHANNEL_BOOKING_NOT_LANDED', field: 'bms.booking_id' } })
-    const { id: stayId, request_id: threadId } = stay
+    const { id: stayId, conversation_id: threadId } = stay
     const before: Terms = { check_in_date: stay.check_in_date, check_out_date: stay.check_out_date, adults: stay.adults, children: stay.children, infants: stay.infants, total_minor: stay.total_minor, currency: stay.currency }
     const proposal: Proposal = { source: 'airbnb', initiated_by: request.initiatedBy, live_feed_event_id: request.id, property_id: request.propertyId, booking_id: request.bookingId, stay_id: stayId, before, after: request.after }
     const guest = request.initiatedBy === 'guest'
-    entry = await appendEntry(db, {
-      threadId, kind: 'operation', actorKind: guest ? 'guest' : 'system', channel: 'airbnb', eventName: 'booking_change.requested', dedupeKey,
+    // The guest's own request names their account; a host's proposal on Airbnb is KrabiClaw's to relay.
+    entry = await appendMessage(db, {
+      conversationId: threadId, authorKind: 'krabiclaw', authorUserId: guest ? stay.guest_user_id : null, channel: 'airbnb', eventName: 'booking_change.requested', dedupeKey,
       body: `${guest ? 'Asked' : 'Proposed'} on Airbnb to change the stay to ${nightsLabel(request.after, 'en')} for ${request.after.adults + request.after.children} guests (${formatMinorAmount(request.after.total_minor, request.after.currency, 'en-US')}).`,
-      payloadJson: proposal,
-    })
-    await updateThreadProjectionIfLatestEntry(db, threadId, entry.id)
-    await publishGuestInboxThreadEvent(env, db, { threadId, type: 'thread.changed' })
+      payload: proposal,
+    }, conversationTaskQueries(threadId, new Date().toISOString()))
+    await publishConversationEvent(env, db, { conversationId: threadId, type: 'MESSAGE_CREATE' })
   }
   const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
   const thread = await queryFirst<{ id: string; organization_id: string; guest_name: string | null }>(db,
-    "SELECT id, organization_id, json_extract(payload_json, '$.guest.name') AS guest_name FROM requests WHERE id = ?", [entry.request_id])
-  if (!thread) throw new Error(`Conversation ${entry.request_id} disappeared under its change request`)
+    "SELECT id, organization_id, json_extract(payload_json, '$.guest.name') AS guest_name FROM conversations WHERE id = ?", [entry.conversation_id])
+  if (!thread) throw new Error(`Conversation ${entry.conversation_id} disappeared under its change request`)
   // Each owner alert is sent once: a run that recorded the fact but stopped before alerting alerts on the next one.
-  const alerted = async (entryId: string) => Boolean(await queryFirst(db, "SELECT 1 FROM guest_thread_deliveries WHERE entry_id = ? AND purpose = 'owner_alert'", [entryId]))
-  let decision = await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)
+  const alerted = async (entryId: string) => Boolean(await queryFirst(db, "SELECT 1 FROM guest_thread_deliveries WHERE message_id = ? AND purpose = 'owner_alert'", [entryId]))
+  let decision = await findMessageByDedupeKey(db, `booking-change-decision:${entry.id}`)
   const reconciled = !decision && request.outcome !== null
   if (!decision && request.outcome) {
     await recordOutcome(db, env, entry, proposal, request.outcome, null)
-    decision = await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)
+    decision = await findMessageByDedupeKey(db, `booking-change-decision:${entry.id}`)
     if (!decision) throw new Error(`Airbnb change request ${request.id} has no recorded outcome`)
   }
   if (decision) {
@@ -220,18 +220,18 @@ export async function runAlterationRequestFeed(db: DbClient, env: CloudflareEnv,
  * afterwards, and an answer that differs from the host's is refused naming it.
  */
 export async function respondToStayChangeRequest(db: DbClient, env: AnswerEnv, input: { thread: GuestThreadRow; requestId: string; decision: 'accept' | 'decline'; actorUserId: string }): Promise<void> {
-  const entry = await getEntryById(db, input.requestId)
-  if (!entry || entry.request_id !== input.thread.id || !isStayChangeRequest(entry)) throw new HTTPError({ statusCode: 404, message: 'Change request not found', data: { code: 'CHANGE_REQUEST_NOT_FOUND', field: 'requestId' } })
+  const entry = await getMessage(db, input.requestId)
+  if (!entry || entry.conversation_id !== input.thread.id || !isStayChangeRequest(entry)) throw new HTTPError({ statusCode: 404, message: 'Change request not found', data: { code: 'CHANGE_REQUEST_NOT_FOUND', field: 'requestId' } })
   const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
   if (proposal.initiated_by === 'host') throw new HTTPError({ statusCode: 409, message: 'This change was proposed on Airbnb by the host; the guest answers it there.', data: { code: 'CHANGE_REQUEST_AWAITS_GUEST', field: 'requestId' } })
   const wanted: Outcome = input.decision === 'accept' ? 'accepted' : 'declined'
-  let decision = await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)
+  let decision = await findMessageByDedupeKey(db, `booking-change-decision:${entry.id}`)
   if (!decision) {
     const current = await readAlterationRequest(env, proposal.live_feed_event_id)
     const answered = current.outcome ?? (await resolveAlterationRequest(env, current.id, input.decision)).outcome
     if (!answered) throw new HTTPError({ statusCode: 502, message: 'Channex accepted the answer but still lists the change request as waiting. Reload before answering again.', data: { code: 'CHANNEX_DECISION_NOT_RECORDED', field: 'resolution' } })
     await recordOutcome(db, env, entry, proposal, answered, !current.outcome && answered === wanted ? input.actorUserId : null)
-    decision = await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)
+    decision = await findMessageByDedupeKey(db, `booking-change-decision:${entry.id}`)
   }
   const outcome = (decision ? JSON.parse(decision.payload_json || '{}') as { outcome?: Outcome } : {}).outcome
   if (outcome === 'accepted') await landAcceptedChange(db, env, proposal)
@@ -239,7 +239,7 @@ export async function respondToStayChangeRequest(db: DbClient, env: AnswerEnv, i
 }
 
 /** The conversation's view of each request: before and after, and the answer Airbnb holds. */
-export async function stayChangeView(db: DbClient, thread: GuestThreadRow, entry: GuestThreadEntryRow, status: BookingChangeStatus): Promise<BookingChangeView> {
+export async function stayChangeView(db: DbClient, thread: GuestThreadRow, entry: MessageRow, status: BookingChangeStatus): Promise<BookingChangeView> {
   const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
   const organization = await queryFirst<{ vertical: string | null }>(db, 'SELECT vertical FROM organization WHERE id = ?', [thread.organization_id])
   const home = await queryFirst<{ name: string }>(db, 'SELECT p.name FROM bookings s JOIN products p ON p.id = s.product_id AND p.organization_id = s.organization_id WHERE s.id = ? AND s.organization_id = ?', [proposal.stay_id, thread.organization_id])

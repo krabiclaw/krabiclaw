@@ -5,15 +5,16 @@ import { queryFirst } from '~/server/db'
 import { parseSuggestionUse, recordSuggestionAccepted, suggestedDraft } from '~/server/domain/suggested-reply'
 
 // Canonical guest-thread operation endpoint (issue #442 Locked Decision #8). Every
-// state-mutating guest-thread action in GUEST_THREAD_ACTIONS (confirm, cancel, reply, archive, …)
+// state-mutating guest-thread action in GUEST_THREAD_ACTIONS (confirm, cancel, reply, block, …)
 // flows through here. The inbox must never call source-specific editor endpoints
 // directly.
 import { jsonResponse } from '~/server/utils/api-response'
 import { requireOrganizationMembership } from '~/server/utils/location-access'
-import { assertAssignedBookingAccess, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
+import { memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
 import { getInboxThread } from '~/server/domain/guest-threads/inbox'
 import { executeGuestThreadOperation, GUEST_THREAD_ACTIONS } from '~/server/domain/guest-threads/operations'
-import { publishDashboardInvalidation } from '~/server/cloudflare/guest-inbox-events'
+import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
+import { MEMBER_REPLY_EVENT, assertConversationAccess, assertGuestOperations } from '~/server/domain/conversations'
 
 export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organizationId')
@@ -26,7 +27,9 @@ export default defineHandler(async (event) => {
 
   const thread = await getGuestRequest(db, threadId, organizationId)
   if (!thread) return jsonResponse({ error: 'Thread not found', code: 'THREAD_NOT_FOUND', field: 'threadId' }, { status: 404 })
-  await assertAssignedBookingAccess(db, { ...memberAccessPrincipal(organization.membership, { env, event }), requestId: thread.id })
+  const principal = memberAccessPrincipal(organization.membership, { env, event })
+  await assertGuestOperations(principal)
+  await assertConversationAccess(db, principal, thread.id)
 
   // A reply with photos arrives as a form, its photos as `photos` parts in the
   // order they were chosen; every other operation is JSON.
@@ -54,8 +57,8 @@ export default defineHandler(async (event) => {
   if (action === 'retry') {
     const messageId = field('messageId')
     const entry = messageId ? await queryFirst<{ body: string | null; dedupe_key: string; photos: number }>(db, `SELECT e.body, e.dedupe_key,
-        (SELECT COUNT(*) FROM media_placements mp WHERE mp.owner_type = 'activity_entry' AND mp.owner_id = e.id AND mp.slot = 'attachments' AND mp.status = 'active') AS photos
-      FROM activity_entries e WHERE e.id = ? AND e.request_id = ? AND e.kind = 'message' AND e.event_name = 'thread.member_reply'`, [messageId, thread.id]) : null
+        (SELECT COUNT(*) FROM media_placements mp WHERE mp.owner_type = 'message' AND mp.owner_id = e.id AND mp.slot = 'attachments' AND mp.status = 'active') AS photos
+      FROM messages e WHERE e.id = ? AND e.conversation_id = ? AND e.event_name = '${MEMBER_REPLY_EVENT}'`, [messageId, thread.id]) : null
     const prefix = `guest-thread-operation:${thread.id}:`
     if (!entry || !entry.dedupe_key.startsWith(prefix)) return jsonResponse({ error: 'That reply is not in this conversation', code: 'MESSAGE_NOT_FOUND', field: 'messageId' }, { status: 404 })
     if (entry.photos || !entry.body?.trim()) return jsonResponse({ error: 'Send the photo again from the composer', code: 'RETRY_TEXT_ONLY', field: 'messageId' }, { status: 409 })
@@ -84,30 +87,9 @@ export default defineHandler(async (event) => {
 
   if (outcome.ok && draft) await recordSuggestionAccepted(db, { organizationId, threadId: thread.id, userId: session.user.id, body: field('body') ?? '', draft })
 
+  // The change is not done until the open inboxes have been told about it.
   if (outcome.ok || outcome.reason === 'delivery_failed') {
-    const changedThread = outcome.ok ? outcome.thread : thread
-    const invalidations = [
-      publishDashboardInvalidation(env, {
-        eventId: crypto.randomUUID(),
-        type: 'thread.changed',
-        organizationId: changedThread.organization_id,
-        locationId: changedThread.location_id,
-        threadId: changedThread.id,
-        occurredAt: new Date().toISOString(),
-      }),
-    ]
-    if (['reply', 'confirm', 'reject', 'cancel', 'complete'].includes(action)) {
-      invalidations.push(publishDashboardInvalidation(env, {
-        eventId: crypto.randomUUID(),
-        type: 'delivery.changed',
-        organizationId: changedThread.organization_id,
-        locationId: changedThread.location_id,
-        threadId: changedThread.id,
-        occurredAt: new Date().toISOString(),
-      }))
-    }
-    // The change is not done until the open inboxes have been told about it.
-    await Promise.all(invalidations)
+    await publishConversationEvent(env, db, { conversationId: thread.id, type: ['reply', 'confirm', 'reject', 'cancel', 'no_show', 'retry'].includes(action) ? 'MESSAGE_CREATE' : 'MESSAGE_UPDATE' })
   }
 
   if (outcome.ok === false) {
@@ -135,7 +117,6 @@ export default defineHandler(async (event) => {
     throw new HTTPError({ statusCode: 500, message: 'Guest-thread operation returned an unhandled outcome', data: { code: 'INVALID_OPERATION_OUTCOME', field: 'outcome.reason' } })
   }
 
-  const principal = memberAccessPrincipal(organization.membership, { env, event })
   const detail = await getInboxThread(db, threadId, organizationId, { audience: 'member', userId: principal.userId, principal })
   return jsonResponse({ thread: detail, availableActions: outcome.availableActions }, { status: outcome.status })
 })

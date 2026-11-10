@@ -23,7 +23,7 @@ export default defineHandler(async event=>{
  const stripe=paymentsStripe(env,Boolean((await requirePayment(db,organization.id,authorization.payment_id)).livemode))
  const paid=authorization.action==='reject_booking'||authorization.action==='cancel_booking'?await requirePayment(db,organization.id,authorization.payment_id):null
  if(paid&&(paid.subject_type!=='booking'||!paid.subject_id)) throw new HTTPError({statusCode:409,statusMessage:'Authorization is not for a booking payment'})
- const booked=paid?await queryFirst<{request_id:string|null;status:string;version:number;nights:number}>(db,'SELECT request_id,status,version,product_session_id IS NULL AS nights FROM bookings WHERE id=? AND organization_id=?',[paid.subject_id,organization.id]):null
+ const booked=paid?await queryFirst<{request_id:string|null;status:string;version:number;nights:number}>(db,"SELECT (SELECT c.id FROM conversations c WHERE c.booking_id=b.id AND c.kind='booking') AS request_id,b.status,b.version,b.product_session_id IS NULL AS nights FROM bookings b WHERE b.id=? AND b.organization_id=?",[paid.subject_id,organization.id]):null
  if(paid&&!booked) throw new HTTPError({statusCode:409,statusMessage:'Paid booking is unavailable'})
  // A stay is cancelled from its own screen, with its nights and channel; any other booking through its conversation.
  if(paid&&booked&&authorization.action==='cancel_booking'&&booked.nights===1){

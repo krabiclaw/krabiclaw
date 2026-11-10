@@ -14,7 +14,7 @@
           <p v-if="message.sentAt" class="text-sm text-muted">Sent {{ atHome(message.sentAt, message.timezone) }}</p>
           <UAlert v-if="message.reason" :color="message.status === 'failed' || message.status === 'needs_review' ? 'error' : 'neutral'" variant="soft" :description="message.reason" />
           <div class="flex flex-wrap gap-3">
-            <UButton v-if="message.requestId" :to="`${messagesPath}/${encodeURIComponent(message.requestId)}`" label="Open conversation" color="neutral" variant="link" />
+            <UButton v-if="message.conversationId" :to="`${messagesPath}/${encodeURIComponent(message.conversationId)}`" label="Open conversation" color="neutral" variant="link" />
             <UButton v-if="manage && message.templateId" :to="`${messagesPath}/automatic/${encodeURIComponent(message.templateId)}/schedule`" label="Edit automatic message" color="neutral" variant="link" />
             <UButton v-if="manage && message.status === 'pending'" label="Cancel scheduled message" color="neutral" variant="outline" :loading="cancelling === message.id" :disabled="!!cancelling" @click="cancel(message.id)" />
           </div>

@@ -5,7 +5,7 @@ import { formatFormAnswer, type FormAnswerSnapshot } from '~/shared/form-questio
 import { formatCalendarDate, formatTime, formatTimestamp } from '~/utils/timezone'
 import { bookingDay, getGuestRequest, isBookingDay, requestSummary, type cancelBookingRequest, type GuestRequest } from '~/server/domain/requests'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { organizationEventQuery } from '~/server/utils/organization-events'
+import { organizationEventQuery, type OrganizationEventType } from '~/server/utils/organization-events'
 import { getEmailDeliveryMode, hashEmail, sendEmail, type EmailSendResult } from '~/server/utils/email-delivery'
 import { buildWhatsAppTemplatePayload, sendWhatsAppImage, sendWhatsAppNotification, WhatsAppTemplateRefusal, type SendWhatsAppResult, type WhatsAppTemplate } from '~/server/utils/whatsapp'
 import { whatsAppServiceWindowOpen } from '~/server/utils/mcp-context'
@@ -16,7 +16,7 @@ import { assignedMemberSql, listOrganizationNotificationMembers } from '~/server
 import { wantsNotification } from '~/server/domain/notification-preferences'
 import { listUserDevices, retireDevice, type UserDevice } from '~/server/domain/devices'
 import { sendApnsAlert, type ApnsAlert, type ApnsEnv } from '~/server/utils/apns'
-import { unreadBadge } from '~/server/domain/unread'
+import { unreadBadge } from '~/server/domain/guest-threads/repository'
 import { sendWebPush, type WebPushEnv } from '~/server/utils/web-push'
 import { isRecord } from '~/server/utils/type-guards'
 import { buildUnsubscribeUrls } from '~/server/utils/unsubscribe'
@@ -54,14 +54,13 @@ import {
   REPLY_NOTE,
 } from '~/server/notifications/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { createCanonicalNotification, isConversationNotification, isScheduleNotification, notifyBuyerThread, type NotificationSeverity } from '~/server/utils/notification-center'
 import { buildOwnerThreadInboxUrl, buildBuyerRequestActivityUrl, dashboardOrigin, destinationUnavailable, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
 import { bookingEditorPath, insightsPath, reviewEditorPath } from '~/server/utils/dashboard-links'
-import { createDeliveryReceipt, deliverReceiptEmail, getDeliveryById, isDeliverySent, recordDeliveryOutcome } from '~/server/domain/guest-threads/deliveries'
-import { appendEntry, findEntryByDedupeKey, getEntryById, parseEntryPayload } from '~/server/domain/guest-threads/entries'
+import { createDeliveryReceipt, deliverReceiptEmail, getDeliveryById, isDeliverySent, recordDeliveryOutcome, type DeliverySubject } from '~/server/domain/guest-threads/deliveries'
+import { GUEST_NOTE_EVENT, appendMessage, findMessageByDedupeKey, getMessage, parseMessagePayload, type MessageRow } from '~/server/domain/conversations'
 import { listMessagePhotos, messagePreview } from '~/server/domain/guest-threads/attachments'
-import { publishGuestInboxThreadEvent, publishNotificationInvalidation } from '~/server/cloudflare/guest-inbox-events'
-import type { GuestThreadDeliveryPurpose, GuestThreadDeliveryRow, GuestThreadEntryRow } from '~/server/domain/guest-threads/types'
+import { publishConversationEvent } from '~/server/cloudflare/guest-inbox-events'
+import type { GuestThreadDeliveryPurpose, GuestThreadDeliveryRow } from '~/server/domain/guest-threads/types'
 import { getPersistedSourceLocale } from '~/server/utils/localization'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import { createReplayableReservationCancelToken } from '~/server/utils/reservation-cancel-token'
@@ -184,8 +183,8 @@ interface ReviewRequestNotificationInput extends OrganizationContext {
   reviewUrl: string
   /** Whose review_requests preference governs this email and its unsubscribe link. */
   userId: string
-  /** The invitation's entry in the visit's conversation, which this email is the receipt of. */
-  delivery: { guestThreadId: string; sourceEntryId: string }
+  /** The invitation's message in the visit's conversation, which this email is the receipt of. */
+  delivery: { conversationId: string; messageId: string }
 }
 
 interface EmailTemplate extends RenderedNotificationEmail {
@@ -193,8 +192,9 @@ interface EmailTemplate extends RenderedNotificationEmail {
 }
 
 interface ThreadDeliveryContext {
-  threadId: string | null
-  entryId: string
+  /** The conversation the send is about, when it is about a message. */
+  conversationId: string | null
+  subject: DeliverySubject
   purpose: GuestThreadDeliveryPurpose
   idempotencyKey: string
 }
@@ -203,7 +203,8 @@ interface ThreadDeliveryContext {
 interface GuestThreadReplyNotificationInput extends Omit<OrganizationContext, 'organizationName'> {
   locationId?: string | null
   threadId: string
-  sourceEntryId: string
+  /** The guest's (or Airbnb Support's) message the alert is about. */
+  messageId: string
   submissionType: 'contact' | 'booking' | 'stay'
   submissionId: string
   /** Who the conversation is with: the contact's recorded name, or the channel's title for a channel thread. */
@@ -273,7 +274,7 @@ async function buildOwnerInboxUrl(
   const submissionType = opts.tab === 'contact' ? 'contact' : 'booking'
   const thread = await getGuestRequest(db, opts.submissionId, opts.organizationId, submissionType)
   if (!thread) throw destinationUnavailable('submission_id', opts.submissionId)
-  await publishGuestInboxThreadEvent(env, db, { threadId: thread.id, type: 'thread.created' })
+  await publishConversationEvent(env, db, { conversationId: thread.id, type: 'MESSAGE_CREATE' })
   return await buildOwnerThreadInboxUrl(env, db, {
     organizationId: opts.organizationId,
     locationId: opts.locationId,
@@ -365,21 +366,15 @@ async function resolveOwnerRecipients(
   return recipients
 }
 
-async function publishAssignedConversationAlert(
-  env: NotificationEnv,
-  recipients: NotificationRecipient[],
-  organizationId: string,
-  locationId: string | null,
-) {
-  await Promise.all(recipients.filter(recipient => !recipient.organizationWide).map(recipient =>
-    publishNotificationInvalidation(env, { type: 'notification.created', organizationId, locationId, targetUserId: recipient.userId })))
+/** The message an email's reply address names: the delivery it is recorded on. */
+function requireDeliveryMessage(delivery: ThreadDeliveryContext | null | undefined): string {
+  if (!delivery || !('messageId' in delivery.subject)) throw new Error('A reply address names a message, and this email is not the delivery of one')
+  return delivery.subject.messageId
 }
 
-
-/** The conversation entry an email's reply address names: the delivery it is recorded on. */
-function requireDeliveryEntry(delivery: ThreadDeliveryContext | null | undefined): string {
-  if (!delivery) throw new Error('A reply address names a conversation entry, and this email has no conversation delivery')
-  return delivery.entryId
+/** Open apps redraw the conversation a receipt changed. */
+async function publishReceipt(env: NotificationEnv, db: DbClient, delivery: ThreadDeliveryContext) {
+  if (delivery.conversationId) await publishConversationEvent(env, db, { conversationId: delivery.conversationId, type: 'MESSAGE_UPDATE' })
 }
 
 async function sendEmailNotification(
@@ -388,7 +383,7 @@ async function sendEmailNotification(
   opts: Omit<OrganizationContext, 'organizationId'> & { organizationId: string | null } & {
     locationId?: string | null
     to: string
-    /** Who a reply to this email speaks as; the address names the delivery's conversation entry. */
+    /** Who a reply to this email speaks as; the address names the delivery's message. */
     replyAs?: ReplyAs
     template: string
     title: string
@@ -397,20 +392,15 @@ async function sendEmailNotification(
     unsubscribeUrl?: string | null
     unsubscribeOneClickUrl?: string | null
     delivery?: ThreadDeliveryContext | null
-    buyerAlert?: boolean
   }
 ): Promise<void> {
   // In provider mode a reserved test address is refused by sendEmail, and the
   // refusal is this Resend delivery's recorded outcome.
   const provider = getEmailDeliveryMode(env) === 'provider' ? 'resend' : 'log_only'
   const deliveryContext = opts.delivery
-  if (opts.buyerAlert) {
-    if (!deliveryContext?.threadId) throw new Error('Buyer alert requires its guest conversation event')
-    await notifyBuyerThread(db, { threadId: deliveryContext.threadId, entryId: deliveryContext.entryId, title: opts.title, message: opts.organizationName })
-  }
   const delivery = deliveryContext
     ? await createDeliveryReceipt(db, {
-        entryId: deliveryContext.entryId,
+        subject: deliveryContext.subject,
         channel: 'email',
         provider,
         purpose: deliveryContext.purpose,
@@ -422,13 +412,13 @@ async function sendEmailNotification(
 
   const email = {
     to: opts.to, subject: opts.email.subject,
-    ...(opts.replyAs ? { replyTo: await buildReplyToAddress(env, requireDeliveryEntry(deliveryContext), opts.replyAs) } : {}),
+    ...(opts.replyAs ? { replyTo: await buildReplyToAddress(env, requireDeliveryMessage(deliveryContext), opts.replyAs) } : {}),
     html: opts.email.html, text: opts.email.text, emailPurpose: opts.email.emailPurpose,
     unsubscribeOneClickUrl: opts.unsubscribeOneClickUrl ?? null,
   }
   let result: EmailSendResult
   if (delivery) {
-    const outcome = await deliverReceiptEmail(db, { env, delivery, threadId: deliveryContext!.threadId, email }).catch(async (error: unknown) => {
+    const outcome = await deliverReceiptEmail(db, { env, delivery, threadId: deliveryContext!.conversationId, email }).catch(async (error: unknown) => {
       // The dispatcher writes a failure onto the delivery before raising it, where the thread shows it.
       const recorded = await getDeliveryById(db, delivery.id)
       if (recorded?.error) throw new RecordedDeliveryFailure(`Email delivery failed: ${recorded.error}`, { cause: error })
@@ -442,7 +432,7 @@ async function sendEmailNotification(
       result = { status: 'failed', code: 'EMAIL_DELIVERY_FAILED', error: outcome.error }
     }
   } else result = await sendEmail(env, email)
-  if (deliveryContext?.threadId) await publishGuestInboxThreadEvent(env, db, { threadId: deliveryContext.threadId, type: 'delivery.changed' })
+  if (deliveryContext) await publishReceipt(env, db, deliveryContext)
   if (result.status === 'sent') {
     console.info(provider === 'log_only' ? 'email_delivery_log_only' : 'email_delivery_sent', {
       organizationId: opts.organizationId,
@@ -465,7 +455,7 @@ async function sendWhatsAppThreadNotification(
   opts: { delivery: ThreadDeliveryContext; send: () => Promise<SendWhatsAppResult> },
 ): Promise<boolean> {
   const delivery = await createDeliveryReceipt(db, {
-    entryId: opts.delivery.entryId,
+    subject: opts.delivery.subject,
     channel: 'whatsapp',
     provider: getWhatsAppDeliveryMode(env) === 'provider' ? 'meta' : 'log_only',
     purpose: opts.delivery.purpose,
@@ -480,7 +470,7 @@ async function sendWhatsAppThreadNotification(
     providerMessageId: result.status === 'sent' ? result.messageId ?? null : null,
     error: result.status === 'skipped' ? result.reason : result.success ? null : result.error,
   })
-  if (opts.delivery.threadId) await publishGuestInboxThreadEvent(env, db, { threadId: opts.delivery.threadId, type: 'delivery.changed' })
+  await publishReceipt(env, db, opts.delivery)
   return result.success
 }
 
@@ -528,7 +518,7 @@ async function sendPushThreadNotification(
   opts: { userId: string; device: UserDevice; alert: PushAlert; delivery: ThreadDeliveryContext },
 ): Promise<void> {
   const delivery = await createDeliveryReceipt(db, {
-    entryId: opts.delivery.entryId,
+    subject: opts.delivery.subject,
     channel: 'push',
     provider: opts.device.kind === 'apns' ? 'apns' : 'web_push',
     purpose: opts.delivery.purpose,
@@ -538,7 +528,7 @@ async function sendPushThreadNotification(
 
   const record = async (outcome: { status: 'sent'; providerMessageId: string | null } | { status: 'failed'; error: string }) => {
     await recordDeliveryOutcome(db, { deliveryId: delivery.id, ...outcome })
-    if (opts.delivery.threadId) await publishGuestInboxThreadEvent(env, db, { threadId: opts.delivery.threadId, type: 'delivery.changed' })
+    await publishReceipt(env, db, opts.delivery)
   }
   let result: PushDispatch
   try {
@@ -562,10 +552,12 @@ async function dashboardPathUrl(env: NotificationEnv, db: DbClient, organization
   return `${dashboardOrigin(env, await resolveDashboardSlugs(env, db, { organizationId }))}${path}`
 }
 
+/** What a push opens: a conversation, a stay, a task, or a page. */
 type MemberNotificationTarget =
   | { kind: 'guest' | 'team'; threadId: string }
   | { kind: 'stay'; stayId: string }
-  | { kind: 'notification'; notificationId: string }
+  | { kind: 'task'; taskId: string }
+  | { kind: 'link'; url: string }
 
 /** Every member alert uses the same channel delivery and receipt implementation. */
 function memberNotificationSends(
@@ -639,19 +631,32 @@ function memberNotificationSends(
   return sends
 }
 
-async function getOpeningThreadContext(
-  db: DbClient,
-  submissionType: 'contact' | 'booking' | 'stay',
-  submissionId: string,
-): Promise<{ guestThreadId: string; sourceEntryId: string }> {
-  const thread = await getGuestRequest(db, submissionId, undefined, submissionType === 'contact' ? 'contact' : 'booking')
-  if (!thread) throw new Error('Submission notification has no canonical request')
-  const entry = await findEntryByDedupeKey(db, `request:${submissionId}:submission`)
-  if (!entry) throw new Error('Submission notification has no opening activity entry')
-  return { guestThreadId: thread.id, sourceEntryId: entry.id }
+/** A new conversation's alerts are the deliveries of its first message: the guest's words, or the booking's opening. */
+async function getOpeningThreadContext(db: DbClient, conversationId: string): Promise<DeliveryAnchor> {
+  const first = await queryFirst<{ id: string }>(db, `SELECT m.id FROM messages m JOIN conversations c ON c.id = m.conversation_id
+    WHERE m.conversation_id = ? AND c.kind IN ('contact', 'booking') ORDER BY m.sequence LIMIT 1`, [conversationId])
+  if (!first) throw new Error(`Conversation ${conversationId} has no first message for its alert`)
+  return { conversationId, subject: { messageId: first.id } }
 }
 
-type DeliveryAnchor = { guestThreadId: string | null; sourceEntryId: string }
+/** What a send is recorded on: a message of a conversation, an audit row, or a task. */
+type DeliveryAnchor = { conversationId: string | null; subject: DeliverySubject }
+const anchorId = (subject: DeliverySubject) => 'messageId' in subject ? subject.messageId : 'activityEntryId' in subject ? subject.activityEntryId : subject.taskId
+
+/**
+ * An alert about no conversation (a payout, a domain, a channel's change to a
+ * stay) is recorded on the audit row that says the owner was told, keyed by
+ * the event, so a replay finds the same row and sends nothing twice.
+ */
+async function auditAnchor(db: DbClient, input: { organizationId: string; eventKey: string; template: string; entityType: string; entityId: string; locationId?: string | null }): Promise<DeliveryAnchor> {
+  const dedupeKey = `alert:${input.eventKey}`
+  const audit = organizationEventQuery({ organizationId: input.organizationId, locationId: input.locationId ?? null, actorType: 'system', eventType: 'owner.alerted' satisfies OrganizationEventType,
+    entityType: input.entityType, entityId: input.entityId, dedupeKey, metadata: { template: input.template } })
+  await execute(db, `${audit.query} ON CONFLICT(dedupe_key) DO NOTHING`, audit.params)
+  const entry = await queryFirst<{ id: string }>(db, 'SELECT id FROM activity_entries WHERE dedupe_key = ? AND organization_id = ?', [dedupeKey, input.organizationId])
+  if (!entry) throw new Error(`The alert ${input.eventKey} has no audit row to record its deliveries on`)
+  return { conversationId: null, subject: { activityEntryId: entry.id } }
+}
 function threadDelivery(context: DeliveryAnchor, purpose: GuestThreadDeliveryPurpose, channel: NotificationChannel, template: string, recipient: string, eventKey?: string): ThreadDeliveryContext
 function threadDelivery(context: DeliveryAnchor | null, purpose: GuestThreadDeliveryPurpose, channel: NotificationChannel, template: string, recipient: string, eventKey?: string): ThreadDeliveryContext | null
 function threadDelivery(
@@ -664,40 +669,15 @@ function threadDelivery(
 ): ThreadDeliveryContext | null {
   if (!context) return null
   return {
-    threadId: context.guestThreadId,
-    entryId: context.sourceEntryId,
+    conversationId: context.conversationId,
+    subject: context.subject,
     purpose,
     idempotencyKey: eventKey
       ? createHash('sha256').update(JSON.stringify([eventKey, purpose, channel, hashEmail(recipient)])).digest('hex')
-      : `${context.sourceEntryId}:${purpose}:${channel}:${template}:${hashEmail(recipient)}`,
+      : `${anchorId(context.subject)}:${purpose}:${channel}:${template}:${hashEmail(recipient)}`,
   }
 }
 
-async function recordGuestCancellation(
-  db: DbClient,
-  input: {
-    submissionType: 'booking'
-    submissionId: string
-    organizationId: string
-    subject: string
-    body: string
-    wasConfirmed: boolean
-  },
-): Promise<{ guestThreadId: string; sourceEntryId: string }> {
-  const thread = await getGuestRequest(db, input.submissionId, undefined, input.submissionType)
-  if (!thread) throw new Error('Guest cancellation has no canonical request')
-  const entry = await appendEntry(db, {
-    threadId: thread.id,
-    kind: 'operation',
-    actorKind: 'guest',
-    channel: 'web',
-    body: input.body,
-    eventName: `${input.submissionType}.guest_cancelled`,
-    payloadJson: { subject: input.subject, wasConfirmed: input.wasConfirmed },
-    dedupeKey: `guest-cancellation:${input.submissionType}:${input.submissionId}`,
-  })
-  return { guestThreadId: thread.id, sourceEntryId: entry.id }
-}
 
 
 // Both sends are attempted before either failure is raised: an owner alert that
@@ -750,6 +730,11 @@ async function messageHero(db: DbClient, organizationId: string, owner: { type: 
   return (await loadOwnerPictures(db, organizationId, ownerType, [ownerId])).get(ownerId) ?? null
 }
 
+// An alert about a booking's schedule opens the booking, not its conversation.
+const scheduleEvents = ['new_reservation', 'new_booking', 'new_stay', 'reservation_cancelled', 'booking_cancelled', 'stay_cancelled']
+const schedulePrefixes = ['channel_stay.', 'calendar_sync.', 'booking.change_', 'reservation.change_', 'stay.change_', 'consultation.change_']
+const isScheduleNotification = (event: string) => scheduleEvents.includes(event) || schedulePrefixes.some(prefix => event.startsWith(prefix))
+
 export async function notifyOwner(
   env: NotificationEnv,
   db: DbClient,
@@ -769,15 +754,18 @@ export async function notifyOwner(
     whatsappTemplate?: WhatsAppTemplate
     submissionType?: 'contact' | 'booking' | 'invitation' | null
     submissionId?: string | null
-    notificationSource?: { threadId: string; entryId: string }
-    /** Keys the in-app notification for an event that has no guest thread. */
+    /** The message the alert is about; its deliveries are that message's. */
+    source?: { conversationId: string; messageId: string }
+    /**
+     * Keys an alert about no conversation: its deliveries are recorded on the
+     * audit row that says the owner was told about `entity`.
+     */
     idempotencyKey?: string
+    entity?: { type: string; id: string }
     /** Native financial event identity, independent of later buyer linking. */
     deliveryEventKey?: string
     /** Explicit assignment audience from the event snapshot. When supplied, no later assignee is inferred. */
     memberIds?: string[]
-    /** The in-app notification's own text and tone, for an event that states them rather than listing its facts. */
-    notification?: { message: string; severity: NotificationSeverity }
     /** KrabiClaw operator addresses copied on operational mail: routing, not a person's preference, so no opt-out link. */
     operatorEmails?: string[]
     /** A conversation whose responsible members are recipients, without the event being a fact on it. */
@@ -792,42 +780,31 @@ export async function notifyOwner(
     stayId?: string
   }
 ) {
-  const threadContext = opts.notificationSource
-    ? { guestThreadId: opts.notificationSource.threadId, sourceEntryId: opts.notificationSource.entryId }
-    : opts.submissionType && opts.submissionType !== 'invitation' && opts.submissionId
-      ? await getOpeningThreadContext(db, opts.submissionType, opts.submissionId)
-      : null
-  const schedule = isScheduleNotification(opts.template)
+  const opening = opts.source ? null : opts.submissionType && opts.submissionType !== 'invitation' && opts.submissionId ? opts.submissionId : null
+  const threadContext: DeliveryAnchor | null = opts.source
+    ? { conversationId: opts.source.conversationId, subject: { messageId: opts.source.messageId } }
+    : opening ? await getOpeningThreadContext(db, opening) : null
   const stayId = opts.stayId ?? opts.memberAlert?.stayId
   let scheduleUrl: string | null = null
-  if (schedule) {
+  if (isScheduleNotification(opts.template)) {
     const { orgSlug } = await resolveDashboardSlugs(env, db, { organizationId: opts.organizationId })
     if (stayId) scheduleUrl = bookingEditorPath(orgSlug, 'stay', stayId)
-    else if (threadContext && opts.submissionType === 'booking') {
-      scheduleUrl = bookingEditorPath(orgSlug, opts.submissionType, threadContext.guestThreadId)
+    else if (threadContext?.conversationId && opts.submissionType === 'booking') {
+      scheduleUrl = bookingEditorPath(orgSlug, opts.submissionType, threadContext.conversationId)
     } else throw new Error(`Schedule notification ${opts.template} has no booking destination`)
     scheduleUrl = new URL(scheduleUrl, dashboardOrigin(env, { orgSlug, locationSlug: null })).href
   }
-  const notificationId = await createCanonicalNotification(db, {
-    publishEnv: env,
-    scope: 'organization',
-    template: opts.template,
-    organizationId: opts.organizationId,
-    locationId: opts.locationId ?? null,
-    sourceEntryId: threadContext?.sourceEntryId ?? null,
-    idempotencyKey: threadContext ? `notification:${threadContext.sourceEntryId}:${opts.template}` : opts.idempotencyKey,
-    title: opts.title,
-    message: opts.notification?.message ?? opts.message.facts.map(fact => `${fact.label}: ${fact.value}`).join('\n'),
-    ...(opts.notification ? { severity: opts.notification.severity } : {}),
-    threadId: threadContext?.guestThreadId ?? null,
-    deepLink: scheduleUrl ?? (opts.payload.deep_link || null),
-    stayId,
-  })
-  const deliveryContext = threadContext ?? { guestThreadId: null, sourceEntryId: notificationId }
+  let deliveryContext: DeliveryAnchor
+  if (threadContext) deliveryContext = threadContext
+  else {
+    if (!opts.idempotencyKey || !opts.entity) throw new Error(`Alert ${opts.template} is about no conversation and names no event to record its deliveries on`)
+    deliveryContext = await auditAnchor(db, { organizationId: opts.organizationId, eventKey: opts.idempotencyKey, template: opts.template, entityType: opts.entity.type, entityId: opts.entity.id, locationId: opts.locationId })
+  }
 
   // Owners and admins hear about every booking; the member it is assigned to hears about theirs.
   const assigned = opts.memberIds === undefined && opts.submissionType === 'booking' && opts.submissionId
-    ? await queryFirst<{ assigned_member_id: string | null }>(db, 'SELECT c.assigned_member_id FROM bookings b JOIN product_booking_configs c ON c.organization_id = b.organization_id AND c.product_id = b.product_id WHERE b.organization_id = ? AND (b.request_id = ? OR b.id = ?) LIMIT 1', [opts.organizationId, opts.submissionId, opts.submissionId])
+    ? await queryFirst<{ assigned_member_id: string | null }>(db, `SELECT c.assigned_member_id FROM bookings b JOIN product_booking_configs c ON c.organization_id = b.organization_id AND c.product_id = b.product_id
+      WHERE b.organization_id = ? AND (b.id = (SELECT booking_id FROM conversations WHERE id = ?) OR b.id = ?) LIMIT 1`, [opts.organizationId, opts.submissionId, opts.submissionId])
     : null
   const recipients = await resolveOwnerRecipients(env, db, {
     organizationId: opts.organizationId,
@@ -835,9 +812,8 @@ export async function notifyOwner(
     emailPurpose: opts.message.emailPurpose,
     assignedMemberId: assigned?.assigned_member_id ?? null,
     memberIds: opts.memberIds ?? [],
-    requestId: threadContext?.guestThreadId ?? opts.responsibleRequestId,
+    requestId: threadContext?.conversationId ?? opts.responsibleRequestId,
   })
-  if (isConversationNotification(opts.template)) await publishAssignedConversationAlert(env, recipients, opts.organizationId, opts.locationId ?? null)
 
   // The owner reads mail sent for their business, framed by its own mark.
   const organizationLogoUrl = await organizationLogo(db, opts.organizationId)
@@ -846,26 +822,18 @@ export async function notifyOwner(
     primaryAction: scheduleUrl ? { ...opts.message.primaryAction, url: scheduleUrl } : opts.message.primaryAction,
   }
   const memberMessage = opts.memberAlert ? { ...opts.memberAlert.message, organizationLogoUrl } : message
-  const memberNotificationIds = new Map(await Promise.all(recipients.filter(recipient => !recipient.organizationWide && schedule).map(async recipient =>
-    [recipient.userId, await createCanonicalNotification(db, {
-        publishEnv: env, scope: 'organization', template: opts.template,
-        organizationId: opts.organizationId, locationId: opts.locationId,
-        targetUserId: recipient.userId, stayId, threadId: threadContext?.guestThreadId,
-        idempotencyKey: `${notificationId}:member:${recipient.userId}`,
-        title: memberMessage.title, message: opts.memberAlert ? memberMessage.facts.map(fact => `${fact.label}: ${fact.value}`).join('\n') : null,
-        deepLink: memberMessage.primaryAction.url,
-      })] as const)))
 
   const results = await Promise.allSettled(recipients.flatMap(recipient => {
     const projected = !recipient.organizationWide && opts.memberAlert !== undefined
+    const read = projected ? memberMessage : message
     return memberNotificationSends(env, db, recipient, {
-      ...opts, message: projected ? memberMessage : message,
+      ...opts, message: read,
       context: deliveryContext,
       pushTemplate: opts.template, whatsappTemplate: opts.whatsappTemplate ?? null,
       eventKey: opts.deliveryEventKey,
       target: stayId ? { kind: 'stay', stayId }
-        : !schedule && deliveryContext.guestThreadId ? { kind: 'guest', threadId: deliveryContext.guestThreadId }
-            : { kind: 'notification', notificationId: memberNotificationIds.get(recipient.userId) ?? notificationId },
+        : !scheduleUrl && deliveryContext.conversationId ? { kind: 'guest', threadId: deliveryContext.conversationId }
+          : { kind: 'link', url: read.primaryAction.url },
     })
   }))
   const memberEmails = new Set(recipients.map(recipient => recipient.email?.toLowerCase()))
@@ -887,7 +855,12 @@ export async function notifyOwner(
     ...results.map(result => ({ result, task: 'ownerAlert' })), ...operatorResults.map(result => ({ result, task: 'operatorCopy' }))])
 }
 
-/** Financial status mail shares the canonical notification and delivery ledger. */
+/**
+ * Financial status mail on the canonical delivery ledger: about a booking's
+ * payment it is the deliveries of the payment's message in the booking's
+ * conversation; otherwise (a payout, a payment no conversation holds) of the
+ * audit row that records the owner was told.
+ */
 export async function notifyFinancialNotification(
   env: NotificationEnv,
   db: DbClient,
@@ -895,24 +868,19 @@ export async function notifyFinancialNotification(
     organizationId: string | null
     eventKey: string
     ownerMessage?: MemberAlertMessage
-    guest?: { userId: string | null; email: string | null; message: NotificationMessage }
-    sourceEntryId?: string | null
-    threadId?: string | null
+    guest?: { email: string | null; message: NotificationMessage }
+    /** The payment's message in its booking's conversation. */
+    source?: { conversationId: string; messageId: string } | null
+    /** What the event is about, for the audit row of an event no conversation holds. */
+    entity?: { type: string; id: string }
     deepLink?: string | null
   },
 ): Promise<void> {
   if (!input.eventKey.trim()) throw new Error('Financial notification requires its native event identity')
-  if (Boolean(input.sourceEntryId) !== Boolean(input.threadId)) throw new Error('Financial conversation activity requires both its entry and thread')
-  const ownerDeliveryAnchor = async () => {
-    if (input.sourceEntryId) return input.sourceEntryId
-    if (!input.organizationId || !input.ownerMessage) throw new Error('Contact-only financial mail has no retained notification delivery anchor')
-    return await createCanonicalNotification(db, {
-      publishEnv: env, scope: 'organization', organizationId: input.organizationId,
-      template: input.eventKey, idempotencyKey: `${input.eventKey}:owner`,
-      title: input.ownerMessage.title,
-      message: input.ownerMessage.facts.map(fact => `${fact.label}: ${fact.value}`).join('\n'),
-      deepLink: input.deepLink ?? input.ownerMessage.primaryAction.url,
-    })
+  const anchor = async (): Promise<DeliveryAnchor> => {
+    if (input.source) return { conversationId: input.source.conversationId, subject: { messageId: input.source.messageId } }
+    if (!input.organizationId || !input.entity) throw new Error(`Financial mail ${input.eventKey} has neither a conversation message nor an organization event to record its deliveries on`)
+    return await auditAnchor(db, { organizationId: input.organizationId, eventKey: `${input.eventKey}:owner`, template: input.eventKey, entityType: input.entity.type, entityId: input.entity.id })
   }
   const tasks: Array<Promise<unknown>> = []
   const taskNames: string[] = []
@@ -925,38 +893,25 @@ export async function notifyFinancialNotification(
       title: input.ownerMessage.title,
       payload: { deep_link: input.deepLink ?? input.ownerMessage.primaryAction.url },
       message: input.ownerMessage,
-      notificationSource: input.sourceEntryId && input.threadId ? { entryId: input.sourceEntryId, threadId: input.threadId } : undefined,
+      source: input.source ?? undefined,
       idempotencyKey: `${input.eventKey}:owner`,
+      entity: input.entity,
       deliveryEventKey: `${input.eventKey}:owner`,
     }))
     taskNames.push('merchant')
   }
-  if (input.guest && (input.guest.userId || input.guest.email)) {
+  if (input.guest?.email) {
     const guest = input.guest
+    const to = input.guest.email
     tasks.push((async () => {
-      // The native checkout contact is an email destination, never an account
-      // identity. Only Better Auth's explicit buyer owns the personal alert.
-      const id = guest.userId
-        ? await createCanonicalNotification(db, {
-            scope: 'global', template: input.eventKey, targetUserId: guest.userId,
-            idempotencyKey: `${input.eventKey}:buyer`,
-            title: guest.message.title,
-            message: guest.message.facts.map(fact => `${fact.label}: ${fact.value}`).join('\n'),
-            deepLink: guest.message.primaryAction?.url ?? '/dashboard/account/activity',
-          })
-        : await ownerDeliveryAnchor()
-      if (!guest.email) return
-      // Mail receipts survive personal account deletion with the merchant's
-      // financial activity. Deleting a personal alert must not allow a resend.
-      const emailEntryId = input.organizationId && input.ownerMessage ? await ownerDeliveryAnchor() : id
       const rendered = await renderNotificationEmail(guest.message, {
         platformDomain: getPlatformDomain(env),
       })
       await sendEmailNotification(env, db, {
         organizationId: input.organizationId, organizationName: guest.message.organizationName,
-        to: guest.email, template: input.eventKey, title: guest.message.title, payload: {},
+        to, template: input.eventKey, title: guest.message.title, payload: {},
         email: { subject: sanitizeEmailHeaderValue(guest.message.title), ...rendered },
-        delivery: threadDelivery({ guestThreadId: input.threadId ?? null, sourceEntryId: emailEntryId }, 'status_update', 'email', input.eventKey, guest.email, `${input.eventKey}:buyer`),
+        delivery: threadDelivery(await anchor(), 'status_update', 'email', input.eventKey, to, `${input.eventKey}:buyer`),
       })
     })())
     taskNames.push('buyer')
@@ -983,7 +938,7 @@ export async function notifyContactSubmitted(
     tab: 'contact',
     submissionId: opts.contactId,
   })
-  const threadContext = await getOpeningThreadContext(db, 'contact', opts.contactId)
+  const threadContext = await getOpeningThreadContext(db, opts.contactId)
   // An inquiry's answers are part of what the guest said: they travel with the message on every channel.
   const answerLines = (words: { yes: string; no: string }) => (opts.answers ?? []).map(answer => `${answer.label}: ${formatFormAnswer(answer, words)}`)
   const ownerText = [opts.message, ...answerLines({ yes: 'Yes', no: 'No' }), opts.phone ? `Phone: ${opts.phone}` : ''].filter(Boolean).join('\n')
@@ -1035,7 +990,6 @@ export async function notifyContactSubmitted(
       title: guestMessage.title,
       payload,
       email: { subject: guestMessage.title, ...guestEmail },
-      buyerAlert: true,
       delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'contact_customer_received', opts.email),
     }),
   ])
@@ -1083,6 +1037,7 @@ export async function notifyReviewReceived(
     },
     message: ownerMessage,
     whatsappTemplate: 'new_review',
+    entity: { type: 'review', id: opts.reviewId },
     responsibleRequestId: opts.visitRequestId,
   })
 }
@@ -1096,10 +1051,10 @@ export async function notifyReviewRequest(
   // completion is pending. Retain any already-recorded receipt for this link.
   const recorded = await queryFirst<{ id: string }>(db, `
     SELECT id FROM guest_thread_deliveries
-    WHERE entry_id = ? AND channel = 'email' AND purpose = 'status_update'
+    WHERE message_id = ? AND channel = 'email' AND purpose = 'status_update'
       AND (email_json IS NULL OR instr(email_json, ?) > 0)
     ORDER BY created_at DESC, id DESC LIMIT 1
-  `, [opts.delivery.sourceEntryId, new URL(opts.reviewUrl).searchParams.get('token')])
+  `, [opts.delivery.messageId, new URL(opts.reviewUrl).searchParams.get('token')])
   const restaurant = organizationName(opts)
   const platformDomain = getPlatformDomain(env)
   const logoUrl = await organizationLogo(db, opts.organizationId)
@@ -1123,7 +1078,7 @@ export async function notifyReviewRequest(
     replyAs: { kind: 'guest' },
     template: 'booking_thank_you_review_request',
     title: `How was your visit to ${restaurant}?`,
-    delivery: { threadId: opts.delivery.guestThreadId, entryId: opts.delivery.sourceEntryId, purpose: 'status_update', idempotencyKey: recorded?.id ?? `review-request:${opts.requestId}` },
+    delivery: { conversationId: opts.delivery.conversationId, subject: { messageId: opts.delivery.messageId }, purpose: 'status_update', idempotencyKey: recorded?.id ?? `review-request:${opts.requestId}` },
     payload: {
       request_id: opts.requestId,
       booking_type: opts.bookingType,
@@ -1181,7 +1136,7 @@ export async function notifyBookingCreated(
         tab: 'bookings',
         submissionId: opts.bookingId,
       })
-  const threadContext = await getOpeningThreadContext(db, 'booking', opts.bookingId)
+  const threadContext = await getOpeningThreadContext(db, opts.bookingId)
 
   const payload = {
     booking_id: opts.bookingId,
@@ -1248,7 +1203,6 @@ export async function notifyBookingCreated(
       title: guestTitle,
       payload,
       email: { subject: guestTitle, ...guestEmail },
-      buyerAlert: true,
       delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'booking_customer_received', opts.email),
     })]),
   ])
@@ -1280,8 +1234,8 @@ async function stayTurnoverAudience(env: NotificationEnv, db: DbClient, organiza
 }
 
 /** The note a guest left when booking: their message in the booking's conversation. */
-async function guestNote(db: DbClient, requestId: string): Promise<string | null> {
-  return (await findEntryByDedupeKey(db, `request:${requestId}:guest-note`))?.body ?? null
+async function guestNote(db: DbClient, conversationId: string): Promise<string | null> {
+  return (await queryFirst<{ body: string | null }>(db, "SELECT body FROM messages WHERE conversation_id = ? AND event_name = 'thread.guest_note' ORDER BY sequence LIMIT 1", [conversationId]))?.body ?? null
 }
 
 /** Who is staying, as the host reads it: "2 adults, 1 child". */
@@ -1347,7 +1301,7 @@ export async function notifyChannelStay(env: NotificationEnv, db: DbClient, orga
   const send = (template: string, message: MemberAlertMessage, memberMessage: MemberAlertMessage, whatsappTemplate?: WhatsAppTemplate) => notifyOwner(env, db, {
     organizationId, organizationName: studio, locationId: home.location_id, template, title: message.title,
     payload: { stay_id: stay.id, revision_id: input.revisionId, deep_link: audience.stayUrl },
-    message, idempotencyKey: `notification:${eventKey}`, deliveryEventKey: eventKey, stayId: stay.id,
+    message, idempotencyKey: `notification:${eventKey}`, entity: { type: 'booking', id: stay.id }, deliveryEventKey: eventKey, stayId: stay.id,
     memberIds: audience.memberIds, memberAlert: { message: memberMessage, stayId: stay.id }, whatsappTemplate,
   })
   if (cancelled) {
@@ -1391,7 +1345,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
   if (!isCurrencyCode(stay.currency)) throw new Error('The stay has an unsupported currency')
   const home = stay.home
   const studio = organizationName({ organizationId, organizationName: organization.name })
-  const threadContext = await getOpeningThreadContext(db, 'stay', stay.request_id)
+  const threadContext = await getOpeningThreadContext(db, stay.request_id)
   const [inboxUrl, hero, logoUrl, guest, contact, audience, notes] = await Promise.all([
     buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: home.location_id, threadId: stay.request_id }),
     messageHero(db, organizationId, { type: 'product', id: home.product_id }),
@@ -1433,14 +1387,13 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
   const results = await Promise.allSettled([
     notifyOwner(env, db, {
       organizationId, organizationName: studio, locationId: home.location_id, template: 'new_stay', title: ownerMessage.title, payload, message: ownerMessage,
-      notificationSource: { threadId: threadContext.guestThreadId, entryId: threadContext.sourceEntryId },
+      source: { conversationId: stay.request_id, messageId: anchorId(threadContext.subject) },
       memberIds: audience.memberIds, memberAlert: { message: stayBookedMessage(stayTurnoverAlert(ownerInput, audience.stayUrl, memberGuestName({ name: stay.guest_name }))), stayId: stay.id },
     }),
     sendEmailNotification(env, db, {
       organizationId, organizationName: studio, locationId: home.location_id, to: stay.guest_email, replyAs: { kind: 'guest' },
       template: 'stay_customer_confirmed', title: guestTitle, payload,
       email: { subject: guestTitle, ...guestEmail },
-      buyerAlert: true,
       delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'stay_customer_confirmed', stay.guest_email),
     }),
   ])
@@ -1459,7 +1412,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
   if (!isCurrencyCode(stay.currency)) throw new Error('The stay has an unsupported currency')
   const home = stay.home
   const dedupeKey = `stay-cancellation:${stayId}`
-  let entry = await findEntryByDedupeKey(db, dedupeKey)
+  let entry = await findMessageByDedupeKey(db, dedupeKey)
   if (!entry) {
     const organization = await queryFirst<{ name: string | null }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId])
     if (!organization || !stay.guest_email || !stay.guest_name) throw new Error('A stay paid on the site needs its organization, guest name and email')
@@ -1481,10 +1434,10 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
     })
     const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain: getPlatformDomain(env) })
     const guestTitle = `${guestMessage.title} — ${guestMessage.preheader?.split(' · ')[0] ?? home.name}`
-    entry = await appendEntry(db, {
-      threadId: stay.request_id, kind: 'operation', actorKind: by === 'guest' ? 'guest' : 'member', channel: 'web', body: guestEmail.text,
+    entry = await appendMessage(db, {
+      conversationId: stay.request_id, authorKind: 'krabiclaw', authorUserId: null, channel: 'web', body: guestEmail.text,
       eventName: `stay.${by}_cancelled`, dedupeKey,
-      payloadJson: { subject: guestTitle, refund_minor: refundMinor, location_id: home.location_id,
+      payload: { subject: guestTitle, refund_minor: refundMinor, location_id: home.location_id,
         email: { to: stay.guest_email, fromName: studio, html: guestEmail.html, text: guestEmail.text },
         owner: {
           guestName: stay.guest_name, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name,
@@ -1495,13 +1448,13 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
       },
     })
   }
-  if (entry.request_id !== stay.request_id || entry.kind !== 'operation' || entry.actor_kind !== (by === 'guest' ? 'guest' : 'member') || entry.event_name !== `stay.${by}_cancelled`) throw new Error('Stay cancellation notification has a different ledger fact')
-  const stored = parseEntryPayload(entry)
+  if (entry.conversation_id !== stay.request_id || entry.author_kind !== 'krabiclaw' || entry.event_name !== `stay.${by}_cancelled`) throw new Error('Stay cancellation notification has a different message')
+  const stored = parseMessagePayload(entry)
   if (stored?.refund_minor !== refundMinor) throw new Error('Stay cancellation notification differs from its recorded refund')
   // A host cancellation has one required notice. Guest cancellations also
   // resume the host alert: a sent guest email cannot prove that alert completed.
   if (by === 'host') {
-    const receipts = await queryAll<GuestThreadDeliveryRow>(db, 'SELECT * FROM guest_thread_deliveries WHERE entry_id = ?', [entry.id])
+    const receipts = await queryAll<GuestThreadDeliveryRow>(db, 'SELECT * FROM guest_thread_deliveries WHERE message_id = ?', [entry.id])
     if (receipts.some(receipt => receipt.channel === 'email' && receipt.purpose === 'guest_acknowledgement') && receipts.every(isDeliverySent)) return
   }
   if (!isRecord(stored?.email)) throw new Error('Stay cancellation notification has no recorded email content to retry')
@@ -1517,12 +1470,12 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
   const audience = await stayTurnoverAudience(env, db, organizationId, stay, home.check_in_time)
   const ownerInput = { ...recorded.owner, channel: null, arrival: audience.arrival, stayDates: { checkIn: stay.check_in_date, checkOut: stay.check_out_date } }
   const ownerMessage = stayCancelledMessage(ownerInput)
-  const threadContext = { guestThreadId: stay.request_id, sourceEntryId: entry.id }
+  const threadContext: DeliveryAnchor = { conversationId: stay.request_id, subject: { messageId: entry.id } }
   const payload = { stay_id: stay.id, organization_name: recorded.email.fromName, deep_link: recorded.owner.replyUrl ?? '' }
   const results = await Promise.allSettled([
     ...(by === 'guest' ? [notifyOwner(env, db, {
       organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, template: 'stay_cancelled', payload,
-      notificationSource: { threadId: threadContext.guestThreadId, entryId: threadContext.sourceEntryId },
+      source: { conversationId: stay.request_id, messageId: entry.id },
       title: ownerMessage.title, message: ownerMessage,
       memberIds: audience.memberIds, memberAlert: { message: stayCancelledMessage(stayTurnoverAlert(ownerInput, audience.stayUrl, memberGuestName({ name: recorded.owner.guestName }))), stayId: stay.id },
     })] : []),
@@ -1530,7 +1483,6 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
       organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, to: recorded.email.to, replyAs: { kind: 'guest' },
       template: 'stay_customer_cancelled', title: recorded.subject, payload,
       email: { subject: recorded.subject, html: recorded.email.html, text: recorded.email.text, emailPurpose: 'transactional' },
-      buyerAlert: true,
       delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'stay_customer_cancelled', recorded.email.to),
     }),
   ])
@@ -1540,7 +1492,8 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
 export async function notifyBookingCancelled(
   env: NotificationEnv,
   db: DbClient,
-  opts: BookingNotificationInput
+  /** cancellationMessageId: the one KrabiClaw message the cancellation wrote in the booking's conversation. */
+  opts: BookingNotificationInput & { cancellationMessageId: string }
 ) {
   const confirmed = Boolean(opts.wasConfirmed)
   const studio = organizationName(opts)
@@ -1592,24 +1545,15 @@ export async function notifyBookingCancelled(
     organizationLogoUrl: logoUrl,
   })
   const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain })
-  const threadContext = await recordGuestCancellation(db, {
-    submissionType: 'booking',
-    submissionId: opts.bookingId,
-    organizationId: opts.organizationId,
-    subject: guestMessage.title,
-    body: guestEmail.text,
-    wasConfirmed: confirmed,
-  })
+  const threadContext: DeliveryAnchor = { conversationId: opts.bookingId, subject: { messageId: opts.cancellationMessageId } }
 
   const results = await Promise.allSettled([
     notifyOwner(env, db, {
       ...opts,
       submissionType: 'booking',
       submissionId: opts.bookingId,
-      // The opening entry already carries the new_booking alert and a source
-      // entry holds one notification, so this one hangs off the cancellation
-      // entry recorded above.
-      notificationSource: { threadId: threadContext.guestThreadId, entryId: threadContext.sourceEntryId },
+      // The opening message carries the new_booking alert; this one is the cancellation's.
+      source: { conversationId: opts.bookingId, messageId: opts.cancellationMessageId },
       template: 'booking_cancelled',
       title: ownerMessage.title,
       payload,
@@ -1624,7 +1568,6 @@ export async function notifyBookingCancelled(
       title: guestMessage.title,
       payload,
       email: { subject: guestMessage.title, ...guestEmail },
-      buyerAlert: true,
       delivery: threadDelivery(threadContext, 'status_update', 'email', 'booking_customer_cancelled', opts.email),
     }),
   ])
@@ -1640,7 +1583,8 @@ export async function notifyBookingChangeOwner(
     threadId: string
     submissionType: 'booking' | 'stay'
     submissionId: string
-    sourceEntryId: string
+    /** The change's message in the conversation. */
+    messageId: string
     locationId: string | null
     vertical?: string | null
     /** A booking's assignment before and after, which decides the members told; a stay's members are its home's. */
@@ -1680,7 +1624,7 @@ export async function notifyBookingChangeOwner(
       status: change.status,
       deep_link: replyUrl,
     },
-    notificationSource: { threadId: opts.threadId, entryId: opts.sourceEntryId },
+    source: { conversationId: opts.threadId, messageId: opts.messageId },
     message: ownerMessage,
     memberIds: audience ? audience.memberIds
       : opts.assignment ? [...new Set([opts.assignment.beforeMemberId, ...(change.status === 'accepted' ? [opts.assignment.afterMemberId] : [])].filter((id): id is string => id !== null))]
@@ -1698,7 +1642,7 @@ export async function notifyCalendarSyncOwner(
     kind: 'event_deleted' | 'move_refused'
     threadId: string
     submissionType: 'booking'
-    sourceEntryId: string
+    messageId: string
     locationId: string | null
     guestName: string
     noun: string
@@ -1719,7 +1663,7 @@ export async function notifyCalendarSyncOwner(
     title: ownerMessage.title,
     payload: { request_id: opts.threadId, submission_type: opts.submissionType, submission_id: opts.threadId, kind: opts.kind, deep_link: replyUrl ?? '' },
     submissionId: opts.threadId,
-    notificationSource: { threadId: opts.threadId, entryId: opts.sourceEntryId },
+    source: { conversationId: opts.threadId, messageId: opts.messageId },
     message: ownerMessage,
   })
 }
@@ -1739,7 +1683,7 @@ export async function notifyGuestThreadReply(
     queryFirst<{ name: string | null }>(db, 'SELECT name FROM organization WHERE id = ?', [opts.organizationId]),
   ])
   const business = organizationName({ organizationId: opts.organizationId, organizationName: organization?.name })
-  const threadContext = { guestThreadId: opts.threadId, sourceEntryId: opts.sourceEntryId }
+  const threadContext: DeliveryAnchor = { conversationId: opts.threadId, subject: { messageId: opts.messageId } }
   const replyUrl = await buildOwnerThreadInboxUrl(env, db, {
     organizationId: opts.organizationId,
     locationId: opts.locationId,
@@ -1757,10 +1701,10 @@ export async function notifyGuestThreadReply(
 
   // Who wrote decides the alert: a guest's message carries the conversation's
   // record under it; Airbnb Support writing about a case carries none.
-  const entry = await getEntryById(db, opts.sourceEntryId)
-  if (!entry || entry.request_id !== opts.threadId) throw new Error(`Message ${opts.sourceEntryId} is not in conversation ${opts.threadId}`)
+  const entry = await getMessage(db, opts.messageId)
+  if (!entry || entry.conversation_id !== opts.threadId) throw new Error(`Message ${opts.messageId} is not in conversation ${opts.threadId}`)
   const support = isAirbnbSupportMessage(entry)
-  if (entry.actor_kind !== 'guest' && !support) throw new Error(`Message ${entry.id} is neither a guest's nor Airbnb Support's; nobody is alerted to it`)
+  if (entry.author_kind !== 'guest' && !support) throw new Error(`Message ${entry.id} is neither a guest's nor Airbnb Support's; nobody is alerted to it`)
   const { guestName, body, photos, preview, history } = await alertedMessage(db, thread, entry)
   const ownerMessage = {
     ...messageReceived({
@@ -1777,31 +1721,12 @@ export async function notifyGuestThreadReply(
   }
 
 
-  const template = `submission_reply_${opts.inboundChannel}`
-  await createCanonicalNotification(db, {
-    publishEnv: env,
-    scope: 'organization',
-    template,
-    organizationId: opts.organizationId,
-    locationId: opts.locationId ?? null,
-    sourceEntryId: opts.sourceEntryId,
-    // Keyed by the guest's entry, so a redelivered email that resolves to the
-    // same entry does not notify the owner a second time.
-    idempotencyKey: `notification:${opts.sourceEntryId}:${template}`,
-    title: ownerMessage.title,
-    message: preview,
-    threadId: threadContext.guestThreadId,
-    deepLink: payload.deep_link || null,
-  })
-
-
   const recipients = await resolveOwnerRecipients(env, db, {
     organizationId: opts.organizationId,
     category: ownerMessage.category,
     emailPurpose: ownerMessage.emailPurpose,
     requestId: opts.threadId,
   })
-  await publishAssignedConversationAlert(env, recipients, opts.organizationId, opts.locationId ?? null)
 
   const results = await Promise.allSettled(recipients.flatMap(recipient => memberNotificationSends(env, db, recipient, {
     ...opts, organizationName: business, context: threadContext,
@@ -1821,7 +1746,7 @@ const ALERT_HISTORY = 3
  * can fetch), what a list says when it has no words, and the last messages
  * before it, named as the inbox names their authors.
  */
-async function alertedMessage(db: DbClient, thread: GuestRequest, entry: GuestThreadEntryRow) {
+async function alertedMessage(db: DbClient, thread: GuestRequest, entry: MessageRow) {
   // The conversation reader depends on this module through the inbox, so it is loaded when an alert needs it.
   const [{ getGuestThreadDetail }, { inboxGuestNames }] = await Promise.all([import('~/server/domain/guest-threads/detail'), import('~/server/domain/guest-threads/inbox')])
   const detail = await getGuestThreadDetail(db, thread.id, thread.organization_id)
@@ -1851,15 +1776,15 @@ async function alertedMessage(db: DbClient, thread: GuestRequest, entry: GuestTh
   }
 }
 
-/** Channex marks an Airbnb agent's message with the role AGENT (read from a live thread, 2026-10-23); the mirror records it as the system's. */
-export function isAirbnbSupportMessage(entry: GuestThreadEntryRow): boolean {
-  const meta = entry.channel === 'airbnb' ? parseEntryPayload(entry)?.meta : null
-  return entry.actor_kind === 'system' && isRecord(meta) && meta.role === 'AGENT'
+/** Channex marks an Airbnb agent's message with the role AGENT (read from a live thread, 2026-10-23); the mirror records it as KrabiClaw's relay. */
+export function isAirbnbSupportMessage(entry: MessageRow): boolean {
+  const meta = entry.channel === 'airbnb' ? parseMessagePayload(entry).meta : null
+  return entry.author_kind === 'krabiclaw' && isRecord(meta) && meta.role === 'AGENT'
 }
 
 /** Airbnb's translation of a guest's message, which Channex sends as meta.translated_message beside the words as written. */
-function airbnbTranslation(entry: GuestThreadEntryRow): { by: string; text: string } | null {
-  const meta = entry.channel === 'airbnb' ? parseEntryPayload(entry)?.meta : null
+function airbnbTranslation(entry: MessageRow): { by: string; text: string } | null {
+  const meta = entry.channel === 'airbnb' ? parseMessagePayload(entry).meta : null
   const text = isRecord(meta) && typeof meta.translated_message === 'string' ? meta.translated_message.trim() : ''
   return text ? { by: 'Airbnb', text } : null
 }
@@ -1870,8 +1795,8 @@ async function channelHome(db: DbClient, thread: GuestRequest) {
     FROM channel_threads t JOIN products p ON p.id = t.product_id AND p.organization_id = t.organization_id
     JOIN product_stay_configs c ON c.product_id = t.product_id AND c.organization_id = t.organization_id
     JOIN business_locations l ON l.id = c.location_id AND l.organization_id = c.organization_id
-    JOIN organization o ON o.id = t.organization_id WHERE t.request_id = ? AND t.organization_id = ?`, [thread.id, thread.organization_id])
-  if (!home) throw new HTTPError({ statusCode: 500, message: 'The channel conversation has no home', data: { code: 'CHANNEL_THREAD_MISSING', field: 'request_id', request_id: thread.id } })
+    JOIN organization o ON o.id = t.organization_id WHERE t.conversation_id = ? AND t.organization_id = ?`, [thread.id, thread.organization_id])
+  if (!home) throw new HTTPError({ statusCode: 500, message: 'The channel conversation has no home', data: { code: 'CHANNEL_THREAD_MISSING', field: 'conversation_id', conversation_id: thread.id } })
   return home
 }
 
@@ -1901,7 +1826,8 @@ async function conversationRecord(db: DbClient, thread: GuestRequest): Promise<C
   if (thread.kind !== 'booking') return null
   const stay = await queryFirst<{ product_id: string; product_name: string; adults: number | null; children: number | null; infants: number | null; starts_at: string; ends_at: string; timezone: string; nights: number }>(db,
     `SELECT b.product_id, p.name AS product_name, b.adults, b.children, b.infants, b.starts_at, b.ends_at, b.timezone, b.product_session_id IS NULL AS nights
-      FROM bookings b JOIN products p ON p.id = b.product_id AND p.organization_id = b.organization_id WHERE b.organization_id = ? AND b.request_id = ?`, [thread.organization_id, thread.id])
+      FROM bookings b JOIN products p ON p.id = b.product_id AND p.organization_id = b.organization_id
+      WHERE b.organization_id = ? AND b.id = (SELECT booking_id FROM conversations WHERE id = ?)`, [thread.organization_id, thread.id])
   if (stay && stay.nights !== 1) return null
   if (stay) {
     if (stay.adults === null || stay.children === null || stay.infants === null) throw new Error(`The stay of conversation ${thread.id} has no party breakdown`)
@@ -1909,28 +1835,26 @@ async function conversationRecord(db: DbClient, thread: GuestRequest): Promise<C
       checkIn: bookingDay(stay.starts_at, stay.timezone), checkOut: bookingDay(stay.ends_at, stay.timezone), guests: stayParty({ adults: stay.adults, children: stay.children, infants: stay.infants }), replyBy: null }
   }
   if (!thread.payload.participant) return null
-  const asked = await queryFirst<GuestThreadEntryRow>(db, `SELECT * FROM activity_entries WHERE request_id = ? AND event_name = 'channel.inquiry_received'
-    ORDER BY sequence DESC, occurred_at DESC, id DESC LIMIT 1`, [thread.id])
-  if (!asked) return null
-  const payload = z.object({ check_in_date: z.string(), check_out_date: z.string(), adults: z.number().int(), children: z.number().int(), infants: z.number().int(), pets: z.number().int(), respond_by: z.string() }).parse(parseEntryPayload(asked))
+  // The inquiry is the conversation's own: the dates and party the guest asked about before booking.
+  if (thread.kind !== 'booking' || !thread.payload.inquiry) return null
+  const payload = z.object({ check_in_date: z.string(), check_out_date: z.string(), adults: z.number().int(), children: z.number().int(), infants: z.number().int(), pets: z.number().int(), respond_by: z.string() }).parse(thread.payload.inquiry)
   return inquiryRecord(db, thread, { checkInDate: payload.check_in_date, checkOutDate: payload.check_out_date, adults: payload.adults, children: payload.children,
     infants: payload.infants, pets: payload.pets, respondBy: payload.respond_by })
 }
 
 /** An Airbnb guest asked about dates: the owners, and the members who look after the home, are told the guest's words, the request and Airbnb's deadline. */
-export async function notifyAirbnbInquiry(env: NotificationEnv, db: DbClient, input: { threadId: string; entryId: string; inquiry: AirbnbInquiry }) {
+/** `messageId` is the guest's message that asked, which carries the inquiry. */
+export async function notifyAirbnbInquiry(env: NotificationEnv, db: DbClient, input: { threadId: string; messageId: string; inquiry: AirbnbInquiry }) {
   const thread = await getGuestRequest(db, input.threadId)
   if (!thread) throw new Error(`Inquiry conversation ${input.threadId} does not exist`)
   if (thread.blocked_at !== null) return
-  // The conversation is mirrored before its inquiry is recorded, so the guest's words that asked are already in it.
-  const asked = await queryFirst<GuestThreadEntryRow>(db, `SELECT * FROM activity_entries WHERE request_id = ? AND kind = 'message' AND actor_kind = 'guest'
-    AND sequence < (SELECT sequence FROM activity_entries WHERE id = ? AND request_id = ?) ORDER BY sequence DESC LIMIT 1`, [thread.id, input.entryId, thread.id])
-  if (!asked?.body?.trim()) throw new HTTPError({ statusCode: 500, message: 'The inquiry conversation has no message from the guest', data: { code: 'CHANNEL_INQUIRY_MESSAGE_MISSING', field: 'request_id', request_id: thread.id } })
+  const asked = await getMessage(db, input.messageId)
+  if (!asked || asked.conversation_id !== thread.id || asked.author_kind !== 'guest' || !asked.body?.trim()) throw new HTTPError({ statusCode: 500, message: 'The inquiry conversation has no message from the guest', data: { code: 'CHANNEL_INQUIRY_MESSAGE_MISSING', field: 'request_id', request_id: thread.id } })
   const [home, record, replyUrl, photos] = await Promise.all([
     channelHome(db, thread),
     inquiryRecord(db, thread, input.inquiry),
     buildOwnerThreadInboxUrl(env, db, { organizationId: thread.organization_id, threadId: thread.id }),
-    listMessagePhotos(db, 'activity_entry', [asked.id]).then(found => found.get(asked.id) ?? []),
+    listMessagePhotos(db, 'message', [asked.id]).then(found => found.get(asked.id) ?? []),
   ])
   const message = inquiryReceivedMessage({
     guestName: input.inquiry.guestName, message: asked.body.trim(), translation: airbnbTranslation(asked), record, replyUrl,
@@ -1940,15 +1864,15 @@ export async function notifyAirbnbInquiry(env: NotificationEnv, db: DbClient, in
   await notifyOwner(env, db, {
     organizationId: thread.organization_id, organizationName: message.organizationName, locationId: thread.location_id,
     template: 'channel_inquiry', title: message.title, payload: { request_id: thread.id, live_feed_event_id: input.inquiry.id, deep_link: replyUrl },
-    notificationSource: { threadId: thread.id, entryId: input.entryId }, message, whatsappTemplate: 'guest_thread_reply_whatsapp',
+    source: { conversationId: thread.id, messageId: asked.id }, message, whatsappTemplate: 'guest_thread_reply_whatsapp',
   })
 }
 
 export interface TeamMessageNotificationInput {
   organizationId: string
   threadId: string
-  /** The message's organization audit entry; every delivery receipt hangs off it. */
-  entryId: string
+  /** The team message; every delivery receipt is its. */
+  messageId: string
   senderName: string
   /** The message's words, or what it sent when it has none. */
   messagePreview: string
@@ -1972,7 +1896,7 @@ export async function notifyTeamMessage(env: NotificationEnv, db: DbClient, inpu
     organizationId: input.organizationId, category: message.category, emailPurpose: message.emailPurpose,
     memberIds: members.filter(member => recipientIds.has(member.userId)).map(member => member.id),
   })).filter(recipient => recipientIds.has(recipient.userId))
-  const context = { guestThreadId: null, sourceEntryId: input.entryId }
+  const context: DeliveryAnchor = { conversationId: input.threadId, subject: { messageId: input.messageId } }
   const results = await Promise.allSettled(recipients.flatMap(recipient => memberNotificationSends(env, db, recipient, {
     organizationId: input.organizationId, organizationName: organization.name,
     context, template: 'team_message', pushTemplate: 'team_message',
@@ -2009,7 +1933,7 @@ export async function notifyOrganizationInvited(
     eventType: 'member.invited', entityType: 'invitation', entityId: opts.invitationId,
     dedupeKey: eventKey, metadata: { role: opts.role } })
   await execute(db, `${audit.query} ON CONFLICT(dedupe_key) DO NOTHING`, audit.params)
-  const entry = await queryFirst<{id:string}>(db, "SELECT id FROM activity_entries WHERE dedupe_key=? AND organization_id=? AND scope_kind='organization'", [eventKey,opts.organizationId])
+  const entry = await queryFirst<{ id: string }>(db, 'SELECT id FROM activity_entries WHERE dedupe_key = ? AND organization_id = ?', [eventKey, opts.organizationId])
   if (!entry) throw new Error('Invitation delivery has no organization receipt')
 
   const rendered = await renderNotificationEmail(organizationInviteMessage({
@@ -2025,7 +1949,7 @@ export async function notifyOrganizationInvited(
     to: opts.email,
     template: 'organization_invited',
     title: `You're invited to join ${opts.organizationName}`,
-    delivery: { threadId: null, entryId: entry.id, purpose: 'status_update', idempotencyKey: `organization-invitation-email:${opts.invitationId}:${opts.expiresAt}` },
+    delivery: { conversationId: null, subject: { activityEntryId: entry.id }, purpose: 'status_update', idempotencyKey: `organization-invitation-email:${opts.invitationId}:${opts.expiresAt}` },
     payload: {
       invitation_id: opts.invitationId,
       role: opts.role,
@@ -2121,9 +2045,14 @@ export async function notifyGuestCancellation(env: NotificationEnv, db: DbClient
   const organizationId = request.organization_id
   if (record.unit !== 'slot' || !record.product_name.trim()) throw new Error('Booking cancellation delivery requires its canonical offering')
   if (request.payload.guest.name === null || request.payload.guest.email === null) throw new Error(`Booking ${record.id} was cancelled through its guest token without the guest's name and email`)
-  await publishGuestInboxThreadEvent(env, db, { threadId: request.id, type: 'thread.changed' })
+  await publishConversationEvent(env, db, { conversationId: request.id, type: 'MESSAGE_CREATE' })
+  // The cancellation's one message, which cancelBookingRequest wrote under this key.
+  const cancellation = await findMessageByDedupeKey(db, `booking:${record.id}:guest-cancel`)
+  if (!cancellation || cancellation.conversation_id !== request.id) throw new Error(`Booking ${record.id} was cancelled without its cancellation message`)
 
   const organization = await queryFirst<{ name: string | null; vertical: string | null }>(db, 'SELECT name, vertical FROM organization WHERE id = ? LIMIT 1', [organizationId])
+  // The guest's note is their own message in the conversation, its one source.
+  const note = await queryFirst<{ body: string | null }>(db, 'SELECT body FROM messages WHERE conversation_id = ? AND event_name = ?', [request.id, GUEST_NOTE_EVENT])
   await notifyBookingCancelled(env, db, {
     organizationId: request.organization_id, organizationName: organization?.name, vertical: organization?.vertical ?? null,
     locale: request.payload.guest.locale,
@@ -2131,16 +2060,16 @@ export async function notifyGuestCancellation(env: NotificationEnv, db: DbClient
     email: request.payload.guest.email, guestPhone: request.payload.guest.phone,
     productId: record.product_id, productKind: record.product_kind, productTitle: record.product_name,
     startsAt: record.starts_at, timezone: record.timezone, partySize: record.party_size, partySizeIsMinimum: record.party_size_is_minimum,
-    notes: request.payload.notes, wasConfirmed: cancelled.wasConfirmed,
+    notes: note?.body ?? null, wasConfirmed: cancelled.wasConfirmed, cancellationMessageId: cancellation.id,
   })
 }
 
 /**
- * Tell the people a task is now theirs, or that its window starts today: an
- * in-app notification addressed to each, and their own Email, WhatsApp and
- * Push for the Tasks category. The task opens on Today.
+ * Tell the people a task is now theirs, or that its window starts today, by
+ * their own Email, WhatsApp and Push for the Tasks category, each send
+ * recorded on the task. The task opens on Today.
  */
-async function notifyTaskPeople(env: NotificationEnv, db: DbClient, input: { organizationId: string; taskId: string; recipientUserIds: string[]; kind: 'assigned' | 'starting'; actorUserId: string | null; eventKey: string }): Promise<void> {
+async function notifyTaskPeople(env: NotificationEnv, db: DbClient, input: { organizationId: string; taskId: string; recipientUserIds: string[]; actorUserId: string | null } & ({ kind: 'assigned'; eventKey: string } | { kind: 'starting'; day: string })): Promise<void> {
   const recipientIds = new Set(input.recipientUserIds)
   if (!recipientIds.size) return
   const { describeTaskForAlert } = await import('~/server/domain/tasks')
@@ -2157,19 +2086,15 @@ async function notifyTaskPeople(env: NotificationEnv, db: DbClient, input: { org
   const results = await Promise.allSettled([...recipientIds].map(async (userId) => {
     const task = await describeTaskForAlert(db, input.organizationId, input.taskId, userId)
     const message = { ...taskAlertMessage({ kind: input.kind, actorName: actor?.name ?? null, task, organizationName: organization.name, taskUrl }), organizationLogoUrl }
-    const notificationId = await createCanonicalNotification(db, {
-      publishEnv: env, scope: 'organization', template: input.kind === 'assigned' ? 'task_assigned' : 'task_starting',
-      organizationId: input.organizationId, locationId: task.locationId, targetUserId: userId,
-      idempotencyKey: `${input.eventKey}:${userId}`, title: message.title,
-      message: message.facts.map(fact => `${fact.label}: ${fact.value}`).join('\n'), deepLink: taskUrl,
-    })
     const recipient = recipients.find(item => item.userId === userId)
     if (!recipient) return
     const sends = memberNotificationSends(env, db, recipient, {
       organizationId: input.organizationId, organizationName: organization.name, locationId: task.locationId,
-      context: { guestThreadId: null, sourceEntryId: notificationId }, template: input.kind === 'assigned' ? 'task_assigned' : 'task_starting', pushTemplate: input.kind === 'assigned' ? 'task_assigned' : 'task_starting',
+      // An assignment's sends are keyed by its version; a start's by its day, which taskStartingSent reads.
+      context: { conversationId: null, subject: { taskId: input.taskId } }, eventKey: input.kind === 'assigned' ? `${input.eventKey}:${userId}` : undefined,
+      template: input.kind === 'assigned' ? 'task_assigned' : `task_starting:${input.day}`, pushTemplate: input.kind === 'assigned' ? 'task_assigned' : `task_starting:${input.day}`,
       whatsappTemplate: 'guest_thread_reply_whatsapp', payload: { task_id: input.taskId, deep_link: taskUrl }, message,
-      target: { kind: 'notification', notificationId },
+      target: { kind: 'task', taskId: input.taskId },
     })
     const outcomes = await Promise.allSettled(sends)
     raiseUnrecordedOwnerAlertFailures('notifyTaskPeople', `task ${input.taskId}`, outcomes.map(result => ({ result, task: 'taskAlert' })))
@@ -2185,6 +2110,11 @@ export async function notifyTaskAssigned(env: NotificationEnv, db: DbClient, inp
 
 /** A job an owner or admin keeps for themselves starts today: the task alert, once per day. The organization's jobs wake sends it. */
 export async function notifyTaskStarting(env: NotificationEnv, db: DbClient, input: { organizationId: string; taskId: string; day: string; recipientUserIds: string[] }): Promise<void> {
-  await notifyTaskPeople(env, db, { organizationId: input.organizationId, taskId: input.taskId, recipientUserIds: input.recipientUserIds, kind: 'starting', actorUserId: null, eventKey: `task-starting:${input.taskId}:${input.day}` })
+  await notifyTaskPeople(env, db, { organizationId: input.organizationId, taskId: input.taskId, recipientUserIds: input.recipientUserIds, kind: 'starting', actorUserId: null, day: input.day })
+}
+
+/** Whether a task's start alert for this day already went out on some channel: its sends are keyed by task, alert and day. */
+export async function taskStartingSent(db: DbClient, taskId: string, day: string): Promise<boolean> {
+  return Boolean(await queryFirst(db, 'SELECT 1 FROM guest_thread_deliveries WHERE task_id = ? AND id GLOB ?', [taskId, `${taskId}:owner_alert:*:task_starting:${day}:*`]))
 }
 
