@@ -50,7 +50,8 @@ value) and managed ad spend are queued in `payment_usage_events` and delivered
 by `deliverPaymentsUsage` (`server/domain/payments/usage.ts`) as Stripe meter
 events on the business's own customer, timestamped when they are sent so they
 land in the open period. Each event's identifier and idempotency key derive
-from its source, so a repeat after a lost answer is the same event
+from its source, and Stripe takes a repeat of an identifier within at least
+24 hours as the same event
 ([meter event identifier](https://docs.stripe.com/api/billing/meter-event/create#create_billing_meter_event-identifier)).
 Payments → Plan reads the fee rates from the subscription's own metered prices.
 

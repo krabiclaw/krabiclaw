@@ -29,8 +29,9 @@ interface UsageEvent { id: string; payment_id: string | null; kind: UsageKind; c
 /**
  * Send each undelivered usage event to its meter, timestamped now so it lands
  * in the period Stripe has open; a cost correction is a negative value. The
- * identifier and idempotency key are the source's, so a repeat after a lost
- * answer is the same event. An event Stripe does not take keeps the reason and
+ * identifier and idempotency key are the source's, and Stripe takes a repeat
+ * of an identifier within at least 24 hours as the same event
+ * (https://docs.stripe.com/api/billing/meter-event/create). An event Stripe does not take keeps the reason and
  * the others are still sent; the delivery then fails with every reason, and
  * the next delivery sends those events again.
  */

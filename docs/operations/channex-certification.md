@@ -84,8 +84,9 @@ The write path Channex will ask to see:
    listing chooser and tap **Full sync** beside that home's name. It requires
    an owner or admin with channel sync access. It verifies canonical defaults,
    repairs differing metadata if needed, then sends one restrictions and one
-   availability task. It does not reimport Airbnb content. Wait for its result;
-   if delivery is pending, read the reason; the next delivery sends it.
+   availability task. It does not reimport Airbnb content. Wait until every
+   night is `pushed`: a pending night names its reason and goes with the next
+   delivery, and a `needs_review` night names what Channex refused.
    Do this before tests 2 to 10: full sync records what Channex holds for every
    night, so each later save sends only the field the test changes. The home's
    existing connection and mapping stay in place throughout.
