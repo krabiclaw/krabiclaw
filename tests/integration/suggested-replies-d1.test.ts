@@ -84,3 +84,42 @@ test('suggested replies meter each generation and one acceptance per generation,
     await runtime.dispose()
   }
 })
+
+test('a table reservation conversation drafts from the reservation behind it', { timeout: 120000 }, async () => {
+  const runtime = new Miniflare({ workers: [{ config: {
+    name: 'suggested-replies-reservation-proof', compatibilityDate: '2024-11-01',
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
+    env: { DB: { type: 'd1' } },
+  } }] })
+  try {
+    const db = await runtime.getD1Database('DB')
+    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
+      VALUES (?, 'Robata House', 'org', 'org', '{}', 'tenant-theme-v1', 'THB', 'active', 'active', 'flat', 'restaurant', ?, 'Asia/Bangkok')`).bind(ORG, NOW).run()
+    await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Owner Person', 'owner@example.test', 1, 0, 0)").bind(OWNER).run()
+    await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('m-owner', ?, ?, 'owner', 0)").bind(ORG, OWNER).run()
+    await db.prepare("INSERT INTO business_locations (id, organization_id, slug, title, address, phone, timezone) VALUES ('loc', ?, 'robata', 'Robata House Ao Nang', ?, '+66 75 000 000', 'Asia/Bangkok')")
+      .bind(ORG, JSON.stringify({ regionCode: 'TH', addressLines: ['325'], sublocality: 'Ao Nang', locality: 'Krabi', postalCode: '81180' })).run()
+    const payload = JSON.stringify({ guest: { name: 'Xavi Roca', email: 'xavi@example.test', phone: '+34600000000', locale: 'en' }, notes: '', ip_hash: null, party_size_is_minimum: false, answers: [],
+      cancellation: { token_hash: 'hash', expires_at: '2026-12-08T12:55:04.443Z', used_at: null } })
+    await db.prepare("INSERT INTO requests (id, kind, organization_id, location_id, payload_json, created_at, updated_at) VALUES ('reservation-thread', 'reservation', ?, 'loc', ?, ?, ?)").bind(ORG, payload, NOW, NOW).run()
+    await db.prepare(`INSERT INTO reservations (id, organization_id, location_id, request_id, timezone, starts_at, ends_at, party_size, status, created_at, updated_at)
+      VALUES ('table', ?, 'loc', 'reservation-thread', 'Asia/Bangkok', '2026-11-08T13:30:00.000Z', '2026-11-08T15:30:00.000Z', 2, 'confirmed', ?, ?)`).bind(ORG, NOW, NOW).run()
+    await db.prepare(`INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, channel, body, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
+      VALUES ('opening', 'reservation-thread', 'message', 'request', 'system', 'web', 'Table for 2 on Sun, Nov 8 at 8:30 PM at Robata House Ao Nang. Xavi Roca, +34 600 000 000.', 'thread.opening', '{}', 'opening', 1, ?, ?)`).bind(NOW, NOW).run()
+
+    const prompts: string[] = []
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), AI: { run: async (_model: string, input: { messages: { content: string }[] }) => {
+      prompts.push(input.messages.at(-1)!.content)
+      return { response: '["See you at 8:30, Xavi!"]', usage: { prompt_tokens: 90, completion_tokens: 8 } }
+    } } } as unknown as CloudflareEnv
+    const principal = memberAccessPrincipal({ userId: OWNER, organizationId: ORG, role: 'owner' }, { env })
+    await suggestGuestReplies(db, env as unknown as Record<string, unknown>, principal, 'reservation-thread')
+    const facts = JSON.parse(prompts[0]!.slice(prompts[0]!.indexOf('{'))) as Record<string, unknown>
+    assert.deepEqual(facts.booking, { kind: 'reservation', status: 'confirmed', offering: null, location: 'Robata House Ao Nang', address: '325, Ao Nang, Krabi, 81180', phone: '+66 75 000 000',
+      partySize: 2, timezone: 'Asia/Bangkok', startsAt: '2026-11-08 20:30', endsAt: '2026-11-08 22:30', noShow: false })
+    assert.deepEqual(facts.messages, [{ from: 'guest', at: NOW, text: 'Table for 2 on Sun, Nov 8 at 8:30 PM at Robata House Ao Nang. Xavi Roca, +34 600 000 000.' }])
+  } finally {
+    await runtime.dispose()
+  }
+})

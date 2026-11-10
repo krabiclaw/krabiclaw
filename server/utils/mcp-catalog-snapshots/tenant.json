@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:8fee0a81f71bd1ac8a8aab462e5d66c9ab83654a49767caa08aea8d5e0dd1231",
-  "documentationFingerprint": "sha256:127bfe2bda32e91c15681275aafbe1a77c4a030d73cc03024776a34fc8c7e9d5",
+  "fingerprint": "sha256:db26ef9a50e4a28845e5c819517cbe296b69e87effcd4a4df3ba781c4ebb9b56",
+  "documentationFingerprint": "sha256:b85a2ca48fd06faac8631fcc370054d429742674516f18a48373dcb387957c3f",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -48786,7 +48786,7 @@
     {
       "name": "get_guest_messaging_context",
       "title": "Get guest messaging context",
-      "description": "Read the actual home and optional stay behind a canonical guest conversation, including private check-in instructions the host may choose to share. Contact conversations may have no home or stay; channel inquiries can have a home without a booked stay.",
+      "description": "Read the actual home and optional stay, or the class, consultation or table reservation, behind a canonical guest conversation, including private check-in instructions the host may choose to share. Contact conversations have none of these; channel inquiries can have a home without a booked stay.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -48810,6 +48810,83 @@
         "$defs": {},
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
+          "booking": {
+            "additionalProperties": false,
+            "properties": {
+              "address": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "endsAt": {
+                "description": "Local date and time, YYYY-MM-DD HH:mm, in timezone.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "booking",
+                  "reservation"
+                ],
+                "type": "string"
+              },
+              "location": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "noShow": {
+                "type": "boolean"
+              },
+              "offering": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "partySize": {
+                "type": "integer"
+              },
+              "phone": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "startsAt": {
+                "description": "Local date and time, YYYY-MM-DD HH:mm, in timezone.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "status": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "timezone": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "status",
+              "offering",
+              "location",
+              "address",
+              "phone",
+              "partySize",
+              "timezone",
+              "startsAt",
+              "endsAt",
+              "noShow"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "home": {
             "additionalProperties": false,
             "properties": {
@@ -48968,7 +49045,8 @@
         "required": [
           "requestId",
           "home",
-          "stay"
+          "stay",
+          "booking"
         ],
         "type": "object"
       },
