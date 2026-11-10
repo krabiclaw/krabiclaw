@@ -16,12 +16,11 @@ import { ingestStripeFeeReport, stripeFeeMinor, stripeFeeScaled } from '../../se
 import { buyerActivities, buyerPaymentActivityPath, claimCheckoutReturn, tokenHash } from '../../server/domain/payments/buyer.ts'
 import { loadBuyerBookingDetails } from '../../server/utils/dashboard-booking-details.ts'
 import { cancelBookingRequest, requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
-import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
+import { appendMessage, markConversationRead } from '../../server/domain/conversations.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
 import { getInboxThread } from '../../server/domain/guest-threads/inbox.ts'
-import { listGuestThreads } from '../../server/domain/guest-threads/repository.ts'
+import { archiveConversation, listConversations } from '../../server/domain/guest-threads/repository.ts'
 import { receiveGuestWebReply } from '../../server/domain/guest-threads/inbound-email.ts'
-import { acknowledgeBuyerThreadEntries } from '../../server/utils/notification-acknowledgement.ts'
 import { retainPaymentsForTenantDeletion } from '../../server/domain/payments/retention.ts'
 import { deliverPaymentsUsage, paymentsUsage } from '../../server/domain/payments/usage.ts'
 import { agreeToService, endService, listServices, SERVICE_TERMS_VERSION } from '../../server/utils/organization-services.ts'
@@ -214,8 +213,8 @@ test('a checkout thread stays out of Messages until payment creates its booking'
   const provenance = { source: 'website', external_reference: null, actor_user_id: null, idempotency_key: 'checkout-key', fingerprint: 'checkout-fingerprint', guest_acknowledgement: true, creation_kind: 'checkout' as const, creation_status: 'confirmed' as const, followups_completed: false }
   const opening = { id: 'checkout-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'verified', booking_id: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com' }), provenance }, created_at: NOW }
   await db.batch(requestInsertQueries(opening, undefined, { opening: 'Class for 1 guest', note: 'A note before paying' }).map(write => db.prepare(write.query).bind(...write.params)))
-  const owner = async () => (await listGuestThreads(db, ORG, { userId: 'owner-reader' })).map(row => row.id)
-  const buyer = async () => (await listGuestThreads(db, null, { userId: 'verified', buyerAudience: true })).map(row => row.id)
+  const owner = async () => (await listConversations(db, ORG, { userId: 'owner-reader' })).map(row => row.id)
+  const buyer = async () => (await listConversations(db, null, { userId: 'verified', buyerAudience: true })).map(row => row.id)
   assert.deepEqual([await owner(), await buyer()], [[], []])
   await nameConversationBooking(db, opening.id, (await claimSessionCapacity(db, { policyJson: OPEN_TERMS_JSON, env, organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1, userId: 'verified' })).bookingId)
   assert.deepEqual([await owner(), await buyer()], [[opening.id], [opening.id]])
@@ -816,29 +815,34 @@ test('buyer Activity groups exact owned visits and immutable orders without manu
   assert.equal(retainedPayment.payments![0]!.payment.id,'visit-payment')
   assert.equal(await db.prepare("SELECT buyer_user_id FROM payments WHERE id='visit-payment'").first('buyer_user_id'),'verified')
   assert.equal(await getGuestThreadDetail(db,opening.id,ORG,{buyerUserId:'verified'}),null)
-  assert.deepEqual(await listGuestThreads(db,null,{userId:'verified',buyerAudience:true}),[])
+  assert.deepEqual(await listConversations(db,null,{userId:'verified',buyerAudience:true}),[])
  }finally{await runtime.dispose()}
 })
 
 test('buyer conversations hide merchant facts and preserve public unread receipts and immutable reply retries', {timeout:120000},async()=>{
  const {db,runtime}=await boot();try{
   const env={...await runtime.getBindings<CloudflareEnv>(),BETTER_AUTH_SECRET:'local-proof-secret-long-enough-for-auth',BETTER_AUTH_URL:'https://proof.example',STRIPE_SECRET_KEY:'sk_test_local_d1_no_stripe_requests',NUXT_PUBLIC_PLATFORM_DOMAIN:'https://proof.example',EMAIL_REPLY_SECRET:'local-reply-proof',EMAIL_DELIVERY_MODE:'log_only',WHATSAPP_DELIVERY_MODE:'log_only'}
-  const opening=requestInsertQueries({id:'buyer-conversation',kind:'contact',organization_id:ORG,location_id:null,user_id:'verified',booking_id:null,payload:{guest:{name:'Verified',email:'verified@example.com',phone:null},subject:'Sandbox conversation',message:'My question',consent_at:null,ip_hash:'private-ip-hash'},created_at:NOW })
+  // The member who answers is the business's owner, so the guest's messages alert them.
+  await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES('other-member',?,'other','owner',1)").bind(ORG).run()
+  const opening=requestInsertQueries({id:'buyer-conversation',kind:'contact',organization_id:ORG,location_id:null,user_id:'verified',booking_id:null,payload:{guest:{name:'Verified',email:'verified@example.com',phone:null},subject:'Sandbox conversation',consent_at:null,ip_hash:'private-ip-hash',answers:[]},created_at:NOW },undefined,{words:'My question'})
   await db.batch(opening.map(write=>db.prepare(write.query).bind(...write.params)))
-  const publicReply=await appendEntry(db,{threadId:'buyer-conversation',kind:'message',actorKind:'member',actorUserId:'other',channel:'web',eventName:'thread.member_reply',body:'Public host reply',payloadJson:{provider_secret:'private-diagnostic'},dedupeKey:'public-host-reply'})
-  const capture=await appendEntry(db,{threadId:'buyer-conversation',kind:'operation',actorKind:'system',eventName:'payment.payment_captured',body:'Payment received',payloadJson:{stripe_charge_id:'private-charge'},dedupeKey:'public-capture'})
-  const internal=await appendEntry(db,{threadId:'buyer-conversation',kind:'message',actorKind:'member',actorUserId:'other',channel:'system',body:'Internal staff note',dedupeKey:'internal-note'})
-  const dispute=await appendEntry(db,{threadId:'buyer-conversation',kind:'operation',actorKind:'system',eventName:'payment.dispute_created',body:'Merchant dispute diagnostic',payloadJson:{stripe_dispute_id:'private-dispute'},dedupeKey:'merchant-dispute'})
-  await db.prepare("UPDATE conversations SET archived_at=?,archived_by_user_id='other' WHERE id='buyer-conversation'").bind(NOW).run()
+  const question=(await db.prepare("SELECT id FROM messages WHERE conversation_id='buyer-conversation' AND event_name='thread.submission'").first<string>('id'))!
+  const publicReply=await appendMessage(db,{conversationId:'buyer-conversation',authorKind:'member',authorUserId:'other',channel:'web',eventName:'thread.member_reply',body:'Public host reply',payload:{provider_secret:'private-diagnostic'},dedupeKey:'public-host-reply'})
+  const capture=await appendMessage(db,{conversationId:'buyer-conversation',authorKind:'krabiclaw',authorUserId:null,eventName:'payment.payment_captured',body:'Payment received',payload:{stripe_charge_id:'private-charge'},dedupeKey:'public-capture'})
+  // A member's words that are not a reply to the guest, and a dispute: the business's alone.
+  await appendMessage(db,{conversationId:'buyer-conversation',authorKind:'member',authorUserId:'other',body:'Internal staff note',dedupeKey:'internal-note'})
+  await appendMessage(db,{conversationId:'buyer-conversation',authorKind:'krabiclaw',authorUserId:null,eventName:'payment.dispute_created',body:'Merchant dispute diagnostic',payload:{stripe_dispute_id:'private-dispute'},dedupeKey:'merchant-dispute'})
+  // A member archived it for themselves; the guest's own view does not change.
+  await archiveConversation(db,{organizationId:ORG,conversationId:'buyer-conversation',userId:'other',archived:true})
   const view=await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'verified'})
   assert(view)
-  assert.deepEqual(view.entries.filter(entry=>entry.kind!=='submission').map(entry=>entry.id),[publicReply.id,capture.id])
+  assert.deepEqual(view.entries.map(entry=>entry.id),[question,publicReply.id,capture.id])
   assert(view.entries.every(entry=>(entry.actorUserId===null||(entry.actorKind==='guest'&&entry.actorUserId==='verified'))&&entry.deliveries.length===0))
   assert.deepEqual(view.deliveryFailures,[])
   assert.deepEqual(view.availableActions,[])
   assert.equal(view.needsReply,false,'whether the business owes a reply is merchant state')
   assert.equal(view.manuallyArchived,false)
-  assert.equal(view.archivedByUserId,null)
+  assert.equal(view.archivedAt,null)
   const secrets=['private-ip-hash','private-diagnostic','private-charge','private-dispute','Internal staff note','Merchant dispute diagnostic']
   for(const secret of secrets)assert.equal(JSON.stringify(view).includes(secret),false)
   // The buyer's own conversation, as their inbox draws it, says only what the buyer may read.
@@ -848,57 +852,57 @@ test('buyer conversations hide merchant facts and preserve public unread receipt
    [['guest','You','My question'],['business','Payments','Public host reply'],['event','Payment received']])
   assert.deepEqual([thread.pending,thread.composer],[[],{channel:'email',available:true,reason:null}])
   for(const secret of secrets)assert.equal(JSON.stringify(thread).includes(secret),false,secret)
-  const inbox=await listGuestThreads(db,null,{userId:'verified',buyerAudience:true})
-  // The newest message is the internal note; the buyer's row previews the newest message they can read, unread.
-  assert.deepEqual(inbox.map(row=>[row.id,row.preview,row.previewFrom,row.guestName,row.unread]),[['buyer-conversation','Public host reply','Payments','Payments',true]])
-  assert.deepEqual(await listGuestThreads(db,null,{userId:'other',buyerAudience:true}),[])
-  assert.equal(await acknowledgeBuyerThreadEntries(db,'other','buyer-conversation',[publicReply.id,capture.id]),0)
-  assert.equal(await acknowledgeBuyerThreadEntries(db,'verified','buyer-conversation',[publicReply.id,capture.id,internal.id,dispute.id]),2)
-  assert.deepEqual((await db.prepare("SELECT parent_id,actor_user_id FROM activity_entries WHERE kind='acknowledgement' AND request_id='buyer-conversation' ORDER BY parent_id").all()).results,[{parent_id:publicReply.id,actor_user_id:'verified'},{parent_id:capture.id,actor_user_id:'verified'}].sort((a,b)=>a.parent_id.localeCompare(b.parent_id)))
-  assert.equal(await acknowledgeBuyerThreadEntries(db,'verified','buyer-conversation',[publicReply.id,capture.id]),0)
-  const readInbox=await listGuestThreads(db,null,{userId:'verified',buyerAudience:true})
+  const inbox=await listConversations(db,null,{userId:'verified',buyerAudience:true})
+  // The newest messages are the internal note and the dispute; the buyer's row previews the newest message they can read
+  // (KrabiClaw's payment message, from the business), unread.
+  assert.deepEqual(inbox.map(row=>[row.id,row.preview,row.previewFrom,row.guestName,row.unread]),[['buyer-conversation','Payment received','Payments','Payments',true]])
+  assert.deepEqual(await listConversations(db,null,{userId:'other',buyerAudience:true}),[])
+  // Opening it reads it through the newest message they were shown; what they cannot see does not keep it unread.
+  await markConversationRead(db,{organizationId:ORG,conversationId:'buyer-conversation',userId:'verified',throughMessageId:capture.id})
+  const readInbox=await listConversations(db,null,{userId:'verified',buyerAudience:true})
   assert.deepEqual(readInbox.map(row=>[row.id,row.unread]),[['buyer-conversation',false]])
-  assert.deepEqual(await listGuestThreads(db,null,{userId:'verified',buyerAudience:true,unreadOnly:true}),[])
+  assert.deepEqual(await listConversations(db,null,{userId:'verified',buyerAudience:true,unreadOnly:true}),[])
   assert.deepEqual((await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'verified'}))?.entries,view.entries)
-  assert.equal((await getGuestThreadDetail(db,'buyer-conversation',ORG))?.entries.some(entry=>entry.kind==='acknowledgement'),false)
   const input={threadId:'buyer-conversation',userId:'verified',body:'My web reply',photos:[],idempotencyKey:'buyer-reply-key'}
   await receiveGuestWebReply(env,input)
   const ledger=(await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results
   const message=ledger.find(entry=>entry.body===input.body)
   assert(message)
-  assert.equal(message.actor_user_id,'verified')
+  assert.equal(message.author_user_id,'verified')
   assert.equal(message.channel,'web')
   const ownReplyView=await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'verified'})
   assert.equal(ownReplyView?.entries.find(entry=>entry.id===message.id)?.actorUserId,'verified')
   assert(ownReplyView?.entries.every(entry=>entry.actorUserId===null||(entry.actorKind==='guest'&&entry.actorUserId==='verified')))
   // The conversation's projection: its inbox order and its reply tasks.
-  const projectionOf=async()=>({updated_at:await db.prepare("SELECT updated_at FROM conversations WHERE id='buyer-conversation'").first<string>('updated_at'),
-   tasks:(await db.prepare("SELECT dedupe_key,status,version FROM tasks WHERE subject_type='request' AND subject_id='buyer-conversation' ORDER BY dedupe_key").all()).results})
+  const projectionOf=async()=>({last_message_at:await db.prepare("SELECT last_message_at FROM conversations WHERE id='buyer-conversation'").first<string>('last_message_at'),
+   tasks:(await db.prepare("SELECT dedupe_key,status,version FROM tasks WHERE subject_type='conversation' AND subject_id='buyer-conversation' ORDER BY dedupe_key").all()).results})
   const projection=await projectionOf()
-  assert.equal(projection.updated_at,message.occurred_at)
-  const notices=(await db.prepare("SELECT * FROM activity_entries WHERE kind='notification' AND parent_id=?").bind(message.id).all()).results
-  assert.equal(notices.length,1)
+  assert.equal(projection.last_message_at,message.occurred_at)
+  // The owner's alert about it is sent once and recorded on the message.
+  const notices=(await db.prepare("SELECT * FROM guest_thread_deliveries WHERE message_id=? ORDER BY id").bind(message.id).all()).results
+  assert.deepEqual(notices.map(notice=>[notice.channel,notice.purpose,notice.status]),[['email','owner_alert','sent']])
   await receiveGuestWebReply(env,input)
   assert.deepEqual((await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results,ledger)
   assert.deepEqual(await projectionOf(),projection)
-  assert.deepEqual((await db.prepare("SELECT * FROM activity_entries WHERE kind='notification' AND parent_id=?").bind(message.id).all()).results,notices)
+  assert.deepEqual((await db.prepare("SELECT * FROM guest_thread_deliveries WHERE message_id=? ORDER BY id").bind(message.id).all()).results,notices)
   await assert.rejects(()=>receiveGuestWebReply(env,{...input,body:'Changed message'}),error=>error instanceof HTTPError&&error.statusCode===409)
   await assert.rejects(()=>receiveGuestWebReply(env,{...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===404)
+  // The conversation now belongs to another account: the key names the earlier owner's message, so their retry is refused and writes nothing.
   await db.prepare("UPDATE conversations SET user_id='other' WHERE id='buyer-conversation'").run()
-  await receiveGuestWebReply(env,{...input,userId:'other'})
+  await assert.rejects(()=>receiveGuestWebReply(env,{...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===409)
   assert.deepEqual((await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results,ledger)
   const previousActorView=await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'other'})
   assert(previousActorView?.entries.every(entry=>entry.actorUserId===null))
   await assert.rejects(()=>receiveGuestWebReply(env,input),error=>error instanceof HTTPError&&error.statusCode===404)
-  await db.prepare('UPDATE activity_entries SET actor_user_id=NULL WHERE id=?').bind(message.id).run()
+  await db.prepare('UPDATE messages SET author_user_id=NULL WHERE id=?').bind(message.id).run()
   const retained=(await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results
-  await receiveGuestWebReply(env,{...input,userId:'other'})
+  await assert.rejects(()=>receiveGuestWebReply(env,{...input,userId:'other'}),error=>error instanceof HTTPError&&error.statusCode===409)
   const historicalNullView=await getGuestThreadDetail(db,'buyer-conversation',ORG,{buyerUserId:'other'})
   assert(historicalNullView?.entries.every(entry=>entry.actorUserId===null))
   await assert.rejects(()=>receiveGuestWebReply(env,input),error=>error instanceof HTTPError&&error.statusCode===404)
   assert.deepEqual((await db.prepare("SELECT * FROM messages WHERE conversation_id='buyer-conversation' ORDER BY sequence").all()).results,retained)
   assert.deepEqual(await projectionOf(),projection)
-  assert.deepEqual((await db.prepare("SELECT * FROM activity_entries WHERE kind='notification' AND parent_id=?").bind(message.id).all()).results,notices)
+  assert.deepEqual((await db.prepare("SELECT * FROM guest_thread_deliveries WHERE message_id=? ORDER BY id").bind(message.id).all()).results,notices)
  }finally{await runtime.dispose()}
 })
 
@@ -1378,7 +1382,9 @@ test('processing webhooks extend only active checkout holds and preserve capacit
 async function confirmable(db: D1Database, id: string, holdExpires: string, checkoutExpires = '2099-09-30T00:00:00.000Z') {
  await payable(db, id, checkoutExpires)
  const claim = crypto.randomUUID() + crypto.randomUUID()
- const opening = { id: `request-${id}`, kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', booking_id: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'buyer@krabiclaw-proof.com' }), created_at: NOW }
+ // A site checkout's conversation, as createProductBooking writes it; capture records the status its booking is created in.
+ const provenance = { source: 'website', external_reference: null, actor_user_id: null, idempotency_key: `checkout-${id}`, fingerprint: `fingerprint-${id}`, guest_acknowledgement: true, creation_kind: 'checkout' as const, creation_status: 'pending' as const, followups_completed: false }
+ const opening = { id: `request-${id}`, kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', booking_id: null, payload: { ...threadPayloadForGuest({ name: 'Guest', email: 'buyer@krabiclaw-proof.com' }), provenance }, created_at: NOW }
  await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
  await db.prepare("UPDATE payments SET return_token_hash=?,return_expires_at='2099-01-01T00:00:00.000Z',review_json=? WHERE id=?").bind(await tokenHash(claim), JSON.stringify({ payment_method_id: 'pm_proof', subtotal: 10000, tax: 0, tax_included: 0, surcharge: 0, total: 10000, reviewed_at: NOW }), id).run()
  await db.prepare('UPDATE payment_checkout_holds SET expires_at=?,conversation_id=? WHERE payment_id=?').bind(holdExpires, opening.id, id).run()

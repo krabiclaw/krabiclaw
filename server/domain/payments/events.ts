@@ -158,8 +158,8 @@ export async function commitBooking(db:DbClient,env:CloudflareEnv,payment:Paymen
   if(!hold.conversation_id)throw new Error('Visit hold has no guest conversation')
   if(!hold.variant_id)throw new Error('Booking hold has no offering or session')
   claim=[await sessionClaimQuery(db,{env,bookingId,organizationId:hold.organization_id,productId:hold.product_id,sessionId:hold.session_id,productVariantId:hold.variant_id,partySize:hold.quantity,userId:hold.buyer_user_id,now,chargedPaymentId:payment.id,chargedAt,policyJson:policy,answers:frozenAnswers(snapshot)}),
-   // The conversation the checkout waited in is the booking's, created in the status the booking was.
-   {query:`UPDATE conversations SET booking_id=v.id,payload_json=json_set(payload_json,'$.provenance.creation_status',v.status) FROM bookings v
+   // The conversation the checkout waited in is the booking's; an operator's checkout records the status the booking was created in.
+   {query:`UPDATE conversations SET booking_id=v.id,payload_json=CASE WHEN json_type(payload_json,'$.provenance')='object' THEN json_set(payload_json,'$.provenance.creation_status',v.status) ELSE payload_json END FROM bookings v
      WHERE v.id=? AND conversations.id=? AND conversations.organization_id=v.organization_id AND conversations.kind='booking' AND conversations.booking_id IS NULL`,params:[bookingId,hold.conversation_id]},
    ...conversationTaskQueries(hold.conversation_id,now)]
  }else{
