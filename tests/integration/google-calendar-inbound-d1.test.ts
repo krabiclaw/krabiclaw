@@ -9,7 +9,7 @@ import { claimSessionCapacity } from '../../server/utils/availability.ts'
 import { readCalendarIntegration, storeCalendarSelection, syncCalendarOrganization } from '../../server/utils/google-calendar.ts'
 import { ensureCalendarWatch, pullCalendarChanges, readCalendarSync, resolveCalendarChannel, setCalendarReschedules, stopCalendarWatch } from '../../server/utils/google-calendar-inbound.ts'
 import { respondToBookingChange } from '../../server/domain/guest-threads/booking-changes.ts'
-import { isBuyerVisibleThreadEntry, listThreadEntries } from '../../server/domain/guest-threads/entries.ts'
+import { isGuestVisible, listConversationMessages } from '../../server/domain/conversations.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
 /** Provider I/O is intercepted: real D1/domain/delivery operations run, without live invitations. */
@@ -108,7 +108,7 @@ test('Google time changes request client approval while canonical appointments a
     assert.equal(await db.prepare("SELECT count(*) n FROM tasks WHERE kind='guest_reply' AND subject_id='thread' AND status='open'").first('n'),0,'an attorney proposal leaves no reply owed to the client')
     assert.deepEqual(events.get(eventId)?.start,{dateTime:at('14:00'),timeZone:'America/New_York'})
     const first=(await db.prepare("SELECT * FROM messages WHERE event_name='booking_change.requested'").first())!
-    assert.equal(first.actor_kind,'system')
+    assert.deepEqual([first.author_kind,first.author_user_id],['krabiclaw','owner'],'KrabiClaw records the change, naming the calendar owner who moved the event')
     const before=await respondToBookingChange(db,env,{threadId:'thread',requestId:String(first.id),buyerUserId:'buyer'})
     assert.equal(before.status,'pending')
     assert.notEqual(before.before.whenLabel,before.after.whenLabel)
@@ -120,7 +120,7 @@ test('Google time changes request client approval while canonical appointments a
     const message=JSON.parse(String(delivered.email_json)).message
     assert.equal(message.to,'jane@example.test')
     assert.match(message.html,/booking-changes\/thread\//)
-    assert.ok((await listThreadEntries(db,'thread')).filter(isBuyerVisibleThreadEntry).some(entry=>entry.id===first.id))
+    assert.ok((await listConversationMessages(db,'thread')).filter(isGuestVisible).some(entry=>entry.id===first.id))
     // Replayed stale provider notification reads the restored current event,
     // rather than producing another proposal or delivering a second email.
     changes=[firstChange]
