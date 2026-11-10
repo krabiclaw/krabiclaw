@@ -40,9 +40,21 @@ const conversationMutationResult = { type: 'object', properties: {
 async function readConversation(ctx: McpExecutorContext, requestId: string) {
   const { db, organizationId } = ctx.organization
   const detail = await getGuestThreadDetail(db, requestId, organizationId)
-  if (!detail) throw new HTTPError({ statusCode: 404, message: 'Guest conversation not found' })
+  if (!detail) {
+    throw new HTTPError({
+      statusCode: 404,
+      message: `Guest conversation '${requestId}' not found in this organization. Call list_guest_conversations to find valid conversation request IDs.`,
+      data: { code: 'CONVERSATION_NOT_FOUND', request_id: requestId, hint: 'Call list_guest_conversations to find valid conversation request IDs.' },
+    })
+  }
   const request = await getGuestRequest(db, requestId, organizationId)
-  if (!request) throw new HTTPError({ statusCode: 404, message: 'Guest conversation not found' })
+  if (!request) {
+    throw new HTTPError({
+      statusCode: 404,
+      message: `Guest conversation '${requestId}' not found in this organization. Call list_guest_conversations to find valid conversation request IDs.`,
+      data: { code: 'CONVERSATION_NOT_FOUND', request_id: requestId, hint: 'Call list_guest_conversations to find valid conversation request IDs.' },
+    })
+  }
   // Where reply_to_guest would send, by the reply operation's own rule.
   const destination = await guestReplyDestination(db, request)
   return { request_id: detail.id, type: detail.submissionType, needs_reply: detail.needsReply, archived: detail.manuallyArchived, updated_at: detail.updatedAt,
@@ -147,7 +159,13 @@ export async function handleSubmissionsTools(ctx: McpExecutorContext): Promise<u
     case 'set_guest_conversation_archived': {
       const requestId = requiredString(args, 'request_id')
       const thread = await getGuestRequest(organization.db, requestId, organization.organizationId)
-      if (!thread) throw new HTTPError({ statusCode: 404, message: 'Guest conversation not found' })
+      if (!thread) {
+        throw new HTTPError({
+          statusCode: 404,
+          message: `Guest conversation '${requestId}' not found in this organization. Call list_guest_conversations to find valid conversation request IDs.`,
+          data: { code: 'CONVERSATION_NOT_FOUND', request_id: requestId, hint: 'Call list_guest_conversations to find valid conversation request IDs.' },
+        })
+      }
       const principal = memberAccessPrincipal(organization.membership, { env: organization.env, event: ctx.event })
       await assertAssignedBookingAccess(organization.db, { ...principal, requestId: thread.id })
       if (toolName === 'set_guest_conversation_read') {

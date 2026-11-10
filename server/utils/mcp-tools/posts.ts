@@ -258,8 +258,15 @@ export async function handlePostsTools(ctx: McpExecutorContext): Promise<unknown
       return { posts: page.posts.map(post => forMcp(post, organization)), page_info: page.page_info }
     }
     case 'get_post': {
-      const post = await getPost(organization.db, env, organization.organizationId, requiredString(args, 'post_id'))
-      if (!post) throw new HTTPError({ statusCode: 404, statusMessage: 'Post not found' })
+      const postId = requiredString(args, 'post_id')
+      const post = await getPost(organization.db, env, organization.organizationId, postId)
+      if (!post) {
+        throw new HTTPError({
+          statusCode: 404,
+          statusMessage: `Post '${postId}' not found in this organization. Call list_posts to inspect valid posts.`,
+          data: { code: 'POST_NOT_FOUND', post_id: postId, hint: 'Call list_posts to inspect valid posts.' },
+        })
+      }
       return { post: forMcp(post, organization) }
     }
     case 'create_post': {
@@ -271,9 +278,16 @@ export async function handlePostsTools(ctx: McpExecutorContext): Promise<unknown
       )
     }
     case 'update_post': {
-      const post = await asMcpValidationError(() => updatePost(organization.db, env, organization.organizationId, requiredString(args, 'post_id'),
+      const postId = requiredString(args, 'post_id')
+      const post = await asMcpValidationError(() => updatePost(organization.db, env, organization.organizationId, postId,
         { changes: omit(args, ['post_id', 'organization_id', 'expected_updated_at']), expectedUpdatedAt: requiredString(args, 'expected_updated_at') }, organization.userId))
-      if (!post) throw new HTTPError({ statusCode: 404, statusMessage: 'Post not found' })
+      if (!post) {
+        throw new HTTPError({
+          statusCode: 404,
+          statusMessage: `Post '${postId}' not found in this organization. Call list_posts to inspect valid posts.`,
+          data: { code: 'POST_NOT_FOUND', post_id: postId, hint: 'Call list_posts to inspect valid posts.' },
+        })
+      }
       return renderStructuredResponse(
         { ok: true, post: forMcp(post, organization), context: await mutationContextPayload(organization, { locationId: post.location_id }) },
         `Updated post ${post.id}.`,
@@ -326,7 +340,13 @@ export async function handlePostsTools(ctx: McpExecutorContext): Promise<unknown
     case 'delete_post': {
       const postId = requiredString(args, 'post_id')
       const deleted = await deletePost(organization.db, organization.organizationId, postId, organization.userId)
-      if (!deleted) throw new HTTPError({ statusCode: 404, statusMessage: 'Post not found' })
+      if (!deleted) {
+        throw new HTTPError({
+          statusCode: 404,
+          statusMessage: `Post '${postId}' not found in this organization. Call list_posts to inspect valid posts.`,
+          data: { code: 'POST_NOT_FOUND', post_id: postId, hint: 'Call list_posts to inspect valid posts.' },
+        })
+      }
       return { post_id: postId, deleted: true }
     }
     default:
