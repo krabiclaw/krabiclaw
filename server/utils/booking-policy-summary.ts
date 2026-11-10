@@ -1,7 +1,7 @@
 import { platformLocale } from '~/shared/platform-locales'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount } from '~/shared/prices'
-import { changeNoticeMinutes, noticeDuration } from '~/shared/availability-settings'
+import { freeCancellationNoticeMinutes, noticeDuration } from '~/shared/availability-settings'
 
 export type BookingPolicySummaryType = 'reservation' | 'experience'
 
@@ -47,11 +47,10 @@ export function formatBookingPolicySummary(
 ): FormattedBookingPolicySummary {
   const t = policyMessages(locale)
   const experience = policy.policy_type === 'experience'
-  // A class's or consultation's advance notice also closes its changes and free cancellation; a table's notice governs booking only.
-  const window = noticeDuration(changeNoticeMinutes(experience ? policy.advance_notice_minutes : null), locale)
+  // A class's or consultation's advance notice also closes its free cancellation; a table's notice governs booking only.
+  const window = noticeDuration(freeCancellationNoticeMinutes(experience ? policy.advance_notice_minutes : null), locale)
   const items: FormattedBookingPolicySummaryItem[] = [
     { id: 'cancellation', text: t('cancellation', { window }) },
-    { id: 'reschedule', text: t('reschedule', { window }) },
   ]
 
   if (policy.deposit_required) {

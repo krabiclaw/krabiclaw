@@ -165,7 +165,7 @@
 
   <DashboardListItemDialog v-model:open="manageOpen" :title="`Manage ${noun}`" :show-actions="false" :error="actionError">
     <div v-if="booking" class="divide-y divide-default">
-      <NuxtLink v-if="canChangeBooking && !personalScope" :to="{ path: `${editorPath}/change`, query: route.query }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false; beginChange()"><span>Change {{ noun }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
+      <NuxtLink v-if="canChangeBooking && !personalScope" :to="{ path: `${editorPath}/change`, query: route.query }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>Change {{ noun }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
       <NuxtLink v-if="personalScope && canChangeBooking && messageTo" :to="{ path: messageTo, query: { intent: 'booking-change' } }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>{{ t('booking.request_change') }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
       <NuxtLink v-if="!purchase" :to="{ path: personalScope ? `/dashboard/account/calendar/${booking.bookingDate}` : `/dashboard/${orgSlug}/calendar/${booking.bookingDate}`, query: !personalScope && booking.locationId ? { locationId: booking.locationId } : undefined }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>View on calendar</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
       <UButton v-for="action in availableActions" :key="action.value" :label="action.label" :icon="action.icon" :color="action.color" variant="ghost" block class="justify-start py-4" :loading="pendingAction === action.value" @click="selectAction(action.value)" />
@@ -229,10 +229,7 @@
 import type { ComputedRef, InjectionKey, Ref } from 'vue'
 import type { DashboardBookingDetails, DashboardRecordType } from '~/server/utils/dashboard-booking-details'
 
-export interface BookingChangeDraft { overridePolicy: boolean; bookingDate: string; bookingTime: string; partySize: number; locationId: string; sessionId: string; sessionLabel: string; sourceUpdatedAt: string }
-export type BookingChangeField = 'date' | 'time' | 'guests' | 'location' | 'session'
-
-/** The record and the drafts its levels edit: one change request, one note. */
+/** The record and the note draft its levels edit; the change request keeps its own draft. */
 export interface BookingEditor {
   bookingType: DashboardRecordType
   refresh: () => Promise<void>
@@ -241,19 +238,6 @@ export interface BookingEditor {
   noun: ComputedRef<string>
   messageTo: ComputedRef<string | null>
   callTo: ComputedRef<string | null>
-  // the change request
-  changeDraft: Ref<BookingChangeDraft>
-  changeFields: ComputedRef<Array<{ key: string; label: string; summary: string }>>
-  changeLocation: ComputedRef<{ title: string; imageUrl?: string | null } | undefined>
-  changeDirty: ComputedRef<boolean>
-  changeValid: ComputedRef<boolean>
-  changeSaving: Ref<boolean>
-  changeError: Ref<string | null>
-  resetChangeDraft: () => void
-  /** Remembers the field's value so a cancelled field leaf can put it back. */
-  beginChangeField: (field: BookingChangeField) => void
-  cancelChangeField: (field: BookingChangeField) => void
-  sendChangeRequest: () => Promise<void>
   firstName: (name: string) => string
   // notes
   noteDraft: Ref<string>
@@ -392,44 +376,6 @@ const noShowOpen = ref(false)
 const cancelNote = ref('')
 // What a cancellation gives back: everything still captured, as Airbnb's host cancellation does.
 const refundable = computed(() => (booking.value?.payments ?? []).reduce((sum, entry) => sum + entry.payment.captured_amount - entry.payment.refunded_amount, 0))
-const changeSaving = ref(false)
-const changeDraft = useState(
-  `booking-change-draft:${orgSlug.value}:${props.bookingType}:${props.bookingId}`,
-  () => ({ overridePolicy: false, bookingDate: '', bookingTime: '', partySize: 1, locationId: '', sessionId: '', sessionLabel: '', sourceUpdatedAt: '' }),
-)
-const changeAttemptKey = ref<string | null>(null)
-const changeAttemptDraft = ref('')
-const changeFieldOriginal = ref<string | number | null>(null)
-const changeLocation = computed(() => booking.value?.locations.find(location => location.id === changeDraft.value.locationId))
-const changeDirty = computed(() => {
-  if (!booking.value) return false
-  if (changeDraft.value.partySize !== (booking.value.partySize ?? 1)) return true
-  // Only the fields this kind can actually change count as a change.
-  if (props.bookingType !== 'reservation') return changeDraft.value.sessionId !== (booking.value.sessionId ?? '')
-  return changeDraft.value.bookingDate !== booking.value.bookingDate
-    || changeDraft.value.bookingTime !== (booking.value.bookingTime ?? '').slice(0, 5)
-    || changeDraft.value.locationId !== booking.value.locationId
-})
-/**
- * What this record can be changed to.
- *
- * A reservation moves to a location, date and time. A booking moves to another
- * SESSION of its product — an occurrence that exists as a row — so its "Date
- * and time" is chosen from the product's open sessions.
- */
-const changeFields = computed(() => props.bookingType === 'reservation'
-  ? [
-      { key: 'date', label: 'Date', summary: changeDraft.value.bookingDate ? formatCalendarDate(changeDraft.value.bookingDate, 'en') : 'Choose a date' },
-      { key: 'time', label: 'Time', summary: changeDraft.value.bookingTime ? formatTime(changeDraft.value.bookingTime, 'en') : 'Choose a time' },
-      { key: 'guests', label: guestHeading.value, summary: `${changeDraft.value.partySize} ${changeDraft.value.partySize === 1 ? recordCopy.value?.guestLabel : recordCopy.value?.guestsLabelPlural}` },
-    ]
-  : [
-      { key: 'session', label: 'Date and time', summary: changeDraft.value.sessionLabel || (booking.value?.bookingDate ? `${formatCalendarDate(booking.value.bookingDate, 'en')}${booking.value.bookingTime ? ` · ${formatTime(booking.value.bookingTime, 'en')}` : ''}` : 'Choose a time') },
-      { key: 'guests', label: guestHeading.value, summary: `${changeDraft.value.partySize} ${changeDraft.value.partySize === 1 ? recordCopy.value?.guestLabel : recordCopy.value?.guestsLabelPlural}` },
-    ])
-const changeValid = computed(() => props.bookingType === 'reservation'
-  ? Boolean(changeDraft.value.bookingDate && changeDraft.value.bookingTime && changeDraft.value.locationId && Number.isInteger(changeDraft.value.partySize) && changeDraft.value.partySize > 0)
-  : Boolean((changeDraft.value.sessionId || booking.value?.sessionId) && Number.isInteger(changeDraft.value.partySize) && changeDraft.value.partySize > 0))
 const pendingAction = ref<string | null>(null)
 const actionAttempt = ref<{ draft: string; key: string } | null>(null)
 const noteDraft = ref('')
@@ -438,7 +384,6 @@ const noteSaving = ref(false)
 const noteAttemptKey = ref<string | null>(null)
 const noteAttemptDraft = ref<string | null>(null)
 const noteError = ref<string | null>(null)
-const changeError = ref<string | null>(null)
 
 function openNote(noteId: string | null) {
   openNoteId.value = noteId
@@ -447,47 +392,6 @@ function openNote(noteId: string | null) {
   noteAttemptKey.value = null
   noteAttemptDraft.value = null
   noteError.value = null
-}
-
-// The staged change lives in Nuxt state so the change index and its field leaves,
-// each a route of its own, edit one draft. It is reseeded only when it belongs
-// to an older source revision.
-watch(booking, (currentBooking) => {
-  if (currentBooking && changeDraft.value.sourceUpdatedAt !== currentBooking.updatedAt) resetChangeDraft()
-}, { immediate: true })
-
-function beginChangeField(field: BookingChangeField) {
-  changeFieldOriginal.value = changeDraft.value[draftKey(field)]
-}
-
-function cancelChangeField(field: BookingChangeField) {
-  changeError.value = null
-  if (changeFieldOriginal.value === null) return
-  const key = draftKey(field)
-  if (key === 'partySize') changeDraft.value.partySize = Number(changeFieldOriginal.value)
-  else changeDraft.value[key] = String(changeFieldOriginal.value)
-}
-
-function draftKey(field: BookingChangeField) {
-  return field === 'date' ? 'bookingDate' : field === 'time' ? 'bookingTime' : field === 'guests' ? 'partySize' : field === 'session' ? 'sessionId' : 'locationId'
-}
-
-function resetChangeDraft() {
-  if (!booking.value) return
-  changeDraft.value.bookingDate = booking.value.bookingDate
-  changeDraft.value.bookingTime = (booking.value.bookingTime ?? '').slice(0, 5)
-  changeDraft.value.overridePolicy = false
-  changeDraft.value.partySize = booking.value.partySize ?? 1
-  changeDraft.value.locationId = booking.value.locationId ?? ''
-  changeDraft.value.sessionId = booking.value.sessionId ?? ''
-  changeDraft.value.sessionLabel = ''
-  changeDraft.value.sourceUpdatedAt = booking.value.updatedAt
-  changeAttemptKey.value = null
-  changeAttemptDraft.value = ''
-}
-
-function beginChange() {
-  resetChangeDraft()
 }
 
 // Nothing to approve and nothing to mark done: a booking arrives confirmed and
@@ -600,47 +504,6 @@ async function saveNote() {
   }
 }
 
-async function sendChangeRequest() {
-  if (!changeValid.value || !changeDirty.value) return
-  const draft = JSON.stringify(changeDraft.value)
-  if (!changeAttemptKey.value || changeAttemptDraft.value !== draft) {
-    changeAttemptKey.value = crypto.randomUUID()
-    changeAttemptDraft.value = draft
-  }
-  changeSaving.value = true
-  changeError.value = null
-  try {
-    // The writer takes one shape per kind and refuses anything else, so the
-    // screen says which it is sending rather than posting a reservation-shaped
-    // body for both — which is how every change request came back a 400.
-    const proposal = props.bookingType === 'reservation'
-      ? {
-          kind: 'reservation' as const,
-          overridePolicy: changeDraft.value.overridePolicy,
-          bookingDate: changeDraft.value.bookingDate,
-          bookingTime: changeDraft.value.bookingTime,
-          partySize: changeDraft.value.partySize,
-          locationId: changeDraft.value.locationId,
-        }
-      : { kind: 'booking' as const, overridePolicy: changeDraft.value.overridePolicy, sessionId: changeDraft.value.sessionId || (booking.value?.sessionId ?? ''), partySize: changeDraft.value.partySize }
-    const response = await dashboardApi<{ booking: DashboardBookingDetails }>(
-      `/api/dashboard/bookings/${props.bookingType}/${encodeURIComponent(props.bookingId)}/changes`,
-      {
-        method: 'POST',
-        body: { ...proposal, expectedUpdatedAt: booking.value?.updatedAt, idempotencyKey: changeAttemptKey.value },
-        validate: isBookingDetailsResponse,
-      },
-    )
-    resource.value = response
-    resetChangeDraft()
-    await navigateTo({ path: editorPath.value, query: route.query })
-  } catch (cause) {
-    changeError.value = getErrorMessage(cause, 'Change request could not be sent')
-  } finally {
-    changeSaving.value = false
-  }
-}
-
 async function runAction(action: string) {
   if (!booking.value?.threadId || pendingAction.value) return
   const note = action === 'cancel' ? cancelNote.value.trim() : ''
@@ -684,17 +547,6 @@ provide(bookingEditorKey, {
   noun,
   messageTo,
   callTo,
-  changeDraft,
-  changeFields,
-  changeLocation,
-  changeDirty,
-  changeValid,
-  changeSaving,
-  changeError,
-  resetChangeDraft,
-  beginChangeField,
-  cancelChangeField,
-  sendChangeRequest,
   firstName,
   noteDraft,
   noteSaving,

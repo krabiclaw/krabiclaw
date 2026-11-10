@@ -633,7 +633,6 @@ test.describe('stateless MCP server', () => {
       await page.getByRole('dialog').locator('label[role="button"]').click()
       const terms = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Reservation policies', exact: true }) })
       await expect(terms).toContainText('Cancel free up to 24 hours before the start time.')
-      await expect(terms).toContainText('You can reschedule up to 24 hours before the start time.')
       await expect(terms).not.toContainText(/deposit/i)
     } finally {
       try {

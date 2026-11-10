@@ -675,6 +675,15 @@ test('native online review uses canonical Products, holds capacity, and releases
     }
     const confirmedDetails = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.request_id}?org=${legal.slug}`)
     expect((await confirmedDetails.json()).booking).toMatchObject({ status: 'confirmed', operationalBookingId: browserBooking.operational_booking_id })
+    // The day counts the party in the practice's own noun, and the change sheet
+    // shows that day's open times as buttons, the booked one chosen.
+    await page.goto(`${dashboard}/calendar/${day}`)
+    const dayRow = page.locator('#dashboard-panel-calendar-day').getByRole('link').filter({ hasText: 'Browser review guest' })
+    await expect(dayRow.getByText('1 client', { exact: true })).toBeVisible()
+    await page.goto(`${dashboard}/bookings/booking/${browserBooking.request_id}/change`)
+    const changeSheet = page.locator('#dashboard-panel-booking-change')
+    await expect(changeSheet.getByRole('button', { name: '2:00 PM', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await expect(changeSheet.getByRole('button', { name: 'Send request', exact: true })).toBeDisabled()
     await page.goto(`${dashboard}/bookings/booking/${browserBooking.request_id}`)
     await page.getByRole('button', { name: `Cancellation policy ${cancellationTerms}`, exact: true }).click()
     const policyDialog = page.getByRole('dialog', { name: browserBooking.policy_summary.heading, exact: true })

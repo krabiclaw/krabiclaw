@@ -1920,7 +1920,7 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page).toHaveURL(`${ORG}${context}`)
     await expectPanes(page, ['org-today'])
     await open(page, `${reservation!.to}/change${context}`)
-    await expect(page).toHaveURL(`${reservation!.to}/change/location${context}`)
+    await expect(page).toHaveURL(`${reservation!.to}/change${context}`)
     await page.locator('#dashboard-panel-booking-change').getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).toHaveURL(`${reservation!.to}${context}`)
     await page.setViewportSize(PHONE)

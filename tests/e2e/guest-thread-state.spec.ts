@@ -979,15 +979,14 @@ test('Calendar retains confirmed reservations and their detail sends one change 
       payload: { private: true, noteId: addedNotes[0]!.id, revisionId: addedNotes[0]!.id } }])
   await expect(detailPanel.getByRole('link', { name: `Edit note: ${revisedNote}`, exact: true })).toHaveAttribute('href', notePath)
 
-  // Change is a mode of the booking leaf, not a dialog over it: the action is a
-  // link, every field is a row of the same staged draft, and one footer commit
-  // sends the request the guest confirms.
+  // Change is one sheet beneath the record, as Airbnb's: the details are edited
+  // in place and one footer commit sends the request the guest confirms.
   await detailPanel.getByRole('button', { name: 'Manage reservation', exact: true }).click()
   const manage = page.getByRole('dialog', { name: 'Manage reservation', exact: true })
   await manage.getByRole('link', { name: 'Change reservation', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'What do you want to change?', exact: true })).toBeVisible()
-  await expect(page.getByText(`${firstName} confirms the change before anything moves.`)).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Change date', exact: true })).toBeVisible()
+  await expect(page.getByText(`Nothing changes until ${firstName} accepts.`)).toBeVisible()
+  await expect(page.getByLabel('Date', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Send request', exact: true })).toBeVisible()
 
   const changeContext = `?range=upcoming&locationId=${demoLocationId()}&kinds=reservation`
@@ -999,10 +998,7 @@ test('Calendar retains confirmed reservations and their detail sends one change 
   await expectStatus(beforeResponse, 200)
   const before = await beforeResponse.json() as { booking: { partySize: number; threadId: string } }
   const targetPartySize = before.booking.partySize === 99 ? 98 : before.booking.partySize + 1
-  await page.getByRole('link', { name: 'Change guests', exact: true }).click()
-  await expect(page).toHaveURL(`${baseURL}/dashboard/${demoSlug()}/bookings/reservation/${upcomingBookingId}/change/guests${changeContext}`)
   await page.getByRole('spinbutton', { name: 'Guests', exact: true }).fill(String(targetPartySize))
-  await page.getByRole('button', { name: 'Done', exact: true }).click()
   const requestedAt = new Date().toISOString()
   const requestCompleted = page.waitForResponse(response =>
     response.request().method() === 'POST'
@@ -1058,7 +1054,7 @@ test('buyer conversation approves and declines canonical changes without moving 
   try {
     await loginAs(owner, baseURL, 'user-e2e-demo-owner')
     await loginAs(page.request, baseURL, 'user-e2e-buyer')
-    // A visit is changed only 24 hours or more before it starts, so the slot sits at least two full
+    // The slot sits at least two full
     // days out whatever the location's clock says relative to this run's.
     let slot: { date: string; time: string } | null = null
     for (let offset = 3; offset <= 9 && !slot; offset++) {

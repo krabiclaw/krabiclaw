@@ -1,89 +1,176 @@
 <template>
   <!--
-    Change is a request the guest confirms: every row edits one staged draft
-    and nothing persists until Send. That is why the field leaves have no Save
-    of their own — the commit is this level's footer.
+    Airbnb's change request: one sheet, the reservation's details edited in
+    place, sent once. Nothing moves until the guest accepts.
   -->
-  <DashboardIndexPanel
+  <DashboardLeafPanel
     id="booking-change"
     title="What do you want to change?"
-    :lead="b.booking.value ? `${b.firstName(b.booking.value.guestName ?? '')} confirms the change before anything moves.` : undefined"
-    :auto-open="firstField"
-    column="leaf"
+    :lead="booking ? `Nothing changes until ${b.firstName(booking.guestName ?? '')} accepts.` : undefined"
+    save-label="Send request"
+    :saving="saving"
+    :disabled="!booking || !valid || !dirty"
+    :error="error ?? ''"
+    @save="send"
   >
-    <div v-if="b.booking.value">
-      <UAlert v-if="b.changeError.value" class="mb-6" color="error" variant="soft" icon="i-lucide-circle-alert" :description="b.changeError.value" />
-
-      <div class="flex items-center gap-4 border-t border-default pt-6">
-        <img v-if="b.changeLocation.value?.imageUrl" :src="b.changeLocation.value.imageUrl" alt="" class="size-14 shrink-0 rounded-xl object-cover">
-        <p class="min-w-0 flex-1 text-base font-medium text-highlighted">{{ b.changeLocation.value?.title }}</p>
-        <UButton
-          v-if="locationRow"
-          :to="{ path: `${level.path.value}/location`, query: route.query }"
-          icon="i-lucide-pencil"
-          aria-label="Change location"
-          color="neutral"
-          variant="soft"
-          square
-          class="shrink-0 rounded-full"
-        />
+    <div v-if="booking" class="space-y-8">
+      <div class="flex items-center gap-4">
+        <img v-if="recordImage" :src="recordImage" alt="" class="size-14 shrink-0 rounded-xl object-cover">
+        <p class="min-w-0 flex-1 text-base font-medium text-highlighted">{{ booking.resourceTitle }}</p>
       </div>
 
-      <USwitch v-model="b.changeDraft.value.overridePolicy" class="mt-6" label="Approve an exception to the change policy" />
-      <div class="mt-2 border-t border-default">
-        <NuxtLink
-          v-for="field in b.changeFields.value"
-          :key="field.key"
-          :to="{ path: `${level.path.value}/${field.key}`, query: route.query }"
-          class="flex items-center gap-4 border-b border-default py-4"
-          :aria-label="`Change ${field.label.toLowerCase()}`"
-        >
-          <span class="min-w-0 flex-1">
-            <span class="block text-base font-medium text-highlighted">{{ field.label }}</span>
-            <span class="block text-sm text-muted">{{ field.summary }}</span>
-          </span>
-          <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
-        </NuxtLink>
-      </div>
+      <section class="space-y-6 border-t border-default pt-6">
+        <h2 class="text-lg font-semibold text-highlighted">Reservation details</h2>
+
+        <template v-if="b.bookingType === 'reservation'">
+          <UFormField v-if="booking.locations.length > 1" label="Location">
+            <USelect v-model="draft.locationId" :items="booking.locations.map(location => ({ label: location.title, value: location.id }))" class="w-full" />
+          </UFormField>
+          <div class="grid grid-cols-2 gap-4">
+            <UFormField label="Date">
+              <UInput v-model="draft.date" type="date" class="w-full" />
+            </UFormField>
+            <UFormField label="Time">
+              <UInput v-model="draft.time" type="time" class="w-full" />
+            </UFormField>
+          </div>
+        </template>
+
+        <template v-else>
+          <UFormField label="Date">
+            <UInput v-model="draft.date" type="date" class="w-full" />
+          </UFormField>
+          <UFormField label="Time">
+            <p v-if="sessionsStatus === 'pending'" class="text-sm text-muted">Loading open times…</p>
+            <UAlert v-else-if="sessionsError" color="error" variant="soft" :description="getErrorMessage(sessionsError, 'Open times could not be loaded')" />
+            <p v-else-if="!times.length" class="text-sm text-muted">No open times on this day.</p>
+            <!-- The guest picker's times: a grid of pills, the chosen one filled. -->
+            <div v-else class="grid grid-cols-3 gap-2 sm:grid-cols-4">
+              <button
+                v-for="slot in times"
+                :key="slot.id"
+                type="button"
+                :disabled="slot.disabled"
+                :aria-pressed="draft.sessionId === slot.id"
+                class="flex min-h-11 items-center justify-center rounded-lg border px-2 py-2 text-sm font-medium transition-colors"
+                :class="draft.sessionId === slot.id ? 'border-inverted bg-inverted text-inverted' : slot.disabled ? 'cursor-default border-default text-muted line-through' : 'cursor-pointer border-default text-default hover:border-inverted'"
+                @click="draft.sessionId = slot.id"
+              >
+                {{ slot.label }}
+              </button>
+            </div>
+          </UFormField>
+        </template>
+
+        <UFormField :label="guestsLabel">
+          <UInputNumber v-model="draft.partySize" :min="1" :max="99" class="w-full" />
+        </UFormField>
+      </section>
+
+      <p v-if="policyLine" class="border-t border-default pt-6 text-sm text-muted">{{ policyLine }}</p>
     </div>
-
-    <template #footer>
-      <DashboardPanelFooter
-        save-label="Send request"
-        :loading="b.changeSaving.value"
-        :disabled="!b.changeValid.value || !b.changeDirty.value"
-        @cancel="cancel"
-        @save="b.sendChangeRequest"
-      />
-    </template>
-  </DashboardIndexPanel>
+  </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
 import { bookingEditorKey } from '~/components/dashboard/BookingDetails.vue'
+import type { DashboardBookingDetails } from '~/server/utils/dashboard-booking-details'
+import { addLocalDays, formatTimestamp, localDateTimeToInstant } from '~/utils/timezone'
+import { getErrorMessage } from '~/utils/errors'
+import { getVerticalCopy } from '~/utils/vertical-copy'
 
 definePageMeta({ layout: 'dashboard' })
 
-const level = useRouteLevel()
 const route = useRoute()
+const level = useRouteLevel()
+const api = useDashboardApi()
 const b = inject(bookingEditorKey)!
+const booking = computed(() => b.booking.value)
+const copy = computed(() => booking.value ? getVerticalCopy(booking.value.vertical) : null)
+const guestsLabel = computed(() => copy.value?.guestsLabelPlural.replace(/^./u, letter => letter.toUpperCase()) ?? 'Guests')
+const recordImage = computed(() => booking.value?.resourceImageUrl ?? booking.value?.locations.find(location => location.id === booking.value?.locationId)?.imageUrl ?? null)
+// The booked terms, as the guest read them: one line, not a setting here.
+const policyLine = computed(() => booking.value?.policy?.items.find(item => item.id === 'cancellation')?.text ?? null)
 
-// A reservation's Location row sits above the other fields, so it is the first row.
-const locationRow = computed(() => b.bookingType === 'reservation')
+// The page's own draft, seeded from the record each time it is opened.
+const draft = reactive({ date: '', time: '', partySize: 1, locationId: '', sessionId: '' })
+function seed(record: DashboardBookingDetails | null) {
+  if (!record) return
+  draft.date = record.bookingDate
+  draft.time = (record.bookingTime ?? '').slice(0, 5)
+  draft.partySize = record.partySize ?? 1
+  draft.locationId = record.locationId ?? ''
+  draft.sessionId = record.sessionId ?? ''
+}
+watch(() => booking.value?.updatedAt, () => seed(booking.value), { immediate: true })
 
-// The rows are deterministic fields of one request, so the pane opens the first
-// one the screen shows, the way a listing editor lands on its first section.
-const firstField = computed(() => {
-  if (!b.booking.value) return null
-  const key = locationRow.value ? 'location' : b.changeFields.value[0]?.key
-  return key ? { path: `${level.path.value}/${key}`, query: route.query } : null
+type SessionRow = { id: string; starts_at: string; timezone: string; remaining: number | null; assigned_member_id: string | null }
+const isSessionList = (value: unknown): value is { sessions: SessionRow[] } => isRecord(value) && Array.isArray(value.sessions)
+  && value.sessions.every(row => isRecord(row) && typeof row.id === 'string' && typeof row.starts_at === 'string' && typeof row.timezone === 'string' && (row.remaining === null || typeof row.remaining === 'number'))
+// The chosen day's sessions, read for that day alone, so the current one is always among them.
+const { data: sessionData, error: sessionsError, status: sessionsStatus } = await useAsyncData(
+  () => `booking-change-sessions:${booking.value?.experienceId ?? ''}:${draft.date}`,
+  () => {
+    const record = booking.value
+    if (!record || b.bookingType === 'reservation' || !record.experienceId || !/^\d{4}-\d{2}-\d{2}$/.test(draft.date)) return Promise.resolve(null)
+    const from = localDateTimeToInstant(draft.date, '00:00', record.timeZone, 'compatible').toISOString()
+    const to = localDateTimeToInstant(addLocalDays(draft.date, 1), '00:00', record.timeZone, 'compatible').toISOString()
+    return api<{ sessions: SessionRow[] }>(`/api/editor/organizations/${record.organizationId}/products/${record.experienceId}/sessions`, { query: { status: 'scheduled', from, to }, validate: isSessionList })
+  },
+  { watch: [() => draft.date] },
+)
+// One button per start time; the booked attorney's session is preferred at each.
+const times = computed(() => {
+  const record = booking.value
+  const byStart = new Map<string, SessionRow>()
+  for (const row of sessionData.value?.sessions ?? []) {
+    const current = byStart.get(row.starts_at)
+    if (!current || row.id === record?.sessionId || (current.id !== record?.sessionId && row.assigned_member_id === record?.assignedMemberId)) byStart.set(row.starts_at, row)
+  }
+  return [...byStart.values()].map(row => ({
+    id: row.id,
+    label: formatTimestamp(row.starts_at, 'en', row.timezone, { hour: 'numeric', minute: '2-digit' }),
+    disabled: row.id !== record?.sessionId && row.remaining !== null && row.remaining < draft.partySize,
+  }))
 })
 
-// Entering the request afresh: the tenant should not inherit edits they abandoned last time.
-b.resetChangeDraft()
+const dirty = computed(() => {
+  const record = booking.value
+  if (!record) return false
+  if (draft.partySize !== (record.partySize ?? 1)) return true
+  if (b.bookingType !== 'reservation') return draft.sessionId !== (record.sessionId ?? '')
+  return draft.date !== record.bookingDate || draft.time !== (record.bookingTime ?? '').slice(0, 5) || draft.locationId !== record.locationId
+})
+const valid = computed(() => Number.isInteger(draft.partySize) && draft.partySize > 0 && (b.bookingType === 'reservation'
+  ? Boolean(draft.date && draft.time && draft.locationId)
+  : times.value.some(slot => slot.id === draft.sessionId && !slot.disabled)))
 
-function cancel() {
-  b.resetChangeDraft()
-  return navigateTo(level.to.value ?? '/dashboard')
+const saving = ref(false)
+const error = ref<string | null>(null)
+// One key per attempted request, so a retry of the same request is one proposal.
+let attempt: { draft: string; key: string } | null = null
+async function send() {
+  const record = booking.value
+  if (!record || !valid.value || !dirty.value || saving.value) return
+  const proposal = b.bookingType === 'reservation'
+    ? { kind: 'reservation' as const, bookingDate: draft.date, bookingTime: draft.time, partySize: draft.partySize, locationId: draft.locationId }
+    : { kind: 'booking' as const, sessionId: draft.sessionId, partySize: draft.partySize }
+  const signature = JSON.stringify(proposal)
+  if (attempt?.draft !== signature) attempt = { draft: signature, key: crypto.randomUUID() }
+  saving.value = true
+  error.value = null
+  try {
+    await api(`/api/dashboard/bookings/${b.bookingType}/${encodeURIComponent(String(route.params.bookingId))}/changes`, {
+      method: 'POST',
+      body: { ...proposal, expectedUpdatedAt: record.updatedAt, idempotencyKey: attempt.key },
+      validate: isRecord,
+    })
+    await b.refresh()
+    await navigateTo(level.to.value ?? '/dashboard')
+  } catch (cause) {
+    error.value = getErrorMessage(cause, 'Change request could not be sent')
+  } finally {
+    saving.value = false
+  }
 }
 </script>

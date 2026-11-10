@@ -146,7 +146,6 @@
   "booking_policy.experience_heading": "体験ポリシー",
   "booking_policy.consultation_heading": "相談予約ポリシー",
   "booking_policy.minimum_guest_age": "ご参加は{age}歳以上の方に限ります。",
-  "booking_policy.reschedule": "開始時刻の{window}前まで日時を変更できます。",
   "booking_policy.reservation_heading": "予約ポリシー",
   "dates.date_unavailable": "日付不明",
   "dates.time_unavailable": "時刻不明",

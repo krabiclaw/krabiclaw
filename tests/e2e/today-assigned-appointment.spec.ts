@@ -214,7 +214,7 @@ test('an assigned staff member reviews a consultation from Calendar while Today 
     await expect(memberPage.locator('#dashboard-panel-booking-team-member')).toHaveCount(0)
     const missingId = crypto.randomUUID()
     const missingRead = memberPage.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/bookings/booking/${missingId}`)
-    await memberPage.goto(`${DASHBOARD}/bookings/booking/${missingId}/change/guests`)
+    await memberPage.goto(`${DASHBOARD}/bookings/booking/${missingId}/change`)
     await body(await missingRead, 404)
     await expect(memberPage.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
   } finally {

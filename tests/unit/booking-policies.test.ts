@@ -20,7 +20,6 @@ test('reservation summaries state the one cancellation rule', () => {
   assert.equal(summary.heading, 'Reservation policies')
   assert.deepEqual(summary.items, [
     { id: 'cancellation', text: 'Cancel free up to 24 hours before the start time. After that, payments aren\'t refunded automatically.' },
-    { id: 'reschedule', text: 'You can reschedule up to 24 hours before the start time.' },
     { id: 'deposit', text: 'Parties of 6+ guests require a deposit.' },
   ])
 })
@@ -28,7 +27,7 @@ test('reservation summaries state the one cancellation rule', () => {
 test('experience summaries state the same rule', () => {
   const summary = formatBookingPolicySummary(reservationPolicy({ policy_type: 'experience' }), 'en')
   assert.equal(summary.heading, 'Experience policies')
-  assert.deepEqual(summary.items.map(item => item.id), ['cancellation', 'reschedule', 'deposit'])
+  assert.deepEqual(summary.items.map(item => item.id), ['cancellation', 'deposit'])
   assert(summary.items.some(item => item.text.includes('6+')))
 })
 
@@ -37,10 +36,9 @@ test('a class or consultation states its advance notice when it is longer than a
   assert.equal(consultation.heading, 'Consultation policies')
   assert.deepEqual(consultation.items, [
     { id: 'cancellation', text: 'Cancel free up to 2 days before the start time. After that, payments aren\'t refunded automatically.' },
-    { id: 'reschedule', text: 'You can reschedule up to 2 days before the start time.' },
   ])
-  assert.equal(formatBookingPolicySummary(reservationPolicy({ policy_type: 'experience', advance_notice_minutes: 120, deposit_required: null }), 'en').items[1]!.text, 'You can reschedule up to 24 hours before the start time.')
-  assert.equal(formatBookingPolicySummary(reservationPolicy({ advance_notice_minutes: 2880 }), 'en').items[1]!.text, 'You can reschedule up to 24 hours before the start time.')
+  assert.equal(formatBookingPolicySummary(reservationPolicy({ policy_type: 'experience', advance_notice_minutes: 120, deposit_required: null }), 'en').items[0]!.text, 'Cancel free up to 24 hours before the start time. After that, payments aren\'t refunded automatically.')
+  assert.equal(formatBookingPolicySummary(reservationPolicy({ advance_notice_minutes: 2880 }), 'en').items[0]!.text, 'Cancel free up to 24 hours before the start time. After that, payments aren\'t refunded automatically.')
 })
 
 test('renderBookingPolicySummary localizes Thai summaries', () => {
@@ -54,7 +52,6 @@ test('renderBookingPolicySummary localizes Vietnamese summaries', () => {
   assert.equal(summary.heading, 'Chính sách đặt bàn')
   assert.deepEqual(summary.items, [
     { id: 'cancellation', text: 'Hủy miễn phí trước giờ bắt đầu ít nhất 24 giờ. Sau thời điểm đó, khoản thanh toán sẽ không được hoàn tự động.' },
-    { id: 'reschedule', text: 'Bạn có thể đổi lịch trước giờ bắt đầu ít nhất 24 giờ.' },
     { id: 'deposit', text: 'Nhóm từ 6 khách trở lên cần đặt cọc.' },
   ])
 })
