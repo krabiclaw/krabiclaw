@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { execute, executeBatch, queryAllPages, queryFirst, type DbClient } from '~/server/db'
 import { messageDeliveryTaskQueries } from './tasks'
-import { isValidInstant, isValidTimezone, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
+import { isValidInstant, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import { guestMessageDueAt, messagingError, type ScheduleAnchor } from './guest-message-schedule'
 import { templateSchedule, type MessageTemplateRow, type ScheduledGuestMessageRow } from './guest-messaging'
 import { sendScheduledGuestReply, type OperationOutcome } from './guest-threads/operations'
