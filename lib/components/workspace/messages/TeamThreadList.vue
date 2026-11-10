@@ -69,10 +69,17 @@ watch(threads, rows => emit('first', rows[0] ? target(rows[0].id) : null), { imm
 // Read or unread without opening it, as the guest list does.
 const api = useDashboardApi()
 const toast = useToast()
+// A row being saved takes no second toggle, so a failure cannot put back a state the member has since changed.
+const toggling = new Set<string>()
 async function toggleRead(thread: TeamThread) {
+  if (toggling.has(thread.id)) return
+  toggling.add(thread.id)
+  try { await saveRead(thread) } finally { toggling.delete(thread.id) }
+}
+async function saveRead(thread: TeamThread) {
   const read = thread.unread
   const mark = (unread: boolean) => {
-    if (data.value) data.value = { threads: data.value.threads.map(row => row.id === thread.id ? { ...row, unread, unreadCount: unread ? Math.max(row.unreadCount, 1) : 0 } : row) }
+    if (data.value) data.value = { ...data.value, threads: data.value.threads.map(row => row.id === thread.id ? { ...row, unread, unreadCount: unread ? Math.max(row.unreadCount, 1) : 0 } : row) }
   }
   mark(!read)
   try {

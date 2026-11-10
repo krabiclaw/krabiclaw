@@ -297,7 +297,14 @@ function threadRoute(thread: ThreadListItem) {
 // Read or unread without opening it: the row changes at once, and the list and
 // its counts are read again from the server once it has saved.
 const toast = useToast()
+// A row being saved takes no second toggle, so a failure cannot put back a state the member has since changed.
+const toggling = new Set<string>()
 async function toggleRead(thread: ThreadListItem) {
+  if (toggling.has(thread.id)) return
+  toggling.add(thread.id)
+  try { await saveRead(thread) } finally { toggling.delete(thread.id) }
+}
+async function saveRead(thread: ThreadListItem) {
   const read = thread.unread
   const mark = (unread: boolean) => {
     if (data.value) data.value = { ...data.value, threads: data.value.threads.map(row => row.id === thread.id ? { ...row, unread } : row) }
