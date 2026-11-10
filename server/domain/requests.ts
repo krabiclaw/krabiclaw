@@ -8,6 +8,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { recordBookingCancelled } from '~/server/domain/booking-analytics'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
+import { isValidInstant, isValidTimezone, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import { noticeDuration, outsideNotice } from '~/shared/availability-settings'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { formAnswerSnapshotsSchema } from '~/shared/form-questions'
@@ -177,34 +178,89 @@ export async function getGuestRequest(db: DbClient, id: string, organizationId?:
  * must have its own tenant's matching record after allocation. Uncaptured
  * Checkout has only its native payment and capacity hold until conversion.
  */
-export async function getThreadOperationalRecord(db: DbClient, requestId: string): Promise<ThreadOperationalRecord | null> {
-  const record = await queryFirst<ThreadOperationalRecord>(db, `
-    SELECT 'booking' AS kind, b.id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone,
-           s.location_id, b.product_id, p.name AS product_name, NULL AS product_internal_name, b.assigned_member_id, b.organization_id, b.user_id,
-           NULL AS check_in_date, NULL AS check_out_date, b.no_show_at, owner.review_id, c.advance_notice_minutes
+/**
+ * Every booked record, one row each: a stay, a product booking or a table
+ * reservation, by kind and id. A stay's starts_at/ends_at are its conversation
+ * window (STAY_THREAD_*); its nights are check_in_date/check_out_date at its
+ * home's check_in_time/check_out_time. offering_id is what a business offers:
+ * the product, or the location for a table reservation. fingerprint is every
+ * fact a plan made from the record depends on, for guarded writes.
+ */
+export const BOOKED_RECORDS_SQL = `(
+    SELECT 'booking' AS kind, b.id, b.request_id, b.organization_id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone,
+           s.location_id, b.product_id, b.product_id AS offering_id, p.name AS product_name, NULL AS product_internal_name, b.assigned_member_id, b.user_id,
+           NULL AS check_in_date, NULL AS check_out_date, NULL AS check_in_time, NULL AS check_out_time, b.no_show_at, b.created_at, b.created_at AS received_at, b.updated_at,
+           NULL AS location_updated_at, c.advance_notice_minutes, json_array(b.status, b.request_id, b.product_session_id, s.starts_at, s.ends_at, s.timezone, b.updated_at) AS fingerprint
       FROM bookings b
-      JOIN requests owner ON owner.id = b.request_id AND owner.kind = 'booking' AND owner.organization_id = b.organization_id
       JOIN product_sessions s ON s.id = b.product_session_id AND s.product_id = b.product_id AND s.organization_id = b.organization_id
       JOIN products p ON p.id = b.product_id AND p.organization_id = b.organization_id
       LEFT JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
-     WHERE b.request_id = ?
     UNION ALL
-    SELECT 'reservation', r.id, r.status, r.party_size, r.starts_at, r.ends_at, r.timezone,
-           r.location_id, NULL, NULL, NULL, NULL, r.organization_id, r.user_id, NULL, NULL, r.no_show_at, owner.review_id, NULL
+    SELECT 'reservation', r.id, r.request_id, r.organization_id, r.status, r.party_size, r.starts_at, r.ends_at, r.timezone,
+           r.location_id, NULL, r.location_id, NULL, NULL, NULL, r.user_id, NULL, NULL, NULL, NULL, r.no_show_at, r.created_at, r.created_at, r.updated_at,
+           NULL, NULL, json_array(r.status, r.request_id, r.location_id, r.starts_at, r.ends_at, r.timezone, r.updated_at)
       FROM reservations r
-      JOIN requests owner ON owner.id = r.request_id AND owner.kind = 'reservation' AND owner.organization_id = r.organization_id
-     WHERE r.request_id = ?
     UNION ALL
-    SELECT 'stay', st.id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone,
-           c.location_id, st.product_id, p.name, c.internal_name, c.assigned_member_id, st.organization_id, st.user_id, st.check_in_date, st.check_out_date, st.no_show_at, owner.review_id, NULL
+    SELECT 'stay', st.id, st.request_id, st.organization_id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone,
+           c.location_id, st.product_id, st.product_id, p.name, c.internal_name, c.assigned_member_id, st.user_id, st.check_in_date, st.check_out_date,
+           c.check_in_time, c.check_out_time, st.no_show_at, st.created_at, st.booking_received_at, st.updated_at,
+           l.updated_at, NULL, json_array(st.version, st.request_id, l.timezone, c.check_in_time, c.check_out_time)
       FROM stays st
-      JOIN requests owner ON owner.id = st.request_id AND owner.kind = 'stay' AND owner.organization_id = st.organization_id
       JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
       JOIN products p ON p.organization_id = st.organization_id AND p.id = st.product_id
-     WHERE st.request_id = ?
+  )`
+
+export type BookedKind = 'booking' | 'reservation' | 'stay'
+
+/** One row of BOOKED_RECORDS_SQL. received_at is null for a stay imported or known before KrabiClaw received it. */
+export interface BookedRecord extends Omit<ThreadOperationalRecord, 'review_id'> {
+  request_id: string | null
+  offering_id: string
+  check_in_time: string | null
+  check_out_time: string | null
+  created_at: string
+  received_at: string | null
+  updated_at: string
+  location_updated_at: string | null
+  fingerprint: string
+}
+
+/**
+ * When a booked record starts and ends, as its own clock reads it: a stay's
+ * check-in and checkout days at its home's times (no instant without a time),
+ * anything else its own instants on their local days.
+ */
+export function bookedRecordWindow(record: Pick<BookedRecord, 'id' | 'kind' | 'timezone' | 'check_in_date' | 'check_out_date' | 'check_in_time' | 'check_out_time' | 'starts_at' | 'ends_at'>):
+  { start: { date: string; instant: string | null }; end: { date: string; instant: string | null } } {
+  if (!isValidTimezone(record.timezone) || /^[+-]/.test(record.timezone)) throw new HTTPError({ statusCode: 500, message: `The ${record.kind} ${record.id} has no IANA timezone`, data: { code: 'INVALID_HOME_TIMEZONE', field: 'timezone' } })
+  if (record.check_in_date !== null && record.check_out_date !== null) {
+    const at = (date: string, time: string | null) => ({ date, instant: time === null ? null : localDateTimeToInstant(date, time, record.timezone, 'earlier').toISOString() })
+    return { start: at(record.check_in_date, record.check_in_time), end: at(record.check_out_date, record.check_out_time) }
+  }
+  for (const value of [record.starts_at, record.ends_at]) if (!isValidInstant(value)) throw new HTTPError({ statusCode: 500, message: `The ${record.kind} ${record.id} has an invalid start or end time`, data: { code: 'INVALID_BOOKING_TIME', field: 'startsAt' } })
+  const at = (instant: string) => ({ date: localDateAt(new Date(instant), record.timezone), instant })
+  return { start: at(record.starts_at), end: at(record.ends_at) }
+}
+
+export async function readBookedRecord(db: DbClient, organizationId: string, ref: { kind: BookedKind; id: string }): Promise<BookedRecord | null> {
+  return await queryFirst<BookedRecord>(db, `SELECT br.* FROM ${BOOKED_RECORDS_SQL} br WHERE br.organization_id = ? AND br.kind = ? AND br.id = ?`, [organizationId, ref.kind, ref.id]) ?? null
+}
+
+/** The record still has every fact a plan was made from. */
+export function bookedRecordGuard(record: Pick<BookedRecord, 'organization_id' | 'kind' | 'id' | 'fingerprint'>): { query: string; params: unknown[] } {
+  return { query: `EXISTS (SELECT 1 FROM ${BOOKED_RECORDS_SQL} br WHERE br.organization_id = ? AND br.kind = ? AND br.id = ? AND br.fingerprint = ?)`, params: [record.organization_id, record.kind, record.id, record.fingerprint] }
+}
+
+export async function getThreadOperationalRecord(db: DbClient, requestId: string): Promise<ThreadOperationalRecord | null> {
+  const record = await queryFirst<ThreadOperationalRecord>(db, `
+    SELECT br.kind, br.id, br.status, br.party_size, br.starts_at, br.ends_at, br.timezone, br.location_id, br.product_id, br.product_name, br.product_internal_name,
+           br.assigned_member_id, br.organization_id, br.user_id, br.check_in_date, br.check_out_date, br.no_show_at, owner.review_id, br.advance_notice_minutes
+      FROM ${BOOKED_RECORDS_SQL} br
+      JOIN requests owner ON owner.id = br.request_id AND owner.kind = br.kind AND owner.organization_id = br.organization_id
+     WHERE br.request_id = ?
      LIMIT 1
-  `, [requestId, requestId, requestId])
+  `, [requestId])
   if (record) return record
   const request = await queryFirst<{ kind: GuestRequestKind; uncaptured_checkout: number | null }>(db, `
     SELECT r.kind,
@@ -401,6 +457,8 @@ export async function cancelBookingRequest(db: DbClient, input: {
     const before = JSON.parse(entry.payload_json).beforeStatus
     if (!['pending', 'confirmed'].includes(before)) throw new Error('Cancellation audit has no valid prior status')
     if (cancelled.kind === 'booking') await recordBookingCancelled(db, { organizationId: input.organizationId, bookingId: cancelled.id, cancelledBy: 'guest', actorUserId: input.buyerUserId ?? null })
+    // A cancelled visit sends none of its pending automatic messages.
+    await (await import('~/server/domain/scheduled-guest-messages')).planSourceMessages(db, input.organizationId, { kind: cancelled.kind, id: cancelled.id })
     const refund = await queryFirst<{ payment_id: string; idempotency_key: string }>(db, `SELECT r.payment_id,r.idempotency_key FROM payment_refunds r
       JOIN payments p ON p.id=r.payment_id WHERE p.organization_id=? AND p.subject_type=? AND p.subject_id=? AND r.idempotency_key=?`, [input.organizationId, cancelled.kind, cancelled.id, guestVisitRefundKey(cancelled.kind, cancelled.id)])
     if (refund) {

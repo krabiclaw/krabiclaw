@@ -14,7 +14,8 @@ import { freeCancellationUntil, outsideNotice } from '~/shared/availability-sett
 import { assertProductKind, type ProductKind } from '~/shared/product-details'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { loadOwnerPictures } from '~/server/notifications/hero'
-import { localPartsAt } from '~/utils/timezone'
+import { addLocalDays, isValidCalendarDate, localDateTimeToInstant, localPartsAt } from '~/utils/timezone'
+import { listSessions } from '~/server/utils/availability'
 import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
 import { appendEntry, getEntryById, GuestThreadEntryDedupeConflictError } from '~/server/domain/guest-threads/entries'
 import { moveBooking, requestBookingChange, bookingChangeViews } from '~/server/domain/guest-threads/booking-changes'
@@ -424,6 +425,22 @@ export async function requestDashboardBookingChange(
   else await requestBookingChange(context.db, context.env, thread, context.userId, input.body, input.body.idempotencyKey)
   await publishGuestInboxThreadEvent(context.env, context.db, { threadId: threadId, type: 'thread.changed' })
   return await loadDashboardBookingDetails(event, { type: input.type, bookingId: row.id })
+}
+
+/**
+ * The scheduled sessions of a booking's own offering on one local day, for
+ * whoever may change that booking: its booked provider reads them without
+ * product access. The booking's current session is among them when it is that day.
+ */
+export async function listDashboardBookingChangeSessions(event: H3Event, input: { bookingId: string; date: unknown }) {
+  if (typeof input.date !== 'string' || !isValidCalendarDate(input.date)) throw new HTTPError({ statusCode: 400, message: 'date must be a calendar date' })
+  const context = await bookingContext(event)
+  const row = await loadBookingRow(context.db, { organizationId: context.organization.id }, 'booking', input.bookingId)
+  if (!row?.experience_id) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
+  await assertBookingAccess(context, row)
+  return await listSessions(context.db, { env: context.env, organizationId: row.organization_id, productId: row.experience_id, statuses: ['scheduled'],
+    fromInstant: localDateTimeToInstant(input.date, '00:00', row.timezone, 'compatible').toISOString(),
+    toInstant: localDateTimeToInstant(addLocalDays(input.date, 1), '00:00', row.timezone, 'compatible').toISOString() })
 }
 
 export async function addDashboardBookingNote(

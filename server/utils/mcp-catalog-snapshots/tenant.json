@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:d53e5411139c9f7b4c4c9fe6ee3e9689378f42fd2ee76e2483ca1b75d845cf3b",
-  "documentationFingerprint": "sha256:ae5f58fc77d5a26bd7fb796f4e520cfd6811df8ec69ad0df25e425f890e957e1",
+  "fingerprint": "sha256:a7c115c4a478ef608e24f1e56822542f5906b64e4448a7af916307a6e4f06dfe",
+  "documentationFingerprint": "sha256:a9254b0212e4d7da8d1fe8732f5ab418fc156c096f3934f1034dd9c50769acb6",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -9958,7 +9958,7 @@
                 "booking": {
                   "properties": {
                     "advance_notice_minutes": {
-                      "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book, reschedule or cancel online a session that starts sooner. Changes and free cancellation close at least 24 hours before the start either way. Null means no notice.",
+                      "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book or cancel online a session that starts sooner, and no booking is moved into one. Free cancellation closes at least 24 hours before the start either way. Null means no notice.",
                       "minimum": 0,
                       "type": [
                         "integer",
@@ -20842,7 +20842,7 @@
     {
       "name": "create_message_template",
       "title": "Create message template",
-      "description": "Create an automatic guest message, sent to every guest at the named homes at the scheduled time in each home’s own timezone. It plans only eligible future events; ambiguous or nonexistent local times fail visibly. Every confirmed stay is already sent its home’s check-in instructions at 10:00 the day before arrival, so the name “Check-in instructions” is reserved.",
+      "description": "Create an automatic guest message, sent into the conversation of every stay, product booking (experience or consultation) or table reservation on the named offerings, at the scheduled time in each booking’s own timezone. A cancelled booking’s pending messages are cancelled and a moved one’s follow it. It plans only eligible future events; ambiguous or nonexistent local times fail visibly. Every confirmed stay is already sent its home’s check-in instructions at 10:00 the day before arrival, so the name “Check-in instructions” is reserved.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -20861,13 +20861,15 @@
             "oneOf": [
               {
                 "additionalProperties": false,
+                "description": "Five minutes after KrabiClaw receives a new booking.",
                 "properties": {
                   "delayMinutes": {
                     "const": 5
                   },
                   "productIds": {
+                    "description": "The offerings whose bookings get this message.",
                     "items": {
-                      "description": "Canonical home product ID, never a provider property ID.",
+                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                       "minLength": 1,
                       "type": "string"
                     },
@@ -20889,6 +20891,7 @@
               },
               {
                 "additionalProperties": false,
+                "description": "A number of days before or after the start or end, at a local time in the booking’s own timezone (the home’s, location’s, or an online consultation’s attorney’s).",
                 "properties": {
                   "localTime": {
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -20900,8 +20903,9 @@
                     "type": "integer"
                   },
                   "productIds": {
+                    "description": "The offerings whose bookings get this message.",
                     "items": {
-                      "description": "Canonical home product ID, never a provider property ID.",
+                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                       "minLength": 1,
                       "type": "string"
                     },
@@ -20911,6 +20915,7 @@
                     "uniqueItems": true
                   },
                   "trigger": {
+                    "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
                     "enum": [
                       "check_in",
                       "check_out"
@@ -20922,6 +20927,43 @@
                   "trigger",
                   "offsetDays",
                   "localTime",
+                  "productIds"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "description": "A number of hours before (negative) or after (positive) the start or end itself. A home needs its check-in or checkout time.",
+                "properties": {
+                  "offsetHours": {
+                    "maximum": 72,
+                    "minimum": -72,
+                    "type": "integer"
+                  },
+                  "productIds": {
+                    "description": "The offerings whose bookings get this message.",
+                    "items": {
+                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "trigger": {
+                    "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                    "enum": [
+                      "check_in",
+                      "check_out"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "trigger",
+                  "offsetHours",
                   "productIds"
                 ],
                 "type": "object"
@@ -20967,13 +21009,15 @@
                 "oneOf": [
                   {
                     "additionalProperties": false,
+                    "description": "Five minutes after KrabiClaw receives a new booking.",
                     "properties": {
                       "delayMinutes": {
                         "const": 5
                       },
                       "productIds": {
+                        "description": "The offerings whose bookings get this message.",
                         "items": {
-                          "description": "Canonical home product ID, never a provider property ID.",
+                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                           "minLength": 1,
                           "type": "string"
                         },
@@ -20995,6 +21039,7 @@
                   },
                   {
                     "additionalProperties": false,
+                    "description": "A number of days before or after the start or end, at a local time in the booking’s own timezone (the home’s, location’s, or an online consultation’s attorney’s).",
                     "properties": {
                       "localTime": {
                         "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -21006,8 +21051,9 @@
                         "type": "integer"
                       },
                       "productIds": {
+                        "description": "The offerings whose bookings get this message.",
                         "items": {
-                          "description": "Canonical home product ID, never a provider property ID.",
+                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                           "minLength": 1,
                           "type": "string"
                         },
@@ -21017,6 +21063,7 @@
                         "uniqueItems": true
                       },
                       "trigger": {
+                        "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
                         "enum": [
                           "check_in",
                           "check_out"
@@ -21028,6 +21075,43 @@
                       "trigger",
                       "offsetDays",
                       "localTime",
+                      "productIds"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "description": "A number of hours before (negative) or after (positive) the start or end itself. A home needs its check-in or checkout time.",
+                    "properties": {
+                      "offsetHours": {
+                        "maximum": 72,
+                        "minimum": -72,
+                        "type": "integer"
+                      },
+                      "productIds": {
+                        "description": "The offerings whose bookings get this message.",
+                        "items": {
+                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "maxItems": 100,
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "trigger": {
+                        "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                        "enum": [
+                          "check_in",
+                          "check_out"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "trigger",
+                      "offsetHours",
                       "productIds"
                     ],
                     "type": "object"
@@ -26852,7 +26936,7 @@
               "booking": {
                 "properties": {
                   "advance_notice_minutes": {
-                    "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book, reschedule or cancel online a session that starts sooner. Changes and free cancellation close at least 24 hours before the start either way. Null means no notice.",
+                    "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book or cancel online a session that starts sooner, and no booking is moved into one. Free cancellation closes at least 24 hours before the start either way. Null means no notice.",
                     "minimum": 0,
                     "type": [
                       "integer",
@@ -48702,7 +48786,7 @@
     {
       "name": "get_guest_messaging_context",
       "title": "Get guest messaging context",
-      "description": "Read the actual home and optional stay behind a canonical guest conversation, including private check-in instructions the host may choose to share. Contact conversations may have no home or stay; channel inquiries can have a home without a booked stay.",
+      "description": "Read what a canonical guest conversation is about: its booked record (a stay, booking or table reservation: what, where, for how many and when, in its own timezone), and for a home its listing and stay, including private check-in instructions the host may choose to share. An inquiry has no record; a channel inquiry can have a home without a booked stay.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -48821,6 +48905,82 @@
               "null"
             ]
           },
+          "record": {
+            "description": "The stay, booking or table reservation the conversation is about, as its guest reads it; null for an inquiry. starts and ends are local to timezone: a date, or a date and time.",
+            "properties": {
+              "address": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ends": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "stay",
+                  "booking",
+                  "reservation"
+                ],
+                "type": "string"
+              },
+              "location": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "noShow": {
+                "type": "boolean"
+              },
+              "offering": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "partySize": {
+                "type": "integer"
+              },
+              "phone": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "starts": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "status": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "timezone": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "status",
+              "offering",
+              "location",
+              "address",
+              "phone",
+              "partySize",
+              "timezone",
+              "starts",
+              "ends",
+              "noShow"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "requestId": {
             "minLength": 1,
             "type": "string"
@@ -48884,7 +49044,8 @@
         "required": [
           "requestId",
           "home",
-          "stay"
+          "stay",
+          "record"
         ],
         "type": "object"
       },
@@ -52851,7 +53012,7 @@
               "booking": {
                 "properties": {
                   "advance_notice_minutes": {
-                    "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book, reschedule or cancel online a session that starts sooner. Changes and free cancellation close at least 24 hours before the start either way. Null means no notice.",
+                    "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book or cancel online a session that starts sooner, and no booking is moved into one. Free cancellation closes at least 24 hours before the start either way. Null means no notice.",
                     "minimum": 0,
                     "type": [
                       "integer",
@@ -69173,7 +69334,7 @@
     {
       "name": "list_message_templates",
       "title": "List message templates",
-      "description": "Read the workspace’s automatic guest messages: text the server sends every guest at the named homes on its own schedule. Follow page_info for every page.",
+      "description": "Read the workspace’s automatic guest messages: text the server sends every guest or client booked on the named homes, experiences, consultations or table-reservation locations, on its own schedule. Follow page_info for every page.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -69242,13 +69403,15 @@
                   "oneOf": [
                     {
                       "additionalProperties": false,
+                      "description": "Five minutes after KrabiClaw receives a new booking.",
                       "properties": {
                         "delayMinutes": {
                           "const": 5
                         },
                         "productIds": {
+                          "description": "The offerings whose bookings get this message.",
                           "items": {
-                            "description": "Canonical home product ID, never a provider property ID.",
+                            "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                             "minLength": 1,
                             "type": "string"
                           },
@@ -69270,6 +69433,7 @@
                     },
                     {
                       "additionalProperties": false,
+                      "description": "A number of days before or after the start or end, at a local time in the booking’s own timezone (the home’s, location’s, or an online consultation’s attorney’s).",
                       "properties": {
                         "localTime": {
                           "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -69281,8 +69445,9 @@
                           "type": "integer"
                         },
                         "productIds": {
+                          "description": "The offerings whose bookings get this message.",
                           "items": {
-                            "description": "Canonical home product ID, never a provider property ID.",
+                            "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                             "minLength": 1,
                             "type": "string"
                           },
@@ -69292,6 +69457,7 @@
                           "uniqueItems": true
                         },
                         "trigger": {
+                          "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
                           "enum": [
                             "check_in",
                             "check_out"
@@ -69303,6 +69469,43 @@
                         "trigger",
                         "offsetDays",
                         "localTime",
+                        "productIds"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "description": "A number of hours before (negative) or after (positive) the start or end itself. A home needs its check-in or checkout time.",
+                      "properties": {
+                        "offsetHours": {
+                          "maximum": 72,
+                          "minimum": -72,
+                          "type": "integer"
+                        },
+                        "productIds": {
+                          "description": "The offerings whose bookings get this message.",
+                          "items": {
+                            "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 100,
+                          "minItems": 1,
+                          "type": "array",
+                          "uniqueItems": true
+                        },
+                        "trigger": {
+                          "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                          "enum": [
+                            "check_in",
+                            "check_out"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "trigger",
+                        "offsetHours",
                         "productIds"
                       ],
                       "type": "object"
@@ -69367,7 +69570,7 @@
     {
       "name": "list_opportunities",
       "title": "List opportunities",
-      "description": "List and save current opportunities such as drafts to finish, posts to share and calendar gaps. Reports evidence it could not read. Use a returned ID to accept, dismiss or defer an opportunity.",
+      "description": "List and save current opportunities such as drafts to finish, posts to share, calendar gaps and preparation to send a booked guest or client. Reports evidence it could not read. Use a returned ID to accept, dismiss or defer an opportunity.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -69413,10 +69616,24 @@
                     "null"
                   ]
                 },
+                "message": {
+                  "description": "The message it pre-writes from the business’s own records. Review it, then send it with reply_to_guest in requestId’s conversation; nothing is sent until then.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "path": {
                   "type": "string"
                 },
                 "productId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "requestId": {
+                  "description": "The guest conversation a message opportunity is sent in.",
                   "type": [
                     "string",
                     "null"
@@ -69437,7 +69654,9 @@
                 "icon",
                 "path",
                 "productId",
-                "locationId"
+                "locationId",
+                "requestId",
+                "message"
               ],
               "type": "object"
             },
@@ -71519,7 +71738,7 @@
     {
       "name": "list_scheduled_guest_messages",
       "title": "List scheduled guest messages",
-      "description": "Read automatic guest-message snapshots and visible failure reasons, optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.",
+      "description": "Read automatic guest-message snapshots and visible failure reasons for stays, bookings and table reservations (stayId, bookingId or reservationId names which), optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -71595,8 +71814,10 @@
                   "type": "string"
                 },
                 "productId": {
-                  "minLength": 1,
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "reason": {
                   "type": [
@@ -71635,7 +71856,21 @@
                   "type": "string"
                 },
                 "stayId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "subjectId": {
                   "minLength": 1,
+                  "type": "string"
+                },
+                "subjectType": {
+                  "enum": [
+                    "stay",
+                    "booking",
+                    "reservation"
+                  ],
                   "type": "string"
                 },
                 "templateId": {
@@ -71665,6 +71900,8 @@
                 "id",
                 "organizationId",
                 "productId",
+                "subjectType",
+                "subjectId",
                 "stayId",
                 "requestId",
                 "templateId",
@@ -73219,7 +73456,7 @@
                   "type": "boolean"
                 },
                 "job": {
-                  "description": "A stay conversation’s cleaning job (the turnover, or the job to get the home ready after a move) as list_tasks presents it; null when the stay has none the caller may see.",
+                  "description": "The job for the conversation’s booked record (a turnover or home-ready job for a stay, the prep or follow-up for a booking or reservation) as list_tasks presents it; null when there is none the caller may see.",
                   "properties": {
                     "action": {
                       "type": [
@@ -73679,6 +73916,33 @@
                   },
                   "type": "array"
                 },
+                "record": {
+                  "description": "The booking or table reservation the conversation is about: who booked, else what.",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "booking",
+                        "reservation"
+                      ],
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "title"
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
                 "stay": {
                   "properties": {
                     "checkInDate": {
@@ -73724,6 +73988,24 @@
                     "null"
                   ]
                 },
+                "subjectId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "subjectType": {
+                  "enum": [
+                    "stay",
+                    "booking",
+                    "reservation",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "unread": {
                   "type": "boolean"
                 },
@@ -73735,9 +74017,12 @@
                 "id",
                 "createdAt",
                 "lastMessageAt",
+                "subjectType",
+                "subjectId",
                 "stayId",
                 "bookingId",
                 "locationId",
+                "record",
                 "name",
                 "isGroup",
                 "createdByUserId",
@@ -86114,7 +86399,7 @@
     {
       "name": "reassign_product_booking",
       "title": "Reassign product booking",
-      "description": "Propose a same-time attorney replacement for one consultation. The current appointment and other clients remain unchanged until this client accepts in their conversation. Requires a published available session for that attorney, before the change window closes: 24 hours before the consultation, or its minimum notice if longer. Read get_product_booking and supply operational_updated_at.",
+      "description": "Propose a same-time attorney replacement for one consultation. The current appointment and other clients remain unchanged until this client accepts in their conversation. Requires a published available session for that attorney outside the consultation’s minimum notice. Read get_product_booking and supply operational_updated_at.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -87675,7 +87960,7 @@
                 "booking": {
                   "properties": {
                     "advance_notice_minutes": {
-                      "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book, reschedule or cancel online a session that starts sooner. Changes and free cancellation close at least 24 hours before the start either way. Null means no notice.",
+                      "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book or cancel online a session that starts sooner, and no booking is moved into one. Free cancellation closes at least 24 hours before the start either way. Null means no notice.",
                       "minimum": 0,
                       "type": [
                         "integer",
@@ -99861,7 +100146,7 @@
     {
       "name": "request_product_booking_change",
       "title": "Request product booking change",
-      "description": "Email the guest a proposal to change a booking’s session or party size. The current booking and places remain unchanged until guest acceptance, which requires availability and preserves its review status. Consultation time and attorney changes always require client acceptance. Once the change window has closed (24 hours before the original start, or the offering’s minimum notice if longer), an approved override_policy is required. For other booking kinds, apply moves the booking now and emails the guest; a paid quantity or location change is refused.",
+      "description": "Email the guest a proposal to change a booking’s session or party size. The current booking and places remain unchanged until guest acceptance, which requires availability and preserves its review status. Consultation time and attorney changes always require client acceptance. For other booking kinds, apply moves the booking now and emails the guest; a paid quantity or location change is refused.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -99892,10 +100177,6 @@
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
-          },
-          "override_policy": {
-            "description": "True only when the business approves an exception to its change policy.",
-            "type": "boolean"
           },
           "party_size": {
             "maximum": 99,
@@ -100045,7 +100326,7 @@
     {
       "name": "request_table_reservation_change",
       "title": "Request table reservation change",
-      "description": "Email the guest a proposal to change a table reservation’s location, local date, time or party size. The current reservation remains unchanged until the guest accepts. With apply, move the reservation now and email the guest only when their consent is not required. Within 24 hours of the original start, an approved override_policy is required.",
+      "description": "Email the guest a proposal to change a table reservation’s location, local date, time or party size. The current reservation remains unchanged until the guest accepts. With apply, move the reservation now and email the guest only when their consent is not required.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -100079,10 +100360,6 @@
             "minLength": 1,
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
-          },
-          "override_policy": {
-            "description": "True only when the business approves an exception to its change policy.",
-            "type": "boolean"
           },
           "party_size": {
             "maximum": 99,
@@ -103312,7 +103589,7 @@
         "additionalProperties": false,
         "properties": {
           "advance_notice_minutes": {
-            "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book, reschedule or cancel online a session that starts sooner. Changes and free cancellation close at least 24 hours before the start either way. Null means no notice.",
+            "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book or cancel online a session that starts sooner, and no booking is moved into one. Free cancellation closes at least 24 hours before the start either way. Null means no notice.",
             "minimum": 0,
             "type": [
               "integer",
@@ -103472,7 +103749,7 @@
           "config": {
             "properties": {
               "advance_notice_minutes": {
-                "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book, reschedule or cancel online a session that starts sooner. Changes and free cancellation close at least 24 hours before the start either way. Null means no notice.",
+                "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book or cancel online a session that starts sooner, and no booking is moved into one. Free cancellation closes at least 24 hours before the start either way. Null means no notice.",
                 "minimum": 0,
                 "type": [
                   "integer",
@@ -114088,13 +114365,15 @@
             "oneOf": [
               {
                 "additionalProperties": false,
+                "description": "Five minutes after KrabiClaw receives a new booking.",
                 "properties": {
                   "delayMinutes": {
                     "const": 5
                   },
                   "productIds": {
+                    "description": "The offerings whose bookings get this message.",
                     "items": {
-                      "description": "Canonical home product ID, never a provider property ID.",
+                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                       "minLength": 1,
                       "type": "string"
                     },
@@ -114116,6 +114395,7 @@
               },
               {
                 "additionalProperties": false,
+                "description": "A number of days before or after the start or end, at a local time in the booking’s own timezone (the home’s, location’s, or an online consultation’s attorney’s).",
                 "properties": {
                   "localTime": {
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -114127,8 +114407,9 @@
                     "type": "integer"
                   },
                   "productIds": {
+                    "description": "The offerings whose bookings get this message.",
                     "items": {
-                      "description": "Canonical home product ID, never a provider property ID.",
+                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                       "minLength": 1,
                       "type": "string"
                     },
@@ -114138,6 +114419,7 @@
                     "uniqueItems": true
                   },
                   "trigger": {
+                    "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
                     "enum": [
                       "check_in",
                       "check_out"
@@ -114149,6 +114431,43 @@
                   "trigger",
                   "offsetDays",
                   "localTime",
+                  "productIds"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "description": "A number of hours before (negative) or after (positive) the start or end itself. A home needs its check-in or checkout time.",
+                "properties": {
+                  "offsetHours": {
+                    "maximum": 72,
+                    "minimum": -72,
+                    "type": "integer"
+                  },
+                  "productIds": {
+                    "description": "The offerings whose bookings get this message.",
+                    "items": {
+                      "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "trigger": {
+                    "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                    "enum": [
+                      "check_in",
+                      "check_out"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "trigger",
+                  "offsetHours",
                   "productIds"
                 ],
                 "type": "object"
@@ -114200,13 +114519,15 @@
                 "oneOf": [
                   {
                     "additionalProperties": false,
+                    "description": "Five minutes after KrabiClaw receives a new booking.",
                     "properties": {
                       "delayMinutes": {
                         "const": 5
                       },
                       "productIds": {
+                        "description": "The offerings whose bookings get this message.",
                         "items": {
-                          "description": "Canonical home product ID, never a provider property ID.",
+                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                           "minLength": 1,
                           "type": "string"
                         },
@@ -114228,6 +114549,7 @@
                   },
                   {
                     "additionalProperties": false,
+                    "description": "A number of days before or after the start or end, at a local time in the booking’s own timezone (the home’s, location’s, or an online consultation’s attorney’s).",
                     "properties": {
                       "localTime": {
                         "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -114239,8 +114561,9 @@
                         "type": "integer"
                       },
                       "productIds": {
+                        "description": "The offerings whose bookings get this message.",
                         "items": {
-                          "description": "Canonical home product ID, never a provider property ID.",
+                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
                           "minLength": 1,
                           "type": "string"
                         },
@@ -114250,6 +114573,7 @@
                         "uniqueItems": true
                       },
                       "trigger": {
+                        "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
                         "enum": [
                           "check_in",
                           "check_out"
@@ -114261,6 +114585,43 @@
                       "trigger",
                       "offsetDays",
                       "localTime",
+                      "productIds"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "description": "A number of hours before (negative) or after (positive) the start or end itself. A home needs its check-in or checkout time.",
+                    "properties": {
+                      "offsetHours": {
+                        "maximum": 72,
+                        "minimum": -72,
+                        "type": "integer"
+                      },
+                      "productIds": {
+                        "description": "The offerings whose bookings get this message.",
+                        "items": {
+                          "description": "A canonical product ID of a home, experience or consultation (list_products), or the location ID of a place that takes table reservations (list_locations); never a provider property ID.",
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "maxItems": 100,
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "trigger": {
+                        "description": "check_in is when the booking starts: a stay’s check-in, or a consultation’s, class’s or table reservation’s start time. check_out is when it ends.",
+                        "enum": [
+                          "check_in",
+                          "check_out"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "trigger",
+                      "offsetHours",
                       "productIds"
                     ],
                     "type": "object"
@@ -117956,7 +118317,7 @@
               "booking": {
                 "properties": {
                   "advance_notice_minutes": {
-                    "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book, reschedule or cancel online a session that starts sooner. Changes and free cancellation close at least 24 hours before the start either way. Null means no notice.",
+                    "description": "Minimum notice in minutes (1440 is 1 day, 2880 is 2 days): clients cannot book or cancel online a session that starts sooner, and no booking is moved into one. Free cancellation closes at least 24 hours before the start either way. Null means no notice.",
                     "minimum": 0,
                     "type": [
                       "integer",
@@ -120646,7 +121007,7 @@
     {
       "name": "update_reservation_policy",
       "title": "Update reservation policy",
-      "description": "Enable or update table reservations using the location’s saved hours, including the questions asked with each reservation. New setup defaults to two hours, unlimited capacity, no advance notice and no deposit. Use the current updated_at when amending it; omitted fields keep their value. Deposits need an amount, currency, tax treatment and ready Payments. Cancellation is not a setting: every reservation is free to cancel until 24 hours before the start. A class or consultation closes changes and free cancellation at 24 hours or its own minimum notice, if longer (set_product_booking_config).",
+      "description": "Enable or update table reservations using the location’s saved hours, including the questions asked with each reservation. New setup defaults to two hours, unlimited capacity, no advance notice and no deposit. Use the current updated_at when amending it; omitted fields keep their value. Deposits need an amount, currency, tax treatment and ready Payments. Cancellation is not a setting: every reservation is free to cancel until 24 hours before the start. A class or consultation closes free cancellation at 24 hours or its own minimum notice, if longer (set_product_booking_config).",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -130003,18 +130364,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:46077f463c31fbc4989a39c06d08583d7b9a62bd97f891feabb3c2505238338c",
-        "get_product": "sha256:1215315eabf5691d64ddcc1c161b6ca4f71a40ca688483b6ff897a1911625f16",
+        "create_product": "sha256:3b02f96ee076f54533dcec3d72ff98aff6df3508c8039b96963e44b914431a13",
+        "get_product": "sha256:93d845e22274e41fb456c2a8766df4b23d6956376f3d96f8cc066760f3eb6052",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
         "list_location_products": "sha256:2015626d39e62ce848fe36e9f0b99ac1e50b9afb915d67d7ce067553afb700b6",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
-        "reconcile_products": "sha256:e9c54e243635688512c169aa619fa1942acaa12ae6030ce20ee42d23dcea23de",
+        "reconcile_products": "sha256:1a49f56c0b048e0638eacea3950900b35d4765db2685c41bda81e278cfb012fb",
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
         "set_collection_products": "sha256:124140d2c1f17f41c466ca886c7fcabdfa4d9f34d9b6f0da8a1299548ae49289",
         "update_menu": "sha256:947551eb104f6be470aeaab3b3570d0ab9924d01450192f8ac88a77f91de7433",
-        "update_product": "sha256:8fb1c4984f4bc183070d582441f9b18e4112b6c36be77cabadcff8e9493d85c6"
+        "update_product": "sha256:0de2acdd8a9d3abaa374c93481ca38cf9e666320b1989ab68de06bd7e9549af3"
       }
     },
     {
@@ -130058,8 +130419,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:46077f463c31fbc4989a39c06d08583d7b9a62bd97f891feabb3c2505238338c",
-        "get_product": "sha256:1215315eabf5691d64ddcc1c161b6ca4f71a40ca688483b6ff897a1911625f16",
+        "create_product": "sha256:3b02f96ee076f54533dcec3d72ff98aff6df3508c8039b96963e44b914431a13",
+        "get_product": "sha256:93d845e22274e41fb456c2a8766df4b23d6956376f3d96f8cc066760f3eb6052",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
@@ -130087,12 +130448,12 @@
         "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
-        "list_team_conversations": "sha256:1d7d0e453b5897c4f47bc11a4be939eed31a39eed442513ff59f78f953ef7d0c",
+        "list_team_conversations": "sha256:88b9488527690e03c33a2d12de8af89ff611fdd21be1ab0892a066da0f2617f6",
         "mark_team_conversation_read": "sha256:3ad65b07c9bd78090f9f81aeffa74ac00f1c201ee8b6325cf16cd879f1e2644d",
         "reject_product_booking": "sha256:91a5bee34d02b729a3dacb01885157ce63b443594116d8710ca90313fb76e357",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
-        "request_product_booking_change": "sha256:8026179199818a0e900d24861e105368b0a132b1278564b30dfbd4659e224369",
-        "request_table_reservation_change": "sha256:00c70a0252033e9df90a66171d64b1728bf1bae7c681a3e7e702ef864223bb88",
+        "request_product_booking_change": "sha256:d09a9c88466237aff04465bbcffa219f28e197cfad0cb4fdd99f41484343d400",
+        "request_table_reservation_change": "sha256:f9a5a6f7a2da6dca328fa041f90cda5ece2f777db64e70a9f3568da1046a6795",
         "send_team_message": "sha256:a1da8c45097286e7a2f9b5f0abcfafc9319a970eb70e6c3859e972be70beea73",
         "start_team_conversation": "sha256:936cdcf65c7d841f0da4c5bf208573caff2204fab1481fd7f1d5dbda45d22699",
         "update_team_group": "sha256:e58436da6c0b45816e909c58d6ff9265c364e410a5c5edf696a7c6085bb3f6cb"
@@ -130130,7 +130491,7 @@
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
         "get_post": "sha256:084fd73ea9efe150fe8e7812e02a80394a52477719bdab8ed3c33beae8225df8",
-        "get_product": "sha256:1215315eabf5691d64ddcc1c161b6ca4f71a40ca688483b6ff897a1911625f16",
+        "get_product": "sha256:93d845e22274e41fb456c2a8766df4b23d6956376f3d96f8cc066760f3eb6052",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
@@ -130146,7 +130507,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:46077f463c31fbc4989a39c06d08583d7b9a62bd97f891feabb3c2505238338c",
+        "create_product": "sha256:3b02f96ee076f54533dcec3d72ff98aff6df3508c8039b96963e44b914431a13",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:4991f484621a89a5c664386fca8d24faea4ce852a275059de9ec33ba04e3ea51",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
@@ -130172,16 +130533,16 @@
       },
       "toolContracts": {
         "get_location": "sha256:5ea35903cf5c7ae17e874fd4c1061dbfbb1b936c3550dedbb2883f74a2aaee1f",
-        "get_product": "sha256:1215315eabf5691d64ddcc1c161b6ca4f71a40ca688483b6ff897a1911625f16",
+        "get_product": "sha256:93d845e22274e41fb456c2a8766df4b23d6956376f3d96f8cc066760f3eb6052",
         "get_reservation_policy": "sha256:1e70aca37a43c0512b2249b7c26e37844b0c04959bd40d3fbb5a73d711238943",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "replace_product_weekly_schedule": "sha256:cc5f48fb054661e70ce26d988fc12a29f4325c7fc59b5b20852fb98d0e0e2451",
-        "set_product_booking_config": "sha256:27f09498655bddb6827839a62bc937c4d045f1272cc73e66125c3779cb3e79fe",
-        "update_product": "sha256:8fb1c4984f4bc183070d582441f9b18e4112b6c36be77cabadcff8e9493d85c6",
-        "update_reservation_policy": "sha256:71e5ffffacee06d9005b39335b349687a61246b82820dca13dabb78e1b993925"
+        "set_product_booking_config": "sha256:76facc8240c3d43694b54c1848a8535501c865c13905d4574521bfcfdc3176a5",
+        "update_product": "sha256:0de2acdd8a9d3abaa374c93481ca38cf9e666320b1989ab68de06bd7e9549af3",
+        "update_reservation_policy": "sha256:bba55ab3d0be1e0ea20d68f78438e4ad6b30cfa6a991ad2ba2d723c9e99a843a"
       }
     },
     {
@@ -130200,7 +130561,7 @@
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_product": "sha256:8fb1c4984f4bc183070d582441f9b18e4112b6c36be77cabadcff8e9493d85c6",
+        "update_product": "sha256:0de2acdd8a9d3abaa374c93481ca38cf9e666320b1989ab68de06bd7e9549af3",
         "update_site_page": "sha256:1a5471900a3203b0215956f65d00b00a18459bf28b204542377bbdf93af009a1"
       }
     },
@@ -130216,14 +130577,14 @@
         "create_post": "sha256:e800e3c19ecf887d09aa70d80dcbe66d985196d2138620b369cb9e1f9cace67a",
         "get_guest_conversation": "sha256:bbc45bf9bdc9097c8aad98e871de2e959a34fbfaf24635f8d2490185732bab59",
         "get_organization_analytics": "sha256:06e0bfe504a9b9183d0429a06162e4af2d760695c842396608752a8f107cb4d9",
-        "get_product": "sha256:1215315eabf5691d64ddcc1c161b6ca4f71a40ca688483b6ff897a1911625f16",
+        "get_product": "sha256:93d845e22274e41fb456c2a8766df4b23d6956376f3d96f8cc066760f3eb6052",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:2094e77b9c0524ea5996a63d5feff72271e44d4d38e6dab9ac469766844cf693",
         "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
         "list_products": "sha256:d586cfff763528e260cc3f640a44ab69c1e6a41d4cc4c28edac2d1cfee1aa837",
         "publish_post": "sha256:fbfd1f5ff6cbdc02ecba0e29e88a7efc5bedb5e6b60ad98eca33b6e99016f1b2",
         "reply_to_guest": "sha256:25c1e77ff9ef3f712ea7e9671dd942c63f69a64b91c216f327488210021447f8",
-        "update_product": "sha256:8fb1c4984f4bc183070d582441f9b18e4112b6c36be77cabadcff8e9493d85c6"
+        "update_product": "sha256:0de2acdd8a9d3abaa374c93481ca38cf9e666320b1989ab68de06bd7e9549af3"
       }
     }
   ]

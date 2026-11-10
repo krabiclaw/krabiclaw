@@ -3,7 +3,7 @@
     <template v-if="manage" #right><UButton :to="`${level.path.value}/new`" icon="i-lucide-plus" color="neutral" variant="ghost" aria-label="New automatic message" /></template>
     <UAlert v-if="error" color="error" title="Automatic messages could not be loaded" :description="getErrorMessage(error, 'Automatic messages request failed')" />
     <template v-else-if="data">
-      <EditorNavigationList :groups="[{ id: 'automatic', items: data.templates.map(reply => ({ id: reply.id, label: reply.title, summary: messageScheduleLabel(reply.schedule), to: `${level.path.value}/${encodeURIComponent(reply.id)}` })) }]" :active-item="level.child.value" />
+      <EditorNavigationList :groups="[{ id: 'automatic', items: data.templates.map(reply => ({ id: reply.id, label: reply.title, summary: messageScheduleLabel(reply.schedule, dashboard.organization.value?.vertical ?? ''), to: `${level.path.value}/${encodeURIComponent(reply.id)}` })) }]" :active-item="level.child.value" />
       <p v-if="!data.templates.length" class="py-8 text-muted">No automatic messages yet.</p>
       <div v-if="offset || data.pagination.hasMore" class="mt-6 flex justify-between gap-3">
         <UButton label="Previous" color="neutral" variant="outline" :disabled="!offset || status === 'pending'" @click="offset = Math.max(0, offset - 50)" />

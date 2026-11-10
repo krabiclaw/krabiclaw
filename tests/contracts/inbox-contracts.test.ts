@@ -88,9 +88,13 @@ function stable(value: unknown): unknown {
   return value
 }
 
+const generatedId = (sequence: number) => `00000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`
+/** Generated ids, numbered in the order the contract files first show them: an id the server draws elsewhere leaves the files as they are. */
+const shown = new Map<string, string>()
+
 async function check(name: string, value: unknown) {
   const path = new URL(`../../contracts/inbox/${name}.json`, import.meta.url)
-  const text = `${JSON.stringify(stable(value), null, 2)}\n`
+  const text = `${JSON.stringify(stable(value), null, 2)}\n`.replace(/00000000-0000-4000-8000-\d{12}/g, id => shown.get(id) ?? shown.set(id, generatedId(shown.size + 1)).get(id)!)
   if (WRITE) { await writeFile(path, text); return }
   const committed = await readFile(path, 'utf8').catch((error: unknown) => { throw new Error(`contracts/inbox/${name}.json is missing; run yarn contracts:write`, { cause: error }) })
   assert.equal(text, committed, `contracts/inbox/${name}.json differs from what the inbox view model returns; run yarn contracts:write and commit the diff`)
@@ -98,7 +102,7 @@ async function check(name: string, value: unknown) {
 
 test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async (t) => {
   let sequence = 0
-  t.mock.method(crypto, 'randomUUID', () => `00000000-0000-4000-8000-${String(++sequence).padStart(12, '0')}`)
+  t.mock.method(crypto, 'randomUUID', () => generatedId(++sequence))
   t.mock.timers.enable({ apis: ['Date'], now: new Date(NOW) })
   const channex = new FakeChannex(), realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
@@ -147,9 +151,9 @@ test('the inbox view model matches contracts/inbox', { timeout: 120_000 }, async
       db.prepare(`INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, channel, body, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
         SELECT 'automatic-contract', ?, 'message', 'request', 'system', 'airbnb', 'Your door code is 1106. Garage D is unlocked.', 'thread.scheduled_message', '{}', 'automatic-contract',
           (SELECT MAX(sequence) FROM activity_entries WHERE request_id = ?) + 1, ?, ?`).bind(threadId, threadId, NOW, NOW),
-      db.prepare(`INSERT INTO scheduled_guest_messages (id, organization_id, product_id, stay_id, request_id, template_id, template_title, template_version, stay_version, body, due_at, timezone, status, entry_id, sent_at, created_at, updated_at)
-        VALUES ('scheduled-contract', ?, ?, ?, ?, NULL, 'Check-in instructions', 1, ?, 'Your door code is 1106. Garage D is unlocked.', ?, 'America/Denver', 'sent', 'automatic-contract', ?, ?, ?)`)
-        .bind(ORG, home.id, stay.id, threadId, stay.version, NOW, NOW, NOW, NOW),
+      db.prepare(`INSERT INTO scheduled_guest_messages (id, organization_id, product_id, subject_type, subject_id, request_id, template_id, template_title, template_version, body, due_at, timezone, status, entry_id, sent_at, created_at, updated_at)
+        VALUES ('scheduled-contract', ?, ?, 'stay', ?, ?, NULL, 'Check-in instructions', 1, 'Your door code is 1106. Garage D is unlocked.', ?, 'America/Denver', 'sent', 'automatic-contract', ?, ?, ?)`)
+        .bind(ORG, home.id, stay.id, threadId, NOW, NOW, NOW, NOW),
     ])
     assert.deepEqual(await runAlterationRequestFeed(db, env, PROPERTY), { recorded: 1, reconciled: 0 })
     for (const action of ['archive', 'unarchive'] as const) {

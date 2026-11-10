@@ -102,9 +102,9 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
   for (const row of teamRows) teams.set(row.team_id, [...teams.get(row.team_id) ?? [], row.user_id])
   const subjectIds = [...new Set(tasks.filter(isJobTask).map(task => jobSubject(task).id))]
   const posted = subjectIds.length ? await queryAll<{ thread_id: string; subject_id: string; participants_key: string; idempotency_key: string }>(db, `
-    SELECT m.thread_id, COALESCE(t.stay_id, t.booking_id) AS subject_id, t.participants_key, m.idempotency_key FROM team_messages m
+    SELECT m.thread_id, t.subject_id, t.participants_key, m.idempotency_key FROM team_messages m
       JOIN team_threads t ON t.organization_id = m.organization_id AND t.id = m.thread_id
-     WHERE t.organization_id = ? AND COALESCE(t.stay_id, t.booking_id) IN (SELECT value FROM json_each(?)) AND m.automatic = 1`, [organizationId, d1JsonStringSet(subjectIds)]) : []
+     WHERE t.organization_id = ? AND t.subject_id IN (SELECT value FROM json_each(?)) AND m.automatic = 1`, [organizationId, d1JsonStringSet(subjectIds)]) : []
   const keysByThread = new Map<string, Set<string>>()
   const threads = new Map<string, { subject_id: string; participants_key: string }>()
   for (const row of posted) {
@@ -144,7 +144,7 @@ export async function runOrganizationJobs(env: CloudflareEnv, db: DbClient, orga
         continue
       }
       const subject = jobSubject(task)
-      const about = subject.kind === 'booking' ? 'with' : 'at'
+      const about = subject.kind === 'stay' ? 'at' : 'with'
       const roster = rosterFor(task, members, teams)
       const view = roster || task.status === 'open' ? await taskViewForUser(db, organizationId, task.id, roster?.cleaners[0] ?? hostUsers[0] ?? null, now) : null
       // Conversations of this stay that once carried this job: the one still held by the same people keeps it,

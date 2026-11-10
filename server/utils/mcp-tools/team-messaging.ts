@@ -10,14 +10,15 @@ import { NOT_HANDLED, optionalString, requiredString, resolveUserUploadedMediaFi
 const text = { type: 'string' }, nullableText = { type: ['string', 'null'] }
 const participant = { type: 'object', properties: { id: text, memberId: text, name: text, image: nullableText }, required: ['id', 'memberId', 'name', 'image'] }
 const conversation = { type: 'object', properties: {
-  id: text, createdAt: text, lastMessageAt: text, stayId: nullableText, bookingId: nullableText, locationId: nullableText,
+  id: text, createdAt: text, lastMessageAt: text, subjectType: { type: ['string', 'null'], enum: ['stay', 'booking', 'reservation', null] }, subjectId: nullableText, stayId: nullableText, bookingId: nullableText, locationId: nullableText,
   name: { ...nullableText, description: 'A group’s name; a stay conversation is titled by the home the guest sleeps in.' }, isGroup: { type: 'boolean' }, createdByUserId: nullableText, canManage: { type: 'boolean' }, canLeave: { type: 'boolean' },
   participants: { type: 'array', items: participant }, unread: { type: 'boolean' }, unreadCount: { type: 'integer' },
   stay: { type: ['object', 'null'], properties: { id: text, productId: text, homeName: text, checkInDate: text, checkOutDate: text, status: { type: 'string', enum: ['pending', 'confirmed', 'cancelled'] } }, required: ['id', 'productId', 'homeName', 'checkInDate', 'checkOutDate', 'status'] },
-  job: { ...TASK_VIEW_SCHEMA, type: ['object', 'null'], description: 'A stay conversation’s cleaning job (the turnover, or the job to get the home ready after a move) as list_tasks presents it; null when the stay has none the caller may see.' },
+  job: { ...TASK_VIEW_SCHEMA, type: ['object', 'null'], description: 'The job for the conversation’s booked record (a turnover or home-ready job for a stay, the prep or follow-up for a booking or reservation) as list_tasks presents it; null when there is none the caller may see.' },
   location: { type: ['object', 'null'], properties: { id: text, title: text, slug: text, timezone: text }, required: ['id', 'title', 'slug', 'timezone'] },
+  record: { type: ['object', 'null'], description: 'The booking or table reservation the conversation is about: who booked, else what.', properties: { kind: { type: 'string', enum: ['booking', 'reservation'] }, id: text, title: text }, required: ['kind', 'id', 'title'] },
   lastMessage: { type: ['object', 'null'], properties: { id: text, senderId: nullableText, body: text, attachmentCount: { type: 'integer' }, createdAt: text }, required: ['id', 'senderId', 'body', 'attachmentCount', 'createdAt'] },
-}, required: ['id', 'createdAt', 'lastMessageAt', 'stayId', 'bookingId', 'locationId', 'name', 'isGroup', 'createdByUserId', 'canManage', 'canLeave', 'participants', 'unread', 'unreadCount', 'stay', 'job', 'location', 'lastMessage'] }
+}, required: ['id', 'createdAt', 'lastMessageAt', 'subjectType', 'subjectId', 'stayId', 'bookingId', 'locationId', 'record', 'name', 'isGroup', 'createdByUserId', 'canManage', 'canLeave', 'participants', 'unread', 'unreadCount', 'stay', 'job', 'location', 'lastMessage'] }
 const message = { type: 'object', properties: {
   id: text, threadId: text, senderId: { ...nullableText, description: 'The sender; null for an automatic message, or once a person’s account was deleted.' }, automatic: { type: 'boolean', description: 'Written by KrabiClaw (a cleaning job, a reminder, a move), not by a member; never counted as unread.' }, body: text, createdAt: text,
   attachments: { type: 'array', items: { type: 'object', properties: { id: text, url: text, width: { type: ['number', 'null'] }, height: { type: ['number', 'null'] } }, required: ['id', 'url', 'width', 'height'] } },
@@ -75,7 +76,8 @@ export async function handleTeamMessagingTools(ctx: McpExecutorContext): Promise
   switch (toolName) {
     case 'list_team_conversation_recipients': return { current_user_id: organization.userId, members: await listTeamMembers(env, access) }
     case 'list_team_conversations': {
-      const filter = { stayId: optionalString(args, 'stay_id') ?? undefined, bookingId: optionalString(args, 'booking_id') ?? undefined, locationId: optionalString(args, 'location_id') ?? undefined }
+      const stayId = optionalString(args, 'stay_id'), bookingId = optionalString(args, 'booking_id')
+      const filter = { subject: stayId ? { kind: 'stay' as const, id: stayId } : bookingId ? { kind: 'booking' as const, id: bookingId } : undefined, locationId: optionalString(args, 'location_id') ?? undefined }
       const page = paginateMcpCollection(await listTeamThreads(env, db, access, filter), args, {
         resource: `team-conversations:${JSON.stringify([organization.organizationId, organization.userId, filter])}`,
       })

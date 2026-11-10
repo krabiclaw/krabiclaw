@@ -64,7 +64,7 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
       kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
       stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null, assigned_team_id: null },
     } })
-    const checkIn = (stayId: string) => db.prepare("SELECT * FROM scheduled_guest_messages WHERE stay_id = ? AND template_id IS NULL AND template_title = 'Check-in instructions'").bind(stayId).first<Record<string, string | null>>()
+    const checkIn = (stayId: string) => db.prepare("SELECT * FROM scheduled_guest_messages WHERE subject_type = 'stay' AND subject_id = ? AND template_id IS NULL AND template_title = 'Check-in instructions'").bind(stayId).first<Record<string, string | null>>()
 
     // A home with no instructions sends nothing.
     const ana = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'ana', check_in_date: day(5), check_out_date: day(7), adults: 2, guest_name: 'Ana', guest_email: 'ana@example.test', total_minor: 30_000 })
@@ -184,7 +184,7 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     await db.prepare('UPDATE stays SET request_id = NULL WHERE id = ?').bind(cy.id).run()
     const automatic = await saveMessageTemplate(db, env, manager, null, { title: 'After your stay', body: 'Thanks for staying.',
       schedule: { trigger: 'check_out', offsetDays: 7, localTime: '09:00', productIds: [cabin.id] } })
-    const automaticRow = await db.prepare('SELECT id, request_id, status FROM scheduled_guest_messages WHERE stay_id = ? AND template_id = ?').bind(cy.id, automatic.id).first<{ id: string; request_id: null; status: string }>()
+    const automaticRow = await db.prepare("SELECT id, request_id, status FROM scheduled_guest_messages WHERE subject_type = 'stay' AND subject_id = ? AND template_id = ?").bind(cy.id, automatic.id).first<{ id: string; request_id: null; status: string }>()
     assert.deepEqual([automaticRow?.request_id, automaticRow?.status], [null, 'pending'])
     const lastStayChange = (await publications()).filter(event => event.type === 'stay.changed').at(-1)
     assert.ok(lastStayChange?.type === 'stay.changed')
@@ -209,8 +209,8 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
       schedule: { trigger: 'check_out', offsetDays: 7, localTime: '11:00', productIds: [cabin.id] } })
     beforeChange = (await publications()).length
     assert.deepEqual(await sendDueScheduledGuestMessages(db, env, `${day(18)}T23:59:00.000Z`), { sent: 2, failed: 1, needs_review: 0 })
-    assert.deepEqual(await db.prepare('SELECT status, error_code, error_field, entry_id, request_id FROM scheduled_guest_messages WHERE stay_id = ? AND template_id = ?').bind(cy.id, noConversation.id).first(),
-      { status: 'failed', error_code: 'STAY_CONVERSATION_REQUIRED', error_field: 'requestId', entry_id: null, request_id: null })
+    assert.deepEqual(await db.prepare("SELECT status, error_code, error_field, entry_id, request_id FROM scheduled_guest_messages WHERE subject_type = 'stay' AND subject_id = ? AND template_id = ?").bind(cy.id, noConversation.id).first(),
+      { status: 'failed', error_code: 'CONVERSATION_REQUIRED', error_field: 'requestId', entry_id: null, request_id: null })
     assert.deepEqual((await publications()).slice(beforeChange).flatMap(event => event.type === 'stay.changed' ? [[event.organizationId, event.locationId, event.productId, event.stayId]] : []), [[ORG, 'cabin-site', cabin.id, cy.id]])
   } finally {
     await runtime.dispose()

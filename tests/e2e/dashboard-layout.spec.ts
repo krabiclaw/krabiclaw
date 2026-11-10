@@ -1857,7 +1857,7 @@ test.describe('dashboard pane hierarchy', () => {
     }
   })
 
-  test('booking Change opens its first field on desktop and not below lg', async ({ page }) => {
+  test('booking Change is one sheet beside its record on desktop and over it below lg', async ({ page }) => {
     const agenda = await page.request.get('/api/dashboard/agenda', { params: { org: 'ember-slice-demo', from: '2000-01-01', to: '2100-01-01' } })
     expect(agenda.status()).toBe(200)
     const { items } = await agenda.json() as { items: Array<{ kind: string; to: string }> }
@@ -1867,13 +1867,14 @@ test.describe('dashboard pane hierarchy', () => {
 
     await page.setViewportSize(WIDE)
     await open(page, change)
-    // A reservation's Location row is the first row on the screen.
-    await expect(page).toHaveURL(`${change}/location`)
-    await expectPanes(page, ['booking-change', 'booking-change-field'])
+    // The details are edited in place: the sheet opens nothing further.
+    await expect(page).toHaveURL(change)
+    await expectPanes(page, ['booking-details', 'booking-change'])
+    await expect(page.locator('#dashboard-panel-booking-change').getByRole('heading', { name: 'Reservation details', exact: true })).toBeVisible()
 
     await page.setViewportSize(NARROW)
     await open(page, change)
-    await expectPanes(page, ['booking-change'])
+    await expect(page.locator('#dashboard-panel-booking-change').getByRole('button', { name: 'Send request', exact: true })).toBeVisible()
     await expect(page).toHaveURL(change)
   })
 
@@ -1920,7 +1921,7 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page).toHaveURL(`${ORG}${context}`)
     await expectPanes(page, ['org-today'])
     await open(page, `${reservation!.to}/change${context}`)
-    await expect(page).toHaveURL(`${reservation!.to}/change/location${context}`)
+    await expect(page).toHaveURL(`${reservation!.to}/change${context}`)
     await page.locator('#dashboard-panel-booking-change').getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).toHaveURL(`${reservation!.to}${context}`)
     await page.setViewportSize(PHONE)

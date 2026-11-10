@@ -264,7 +264,7 @@ test('a moved guest takes the nights, turnover and messages to the new home whil
     assert.deepEqual(await db.prepare("SELECT product_id, starts_at FROM tasks WHERE dedupe_key = ?").bind(`turnover:${stayId}`).first(), { product_id: annex, starts_at: '2027-03-13T18:00:00.000Z' })
     assert.deepEqual(await db.prepare('SELECT kind, status, product_id, title, due_at FROM tasks WHERE dedupe_key = ?').bind(`stay-ready:${stayId}:${annex}`).first(),
       { kind: 'stay_ready', status: 'open', product_id: annex, title: 'Get Annex ready', due_at: '2027-03-10T22:00:00.000Z' })
-    const told = await db.prepare("SELECT product_id, status, body FROM scheduled_guest_messages WHERE stay_id = ? AND template_title = 'Your stay has moved'").bind(stayId).first<{ product_id: string; status: string; body: string }>()
+    const told = await db.prepare("SELECT product_id, status, body FROM scheduled_guest_messages WHERE subject_type = 'stay' AND subject_id = ? AND template_title = 'Your stay has moved'").bind(stayId).first<{ product_id: string; status: string; body: string }>()
     assert.deepEqual([told!.product_id, told!.status], [annex, 'pending'])
     assert.match(told!.body, /Your stay has moved to Annex|your stay has moved to Annex/)
     assert.match(told!.body, /Door code 1234/)

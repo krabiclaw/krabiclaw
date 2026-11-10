@@ -14,6 +14,7 @@ import { STAY_SAFETY_DETAIL_KEYS } from '../../shared/stay-safety'
 import { formQuestionsRevision } from '../../shared/form-questions'
 import type { PublicLocationDisclosure } from '../../types/public-location'
 import type { StayPhotoRoom } from '../../shared/stay-photos'
+import type { TodayReservation } from '../../shared/dashboard-today'
 import type { StayHomeAccessibility } from '../../shared/stay-accessibility'
 import { formatMinorAmount } from '../../shared/prices'
 import type { TaskPerson, TaskSection, TaskView } from '../../server/domain/tasks'
@@ -28,7 +29,7 @@ import type { OpportunityView } from '../../server/domain/opportunities'
 const TIME_ZONE = 'Asia/Bangkok'
 
 /** GET /api/dashboard/today: the business's stored tasks and, for a manager, its opportunities. */
-type BusinessToday = { tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
+type BusinessToday = { reservations: { title: string | null; cards: TodayReservation[] }; tasks: TaskSection[]; opportunities: OpportunityView[]; opportunityIssues: string[]; assignees: TaskPerson[]; resolvedAt: string }
 
 function localDay(offset: number): string {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
@@ -253,11 +254,14 @@ test('a home keeps its operator name independent from its public title across CM
   expect((await scheduled.json() as { task: TaskView }).task).toMatchObject({ id: task.id, version: task.version + 1, startsAt, dueAt: startsAt, action: task.action })
   const upcoming = await request.get(api('today?range=upcoming'))
   await expectStatus(upcoming, 200)
-  const upcomingTasks = (await upcoming.json() as BusinessToday).tasks.flatMap(section => section.tasks)
+  const upcomingToday = await upcoming.json() as BusinessToday
+  const upcomingTasks = upcomingToday.tasks.flatMap(section => section.tasks)
   expect(upcomingTasks.filter(item => item.stayId === stay.id).map(item => item.kind).sort()).toEqual(['guest_reply', 'turnover'])
-  expect(upcomingTasks.find(item => item.id === task.id)).toMatchObject({
-    version: task.version + 1, action: task.action, detail: task.detail, reservation: task.reservation,
-  })
+  // Upcoming draws the stay once, as its reservation card; the reply under it is the question alone.
+  const upcomingReply = upcomingTasks.find(item => item.id === task.id)!
+  expect(upcomingReply).toMatchObject({ version: task.version + 1, action: task.action, detail: task.detail })
+  expect(upcomingReply.reservation).toBeUndefined()
+  expect(upcomingToday.reservations.cards.filter(card => card.stayId === stay.id).map(card => [card.headline, card.resourceName])).toEqual([['Ana’s group of 3', internalName]])
   expect(upcomingTasks.find(item => item.kind === 'turnover' && item.stayId === stay.id)).toMatchObject({
     face: 'photo', action: { type: 'complete', label: 'Done' },
   })
@@ -594,11 +598,14 @@ test('a host creates a stay, records its payments and arrival guide, and cancels
   expect(paid.error).toBeNull()
   expect(paid.data!.stay).toMatchObject({ paid_minor: 100_00, payment_status: 'partial', payments: [{ method: 'cash', amount_minor: 100_00 }] })
   expect(createdReceipt.stay).toMatchObject({ id: paid.data!.stay.id, product_id: productId, request_id: paid.data!.stay.request_id, status: 'confirmed', version: 1, check_in_date: checkIn, check_out_date: checkOut, channel_push: null })
-  const messagingContext = await call<{ requestId: string; home: Record<string, unknown>; stay: Record<string, unknown> }>('get_guest_messaging_context', { request_id: paid.data!.stay.request_id })
+  const messagingContext = await call<{ requestId: string; home: Record<string, unknown>; stay: Record<string, unknown>; record: Record<string, unknown> }>('get_guest_messaging_context', { request_id: paid.data!.stay.request_id })
   expect(messagingContext.error).toBeNull()
   expect(messagingContext.data).toEqual({ requestId: paid.data!.stay.request_id,
     home: { product_id: productId, name: 'Cliff Cabin', timezone: TIME_ZONE, check_in_method: null, check_in_instructions: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [] },
     stay: { id: paid.data!.stay.id, product_id: productId, status: 'confirmed', check_in_date: checkIn, check_out_date: checkOut, guest_name: paid.data!.stay.guest_name, adults: paid.data!.stay.adults, children: paid.data!.stay.children, infants: paid.data!.stay.infants },
+    // The booked record every conversation names, a stay's at its home's check-in and checkout times.
+    record: { kind: 'stay', status: 'confirmed', offering: 'Cliff Cabin', location: 'Cliff Cabin location', address: expect.any(String), phone: null,
+      partySize: paid.data!.stay.adults + paid.data!.stay.children, timezone: TIME_ZONE, starts: expect.stringMatching(new RegExp(`^${checkIn}( |$)`)), ends: expect.stringMatching(new RegExp(`^${checkOut}( |$)`)), noShow: false },
   })
   const selectedStays = await call<{ stays: Array<Record<string, unknown>> }>('list_stays', { product_id: productId, from: checkIn, to: checkOut })
   expect(selectedStays.error).toBeNull()

@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { getGuestRequest, getThreadOperationalRecord } from '~/server/domain/requests'
+import { BOOKED_RECORDS_SQL, getGuestRequest, getThreadOperationalRecord, type BookedKind } from '~/server/domain/requests'
 import { isDeliverySent } from '~/server/domain/guest-threads/deliveries'
 import type { GuestThreadDeliveryRow } from '~/server/domain/guest-threads/types'
 import { assertOrganizationWideAccess, type MemberAccessPrincipal } from '~/server/utils/member-access'
@@ -20,7 +20,11 @@ import { readIntegration } from '~/server/utils/organization-integrations'
 import { getSessionAvailability } from '~/server/utils/availability'
 import { listReservationSlots } from '~/server/utils/reservations'
 import { MAX_HOMES_CALENDAR_DAYS, readStayGapCandidates, stayAccessFor } from '~/server/domain/stays'
-import { addLocalDays, isValidCalendarDate, localDateAt } from '~/utils/timezone'
+import { addLocalDays, formatCalendarRange, formatTimestamp, isValidCalendarDate, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
+import { PRODUCT_DETAIL_FIELDS } from '~/shared/product-details'
+import { platformLocale } from '~/shared/platform-locales'
+import { stayGuestFirstName } from '~/shared/bookings'
+import { UPCOMING_RESERVATION_DAYS } from '~/shared/dashboard-today'
 
 interface OutcomeEntry {
   source_table: BusinessOutcome['source']['table']
@@ -274,6 +278,105 @@ export async function readArticleDistribution(db: DbClient, principal: MemberAcc
 }
 
 /** A correction/deferral is about explicit current evidence, never a permanent suppression of a resource. */
+/**
+ * A booked visit whose client has heard nothing from the business since booking,
+ * with the host's own preparation to send them: an experience's or
+ * consultation's "Before you arrive" and "What to bring", or a home's
+ * directions, wifi and house manual. A home's check-in instructions are not
+ * here; every confirmed stay is already sent them the day before arrival. A
+ * table reservation has no host-authored preparation, so it has none.
+ */
+export interface BookingWelcome {
+  requestId: string
+  kind: BookedKind
+  recordId: string
+  status: string
+  /** The booked instant, or a stay's check-in date. */
+  startsAt: string
+  timezone: string
+  productId: string
+  locationId: string | null
+  guestFirstName: string | null
+  /** The message the host reviews and sends, written only from the fields above. */
+  message: string
+}
+
+interface WelcomeRow {
+  kind: BookedKind; record_id: string; request_id: string; status: string; starts_at: string; check_in_date: string | null; check_out_date: string | null; check_in_time: string | null
+  timezone: string; product_id: string; product_name: string; location_id: string | null; guest_name: string | null
+  details_json: string | null; directions: string | null; wifi_network: string | null; wifi_password: string | null; house_manual: string | null
+}
+
+const fieldName = (key: 'preparation' | 'what_to_bring') => PRODUCT_DETAIL_FIELDS.find(field => field.key === key)!.name
+const stayLabels = () => {
+  const locale = platformLocale('en')
+  if (!locale) throw new Error('The English platform locale is missing')
+  return locale.messages
+}
+const filled = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
+
+function welcomeMessage(row: WelcomeRow): string | null {
+  const first = stayGuestFirstName(row.guest_name)
+  const sections: string[] = []
+  if (row.kind !== 'stay') {
+    const details = JSON.parse(row.details_json ?? '{}') as Record<string, unknown>
+    if (filled(details.preparation)) sections.push(`${fieldName('preparation')}:\n${details.preparation.trim()}`)
+    const items = Array.isArray(details.what_to_bring) ? details.what_to_bring.filter(filled) : []
+    if (items.length) sections.push(`${fieldName('what_to_bring')}:\n${items.map(item => `- ${item.trim()}`).join('\n')}`)
+  } else {
+    const labels = stayLabels()
+    if (filled(row.directions)) sections.push(`${labels['stay.directions']}:\n${row.directions.trim()}`)
+    const wifi = [filled(row.wifi_network) ? `${labels['stay.wifi_network']}: ${row.wifi_network.trim()}` : null, filled(row.wifi_password) ? `${labels['stay.wifi_password']}: ${row.wifi_password.trim()}` : null].filter(Boolean)
+    if (wifi.length) sections.push(`${labels['stay.wifi_details']}:\n${wifi.join('\n')}`)
+    if (filled(row.house_manual)) sections.push(`${labels['stay.house_manual']}:\n${row.house_manual.trim()}`)
+  }
+  if (!sections.length) return null
+  const when = row.kind === 'stay'
+    ? `from ${formatCalendarRange(row.check_in_date!, row.check_out_date!, 'en-US')}`
+    : `on ${formatTimestamp(row.starts_at, 'en-US', row.timezone, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}`
+  const opening = row.kind === 'stay' ? `Looking forward to hosting you at ${row.product_name} ${when}.` : `Looking forward to seeing you for ${row.product_name} ${when}.`
+  return [`Hi${first ? ` ${first}` : ''},`, opening, ...sections].join('\n\n')
+}
+
+/**
+ * The upcoming confirmed booked visits a welcome applies to now, or the one
+ * conversation named: any record whose offering has host-authored preparation.
+ */
+export async function readBookingWelcomes(db: DbClient, organizationId: string, input: { now: Date; requestId?: string; locationId?: string }): Promise<BookingWelcome[]> {
+  const now = input.now.toISOString(), until = new Date(input.now.getTime() + UPCOMING_RESERVATION_DAYS * 86_400_000).toISOString()
+  const only = (column: string, value: string | undefined) => value === undefined ? '' : `AND ${column} = ?`
+  const rows = await queryAll<WelcomeRow>(db, `
+    SELECT br.kind, br.id AS record_id, br.request_id, br.status, br.starts_at, br.check_in_date, br.check_out_date, br.check_in_time, br.timezone,
+      br.product_id, br.product_name, br.location_id, COALESCE(st.guest_name, json_extract(r.payload_json, '$.guest.name')) AS guest_name,
+      p.details_json, c.directions, c.wifi_network, c.wifi_password, c.house_manual
+    FROM ${BOOKED_RECORDS_SQL} br
+    JOIN requests r ON r.id = br.request_id AND r.organization_id = br.organization_id
+    JOIN products p ON p.id = br.product_id AND p.organization_id = br.organization_id
+    LEFT JOIN stays st ON br.kind = 'stay' AND st.organization_id = br.organization_id AND st.id = br.id
+    LEFT JOIN product_stay_configs c ON br.kind = 'stay' AND c.organization_id = br.organization_id AND c.product_id = br.product_id
+    WHERE br.organization_id = ? AND br.status = 'confirmed' AND br.starts_at BETWEEN ? AND ?
+      AND (json_extract(p.details_json, '$.preparation') IS NOT NULL OR json_array_length(p.details_json, '$.what_to_bring') > 0
+        OR COALESCE(c.directions, c.wifi_network, c.wifi_password, c.house_manual) IS NOT NULL)
+      AND r.archived_at IS NULL AND r.blocked_at IS NULL
+      -- The client has had no business message in this conversation since they booked.
+      AND NOT EXISTS (SELECT 1 FROM activity_entries e WHERE e.request_id = r.id AND e.kind = 'message' AND e.actor_kind = 'member' AND e.occurred_at >= br.created_at)
+      ${only('r.id', input.requestId)} ${only('br.location_id', input.locationId)}
+    ORDER BY br.starts_at, br.id`,
+  [organizationId, new Date(input.now.getTime() - 2 * 86_400_000).toISOString(), until, ...[input.requestId, input.locationId].filter((value): value is string => value !== undefined)])
+  return rows.flatMap((row) => {
+    // A stay is upcoming in its home's own calendar until its guests arrive; anything else until it starts.
+    const today = localDateAt(input.now, row.timezone)
+    if (row.check_in_date !== null) {
+      if (row.check_in_date < today || row.check_in_date > addLocalDays(today, UPCOMING_RESERVATION_DAYS)) return []
+      if (row.check_in_date === today && row.check_in_time !== null && localDateTimeToInstant(row.check_in_date, row.check_in_time, row.timezone, 'compatible').toISOString() <= now) return []
+    } else if (row.starts_at <= now) return []
+    const message = welcomeMessage(row)
+    if (message === null) return []
+    return [{ requestId: row.request_id, kind: row.kind, recordId: row.record_id, status: row.status, startsAt: row.check_in_date ?? row.starts_at, timezone: row.timezone,
+      productId: row.product_id, locationId: row.location_id, guestFirstName: stayGuestFirstName(row.guest_name), message }]
+  })
+}
+
 export async function readBusinessProgressReference(
   db: DbClient,
   principal: MemberAccessPrincipal,
@@ -416,6 +519,11 @@ export async function readBusinessProgressReference(
       ...(input.operation === 'article.distribute' ? { distribution: await readArticleDistribution(db, principal, document.id) } : {}),
     }
     return { ...input, evidenceRevision: await creationRequestHash({ operation: input.operation, document, blocks, categories, media, activityEntryId: evidence.activityEntryId, ...(evidence.distribution ? { distribution: evidence.distribution } : {}) }), evidence }
+  }
+  if (input.operation === 'booking.welcome') {
+    const [welcome] = await readBookingWelcomes(db, principal.organizationId, { now: new Date(), requestId: input.subjectId })
+    if (!welcome) throw missing()
+    return result({ kind: 'booking_welcome', record: { kind: welcome.kind, id: welcome.recordId, status: welcome.status, startsAt: welcome.startsAt }, message: welcome.message })
   }
   const request = await getGuestRequest(db, input.subjectId, principal.organizationId)
   if (!request) throw missing()

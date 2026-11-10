@@ -1,4 +1,5 @@
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
+import { planSourceMessages } from '~/server/domain/scheduled-guest-messages'
 import { CapacityUnavailableError, claimSessionCapacity, requireBookingConfig } from '~/server/utils/availability'
 import { cloudflareEnv, cleanString } from '~/server/utils/api-response'
 import { isReservedTestDomain, shouldSendRealEmail } from '~/server/utils/email-delivery'
@@ -64,6 +65,8 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
     buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: record.location_id ?? undefined, threadId: requestId }),
     paidOnline(db, organizationId, 'booking', record.id),
   ])
+  // Its automatic messages are planned before the new conversation is announced, so it opens with them.
+  await planSourceMessages(db, organizationId, { kind: 'booking', id: record.id })
   const results = await Promise.allSettled([
     publishGuestInboxThreadEvent(env, db, { threadId: requestId, type: 'thread.created' }),
     notifyBookingCreated(env, db, {

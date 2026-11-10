@@ -345,11 +345,13 @@ pane and Back, including on reload and deep links.
 | Organization member | that member's public profile and independently authored availability in the named organization |
 | Organization | the shared site: brand, domains, languages, connections |
 | User | account name, avatar, personal preferences and security |
-| Guest messaging | organization automatic messages and their home schedules at `O/messages/automatic`; immutable delivery snapshots at `O/messages/scheduled` or a conversation's `scheduled` child; each member's own send-later replies |
+| Guest messaging | organization automatic messages and their schedules for homes, experiences, consultations and table reservations at `O/messages/automatic`; immutable delivery snapshots at `O/messages/scheduled` or a conversation's `scheduled` child; each member's own send-later replies |
 
 Automatic messages use the canonical message-template operations: Message edits
-its name and text, When it is sent edits its trigger, local time and named homes;
-every automatic message has a schedule. Managers create, change and delete them.
+its name and text, When it is sent edits its trigger, day or hours, local time
+and named offerings, in the business's own words (check-in for a home, the
+consultation, booking or reservation otherwise); every automatic message has a
+schedule. The one editor serves every vertical. Managers create, change and delete them.
 Every confirmed stay is also sent its home's check-in instructions by the server;
 that message has no template. In a conversation, "+" adds to the message
 (photos, or Send later), and the conversation's "⋯" holds Messaging settings:
