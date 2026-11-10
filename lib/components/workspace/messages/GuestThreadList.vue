@@ -317,9 +317,9 @@ async function saveRead(thread: ThreadListItem) {
     })
   } catch (error) {
     mark(read)
-    toast.add({ color: 'error', title: read ? 'Could not mark as read' : 'Could not mark as unread', description: getErrorMessage(error, 'The conversation was not changed') })
-    return
+    toast.add({ color: 'error', title: read ? 'Could not mark as read' : 'Could not mark as unread', description: getErrorMessage(error, 'Try again') })
   }
+  // Saved or not, the server says what the row is now: a save can land while telling other devices fails.
   await refresh()
 }
 

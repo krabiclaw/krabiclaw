@@ -78,20 +78,21 @@ async function toggleRead(thread: TeamThread) {
 }
 async function saveRead(thread: TeamThread) {
   const read = thread.unread
-  const mark = (unread: boolean) => {
-    if (data.value) data.value = { ...data.value, threads: data.value.threads.map(row => row.id === thread.id ? { ...row, unread, unreadCount: unread ? Math.max(row.unreadCount, 1) : 0 } : row) }
+  const previous = { unread: thread.unread, unreadCount: thread.unreadCount }
+  const mark = (next: typeof previous) => {
+    if (data.value) data.value = { ...data.value, threads: data.value.threads.map(row => row.id === thread.id ? { ...row, ...next } : row) }
   }
-  mark(!read)
+  mark({ unread: !read, unreadCount: read ? 0 : Math.max(previous.unreadCount, 1) })
   try {
     await api(`/api/dashboard/team/threads/${encodeURIComponent(thread.id)}/${read ? 'read' : 'unread'}`, {
       method: 'POST',
       validate: (value: unknown): value is { status: string } => typeof value === 'object' && value !== null && Reflect.get(value, 'status') === (read ? 'read' : 'unread'),
     })
   } catch (cause) {
-    mark(read)
-    toast.add({ color: 'error', title: read ? 'Could not mark as read' : 'Could not mark as unread', description: getErrorMessage(cause, 'The conversation was not changed') })
-    return
+    mark(previous)
+    toast.add({ color: 'error', title: read ? 'Could not mark as read' : 'Could not mark as unread', description: getErrorMessage(cause, 'Try again') })
   }
+  // Saved or not, the server says what the row is now: a save can land while telling other devices fails.
   await refresh()
 }
 const realtime = useDashboardInvalidations()

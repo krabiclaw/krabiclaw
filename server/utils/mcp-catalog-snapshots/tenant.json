@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:1888d5df41739e7d6dd0e53e72743f517ac12f5943aa0d87208d6822eb788a33",
-  "documentationFingerprint": "sha256:f7c78431c2996a0939eb804411adf2e9d21ef91c0af93cc2515e75e72f935ca4",
+  "fingerprint": "sha256:d53e5411139c9f7b4c4c9fe6ee3e9689378f42fd2ee76e2483ca1b75d845cf3b",
+  "documentationFingerprint": "sha256:ae5f58fc77d5a26bd7fb796f4e520cfd6811df8ec69ad0df25e425f890e957e1",
   "tools": [
     {
       "name": "accept_opportunity",
@@ -102091,7 +102091,7 @@
     {
       "name": "set_guest_conversation_read",
       "title": "Set guest conversation read",
-      "description": "Mark the inbox conversation identified by request_id read or unread for you, as swiping it in Messages does, without reading it. Changes only your own unread state; does not message the guest or change anyone else's. Marking unread needs a guest message in the conversation.",
+      "description": "Mark the inbox conversation identified by request_id read or unread for you, as swiping it in Messages does, without reading it. Changes only your own unread state; does not message the guest or change anyone else's. Marking unread needs an alert from the conversation that you can see; otherwise it is refused with NO_CONVERSATION_ALERT.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
